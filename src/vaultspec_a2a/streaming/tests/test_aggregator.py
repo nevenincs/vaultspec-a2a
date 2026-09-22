@@ -38,7 +38,7 @@ from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
 from ..aggregator import EventAggregator
-from ..ingest import summarize_ingest_exception
+from ..ingest import _next_event_or_cancel, summarize_ingest_exception
 from ..types import SequencedEvent, StreamableGraph
 
 # ---------------------------------------------------------------------------
@@ -81,6 +81,72 @@ async def _ingest(
 # ---------------------------------------------------------------------------
 # Sequence management
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancellation_at_stream_eof_wins_and_closes_generator() -> None:
+    cancel = asyncio.Event()
+    closed = asyncio.Event()
+
+    async def stream() -> AsyncIterator[dict[str, Any]]:
+        try:
+            yield {"event": "on_chain_start"}
+            cancel.set()
+        finally:
+            closed.set()
+
+    events = stream()
+    first, cancelled = await _next_event_or_cancel(events, cancel, stall_timeout=1.0)
+    assert first == {"event": "on_chain_start"} and not cancelled
+    last, cancelled = await _next_event_or_cancel(events, cancel, stall_timeout=1.0)
+    assert last is None and cancelled
+    assert closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_post_read_callback_drops_event(
+    aggregator: EventAggregator,
+) -> None:
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, StateGraph
+
+    from ...thread.state import TeamState
+
+    def finish(_state: TeamState) -> dict[str, object]:
+        return {}
+
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "finish", finish)
+    builder.set_entry_point("finish")
+    builder.add_edge("finish", END)
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
+    thread_id = "cancel-post-read-callback"
+    queue = aggregator.add_subscriber("post-read")
+    aggregator.subscribe("post-read", [thread_id])
+
+    async def cancel_after_read() -> None:
+        aggregator.cancel_thread(thread_id)
+
+    outcome = await aggregator.ingest(
+        thread_id,
+        "supervisor",
+        graph,
+        {},
+        {"configurable": {"thread_id": thread_id}},
+        on_graph_started=cancel_after_read,
+    )
+    assert outcome == ThreadStatus.CANCELLED
+    frames = []
+    while not queue.empty():
+        frames.append(queue.get_nowait().event)
+    # Agent lifecycle emission also publishes its authoritative team projection.
+    assert len(frames) == 2
+    assert isinstance(frames[0], AgentStatus)
+    assert frames[0].state == AgentLifecycleState.CANCELLED
+    assert isinstance(frames[1], TeamStatus)
+    assert len(frames[1].agents) == 1
+    assert frames[1].agents[0]["state"] == AgentLifecycleState.CANCELLED
+    await aggregator.shutdown()
 
 
 class TestSequenceManagement:
@@ -2331,6 +2397,30 @@ class _StallingGraph:
 assert issubclass(_StallingGraph, StreamableGraph)  # protocol drift guard
 
 
+def _cancellable_stalling_graph(
+    entered: asyncio.Event, closed: asyncio.Event
+) -> StreamableGraph:
+    """Compile a real graph with a blocked node and observable cleanup."""
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, StateGraph
+
+    from ...thread.state import TeamState
+
+    async def wait_for_cancel(_state: TeamState) -> dict[str, object]:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            closed.set()
+        return {}
+
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "wait_for_cancel", wait_for_cancel)
+    builder.set_entry_point("wait_for_cancel")
+    builder.add_edge("wait_for_cancel", END)
+    return compile_test_graph(builder, checkpointer=InMemorySaver())
+
+
 class _LongStepBudgetGraph:
     """Graph stub carrying a compiled ``step_timeout``, quiet within that budget.
 
@@ -2408,6 +2498,75 @@ class TestIngestStallWatchdog:
         assert err.code == "INGEST_STALL_TIMEOUT"
         assert err.recoverable is True
         assert "stalled" in err.message.lower()
+
+    @pytest.mark.asyncio
+    async def test_cancel_interrupts_a_blocked_next_event_and_closes_the_stream(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """Cancellation wins before the watchdog and does not leak the generator."""
+        thread_id = "thread-cancel-blocked"
+        queue = aggregator.add_subscriber("client-cancel-blocked")
+        aggregator.subscribe("client-cancel-blocked", [thread_id])
+        entered, closed = asyncio.Event(), asyncio.Event()
+        graph = _cancellable_stalling_graph(entered, closed)
+        task = asyncio.create_task(
+            _ingest(
+                aggregator,
+                thread_id=thread_id,
+                agent_id="supervisor",
+                graph=graph,
+                graph_input={"messages": []},
+                config={"configurable": {"thread_id": thread_id}},
+            )
+        )
+
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        aggregator.cancel_thread(thread_id)
+        assert await asyncio.wait_for(task, timeout=1.0) == ThreadStatus.CANCELLED
+        await asyncio.wait_for(closed.wait(), timeout=1.0)
+
+        events: list[SequencedEvent] = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        assert any(
+            isinstance(frame.event, AgentStatus)
+            and frame.event.state is AgentLifecycleState.CANCELLED
+            for frame in events
+        )
+        assert not any(isinstance(frame.event, ErrorOccurred) for frame in events)
+
+    @pytest.mark.asyncio
+    async def test_cancel_before_ingest_starts_is_observed_by_the_new_ingest(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """An accepted cancel must survive the dispatch-to-ingest startup race."""
+        thread_id = "thread-cancel-before-ingest"
+        queue = aggregator.add_subscriber("client-cancel-before-ingest")
+        aggregator.subscribe("client-cancel-before-ingest", [thread_id])
+        aggregator.cancel_thread(thread_id)
+
+        outcome = await asyncio.wait_for(
+            _ingest(
+                aggregator,
+                thread_id=thread_id,
+                agent_id="supervisor",
+                graph=_cancellable_stalling_graph(asyncio.Event(), asyncio.Event()),
+                graph_input={"messages": []},
+                config={"configurable": {"thread_id": thread_id}},
+            ),
+            timeout=1.0,
+        )
+
+        assert outcome == ThreadStatus.CANCELLED
+        events: list[SequencedEvent] = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        assert any(
+            isinstance(frame.event, AgentStatus)
+            and frame.event.state == AgentLifecycleState.CANCELLED
+            for frame in events
+        )
+        assert not any(isinstance(frame.event, ErrorOccurred) for frame in events)
 
     @pytest.mark.asyncio
     async def test_stall_reason_is_retrievable_via_take_failure_reason(

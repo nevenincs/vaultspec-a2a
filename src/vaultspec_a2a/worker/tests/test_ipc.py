@@ -441,6 +441,40 @@ class TestClose:
         assert bridge._client.is_closed
 
     @pytest.mark.asyncio(loop_scope="function")
+    async def test_close_closes_client_after_flush_budget_is_exhausted(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Transport cleanup gets its own bound after delivery time is gone."""
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
+        await bridge.send_event("t-deadline", {"terminal": True})
+        deferred = bridge._flush_task
+        assert deferred is not None
+        deferred.cancel()
+        await asyncio.gather(deferred, return_exceptions=True)
+        bridge._flush_task = None
+
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with caplog.at_level(logging.ERROR, logger="vaultspec_a2a.worker.ipc"):
+            delivered = await bridge.close(deadline=started - 0.001)
+        elapsed = loop.time() - started
+
+        assert delivered is False
+        assert bridge._client.is_closed
+        assert len(bridge._event_buffer) == 1
+        assert not gw.batches
+        exhausted_records = [
+            record
+            for record in caplog.records
+            if record.__dict__.get("action") == "flush_events_exhausted"
+        ]
+        assert len(exhausted_records) == 1
+        assert elapsed < 0.2, (
+            f"client close exceeded its bounded allowance: {elapsed:.4f}s"
+        )
+
+    @pytest.mark.asyncio(loop_scope="function")
     async def test_unreachable_buffered_event_obeys_one_deadline_without_loop_stall(
         self,
     ) -> None:

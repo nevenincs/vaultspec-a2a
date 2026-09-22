@@ -7,10 +7,13 @@ placed next to their consumers.
 
 import asyncio
 import logging
+import os
 import re
 import signal
+import sys
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from langgraph.errors import GraphBubbleUp
@@ -109,6 +112,176 @@ def sandbox_path(path: str, config: AcpModelConfig) -> Path:
     if not resolved.is_relative_to(cwd.resolve()):
         raise ValueError(f"Path {path!r} escapes sandbox")
     return resolved
+
+
+def _descriptor_relative_parts(path: str, workspace_root: Path) -> tuple[str, ...]:
+    """Return a lexical path below ``workspace_root`` for anchored POSIX I/O."""
+    candidate = Path(path)
+    if candidate.is_absolute():
+        try:
+            candidate = candidate.relative_to(workspace_root)
+        except ValueError as exc:
+            raise ValueError(f"Path {path!r} escapes sandbox") from exc
+    parts = candidate.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise ValueError(f"Path {path!r} is not a confined file path")
+    return parts
+
+
+def _open_anchored_directory(
+    anchor_root: Path,
+    run_root_parts: tuple[str, ...],
+    parts: tuple[str, ...],
+    *,
+    create: bool,
+) -> tuple[int, str]:
+    """Open the parent of ``parts`` below an immutable managed-root handle."""
+    directory_flags = (
+        os.O_RDONLY
+        | _required_posix_open_flag("O_DIRECTORY")
+        | _required_posix_open_flag("O_CLOEXEC")
+        | _required_posix_open_flag("O_NOFOLLOW")
+    )
+    current = os.open(anchor_root, directory_flags)
+    try:
+        for component in run_root_parts:
+            child = os.open(component, directory_flags, dir_fd=current)
+            os.close(current)
+            current = child
+        for component in parts[:-1]:
+            try:
+                child = os.open(component, directory_flags, dir_fd=current)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(component, mode=0o777, dir_fd=current)
+                child = os.open(component, directory_flags, dir_fd=current)
+                _required_posix_function("fchown")(child, -1, _required_agent_gid())
+                os.fchmod(child, 0o2770)
+            os.close(current)
+            current = child
+        return current, parts[-1]
+    except BaseException:
+        os.close(current)
+        raise
+
+
+def _secure_callback_enabled() -> bool:
+    """Return whether this worker requires descriptor-anchored callback I/O."""
+    return sys.platform != "win32" and settings.provider_identity_launcher is not None
+
+
+def _required_agent_gid() -> int:
+    """Return the configured shared workspace GID or fail closed."""
+    gid = settings.provider_agent_gid
+    if gid is None:
+        raise RuntimeError("secure provider callback requires an agent GID")
+    return gid
+
+
+def _secure_workspace_anchor(config: AcpModelConfig) -> tuple[Path, tuple[str, ...]]:
+    """Return the managed anchor and no-follow run-root traversal components."""
+    workspace_root = require_workspace_root(
+        config.workspace_root, surface="agent filesystem sandbox root"
+    ).resolve()
+    if not workspace_root.is_dir():
+        raise ValueError("agent filesystem sandbox root is not an existing directory")
+    configured = settings.workspace_root
+    if settings.desktop_profile_armed or configured is None:
+        return workspace_root, ()
+    boundary = Path(configured).resolve()
+    try:
+        run_root_parts = workspace_root.relative_to(boundary).parts
+    except ValueError as exc:
+        raise ValueError(
+            "agent filesystem sandbox root escaped its managed boundary"
+        ) from exc
+    return boundary, run_root_parts
+
+
+def _required_posix_open_flag(name: str) -> int:
+    """Return a required Linux open flag or fail closed before filesystem I/O."""
+    value = getattr(os, name, None)
+    if not isinstance(value, int):
+        raise RuntimeError(f"secure provider callback requires os.{name}")
+    return value
+
+
+def _required_posix_function(name: str) -> Any:
+    """Return one required POSIX function or fail closed."""
+    value = getattr(os, name, None)
+    if not callable(value):
+        raise RuntimeError(f"secure provider callback requires os.{name}")
+    return value
+
+
+def _read_workspace_text(
+    path: str, config: AcpModelConfig, *, offset: int, limit: int
+) -> str:
+    """Read one workspace file, anchored against symlink replacement in Compose."""
+    anchor_root, run_root_parts = _secure_workspace_anchor(config)
+    if not _secure_callback_enabled():
+        file_path = sandbox_path(path, config)
+        with file_path.open(encoding="utf-8", errors="ignore") as handle:
+            if offset:
+                handle.seek(offset)
+            return handle.read(limit)
+
+    workspace_root = anchor_root.joinpath(*run_root_parts)
+    parts = _descriptor_relative_parts(path, workspace_root)
+    parent_fd, leaf = _open_anchored_directory(
+        anchor_root, run_root_parts, parts, create=False
+    )
+    try:
+        file_fd = os.open(
+            leaf,
+            os.O_RDONLY
+            | _required_posix_open_flag("O_CLOEXEC")
+            | _required_posix_open_flag("O_NOFOLLOW"),
+            dir_fd=parent_fd,
+        )
+    finally:
+        os.close(parent_fd)
+    with os.fdopen(file_fd, encoding="utf-8", errors="ignore") as handle:
+        if offset:
+            handle.seek(offset)
+        return handle.read(limit)
+
+
+def _write_workspace_text(path: str, content: str, config: AcpModelConfig) -> None:
+    """Write one workspace file through an anchored, no-follow Compose path."""
+    anchor_root, run_root_parts = _secure_workspace_anchor(config)
+    if not _secure_callback_enabled():
+        file_path = sandbox_path(path, config)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
+        return
+
+    workspace_root = anchor_root.joinpath(*run_root_parts)
+    parts = _descriptor_relative_parts(path, workspace_root)
+    parent_fd, leaf = _open_anchored_directory(
+        anchor_root, run_root_parts, parts, create=True
+    )
+    try:
+        flags = (
+            os.O_WRONLY
+            | os.O_TRUNC
+            | _required_posix_open_flag("O_CLOEXEC")
+            | _required_posix_open_flag("O_NOFOLLOW")
+        )
+        try:
+            file_fd = os.open(
+                leaf, flags | os.O_CREAT | os.O_EXCL, 0o660, dir_fd=parent_fd
+            )
+        except FileExistsError:
+            file_fd = os.open(leaf, flags, dir_fd=parent_fd)
+        else:
+            _required_posix_function("fchown")(file_fd, -1, _required_agent_gid())
+            os.fchmod(file_fd, 0o660)
+    finally:
+        os.close(parent_fd)
+    with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
 
 
 def _targets_vault(file_path: Path, _config: AcpModelConfig) -> bool:
@@ -524,7 +697,7 @@ async def on_fs_read_text_file(
     Uses asyncio.to_thread so blocking I/O does not stall the event loop.
     """
     try:
-        file_path = sandbox_path(_required_string(params, "path"), config)
+        path = _required_string(params, "path")
         offset = _integer(params.get("offset") or 0, field="offset")
         limit: int | None = (
             _integer(params["limit"], field="limit")
@@ -538,13 +711,13 @@ async def on_fs_read_text_file(
         if limit is not None:
             effective_limit = min(limit, settings.acp_fs_read_max_bytes)
 
-        def _read() -> str:
-            with file_path.open(encoding="utf-8", errors="ignore") as fh:
-                if offset:
-                    fh.seek(offset)
-                return fh.read(effective_limit)
-
-        text = await asyncio.to_thread(_read)
+        text = await asyncio.to_thread(
+            _read_workspace_text,
+            path,
+            config,
+            offset=offset,
+            limit=effective_limit,
+        )
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": text}}
     except Exception as exc:
         return {
@@ -584,12 +757,8 @@ async def on_fs_write_text_file(
 
         content = _required_string(params, "content")
 
-        def _write() -> None:
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8")
-
         async with git_workspace_mutex:
-            await asyncio.to_thread(_write)
+            await asyncio.to_thread(_write_workspace_text, path, content, config)
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
     except Exception as exc:
         return {

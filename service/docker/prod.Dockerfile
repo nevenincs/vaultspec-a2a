@@ -20,6 +20,15 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
+# Build the small provider identity launcher separately. The worker image gets
+# only the compiled binary, not a compiler or headers.
+FROM debian:bookworm-slim AS identity-launcher
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY service/docker/provider_identity_launcher.c /src/provider_identity_launcher.c
+RUN gcc -std=c11 -O2 -Wall -Wextra -Werror \
+    /src/provider_identity_launcher.c -o /vaultspec-agent-launch
+
 # ── Stage 2a: Python base (shared by gateway + worker) ──────────────────────
 FROM python:3.13-slim-bookworm AS python-base
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -48,16 +57,29 @@ COPY schemas/ ./schemas/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --frozen --no-editable
 
-# Non-root user
-RUN groupadd -g 1001 app && useradd -u 1001 -g app -m appuser
+# Non-root service and provider identities. The service keeps database authority;
+# every provider/tool descendant is dropped to agentuser by the worker launcher.
+RUN groupadd -g 1001 app \
+    && groupadd -g 1002 agent \
+    && useradd -u 1001 -g app -m appuser \
+    && useradd -u 1002 -g agent -M -d /nonexistent -s /usr/sbin/nologin agentuser \
+    && usermod -aG agent appuser
 # The SQLite database and checkpoint files live under /app/data, which Compose
 # backs with a named volume. Create the directory owned by the non-root user
 # while still root: Docker seeds a fresh named volume from the image mountpoint,
 # so this ownership carries into the volume and lets the runtime open the
 # database (SQLite reports "unable to open database file" against a root-owned
 # mount otherwise).
-RUN mkdir -p /app/data && chown appuser:app /app/data
+RUN mkdir -p /app/data/workspaces /app/gateway-state /app/worker-state \
+    && chown appuser:app /app/data /app/gateway-state /app/worker-state \
+    && chown appuser:agent /app/data/workspaces \
+    && chmod 0711 /app/data \
+    && chmod 2770 /app/data/workspaces \
+    && chmod 0700 /app/gateway-state /app/worker-state
+COPY service/docker/service_entrypoint.py /app/service_entrypoint.py
 USER appuser
+
+ENTRYPOINT ["/app/.venv/bin/python", "/app/service_entrypoint.py"]
 
 # ── Stage 2b: Gateway (control surface) ─────────────────────────────────────
 FROM python-base AS gateway
@@ -77,6 +99,15 @@ RUN npm install -g ${GEMINI_CLI_NPM_SPEC}
 
 # ── Stage 2d: Worker (agent executor) ───────────────────────────────────────
 FROM python-base AS worker
+
+COPY --from=identity-launcher /vaultspec-agent-launch /usr/local/bin/vaultspec-agent-launch
+# The long-running worker remains appuser. Only this audited launcher acquires
+# the bounded SETUID/SETGID authority long enough to enter the agent identity;
+# it then clears all groups/capabilities and sets no-new-privileges before exec.
+USER root
+RUN chown root:root /usr/local/bin/vaultspec-agent-launch \
+    && chmod 4755 /usr/local/bin/vaultspec-agent-launch
+USER appuser
 
 # PROV-O01: ACP runtime — Claude/Gemini providers spawn claude-agent-acp as a
 # Node.js subprocess.  The worker needs a glibc-compatible node binary.

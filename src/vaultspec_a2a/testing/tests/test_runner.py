@@ -64,6 +64,74 @@ def _run_runner(
     )
 
 
+def test_runner_child_declares_test_environment_before_settings_import(
+    tmp_path: Path,
+) -> None:
+    """The child opts into test auth before importing the settings singleton."""
+    probe = tmp_path / "test_bootstrap_probe.py"
+    probe.write_text(
+        "from vaultspec_a2a.control.config import settings\n"
+        "from vaultspec_a2a.utils.ipc_auth import ("
+        "BearerVerdict, verify_internal_bearer)\n"
+        "\n"
+        "def test_child_bootstrap():\n"
+        "    assert settings.environment.value == 'development'\n"
+        "    assert settings.environment_declared is True\n"
+        "    verdict, _ = verify_internal_bearer(\n"
+        "        None,\n"
+        "        token=settings.internal_token,\n"
+        "        environment=settings.environment,\n"
+        "        environment_declared=settings.environment_declared,\n"
+        "    )\n"
+        "    assert verdict is BearerVerdict.OK\n",
+        encoding="utf-8",
+    )
+
+    child_environment = os.environ.copy()
+    child_environment.pop("VAULTSPEC_ENVIRONMENT", None)
+    child_environment.pop("VAULTSPEC_INTERNAL_TOKEN", None)
+    child = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "vaultspec_a2a.testing.runner_child",
+            f"--confcutdir={tmp_path}",
+            str(probe),
+            "-q",
+        ],
+        cwd=Path.cwd(),
+        env=child_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert child.returncode == 0, child.stdout + child.stderr
+    assert "1 passed" in child.stdout
+
+    production = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from vaultspec_a2a.control.config import settings; "
+            "from vaultspec_a2a.utils.ipc_auth import verify_internal_bearer; "
+            "verdict, _ = verify_internal_bearer("
+            "None, token=settings.internal_token, environment=settings.environment, "
+            "environment_declared=settings.environment_declared); "
+            "assert settings.environment_declared is False; "
+            "assert verdict.value == 'misconfigured'; print('production-fail-closed')",
+        ],
+        cwd=Path.cwd(),
+        env=child_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert production.returncode == 0, production.stdout + production.stderr
+    assert production.stdout.strip() == "production-fail-closed"
+
+
 def test_runner_reaps_a_process_that_hangs_after_its_passing_result(
     tmp_path: Path,
 ) -> None:

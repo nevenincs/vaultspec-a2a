@@ -102,6 +102,18 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
             "AWS_SECRET_ACCESS_KEY",
             "AZURE_OPENAI_API_KEY",
             "ZHIPU_API_KEY",
+            # Generic database/service spellings are scrubbed independently of
+            # the VAULTSPEC_* family. Operators and container platforms often
+            # inject these aliases alongside the canonical settings; a lower-
+            # trust provider child must not inherit either spelling.
+            "DATABASE_URL",
+            "CHECKPOINT_DATABASE_URL",
+            "SQLALCHEMY_DATABASE_URI",
+            "PGPASSWORD",
+            "POSTGRES_PASSWORD",
+            "SERVICE_TOKEN",
+            "GATEWAY_TOKEN",
+            "INTERNAL_TOKEN",
             "LANGCHAIN_API_KEY",
             "LANGSMITH_API_KEY",
             "LANGCHAIN_TRACING_V2",

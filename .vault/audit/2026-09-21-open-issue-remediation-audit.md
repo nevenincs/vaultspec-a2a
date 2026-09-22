@@ -3,12 +3,13 @@ tags:
   - '#audit'
   - '#open-issue-remediation'
 date: '2026-09-21'
-modified: '2026-09-21'
+modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:c25ac34cddbd7e3b53b5ee25fcd511dce115c798d55d55f63b1006ce9450d9ed'
+body_hash: 'sha256:3933b6107f098557910f049698cd0bf3b8cdf00ea223fb9729c1a5e7c8e9bc1b'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
+
 # `open-issue-remediation` audit: `rolling backlog implementation review`
 
 ## Scope
@@ -141,6 +142,29 @@ drops the browser relay after a known sequence and observes delta replay or an
 honest gap followed by terminal status reconciliation. Dashboard issue #137 and
 plan Step P01.S08 own it.
 
+### locked-quality-type-policy | medium | pinned quality checks reject prohibited type suppressions | resolved
+
+P01.S11 removed the prohibited `ty:ignore` directives from
+`service/docker/service_entrypoint.py:32,174` without adding a suppression.
+The independent S11 PASS reran the locked Ty/type-policy checks, targeted suites,
+and the real Linux entrypoint proof with no new policy suppression. The governing
+Compose/provider-boundary decision and the reviewed S03/S10 snapshots remain
+unchanged.
+
+### locked-quality-type-safety | medium | lock-pinned Ty reports nullable release metadata and broad race-test wrappers | resolved
+
+P01.S11 corrected the nullable release metadata and retained the typed
+descriptor-relative `os.open` seam in the provider race tests. Independent S11
+PASS reran the locked official Ty/type-safety gate and targeted suites; the Ty
+gate is clean. Five known strict-only basedpyright diagnostics remain separately
+queued as a non-gating follow-up and do not reopen this official Ty finding.
+
+### locked-quality-format | low | pinned formatter reports drift in four reviewed files | resolved
+
+P01.S11 applied the bounded formatter corrections to the four reviewed files.
+The independent PASS reran the pinned formatter and targeted suites with no
+scope widening. The formatting finding is resolved.
+
 ### retired-ui-issues | low | five legacy issues no longer describe owned source surfaces | closed
 
 Issues #30 and #31 are satisfied by the current relay replay and browser bounds.
@@ -156,6 +180,137 @@ The configured executable `X:/ci-shared/cargo/bin/cargo.exe` was absent, so the
 Dashboard engine Rust tests did not run during this review. No conclusion was
 drawn about whether another installed Rust toolchain exists. The passing 61-case
 frontend result does not substitute for that engine-side check.
+
+### compose-callback-root-anchor | high/security | intermediate run-root replacement bypassed descendant-only anchoring | resolved
+
+P01.S10 review found that descriptor-relative callback traversal began from the
+resolved run-root pathname, leaving its intermediate components subject to a
+resolve-to-open replacement race. The correction now opens the configured
+managed workspace boundary first and traverses every admitted run-root and
+request component with no-follow directory handles. The real Linux image proof
+replaces an intermediate run-root directory with a symlink to `/app` between
+resolution and open; the callback refuses it without reading the service-state
+sentinel.
+
+### compose-workspace-sharing | high/compatibility | distinct identities could not exchange new or upgraded workspace files | resolved
+
+P01.S10 review found that the service umask and top-directory-only ownership
+change made agent-created files unreadable to worker callbacks, callback-created
+files unreadable to the agent, and legacy UID/GID 1001 project content
+non-writable by UID/GID 1002. The shipped worker profiles now explicitly opt
+service-owned named volumes into a bounded no-follow migration that mirrors
+owner access to the agent group and preserves executable bits. The launcher
+sets a group-sharing umask only after dropping identity; callbacks explicitly
+create shared workspace entries. Custom bind mounts receive validation rather
+than recursive mutation. The real image proof starts from legacy ownership,
+executes a migrated tool, performs bidirectional callback/agent reads and
+writes, and confirms hard-linked service state fails closed without mutation.
+
+### lifecycle-readiness-credential-probe | high/security | unresolved listener ownership can receive a credentialed health probe | open
+
+P01.S01 review found `src/vaultspec_a2a/lifecycle/manager.py:798-800` and
+`:859-880` can send the worker credential to `/health` while listener ownership
+is still `UNRESOLVED`. A foreign listener can therefore capture the token.
+P01.S01 must refuse the probe until ownership is established and prove that no
+token is transmitted to an unresolved or foreign listener.
+
+### release-input-shell-expansion | high/security | raw tag or user input reaches Bash command construction | open
+
+P01.S04 review found raw release tag or user-controlled input reaches Bash at
+`.github/workflows/release.yml:198`, `:409`, and `:436`. P01.S04 must pass values
+through non-executable data channels and prove shell metacharacters cannot alter
+commands.
+
+### release-ref-binding | medium/integrity | publication is not bound to a tag at the current commit | open
+
+P01.S04 review found publication permits a missing tag or branch-spoofed input
+without proving `refs/tags/<tag>` resolves to `HEAD`. Bind publication to an
+existing release tag at the current commit and add negative branch and stale-tag
+proofs.
+
+### release-artifact-persistence | medium/supply-chain | persistent download directory and wildcard upload admit stale extras | open
+
+P01.S04 review found persistent `members/` downloads combined with wildcard
+upload can publish stale artifacts from an earlier run. Use an empty per-run
+staging directory and an exact four-member manifest before upload.
+
+### release-ci-contract | medium/verification | CI contract rejects current release command forms | open
+
+P01.S04 review found `dev.ci_contract` rejects the workflow commands at lines 85
+and 110. Align the workflow with the repository contract and retain an
+executable contract check before closing the Step.
+### dashboard-live-worker-startup | high/integration | real demand starts the worker but the live relay lane does not become healthy | open
+
+P01.S08 now uses a normal engine-origin run demand before waiting for the lazy
+worker. In the live lane that demand starts a worker, after which worker health
+returns 500 and the engine returns 504; a subsequent concurrent run times out
+on gateway discovery, with no worker traceback captured. Static Prettier,
+ESLint, TypeScript, and 28 Rust relay tests pass, but they do not discharge the
+live connected recovery requirement. No environment or S10 cause is inferred.
+P01.S08 and Dashboard issue #137 remain open pending diagnosis and a passing
+live relay-recovery proof.
+
+### dashboard-warmup-terminal-row | low/test-hygiene | cancelled warmup state persists only for the isolated harness lifetime | closed
+
+Review considered whether the lazy-worker warmup leaks a broker thread because
+it cancels and waits for terminal settlement without invoking a separate broker
+delete. This is not a durable or production-state leak: the harness owns fresh
+SQLite state beneath its temporary A2A home and fixture worktree, stops both
+process trees, and recursively removes both roots in teardown
+(`frontend/e2e/agent/harness.ts:507-525`, `:599-614`). The unique cancelled row
+exists only for the remaining lifetime of that isolated suite and cannot survive
+teardown. No production delete requirement or additional cleanup verb is
+warranted; future test cleanup may remove it only if in-suite enumeration proves
+observable interference.
+
+### blocked-cancel-process-boundary | high/concurrency | blocked ingest read loses the accepted cancellation boundary | REVISION REQUIRED
+
+Independent P01.S12 review found that an accepted cancellation can remain local to the
+coordinator while the worker is blocked awaiting the next streamed event. The
+cancellation signal does not yet race the blocked process-boundary read, so a
+watchdog can observe a non-settling run rather than prompt cancellation. P01.S12
+owns the ingest and focused cancellation-test paths; no architecture change is
+claimed here. Keep the finding open pending the required architecture research and
+the bounded race-cancellation implementation and proof.
+
+### blocked-cancel-settlement-race | high/correctness | completion and cancellation can settle the wrong current receipt | REVISION REQUIRED
+
+Independent P01.S12 review found a completion/cancellation settlement race: a
+completion or failure event can arrive while cancellation is being accepted, and
+current-receipt ownership is not yet proven to preserve the required
+CancellationEvidence for the active cancellation. A stale or non-current receipt
+must not settle the wrong action or leave the current cancellation without terminal
+evidence. P01.S12 owns the bounded ingest, executor, aggregator, and new blocked
+cancellation-test paths; architecture research remains pending.
+
+### blocked-cancel-post-read-recheck | medium/concurrency | a post-read cancellation recheck cannot interrupt a blocked read | REVISION REQUIRED
+
+Independent P01.S12 review found that checking cancel_event only after an event
+read returns is insufficient: the read itself can remain blocked after cancellation
+is accepted. The correction must race cancellation against the next-event await,
+while preserving watchdog behavior and generator cleanup. P01.S12 owns the bounded
+paths and remains open pending architecture research, implementation, and focused
+proof.
+
+### locked-env-example-service-identity | medium/CI-blocking | required Compose service identity variables are absent from the root operator example | resolved
+
+P01.S11 added the required service-identity semantics to root `.env.example`
+and reverified `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
+deterministically. The independent PASS confirmed
+`VAULTSPEC_PROVIDER_AGENT_UID`, `VAULTSPEC_PROVIDER_AGENT_GID`, and
+`VAULTSPEC_PROVIDER_IDENTITY_LAUNCHER` remain documented rather than excluded;
+the low wording correction was also reverified. The other 39 canonical failures
+passed in isolation and remain classified as concurrent runtime contention, with
+no source action unless recurrence is observed.
+
+### basedpyright-strict-follow-up | low/type-safety | five known strict-only diagnostics remain outside the official Ty gate | queued
+
+The independent S11 review recorded five known basedpyright strict diagnostics as
+a non-gating follow-up: `scripts/prepare_release.py:37,243,262` and private
+`os.open` access in
+`src/vaultspec_a2a/providers/tests/test_project_confinement.py:524,567`.
+The official Ty gate passed and is the S11 authority; these basedpyright-only
+diagnostics must not be misclassified as Ty failures or reopen S11.
 
 ## Recommendations
 
@@ -175,3 +330,18 @@ frontend result does not substitute for that engine-side check.
   test coverage; keep the absence classified as tooling until checked.
 - Keep the five legacy A2A issues closed; future work belongs to current
   Dashboard paths and issue #137 rather than recreating the retired UI surface.
+### integrated-dirty-worktree-review | low | PASS with no unresolved critical or high implementation findings
+
+Type: integrated implementation review. Status: verified. The coordinated snapshot closes the implemented lifecycle readiness, workspace admission, release preparation, Compose execution isolation, and blocked-cancellation Steps. Focused verification passed 41 lifecycle tests, 67 workspace-admission tests, 200 cancellation/streaming tests, and 30 provider/workspace-isolation tests. Eight Linux identity-launcher cases were correctly platform-excluded on Windows and retain their prior real-image evidence. The complete `prek run --all-files` suite passed Ruff, formatting, Taplo, Ty, Markdown, canonical actionlint, Vault checks, provider-artifact checks, and spec diagnostics.
+
+### prek-actionlint-owner-drift | medium | resolved
+
+Type: repository tooling and ownership. Status: fixed. The hook invoked raw actionlint while hosted CI invoked `python -m dev.actionlint`; only the raw path treated the infrastructure-owned `dev-runner` label as a repository error. `prek.toml` now calls the canonical repository wrapper, preserving workflow syntax and code-owned checks while applying the already-reviewed runner-topology boundary consistently. The complete hook suite passes without suppressing source, type, format, or workflow diagnostics.
+
+### blocked-cancel-race-rereview | low | resolved
+
+Type: concurrency and settlement. Status: verified. The ingest path now races accepted cancellation against the blocked next-event await, preserves completion-first behavior and current-receipt cancellation evidence, and retains generator/watchdog cleanup. The focused 200-test suite passes, including the real blocked-stream cancellation service test and the direct-recovery, event-handler, executor, IPC, and aggregator cases. The prior high and medium P01.S12 findings are resolved.
+
+### lifecycle-readiness-rereview | low | resolved
+
+Type: credential boundary and readiness. Status: verified. Listener ownership is established before credentialed readiness probing, foreign listeners are rejected without receiving a probe or registry record, and the lifecycle suite passes 41 tests. The prior high credential-probe finding is resolved.

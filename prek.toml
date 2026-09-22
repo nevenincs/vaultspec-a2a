@@ -63,7 +63,7 @@ repo = "local"
   types = ["markdown"]
 
   [[repos.hooks]]
-  entry = "uv run --no-sync --frozen --no-default-groups --group tooling actionlint"
+  entry = "uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.actionlint"
   files = '''^\.github/workflows/.*\.ya?ml$'''
   id = "actionlint"
   language = "system"

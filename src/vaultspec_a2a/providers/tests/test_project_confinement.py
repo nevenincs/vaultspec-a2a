@@ -14,11 +14,19 @@ the subprocess-backed session context fixture.
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 import pytest
 
-from .._acp_rpc_handlers import on_request_permission
+from ...control.config import settings
+from .. import _acp_rpc_handlers
+from .._acp_rpc_handlers import (
+    on_fs_read_text_file,
+    on_fs_write_text_file,
+    on_request_permission,
+)
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._json_contract import JsonObject, JsonValue
 
@@ -428,3 +436,142 @@ async def test_the_kimi_lane_keeps_its_proven_behaviour(
         )
         == "reject"
     )
+
+
+@pytest.mark.asyncio
+async def test_privileged_callback_refuses_static_symlink_escape(
+    two_projects: tuple[Path, Path],
+    acp_session_context: AcpSessionContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bound, protected = two_projects
+    secret = protected / "service.token"
+    secret.write_text("must-not-leak", encoding="utf-8")
+    escape = bound / "escape"
+    escape.symlink_to(protected, target_is_directory=True)
+    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
+
+    response = await on_fs_read_text_file(
+        1,
+        {"path": "escape/service.token"},
+        acp_session_context,
+        _config(workspace_root=str(bound)),
+    )
+
+    assert "error" in response
+    assert "must-not-leak" not in str(response)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Linux descriptor contract")
+@pytest.mark.asyncio
+async def test_privileged_callback_refuses_replaced_workspace_root(
+    two_projects: tuple[Path, Path],
+    acp_session_context: AcpSessionContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bound, protected = two_projects
+    managed = bound.parent / "managed"
+    managed.mkdir()
+    admitted = managed / "project"
+    admitted.symlink_to(protected, target_is_directory=True)
+    secret = protected / "service.token"
+    secret.write_text("must-not-leak", encoding="utf-8")
+    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
+    monkeypatch.setattr(settings, "workspace_root", managed)
+
+    response = await on_fs_read_text_file(
+        1,
+        {"path": "service.token"},
+        acp_session_context,
+        _config(workspace_root=str(admitted)),
+    )
+
+    assert "error" in response
+    assert "must-not-leak" not in str(response)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Linux descriptor contract")
+@pytest.mark.asyncio
+async def test_privileged_read_stays_on_opened_parent_during_symlink_swap(
+    two_projects: tuple[Path, Path],
+    acp_session_context: AcpSessionContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bound, protected = two_projects
+    safe = bound / "safe"
+    parked = bound / "parked"
+    safe.mkdir()
+    (safe / "data.txt").write_text("workspace-data", encoding="utf-8")
+    (protected / "data.txt").write_text("service-secret", encoding="utf-8")
+    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
+    real_open = os.open
+    swapped = False
+
+    def swapping_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped
+        if path == "data.txt" and dir_fd is not None and not swapped:
+            swapped = True
+            safe.rename(parked)
+            safe.symlink_to(protected, target_is_directory=True)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(_acp_rpc_handlers.os, "open", swapping_open)
+    response = await on_fs_read_text_file(
+        1,
+        {"path": "safe/data.txt"},
+        acp_session_context,
+        _config(workspace_root=str(bound)),
+    )
+
+    assert response["result"] == {"content": "workspace-data"}
+    assert "service-secret" not in str(response)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Linux descriptor contract")
+@pytest.mark.asyncio
+async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
+    two_projects: tuple[Path, Path],
+    acp_session_context: AcpSessionContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bound, protected = two_projects
+    safe = bound / "safe"
+    parked = bound / "parked"
+    safe.mkdir()
+    protected_target = protected / "target.txt"
+    protected_target.write_text("service-state", encoding="utf-8")
+    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
+    real_open = os.open
+    swapped = False
+
+    def swapping_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped
+        if path == "target.txt" and dir_fd is not None and not swapped:
+            swapped = True
+            safe.rename(parked)
+            safe.symlink_to(protected, target_is_directory=True)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(_acp_rpc_handlers.os, "open", swapping_open)
+    response = await on_fs_write_text_file(
+        1,
+        {"path": "safe/target.txt", "content": "workspace-write"},
+        acp_session_context,
+        _config(workspace_root=str(bound)),
+    )
+
+    assert response["result"] == {}
+    assert protected_target.read_text(encoding="utf-8") == "service-state"
+    assert (parked / "target.txt").read_text(encoding="utf-8") == "workspace-write"

@@ -54,6 +54,10 @@ migrations.yml:Exercise migration round trip
 #                           tag with its own copy
 #   check-release-cohort    the four-target completeness check, which lists the
 #                           targets by hand in a second place
+#   attest-release          derive the immutable archive subject set for the
+#                           isolated provenance action
+#   verify-release          download attached archives and pin verification to
+#                           this repository's release workflow
 release.yml:Install Python
 release.yml:Resolve a host Python for the release scripts
 release.yml:Resolve and agree the version
@@ -65,3 +69,5 @@ release.yml:Prove the artifact starts, serves, and stops
 release.yml:Archive the onedir
 release.yml:Refuse an incomplete cohort
 release.yml:Upload the assets to the release
+release.yml:Enumerate immutable archives
+release.yml:Verify attached archive provenance

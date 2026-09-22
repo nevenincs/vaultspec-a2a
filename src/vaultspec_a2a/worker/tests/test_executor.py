@@ -652,8 +652,18 @@ class TestHandleDispatch:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
+    @pytest.mark.parametrize(
+        "outcome",
+        [
+            ThreadStatus.CANCELLED,
+            ThreadStatus.COMPLETED,
+            ThreadStatus.FAILED,
+            "interrupted",
+        ],
+    )
     async def test_active_cancel_retains_exact_cessation_evidence_for_settle(
         self,
+        outcome: str,
     ) -> None:
         thread_id = "t-active-cancel"
         relayed: list[dict[str, Any]] = []
@@ -664,6 +674,16 @@ class TestHandleDispatch:
             try:
                 reservation = await executor.reserve_dispatch_capacity(thread_id)
                 assert reservation is not None
+                graph = _terminal_graph(executor)
+                if outcome == ThreadStatus.COMPLETED:
+                    completed = await executor.aggregator.ingest(
+                        thread_id,
+                        "supervisor",
+                        graph,
+                        {},
+                        {"configurable": {"thread_id": thread_id}},
+                    )
+                    assert completed == ThreadStatus.COMPLETED
                 request = DispatchRequest(
                     dispatch_id="active-cancel-dispatch",
                     action="cancel",
@@ -672,22 +692,44 @@ class TestHandleDispatch:
                 )
 
                 await executor.handle_dispatch(request)
-
-                assert [
-                    item
+                await executor._settle_run(
+                    _current_ingest_dispatch(thread_id),
+                    graph,
+                    {},
+                    outcome,
+                )
+                terminal = [
+                    item["payload"]
                     for item in relayed
                     if item["payload"].get("event_type") == "thread_terminal"
-                ] == []
-                evidence = executor._take_cancellation_evidence(
-                    thread_id, outcome="ceased"
-                )
-                assert evidence is not None
-                assert evidence.dispatch_id == "active-cancel-dispatch"
-                assert evidence.outcome == "ceased"
-                assert (
-                    executor._take_cancellation_evidence(thread_id, outcome="ceased")
-                    is None
-                )
+                ]
+                assert terminal == [
+                    {
+                        "event_type": "thread_terminal",
+                        "thread_id": thread_id,
+                        "status": "cancelled",
+                        "cancellation_evidence": {
+                            "schema_version": "cancellation-evidence-v1",
+                            "dispatch_id": request.dispatch_id,
+                            "outcome": "ceased",
+                        },
+                    }
+                ]
+                assert executor._pending_cancellations == {}
+                assert executor._terminal_arbitrations == {}
+                assert thread_id not in executor.aggregator._ingest._cancel_events
+                if outcome != ThreadStatus.CANCELLED:
+                    assert (
+                        len(
+                            [
+                                item
+                                for item in relayed
+                                if item["payload"].get("type") == "agent_status"
+                                and item["payload"].get("state") == "cancelled"
+                            ]
+                        )
+                        == 1
+                    )
                 await executor.release_dispatch_capacity(reservation)
             finally:
                 await bridge.close()

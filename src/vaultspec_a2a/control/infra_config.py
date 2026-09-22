@@ -274,6 +274,26 @@ class InfraConfig(BaseSettings):
             "armed desktop profile seats its own derived workspace tree here."
         ),
     )
+    provider_identity_launcher: Path | None = Field(
+        default=None,
+        alias="VAULTSPEC_PROVIDER_IDENTITY_LAUNCHER",
+        description=(
+            "Compose/Linux launcher that drops every provider and tool child to "
+            "the configured agent identity. Unset outside the isolated worker."
+        ),
+    )
+    provider_agent_uid: int | None = Field(
+        default=None,
+        alias="VAULTSPEC_PROVIDER_AGENT_UID",
+        ge=1,
+        description="Unprivileged UID selected by provider_identity_launcher.",
+    )
+    provider_agent_gid: int | None = Field(
+        default=None,
+        alias="VAULTSPEC_PROVIDER_AGENT_GID",
+        ge=1,
+        description="Unprivileged GID selected by provider_identity_launcher.",
+    )
     project_root: Path = Field(
         default_factory=lambda: _DEFAULT_PROJECT_ROOT,
         alias="VAULTSPEC_PROJECT_ROOT",

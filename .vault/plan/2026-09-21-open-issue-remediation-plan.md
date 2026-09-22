@@ -17,9 +17,9 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]'
   - '[[2026-08-02-control-action-leases-adr]]'
-modified: '2026-09-21'
+modified: '2026-09-22'
 body_schema: body-v2
-body_hash: 'sha256:0ccbe4dc764637c68d66630f73fb5af302a41f59647c927d5b1797d248fbba69'
+body_hash: 'sha256:79c10b3a4368e6ad851ca42635654c95f7f6efa3d57376986db4fc3fc89ff163'
 ---
 
 # `open-issue-remediation` plan
@@ -76,6 +76,7 @@ Settle and implement each issue lane against its current governing contracts, wi
 - [x] `P01.S17` - Fix the MEDIUM worker IPC lifecycle close-deadline bug: when the flush deadline is exhausted, the IPC client may return delivered=false without calling client.aclose; add bounded cleanup that always attempts client close after flush exhaustion without waiting indefinitely, and prove timeout/close behavior with focused tests while preserving bounded flush semantics; `src/vaultspec_a2a/worker/tests/test_ipc.py:483, src/vaultspec_a2a/worker/ipc.py:127-145, focused IPC lifecycle tests, canonical CI runner/session evidence and cleanup`.
 - [x] `P01.S18` - Instrument and repair the real desktop readiness/liveness failure observed by canonical CI: preserve the public /health 200 then authenticated /health timeout proof, capture gateway stderr, exit code, lifespan, and per-test gateway log when Popen exits 1, and fix the actual crash without weakening the assertion; `src/vaultspec_a2a/desktop_tests/test_readiness_model.py, desktop gateway lifecycle/diagnostic helpers required by the root cause, focused readiness tests, canonical CI evidence`.
 - [x] `P01.S19` - Correct runner lifecycle classification for the two canonical failures: preserve process-tree reaping, distinguish root exit from descendant linger, and retain exit 124 only for a genuine root/process timeout while proving the descendant timeout and post-receipt root-exit cases; `src/vaultspec_a2a/testing/runner.py, src/vaultspec_a2a/testing/tests/test_runner.py, runner lifecycle helper paths required by the root cause, canonical CI evidence`.
+- [x] `P01.S20` - Correct the HIGH CI-blocking nested scheduling-evidence runner teardown by scrubbing inherited completion credentials, pinning the pre-pytest runner-child identity through its contained launcher ancestry, and retaining exact owned-process timeout diagnostics; preserve truthful lifecycle, real scheduling tests, and the 10-second bound without skipping or global timeout padding; `src/vaultspec_a2a/testing/runner.py, src/vaultspec_a2a/testing/runner_child.py, src/vaultspec_a2a/testing/plugin.py, src/vaultspec_a2a/testing/tests/test_runner.py, src/vaultspec_a2a/testing/tests/test_scheduling_evidence.py, src/vaultspec_a2a/utils/process.py, src/vaultspec_a2a/utils/_process_tree.py`.
 
 ### Phase `P02` - integrate review and issue closure
 

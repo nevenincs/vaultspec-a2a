@@ -3,22 +3,11 @@ tags:
   - '#audit'
   - '#open-issue-remediation'
 date: '2026-09-21'
-modified: '2026-09-21'
+modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:c085342982419f0b291f7ddfc8fca67fe9037076eb5bb8392c202bd83208dbd9'
+body_hash: 'sha256:5b8b51141041b0c49477c9ac041f11ab49d367b506515c73f9dfd43afdf53e17'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
----
----
-tags:
-  - '#audit'
-  - '#open-issue-remediation'
-date: '2026-09-21'
-modified: '2026-09-21'
-body_schema: 'body-v2'
-body_hash: 'sha256:4603903719e3d2a248d3117ac11331c8207bfa9fbd18b988aa82301e75e35612'
-related:
-  - "`2026-09-21-open-issue-remediation-plan`"
 ---
 # `open-issue-remediation` audit: `rolling backlog implementation review`
 
@@ -395,3 +384,21 @@ S18 bounds and joins the dependency-probe aggregate, but later synchronous servi
 ### p01-s18-final-review | low/review | PASS
 
 Independent review found the original high resolved and required only the two low observations above. The final structured concurrency path gives each task an owned connection/session boundary: the request session belongs only to its database probe, journal inspection opens its own engine connection, and nested and outer task groups cancel and join all observations. The 3.0-second aggregate does not serially accumulate the journal, checkpoint, and worker budgets. No critical, high, or medium finding remains in S18.
+
+### nested-scheduling-runner-teardown | high/CI-blocking | canonical scheduling evidence reaches runner teardown without a truthful owned-process diagnosis | open
+
+The exact canonical log `Y:\code\vaultspec-a2a-ci-logs\c45b3222-just-ci-20260922-011503.log` records the run reaching 87% in `src/vaultspec_a2a/testing/tests/test_scheduling_evidence.py` after `test_runner6` passed, then the outer runner reporting its own session result followed by the 10-second process-tree exit timeout and reaped exit 124. There is no assertion failure/error and no PID snapshot, so the evidence does not distinguish a nested pytest or xdist descendant from the runner root. P01.S20 owns capturing the exact owned process tree and stack on timeout, identifying the root-versus-descendant cause, and fixing truthful lifecycle/cleanup while preserving the real scheduling tests and the 10-second bound. Skipping the tests or adding global timeout padding is out of scope; no source fix or issue closure is claimed. P01.S08 and P02.S09 remain open.
+
+### canonical-ci-scheduling-performance | low/measurement | scheduling-evidence run timing facts recorded without a misleading comparison | recorded
+
+For the same full run, the measured total was `1607.82s`; the harness stage completed `122` tests in `62.47s`; the unit stage was at least `1481.3s` when it reached 87%; and no pytest `--durations` report was emitted. These are standalone measurements for the exact log above, not a causal attribution or a comparison with the earlier canonical run; the missing durations report leaves per-node attribution unproven until a clean completion or targeted rerun.
+
+### nested-scheduling-runner-teardown | high | resolved
+
+P01.S20 resolution: the completion endpoint and prior owner PID are removed from the runner-child environment before pytest starts. A pre-pytest hello pins the designated execution PID; Windows admits the virtual-environment launcher descendant only while it belongs to the exact owned Job Object, and POSIX requires the spawned root PID. Later completion must name that pinned PID. The scheduling subprocess boundary also removes inherited credentials. Timeout diagnostics record the retained root status and exact Job/process-group member snapshot without command lines or environment. The proven cause is nested completion-channel inheritance; stack capture is unnecessary for that established cause and the owning Step now names the exact seven changed source/test paths.
+
+Final bounded verification: one runner-suite invocation passed 8/8 in 15.71s, including forged sender rejection, real nested xdist rebound rejection, legitimate hello/completion, exit-124 reaping, and exit-126 descendant classification. Ruff and Ty each passed once over all seven changed paths. Earlier same-source scheduling evidence passed 7/7 under the runner. No full CI rerun was started for this review. Self-review result: PASS; no critical, high, or medium implementation finding remains. The full canonical gate and its completed performance report remain pending integrated review.
+
+### completion-identity-reuse-review | low | not applicable to retained runner lifecycle
+
+Independent review proposed a HIGH numeric-PID reuse race. Actual lifecycle inspection does not support it: Windows Popen retains its process HANDLE throughout _await_pytest_exit; its _internal_poll and _wait inspect that handle without closing it, and assign_suspended_process seats that same handle in the Job before resuming the launcher. Job membership and launcher ancestry are checked for the initial hello, sent before pytest and before ordinary descendants receive control; nested environments lack its secret endpoint. On POSIX, the exact root remains unreusable while alive or unreaped; after poll observes/reaps its exit, _root_exit_status governs regardless of any receipt and never applies the root teardown branch. A later completion cannot change the pinned identity. No executable premature-timeout race or unrelated-process kill was demonstrated. The channel prevents accidental inherited nested receipts; it is not an isolation boundary against malicious code already executing inside the trusted pytest interpreter. Classification: review hypothesis, not applicable; no speculative process-identity subsystem added.

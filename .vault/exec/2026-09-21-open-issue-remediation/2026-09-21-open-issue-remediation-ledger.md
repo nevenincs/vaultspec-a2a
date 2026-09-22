@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-09-22'
 body_schema: 'body-v2'
-body_hash: 'sha256:c7e1b03d50037a8857c682f39d838fdaa521221be6b25ec93a1fc6e0b062970b'
+body_hash: 'sha256:0d83214fea11baca8ca8ebfad002138af8a27b716eb6678f9480a7958d75f4de'
 related:
   - "[[2026-09-21-open-issue-remediation-plan]]"
 ---
@@ -165,6 +165,17 @@ related:
 - `S18` `by:` `terra-high-s18`
 - `S18` `verify:` `focused service/auth/database/readiness 49/49 in 15.81s` -> `pass`
 - `S18` `verify:` `locked-checkpoint real TCP proof 3/3 with response under 4.5s` -> `pass`
+- `S20` `M` `src/vaultspec_a2a/testing/runner.py`
+- `S20` `M` `src/vaultspec_a2a/testing/runner_child.py`
+- `S20` `M` `src/vaultspec_a2a/testing/plugin.py`
+- `S20` `M` `src/vaultspec_a2a/testing/tests/test_runner.py`
+- `S20` `M` `src/vaultspec_a2a/testing/tests/test_scheduling_evidence.py`
+- `S20` `M` `src/vaultspec_a2a/utils/process.py`
+- `S20` `M` `src/vaultspec_a2a/utils/_process_tree.py`
+- `S20` `M` `.vault/audit/2026-09-21-open-issue-remediation-audit.md`
+- `S20` `M` `.vault/plan/2026-09-21-open-issue-remediation-plan.md`
+- `S20` `verify:` `uv run --no-sync ty check (seven S20 paths)` -> `pass`
+- `S20` `by:` `astra-medium`
 
 ## Notes
 
@@ -186,3 +197,4 @@ related:
 - `S15` Traceability correction only; source-inclusive S15 commit 1f794eaa already contains implementation and existing full-file evidence.
 - `S16` Review classified the former HIGH bootstrap finding resolved; S17 IPC lifecycle finding remains open.
 - `S19` Review resolved the medium descendant-classification and high post-receipt classification findings; S18 readiness remains open.
+- `S20` Full canonical run and final performance analysis remain pending P02.S09; no full rerun in bounded S20 review.

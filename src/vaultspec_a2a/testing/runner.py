@@ -19,7 +19,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol
 
 from ..utils.process import ProcessContainment, ProcessContainmentError
 
@@ -40,6 +40,10 @@ class _RunLimits:
     exit_timeout_s: float
     run_timeout_s: float | None
     progress_interval_s: float
+
+
+class _CompletionContainment(Protocol):
+    def is_designated_child(self, pid: int) -> bool: ...
 
 
 @dataclass
@@ -66,12 +70,24 @@ class _ProgressReporter:
         self.next_progress = now + self.interval_s
 
 
-def _completion_received(listener: socket.socket, token: str) -> bool:
-    """Accept one bounded authenticated completion message without blocking."""
+def _completion_received(
+    listener: socket.socket,
+    token: str,
+    containment: _CompletionContainment,
+    designated_pid: int | None,
+) -> tuple[int | None, bool]:
+    """Accept completion only from the designated runner child.
+
+    The endpoint token authenticates the owner channel, but environment values
+    are inherited by ordinary nested subprocesses.  The receipt therefore also
+    carries the sender's actual process id. The initial ``hello`` pins the
+    runner child's verified launcher descendant before pytest can spawn nested
+    processes; a later ``complete`` must come from that exact identity.
+    """
     try:
         connection, _address = listener.accept()
     except BlockingIOError:
-        return False
+        return designated_pid, False
     with connection:
         connection.settimeout(0.1)
         received = bytearray()
@@ -83,13 +99,56 @@ def _completion_received(listener: socket.socket, token: str) -> bool:
                 received.extend(chunk)
             payload = bytes(received).decode("ascii")
         except (OSError, UnicodeDecodeError):
-            return False
-    supplied, separator, exitstatus = payload.partition(":")
-    return bool(
-        separator
-        and exitstatus.rstrip("\n").lstrip("-").isdigit()
+            return designated_pid, False
+    fields = payload.rstrip("\n").split(":")
+    if len(fields) not in {3, 4}:
+        return designated_pid, False
+    supplied, sender_text, message_type, *status_fields = fields
+    exitstatus = status_fields[0] if len(status_fields) == 1 else ""
+    if not (
+        sender_text.isdigit()
+        and message_type in {"hello", "complete"}
         and hmac.compare_digest(supplied, token)
+    ):
+        return designated_pid, False
+    sender_pid = int(sender_text)
+    if message_type == "hello":
+        invalid_hello = (
+            exitstatus
+            or designated_pid is not None
+            or not containment.is_designated_child(sender_pid)
+        )
+        if invalid_hello:
+            print(
+                "pytest completion hello rejected: "
+                f"sender_pid={sender_pid} designated_pid={designated_pid}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return designated_pid, False
+        print(
+            "pytest completion hello accepted: "
+            f"designated_runner_child_pid={sender_pid}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return sender_pid, False
+    valid_status = exitstatus.rstrip("\n").lstrip("-").isdigit()
+    if not valid_status or sender_pid != designated_pid:
+        print(
+            "pytest completion receipt rejected: "
+            f"sender_pid={sender_pid} designated_runner_child_pid={designated_pid}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return designated_pid, False
+    print(
+        "pytest completion receipt accepted: "
+        f"sender_pid={sender_pid} exitstatus={exitstatus.rstrip()}",
+        file=sys.stderr,
+        flush=True,
     )
+    return designated_pid, True
 
 
 def _terminate(
@@ -103,25 +162,48 @@ def _terminate(
     return tree_reaped
 
 
+def _timeout_context(
+    process: subprocess.Popen[bytes], containment: ProcessContainment
+) -> str:
+    """Return safe, pre-reap ownership evidence for a timeout diagnostic."""
+    return (
+        f"root_pid={process.pid} root_returncode={process.poll()} "
+        f"{containment.diagnostic_snapshot()}"
+    )
+
+
 def _spawn_pytest_process(
     pytest_args: Sequence[str], containment: ProcessContainment, endpoint: str
 ) -> subprocess.Popen[bytes]:
-    env = {**os.environ, COMPLETION_ENDPOINT_ENV: endpoint}
+    env: dict[str, str] = dict(os.environ)
+    env[COMPLETION_ENDPOINT_ENV] = endpoint
+    # A caller cannot accidentally donate a stale owner identity to the child.
+    # ``runner_child`` also clears it around pytest; retaining both boundaries
+    # makes the spawn contract explicit before any child instructions execute.
+    env.pop(COMPLETION_OWNER_PID_ENV, None)
+    python_executable = sys.executable
+    if not python_executable:
+        raise OSError("Python executable is unavailable for pytest ownership")
     command = [
-        sys.executable,
+        python_executable,
         "-m",
         "vaultspec_a2a.testing.runner_child",
         *pytest_args,
     ]
+    spawn_kwargs = containment.spawn_kwargs()
+    start_new_session = bool(spawn_kwargs.get("start_new_session", False))
     try:
-        return cast(
-            "subprocess.Popen[bytes]",
-            subprocess.Popen(
-                command,
-                env=env,
-                creationflags=containment.suspended_creation_flag(),
-                **containment.spawn_kwargs(),
-            ),
+        return subprocess.Popen(
+            command,
+            stdin=None,
+            stdout=None,
+            stderr=None,
+            env=env,
+            creationflags=containment.suspended_creation_flag(),
+            start_new_session=start_new_session,
+            text=False,
+            encoding=None,
+            errors=None,
         )
     except BaseException:
         containment.close()
@@ -159,10 +241,12 @@ def _root_exit_status(
         return process.returncode, now
     first_seen = now if first_seen is None else first_seen
     if now - first_seen >= timeout_s:
+        context = _timeout_context(process, containment)
         reaped = _terminate(containment, process)
         print(
             "pytest exited but its contained descendants did not "
-            f"exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()}",
+            f"exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()} "
+            f"{context}",
             file=sys.stderr,
             flush=True,
         )
@@ -179,10 +263,12 @@ def _teardown_timeout_status(
 ) -> int | None:
     if completion_seen is None or now - completion_seen < timeout_s:
         return None
+    context = _timeout_context(process, containment)
     reaped = _terminate(containment, process)
     print(
         "pytest produced a session result but its owned process tree "
-        f"did not exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()}",
+        f"did not exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()} "
+        f"{context}",
         file=sys.stderr,
         flush=True,
     )
@@ -198,10 +284,11 @@ def _run_timeout_status(
 ) -> int | None:
     if timeout_s is None or now - started < timeout_s:
         return None
+    context = _timeout_context(process, containment)
     reaped = _terminate(containment, process)
     print(
         "pytest did not produce a session result within "
-        f"{timeout_s:g}s; tree_reaped={str(reaped).lower()}",
+        f"{timeout_s:g}s; tree_reaped={str(reaped).lower()} {context}",
         file=sys.stderr,
         flush=True,
     )
@@ -209,11 +296,19 @@ def _run_timeout_status(
 
 
 def _completion_time(
-    listener: socket.socket, token: str, completion_seen: float | None, now: float
-) -> float | None:
-    if completion_seen is None and _completion_received(listener, token):
-        return now
-    return completion_seen
+    listener: socket.socket,
+    token: str,
+    containment: ProcessContainment,
+    designated_pid: int | None,
+    completion_seen: float | None,
+    now: float,
+) -> tuple[int | None, float | None]:
+    if completion_seen is not None:
+        return designated_pid, completion_seen
+    designated_pid, received = _completion_received(
+        listener, token, containment, designated_pid
+    )
+    return designated_pid, now if received else completion_seen
 
 
 def _await_pytest_exit(
@@ -228,6 +323,7 @@ def _await_pytest_exit(
         started, started + limits.progress_interval_s, limits.progress_interval_s
     )
     completion_seen: float | None = None
+    designated_pid: int | None = None
     root_exit_seen: float | None = None
     run_timeout = (
         "unbounded" if limits.run_timeout_s is None else f"{limits.run_timeout_s:g}s"
@@ -243,7 +339,9 @@ def _await_pytest_exit(
         while True:
             returncode = process.poll()
             now = time.monotonic()
-            completion_seen = _completion_time(listener, token, completion_seen, now)
+            designated_pid, completion_seen = _completion_time(
+                listener, token, containment, designated_pid, completion_seen, now
+            )
             # A root may terminate between the first poll and receipt
             # observation. Re-sample before applying the post-receipt timeout;
             # otherwise a scheduling boundary can misclassify a root exit as a

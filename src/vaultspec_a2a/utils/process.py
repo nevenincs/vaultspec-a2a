@@ -8,7 +8,7 @@ import logging
 import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import Any, TypedDict
 
 from ._process_tree import (
     CREATE_SUSPENDED as _CREATE_SUSPENDED,
@@ -21,6 +21,9 @@ from ._process_tree import (
 )
 from ._process_tree import (
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE as _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+)
+from ._process_tree import (
+    JOB_PROCESS_ID_LIST_CLASS as _JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS,
 )
 from ._process_tree import (
     POLL_INTERVAL as _POLL_INTERVAL,
@@ -47,12 +50,12 @@ from ._process_tree import (
     THREAD_SUSPEND_RESUME as _THREAD_SUSPEND_RESUME,
 )
 from ._process_tree import (
+    pid_in_tree as _pid_in_tree,
+)
+from ._process_tree import (
     win_kernel32 as _win_kernel32,
 )
 from .async_cleanup import complete_cleanup
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 __all__ = [
     "ProcessContainment",
@@ -60,6 +63,12 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+class _SpawnKwargs(TypedDict, total=False):
+    """The only platform-specific ``Popen`` keyword this facade supplies."""
+
+    start_new_session: bool
 
 
 def _posix_group_is_live(pgid: int) -> bool | None:
@@ -134,6 +143,30 @@ def _ps_group_is_live(pgid: int) -> bool | None:
         elif int(fields[0]) == pgid and fields[1][0] not in {"Z", "X"}:
             return True
     return None if uncertain else False
+
+
+def _posix_group_process_ids(pgid: int | None) -> tuple[int, ...] | None:
+    """Return a safe diagnostic snapshot of live members in an owned group."""
+    if pgid is None or sys.platform == "win32":
+        return None
+    if sys.platform != "linux":
+        return None
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return None
+    pids: list[int] = []
+    uncertain = False
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        live = _proc_group_member_is_live(pid, pgid)
+        if live is True:
+            pids.append(pid)
+        elif live is None:
+            uncertain = True
+    return None if uncertain else tuple(sorted(pids))
 
 
 async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
@@ -286,7 +319,7 @@ class ProcessContainment:
             raise
         return job
 
-    def spawn_kwargs(self) -> Mapping[str, Any]:
+    def spawn_kwargs(self) -> _SpawnKwargs:
         """Return spawn kwargs that seat the root in its containment at spawn.
 
         POSIX seats the root in a new session/process group at fork; Windows
@@ -634,6 +667,84 @@ class ProcessContainment:
         ):
             return None
         return int(info.ActiveProcesses)
+
+    def diagnostic_snapshot(self) -> str:
+        """Return process identities currently owned by this containment.
+
+        This is diagnostic-only: it never discovers descendants by parent pid
+        and never includes command lines or environment values. Windows reads
+        Job Object membership; POSIX names the isolated process group, whose
+        members are the owned tree by construction.
+        """
+        if self._pid is None or not self._assigned:
+            return "owned_pids=unassigned"
+        if sys.platform == "win32":
+            pids = self._win_job_process_ids(_win_kernel32())
+        else:
+            pids = _posix_group_process_ids(self._pgid)
+        if pids is None:
+            return "owned_pids=unknown"
+        return "owned_pids=" + ",".join(str(pid) for pid in pids)
+
+    def is_designated_child(self, pid: int) -> bool:
+        """Whether *pid* is the launcher-root's direct execution identity.
+
+        A Windows virtual-environment launcher can replace the ``Popen`` root
+        with one Python child. That child must be both in the owned Job Object
+        and a descendant of the retained launcher root. POSIX has no launcher
+        hop here, so only the exact spawned root is valid.
+        """
+        if self._pid is None or not self._assigned or pid <= 1:
+            return False
+        if sys.platform != "win32":
+            return pid == self._pid
+        pids = self._win_job_process_ids(_win_kernel32())
+        return bool(pids and pid in pids and _pid_in_tree(self._pid, pid) is True)
+
+    def _win_job_process_ids(self, kernel32: Any) -> tuple[int, ...] | None:
+        """Read exact current Job Object membership without a parent-pid walk."""
+        if self._job is None:
+            return None
+        import ctypes
+        from ctypes import wintypes
+
+        header_size = ctypes.sizeof(wintypes.DWORD) * 2
+        pointer_size = ctypes.sizeof(ctypes.c_size_t)
+        size = header_size + pointer_size * 16
+        for _attempt in range(3):
+            buffer = (ctypes.c_byte * size)()
+            needed = wintypes.DWORD()
+            kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+            kernel32.QueryInformationJobObject.argtypes = (
+                wintypes.HANDLE,
+                ctypes.c_int,
+                ctypes.c_void_p,
+                wintypes.DWORD,
+                ctypes.POINTER(wintypes.DWORD),
+            )
+            if kernel32.QueryInformationJobObject(
+                self._job,
+                _JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS,
+                ctypes.byref(buffer),
+                size,
+                ctypes.byref(needed),
+            ):
+                assigned = wintypes.DWORD.from_buffer(buffer, 0).value
+                listed = wintypes.DWORD.from_buffer(buffer, 4).value
+                capacity = (size - header_size) // pointer_size
+                if assigned > capacity or listed > capacity:
+                    return None
+                pids = tuple(
+                    ctypes.c_size_t.from_buffer(
+                        buffer, header_size + pointer_size * index
+                    ).value
+                    for index in range(listed)
+                )
+                return tuple(sorted(int(pid) for pid in pids if pid))
+            if needed.value <= size:
+                return None
+            size = int(needed.value)
+        return None
 
     async def _terminate_posix_group(
         self, *, term_timeout: float, kill_timeout: float

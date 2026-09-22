@@ -15,6 +15,8 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+from ..runner import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -65,6 +67,12 @@ def _run_pytest(
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env.pop("PYTEST_ADDOPTS", None)
+    # This nested controller exercises scheduling, not the outer runner's
+    # lifecycle.  Completion credentials are strictly parent-scoped; passing
+    # them through would let an accidental child rebind its PID and compete for
+    # the outer receipt channel.
+    env.pop(COMPLETION_ENDPOINT_ENV, None)
+    env.pop(COMPLETION_OWNER_PID_ENV, None)
     env.update(env_overrides or {})
     return subprocess.run(
         [

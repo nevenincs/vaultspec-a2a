@@ -1,16 +1,22 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
 import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
+import httpx
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -42,6 +48,7 @@ from ...database import (
     thread_write_expectation,
 )
 from ...database.models import ControlActionModel, RunWriteAuthority, ThreadModel
+from ...database.session import configure_sqlite_transactions
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
@@ -51,6 +58,7 @@ from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ...worker.ipc import WorkerBridge
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,6 +398,112 @@ async def test_exact_cancellation_evidence_settles_current_action(
     assert action is not None
     assert action.applied_at is not None
     assert action.result_status == result_status.value
+    assert action.claim_token is None
+    assert thread is not None
+    assert thread.status == ThreadStatus.CANCELLED.value
+    assert thread.run_revision == 1
+    assert thread.last_applied_action == ControlActionType.CANCEL.value
+
+
+@pytest.mark.asyncio
+async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) -> None:
+    """A busy terminal election can recover through the bounded bridge retry."""
+    db_file = materialize_schema(tmp_path / "terminal-election-contention.db")
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{db_file}",
+        connect_args={"timeout": 0},
+    )
+    configure_sqlite_transactions(engine)
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    blocker = sqlite3.connect(str(db_file), isolation_level=None, timeout=0)
+    attempts: list[dict[str, Any]] = []
+    busy_errors: list[str] = []
+    app = FastAPI()
+
+    action_id = await _seed_current_cancel(
+        sessions,
+        thread_id="terminal-election-contention",
+        dispatch_id="terminal-election-receipt",
+    )
+    payload: dict[str, object] = {
+        "event_type": "thread_terminal",
+        "status": "cancelled",
+        "cancellation_evidence": {
+            "schema_version": "cancellation-evidence-v1",
+            "dispatch_id": "terminal-election-receipt",
+            "outcome": "no_active_work",
+        },
+    }
+
+    blocker.execute("PRAGMA journal_mode=WAL")
+    blocker.execute("PRAGMA busy_timeout=0")
+    blocker.execute("BEGIN IMMEDIATE")
+
+    @app.post("/internal/events/batch")
+    async def receive_batch(request: Request) -> Response:
+        body = cast("dict[str, Any]", await request.json())
+        attempts.append(body)
+        event = cast("dict[str, Any]", body["events"][0])
+        try:
+            await _handle_terminal_event(
+                event["thread_id"],
+                event["payload"],
+                session_factory=sessions,
+            )
+        except OperationalError as exc:
+            if not isinstance(exc.orig, sqlite3.OperationalError):
+                raise
+            busy_errors.append(str(exc.orig))
+            blocker.rollback()
+            return Response(status_code=503)
+        return Response(
+            content='{"status":"ok"}',
+            media_type="application/json",
+        )
+
+    bridge = WorkerBridge("http://control", "terminal-election-contention")
+    await bridge._client.aclose()
+    bridge._client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://control",
+    )
+    try:
+        await bridge.send_event("terminal-election-contention", payload)
+        assert await bridge.flush_events()
+    finally:
+        await bridge.close()
+        blocker.close()
+        await engine.dispose()
+
+    assert busy_errors == ["database is locked"]
+    assert len(attempts) == 2
+    assert attempts[0] == attempts[1]
+    first_event = cast("dict[str, Any]", attempts[0]["events"][0])
+    assert first_event["payload"]["cancellation_evidence"]["dispatch_id"] == (
+        "terminal-election-receipt"
+    )
+
+    verification_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    verification_sessions = async_sessionmaker(
+        verification_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    try:
+        async with verification_sessions() as session:
+            action = await session.get(ControlActionModel, action_id)
+            thread = await session.get(
+                ThreadModel,
+                "terminal-election-contention",
+            )
+    finally:
+        await verification_engine.dispose()
+
+    assert action is not None
+    assert action.applied_at is not None
+    assert (
+        action.result_status == ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK.value
+    )
     assert action.claim_token is None
     assert thread is not None
     assert thread.status == ThreadStatus.CANCELLED.value

@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from ..plugin import _send_completion_receipt
 from ..runner import (
@@ -17,7 +17,11 @@ from ..runner import (
     DESCENDANT_TIMEOUT_EXIT,
     RUN_TIMEOUT_EXIT,
     TEARDOWN_TIMEOUT_EXIT,
+    _completion_received,
 )
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class _RunnerResult(NamedTuple):
@@ -49,6 +53,7 @@ def _run_runner(
                 "1",
                 *runner_args,
                 "--",
+                f"--confcutdir={probe.parent}",
                 str(probe),
                 "-q",
             ],
@@ -144,6 +149,8 @@ def test_runner_reaps_a_process_that_hangs_after_its_passing_result(
     assert "[100%]" in completed.stdout
     assert "produced a session result" in completed.stderr
     assert "tree_reaped=true" in completed.stderr
+    assert "root_pid=" in completed.stderr
+    assert "owned_pids=" in completed.stderr
     assert time.monotonic() - started < 15
 
 
@@ -175,6 +182,92 @@ def test_nested_pytest_process_cannot_complete_its_parent_receipt() -> None:
             os.environ.pop(COMPLETION_OWNER_PID_ENV, None)
         else:
             os.environ[COMPLETION_OWNER_PID_ENV] = old_owner
+
+
+def test_completion_receiver_rejects_a_forged_sender_after_child_hello(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only the verified runner-child PID can finish an admitted session."""
+
+    class _Containment:
+        def is_designated_child(self, pid: int) -> bool:
+            return pid == os.getpid()
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(2)
+    listener.setblocking(False)
+    host, port = listener.getsockname()
+    try:
+        with socket.create_connection((host, port)) as connection:
+            connection.sendall(f"parent-token:{os.getpid()}:hello\n".encode())
+        designated, completed = _completion_received(
+            listener, "parent-token", _Containment(), None
+        )
+        assert designated == os.getpid()
+        assert completed is False
+        with socket.create_connection((host, port)) as connection:
+            connection.sendall(f"parent-token:{os.getpid() + 1}:complete:0\n".encode())
+        designated, completed = _completion_received(
+            listener, "parent-token", _Containment(), designated
+        )
+        assert designated == os.getpid()
+        assert completed is False
+    finally:
+        listener.close()
+    assert "pytest completion receipt rejected: sender_pid=" in capsys.readouterr().err
+
+
+def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
+    """A nested xdist controller cannot start the outer teardown clock.
+
+    The miniature child deliberately rebinds the former owner variable to its
+    own PID, but the real runner child has already scrubbed the endpoint before
+    pytest can spawn it. The outer test remains active longer than the
+    one-second teardown budget, so a leaked nested completion channel would
+    recreate the canonical false exit-124 failure.
+    """
+    outer = tmp_path / "test_nested_xdist_receipt.py"
+    outer.write_text(
+        "import os\n"
+        "import subprocess\n"
+        "import sys\n"
+        "import time\n"
+        "from vaultspec_a2a.testing.runner import COMPLETION_ENDPOINT_ENV\n"
+        "\n"
+        "def test_nested_xdist_cannot_finish_outer(tmp_path):\n"
+        "    assert COMPLETION_ENDPOINT_ENV not in os.environ\n"
+        "    nested = tmp_path / 'nested'\n"
+        "    nested.mkdir()\n"
+        "    (nested / 'conftest.py').write_text(\n"
+        "        'import os\\n'\n"
+        "        'from vaultspec_a2a.testing.runner import '\n"
+        "        'COMPLETION_OWNER_PID_ENV\\n'\n"
+        "        'os.environ[COMPLETION_OWNER_PID_ENV] = str(os.getpid())\\n'\n"
+        "    )\n"
+        "    (nested / 'test_inner.py').write_text(\n"
+        "        'def test_one():\\n    assert True\\n'\n"
+        "    )\n"
+        "    completed = subprocess.run(\n"
+        "        [sys.executable, '-m', 'pytest', str(nested), '-p',\n"
+        "         'vaultspec_a2a.testing.plugin', '-p', 'no:cacheprovider',\n"
+        "         '-n', '2', '--dist=loadgroup', '-q'],\n"
+        "        cwd=nested, env=dict(os.environ), capture_output=True, text=True,\n"
+        "        timeout=30, check=False,\n"
+        "    )\n"
+        "    assert completed.returncode == 0, completed.stdout + completed.stderr\n"
+        "    time.sleep(1.2)\n",
+        encoding="utf-8",
+    )
+
+    completed = _run_runner(outer, tmp_path)
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert (
+        "pytest completion hello accepted: designated_runner_child_pid="
+        in completed.stderr
+    )
+    assert "pytest completion receipt accepted: sender_pid=" in completed.stderr
 
 
 def test_runner_reaps_descendants_left_after_pytest_exits(tmp_path: Path) -> None:

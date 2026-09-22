@@ -52,15 +52,18 @@ def test_release_please_owns_reviewable_version_proposals() -> None:
     )
     assert "gh workflow run merge-gate.yml" in steps[1]["run"]
     assert "gh workflow run release.yml" in steps[2]["run"]
+    assert '-f "operation=publish"' in steps[2]["run"]
 
 
 def test_release_proves_tag_and_publishes_complete_cohort_last() -> None:
-    """Prevent an implicit tag push or partial artifact set from publishing."""
+    """Permit exact tag publication while refusing partial artifact sets."""
     workflow = _workflow("release.yml")
-    assert set(_triggers(workflow)) == {"workflow_dispatch"}
+    triggers = _triggers(workflow)
+    assert set(triggers) == {"push", "workflow_dispatch"}
+    assert triggers["push"] == {"tags": ["v*.*.*"]}
     jobs = workflow["jobs"]
     assert jobs["health"]["uses"] == "./.github/workflows/test.yml"
-    assert jobs["health"]["with"]["ref"] == "${{ inputs.tag }}"
+    assert jobs["health"]["with"]["ref"] == "${{ inputs.tag || github.ref }}"
     assert jobs["build"]["needs"] == "health"
     assert jobs["provenance"]["needs"] == "build"
     assert jobs["provenance"]["permissions"] == {
@@ -79,6 +82,7 @@ def test_release_proves_tag_and_publishes_complete_cohort_last() -> None:
     upload = steps[-3]["run"]
     assert 'gh release upload "$RAW_TAG" "${members[@]}"' in upload
     assert "members/*" not in upload
+    assert "checksum mismatch" in steps[-4]["run"]
     assert "gh attestation verify" in steps[-2]["run"]
     assert 'gh release edit "$RAW_TAG" --draft=false' in steps[-1]["run"]
 

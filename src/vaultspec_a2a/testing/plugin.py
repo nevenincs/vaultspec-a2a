@@ -65,19 +65,34 @@ _session_lease: object | None = None
 _admission_line: str = ""
 
 
-def _send_completion_receipt(exitstatus: int) -> None:
-    """Notify the containing runner that pytest has produced its result."""
-    from .runner import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
-
-    endpoint = os.environ.get(COMPLETION_ENDPOINT_ENV)
-    owner_pid = os.environ.get(COMPLETION_OWNER_PID_ENV)
-    if not endpoint or owner_pid != str(os.getpid()):
-        return
+def _send_completion_message(
+    endpoint: str, message_type: str, exitstatus: int | None = None
+) -> None:
+    """Send one bounded runner-child message with its actual process identity."""
+    if message_type not in {"hello", "complete"}:
+        raise ValueError("invalid pytest completion message type")
+    if message_type == "complete" and exitstatus is None:
+        raise ValueError("completion receipt requires an exit status")
     host, port_text, token = endpoint.split(":", maxsplit=2)
     if host != "127.0.0.1" or not port_text.isdigit() or not token:
         raise ValueError("invalid pytest completion endpoint")
+    payload = f"{token}:{os.getpid()}:{message_type}"
+    if exitstatus is not None:
+        payload += f":{exitstatus}"
     with socket.create_connection((host, int(port_text)), timeout=1.0) as connection:
-        connection.sendall(f"{token}:{exitstatus}\n".encode("ascii"))
+        connection.sendall(f"{payload}\n".encode("ascii"))
+
+
+def _send_completion_receipt(exitstatus: int, *, endpoint: str | None = None) -> None:
+    """Notify the containing runner that pytest has produced its result."""
+    from .runner import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
+
+    if endpoint is None:
+        endpoint = os.environ.get(COMPLETION_ENDPOINT_ENV)
+        owner_pid = os.environ.get(COMPLETION_OWNER_PID_ENV)
+        if not endpoint or owner_pid != str(os.getpid()):
+            return
+    _send_completion_message(endpoint, "complete", exitstatus)
 
 
 @pytest.hookimpl(trylast=True)

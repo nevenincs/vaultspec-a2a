@@ -35,7 +35,8 @@ from ...authoring.catalog import (
     make_tool_dispatch,
     parse_catalog,
 )
-from ...control.settings_base import ENV_PREFIX, ProjectSettings, env_name
+from ...control.env_prefix import ENV_PREFIX
+from ...control.settings_base import ProjectSettings, env_name
 from .tools.authoring_bridge import build_authoring_mcp_server
 
 __all__ = [

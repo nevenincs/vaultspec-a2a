@@ -9,8 +9,8 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import NoDecode, SettingsConfigDict
 
 from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
+from .env_prefix import ENV_PREFIX
 from .settings_base import (
-    ENV_PREFIX,
     ProjectSettings,
     env_name,
     resolve_project_root,

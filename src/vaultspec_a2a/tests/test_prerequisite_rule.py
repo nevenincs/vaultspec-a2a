@@ -165,11 +165,11 @@ def test_live_provider_proofs_deselect_until_every_resource_is_declared() -> Non
         *_LIVE_PROVIDER_TESTS,
         without=(
             "VAULTSPEC_A2A_ENGINE_SERVE_CMD",
-            "VAULTSPEC_LIVE_PROVIDER_ID",
-            "VAULTSPEC_LIVE_EXECUTION_MODE",
-            "VAULTSPEC_LIVE_ENTRY_ID",
-            "VAULTSPEC_LIVE_CONTROL_ID",
-            "VAULTSPEC_LIVE_OPTION_ID",
+            "VAULTSPEC_A2A_LIVE_PROVIDER_ID",
+            "VAULTSPEC_A2A_LIVE_EXECUTION_MODE",
+            "VAULTSPEC_A2A_LIVE_ENTRY_ID",
+            "VAULTSPEC_A2A_LIVE_CONTROL_ID",
+            "VAULTSPEC_A2A_LIVE_OPTION_ID",
         ),
     )
     combined = result.stdout + result.stderr
@@ -193,28 +193,28 @@ def test_declared_live_provider_selector_fails_before_collection_when_unset() ->
         "-q",
         _LIVE_PROVIDER_TESTS[1],
         without=(
-            "VAULTSPEC_LIVE_PROVIDER_ID",
-            "VAULTSPEC_LIVE_EXECUTION_MODE",
-            "VAULTSPEC_LIVE_ENTRY_ID",
-            "VAULTSPEC_LIVE_CONTROL_ID",
-            "VAULTSPEC_LIVE_OPTION_ID",
+            "VAULTSPEC_A2A_LIVE_PROVIDER_ID",
+            "VAULTSPEC_A2A_LIVE_EXECUTION_MODE",
+            "VAULTSPEC_A2A_LIVE_ENTRY_ID",
+            "VAULTSPEC_A2A_LIVE_CONTROL_ID",
+            "VAULTSPEC_A2A_LIVE_OPTION_ID",
         ),
     )
     combined = result.stdout + result.stderr
     assert result.returncode == _USAGE_ERROR, combined
     assert "provider-catalog-live-selection" in combined, combined
-    assert "VAULTSPEC_LIVE_OPTION_ID" in combined, combined
+    assert "VAULTSPEC_A2A_LIVE_OPTION_ID" in combined, combined
 
 
 def test_live_provider_proofs_collect_only_after_all_resources_are_declared() -> None:
     """Collection requires explicit authorization, before either process can start."""
     required_env = {
         "VAULTSPEC_A2A_ENGINE_SERVE_CMD": sys.executable,
-        "VAULTSPEC_LIVE_PROVIDER_ID": "collection-authorized",
-        "VAULTSPEC_LIVE_EXECUTION_MODE": "collection-authorized",
-        "VAULTSPEC_LIVE_ENTRY_ID": "collection-authorized",
-        "VAULTSPEC_LIVE_CONTROL_ID": "collection-authorized",
-        "VAULTSPEC_LIVE_OPTION_ID": "collection-authorized",
+        "VAULTSPEC_A2A_LIVE_PROVIDER_ID": "collection-authorized",
+        "VAULTSPEC_A2A_LIVE_EXECUTION_MODE": "collection-authorized",
+        "VAULTSPEC_A2A_LIVE_ENTRY_ID": "collection-authorized",
+        "VAULTSPEC_A2A_LIVE_CONTROL_ID": "collection-authorized",
+        "VAULTSPEC_A2A_LIVE_OPTION_ID": "collection-authorized",
     }
     result = _pytest(
         "--override-ini",

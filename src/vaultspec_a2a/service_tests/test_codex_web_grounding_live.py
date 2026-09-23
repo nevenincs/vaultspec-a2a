@@ -420,13 +420,13 @@ async def _resolve_served_codex_model(
     Print a current block with ``just test-lanes --exports codex=<model>``.
     """
     rule("provider-catalog-live-selection")
-    declared_provider = (os.environ.get("VAULTSPEC_LIVE_PROVIDER_ID") or "").strip()
+    declared_provider = (os.environ.get("VAULTSPEC_A2A_LIVE_PROVIDER_ID") or "").strip()
     if declared_provider != Provider.CODEX.value:
         rule.absent(
             "provider-catalog-live-selection",
             f"the declared lane is {declared_provider!r}, not codex",
         )
-    entry_id = (os.environ.get("VAULTSPEC_LIVE_ENTRY_ID") or "").strip()
+    entry_id = (os.environ.get("VAULTSPEC_A2A_LIVE_ENTRY_ID") or "").strip()
     registration = next(
         item
         for item in ProviderFactory().catalog_registrations(workspace_root)

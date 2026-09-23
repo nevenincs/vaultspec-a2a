@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...streaming.aggregator import EventAggregator
+from ...testing import session_scratch_dir
 from .conftest import SessionFactory, catalog_run_fields
 from .conftest import make_app as _make_app_4
 
@@ -47,7 +48,9 @@ def _run_workspace():
     below assert on stored metadata and discovered context refs, and a leftover
     temp directory is the OS's business, not theirs.
     """
-    return tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+    return tempfile.TemporaryDirectory(
+        dir=session_scratch_dir("thread-metadata-"), ignore_cleanup_errors=True
+    )
 
 
 def _make_app(

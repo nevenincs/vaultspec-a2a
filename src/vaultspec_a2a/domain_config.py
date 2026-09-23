@@ -15,7 +15,8 @@ The settings govern :mod:`vaultspec_a2a.context`, :mod:`vaultspec_a2a.graph`,
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from .control.settings_base import ENV_PREFIX, ProjectSettings
+from .control.env_prefix import ENV_PREFIX
+from .control.settings_base import ProjectSettings
 
 
 class DomainConfig(ProjectSettings):

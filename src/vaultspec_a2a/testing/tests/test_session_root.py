@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ...control.infra_config import InfraConfig
 from ...control.settings_base import env_name
+from .. import harness_names
 from ..environment import armed_environment
 from ..session_root import TEST_ROOT_NAME, TestSessionSettings, seat_test_session
 
@@ -29,9 +30,24 @@ _SEAT_NAMES = (
 
 
 def _cleared(**values: str | None) -> dict[str, str | None]:
-    names: dict[str, str | None] = dict.fromkeys(_SEAT_NAMES)
+    # These cases describe a controller, so the xdist worker marker this very
+    # test may be running under is cleared too.
+    names: dict[str, str | None] = dict.fromkeys((*_SEAT_NAMES, "PYTEST_XDIST_WORKER"))
     names.update(values)
     return names
+
+
+def test_the_light_harness_names_are_the_ones_the_settings_read() -> None:
+    """The import-light spellings must never drift from the schema."""
+    assert (
+        env_name(TestSessionSettings, "completion_endpoint")
+        == harness_names.COMPLETION_ENDPOINT_ENV
+    )
+    assert (
+        env_name(TestSessionSettings, "completion_owner_pid")
+        == harness_names.COMPLETION_OWNER_PID_ENV
+    )
+    assert env_name(TestSessionSettings, "cpu_budget") == harness_names.CPU_BUDGET_ENV
 
 
 def test_a_fresh_seat_places_everything_under_the_rootdir(tmp_path: Path) -> None:

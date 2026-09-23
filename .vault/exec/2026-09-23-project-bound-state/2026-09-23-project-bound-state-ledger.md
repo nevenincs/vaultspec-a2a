@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:c7db4f41a753d631c10be08bf6682d9a9fe7914729bb7af983ce10aa5c31292d'
+body_hash: 'sha256:80513fa7dd4b4b537340fc1a57d18dfcdfd1c2fe9ed3c19d2f626b5fe7a0097d'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -265,4 +265,41 @@ related:
 - `S08` `M` `src/vaultspec_a2a/tests/test_prerequisite_rule.py`
 - `S08` `verify:` `pytest testing/tests, tests/ -n 3 unpinned (97 passed), test_session_root 5 passed, test_project_root; no writes to ~/.vaultspec-a2a or ~/.vaultspec and basetemp inside the seat` -> `pass`
 - `S08` `by:` `claude`
+- `S09` `M` `.gitignore`
+- `S09` `M` `.vault/audit/2026-09-23-project-bound-state-audit.md`
+- `S09` `M` `Justfile`
+- `S09` `M` `dev/providers.py`
+- `S09` `M` `scripts/prove_artifact_lifecycle.sh`
+- `S09` `M` `src/vaultspec_a2a/acceptance/tests/test_deterministic_completion.py`
+- `S09` `M` `src/vaultspec_a2a/api/tests/test_engine_edge_bounds_agreement.py`
+- `S09` `M` `src/vaultspec_a2a/api/tests/test_thread_metadata.py`
+- `S09` `M` `src/vaultspec_a2a/conftest.py`
+- `S09` `M` `src/vaultspec_a2a/control/config.py`
+- `S09` `A` `src/vaultspec_a2a/control/env_prefix.py`
+- `S09` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S09` `M` `src/vaultspec_a2a/control/settings_base.py`
+- `S09` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `S09` `M` `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+- `S09` `M` `src/vaultspec_a2a/domain_config.py`
+- `S09` `M` `src/vaultspec_a2a/protocols/mcp/authoring_stdio.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_zai_catalog_live.py`
+- `S09` `M` `src/vaultspec_a2a/service_tests/_provider_catalog_live.py`
+- `S09` `M` `src/vaultspec_a2a/service_tests/test_codex_web_grounding_live.py`
+- `S09` `M` `src/vaultspec_a2a/service_tests/test_provider_condition_live.py`
+- `S09` `M` `src/vaultspec_a2a/service_tests/test_provider_execution_live.py`
+- `S09` `M` `src/vaultspec_a2a/testing/__init__.py`
+- `S09` `A` `src/vaultspec_a2a/testing/harness_names.py`
+- `S09` `M` `src/vaultspec_a2a/testing/runner.py`
+- `S09` `M` `src/vaultspec_a2a/testing/runner_child.py`
+- `S09` `M` `src/vaultspec_a2a/testing/session_root.py`
+- `S09` `M` `src/vaultspec_a2a/testing/sessions.py`
+- `S09` `M` `src/vaultspec_a2a/testing/tests/test_runner.py`
+- `S09` `M` `src/vaultspec_a2a/testing/tests/test_scheduling_evidence.py`
+- `S09` `M` `src/vaultspec_a2a/testing/tests/test_session_root.py`
+- `S09` `M` `src/vaultspec_a2a/tests/test_prerequisite_rule.py`
+- `S09` `M` `src/vaultspec_a2a/worker/tests/test_authoring_binding.py`
+- `S09` `M` `src/vaultspec_a2a/workspace/environment.py`
+- `S09` `M` `src/vaultspec_a2a/workspace/tests/test_workspace.py`
+- `S09` `verify:` `pytest -n 6 full unit tier unpinned: 4655 passed, 5 failed, all load-sensitive timing tests that pass serially; after fixes testing/tests and tests -n 3: only the 30 s-budget runner tests and the degraded-admission test fail under load; no writes to ~/.vaultspec-a2a, ~/.vaultspec or C:\Users\hello\AppData\Local\Temp` -> `pass`
+- `S09` `by:` `claude`
 

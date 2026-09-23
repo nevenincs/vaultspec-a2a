@@ -197,8 +197,9 @@ the checkpoint store into the same file.
 `VAULTSPEC_ALLOW_EMPTY_SELECTION` (`dev/exit_codes.py`), `VAULTSPEC_INIT_JSON` and
 `VAULTSPEC_INIT_FORCE` (`dev/init/contract.py`). The CI, fix-strict, empty-selection
 and init names are shared with the dashboard's development harness, so they read as
-fleet conventions rather than a2a settings. Status: `VAULTSPEC_LIVE_*` owned by
-`P03.S09`; the fleet-shared names are open pending the owner's call on whether D1
+fleet conventions rather than a2a settings. Status: `VAULTSPEC_LIVE_*` and the other
+repository test variables renamed under `VAULTSPEC_A2A_` in `P03.S09`; the
+fleet-shared names are open pending the owner's call on whether D1
 covers the development harness.
 
 ### capsule-root-tilde-regression | low | The capsule assets root no longer expanded a tilde
@@ -218,6 +219,45 @@ carry an editable `NAME=` line under at least one of its names.
 `.venv`, so a workspace nested in another repository (now every test workspace,
 and any operator workspace inside a larger checkout) receives the enclosing
 repository's interpreter. Status: owned by `P03.S09`.
+
+### nested-run-took-parent-seat | high | A nested pytest inside an xdist worker reused, then cleared, its parent's basetemp
+
+Found while verifying `P03.S08`: a nested pytest started from a worker inherits
+`PYTEST_XDIST_WORKER`, the seat took it for a worker, handed it the parent's seat,
+and the nested controller's own xdist then cleared the parent's live basetemp.
+Status: fixed in `P03.S08`; a worker is recognised by also being execnet's
+`python -c` (`testing/session_root.py`), covered in
+`testing/tests/test_session_root.py`.
+
+### confcutdir-runs-used-system-temp | medium | Runner-launched sessions below the repository used the system temp directory
+
+A run launched through `testing/runner.py` with `--confcutdir` below the repository
+loads neither the root conftest nor the harness plugin, so pytest fell back to
+`%TEMP%/pytest-of-<user>`. Status: fixed in `P03.S09`; the runner child seats its
+own session and passes the basetemp.
+
+### harness-startup-cost | low | Deriving harness names from the settings class slowed the timed runner
+
+Importing the settings stack to spell three variable names added two to three
+seconds to every runner start on a loaded host, pushing runner tests over their
+30-second budget. Status: fixed in `P03.S09`; `testing/harness_names.py` spells the
+names from `control/env_prefix.py`, and a test holds them equal to what the schema
+reads.
+
+### load-sensitive-runner-tests | low | Runner and admission harness tests exceed their budgets on a loaded host
+
+`testing/tests/test_runner.py` bounds each nested run at 30 seconds and
+`testing/tests/test_default_safety.py::test_second_session_is_admitted_degraded`
+needs its 20-second holder alive while a second session boots. With Python
+itself taking four to seven seconds to start on this host, they fail in parallel
+and pass serially (`test_runner_reaps_descendants_left_after_pytest_exits` passed
+alone in 27.4 s). They could not run here at all before `P03.S08`, which is when the
+sandbox's `%TEMP%` denial stopped applying. Status: open; not owned by this plan.
+
+### workspace-venv-escapes-repository-fixed | info | The agent venv walk stops at the workspace's own repository
+
+Status: fixed in `P03.S09` (`workspace/environment.py`), covered in
+`workspace/tests/test_workspace.py`.
 
 ## Recommendations
 

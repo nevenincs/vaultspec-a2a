@@ -21,8 +21,10 @@ def resolve_venv(workspace_path: Path) -> Path | None:
     Search order:
     1. ``workspace_path / .venv`` (flat hierarchy)
     2. ``workspace_path.parent / .venv`` (container folder for worktrees)
-    3. Walk up parents looking for a ``.venv`` alongside a ``.git`` dir
-       (main repository root)
+    3. Walk up to the workspace's own repository root (the nearest ``.git``)
+       and use its ``.venv``. The walk stops there: a repository that merely
+       contains the workspace's repository is not the workspace's project, and
+       its interpreter is not the agent's to run.
 
     Returns ``None`` if no venv is found.
     """
@@ -42,8 +44,9 @@ def resolve_venv(workspace_path: Path) -> Path | None:
     # A worktree is typically 2-4 levels below the repo root; 10 provides a
     # generous upper bound while preventing unbounded filesystem traversal.
     for _ in range(10):  # bounded to prevent infinite traversal
-        if (current / ".git").exists() and (current / ".venv").is_dir():
-            return current / ".venv"
+        if (current / ".git").exists():
+            venv = current / ".venv"
+            return venv if venv.is_dir() else None
         parent = current.parent
         if parent == current:
             break  # filesystem root

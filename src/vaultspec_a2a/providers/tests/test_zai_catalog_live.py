@@ -2,7 +2,7 @@
 
 This service test first performs the prompt-free catalog handshake, then sends
 one deliberately tiny real turn only after the operator identifies an
-advertised, low-cost provider value in ``VAULTSPEC_ZAI_PROOF_MODEL``.  The
+advertised, low-cost provider value in ``VAULTSPEC_A2A_ZAI_PROOF_MODEL``.  The
 catalog is the authority for that value: no static Z.ai tier or Claude alias is
 accepted here.  The assertion after the turn reads the ACP adapter's confirmed
 ``currentValue`` from the production model instance, proving that the selected
@@ -76,13 +76,13 @@ async def test_zai_catalog_selection_is_confirmed_by_one_minimal_turn(
     advertised = {entry.provider_value for entry in discovery.catalog.models}
     assert advertised, "Z.ai ACP session advertised no model choices"
 
-    requested = os.environ.get("VAULTSPEC_ZAI_PROOF_MODEL", "").strip()
+    requested = os.environ.get("VAULTSPEC_A2A_ZAI_PROOF_MODEL", "").strip()
     assert requested, (
-        "set VAULTSPEC_ZAI_PROOF_MODEL to one low-cost value from the current "
+        "set VAULTSPEC_A2A_ZAI_PROOF_MODEL to one low-cost value from the current "
         "Z.ai catalog before authorizing this billable proof"
     )
     assert requested in advertised, (
-        "VAULTSPEC_ZAI_PROOF_MODEL is not advertised by the current Z.ai catalog"
+        "VAULTSPEC_A2A_ZAI_PROOF_MODEL is not advertised by the current Z.ai catalog"
     )
 
     model = ProviderFactory().create(

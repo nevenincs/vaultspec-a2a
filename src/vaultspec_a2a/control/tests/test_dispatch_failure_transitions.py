@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +38,7 @@ from ...database import (
 from ...ipc.schemas import DispatchRequest
 from ...providers.conditions import ProviderCondition
 from ...team.team_config import load_team_config
+from ...testing import session_scratch_dir
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
@@ -75,7 +75,7 @@ async def session_factory(
 # seeded for a dispatch-behaviour test needs a real one: without it the message
 # service refuses before reaching the behaviour under test. The directory is
 # real because the refusal is about presence, not shape.
-_ACTIVE_PROJECT = tempfile.mkdtemp(prefix="vaultspec-active-project-")
+_ACTIVE_PROJECT = str(session_scratch_dir("vaultspec-active-project-"))
 
 
 def _active_project_metadata() -> str:

@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from ...authoring.discovery import EngineEndpoint
     from ._harness import CertifiedGateway
 
-_BUNDLE_ROOT_ENV = "VAULTSPEC_ACCEPTANCE_BUNDLE_DIR"
+_BUNDLE_ROOT_ENV = "VAULTSPEC_A2A_ACCEPTANCE_BUNDLE_DIR"
 _SCENARIO_PATH = (
     Path(__file__).resolve().parent
     / "artifacts"
@@ -99,7 +99,7 @@ def _bundle_root() -> Path:
     """Return the required durable root for committed review evidence."""
     configured = os.environ.get(_BUNDLE_ROOT_ENV)
     assert configured, (
-        "deterministic completion requires VAULTSPEC_ACCEPTANCE_BUNDLE_DIR; "
+        "deterministic completion requires VAULTSPEC_A2A_ACCEPTANCE_BUNDLE_DIR; "
         "an ephemeral test-only review bundle is not S05 evidence"
     )
     root = Path(configured).resolve()

@@ -42,9 +42,24 @@ class TestResolveVenv:
         assert resolve_venv(workspace) == tmp_path / ".venv"
 
     def test_no_venv_returns_none(self, tmp_path: Path) -> None:
-        """Returns None when no .venv can be found in the search hierarchy."""
+        """Returns None when the workspace's own repository has no .venv."""
+        (tmp_path / ".git").mkdir()
         workspace = tmp_path / "isolated"
         workspace.mkdir()
+        assert resolve_venv(workspace) is None
+
+    def test_an_enclosing_repositorys_venv_is_not_used(self, tmp_path: Path) -> None:
+        """The walk stops at the workspace's own repository root.
+
+        A project checked out inside another repository must not inherit that
+        repository's interpreter: the outer checkout is not the agent's project.
+        """
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".venv").mkdir()
+        inner = tmp_path / "vendor" / "project"
+        (inner / ".git").mkdir(parents=True)
+        workspace = inner / "agent" / "coder"
+        workspace.mkdir(parents=True)
         assert resolve_venv(workspace) is None
 
 
@@ -68,6 +83,7 @@ class TestResolveEnvVars:
 
     def test_no_virtual_env_when_missing(self, tmp_path: Path) -> None:
         """VIRTUAL_ENV is absent when no .venv found."""
+        (tmp_path / ".git").mkdir()
         workspace = tmp_path / "no-venv"
         workspace.mkdir()
         env = resolve_env_vars(workspace)

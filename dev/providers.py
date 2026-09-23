@@ -6,7 +6,7 @@ value: a lane is discovered by spawning the provider's own CLI and reading what
 it advertises. This report is that discovery, printed.
 
 Its second job is the live tier's opt-in. A billable proof turn runs only when an
-operator names one exact lane through ``VAULTSPEC_LIVE_*``, because the suite
+operator names one exact lane through ``VAULTSPEC_A2A_LIVE_*``, because the suite
 deliberately ranks nothing and will not spend money on a model it chose for
 itself. Those identifiers are content-derived, so they change whenever the served
 catalog does - which makes a pasted-and-forgotten block the obvious failure mode.
@@ -38,11 +38,11 @@ if TYPE_CHECKING:
 #: suite that consumes them rather than restated, so a rename cannot leave this
 #: reporter emitting a block nothing reads.
 _SELECTION_NAMES = (
-    "VAULTSPEC_LIVE_PROVIDER_ID",
-    "VAULTSPEC_LIVE_EXECUTION_MODE",
-    "VAULTSPEC_LIVE_ENTRY_ID",
-    "VAULTSPEC_LIVE_CONTROL_ID",
-    "VAULTSPEC_LIVE_OPTION_ID",
+    "VAULTSPEC_A2A_LIVE_PROVIDER_ID",
+    "VAULTSPEC_A2A_LIVE_EXECUTION_MODE",
+    "VAULTSPEC_A2A_LIVE_ENTRY_ID",
+    "VAULTSPEC_A2A_LIVE_CONTROL_ID",
+    "VAULTSPEC_A2A_LIVE_OPTION_ID",
 )
 
 #: Discovery spawns real provider subprocesses; a wedged CLI must not hang a
@@ -219,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--exports",
         metavar="PROVIDER=MODEL",
-        help="Print the VAULTSPEC_LIVE_* block selecting one served lane.",
+        help="Print the VAULTSPEC_A2A_LIVE_* block selecting one served lane.",
     )
     parser.add_argument(
         "--option",

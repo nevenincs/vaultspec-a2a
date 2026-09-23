@@ -10,10 +10,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 from ..plugin import _send_completion_receipt
 from ..runner import (
-    COMPLETION_ENDPOINT_ENV,
-    COMPLETION_OWNER_PID_ENV,
     DESCENDANT_TIMEOUT_EXIT,
     RUN_TIMEOUT_EXIT,
     TEARDOWN_TIMEOUT_EXIT,
@@ -237,7 +236,7 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
         "import subprocess\n"
         "import sys\n"
         "import time\n"
-        "from vaultspec_a2a.testing.runner import COMPLETION_ENDPOINT_ENV\n"
+        "from vaultspec_a2a.testing.harness_names import COMPLETION_ENDPOINT_ENV\n"
         "\n"
         "def test_nested_xdist_cannot_finish_outer(tmp_path):\n"
         "    assert COMPLETION_ENDPOINT_ENV not in os.environ\n"
@@ -245,7 +244,7 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
         "    nested.mkdir()\n"
         "    (nested / 'conftest.py').write_text(\n"
         "        'import os\\n'\n"
-        "        'from vaultspec_a2a.testing.runner import '\n"
+        "        'from vaultspec_a2a.testing.harness_names import '\n"
         "        'COMPLETION_OWNER_PID_ENV\\n'\n"
         "        'os.environ[COMPLETION_OWNER_PID_ENV] = str(os.getpid())\\n'\n"
         "    )\n"

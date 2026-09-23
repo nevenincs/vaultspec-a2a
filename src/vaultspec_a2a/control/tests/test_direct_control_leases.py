@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-import tempfile
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,6 +57,7 @@ from ...database.models import Base, RecoveryAttemptModel, ThreadModel
 from ...database.session import begin_write_transaction, configure_sqlite_engine
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import session_scratch_dir
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -192,7 +192,7 @@ def _install_receipt_graph(
 # seeded for a dispatch-behaviour test needs a real one: without it the message
 # service refuses before reaching the behaviour under test. The directory is
 # real because the refusal is about presence, not shape.
-_ACTIVE_PROJECT = tempfile.mkdtemp(prefix="vaultspec-active-project-")
+_ACTIVE_PROJECT = str(session_scratch_dir("vaultspec-active-project-"))
 
 
 def _active_project_metadata() -> str:

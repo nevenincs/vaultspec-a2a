@@ -14,8 +14,11 @@ test -x "$bin" || { echo "::error::frozen binary absent or not executable at $bi
 # the publish. A private directory under the workspace has no such
 # traffic. (Two openers that caused this were ours and are fixed; this
 # removes the remaining environmental one.)
-home="${GITHUB_WORKSPACE}/.a2a-smoke-home"
-rm -rf "$home"
+# Everything this proof writes lives in one directory the repository ignores
+# (`.tmp-*/`), so a run never leaves untracked files in the checkout.
+work="${GITHUB_WORKSPACE}/.tmp-smoke"
+home="$work/home"
+rm -rf "$work"
 mkdir -p "$home"
 
 echo "--- setup (local only; provisions the home and runs bundled migrations)"
@@ -26,9 +29,9 @@ echo "--- setup (local only; provisions the home and runs bundled migrations)"
 # error says so: "start with --log to capture output". An exit code with
 # no output is not a diagnosis — it names that something failed without
 # naming what, which is the failure class this gate exists to close.
-gwlog="${GITHUB_WORKSPACE}/.a2a-smoke-gateway.log"
+gwlog="$work/gateway.log"
 echo "--- start (blocks until discoverably healthy, emits ServiceStatus)"
-if ! "$bin" start --app-home "$home" --host 127.0.0.1 --port "${SMOKE_PORT}" --log "$gwlog" > start.json; then
+if ! "$bin" start --app-home "$home" --host 127.0.0.1 --port "${SMOKE_PORT}" --log "$gwlog" > "$work/start.json"; then
   echo "::error::start failed; the spawned gateway's own output follows" >&2
   echo "===== gateway log ($gwlog) ====="
   cat "$gwlog" 2>/dev/null || echo "(no gateway log was produced)"
@@ -52,9 +55,9 @@ if ! "$bin" start --app-home "$home" --host 127.0.0.1 --port "${SMOKE_PORT}" --l
   fi
   exit 1
 fi
-cat start.json
+cat "$work/start.json"
 read -r state healthy pid base <<EOF
-$($PY -c 'import json;d=json.load(open("start.json"));print(d["state"],d["healthy"],d["pid"],d["base_url"])')
+$($PY -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d["state"],d["healthy"],d["pid"],d["base_url"])' "$work/start.json")
 EOF
 echo "state=$state healthy=$healthy pid=$pid base=$base"
 [ "$state" = "running" ] || { echo "::error::start reported state '$state', expected 'running'" >&2; exit 1; }
@@ -75,11 +78,11 @@ find "$home" -maxdepth 2 -type f | sed "s|^$home|<app-home>|" | sort
 echo "--- USE THE API: /health must answer 200 AND report ready"
 ok=""
 for _ in $(seq 1 30); do
-  if curl -fsS -o health.json "$base/health" 2>/dev/null; then ok=yes; break; fi
+  if curl -fsS -o "$work/health.json" "$base/health" 2>/dev/null; then ok=yes; break; fi
   sleep 2
 done
 [ -n "$ok" ] || { echo "::error::/health never answered at $base within 60s" >&2; exit 1; }
-cat health.json
+cat "$work/health.json"
 # 200 alone is not readiness: this endpoint answers 200 while `ready`
 # is false (for example with the worker down), so assert the field.
 #
@@ -92,10 +95,10 @@ cat health.json
 # that had just reported itself ready.
 "$PY" -c '
 import json,sys
-d=json.load(open("health.json"))
+d=json.load(open(sys.argv[1]))
 if d.get("ready") is not True:
     sys.exit(f"/health answered but is not ready: {d}")
-print("health ready (composite status=" + str(d.get("status")) + ")")'
+print("health ready (composite status=" + str(d.get("status")) + ")")' "$work/health.json"
 
 echo "--- stop"
 "$bin" stop --app-home "$home"

@@ -20,9 +20,7 @@ a proof that silently passes without executing is worse than no proof.
 
 from __future__ import annotations
 
-import tempfile
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -31,6 +29,7 @@ from langchain_core.messages import HumanMessage
 from ..graph.enums import Provider
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import PROVEN_TURN_LANES
+from ..testing import session_scratch_dir
 from ._provider_catalog_live import declared_lane_model_value
 
 if TYPE_CHECKING:
@@ -53,7 +52,7 @@ async def test_the_claude_lane_completes_a_turn_inside_the_runs_project(
     external_prerequisite("claude-credential")
 
     marker = f"ORBITAL-{uuid.uuid4().hex[:12].upper()}"
-    workspace = Path(tempfile.mkdtemp(prefix="live-execution-project-"))
+    workspace = session_scratch_dir("live-execution-project-")
     (workspace / "FACTS.md").write_text(
         f"# Project facts\n\nThe project's calibration code is {marker}.\n",
         encoding="utf-8",

@@ -711,13 +711,12 @@ def schema_template() -> Path:
     """
     global _schema_template
     if _schema_template is None:
-        import tempfile
-
         from sqlalchemy import create_engine
 
         from .database.models import Base
+        from .testing.session_root import session_scratch_dir
 
-        target = Path(tempfile.mkdtemp(prefix="vaultspec-schema-")) / "template.db"
+        target = session_scratch_dir("vaultspec-schema-") / "template.db"
         # Built through the SYNCHRONOUS driver deliberately: callers are async
         # fixtures already inside a running loop, and `asyncio.run` cannot nest.
         # The emitted DDL is identical either way - the schema is a property of

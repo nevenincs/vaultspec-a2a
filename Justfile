@@ -541,7 +541,7 @@ test-all:
     {{creds}} live-tests -- {{dev}} test all
 
 # Report the lanes, models, and controls this host's provider CLIs serve.
-# `--exports claude=haiku --option effort=low` renders the VAULTSPEC_LIVE_*
+# `--exports claude=haiku --option effort=low` renders the VAULTSPEC_A2A_LIVE_*
 # block the live tier opts in with; the ids are catalog-derived, so read them
 # from here rather than committing a block that goes stale.
 [doc("Report the lanes, models, and controls this host's provider CLIs serve.")]

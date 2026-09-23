@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         armed_environment,
         settings_override,
     )
+    from .harness_names import CPU_BUDGET_ENV
     from .leases import (
         LEASE_TTL_MS,
         Lease,
@@ -73,8 +74,8 @@ if TYPE_CHECKING:
         exclusive_keys,
         resolve_spec,
     )
+    from .session_root import session_scratch_dir
     from .sessions import (
-        CPU_BUDGET_ENV,
         SESSION_LEASE_KEY,
         effective_worker_count,
         live_peer_sessions,
@@ -89,6 +90,7 @@ _LAZY_EXPORTS = {
     "resolve_service": (".endpoints", "resolve_service"),
     "resolve_worker_url": (".endpoints", "resolve_worker_url"),
     "armed_desktop_app_home": (".environment", "armed_desktop_app_home"),
+    "session_scratch_dir": (".session_root", "session_scratch_dir"),
     "armed_environment": (".environment", "armed_environment"),
     "settings_override": (".environment", "settings_override"),
     "LEASE_TTL_MS": (".leases", "LEASE_TTL_MS"),
@@ -127,7 +129,7 @@ _LAZY_EXPORTS = {
     "declared_claims": (".resources", "declared_claims"),
     "exclusive_keys": (".resources", "exclusive_keys"),
     "resolve_spec": (".resources", "resolve_spec"),
-    "CPU_BUDGET_ENV": (".sessions", "CPU_BUDGET_ENV"),
+    "CPU_BUDGET_ENV": (".harness_names", "CPU_BUDGET_ENV"),
     "SESSION_LEASE_KEY": (".sessions", "SESSION_LEASE_KEY"),
     "effective_worker_count": (".sessions", "effective_worker_count"),
     "live_peer_sessions": (".sessions", "live_peer_sessions"),
@@ -196,6 +198,7 @@ __all__ = [
     "resolve_service",
     "resolve_spec",
     "resolve_worker_url",
+    "session_scratch_dir",
     "settings_override",
     "uses_impure_fixture",
     "wait_for",

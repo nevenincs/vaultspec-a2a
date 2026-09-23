@@ -7,7 +7,23 @@ import sys
 
 import pytest
 
-from .runner import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
+from .harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
+
+
+def _seated_arguments(arguments: list[str]) -> list[str]:
+    """Pin this session's basetemp inside its seat unless the caller named one.
+
+    A run launched with ``--confcutdir`` below the repository never loads the
+    root conftest or the harness plugin that would otherwise seat it, and pytest
+    would fall back to the system temporary directory.
+    """
+    if any(arg == "--basetemp" or arg.startswith("--basetemp=") for arg in arguments):
+        return arguments
+    from ..control.settings_base import resolve_project_root
+    from .session_root import seat_test_session
+
+    seat = seat_test_session(resolve_project_root())
+    return [*arguments, f"--basetemp={seat.basetemp}"]
 
 
 def main() -> int:
@@ -20,7 +36,7 @@ def main() -> int:
             from .plugin import _send_completion_message
 
             _send_completion_message(completion_endpoint, "hello")
-        exit_status = pytest.main(sys.argv[1:])
+        exit_status = pytest.main(_seated_arguments(sys.argv[1:]))
         # pytest_sessionfinish runs before pytest_unconfigure and before
         # pytest.main() returns.  Publish only after that teardown completes so
         # the outer owner can distinguish a root that is still shutting down

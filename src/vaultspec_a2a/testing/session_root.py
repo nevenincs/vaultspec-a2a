@@ -28,20 +28,22 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from ..control.infra_config import InfraConfig
-from ..control.settings_base import ENV_PREFIX, ProjectSettings, env_name
+from ..control.settings_base import ProjectSettings, env_name
+from .harness_names import TEST_ENV_PREFIX
 
 __all__ = [
     "TEST_ROOT_NAME",
     "SessionSeat",
     "TestSessionSettings",
     "seat_test_session",
+    "session_scratch_dir",
 ]
 
 #: The ignored worktree directory every test artifact lives under.
@@ -64,7 +66,7 @@ class TestSessionSettings(ProjectSettings):
 
     model_config = SettingsConfigDict(
         env_file=None,
-        env_prefix=f"{ENV_PREFIX}TEST_",
+        env_prefix=TEST_ENV_PREFIX,
         extra="ignore",
         env_ignore_empty=True,
     )
@@ -104,6 +106,8 @@ def _prune(sessions: Path, keep: Path) -> None:
 
 def _seat_env(field: str, value: Path, previously_seated: Path | None) -> None:
     """Point one settings variable at the seat unless the caller chose it."""
+    from ..control.infra_config import InfraConfig
+
     name = env_name(InfraConfig, field)
     current = os.environ.get(name)
     if current and (previously_seated is None or Path(current) != previously_seated):
@@ -149,3 +153,19 @@ def seat_test_session(rootdir: Path) -> SessionSeat:
     os.environ[env_name(fields, "seated_home")] = str(seat.home)
     os.environ[env_name(fields, "seated_procs_home")] = str(seat.procs_home)
     return seat
+
+
+def session_scratch_dir(prefix: str) -> Path:
+    """Create a unique scratch directory inside this session's seat.
+
+    For state a test needs outside any one test's ``tmp_path`` - a template
+    built once per process, a directory named at import - so it still lands in
+    the ignored worktree rather than the system temporary directory.
+    """
+    root = TestSessionSettings().session_root
+    if root is None:
+        msg = "no test session is seated; the repository conftest seats one"
+        raise RuntimeError(msg)
+    scratch = root / "scratch"
+    scratch.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=scratch))

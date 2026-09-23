@@ -19,12 +19,13 @@ from pydantic_settings import SettingsConfigDict
 
 from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment
+from .env_prefix import ENV_PREFIX
 from .infra_config import (
     InfraConfig,
     _synchronous_url,
     _warn_seating_discard,
 )
-from .settings_base import ENV_PREFIX, env_name, is_absolute_path, resolve_against
+from .settings_base import env_name, is_absolute_path, resolve_against
 from .state_layout import (
     ENGINE_DISCOVERY_RECORD,
     StateLayout,

@@ -53,7 +53,7 @@ _CONTRACT_MODULE = Path("engine/crates/vaultspec-product/src/a2a_contract.rs")
 
 # Env override first, then the conventional sibling checkouts. The worktree
 # layout this project develops in keeps both repositories side by side.
-_ENGINE_SOURCE_ENV = "VAULTSPEC_ENGINE_SOURCE"
+_ENGINE_SOURCE_ENV = "VAULTSPEC_A2A_ENGINE_SOURCE"
 _CONVENTIONAL_ROOTS = (
     Path("Y:/code/vaultspec-dashboard-worktrees/agent-panel"),
     Path("Y:/code/vaultspec-dashboard-worktrees/main"),

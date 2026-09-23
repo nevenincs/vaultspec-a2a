@@ -31,8 +31,9 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
 )
 
+from .env_prefix import ENV_PREFIX
+
 __all__ = [
-    "ENV_PREFIX",
     "PROJECT_DOTENV",
     "PROJECT_MARKERS",
     "PROJECT_ROOT_ENV",
@@ -44,8 +45,6 @@ __all__ = [
     "resolve_project_root",
 ]
 
-#: The prefix every a2a-owned environment variable carries.
-ENV_PREFIX = "VAULTSPEC_A2A_"
 
 #: The one variable that names the project root. Read from the process
 #: environment only; see the module docstring.

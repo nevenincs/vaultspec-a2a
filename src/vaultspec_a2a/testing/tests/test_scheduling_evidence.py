@@ -15,7 +15,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-from ..runner import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
+from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 
 if TYPE_CHECKING:
     from pathlib import Path

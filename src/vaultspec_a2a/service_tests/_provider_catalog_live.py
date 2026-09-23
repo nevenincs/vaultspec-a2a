@@ -33,11 +33,11 @@ __all__ = [
 
 
 LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON: Final[tuple[str, ...]] = (
-    "VAULTSPEC_LIVE_PROVIDER_ID",
-    "VAULTSPEC_LIVE_EXECUTION_MODE",
-    "VAULTSPEC_LIVE_ENTRY_ID",
-    "VAULTSPEC_LIVE_CONTROL_ID",
-    "VAULTSPEC_LIVE_OPTION_ID",
+    "VAULTSPEC_A2A_LIVE_PROVIDER_ID",
+    "VAULTSPEC_A2A_LIVE_EXECUTION_MODE",
+    "VAULTSPEC_A2A_LIVE_ENTRY_ID",
+    "VAULTSPEC_A2A_LIVE_CONTROL_ID",
+    "VAULTSPEC_A2A_LIVE_OPTION_ID",
 )
 
 #: A SECOND operator-supplied lane, for a proof that needs two lanes in one run.
@@ -50,11 +50,11 @@ LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON: Final[tuple[str, ...]] = (
 #: Degrading it to a single-lane run instead would keep the label "mixed" on a
 #: run that no longer proves anything mixed, which is worse than not running.
 LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON: Final[tuple[str, ...]] = (
-    "VAULTSPEC_LIVE_OVERRIDE_PROVIDER_ID",
-    "VAULTSPEC_LIVE_OVERRIDE_EXECUTION_MODE",
-    "VAULTSPEC_LIVE_OVERRIDE_ENTRY_ID",
-    "VAULTSPEC_LIVE_OVERRIDE_CONTROL_ID",
-    "VAULTSPEC_LIVE_OVERRIDE_OPTION_ID",
+    "VAULTSPEC_A2A_LIVE_OVERRIDE_PROVIDER_ID",
+    "VAULTSPEC_A2A_LIVE_OVERRIDE_EXECUTION_MODE",
+    "VAULTSPEC_A2A_LIVE_OVERRIDE_ENTRY_ID",
+    "VAULTSPEC_A2A_LIVE_OVERRIDE_CONTROL_ID",
+    "VAULTSPEC_A2A_LIVE_OVERRIDE_OPTION_ID",
 )
 
 LIVE_PROVIDER_PREREQUISITES: Final[tuple[str, ...]] = (
@@ -252,14 +252,14 @@ async def declared_lane_model_value(
     """
     from ..providers.factory import ProviderFactory
 
-    declared = (os.environ.get("VAULTSPEC_LIVE_PROVIDER_ID") or "").strip()
+    declared = (os.environ.get("VAULTSPEC_A2A_LIVE_PROVIDER_ID") or "").strip()
     if declared != provider_id:
         return None, (
             f"the declared lane is {declared!r}, not {provider_id!r}"
             if declared
             else "no lane is declared"
         )
-    entry_id = (os.environ.get("VAULTSPEC_LIVE_ENTRY_ID") or "").strip()
+    entry_id = (os.environ.get("VAULTSPEC_A2A_LIVE_ENTRY_ID") or "").strip()
     if not entry_id:
         return None, "the declaration names no entry id"
 

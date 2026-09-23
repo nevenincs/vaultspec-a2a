@@ -49,6 +49,8 @@ node_modules/
 # Temp outputs
 tmp/
 out.txt
+# dev init's report when it ran before .venv existed (see dev/init/stamp.py)
+/.init-report.json
 
 # Database artifacts
 *.db

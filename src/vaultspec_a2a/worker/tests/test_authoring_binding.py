@@ -274,7 +274,7 @@ async def test_binding_for_fetches_catalog_once_per_run_live() -> None:
     second = await provider.binding_for(run_id, "vaultspec-coder")
     assert second is not None
     assert second.snapshot is cached
-    if os.environ.get("VAULTSPEC_DEBUG_CATALOG"):  # pragma: no cover - diagnostic
+    if os.environ.get("VAULTSPEC_A2A_DEBUG_CATALOG"):  # pragma: no cover - diagnostic
         print(f"catalog tools={list(first.tool_names)}")
 
 

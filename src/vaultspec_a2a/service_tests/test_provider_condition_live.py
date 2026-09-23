@@ -36,7 +36,7 @@ throttled or exhausted account, or a transport severed after discovery.
 Arm and run (the stack must already be serving, and the declared condition must be
 one the armed lane will really produce):
 
-    VAULTSPEC_PROVIDER_CONDITION_EXPECT=throttled \\
+    VAULTSPEC_A2A_PROVIDER_CONDITION_EXPECT=throttled \\
         uv run --no-sync pytest -m service \\
         src/vaultspec_a2a/service_tests/test_provider_condition_live.py
 
@@ -70,11 +70,11 @@ JsonObject = dict[str, object]
 #: is also the consent to spend a real credential: without it this module never
 #: starts a run, so pointing the default suite at a healthy stack cannot burn
 #: quota and cannot report a confusing failure for a run that simply succeeded.
-_EXPECT_ENV = "VAULTSPEC_PROVIDER_CONDITION_EXPECT"
+_EXPECT_ENV = "VAULTSPEC_A2A_PROVIDER_CONDITION_EXPECT"
 
 #: The workspace the armed lane belongs to. Named explicitly rather than derived
 #: from an engine discovery file, so this proof needs no engine at all.
-_WORKSPACE_ENV = "VAULTSPEC_PROVIDER_CONDITION_WORKSPACE"
+_WORKSPACE_ENV = "VAULTSPEC_A2A_PROVIDER_CONDITION_WORKSPACE"
 
 #: The preset the provocation rides. Bridge-free deliberately, and that is not a
 #: convenience: a preset declaring an authoring bridge is refused at run-start

@@ -21,15 +21,13 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from ..control.settings_base import env_name
 from ..utils.process import ProcessContainment, ProcessContainmentError
-from .session_root import TestSessionSettings
+from .harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-COMPLETION_ENDPOINT_ENV = env_name(TestSessionSettings, "completion_endpoint")
-COMPLETION_OWNER_PID_ENV = env_name(TestSessionSettings, "completion_owner_pid")
+
 TEARDOWN_TIMEOUT_EXIT = 124
 RUN_TIMEOUT_EXIT = 125
 DESCENDANT_TIMEOUT_EXIT = 126

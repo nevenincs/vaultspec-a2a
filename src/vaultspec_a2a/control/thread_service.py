@@ -68,9 +68,6 @@ from .repositories import (
     create_deletion_saga,
     finalize_deletion_saga,
 )
-from .thread_listing import (
-    list_threads_service,
-)
 
 if TYPE_CHECKING:
     import httpx
@@ -88,7 +85,6 @@ __all__ = [
     "archive_thread",
     "create_and_dispatch_thread",
     "delete_thread_service",
-    "list_threads_service",
     "process_metadata",
     "require_admitted_workspace_root",
 ]

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:33639f9e57de568f9a92024b2badd396b24da6132d56fe9fb40ad087dc3ce644'
+body_hash: 'sha256:9ec9e79a41e3f53b996ad92d0fcb13d12c192d2ebc5dbc693f75f8dfede088bb'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -229,3 +229,7 @@ Re-weighed in S10 and kept: the only alternatives weaken safety, since an automa
 Type: code health. `test.yml` runs seven sentinels with `continue-on-error: true`, so their failures never turned a run red. Measured 2026-09-23, six failed: strict types (18 diagnostics), cognitive complexity (`lifecycle/manager.py` `_await_listener` 32 and `_health_probe_for` 16, `streaming/ingest.py` `IngestManager.ingest` 20, `testing/runner.py` `_completion_received` 16, `utils/process.py` `_win_job_process_ids` 17), cyclomatic complexity (five over 10, including S07's own `respond_to_clarification` at 12), limits (seven ruff C901 or PLR findings), shape, and module size (`providers/_acp_rpc_handlers.py` 1089, `worker/executor.py` 1077, `lifecycle/manager.py` 1022, and `control/thread_service.py` 1011 after S03 and S07). S09 owns the burn-down.
 
 Resolved in S09: every sentinel now exits 0 (`check-type-strict`, `check-complexity`, `check-cyclomatic`, `check-shape`, `check-limits`, `check-nesting`, `check-size`), with `check-anchors` and `check-workflow` also passing. `worker/executor.py` moved its settlement subsystem to `worker/_dispatch_settlement.py` (1077 to 672 lines); `lifecycle/manager.py` moved boot preparation to `lifecycle/boot.py` and `LifecycleError` to `lifecycle/errors.py` (1022 to 922); `providers/_acp_rpc_handlers.py` moved its terminal handlers to `providers/_acp_rpc_terminal_handlers.py`; `control/thread_service.py` moved the run listing to `control/thread_listing.py` (1011 to 732). The complex functions were decomposed in place, and the strict type diagnostics were fixed at their causes. Two corrections were made in review: helpers that cross a new module boundary carry public names rather than importing private ones back, and the storage-anchor guard's deferral for the repository-root serve command moved from `lifecycle/manager.py` to `lifecycle/boot.py` with the code. The guard had hidden the moved violation, because it exits on a stale deferral before it lists new violations.
+
+### s09-republished-names | medium | the S09 module splits left moved names published from their old modules | resolved
+
+Type: architecture rule regression, caught by the whole-tree run of `7b148012`. `tests/test_export_declaration_homes.py` enforces that a module publishes only names it declares; `control/thread_service.py` still listed `list_threads_service` and `lifecycle/manager.py` still listed `LifecycleError`, `render_command`, and `render_env` in `__all__` after those moved to `control/thread_listing.py`, `lifecycle/errors.py`, and `lifecycle/boot.py`. Both modules now keep only the imports they use, and every importer - the `lifecycle` facade, `lifecycle/engine_serve.py`, `cli/main.py`, `api/routes/_gateway_read_endpoints.py`, and the affected tests - imports from the declaring module. The same run's other failures were load: `worker/tests/test_state_projection_timeout_knob.py` passes in isolation, and the live gateway and desktop tests were re-run on their own.

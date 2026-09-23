@@ -16,9 +16,10 @@ The process commands in :mod:`vaultspec_a2a.cli` use this package. See
 :ref:`process-registry` for operator guidance.
 """
 
+from .boot import render_command, render_env
 from .discovery import is_pid_alive
+from .errors import LifecycleError
 from .manager import (
-    LifecycleError,
     ProcVerdict,
     attach,
     default_procs_owner,
@@ -27,8 +28,6 @@ from .manager import (
     list_verdicts,
     reap,
     rebuild,
-    render_command,
-    render_env,
     rerun,
     resolve,
     resume,

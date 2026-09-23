@@ -26,10 +26,10 @@ from ...control.cancel_service import (
 )
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
+from ...control.thread_listing import list_threads_service
 from ...control.thread_service import (
     archive_thread,
     delete_thread_service,
-    list_threads_service,
 )
 from ...control.thread_state_service import (
     capture_thread_state,

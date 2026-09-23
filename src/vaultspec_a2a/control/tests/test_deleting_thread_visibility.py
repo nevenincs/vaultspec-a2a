@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...conftest import materialize_schema
 from ...control.repositories import create_deletion_saga
-from ...control.thread_service import list_threads_service
+from ...control.thread_listing import list_threads_service
 from ...control.thread_state_service import capture_thread_state
 from ...database import create_control_action, create_thread, get_thread
 from ...streaming.aggregator import EventAggregator

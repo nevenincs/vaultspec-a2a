@@ -24,16 +24,20 @@ import pytest
 from ...authoring.discovery import SERVICE_JSON_ENV
 from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ...testing.ports import free_port
-from ..boot import build_cwd_for, serve_cwd_for, serve_env
+from ..boot import (
+    build_cwd_for,
+    render_command,
+    render_env,
+    serve_cwd_for,
+    serve_env,
+)
 from ..discovery import is_pid_alive
+from ..errors import LifecycleError
 from ..manager import (
-    LifecycleError,
     attach,
     kill,
     reap,
     rebuild,
-    render_command,
-    render_env,
     rerun,
     resolve,
     resume,

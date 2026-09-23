@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:c6299dbbca9264c132a5fd078bcd2c3e905dfb928a5a09c2b4b0e9c87e91c8c5'
+body_hash: 'sha256:b45a36a4d960d88d52162f4c92cac18c8e365e19ba33b7bea5a62fcdb00ced84'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -143,6 +143,14 @@ related:
 - `S10` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
 - `S10` `verify:` `just check-workflow with the merged fleet checkers` -> `pass`
 - `S10` `by:` `claude-opus`
+- `S09` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S09` `M` `src/vaultspec_a2a/cli/main.py`
+- `S09` `M` `src/vaultspec_a2a/control/tests/test_deleting_thread_visibility.py`
+- `S09` `M` `src/vaultspec_a2a/control/tests/test_list_threads_service_live.py`
+- `S09` `M` `src/vaultspec_a2a/lifecycle/__init__.py`
+- `S09` `M` `src/vaultspec_a2a/lifecycle/engine_serve.py`
+- `S09` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S09` `verify:` `check-type-strict, check-size, check-shape, check-anchors` -> `pass`
 
 ## Notes
 
@@ -161,3 +169,4 @@ related:
 - `S07` Plan-close review (medium): refusals after a write begin now release the lock before returning; clarification 404 no longer pays a checkpoint read. A first attempt read an expired row after rollback in message_service (MissingGreenlet in two follow-up tests); fixed by capturing the status first.
 - `S06` Plan-close review (low): a test app home that survives deletion is now named on stderr.
 - `S09` Refactors by three dispatched executors on disjoint files, reviewed and corrected by the orchestrator (cross-module private names made public; storage-anchor deferral moved with the code). The final whole-tree run was still in progress at commit time; its result is reported separately.
+- `S09` Whole-tree run of 7b148012 on one admitted worker (1h35m): 14 failed, 4754 passed; the export-declaration failure was a real S09 regression fixed here.

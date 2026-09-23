@@ -37,7 +37,6 @@ from .boot import (
     ensure_explicit_repo,
     read_internal_token,
     render_command,
-    render_env,
     serve_cwd_for,
     serve_env,
 )
@@ -69,7 +68,6 @@ if TYPE_CHECKING:
     from .procs_config import RoleConfig
 
 __all__ = [
-    "LifecycleError",
     "ProcVerdict",
     "attach",
     "default_procs_owner",
@@ -78,8 +76,6 @@ __all__ = [
     "list_verdicts",
     "reap",
     "rebuild",
-    "render_command",
-    "render_env",
     "rerun",
     "resolve",
     "resume",

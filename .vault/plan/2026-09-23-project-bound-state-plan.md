@@ -11,7 +11,7 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:29beb3a4e94b6969a3e0048f364094be895ee846eab2f1d3e96261fb80974de6'
+body_hash: 'sha256:1e8ac414d6566d495b24b00819734cb36d2a8834e25f39e2c2943e91b618b841'
 ---
 
 # `project-bound-state` plan
@@ -63,6 +63,16 @@ Compose, container, process-registry configuration, documentation and the dashbo
 - [x] `P04.S10` - Update compose files, container entrypoint, procs.toml and dev credential tooling to the new names and layout; `service/`.
 - [ ] `P04.S11` - Patch the dashboard engine discovery, product launcher and agent E2E harness to the new names and location; `Y:/code/vaultspec-dashboard-worktrees/main/engine/`.
 - [x] `P04.S12` - Update operator documentation for configuration and storage; `README.md`.
+
+### Phase `P05` - Close every known issue and land the change
+
+Authorized by the owner on 2026-09-23 after the P03 review: every known issue is addressed rather than recorded, everything is committed, nothing a2a owns stays in or is written to the user profile without an explicit override, and no working folder is left behind.
+
+- [x] `P05.S13` - Seal every directory a2a creates inside the project root, refuse a state home that is the project or a repository root, and amend the decision; `src/vaultspec_a2a/control/`.
+- [ ] `P05.S14` - Move the harness variables still under the bare prefix to VAULTSPEC_A2A_, remove tooling scratch roots after use, gate service/ and bind the compose files to the schema without Docker; `dev/`.
+- [ ] `P05.S15` - Make the load-sensitive runner, admission, gateway, codex-home and credential-boundary tests correct on a loaded host; `src/vaultspec_a2a/`.
+- [ ] `P05.S16` - Reuse one scratch directory per test lane, drop the step-named capsule prefix, and complete the operator state-layout table; `src/vaultspec_a2a/`.
+- [ ] `P05.S17` - Merge the branch into main, move the legacy user-profile state out of the profile, and remove the working trees; `Y:/code/vaultspec-a2a-worktrees/main`.
 
 ## Parallelization
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:1d246201873d34aae4bae417a5e9267d56e6f1c1ca8fc3716230264a85aca0e2'
+body_hash: 'sha256:193468c3192e42fee533bf8969404cebec9fd1ace92dd76f358bdf28e7be2db6'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -339,6 +339,14 @@ related:
 - `S09` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
 - `S09` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
 - `S09` `verify:` `python dev/guards/storage_anchors.py` -> `pass`
+- `S13` `M` `.vault/adr/2026-09-23-project-bound-state-adr.md`
+- `S13` `M` `.vault/plan/2026-09-23-project-bound-state-plan.md`
+- `S13` `M` `docs/operations.rst`
+- `S13` `M` `src/vaultspec_a2a/control/config.py`
+- `S13` `M` `src/vaultspec_a2a/control/state_layout.py`
+- `S13` `M` `src/vaultspec_a2a/control/tests/test_state_seal.py`
+- `S13` `verify:` `pytest src/vaultspec_a2a/control/tests src/vaultspec_a2a/lifecycle/tests src/vaultspec_a2a/database -n 4 --dist=loadgroup` -> `pass`
+- `S13` `by:` `claude`
 
 ## Notes
 

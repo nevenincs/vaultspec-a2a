@@ -103,6 +103,23 @@ product launcher passes the renamed desktop variables.
 that holds pytest's `basetemp`, the session state home, and the process registry; no test writes
 to the user profile or the OS temp directory, and no module creates directories at import.
 
+**Amendment 2026-09-23 (D4 and Consequences).** Authorized by the owner on 2026-09-23 after the
+P03 review, with the direction that every known issue be addressed and that nothing a2a owns stay
+in or be written to the user profile without an explicit override.
+
+- *The seal.* a2a keeps its state out of version control by writing a self-ignoring ignore file
+  into the state home before its first write. A directory a2a creates elsewhere inside the project
+  root for a relocated store is sealed the same way, at the outermost directory a2a itself
+  creates. A directory that already existed is the operator's, and a2a writes no ignore file into
+  it. Outside the project root, version control is not a2a's concern.
+- *Refusal.* A state home that is the project root or one of its ancestors is refused at settings
+  validation. A home that is itself a repository root is refused by the seal. Either one would
+  hide a whole repository from version control.
+- *Legacy profile state.* This reverses the consequence that legacy data stays in place. The
+  state in `~/.vaultspec-a2a` and `~/.vaultspec/procs` is moved out of the user profile when this
+  change lands. No a2a code path reads or writes the profile to do so; it is a one-time operator
+  action recorded in the ledger.
+
 ## Rationale
 
 The knockout is the engine: it already treats discovery as per-workspace state under `.vault/data`,

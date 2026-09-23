@@ -29,6 +29,7 @@ from .settings_base import env_name, is_absolute_path, resolve_against
 from .state_layout import (
     ENGINE_DISCOVERY_RECORD,
     StateLayout,
+    UnsafeStateHomeError,
     seal_state_home,
     state_layout,
 )
@@ -192,6 +193,26 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return self
 
     @model_validator(mode="after")
+    def _refuse_a_home_that_holds_the_project(self) -> Self:
+        """Refuse a state home that is the project root or one of its ancestors.
+
+        Every writer seals the home by writing an ignore-everything file into it,
+        so a home that contains the project would take the project's own sources
+        out of version control. That is a configuration mistake to stop at boot,
+        before any writer runs.
+        """
+        home, root = self.a2a_home, self.project_root
+        if root == home or root.is_relative_to(home):
+            msg = (
+                f"{setting_env('a2a_home')}={home} contains the project root {root}; "
+                "a2a seals its state home against version control, which would hide "
+                "the project itself. Choose a directory inside or outside the "
+                "project that holds only a2a state."
+            )
+            raise UnsafeStateHomeError(msg)
+        return self
+
+    @model_validator(mode="after")
     def _validate_synchronous_url_derivation(self) -> Self:
         """Refuse a configured URL that has no synchronous SQLAlchemy equivalent.
 
@@ -252,15 +273,22 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return state_layout(self.a2a_home)
 
     def prepare_state_dir(self, directory: Path) -> Path:
-        """Create ``directory``, sealing the state home first when it lies inside.
+        """Create ``directory`` so that nothing a2a writes can be committed.
 
-        Every writer that creates a directory for a2a state goes through here, so
-        the state home is ignored by version control before anything is written
-        into it, whichever writer happens to be first.
+        Every writer that creates a directory for a2a state goes through here.
+        Inside the state home, the home is sealed first, whichever writer runs
+        first. A store relocated elsewhere inside the project is sealed at the
+        outermost directory a2a itself creates for it; a directory that already
+        existed is the operator's, and a2a writes no ignore file into it.
+        Outside the project, version control is not a2a's concern.
         """
         home = self.a2a_home
         if directory == home or directory.is_relative_to(home):
             seal_state_home(home)
+        elif directory.is_relative_to(self.project_root):
+            created = _outermost_missing(directory, self.project_root)
+            if created is not None:
+                seal_state_home(created)
         directory.mkdir(parents=True, exist_ok=True)
         return directory
 
@@ -508,6 +536,18 @@ def _resolve_sqlite_url(root: Path, url: str) -> str:
     return parsed.set(database=resolved.as_posix()).render_as_string(
         hide_password=False
     )
+
+
+def _outermost_missing(directory: Path, root: Path) -> Path | None:
+    """The outermost ancestor of ``directory`` below ``root`` that does not exist."""
+    missing: Path | None = None
+    current = directory
+    while current != root and current.is_relative_to(root):
+        if current.exists():
+            break
+        missing = current
+        current = current.parent
+    return missing
 
 
 def setting_env(field: str) -> str:

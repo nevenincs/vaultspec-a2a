@@ -45,7 +45,11 @@ the process environment only.
 project root - the runtime subtree vaultspec ignores and never walks. a2a
 writes nothing to the user profile or the system temporary directory, and it
 seals the home with a self-ignoring ``.gitignore`` so a project without
-vaultspec's ignore rules cannot commit it. One layout,
+vaultspec's ignore rules cannot commit it. A store relocated elsewhere inside
+the project is sealed at the outermost directory a2a creates for it; a
+directory that already existed is left to the operator. A home that is the
+project root, one of its ancestors, or any repository root is refused, since
+sealing it would hide that repository. One layout,
 :func:`vaultspec_a2a.control.state_layout.state_layout`, places everything
 beneath the home:
 

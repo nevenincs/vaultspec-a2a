@@ -12,12 +12,15 @@ import shutil
 import subprocess
 from typing import TYPE_CHECKING, Protocol, cast
 
+import pytest
+from pydantic import ValidationError
+
 from ...cli.service import setup_service
 from ...lifecycle.singleton import acquire_singleton
 from ...testing import armed_environment
 from ..config import Settings
 from ..settings_base import PROJECT_ROOT_ENV
-from ..state_layout import SEAL_FILE, seal_state_home
+from ..state_layout import SEAL_FILE, UnsafeStateHomeError, seal_state_home
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,11 +32,18 @@ class _SettingsEnvFileFactory(Protocol):
     def __call__(self, *, _env_file: Path | None) -> Settings: ...
 
 
-def _settings_for(project: Path) -> Settings:
+def _settings_for(project: Path, home: str | None = None) -> Settings:
     with armed_environment(
-        **{PROJECT_ROOT_ENV: str(project), "VAULTSPEC_A2A_HOME": None}
+        **{PROJECT_ROOT_ENV: str(project), "VAULTSPEC_A2A_HOME": home}
     ):
         return cast("_SettingsEnvFileFactory", Settings)(_env_file=None)
+
+
+def _git_repository(tmp_path: Path) -> Path:
+    project = tmp_path / "plain-repo"
+    project.mkdir()
+    _git(project, "init", "-q")
+    return project
 
 
 def _git(project: Path, *args: str) -> str:
@@ -80,12 +90,63 @@ def test_setup_and_the_runtime_lock_leave_a_plain_repository_clean(
     assert _git(project, "status", "--porcelain", "--untracked-files=all") == ""
 
 
-def test_a_directory_outside_the_home_does_not_seal_it(tmp_path: Path) -> None:
+def test_a_directory_outside_the_project_is_left_unsealed(tmp_path: Path) -> None:
     settings = _settings_for(tmp_path / "project")
+    elsewhere = tmp_path / "elsewhere"
 
-    settings.prepare_state_dir(tmp_path / "elsewhere")
+    settings.prepare_state_dir(elsewhere / "store")
 
+    assert elsewhere.is_dir()
     assert not (settings.a2a_home / SEAL_FILE).exists()
+    assert not (elsewhere / SEAL_FILE).exists()
+
+
+def test_a_store_relocated_inside_the_project_stays_untracked(tmp_path: Path) -> None:
+    """A relocated store is sealed where a2a starts creating directories for it."""
+    project = _git_repository(tmp_path)
+    settings = _settings_for(project)
+
+    registry = settings.prepare_state_dir(project / "local-state" / "procs")
+    (registry / "scratch-18000.reserved").write_text("1234", encoding="utf-8")
+
+    assert (project / "local-state" / SEAL_FILE).is_file()
+    assert _git(project, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+def test_an_existing_operator_directory_gets_no_ignore_file(tmp_path: Path) -> None:
+    """a2a writes an ignore file only into a directory it created itself."""
+    project = _git_repository(tmp_path)
+    operator_dir = project / "data"
+    operator_dir.mkdir()
+    settings = _settings_for(project)
+
+    settings.prepare_state_dir(operator_dir / "stores")
+
+    assert not (operator_dir / SEAL_FILE).exists()
+    assert (operator_dir / "stores" / SEAL_FILE).is_file()
+
+
+@pytest.mark.parametrize("home", [".", ".."], ids=["project-root", "ancestor"])
+def test_a_state_home_that_holds_the_project_is_refused(
+    tmp_path: Path, home: str
+) -> None:
+    project = _git_repository(tmp_path)
+
+    with pytest.raises(ValidationError, match="contains the project root"):
+        _settings_for(project, home=home)
+
+    assert not (project / SEAL_FILE).exists()
+
+
+def test_a_repository_root_is_never_sealed(tmp_path: Path) -> None:
+    """Even a home handed straight to a writer is refused when it is a repository."""
+    other = _git_repository(tmp_path)
+
+    with pytest.raises(UnsafeStateHomeError, match="root of a repository"):
+        seal_state_home(other)
+
+    assert not (other / SEAL_FILE).exists()
+    assert _git(other, "status", "--porcelain", "--untracked-files=all") == ""
 
 
 def test_sealing_is_idempotent_and_keeps_the_first_seal(tmp_path: Path) -> None:

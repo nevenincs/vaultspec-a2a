@@ -26,6 +26,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .env_prefix import ENV_PREFIX
+
 __all__ = [
     "DEFAULT_HOME",
     "DISCOVERY_RECORD",
@@ -33,6 +35,7 @@ __all__ = [
     "HANDOFF_CREDENTIAL",
     "SEAL_FILE",
     "StateLayout",
+    "UnsafeStateHomeError",
     "seal_state_home",
     "state_layout",
 ]
@@ -63,8 +66,25 @@ _SEAL_TEXT = (
 )
 
 
+class UnsafeStateHomeError(ValueError):
+    """A state home that is itself a repository, which sealing would hide whole."""
+
+
 def seal_state_home(home: Path) -> None:
-    """Create ``home`` and make it invisible to version control, idempotently."""
+    """Create ``home`` and make it invisible to version control, idempotently.
+
+    Raises:
+        UnsafeStateHomeError: If ``home`` is the root of a repository. The seal
+            ignores everything beneath it, so writing one there would silently
+            stop that repository from tracking anything at all.
+    """
+    if (home / ".git").exists():
+        msg = (
+            f"refusing to use {home} as a2a state: it is the root of a "
+            "repository, and sealing it would hide the whole repository from "
+            f"version control. Point {ENV_PREFIX}HOME at a directory of its own."
+        )
+        raise UnsafeStateHomeError(msg)
     home.mkdir(parents=True, exist_ok=True)
     seal = home / SEAL_FILE
     if seal.exists():

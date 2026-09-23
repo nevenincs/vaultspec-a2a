@@ -40,6 +40,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import NoReturn, TypeGuard, cast
 
+from ..control.state_layout import state_layout
 from ..utils.atomic_write import atomic_write_text
 from .discovery import is_pid_alive
 from .registry import now_ms
@@ -253,12 +254,12 @@ class SingletonRecord:
 
 def singleton_lock_path(app_home: Path) -> Path:
     """Return the OS lock-anchor path for *app_home*."""
-    return app_home / _RUNTIME_DIR / _LOCK_NAME
+    return state_layout(app_home).logs_dir / _LOCK_NAME
 
 
 def singleton_record_path(app_home: Path) -> Path:
     """Return the owner-record path for *app_home*."""
-    return app_home / _RUNTIME_DIR / _RECORD_NAME
+    return state_layout(app_home).logs_dir / _RECORD_NAME
 
 
 def _read_record(path: Path) -> SingletonRecord | None:

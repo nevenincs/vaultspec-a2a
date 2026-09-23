@@ -29,6 +29,7 @@ from pathlib import Path
 __all__ = [
     "DEFAULT_HOME",
     "DISCOVERY_RECORD",
+    "ENGINE_DISCOVERY_RECORD",
     "HANDOFF_CREDENTIAL",
     "StateLayout",
     "state_layout",
@@ -39,6 +40,10 @@ DEFAULT_HOME = Path(".vault") / "data" / "agents"
 
 #: The discovery record's file name at the root of a state home.
 DISCOVERY_RECORD = "service.json"
+
+#: Where the vaultspec engine publishes its own discovery record, relative to
+#: the project root it serves.
+ENGINE_DISCOVERY_RECORD = Path(".vault") / "data" / "engine-data" / DISCOVERY_RECORD
 
 #: The bearer handoff credential's file name beside the discovery record.
 HANDOFF_CREDENTIAL = "service.token"

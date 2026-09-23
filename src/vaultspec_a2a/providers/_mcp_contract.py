@@ -44,6 +44,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from ..thread.errors import HarnessToolContractError
+from ._config_home_roots import temp_home_root
 from ._harness_mcp_registry import (
     declared_harness_tools,
     harness_server_exact_surface,
@@ -260,7 +261,9 @@ async def verify_declared_tool_contract(
         # handle to the OS as the child's stderr, so it needs a true file
         # descriptor - an in-memory buffer cannot serve as one.
         with io.TextIOWrapper(
-            tempfile.TemporaryFile(), encoding="utf-8", errors="replace"
+            tempfile.TemporaryFile(dir=temp_home_root()),
+            encoding="utf-8",
+            errors="replace",
         ) as captured_stderr:
             try:
                 served = await _served_tool_names(

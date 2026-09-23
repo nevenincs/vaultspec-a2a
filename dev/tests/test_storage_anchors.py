@@ -74,18 +74,52 @@ def test_an_unrelated_cwd_attribute_is_not_reported() -> None:
     assert storage_anchors._cwd_violations(tree) == []
 
 
-def test_project_root_reads_are_reported_outside_its_defining_module() -> None:
-    """Reading the anchor elsewhere is how it becomes a storage root."""
-    tree = _parse("root = settings.project_root\n")
-    found = storage_anchors._project_root_violations(tree, Path("providers/factory.py"))
+def test_install_root_reads_are_reported_outside_the_asset_resolver() -> None:
+    """Reading the asset anchor elsewhere is how it becomes a storage root."""
+    tree = _parse("root = settings.install_root\n")
+    found = storage_anchors._install_root_violations(tree, Path("providers/factory.py"))
     assert len(found) == 1, found
-
-
-def test_project_root_is_allowed_in_the_module_that_defines_it() -> None:
-    """Its own definition site is not a violation of its own rule."""
-    tree = _parse("root = self.project_root\n")
     assert (
-        storage_anchors._project_root_violations(tree, Path("control/config.py")) == []
+        storage_anchors._install_root_violations(
+            tree, Path("providers/_factory_commands.py")
+        )
+        == []
+    )
+
+
+def test_user_profile_anchors_are_reported() -> None:
+    """Both spellings of "somewhere in the user's home"."""
+    tree = _parse("a = Path.home() / 'x'\nb = Path('~/y').expanduser()\n")
+    found = storage_anchors._home_violations(tree)
+    assert [lineno for lineno, _ in found] == [1, 2], found
+
+
+def test_system_temp_is_reported_unless_a_directory_is_given() -> None:
+    """``dir=`` places a temporary file under a2a's own state; nothing else does."""
+    tree = _parse(
+        "a = tempfile.mkdtemp()\n"
+        "b = tempfile.TemporaryFile(dir=root)\n"
+        "c = tempfile.gettempdir()\n"
+        "d = tempfile.NamedTemporaryFile(delete=False)\n"
+    )
+    found = storage_anchors._tempfile_violations(tree)
+    assert [lineno for lineno, _ in found] == [1, 3, 4], found
+
+
+def test_raw_environment_reads_are_reported_outside_the_settings_module() -> None:
+    """Every named read; copying the whole environment for a child is not one."""
+    tree = _parse(
+        "a = os.environ.get('X')\n"
+        "b = os.getenv('Y')\n"
+        "c = os.environ['Z']\n"
+        "d = os.environ.copy()\n"
+        "os.environ['W'] = '1'\n"
+    )
+    found = storage_anchors._env_read_violations(tree, Path("providers/factory.py"))
+    assert [lineno for lineno, _ in found] == [1, 2, 3], found
+    assert (
+        storage_anchors._env_read_violations(tree, Path("control/settings_base.py"))
+        == []
     )
 
 
@@ -93,6 +127,7 @@ def test_test_modules_are_out_of_scope() -> None:
     """Tests legitimately build paths against the checkout they run in."""
     assert storage_anchors._is_test_module(Path("control/tests/test_config.py"))
     assert storage_anchors._is_test_module(Path("testing/plugin.py"))
+    assert storage_anchors._is_test_module(Path("conftest.py"))
     assert not storage_anchors._is_test_module(Path("control/config.py"))
 
 

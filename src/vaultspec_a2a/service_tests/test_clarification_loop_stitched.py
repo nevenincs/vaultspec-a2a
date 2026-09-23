@@ -74,7 +74,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
-from ..control.config import setting_env
+from ..control.config import setting_env, settings
 from ..team.team_config import load_team_config
 from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
@@ -122,10 +122,11 @@ _FEATURE_TAG = "clarification-loop"
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 
 # The ENGINE's discovery record, which is NOT a2a's own gateway record: the
-# engine publishes ~/.vaultspec/service.json, while ~/.vaultspec-a2a/service.json
-# is this product's gateway record. Naming the wrong one sends a reader to a file
-# that exists, looks healthy, and has nothing to do with the missing substrate.
-_ENGINE_RECORD = Path.home() / ".vaultspec" / "service.json"
+# engine publishes .vault/data/engine-data/service.json in the project, while
+# .vault/data/agents/service.json is this product's gateway record. Naming the
+# wrong one sends a reader to a file that exists, looks healthy, and has nothing
+# to do with the missing substrate.
+_ENGINE_RECORD = settings.engine_discovery_path
 _SUPPLY_ENGINE = (
     f"start the vaultspec engine so it publishes {_ENGINE_RECORD} "
     f"(or point {setting_env('engine_service_json')} at a live record)"

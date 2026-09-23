@@ -34,7 +34,9 @@ _POSIX_RELATIVE = (".local", "share", "agy", "bin", "agy")
 
 def _home_root(home: str | None) -> Path:
     explicit_home = (home or "").strip()
-    return Path(explicit_home) if explicit_home else Path.home()
+    # Where the Antigravity installer puts its own binary: a read of another
+    # tool's home, never a place a2a writes.
+    return Path(explicit_home) if explicit_home else Path.home()  # storage-anchor-ok
 
 
 def resolve_antigravity_command(

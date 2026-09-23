@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:031a6797ace16dc2c46134a7084a3d2226b4407f7439ed2ff1fe7fa39304d801'
+body_hash: 'sha256:39732442c787d63574bba667e29a3b8d4484d591b0e1c6ab91edf0ebccad2719'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -204,4 +204,26 @@ related:
 - `S05` `M` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
 - `S05` `verify:` `pytest control, desktop_tests, database, cli, utils, desktop -n 8: all failures timeouts under host load; the 14 re-ran green at -n 3 except one readiness test that passes alone; test_storage_paths 16 passed` -> `pass`
 - `S05` `by:` `claude`
+- `S06` `M` `.vault/audit/2026-09-23-project-bound-state-audit.md`
+- `S06` `M` `dev/guards/storage_anchors.py`
+- `S06` `M` `dev/tests/test_storage_anchors.py`
+- `S06` `M` `src/vaultspec_a2a/cli/main.py`
+- `S06` `M` `src/vaultspec_a2a/control/_worker_health.py`
+- `S06` `M` `src/vaultspec_a2a/control/config.py`
+- `S06` `M` `src/vaultspec_a2a/control/state_layout.py`
+- `S06` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S06` `M` `src/vaultspec_a2a/lifecycle/discovery.py`
+- `S06` `M` `src/vaultspec_a2a/lifecycle/singleton.py`
+- `S06` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S06` `M` `src/vaultspec_a2a/providers/_config_home_roots.py`
+- `S06` `M` `src/vaultspec_a2a/providers/_factory_commands.py`
+- `S06` `M` `src/vaultspec_a2a/providers/_mcp_contract.py`
+- `S06` `M` `src/vaultspec_a2a/providers/antigravity_cli.py`
+- `S06` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S06` `M` `src/vaultspec_a2a/providers/tests/test_acp_temp_home_root.py`
+- `S06` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S06` `M` `src/vaultspec_a2a/service_tests/test_clarification_loop_stitched.py`
+- `S06` `M` `src/vaultspec_a2a/utils/logging.py`
+- `S06` `verify:` `pytest lifecycle, providers, control, utils, desktop_tests, cli, authoring, dev/tests -n 5: 2095 passed; the 7 non-passing re-ran green serially with database (406 passed); storage-anchor gate exit 0` -> `pass`
+- `S06` `by:` `claude`
 

@@ -25,7 +25,7 @@ from pydantic import SecretStr
 from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
-from ...testing import armed_desktop_app_home, settings_override
+from ...testing import settings_override
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs
@@ -50,15 +50,10 @@ if TYPE_CHECKING:
 def _active_codex_leak_root() -> Path:
     """Return the root ``build_codex_config_home`` actually creates homes in.
 
-    The pre-fix version of this test file hardcoded ``tempfile.gettempdir()``
-    to search for leaked homes. That hardcoding silently encoded the defect as
-    an expectation: had the home ever landed somewhere else (an armed desktop
-    root), the glob would find nothing there either, and the "no leak"
-    assertion would pass vacuously without ever having looked in the right
-    place. Resolving the root the same way the production code does keeps the
-    leak check honest under both the armed and unarmed profile.
+    Resolved the same way the production code resolves it, so the leak checks
+    below can never search a directory nothing writes to and pass vacuously.
     """
-    return temp_home_root() or Path(tempfile.gettempdir())
+    return temp_home_root()
 
 
 @pytest.fixture
@@ -66,33 +61,18 @@ def private_home_root(tmp_path: Path) -> Iterator[Path]:
     """Point per-run home creation at a root no other process writes to.
 
     The leak assertions below compare a glob of that root before and after a
-    failure. By default the root is the machine-wide temporary directory, shared
-    with every other lane on the machine, so a concurrent run creating its own
-    Codex home made the comparison fail for a reason that had nothing to do with
-    cleanup. Declaring the root through the settings surface - the same field an
-    armed desktop install sets - makes the comparison private without teaching
-    the tests a second way to find homes.
+    failure, so a concurrent run creating its own Codex home under a shared
+    state home would fail them for a reason that has nothing to do with
+    cleanup. A private state home makes the comparison private, through the
+    same setting production resolves the root from.
 
-    The steering is ASSERTED rather than assumed. If the declared root stopped
-    being what the production resolver returns, the glob would search a
-    directory nothing ever writes to and every leak assertion below would pass
-    VACUOUSLY - which is the exact failure :func:`_active_codex_leak_root`
-    exists to prevent, arriving through the fix for a different problem.
-
-    It arms the profile because ``desktop_temp_homes_dir`` is DERIVED from the
-    application home and has no setter; arming through the sanctioned helper
-    sets the field the property reads. That does move these three onto the armed
-    placement, and that costs no coverage: placement under each profile has its
-    own dedicated test below, while what these three assert is the cleanup
-    branch, which does not vary by root.
+    The steering is ASSERTED rather than assumed: if the resolved root stopped
+    following the state home, the glob would search a directory nothing writes
+    to and every leak assertion below would pass vacuously.
     """
-    with armed_desktop_app_home(tmp_path / "app-home"):
+    with settings_override(a2a_home=tmp_path / "state-home"):
         root = _active_codex_leak_root()
-        assert root != Path(tempfile.gettempdir()), (
-            "the armed profile did not move the home root off the shared "
-            "temporary directory, so these assertions would still be exposed "
-            "to every other process on this machine"
-        )
+        assert root.is_relative_to(tmp_path / "state-home"), root
         yield root
 
 
@@ -116,8 +96,12 @@ def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[st
     )
 
 
-def _config_home_parent_from_child(base: Path, app_home: Path | None) -> Path:
+def _config_home_parent_from_child(
+    base: Path, app_home: Path | None, *, state_home: Path | None = None
+) -> Path:
     environment = dict(os.environ)
+    if state_home is not None:
+        environment["VAULTSPEC_A2A_HOME"] = str(state_home)
     if app_home is None:
         environment.pop("VAULTSPEC_A2A_DESKTOP_APP_HOME", None)
     else:
@@ -844,12 +828,15 @@ async def test_turn_failure_after_build_cleans_credential_home(
 # --- desktop-state escape defect (codex-config-home-escapes-desktop-state) ---
 
 
-def test_unarmed_profile_creates_home_in_the_system_temp_root(tmp_path: Path) -> None:
-    """Without a declared desktop root, the Codex home stays on OS temp."""
+def test_unarmed_profile_creates_home_in_the_state_home(tmp_path: Path) -> None:
+    """Without a desktop root, the Codex home lives in the state home's tmp/homes."""
     base = tmp_path / "base"
     base.mkdir()
+    state_home = tmp_path / "state-home"
 
-    assert _config_home_parent_from_child(base, None) == Path(tempfile.gettempdir())
+    parent = _config_home_parent_from_child(base, None, state_home=state_home)
+
+    assert parent == state_home / "tmp" / "homes"
 
 
 def test_armed_desktop_profile_seats_the_home_inside_the_declared_root(

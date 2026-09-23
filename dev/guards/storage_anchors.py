@@ -1,37 +1,37 @@
-"""Gate: production code must not anchor storage to the repository layout.
+"""Gate: production code keeps every path and setting inside its one authority.
 
-A shipped package does not know where it lives. When production code derives a
-mutable path from its own source location, from the repository root, or from
-whatever directory the process happened to start in, the result is correct only
-in a source checkout: an installed wheel resolves the same expression into the
-Python library directory, and a service resolves it against an inherited
-working directory. Both are silent - nothing fails, the data simply lands
-somewhere nobody looks.
-
-Three anchors are refused:
+a2a writes only beneath the state home, which lives in the project it serves,
+and reads its configuration only through the settings module. Each rule below
+refuses one way code has escaped that - silently, because nothing fails when
+data lands somewhere nobody looks:
 
 - **Escaping ``__file__`` walks.** A module may walk up to its OWN package root
   to reach bundled package data (``Path(__file__).parent / "presets"``). Walking
   past the package root reaches the source tree, which does not exist once the
   package is installed.
 - **``Path.cwd()`` / ``os.getcwd()``.** The working directory is inherited from
-  whoever launched the process. Two callers of the same code then disagree about
-  where the data is.
-- **``settings.project_root`` as an anchor.** The field remains legitimate for
-  resolving provider assets; it is not a storage root, and reading it outside
-  the module that defines it is how it became one.
+  whoever launched the process; the project root is the one place it is read.
+- **``Path.home()`` / ``expanduser()``.** a2a never writes into the user
+  profile. Reading another tool's own home (a CLI's login directory) is the
+  legitimate use, and is annotated as such where it happens.
+- **``tempfile`` without ``dir=``.** The system temporary directory is outside
+  every state a2a accounts for; a temporary file or directory is placed under
+  the state home's temporary root instead.
+- **Raw environment reads.** ``os.environ.get``, ``os.getenv`` and
+  ``os.environ[...]`` outside the settings module bypass the one declaration of
+  a setting, its prefix, its dotenv and its documentation.
+- **``install_root`` as an anchor.** The field resolves this service's shipped
+  assets; read anywhere but the asset resolver, it becomes a storage root.
 
 Resolving package data through ``importlib.resources`` is the supported form and
-is never reported: it asks the installed distribution where its own files are
-rather than inferring it from a path.
+is never reported.
 
 Run through the harness::
 
     just check-anchors
 
-A genuinely correct use - a development-only entry point, an anchor that is
-itself the configured override seam - is exempted with a trailing
-``# storage-anchor-ok`` comment on the offending line.
+A genuinely correct use is exempted with a trailing ``# storage-anchor-ok``
+comment on the offending line, next to a comment saying why.
 
 ``DEFERRED`` lists modules whose violations are known, owned, and not yet
 closed. It is a debt list, not an exemption list: the gate reports its contents
@@ -54,6 +54,28 @@ ROOT = Path("src") / PACKAGE
 #: Trailing comment that exempts a single line.
 ALLOW = "storage-anchor-ok"
 
+#: The settings module: the one place the environment is read.
+SETTINGS_MODULES = frozenset({"control/settings_base.py"})
+
+#: The modules allowed to read ``install_root``: its declaration, and the
+#: resolver of the assets it exists to locate.
+INSTALL_ROOT_READERS = frozenset(
+    {"control/infra_config.py", "control/config.py", "providers/_factory_commands.py"}
+)
+
+#: ``tempfile`` entry points that create or name a file or directory.
+_TEMPFILE_CALLS = frozenset(
+    {
+        "mkdtemp",
+        "mkstemp",
+        "gettempdir",
+        "TemporaryDirectory",
+        "TemporaryFile",
+        "NamedTemporaryFile",
+        "SpooledTemporaryFile",
+    }
+)
+
 #: Directory names whose contents are test code rather than shipped production
 #: code. Tests legitimately construct paths against the checkout they run in.
 TEST_DIRS = frozenset(
@@ -63,22 +85,14 @@ TEST_DIRS = frozenset(
 #: Modules with known, owned violations that are not yet closed, each mapped to
 #: the reason it is still open. Delete an entry when its module is fixed; do not
 #: add one without an owner for the work.
-DEFERRED: dict[str, str] = {
-    "lifecycle/manager.py": (
-        "the managed-process registry seats a serve command at the repository "
-        "root; the registry is development harness shipped inside the package "
-        "and its home is unresolved"
-    ),
-    "lifecycle/procs_config.py": (
-        "the managed-process table is read from the repository root; same "
-        "unresolved home as the registry above"
-    ),
-}
+DEFERRED: dict[str, str] = {}
 
 
 def _is_test_module(relative: Path) -> bool:
     """Return whether a package-relative module is test rather than product code."""
-    return any(part in TEST_DIRS for part in relative.parts)
+    return relative.name == "conftest.py" or any(
+        part in TEST_DIRS for part in relative.parts
+    )
 
 
 def _parents_to_package_root(relative: Path) -> int:
@@ -137,14 +151,82 @@ def _cwd_violations(tree: ast.Module) -> list[tuple[int, str]]:
     return sorted(found)
 
 
-def _project_root_violations(tree: ast.Module, relative: Path) -> list[tuple[int, str]]:
-    """Return every read of ``project_root`` outside the module that defines it."""
-    if relative.as_posix() == "control/config.py":
+def _home_violations(tree: ast.Module) -> list[tuple[int, str]]:
+    """Return every user-profile anchor."""
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        func = node.func
+        if func.attr == "home" and isinstance(func.value, ast.Name):
+            if func.value.id == "Path":
+                found.append((node.lineno, "Path.home() anchors to the user profile"))
+        elif func.attr == "expanduser":
+            found.append((node.lineno, "expanduser() anchors to the user profile"))
+    return sorted(found)
+
+
+def _tempfile_violations(tree: ast.Module) -> list[tuple[int, str]]:
+    """Return every ``tempfile`` call that lands in the system temp directory."""
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        func = node.func
+        if not (isinstance(func.value, ast.Name) and func.value.id == "tempfile"):
+            continue
+        if func.attr not in _TEMPFILE_CALLS:
+            continue
+        if func.attr != "gettempdir" and any(k.arg == "dir" for k in node.keywords):
+            continue
+        found.append(
+            (node.lineno, f"tempfile.{func.attr}() lands in the system temp directory")
+        )
+    return sorted(found)
+
+
+def _is_os_environ(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "environ"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "os"
+    )
+
+
+def _env_read_violations(tree: ast.Module, relative: Path) -> list[tuple[int, str]]:
+    """Return every named environment read outside the settings module."""
+    if relative.as_posix() in SETTINGS_MODULES:
         return []
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr == "project_root":
-            found.append((node.lineno, "settings.project_root used as a path anchor"))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            func = node.func
+            if func.attr == "get" and _is_os_environ(func.value):
+                found.append((node.lineno, "os.environ.get() bypasses the settings"))
+            elif (
+                func.attr == "getenv"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "os"
+            ):
+                found.append((node.lineno, "os.getenv() bypasses the settings"))
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Load)
+            and _is_os_environ(node.value)
+        ):
+            found.append((node.lineno, "os.environ[...] bypasses the settings"))
+    return sorted(found)
+
+
+def _install_root_violations(tree: ast.Module, relative: Path) -> list[tuple[int, str]]:
+    """Return every read of ``install_root`` outside the asset resolver."""
+    if relative.as_posix() in INSTALL_ROOT_READERS:
+        return []
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "install_root":
+            found.append((node.lineno, "settings.install_root used as a path anchor"))
     return sorted(found)
 
 
@@ -181,7 +263,10 @@ def main() -> int:
         found = (
             _walk_violations(tree, relative)
             + _cwd_violations(tree)
-            + _project_root_violations(tree, relative)
+            + _home_violations(tree)
+            + _tempfile_violations(tree)
+            + _env_read_violations(tree, relative)
+            + _install_root_violations(tree, relative)
         )
         key = relative.as_posix()
         for lineno, reason in sorted(found):
@@ -218,10 +303,10 @@ def main() -> int:
 
     if violations:
         print(
-            f"{len(violations)} repository-anchored path(s) in production code. "
-            f"Resolve package data through importlib.resources, take the "
-            f"directory from configuration, or annotate the line with "
-            f"# {ALLOW}:",
+            f"{len(violations)} escape(s) from the path and settings "
+            f"authority in production code. Resolve package data through "
+            f"importlib.resources, take the location or value from settings, "
+            f"or annotate a genuine exception with # {ALLOW}:",
             file=sys.stderr,
         )
         for violation in violations:

@@ -8,6 +8,7 @@ import logging
 import sys
 import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -260,9 +261,13 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
     if settings.resolved_checkpoint_backend == "sqlite":
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-        async with AsyncSqliteSaver.from_conn_string(
-            settings.checkpoint_connection_string
-        ) as checkpointer:
+        connection = settings.checkpoint_connection_string
+        if connection != ":memory:":
+            # The store's directory is part of the state layout, not something an
+            # operator creates first - the same courtesy the application database
+            # engine extends to its own file.
+            Path(connection).parent.mkdir(parents=True, exist_ok=True)
+        async with AsyncSqliteSaver.from_conn_string(connection) as checkpointer:
             # Desktop profile boot must not mutate schema: ``setup()`` creates the
             # checkpointer tables, so it is suppressed when the profile is armed.
             # The staged-generation migration entrypoint runs setup instead, and

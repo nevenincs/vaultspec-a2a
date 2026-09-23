@@ -40,6 +40,7 @@ from ..authoring.discovery import (
     heartbeat_is_fresh,
     read_service_json,
 )
+from ..control.state_layout import HANDOFF_CREDENTIAL, state_layout
 from ..desktop._filesystem_authority import (
     DirectoryAuthority,
     assert_directory_authority,
@@ -97,8 +98,6 @@ __all__ = [
 # a live service never reads as stale between writes.
 HEARTBEAT_REFRESH_SECONDS = 15
 
-_SERVICE_JSON_NAME = "service.json"
-
 
 class DiscoveryState(StrEnum):
     """Attach-never-own classification of a discovery file (R8)."""
@@ -131,8 +130,8 @@ class ServiceInfo:
 
 
 def service_json_path(a2a_home: Path) -> Path:
-    """Return the machine-global discovery file path under the A2A home."""
-    return a2a_home / _SERVICE_JSON_NAME
+    """Return the discovery record's path inside a state home."""
+    return state_layout(a2a_home).discovery_path
 
 
 def _read_handoff_credential(discovery_path: Path, reference: object) -> str | None:
@@ -142,7 +141,7 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
     candidate = Path(reference)
     try:
         authority = resolve_directory_authority(discovery_path.parent)
-        expected = authority.path / "service.token"
+        expected = authority.path / HANDOFF_CREDENTIAL
         if candidate != expected or path_is_link_like(candidate):
             return None
         with directory_lease(authority) as leased:
@@ -159,9 +158,9 @@ def _read_leased_credential(leased: DirectoryAuthority, expected: Path) -> str |
         if leased.dir_fd is None or not hasattr(os, "O_NOFOLLOW"):
             return None
         descriptor = os.open(
-            "service.token", unfollowed_read_flags(), dir_fd=leased.dir_fd
+            HANDOFF_CREDENTIAL, unfollowed_read_flags(), dir_fd=leased.dir_fd
         )
-        named = os.stat("service.token", dir_fd=leased.dir_fd, follow_symlinks=False)
+        named = os.stat(HANDOFF_CREDENTIAL, dir_fd=leased.dir_fd, follow_symlinks=False)
     else:
         # DELETE sharing keeps a credential read from blocking publication.
         descriptor = open_shared_read_descriptor(expected)
@@ -244,18 +243,18 @@ def _publish_posix_credential(
         raise OSError("POSIX credential authority is not leased")
     os.link(
         source_name,
-        "service.token",
+        HANDOFF_CREDENTIAL,
         src_dir_fd=leased.dir_fd,
         dst_dir_fd=leased.dir_fd,
         follow_symlinks=False,
     )
     opened = os.fstat(handle.fileno())
-    published = os.stat("service.token", dir_fd=leased.dir_fd, follow_symlinks=False)
+    published = os.stat(HANDOFF_CREDENTIAL, dir_fd=leased.dir_fd, follow_symlinks=False)
     if not stat.S_ISREG(published.st_mode) or (
         published.st_dev,
         published.st_ino,
     ) != (opened.st_dev, opened.st_ino):
-        os.unlink("service.token", dir_fd=leased.dir_fd)
+        os.unlink(HANDOFF_CREDENTIAL, dir_fd=leased.dir_fd)
         raise OSError("credential publication identity changed")
     os.unlink(source_name, dir_fd=leased.dir_fd)
 
@@ -268,11 +267,11 @@ def _publish_credential_source(
 ) -> None:
     if os.name == "nt" or anonymous:
         publish_no_replace(
-            leased, source_name, "service.token", source_fd=handle.fileno()
+            leased, source_name, HANDOFF_CREDENTIAL, source_fd=handle.fileno()
         )
         if os.name == "nt":
             # Restrict the published name after rename to avoid sharing conflicts.
-            _restrict_windows_file(leased.path / "service.token")
+            _restrict_windows_file(leased.path / HANDOFF_CREDENTIAL)
     else:
         _publish_posix_credential(leased, handle, source_name)
 
@@ -280,7 +279,7 @@ def _publish_credential_source(
 def _replace_private_credential(path: Path, payload: bytes) -> Path:
     """Replace the adjacent credential through one leased parent authority."""
     authority = resolve_directory_authority(path.parent)
-    destination = authority.path / "service.token"
+    destination = authority.path / HANDOFF_CREDENTIAL
     with directory_lease(authority, publication=True) as leased:
         _remove_existing_credential(leased, destination)
         source_name = f".service-token-{os.getpid()}-{secrets.token_hex(16)}"
@@ -447,7 +446,7 @@ def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
         "pid": pid,
         "last_heartbeat": now_ms if now_ms is not None else int(time.time() * 1000),
     }
-    credential_path = path.parent.resolve(strict=True) / "service.token"
+    credential_path = path.parent.resolve(strict=True) / HANDOFF_CREDENTIAL
     credential_is_current = (
         service_token
         and _read_handoff_credential(path, str(credential_path)) == service_token
@@ -530,7 +529,7 @@ def _remove_handoff_credential(discovery_path: Path) -> None:
     would let an attacker who can write the directory redirect the removal, so a
     link-like destination is left alone rather than followed.
     """
-    credential = discovery_path.with_name("service.token")
+    credential = discovery_path.with_name(HANDOFF_CREDENTIAL)
     if path_is_link_like(credential):
         return
     credential.unlink(missing_ok=True)

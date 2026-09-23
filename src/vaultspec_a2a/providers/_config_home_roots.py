@@ -7,12 +7,12 @@ the no-auth ambient-environment contract, and its MCP confinement rides
 run-workspace projections instead.)
 
 Two concerns stay shared here rather than in the CLI-specific builder: WHERE a
-per-run directory lives and HOW an abandoned one gets reclaimed. An armed
-desktop install keeps every ephemeral home under its own accounted application
-state directory (so an uninstall can find them all, and a system-wide temp
-sweep cannot delete a live run's home out from under it), and a home left
-behind by a crashed run is reclaimed once it is stale enough that liveness can
-no longer plausibly be assumed. The sweep is parameterized by the caller's own
+per-run directory lives and HOW an abandoned one gets reclaimed. Every profile
+keeps its ephemeral homes inside the state home (so they are accounted for
+with the rest of a2a's state, and a system-wide temp sweep cannot delete a
+live run's home out from under it), and a home left behind by a crashed run is
+reclaimed once it is stale enough that liveness can no longer plausibly be
+assumed. The sweep is parameterized by the caller's own
 naming prefix so it never collects a directory belonging to another product.
 """
 
@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import logging
 import shutil
-import tempfile
 import time
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = ["ORPHAN_HOME_MIN_AGE_SECONDS", "sweep_orphan_homes", "temp_home_root"]
 
@@ -37,35 +39,18 @@ keeping residue for another cycle.
 """
 
 
-def temp_home_root() -> Path | None:
-    """Return the directory per-run config homes are created inside.
+def temp_home_root() -> Path:
+    """Return the directory per-run config homes are created inside, creating it.
 
-    An armed desktop install keeps its ephemeral homes under its own application
-    home, so an uninstall can account for them and a system-wide temporary sweep
-    cannot remove a home out from under a live run.  Every other profile returns
-    ``None``, which leaves the operating system temporary directory in charge -
-    the right default for development, where a system sweep reclaiming an
-    abandoned home is a feature rather than a hazard.
-
-    Falls back to the operating system temporary directory if the declared root
-    cannot be created: an unwritable state directory must not stop a run.
+    The state home's ``tmp/homes``. There is no fallback to the system temporary
+    directory: a home created there would copy a credential outside the state
+    a2a accounts for, so an unwritable state home fails the run loudly instead.
     """
     from ..control.config import settings
 
-    declared = settings.desktop_temp_homes_dir
-    if declared is None:
-        return None
-    try:
-        declared.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        logger.warning(
-            "Could not create the declared temporary-home root %s; "
-            "falling back to the system temporary directory",
-            declared,
-            exc_info=True,
-        )
-        return None
-    return declared
+    root = settings.temp_homes_dir
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _orphan_home_is_collectable(
@@ -109,8 +94,6 @@ def sweep_orphan_homes(
         The homes removed, for the caller to log.
     """
     search_root = root if root is not None else temp_home_root()
-    if search_root is None:
-        search_root = Path(tempfile.gettempdir())
     cutoff = time.time() - ORPHAN_HOME_MIN_AGE_SECONDS
     removed: list[Path] = []
     try:

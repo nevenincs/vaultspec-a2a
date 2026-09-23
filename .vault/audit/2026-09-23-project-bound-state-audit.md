@@ -108,6 +108,23 @@ un-aliased setting (nine at the time) could go undocumented while the test passe
 Status: fixed in `P01.S02` by extracting names through `control/settings_base.py`
 `field_env_names`.
 
+### checkpoint-store-directory | medium | The checkpointer never created its store's directory
+
+`database/checkpoints.py` `open_checkpointer` connected to the SQLite checkpoint
+file without creating its parent. It worked only while the checkpoint store shared
+the application database's file, whose engine creates its own parent
+(`database/session.py`). With the stores split under `state/`, a fresh state home
+failed with "unable to open database file" at the first compile. Status: fixed in
+`P02.S06`.
+
+### gate-enforces-authority | info | The storage-anchor gate now enforces the settings authority
+
+`dev/guards/storage_anchors.py` refuses user-profile anchors, `tempfile` without a
+directory, named environment reads outside `control/settings_base.py`, and
+`install_root` reads outside the asset resolver. The retired project-root rule and
+its two deferred modules are gone: the project root is now the sanctioned anchor.
+Status: fixed in `P02.S06`.
+
 ## Recommendations
 
 - Keep the storage-anchor gate as the enforcement point for the new rules (no profile, temp or raw environment use in production) so regressions fail review rather than surface as leaks.

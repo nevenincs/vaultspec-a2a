@@ -474,11 +474,11 @@ def run_start(**options: Unpack[_RunStartArgs]) -> None:
     # gateway refuses to infer this from the serving process, and it is right
     # to: the caller owns the active project.
     #
-    # The launch directory is that caller's own statement of which project they
-    # mean, which is why the fallback anchors there and not at any root this
-    # repository could resolve for them.
+    # The caller's project is the one the launch directory belongs to: the
+    # project root, found from where the command was run, so a command started
+    # in a subfolder still names its project rather than the subfolder.
     workspace_root = str(
-        Path(workspace).resolve() if workspace else Path.cwd()  # storage-anchor-ok
+        Path(workspace).resolve() if workspace else settings.project_root
     )
     body: dict[str, Any] = {
         "team_preset": preset,

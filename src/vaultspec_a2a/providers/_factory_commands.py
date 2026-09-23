@@ -174,8 +174,7 @@ def capsule_acp_entry(capsule_assets_root: Path) -> Path:
 def _canonical_capsule_assets_root(capsule_assets_root: Path) -> Path:
     """Return the absolute canonical directory that owns capsule assets."""
     try:
-        requested_root = capsule_assets_root.expanduser()
-        canonical_root = requested_root.resolve(strict=True)
+        canonical_root = capsule_assets_root.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise ConfigError(
             f"Desktop capsule assets root cannot be resolved: {capsule_assets_root}. "

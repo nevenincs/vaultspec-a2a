@@ -280,7 +280,8 @@ class CodexChatModel(BaseChatModel):
         # refusal to invent a root when the run names none.
         specs = self._compose_mcp_specs()
         base = self.codex_home or settings.codex_home
-        base_home = Path(base) if base else Path.home() / ".codex"
+        # Codex keeps its own login here; a2a only reads it to seed a run home.
+        base_home = Path(base) if base else Path.home() / ".codex"  # storage-anchor-ok
         configured = self.web_search_mode
         if configured is None:
             configured = settings.codex_web_search_mode

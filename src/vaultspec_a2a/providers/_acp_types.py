@@ -170,7 +170,8 @@ def canonical_project_root(value: str | Path) -> str:
     reduces to a stable key, because refusing a call is a decision the permission
     layer must be able to reach without touching the filesystem's answer.
     """
-    resolved = Path(value).expanduser()
+    # A caller's ``~``-relative project root names a path, not a2a state.
+    resolved = Path(value).expanduser()  # storage-anchor-ok
     try:
         resolved = resolved.resolve()
     except OSError:

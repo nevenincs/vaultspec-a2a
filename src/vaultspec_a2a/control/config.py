@@ -25,7 +25,7 @@ from .infra_config import (
     _warn_seating_discard,
 )
 from .settings_base import ENV_PREFIX, env_name, is_absolute_path, resolve_against
-from .state_layout import StateLayout, state_layout
+from .state_layout import ENGINE_DISCOVERY_RECORD, StateLayout, state_layout
 
 __all__ = [
     "Settings",
@@ -250,7 +250,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         """The development process registry, its reservations and leases."""
         if self.procs_home is not None:
             return self.procs_home
-        return Path.home() / ".vaultspec" / "procs"
+        return self.state_layout.procs_dir
 
     @property
     def procs_table_path(self) -> Path:
@@ -264,7 +264,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         """The vaultspec engine's discovery record a2a attaches through."""
         if self.engine_service_json is not None:
             return self.engine_service_json
-        return Path.home() / ".vaultspec" / "service.json"
+        return self.project_root / ENGINE_DISCOVERY_RECORD
 
     @property
     def gateway_url_configured(self) -> bool:
@@ -327,23 +327,14 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return credential_paths(state.credentials_dir)
 
     @property
-    def desktop_temp_homes_dir(self) -> Path | None:
-        """Return the armed desktop profile's root for per-run temporary homes.
+    def temp_homes_dir(self) -> Path:
+        """The root per-run provider configuration homes are created inside.
 
-        A packaged desktop install keeps its ephemeral working directories inside
-        its own application home rather than scattering them through the operating
-        system temporary directory, so an uninstall can account for them and a
-        system-wide temp sweep cannot delete a home out from under a live run.
-
-        Returns ``None`` while the profile is unarmed, leaving the development and
-        Compose profiles on the operating system temporary directory.
+        Inside the state home, so every home a run leaves behind is accounted
+        for with the rest of a2a's state rather than scattered through the
+        system temporary directory.
         """
-        if self.desktop_app_home is None:
-            return None
-
-        from ..desktop.profile import derive_state_paths
-
-        return derive_state_paths(self.desktop_app_home).temp_homes_dir
+        return self.state_layout.temp_homes_dir
 
     @property
     def resolved_database_backend(self) -> Literal["sqlite", "postgres"]:

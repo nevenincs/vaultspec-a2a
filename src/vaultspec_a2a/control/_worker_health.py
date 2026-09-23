@@ -236,12 +236,8 @@ class WorkerHealthProbe:
 
 
 def _runtime_dir() -> Path:
-    """Return the machine-global runtime directory for gateway-managed process logs.
-
-    Lives under the A2A home, not inside ``.vault/`` — vaultspec
-    firmware rejects foreign directories inside the vault.
-    """
-    runtime_dir = settings.a2a_home / "runtime"
+    """Return the runtime directory gateway-managed process logs go to."""
+    runtime_dir = settings.state_layout.logs_dir
     runtime_dir.mkdir(parents=True, exist_ok=True)
     return runtime_dir
 

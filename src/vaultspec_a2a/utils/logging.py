@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, override
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
 
+from ..control.state_layout import state_layout
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -377,7 +379,7 @@ def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
 
     handlers: list[logging.Handler] = [_stderr_json_handler(level)]
 
-    runtime_dir = settings.a2a_home / "runtime"
+    runtime_dir = state_layout(settings.a2a_home).logs_dir
     try:
         runtime_dir.mkdir(parents=True, exist_ok=True)
         file_handler = RotatingFileHandler(

@@ -24,7 +24,8 @@ def test_the_default_profile_keeps_temporary_homes_in_its_state_home() -> None:
     root = settings.temp_homes_dir
 
     assert root == settings.a2a_home / "tmp" / "homes"
-    assert not root.is_relative_to(Path(tempfile.gettempdir()))
+    # Read only, to prove the root is not there.
+    assert not root.is_relative_to(Path(tempfile.gettempdir()))  # storage-anchor-ok
 
 
 def test_the_armed_profile_keeps_them_inside_its_application_home(

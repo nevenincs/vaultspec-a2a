@@ -189,7 +189,9 @@ def ensure() -> Path:
 
     root.mkdir(parents=True, exist_ok=True)
     url = f"{BASE_URL}/v{VERSION}/actionlint_{VERSION}_{suffix}"
-    with tempfile.TemporaryDirectory() as scratch:
+    # Downloaded beside the cache it is installed into, never in the system
+    # temporary directory.
+    with tempfile.TemporaryDirectory(dir=root) as scratch:
         archive = Path(scratch) / suffix
         _download(url, archive)
         _verify(archive, expected)

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:0be158e20970ab71b4f0af34ec1a2ecc1e07a7e2b2b590e7a25a04e6227b4ab1'
+body_hash: 'sha256:1d246201873d34aae4bae417a5e9267d56e6f1c1ca8fc3716230264a85aca0e2'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -329,6 +329,16 @@ related:
 - `S07` `verify:` `pytest src/vaultspec_a2a/desktop_tests src/vaultspec_a2a/desktop src/vaultspec_a2a/cli src/vaultspec_a2a/control/tests src/vaultspec_a2a/lifecycle -n 6 --dist=loadgroup` -> `pass`
 - `S08` `M` `src/vaultspec_a2a/testing/session_root.py`
 - `S08` `verify:` `pytest src/vaultspec_a2a/testing/tests/test_session_root.py` -> `pass`
+- `S09` `M` `dev/actionlint.py`
+- `S09` `M` `dev/audit/duplication.py`
+- `S09` `M` `dev/guards/storage_anchors.py`
+- `S09` `M` `dev/tests/test_storage_anchors.py`
+- `S09` `M` `dev/vault/enroll.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_acp_temp_home_root.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S09` `verify:` `python dev/guards/storage_anchors.py` -> `pass`
 
 ## Notes
 

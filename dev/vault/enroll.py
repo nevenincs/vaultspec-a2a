@@ -143,7 +143,13 @@ def main() -> None:
         return
 
     _require_clean_owned_paths(root)
-    with tempfile.TemporaryDirectory(prefix="vaultspec-core-adopt-") as temporary:
+    # Staged inside the checkout's ignored .tmp-* space, never the system
+    # temporary directory.
+    scratch = root / ".tmp-enroll"
+    scratch.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="vaultspec-core-adopt-", dir=scratch
+    ) as temporary:
         staged = Path(temporary) / "workspace"
         _run(root, "git", "clone", "--quiet", "--no-hardlinks", str(root), str(staged))
         _core(

@@ -858,7 +858,8 @@ def test_armed_desktop_profile_seats_the_home_inside_the_declared_root(
     app_home.mkdir()
 
     home_parent = _config_home_parent_from_child(base, app_home)
-    assert home_parent != Path(tempfile.gettempdir())
+    # Read only, to prove the home parent is not there.
+    assert home_parent != Path(tempfile.gettempdir())  # storage-anchor-ok
     assert app_home in home_parent.parents
 
 

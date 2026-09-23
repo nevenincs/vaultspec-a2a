@@ -30,6 +30,12 @@ data lands somewhere nobody looks:
 Resolving package data through ``importlib.resources`` is the supported form and
 is never reported.
 
+Test modules and the repository's own tooling under ``dev/`` are held to the
+``tempfile`` rule alone: they may read the checkout and the environment, but
+their scratch space belongs to the worktree (the test session's seat, or an
+ignored ``.tmp-*`` directory), never to a system directory a sandboxed host
+cannot write.
+
 Run through the harness::
 
     just check-anchors
@@ -54,6 +60,9 @@ PACKAGE = "vaultspec_a2a"
 
 #: Source root scanned by the gate.
 ROOT = Path("src") / PACKAGE
+
+#: Repository tooling, held to the ``tempfile`` rule only.
+TOOLING_ROOT = Path("dev")
 
 #: Trailing comment that exempts a single line.
 ALLOW = "storage-anchor-ok"
@@ -319,10 +328,11 @@ def main() -> int:
     violations: list[str] = []
     deferred_hits: dict[str, int] = {}
 
-    for path in sorted(ROOT.rglob("*.py")):
-        relative = path.relative_to(ROOT)
-        if _is_test_module(relative):
-            continue
+    scanned: list[tuple[Path, Path | None]] = [
+        (path, path.relative_to(ROOT)) for path in sorted(ROOT.rglob("*.py"))
+    ]
+    scanned += [(path, None) for path in sorted(TOOLING_ROOT.rglob("*.py"))]
+    for path, relative in scanned:
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
         try:
@@ -331,16 +341,19 @@ def main() -> int:
             print(f"{path}: could not parse: {exc}", file=sys.stderr)
             return 2
 
-        found = (
-            _walk_violations(tree, relative)
-            + _cwd_violations(tree)
-            + _home_violations(tree)
-            + _tempfile_violations(tree)
-            + _env_read_violations(tree, relative)
-            + _install_root_violations(tree, relative)
-            + _name_literal_violations(tree, relative)
-        )
-        key = relative.as_posix()
+        if relative is None or _is_test_module(relative):
+            found = _tempfile_violations(tree)
+        else:
+            found = (
+                _walk_violations(tree, relative)
+                + _cwd_violations(tree)
+                + _home_violations(tree)
+                + _tempfile_violations(tree)
+                + _env_read_violations(tree, relative)
+                + _install_root_violations(tree, relative)
+                + _name_literal_violations(tree, relative)
+            )
+        key = (relative if relative is not None else path).as_posix()
         for lineno, reason in sorted(found):
             source = lines[lineno - 1] if lineno <= len(lines) else ""
             if ALLOW in source:
@@ -376,7 +389,7 @@ def main() -> int:
     if violations:
         print(
             f"{len(violations)} escape(s) from the path and settings "
-            f"authority in production code. Resolve package data through "
+            f"authority. Resolve package data through "
             f"importlib.resources, take the location or value from settings, "
             f"or annotate a genuine exception with # {ALLOW}:",
             file=sys.stderr,

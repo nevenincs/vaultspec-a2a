@@ -24,7 +24,9 @@ def resolve_venv(workspace_path: Path) -> Path | None:
     3. Walk up to the workspace's own repository root (the nearest ``.git``)
        and use its ``.venv``. The walk stops there: a repository that merely
        contains the workspace's repository is not the workspace's project, and
-       its interpreter is not the agent's to run.
+       its interpreter is not the agent's to run. A workspace that is itself a
+       repository (an agent ran ``git init`` in it) is therefore its own
+       project and gets no interpreter unless it holds one.
 
     Returns ``None`` if no venv is found.
     """

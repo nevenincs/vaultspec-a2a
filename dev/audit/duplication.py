@@ -287,7 +287,11 @@ def run_duplication_scan(
         The typed result. This is the single entry point for every duplication
         consumer.
     """
-    with tempfile.TemporaryDirectory(prefix="jscpd-") as tmp:
+    # The report is scratch inside the scanned checkout's ignored .tmp-* space,
+    # never the system temporary directory.
+    scratch = repo_root / ".tmp-duplication"
+    scratch.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="jscpd-", dir=scratch) as tmp:
         output_dir = Path(tmp)
         try:
             completed = run_captured(

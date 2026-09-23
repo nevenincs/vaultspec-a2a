@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing import session_scratch_dir
 from ...thread.errors import ConfigError
 from .._factory_commands import (
     _CLAUDE_ACP_JS,
@@ -102,9 +103,11 @@ def test_unresolvable_user_root_has_stable_config_error() -> None:
 
 def test_relative_capsule_root_returns_absolute_canonical_assets() -> None:
     """A relative capsule root becomes one absolute canonical authority."""
-    with TemporaryDirectory(prefix="capsule-s09-", dir=Path.cwd()) as temp_dir:
+    with TemporaryDirectory(
+        prefix="capsule-s09-", dir=session_scratch_dir("capsule-")
+    ) as temp_dir:
         root = Path(temp_dir)
-        relative_root = root.relative_to(Path.cwd())
+        relative_root = Path(os.path.relpath(root, Path.cwd()))
         node = _write(capsule_node_executable(root), "node runtime\n")
         acp = _write(capsule_acp_entry(root), "// acp entry\n")
 

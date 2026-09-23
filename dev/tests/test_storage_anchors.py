@@ -153,12 +153,49 @@ def test_the_spellings_that_slipped_past_the_first_rules_are_reported() -> None:
     assert [lineno for lineno, _ in storage_anchors._home_violations(tree)] == [5]
 
 
-def test_test_modules_are_out_of_scope() -> None:
+def test_test_modules_are_out_of_the_production_rules() -> None:
     """Tests legitimately build paths against the checkout they run in."""
     assert storage_anchors._is_test_module(Path("control/tests/test_config.py"))
     assert storage_anchors._is_test_module(Path("testing/plugin.py"))
     assert storage_anchors._is_test_module(Path("conftest.py"))
     assert not storage_anchors._is_test_module(Path("control/config.py"))
+
+
+def test_tests_and_tooling_are_held_to_the_tempfile_rule_alone(tmp_path: Path) -> None:
+    """Test and dev modules may read the checkout, but never write to system temp."""
+    tests_dir = tmp_path / storage_anchors.ROOT / "control" / "tests"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_probe.py").write_text(
+        "import tempfile\n"
+        "from pathlib import Path\n"
+        "here = Path.cwd()\n"
+        "scratch = tempfile.mkdtemp()\n",
+        encoding="utf-8",
+    )
+    tooling = tmp_path / storage_anchors.TOOLING_ROOT
+    tooling.mkdir()
+    (tooling / "tool.py").write_text(
+        "import os\n"
+        "import tempfile\n"
+        "flag = os.environ.get('ANY')\n"
+        "with tempfile.TemporaryDirectory() as scratch:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "dev" / "guards" / "storage_anchors.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    reported = [line.strip() for line in result.stderr.splitlines() if ".py:" in line]
+    assert len(reported) == 2, reported
+    assert any("test_probe.py:4: tempfile.mkdtemp()" in line for line in reported)
+    assert any("tool.py:4: tempfile.TemporaryDirectory()" in line for line in reported)
 
 
 def test_the_gate_passes_against_this_repository() -> None:

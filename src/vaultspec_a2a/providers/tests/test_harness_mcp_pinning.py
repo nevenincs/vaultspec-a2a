@@ -39,6 +39,7 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from ...testing import session_scratch_dir
 from ...thread.errors import ConfigError
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
@@ -277,8 +278,8 @@ async def _run_rag_cli(
         return f"{rendered}\n[output truncated]" if truncated else rendered
 
     with (
-        tempfile.TemporaryFile() as stdout_handle,
-        tempfile.TemporaryFile() as stderr_handle,
+        tempfile.TemporaryFile(dir=session_scratch_dir("rag-cli-")) as stdout_handle,
+        tempfile.TemporaryFile(dir=session_scratch_dir("rag-cli-")) as stderr_handle,
     ):
         try:
             async with asyncio.timeout_at(operation_deadline):
@@ -989,7 +990,9 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
         # (the runner's captured stderr has none), and a wedged launch stays
         # diagnosable rather than silent.
         with io.TextIOWrapper(
-            tempfile.TemporaryFile(), encoding="utf-8", errors="replace"
+            tempfile.TemporaryFile(dir=session_scratch_dir("rag-stdio-")),
+            encoding="utf-8",
+            errors="replace",
         ) as captured_stderr:
             async with asyncio.timeout(_LIVE_PROBE_TIMEOUT_SECONDS):
                 async with (

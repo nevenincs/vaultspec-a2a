@@ -8,7 +8,7 @@ related:
   - '[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:f10797640cb8c3013654712350f836e84a2822cc73c52fd8ce27f906b13279b7'
+body_hash: 'sha256:369ff93cff66f1e421224d9c227bb6d155b9ce42652da0a90f582a095ab89cac'
 ---
 
 # `issue-26-release-automation` plan
@@ -49,6 +49,12 @@ write-transaction fix to every other read-then-write transaction; S08 resolves
 the unconsumed worker demand-ready signal. All are corrections within settled
 constraints; no ADR is created.
 
+S09 and S10 approved 2026-09-23 - the user directed that every known finding
+be actioned. S09 burns down the advisory code-health sentinels that fail on every
+Full Validation run under `continue-on-error`; S10 turns each finding the reviews
+accepted into a concrete safeguard. Both are corrections within settled
+constraints; no ADR is created.
+
 ## Steps
 
 - [x] `S01` - Give release-please exclusive ownership of version, lockfile, and changelog proposals while retaining guarded publication of an existing tag; `.github/workflows/release-please.yml, .github/workflows/release.yml, release-please-config.json, .release-please-manifest.json, CHANGELOG.md, Justfile, scripts/prepare_release.py, scripts/tests/test_prepare_release.py, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py`.
@@ -59,6 +65,8 @@ constraints; no ADR is created.
 - [x] `S06` - Keep every test session off the user's real app home and refuse a mismatched engine request; `src/vaultspec_a2a/testing/runner_child.py, src/vaultspec_a2a/database/session.py`.
 - [x] `S07` - Begin every read-then-write gateway transaction holding the SQLite write lock, without holding it across network or checkpoint I/O; `src/vaultspec_a2a/control/, src/vaultspec_a2a/api/routes/, src/vaultspec_a2a/database/reconciliation.py, src/vaultspec_a2a/worker/task_queue_port.py`.
 - [x] `S08` - Resolve the worker demand-ready signal that nothing awaits; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/api/app.py`.
+- [x] `S09` - Bring every advisory code-health sentinel to green: type-strict, cognitive and cyclomatic complexity, shape, limits, and module size; `src/vaultspec_a2a/lifecycle/manager.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/testing/, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/utils/process.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/control/, dev/`.
+- [x] `S10` - Carry each accepted review finding through to a concrete safeguard; `src/vaultspec_a2a/database/__init__.py, .github/workflows/release-please.yml, src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/api/app.py`.
 
 ## Parallelization
 

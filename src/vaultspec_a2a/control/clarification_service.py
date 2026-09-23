@@ -430,6 +430,20 @@ async def respond_to_clarification(
     fingerprint = clarification_resolution_fingerprint(resolution)
     payload = resolution.as_resume_value()
     idempotency_key = _idempotency_key(request_id)
+    not_found = ClarificationResult(
+        request_id=request_id,
+        thread_id=thread_id,
+        accepted=False,
+        applied=False,
+        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+        error_detail="Run not found",
+        error_status_code=404,
+    )
+    # An unknown run is refused before the checkpoint round trip below.
+    known = await get_thread(db, thread_id) is not None
+    await db.rollback()
+    if not known:
+        return not_found
     # The checkpoint read is remote I/O, so it happens before the durable
     # transaction opens: holding the write lock across it would block every
     # other writer for the length of a checkpoint round trip.
@@ -437,62 +451,63 @@ async def respond_to_clarification(
     parked = pending_clarification(checkpoint_snapshot, thread_id=thread_id)
 
     await begin_write_transaction(db)
-    thread = await get_thread(db, thread_id)
-    if thread is None:
-        return ClarificationResult(
-            request_id=request_id,
-            thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail="Run not found",
-            error_status_code=404,
-        )
+    try:
+        thread = await get_thread(db, thread_id)
+        if thread is None:
+            return not_found
 
-    existing = await get_control_action_by_idempotency_key(
-        db,
-        thread_id=thread_id,
-        idempotency_key=idempotency_key,
-    )
-    if existing is None and (parked is None or parked.request_id != request_id):
-        return ClarificationResult(
-            request_id=request_id,
-            thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail="Clarification request is not pending for this run",
-            error_status_code=404,
-        )
-
-    invalid_answers = _invalid_parked_answers(parked, resolution, thread_id, request_id)
-    if invalid_answers is not None:
-        return invalid_answers
-
-    if existing is not None:
-        replay = await _replay_existing_action(
+        existing = await get_control_action_by_idempotency_key(
             db,
-            existing,
-            fingerprint,
-            checkpoint_snapshot,
-            parked is not None and parked.request_id == request_id,
+            thread_id=thread_id,
+            idempotency_key=idempotency_key,
         )
-        if replay is not None:
-            return replay
+        if existing is None and (parked is None or parked.request_id != request_id):
+            return ClarificationResult(
+                request_id=request_id,
+                thread_id=thread_id,
+                accepted=False,
+                applied=False,
+                action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+                error_detail="Clarification request is not pending for this run",
+                error_status_code=404,
+            )
 
-    return await _claim_and_dispatch(
-        db,
-        thread,
-        _ClaimContext(
-            runtime,
-            fingerprint,
-            payload,
-            idempotency_key,
-            thread_id,
-            request_id,
-            parked is not None and parked.request_id == request_id,
-        ),
-    )
+        invalid_answers = _invalid_parked_answers(
+            parked, resolution, thread_id, request_id
+        )
+        if invalid_answers is not None:
+            return invalid_answers
+
+        if existing is not None:
+            replay = await _replay_existing_action(
+                db,
+                existing,
+                fingerprint,
+                checkpoint_snapshot,
+                parked is not None and parked.request_id == request_id,
+            )
+            if replay is not None:
+                return replay
+
+        return await _claim_and_dispatch(
+            db,
+            thread,
+            _ClaimContext(
+                runtime,
+                fingerprint,
+                payload,
+                idempotency_key,
+                thread_id,
+                request_id,
+                parked is not None and parked.request_id == request_id,
+            ),
+        )
+    finally:
+        # The service owns its boundary and no caller commits after it, so a
+        # transaction still open here holds nothing worth keeping: release the
+        # write lock now rather than when the session closes.
+        if db.in_transaction():
+            await db.rollback()
 
 
 async def _claim_and_dispatch(

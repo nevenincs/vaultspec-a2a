@@ -296,6 +296,7 @@ async def run_permission_respond_endpoint(
     await begin_write_transaction(dependencies.db)
     permission = await get_permission_request(dependencies.db, request_id)
     if permission is None or permission.thread_id != run_id:
+        await dependencies.db.rollback()
         raise HTTPException(
             status_code=404,
             detail=f"Permission request {request_id!r} not found for run {run_id!r}",

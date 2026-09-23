@@ -367,6 +367,8 @@ async def cancel_thread(
     await begin_write_transaction(db)
     preflight = await _cancel_preflight(db, thread_id)
     if isinstance(preflight, CancelResult):
+        # A refusal wrote nothing; release the write lock before returning.
+        await db.rollback()
         return preflight
     thread = preflight.thread
     thread_status = preflight.thread_status

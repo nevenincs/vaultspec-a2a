@@ -158,8 +158,11 @@ async def send_followup_message(
     # transaction takes the write lock up front and waits for a racing sender
     # rather than failing once that sender commits.
     await begin_write_transaction(db)
+    # Every refusal before the claim below wrote nothing; each releases the
+    # write lock before it returns.
     thread = await get_thread(db, options["thread_id"])
     if thread is None:
+        await db.rollback()
         return MessageResult(
             action_id="",
             thread_id=options["thread_id"],
@@ -169,18 +172,21 @@ async def send_followup_message(
             failure_type=FailureType.NOT_FOUND,
         )
 
-    eligibility = can_send_followup(thread.status)
+    # Read before any rollback below expires the loaded row.
+    refused_status = thread.status
+    eligibility = can_send_followup(refused_status)
     if not eligibility.allowed:
         # Distinguish INPUT_REQUIRED from generic terminal-state rejection
+        await db.rollback()
         return MessageResult(
             action_id="",
             thread_id=options["thread_id"],
-            thread_status=thread.status,
+            thread_status=refused_status,
             dispatched=False,
             error_detail=eligibility.reason,
             failure_type=(
                 FailureType.INPUT_REQUIRED
-                if thread.status == ThreadStatus.INPUT_REQUIRED.value
+                if refused_status == ThreadStatus.INPUT_REQUIRED.value
                 else FailureType.TERMINAL
             ),
         )
@@ -205,6 +211,7 @@ async def send_followup_message(
         team_preset = graph_definition.team_id
         execution_authority = resolve_execution_authority(thread_metadata)
     except (ExecutionAuthorityError, ValueError) as exc:
+        await db.rollback()
         return MessageResult(
             action_id="",
             thread_id=options["thread_id"],
@@ -222,6 +229,7 @@ async def send_followup_message(
     # whatever directory the worker was started in. Refuse instead.
     workspace_root = dispatchable_workspace_root(thread_metadata)
     if workspace_root is None:
+        await db.rollback()
         return MessageResult(
             action_id="",
             thread_id=options["thread_id"],

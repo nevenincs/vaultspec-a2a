@@ -26,6 +26,7 @@ from ...database.session import begin_write_transaction, configure_sqlite_engine
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..event_handlers import _handle_execution_state_event
+from ..thread_service import archive_thread
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -104,6 +105,34 @@ async def test_execution_state_relay_waits_out_a_concurrent_writer(
     # racing it.
     assert thread is not None
     assert thread.last_sequence == 41
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run_id", ["missing-run", _THREAD_ID])
+async def test_a_refused_archive_releases_the_write_lock_before_returning(
+    sessions: async_sessionmaker[AsyncSession], run_id: str
+) -> None:
+    """A refusal writes nothing, so it must not keep the lock while its session lives.
+
+    ``missing-run`` is refused as unknown and the seeded RUNNING run as not
+    archivable. The refused session stays open while a sibling writes: if it
+    still held the write lock, the sibling would wait out the whole busy timeout
+    instead of committing at once.
+    """
+    async with sessions() as db:
+        result = await archive_thread(db, run_id)
+        assert not result.archived
+        assert not db.in_transaction()
+
+        async def _sibling_write() -> None:
+            async with sessions() as sibling:
+                await begin_write_transaction(sibling)
+                sibling_thread = await sibling.get(ThreadModel, _THREAD_ID)
+                assert sibling_thread is not None
+                sibling_thread.last_sequence = 7
+                await sibling.commit()
+
+        await asyncio.wait_for(_sibling_write(), timeout=1.0)
 
 
 @pytest.mark.asyncio

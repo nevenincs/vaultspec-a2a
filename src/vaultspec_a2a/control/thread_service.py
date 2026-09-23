@@ -857,11 +857,13 @@ async def delete_thread_service(
     await begin_write_transaction(db)
     thread = await get_thread(db, thread_id)
     if thread is None:
+        await db.rollback()
         return DeleteResult(deleted=False, not_found=True)
 
     if thread.status != ThreadStatus.DELETING.value:
         eligibility = can_delete(thread.status)
         if not eligibility.allowed:
+            await db.rollback()
             return DeleteResult(deleted=False, error_detail=eligibility.reason)
         manifest = build_cleanup_manifest(
             thread,
@@ -978,13 +980,17 @@ async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
     """
     await begin_write_transaction(db)
     thread = await get_thread(db, thread_id)
+    # Each refusal below wrote nothing; release the write lock before returning.
     if thread is None:
+        await db.rollback()
         return ArchiveResult(archived=False, not_found=True)
 
     eligibility = can_archive(thread.status)
     if eligibility.already_archived:
+        await db.rollback()
         return ArchiveResult(archived=True, already_archived=True)
     if not eligibility.allowed:
+        await db.rollback()
         return ArchiveResult(archived=False, error_detail=eligibility.reason)
 
     expectation = thread_write_expectation(thread)

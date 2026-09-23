@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
-from ..plugin import _send_completion_receipt
+from ..plugin import send_completion_receipt
 from ..runner import (
     DESCENDANT_TIMEOUT_EXIT,
     RUN_TIMEOUT_EXIT,
@@ -168,7 +168,7 @@ def test_nested_pytest_process_cannot_complete_its_parent_receipt() -> None:
     try:
         os.environ[COMPLETION_ENDPOINT_ENV] = f"127.0.0.1:{port}:parent-token"
         os.environ[COMPLETION_OWNER_PID_ENV] = str(os.getpid() + 1)
-        _send_completion_receipt(0)
+        send_completion_receipt(0)
         try:
             listener.accept()
         except BlockingIOError:

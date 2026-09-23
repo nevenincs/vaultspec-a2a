@@ -24,18 +24,20 @@ import pytest
 from ...control.config import setting_env
 from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ...testing.ports import free_port
+from ..boot import (
+    build_cwd_for,
+    render_command,
+    render_env,
+    serve_cwd_for,
+    serve_env,
+)
 from ..discovery import is_pid_alive
+from ..errors import LifecycleError
 from ..manager import (
-    LifecycleError,
-    _build_cwd_for,
-    _serve_cwd_for,
-    _serve_env,
     attach,
     kill,
     reap,
     rebuild,
-    render_command,
-    render_env,
     rerun,
     resolve,
     resume,
@@ -624,6 +626,86 @@ def test_gateway_serve_up_requires_http_readiness_before_registration(
         tree_kill(record.pid)
 
 
+class _ForeignWorkerListener:
+    """A real foreign socket bound onto a worker's reserved port, before serve_up's
+    own child gets there.
+
+    Stands in for an un-reaped orphan or an unrelated racer holding the SAME
+    reserved port: it never was serve_up's spawned child, so its confirmed-owner
+    check must fail and the worker's credentialed health probe must never reach
+    it. Answers a well-formed worker ``/health`` body regardless, so the test
+    proves the refusal is about OWNERSHIP, not about the response shape.
+    """
+
+    def __init__(self, tmp_path: Path, capture: Path, *, role: str) -> None:
+        self._tmp_path = tmp_path
+        self._capture = capture
+        self._role = role
+        self.ready = threading.Event()
+        self._stop = threading.Event()
+        self.errors: list[BaseException] = []
+        self._thread = threading.Thread(target=self._run)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop_and_join(self, *, timeout: float = 5.0) -> None:
+        self._stop.set()
+        self._thread.join(timeout=timeout)
+
+    @property
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def _wait_for_reservation_marker(self, *, deadline: float) -> Path | None:
+        while time.monotonic() < deadline:
+            markers = list(self._tmp_path.glob(f"{self._role}-*.reserved"))
+            if markers:
+                return markers[0]
+            time.sleep(0.01)
+        return None
+
+    def _run(self) -> None:
+        listener: socket.socket | None = None
+        try:
+            marker = self._wait_for_reservation_marker(deadline=time.monotonic() + 10.0)
+            if marker is None:
+                raise AssertionError("serve_up did not create a worker reservation")
+            foreign_port = int(marker.stem.rsplit("-", 1)[1])
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind(("127.0.0.1", foreign_port))
+            listener.listen()
+            listener.settimeout(0.05)
+            self.ready.set()
+            self._answer_health_checks(listener)
+        except BaseException as exc:
+            self.errors.append(exc)
+            self.ready.set()
+        finally:
+            if listener is not None:
+                listener.close()
+
+    def _answer_health_checks(self, listener: socket.socket) -> None:
+        body = b'{"service":"worker","status":"ok"}'
+        response = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: application/json\r\n"
+            + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+            + body
+        )
+        while not self._stop.is_set():
+            try:
+                connection, _ = listener.accept()
+            except TimeoutError:
+                continue
+            with connection:
+                connection.settimeout(1.0)
+                request = connection.recv(64 * 1024)
+                if request:
+                    self._capture.write_bytes(request)
+                connection.sendall(response)
+
+
 @_LIVE_SOCKET_BAND
 def test_worker_serve_up_rejects_a_foreign_listener_without_probe_or_record(
     tmp_path: Path,
@@ -643,56 +725,8 @@ def test_worker_serve_up_rejects_a_foreign_listener_without_probe_or_record(
     )
     config = ProcsConfig(resident={}, roles={"worker-dev": role})
     capture = tmp_path / "foreign-request.bin"
-    ready = threading.Event()
-    stop = threading.Event()
-    errors: list[BaseException] = []
-
-    def foreign_listener() -> None:
-        listener: socket.socket | None = None
-        try:
-            deadline = time.monotonic() + 10.0
-            marker: Path | None = None
-            while time.monotonic() < deadline:
-                markers = list(tmp_path.glob("worker-dev-*.reserved"))
-                if markers:
-                    marker = markers[0]
-                    break
-                time.sleep(0.01)
-            if marker is None:
-                raise AssertionError("serve_up did not create a worker reservation")
-            foreign_port = int(marker.stem.rsplit("-", 1)[1])
-            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            listener.bind(("127.0.0.1", foreign_port))
-            listener.listen()
-            listener.settimeout(0.05)
-            ready.set()
-            body = b'{"service":"worker","status":"ok"}'
-            response = (
-                b"HTTP/1.1 200 OK\r\n"
-                b"Content-Type: application/json\r\n"
-                + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
-                + body
-            )
-            while not stop.is_set():
-                try:
-                    connection, _ = listener.accept()
-                except TimeoutError:
-                    continue
-                with connection:
-                    connection.settimeout(1.0)
-                    request = connection.recv(64 * 1024)
-                    if request:
-                        capture.write_bytes(request)
-                    connection.sendall(response)
-        except BaseException as exc:
-            errors.append(exc)
-            ready.set()
-        finally:
-            if listener is not None:
-                listener.close()
-
-    listener_thread = threading.Thread(target=foreign_listener)
-    listener_thread.start()
+    foreign = _ForeignWorkerListener(tmp_path, capture, role="worker-dev")
+    foreign.start()
     record: ProcRecord | None = None
     failure: LifecycleError | None = None
     try:
@@ -708,16 +742,15 @@ def test_worker_serve_up_rejects_a_foreign_listener_without_probe_or_record(
         except LifecycleError as exc:
             failure = exc
     finally:
-        stop.set()
-        listener_thread.join(timeout=5.0)
+        foreign.stop_and_join()
         if record is not None:
             tree_kill(record.pid)
             remove_record(record.role, record.name, home=tmp_path)
 
-    if errors:
-        raise errors[0]
-    assert not listener_thread.is_alive()
-    assert ready.is_set()
+    if foreign.errors:
+        raise foreign.errors[0]
+    assert not foreign.is_alive
+    assert foreign.ready.is_set()
     assert failure is not None
     assert "no band port yielded a live listener" in str(failure)
     assert not capture.exists(), "foreign listener received a worker health probe"
@@ -825,7 +858,7 @@ def test_serve_env_carries_identity_and_rendered_role_env() -> None:
         serve=["x"],
         env={"VAULTSPEC_A2A_PORT": "{port}"},
     )
-    env = _serve_env(role, port=18103, workspace="ws", name="g1", owner="sess-a")
+    env = serve_env(role, port=18103, workspace="ws", name="g1", owner="sess-a")
     # Rendered role env plus the managed identity, so a self-registering child
     # converges onto the same (role, name)/owner record instead of a rival one.
     assert env["VAULTSPEC_A2A_PORT"] == "18103"
@@ -843,7 +876,7 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
         serve=["x"],
         env={"VAULTSPEC_A2A_WORKER_PORT": "{port}"},
     )
-    with_seat = _serve_env(
+    with_seat = serve_env(
         role,
         port=18110,
         workspace="ws",
@@ -854,7 +887,7 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
     assert with_seat[setting_env("engine_service_json")] == "C:/seat/service.json"
     assert with_seat["VAULTSPEC_A2A_WORKER_PORT"] == "18110"
     # An unset seat injects nothing (records predating the field keep prior behaviour).
-    without = _serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
+    without = serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
     assert setting_env("engine_service_json") not in without
 
 
@@ -875,7 +908,7 @@ def test_serve_env_injects_gateway_url_and_reads_the_internal_token(
 ) -> None:
     token_file = tmp_path / "tok"
     token_file.write_text("s3cr3t\n")  # trailing newline must be stripped
-    env = _serve_env(
+    env = serve_env(
         _pairing_role(),
         port=18110,
         workspace="",
@@ -890,7 +923,7 @@ def test_serve_env_injects_gateway_url_and_reads_the_internal_token(
     assert env[GATEWAY_URL_ENV] == "http://127.0.0.1:18100"
     assert env[WORKER_URL_ENV] == "http://127.0.0.1:18110"
     # Unset pairing injects nothing.
-    bare = _serve_env(_pairing_role(), port=18110, workspace="", name="w", owner="o")
+    bare = serve_env(_pairing_role(), port=18110, workspace="", name="w", owner="o")
     assert INTERNAL_TOKEN_ENV not in bare
     assert GATEWAY_URL_ENV not in bare
     assert WORKER_URL_ENV not in bare
@@ -917,7 +950,7 @@ def test_serve_up_refuses_a_missing_token_file_with_no_residue(tmp_path: Path) -
 
 def test_serve_env_fails_loud_on_a_missing_or_empty_token_file(tmp_path: Path) -> None:
     with pytest.raises(LifecycleError, match="unreadable"):
-        _serve_env(
+        serve_env(
             _pairing_role(),
             port=18110,
             workspace="",
@@ -928,7 +961,7 @@ def test_serve_env_fails_loud_on_a_missing_or_empty_token_file(tmp_path: Path) -
     empty = tmp_path / "empty"
     empty.write_text("   \n")
     with pytest.raises(LifecycleError, match="empty"):
-        _serve_env(
+        serve_env(
             _pairing_role(),
             port=18110,
             workspace="",
@@ -1081,15 +1114,15 @@ def test_build_cwd_uses_build_repo_and_serve_cwd_ignores_it(tmp_path: Path) -> N
     build_dir = tmp_path / "build"
     # Unset build_repo: build falls back to the serve repo (single-tree roles).
     only_serve = _record(name="one", role="scratch", repo=str(serve_dir))
-    assert _build_cwd_for(only_serve) == serve_dir
-    assert _serve_cwd_for(only_serve) == serve_dir
+    assert build_cwd_for(only_serve) == serve_dir
+    assert serve_cwd_for(only_serve) == serve_dir
     # Distinct trees: build uses build_repo, serve keeps repo — the engine-dev split
     # where cargo builds the dashboard workspace but the wrapper serves from a2a.
     split = _record(
         name="two", role="scratch", repo=str(serve_dir), build_repo=str(build_dir)
     )
-    assert _build_cwd_for(split) == build_dir
-    assert _serve_cwd_for(split) == serve_dir
+    assert build_cwd_for(split) == build_dir
+    assert serve_cwd_for(split) == serve_dir
 
 
 def test_rebuild_runs_the_build_in_the_build_repo_not_the_serve_repo(

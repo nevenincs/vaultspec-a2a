@@ -572,7 +572,7 @@ def procs() -> None:
 
 
 def _lifecycle_error(exc: Exception) -> click.ClickException:
-    from ..lifecycle.manager import LifecycleError
+    from ..lifecycle.errors import LifecycleError
     from ..lifecycle.procs_config import ProcsConfigError
 
     if isinstance(exc, (LifecycleError, ProcsConfigError)):

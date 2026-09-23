@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -23,15 +23,18 @@ def _diagnostic_total(stdout: str) -> int:
     except json.JSONDecodeError as exc:
         raise ValueError("Core did not emit valid JSON") from exc
 
-    if not isinstance(payload, dict) or payload.get("schema") != _SCHEMA:
+    if not isinstance(payload, dict):
         raise ValueError("Core emitted an unexpected annotation-check schema")
-    data = payload.get("data")
+    envelope = cast("dict[str, object]", payload)
+    if envelope.get("schema") != _SCHEMA:
+        raise ValueError("Core emitted an unexpected annotation-check schema")
+    data = envelope.get("data")
     if not isinstance(data, dict):
         raise ValueError("Core JSON has no annotation-check data")
-    diagnostics = data.get("diagnostics")
+    diagnostics = cast("dict[str, object]", data).get("diagnostics")
     if not isinstance(diagnostics, dict):
         raise ValueError("Core JSON has no annotation diagnostics")
-    total = diagnostics.get("total")
+    total = cast("dict[str, object]", diagnostics).get("total")
     if type(total) is not int or total < 0:  # bool is an int subclass.
         raise ValueError("Core JSON has no valid annotation diagnostic total")
     return total

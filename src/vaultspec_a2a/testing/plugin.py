@@ -65,7 +65,7 @@ _session_lease: object | None = None
 _admission_line: str = ""
 
 
-def _send_completion_message(
+def send_completion_message(
     endpoint: str, message_type: str, exitstatus: int | None = None
 ) -> None:
     """Send one bounded runner-child message with its actual process identity."""
@@ -83,7 +83,7 @@ def _send_completion_message(
         connection.sendall(f"{payload}\n".encode("ascii"))
 
 
-def _send_completion_receipt(exitstatus: int, *, endpoint: str | None = None) -> None:
+def send_completion_receipt(exitstatus: int, *, endpoint: str | None = None) -> None:
     """Notify the containing runner that pytest has produced its result."""
     from .session_root import TestSessionSettings
 
@@ -92,7 +92,7 @@ def _send_completion_receipt(exitstatus: int, *, endpoint: str | None = None) ->
         endpoint = harness.completion_endpoint
         if not endpoint or harness.completion_owner_pid != os.getpid():
             return
-    _send_completion_message(endpoint, "complete", exitstatus)
+    send_completion_message(endpoint, "complete", exitstatus)
 
 
 @pytest.hookimpl(trylast=True)
@@ -100,7 +100,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Publish completion independently of interpreter/process teardown."""
     del session
     try:
-        _send_completion_receipt(exitstatus)
+        send_completion_receipt(exitstatus)
     except (OSError, ValueError) as exc:
         print(
             f"resource-aware completion receipt failed: {exc}",

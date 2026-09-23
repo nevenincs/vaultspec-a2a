@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from ...control.config import settings
-from .. import _acp_rpc_handlers
 from .._acp_rpc_handlers import (
     on_fs_read_text_file,
     on_fs_write_text_file,
@@ -521,7 +520,7 @@ async def test_privileged_read_stays_on_opened_parent_during_symlink_swap(
             safe.symlink_to(protected, target_is_directory=True)
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(_acp_rpc_handlers.os, "open", swapping_open)
+    monkeypatch.setattr(os, "open", swapping_open)
     response = await on_fs_read_text_file(
         1,
         {"path": "safe/data.txt"},
@@ -568,7 +567,7 @@ async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
             safe.symlink_to(protected, target_is_directory=True)
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(_acp_rpc_handlers.os, "open", swapping_open)
+    monkeypatch.setattr(os, "open", swapping_open)
     response = await on_fs_write_text_file(
         1,
         {"path": "safe/target.txt", "content": "workspace-write"},

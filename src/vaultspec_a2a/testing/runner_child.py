@@ -33,19 +33,19 @@ def main() -> int:
     os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
     try:
         if completion_endpoint:
-            from .plugin import _send_completion_message
+            from .plugin import send_completion_message
 
-            _send_completion_message(completion_endpoint, "hello")
+            send_completion_message(completion_endpoint, "hello")
         exit_status = pytest.main(_seated_arguments(sys.argv[1:]))
         # pytest_sessionfinish runs before pytest_unconfigure and before
         # pytest.main() returns.  Publish only after that teardown completes so
         # the outer owner can distinguish a root that is still shutting down
         # from one that has exited while a descendant remains.
-        from .plugin import _send_completion_receipt
+        from .plugin import send_completion_receipt
 
         try:
             if completion_endpoint:
-                _send_completion_receipt(exit_status, endpoint=completion_endpoint)
+                send_completion_receipt(exit_status, endpoint=completion_endpoint)
         except (OSError, ValueError) as exc:
             print(
                 f"resource-aware completion receipt failed: {exc}",

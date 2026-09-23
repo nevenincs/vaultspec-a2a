@@ -12,7 +12,20 @@ from .catalog_store import RunCatalogStore
 from .token_store import RunTokenStore
 
 if TYPE_CHECKING:
+    from ..database.checkpoints import Checkpointer
     from ._dispatch_contract import DispatchCapacityReservation
+
+
+@dataclass(slots=True)
+class CheckpointAccess:
+    """A checkpointer handle paired with the read timeout bound to it.
+
+    Grouped so ``Executor`` threads one collaborator, not two, through to
+    every delegate and call site that reads a checkpoint.
+    """
+
+    checkpointer: Checkpointer
+    read_timeout_seconds: float
 
 
 @dataclass(slots=True)

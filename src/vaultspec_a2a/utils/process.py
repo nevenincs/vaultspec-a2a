@@ -701,6 +701,51 @@ class ProcessContainment:
         pids = self._win_job_process_ids(_win_kernel32())
         return bool(pids and pid in pids and _pid_in_tree(self._pid, pid) is True)
 
+    def _query_job_pid_list(
+        self, kernel32: Any, size: int, header_size: int, pointer_size: int
+    ) -> tuple[tuple[int, ...] | None, int | None]:
+        """Return ``(pids, retry_size)`` for one sized query attempt.
+
+        ``pids`` is ``None`` until a usable list is decoded; ``retry_size`` is
+        the buffer size the caller should retry with, or ``None`` when the
+        attempt is final (a decoded list, or a failure the caller cannot
+        recover from by resizing).
+        """
+        import ctypes
+        from ctypes import wintypes
+
+        buffer = (ctypes.c_byte * size)()
+        needed = wintypes.DWORD()
+        kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+        kernel32.QueryInformationJobObject.argtypes = (
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        )
+        if not kernel32.QueryInformationJobObject(
+            self._job,
+            _JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS,
+            ctypes.byref(buffer),
+            size,
+            ctypes.byref(needed),
+        ):
+            retry_size = int(needed.value) if needed.value > size else None
+            return None, retry_size
+        assigned = wintypes.DWORD.from_buffer(buffer, 0).value
+        listed = wintypes.DWORD.from_buffer(buffer, 4).value
+        capacity = (size - header_size) // pointer_size
+        if assigned > capacity or listed > capacity:
+            return None, None
+        pids = tuple(
+            ctypes.c_size_t.from_buffer(
+                buffer, header_size + pointer_size * index
+            ).value
+            for index in range(listed)
+        )
+        return tuple(sorted(int(pid) for pid in pids if pid)), None
+
     def _win_job_process_ids(self, kernel32: Any) -> tuple[int, ...] | None:
         """Read exact current Job Object membership without a parent-pid walk."""
         if self._job is None:
@@ -712,38 +757,12 @@ class ProcessContainment:
         pointer_size = ctypes.sizeof(ctypes.c_size_t)
         size = header_size + pointer_size * 16
         for _attempt in range(3):
-            buffer = (ctypes.c_byte * size)()
-            needed = wintypes.DWORD()
-            kernel32.QueryInformationJobObject.restype = wintypes.BOOL
-            kernel32.QueryInformationJobObject.argtypes = (
-                wintypes.HANDLE,
-                ctypes.c_int,
-                ctypes.c_void_p,
-                wintypes.DWORD,
-                ctypes.POINTER(wintypes.DWORD),
+            pids, retry_size = self._query_job_pid_list(
+                kernel32, size, header_size, pointer_size
             )
-            if kernel32.QueryInformationJobObject(
-                self._job,
-                _JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS,
-                ctypes.byref(buffer),
-                size,
-                ctypes.byref(needed),
-            ):
-                assigned = wintypes.DWORD.from_buffer(buffer, 0).value
-                listed = wintypes.DWORD.from_buffer(buffer, 4).value
-                capacity = (size - header_size) // pointer_size
-                if assigned > capacity or listed > capacity:
-                    return None
-                pids = tuple(
-                    ctypes.c_size_t.from_buffer(
-                        buffer, header_size + pointer_size * index
-                    ).value
-                    for index in range(listed)
-                )
-                return tuple(sorted(int(pid) for pid in pids if pid))
-            if needed.value <= size:
-                return None
-            size = int(needed.value)
+            if pids is not None or retry_size is None:
+                return pids
+            size = retry_size
         return None
 
     async def _terminate_posix_group(

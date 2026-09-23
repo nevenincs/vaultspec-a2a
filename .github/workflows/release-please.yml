@@ -30,7 +30,7 @@ jobs:
         if: steps.release.outputs.pr && !steps.release.outputs.release_created
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          ref: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
           # The lockfile commit below is pushed with this checkout's token.
           persist-credentials: true
 
@@ -67,12 +67,14 @@ jobs:
 
       # Pushes and pull requests made with the default token start no workflow
       # runs, so the proposal would never report its required merge gate. A
-      # dispatch is exempt, and its check lands on the branch head the pull
-      # request waits on. Last, so it validates the lockfile commit above.
-      # `pr` is guarded because a step's env is evaluated before its `if`.
+      # dispatch is exempt. No `ref` input is passed: the gate then checks out
+      # its own run's commit, which is the commit its check is reported on, so
+      # a branch that moves meanwhile cannot have one commit validated and
+      # another marked green. `pr` is guarded because a step's env is evaluated
+      # before its `if`.
       - name: Dispatch the merge gate for the release pull request
         if: steps.release.outputs.pr && !steps.release.outputs.release_created
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_BRANCH: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
-        run: gh workflow run merge-gate.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_BRANCH" -f "ref=$HEAD_BRANCH"
+        run: gh workflow run merge-gate.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_BRANCH"

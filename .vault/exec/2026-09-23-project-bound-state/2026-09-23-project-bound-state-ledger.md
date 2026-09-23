@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:ef7d6cd097e9d64a397de717039ea3500feddbf4db3e81490e54f55496a3b8b0'
+body_hash: 'sha256:87540904fb6817a1a561aeeaf6980f0b1006dd66b3fa620d414a27683f00d4bf'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -319,4 +319,8 @@ related:
 - `S12` `M` `docs/operations.rst`
 - `S12` `verify:` `sphinx-build -n -W --keep-going clean build exit 0; docs/tests 6 passed` -> `pass`
 - `S12` `by:` `claude`
+- `S11` `by:` `claude`
 
+## Notes
+
+- `S11` Dashboard change implemented and verified in Y:/code/vaultspec-dashboard-worktrees/a2a-project-bound-state (branch a2a-project-bound-state): cargo test -p vaultspec-api and -p vaultspec-product, clippy -D warnings, fmt, tsc and eslint clean. Not committed: that repository's unscoped vault-fix pre-commit hook fails on 63 pre-existing errors in unrelated features. Skipping a hook needs the owner's authorization; the Step stays open.

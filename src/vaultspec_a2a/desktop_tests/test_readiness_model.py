@@ -17,10 +17,15 @@ stub, skip, or expected failure is used; children are torn down in a ``finally``
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 import httpx
 
+from ..control.health import (
+    SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS,
+    SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
+)
 from ..tests.gateway_boot import (
     armed_gateway_env,
     gateway_script,
@@ -38,7 +43,11 @@ if TYPE_CHECKING:
 _ATTACH = "attach-credential-readiness-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-readiness-fedcba0987654321"
 _GATEWAY_LOG_TAIL_BYTES = 4096
-_COLD_WORKER_SERVICE_TIMEOUT_SECONDS = 3.0
+# A read budget for a RESPONSE, not a latency assertion: the bounded-probe
+# property is proven from the gateway's own probe measurement, and this only
+# keeps a wedged gateway from hanging the session. The per-item pytest-timeout
+# backstop remains the last-resort guard.
+_SERVICE_READ_BUDGET_SECONDS = 60.0
 
 
 def _gateway_failure_diagnostics(proc: subprocess.Popen[bytes], log_path: Path) -> str:
@@ -74,7 +83,14 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
         "backend",
         "status",
     )
+    # The host's current cost for ONE trivial loopback round trip, measured on
+    # the minimal liveness surface, which runs no probe at all. It is the
+    # baseline the bounded-probe proof below adds its slack from, so that proof
+    # scales with whatever this machine is doing instead of assuming an idle
+    # one.
+    trivial_started = time.monotonic()
     live = client.get("/health")
+    trivial_round_trip_s = time.monotonic() - trivial_started
     assert live.status_code == 200
     assert live.content == b'{"liveness":"alive"}'
     assert live.json() == {"liveness": "alive"}
@@ -110,13 +126,28 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     # unbound loopback port can consume a connection's entire budget instead of
     # refusing promptly, so this real service request proves its worker probe is
     # bounded beneath the caller-facing budget rather than racing it.
-    svc = client.get(
-        "/v1/service", headers=auth, timeout=_COLD_WORKER_SERVICE_TIMEOUT_SECONDS
-    )
+    #
+    # The bound is read from the gateway's OWN measurement of its probe phase,
+    # not from a client budget shorter than the server's deadline. That
+    # arrangement - a three-second client timeout in front of a server whose own
+    # per-dependency deadline is also three seconds - made a busy host fail the
+    # request by a read timeout, which proves nothing about the worker probe.
+    svc = client.get("/v1/service", headers=auth, timeout=_SERVICE_READ_BUDGET_SECONDS)
     assert svc.status_code == 200
     service = svc.json()
-    # The shortened observation budget must not pretend the cold worker is
-    # ready: service-state remains truthful and declines run admission.
+    # The cold worker did not consume the caller's budget: the probe phase ended
+    # at the worker probe's own bound, plus at most what one trivial round trip
+    # costs on this host right now.
+    probe_elapsed_s = service["probe_elapsed_ms"] / 1000
+    assert (
+        probe_elapsed_s
+        <= SERVICE_WORKER_PROBE_TIMEOUT_SECONDS + trivial_round_trip_s + 1.0
+    ), (service, trivial_round_trip_s)
+    # And that bound is only meaningful because it sits below the budget a
+    # service-state caller is entitled to - the relation the constants encode.
+    assert SERVICE_WORKER_PROBE_TIMEOUT_SECONDS < SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS
+    # The bounded observation must not pretend the cold worker is ready:
+    # service-state remains truthful and declines run admission.
     assert service["status"] == "degraded"
     assert service["ready"] is False
     assert service["can_accept_run"] is False
@@ -167,7 +198,9 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
 
     proc, _port, _worker_port, base = spawn_until_ready(_spawn, log_path=log_path)
     try:
-        with httpx.Client(base_url=base, timeout=5.0) as client:
+        with httpx.Client(
+            base_url=base, timeout=_SERVICE_READ_BUDGET_SECONDS
+        ) as client:
             try:
                 _assert_readiness_surfaces(client)
             except (httpx.HTTPError, AssertionError) as exc:

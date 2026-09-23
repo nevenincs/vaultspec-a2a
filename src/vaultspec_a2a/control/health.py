@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -57,6 +58,9 @@ if TYPE_CHECKING:
     from .circuit_breaker import WorkerCircuitBreaker
 
 __all__ = [
+    "SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS",
+    "SERVICE_HEALTH_DEADLINE_SECONDS",
+    "SERVICE_WORKER_PROBE_TIMEOUT_SECONDS",
     "FullHealthRuntime",
     "assemble_desktop_readiness",
     "assemble_health_status",
@@ -72,20 +76,26 @@ __all__ = [
 _MEMORY_PATH = Path(":memory:")
 
 # Each service-health dependency gets the same deadline and all dependencies run
-# concurrently. This keeps the aggregate under the five-second client contract
-# even when a SQLite writer, checkpointer, and cold worker are all slow.
-_SERVICE_HEALTH_DEADLINE_SECONDS = 3.0
+# concurrently. This keeps the aggregate under the client contract below even
+# when a SQLite writer, checkpointer, and cold worker are all slow.
+SERVICE_HEALTH_DEADLINE_SECONDS = 3.0
+
+# The response budget a service-state caller is entitled to. Named here beside
+# the deadline it constrains, rather than left in prose: the per-dependency
+# deadline is only correct RELATIVE to this number, and a future caller that
+# wants a different budget must move both together.
+SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS = 5.0
 
 # How long a journal-mode verification may take before the health surface gives
 # up on it. The probe opens a real connection, so a database locked by a long
 # writer must not be able to stall the one endpoint an operator polls.
-_JOURNAL_PROBE_TIMEOUT_SECONDS = _SERVICE_HEALTH_DEADLINE_SECONDS
+_JOURNAL_PROBE_TIMEOUT_SECONDS = SERVICE_HEALTH_DEADLINE_SECONDS
 
 # Service-state is a read-only status surface. A cold lazy worker is expected,
 # and Windows can spend an unbound loopback connection's whole budget before it
 # reports absence. Keep this bounded below the caller-facing service budget;
 # run-start and watchdog probes retain their own shared default separately.
-_SERVICE_WORKER_PROBE_TIMEOUT_SECONDS = 2.0
+SERVICE_WORKER_PROBE_TIMEOUT_SECONDS = 2.0
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +110,6 @@ def probe_engine_discovery_freshness() -> bool | None:
     but stale or malformed, and None when no engine discovery file is configured
     for this process (authoring is simply not wired here).
     """
-    import time
-
     from ..authoring.discovery import (
         heartbeat_is_fresh,
         read_service_json,
@@ -697,7 +705,7 @@ async def _probe_database_ready_with_deadline(
     try:
         return (
             await asyncio.wait_for(
-                probe_database_ready(db), timeout=_SERVICE_HEALTH_DEADLINE_SECONDS
+                probe_database_ready(db), timeout=SERVICE_HEALTH_DEADLINE_SECONDS
             ),
             None,
         )
@@ -758,7 +766,7 @@ async def _checkpoint_health_check(app_state: object) -> dict[str, str]:
                         }
                     }
                 ),
-                timeout=_SERVICE_HEALTH_DEADLINE_SECONDS,
+                timeout=SERVICE_HEALTH_DEADLINE_SECONDS,
             )
             checkpoint_check["status"] = "ok"
         except TimeoutError:
@@ -778,7 +786,7 @@ async def _worker_health_check(
     # The pooled-client probe is the same exact-200 authority used by the watchdog.
     worker_probe = await probe_worker_health(
         settings.worker_url,
-        timeout=_SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
+        timeout=SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
         client=worker_client,
     )
     if worker_probe.healthy:
@@ -831,12 +839,15 @@ async def build_full_health(
 
     # Start independent dependency observations together so their individual
     # deadlines compose as one service-health deadline rather than accumulating.
+    probe_started = time.monotonic()
     async with asyncio.TaskGroup() as tasks:
         database_task = tasks.create_task(_database_health_check(db, app_state))
         checkpoint_task = tasks.create_task(_checkpoint_health_check(app_state))
         worker_task = tasks.create_task(
             _worker_health_check(runtime.worker_client, include_pairing=include_pairing)
         )
+
+    probe_elapsed_ms = round((time.monotonic() - probe_started) * 1000)
 
     checks: dict[str, dict[str, str]] = {
         "gateway": {"status": "ok"},
@@ -873,6 +884,11 @@ async def build_full_health(
     )
     return {
         "status": "ok" if ready else "degraded",
+        # How long the dependency probes took, measured by the process that ran
+        # them. A caller's own stopwatch also measures transport, scheduling,
+        # and whatever else the host is doing, so it cannot tell a gateway that
+        # over-ran its deadline from a host that was busy; this can.
+        "probe_elapsed_ms": probe_elapsed_ms,
         "checks": checks,
         **pairing,
         **shared,

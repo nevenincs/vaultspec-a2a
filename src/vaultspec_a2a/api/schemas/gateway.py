@@ -901,6 +901,12 @@ class ServiceStateResponse(BaseModel):
     authoring_backend_reachable: bool | None = None
     # Configured maximum concurrent runs this gateway admits.
     active_run_capacity: int | None = None
+    # How long THIS process spent running its dependency probes, measured by the
+    # process that ran them. Additive v1 diagnostic: a caller's own stopwatch
+    # also measures transport and host scheduling, so it cannot distinguish a
+    # gateway that over-ran its probe deadline from a host that was busy. An
+    # operator - and the deadline proof in the live gateway suite - reads this.
+    probe_elapsed_ms: int | None = None
     # Free-form BY DESIGN, and not the same field as the run snapshot's list of
     # the same name. These are operator-readable sentences ("worker is down"),
     # one of them interpolated from the worker's own status, meant to be read

@@ -154,6 +154,12 @@ def _bool_field(record: dict[str, object], field: str) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+def _int_field(record: dict[str, object], field: str) -> int | None:
+    """Read an integer diagnostic, rejecting the bool that ``int`` would admit."""
+    value = record.get(field)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _optional_enum[StrEnumT: StrEnum](
     enum_cls: type[StrEnumT],
     value: str | None,

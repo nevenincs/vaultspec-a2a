@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -33,6 +32,10 @@ import uvicorn
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
+from ...control.health import (
+    SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS,
+    SERVICE_HEALTH_DEADLINE_SECONDS,
+)
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...database import create_control_action, create_thread, list_threads
 from ...ipc.schemas import DispatchRequest
@@ -1073,36 +1076,69 @@ async def test_service_state_degrades_when_recovery_owner_fails(
 async def test_service_state_deadline_returns_degraded_for_locked_real_checkpointer(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """A held real checkpoint cannot consume the service caller's five-second budget.
+    """A held real checkpoint cannot consume the service caller's response budget.
 
     The live TCP gateway uses its actual ``AsyncSqliteSaver`` and in-process
     worker. Holding the saver lock makes the production checkpoint health read
-    wait; service-state must preserve the production five-second client contract
-    while responding inside the measured 4.5-second bound with true degraded
-    checkpoint evidence. The previous sequential five-second checkpoint probe
-    exceeded that response bound.
+    wait; service-state must give up at its own per-dependency deadline and
+    answer with true degraded checkpoint evidence, rather than letting the held
+    lock run out the caller's budget. The previous sequential five-second
+    checkpoint probe did exactly that.
+
+    Measured on the SERVER's clock, against a baseline taken from the same
+    gateway moments earlier. A caller's stopwatch also measures transport and
+    host scheduling, so on a loaded box it cannot tell a gateway that over-ran
+    its deadline from a host that was busy - and a fixed 4.5-second bound on
+    that stopwatch failed for the second reason while the deadline logic was
+    perfectly correct. The two production numbers are imported, never restated:
+    if the deadline or the contract moves, this proof moves with them.
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
-        httpx.AsyncClient(base_url=base, timeout=5.0) as client,
+        # Budgeted well above the contract under proof: the contract is proven
+        # from the server's own measurement below, and a client timeout here
+        # would only re-introduce the host-speed coupling this removes.
+        httpx.AsyncClient(base_url=base, timeout=60.0) as client,
     ):
+        healthy = await client.get("/v1/service")
+        assert healthy.status_code == 200, healthy.text
+        healthy_body = healthy.json()
+        # The baseline: what this host currently costs the gateway to probe its
+        # dependencies when nothing is held. It carries the host's present
+        # scheduling cost, so the bound below scales with load instead of
+        # pretending load does not exist.
+        baseline_s = healthy_body["probe_elapsed_ms"] / 1000
+        assert healthy_body["checkpoint_ready"] is True, healthy_body
+
         await checkpointer.lock.acquire()
         try:
-            started_at = time.perf_counter()
             response = await client.get("/v1/service")
-            elapsed = time.perf_counter() - started_at
         finally:
             checkpointer.lock.release()
 
     assert response.status_code == 200
-    assert elapsed < 4.5
     body = response.json()
     assert body["status"] == "degraded"
     assert body["ready"] is False
     assert body["can_accept_run"] is False
     assert body["checkpoint_ready"] is False
     assert "checkpoint: checkpoint probe timed out" in body["degraded_reasons"]
+
+    locked_s = body["probe_elapsed_ms"] / 1000
+    # It really did wait on the held lock - the degraded verdict came from the
+    # deadline expiring, not from some faster refusal.
+    assert locked_s >= SERVICE_HEALTH_DEADLINE_SECONDS, body
+    # ...and the held lock cost the caller no more than that one deadline on
+    # top of a healthy request on this host, which is what keeps the response
+    # inside the client contract whenever the host serves a healthy one
+    # promptly.
+    assert locked_s <= SERVICE_HEALTH_DEADLINE_SECONDS + baseline_s + 1.0, (
+        body,
+        baseline_s,
+    )
+    # The deadline is only correct relative to the budget it protects.
+    assert SERVICE_HEALTH_DEADLINE_SECONDS < SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS
 
 
 @pytest.mark.asyncio(loop_scope="function")

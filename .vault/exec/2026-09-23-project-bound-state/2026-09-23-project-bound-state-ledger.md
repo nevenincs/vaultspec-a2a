@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:40faa2c055dbafe878f96f73a1b574ab9e6c82b68d136cab057e31ae1b89f3d1'
+body_hash: 'sha256:1a72796fef37e44800331c46f9b575a7ce7fa8e5581d6517c2e8eb18d3f6464e'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -390,6 +390,12 @@ related:
 - `S15` `by:` `claude`
 - `S11` `M` `.vault/audit/2026-09-23-project-bound-state-audit.md`
 - `S11` `verify:` `cargo test -p vaultspec-api` -> `pass`
+- `S15` `M` `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`
+- `S15` `M` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S15` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S15` `M` `src/vaultspec_a2a/control/health.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
+- `S15` `verify:` `pytest src/vaultspec_a2a/api/tests/test_gateway_live.py src/vaultspec_a2a/desktop_tests/test_readiness_model.py -n 4 --dist=loadgroup` -> `pass`
 
 ## Notes
 

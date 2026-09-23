@@ -399,11 +399,13 @@ class TestInitDbMigrationGate:
     ) -> None:
         """Non-mutating init creates the engine but stamps no schema."""
         db = runtime_dir / "unarmed.db"
+        from ..session import close_db
+
+        # A seated engine would make init_db refuse this store.
+        await close_db()
         try:
             await init_db(_url(db), apply_migrations=False)
         finally:
-            from ..session import close_db
-
             await close_db()
 
         # No alembic_version table: the store carries no schema mutation.
@@ -418,11 +420,13 @@ class TestInitDbMigrationGate:
     ) -> None:
         """Ordinary (unarmed) init still migrates the store to head."""
         db = runtime_dir / "armed_off.db"
+        from ..session import close_db
+
+        # A seated engine would make init_db refuse this store.
+        await close_db()
         try:
             await init_db(_url(db), apply_migrations=True)
         finally:
-            from ..session import close_db
-
             await close_db()
 
         conn = sqlite3.connect(str(db))

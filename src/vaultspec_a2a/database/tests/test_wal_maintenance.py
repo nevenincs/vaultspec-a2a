@@ -104,6 +104,7 @@ async def test_the_production_engine_leaves_the_log_bounded(runtime_dir: Path) -
     is the one value that would leave the log genuinely unbounded.
     """
     database = runtime_dir / "posture.db"
+    await close_db()
     try:
         engine = await init_db(database)
         async with engine.connect() as conn:

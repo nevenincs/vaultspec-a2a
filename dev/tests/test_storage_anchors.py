@@ -123,6 +123,21 @@ def test_raw_environment_reads_are_reported_outside_the_settings_module() -> Non
     )
 
 
+def test_spelled_out_setting_names_are_reported_outside_the_settings() -> None:
+    """A literal name is a second declaration; sibling tools' names are theirs."""
+    tree = _parse(
+        "a = {'VAULTSPEC_A2A_PORT': '1'}\n"
+        "b = 'VAULTSPEC_RAG_ROOT'\n"
+        "c = 'set VAULTSPEC_A2A_PORT to change it'\n"
+    )
+    found = storage_anchors._name_literal_violations(tree, Path("cli/main.py"))
+    assert [lineno for lineno, _ in found] == [1], found
+    assert (
+        storage_anchors._name_literal_violations(tree, Path("control/infra_config.py"))
+        == []
+    )
+
+
 def test_test_modules_are_out_of_scope() -> None:
     """Tests legitimately build paths against the checkout they run in."""
     assert storage_anchors._is_test_module(Path("control/tests/test_config.py"))

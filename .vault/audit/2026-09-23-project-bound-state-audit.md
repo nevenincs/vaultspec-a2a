@@ -125,6 +125,22 @@ directory, named environment reads outside `control/settings_base.py`, and
 its two deferred modules are gone: the project root is now the sanctioned anchor.
 Status: fixed in `P02.S06`.
 
+### database-url-directory | medium | The database engine created a directory only for bare paths
+
+`database/session.py` `_resolve_database_url` created the SQLite file's parent for
+a bare path but returned a `sqlite+aiosqlite:///` URL untouched, so a gateway whose
+configured or defaulted store sat in a missing directory failed its migrations
+with "unable to open database file". It was masked because `start` pre-created the
+directories and the old default sat directly in the state home. Status: fixed in
+`P02.S07`.
+
+### start-pins-project | low | `start` pinned the stores but not the project
+
+`cli/service.py` spawned the gateway from the state home's parent and passed the
+database URLs, but not the project root, so the child would rediscover its
+project from where it was launched. It now passes the state home and the project
+root and lets the layout place every store. Status: fixed in `P02.S07`.
+
 ## Recommendations
 
 - Keep the storage-anchor gate as the enforcement point for the new rules (no profile, temp or raw environment use in production) so regressions fail review rather than surface as leaks.

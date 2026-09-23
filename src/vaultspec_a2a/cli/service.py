@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 import click
 import httpx
 
-from ..control.config import settings
+from ..control.config import setting_env, settings
 from ..gateway_auth import gateway_auth_headers
 from ..lifecycle.discovery import (
     DiscoveryState,
@@ -139,8 +139,8 @@ def _desktop_arm_env(app_home: Path, capsule_root: Path) -> dict[str, str]:
     profile = DesktopProfile.resolve(app_home, capsule_root)
     profile.ensure()
     return {
-        "VAULTSPEC_A2A_DESKTOP_APP_HOME": str(profile.app_home),
-        "VAULTSPEC_A2A_CAPSULE_ASSETS": str(profile.capsule_assets_root),
+        setting_env("desktop_app_home"): str(profile.app_home),
+        setting_env("capsule_assets_root"): str(profile.capsule_assets_root),
     }
 
 
@@ -195,34 +195,23 @@ def start_service(
     home = _resolved_app_home(app_home)
     if another_resident_is_live(home):
         return service_status(home)
-    # Pin the child's application home explicitly: discovery, state, and the
-    # singleton must land under the home THIS verb watches, never under an
-    # inherited or default home. The desktop-armed settings profile seats the
-    # same value from the armed roots, so the two never diverge.
-    env: dict[str, str] = {"VAULTSPEC_A2A_HOME": str(home)}
+    # Pin the child's state home and project explicitly: discovery, state and
+    # the singleton must land under the home THIS verb watches, and the child
+    # starts outside the project's working directory (see below), so it must
+    # not have to rediscover the project from where it was launched. Every
+    # store then follows from the home through the one state layout, the same
+    # one the desktop profile seats and setup initialises.
+    home.mkdir(parents=True, exist_ok=True)
+    env: dict[str, str] = {
+        setting_env("a2a_home"): str(home),
+        setting_env("project_root"): str(settings.project_root),
+    }
     if capsule_root is not None:
         env.update(_desktop_arm_env(home, capsule_root))
-    else:
-        # Pin the stores to the same home-derived layout the desktop profile
-        # seats and setup initialises; without this a non-armed gateway would
-        # place its SQLite files relative to whatever working directory it
-        # happened to inherit.
-        from ..desktop.profile import derive_state_paths
-
-        home.mkdir(parents=True, exist_ok=True)
-        state = derive_state_paths(home)
-        state.database_path.parent.mkdir(parents=True, exist_ok=True)
-        state.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        env["VAULTSPEC_A2A_DATABASE_URL"] = (
-            f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
-        )
-        env["VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL"] = (
-            f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
-        )
     if host is not None:
-        env["VAULTSPEC_A2A_HOST"] = host
+        env[setting_env("host")] = host
     if port is not None:
-        env["VAULTSPEC_A2A_PORT"] = str(port)
+        env[setting_env("port")] = str(port)
     # Spawn from the home's PARENT, never from inside the home: a child whose
     # working directory sits inside the application home holds an open handle
     # on it, and the Windows directory lease the discovery publication takes

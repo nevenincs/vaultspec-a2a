@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:39732442c787d63574bba667e29a3b8d4484d591b0e1c6ab91edf0ebccad2719'
+body_hash: 'sha256:7ca0ddaf4795283f1d6c6d25c12583de88891de97193364fda38e36e55d3dfb2'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -226,4 +226,12 @@ related:
 - `S06` `M` `src/vaultspec_a2a/utils/logging.py`
 - `S06` `verify:` `pytest lifecycle, providers, control, utils, desktop_tests, cli, authoring, dev/tests -n 5: 2095 passed; the 7 non-passing re-ran green serially with database (406 passed); storage-anchor gate exit 0` -> `pass`
 - `S06` `by:` `claude`
+- `S07` `M` `.vault/audit/2026-09-23-project-bound-state-audit.md`
+- `S07` `M` `dev/guards/storage_anchors.py`
+- `S07` `M` `dev/tests/test_storage_anchors.py`
+- `S07` `M` `src/vaultspec_a2a/cli/main.py`
+- `S07` `M` `src/vaultspec_a2a/cli/service.py`
+- `S07` `M` `src/vaultspec_a2a/database/session.py`
+- `S07` `verify:` `pytest cli and database (428 passed; 2 contention failures re-ran green alone: start cycle 1 passed, cli live 6 passed); gate tests 16 passed; storage-anchor gate exit 0` -> `pass`
+- `S07` `by:` `claude`
 

@@ -20,6 +20,10 @@ data lands somewhere nobody looks:
 - **Raw environment reads.** ``os.environ.get``, ``os.getenv`` and
   ``os.environ[...]`` outside the settings module bypass the one declaration of
   a setting, its prefix, its dotenv and its documentation.
+- **Spelled-out setting names.** A ``VAULTSPEC_*`` name written as a literal
+  outside the settings modules is a second declaration of a setting; a child
+  environment takes the name from the schema (``setting_env``) instead. The
+  names sibling vaultspec tools own are theirs to spell.
 - **``install_root`` as an anchor.** The field resolves this service's shipped
   assets; read anywhere but the asset resolver, it becomes a storage root.
 
@@ -56,6 +60,19 @@ ALLOW = "storage-anchor-ok"
 
 #: The settings module: the one place the environment is read.
 SETTINGS_MODULES = frozenset({"control/settings_base.py"})
+
+#: The modules that declare settings, and so spell their names.
+NAME_DECLARING_MODULES = frozenset(
+    {
+        "control/settings_base.py",
+        "control/infra_config.py",
+        "control/config.py",
+        "domain_config.py",
+    }
+)
+
+#: Names owned by sibling vaultspec tools, written for their servers only.
+SIBLING_NAMES = frozenset({"VAULTSPEC_RAG_ROOT", "VAULTSPEC_TARGET_DIR"})
 
 #: The modules allowed to read ``install_root``: its declaration, and the
 #: resolver of the assets it exists to locate.
@@ -219,6 +236,29 @@ def _env_read_violations(tree: ast.Module, relative: Path) -> list[tuple[int, st
     return sorted(found)
 
 
+def _name_literal_violations(tree: ast.Module, relative: Path) -> list[tuple[int, str]]:
+    """Return every setting name spelled out outside the declaring modules."""
+    if relative.as_posix() in NAME_DECLARING_MODULES:
+        return []
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        value = node.value
+        if (
+            value.startswith("VAULTSPEC_")
+            # A prefix ("VAULTSPEC_") names a family, not a setting.
+            and not value.endswith("_")
+            and value.replace("_", "").isalnum()
+            and value.isupper()
+            and value not in SIBLING_NAMES
+        ):
+            found.append(
+                (node.lineno, f"{value} spelled out; take it from setting_env()")
+            )
+    return sorted(found)
+
+
 def _install_root_violations(tree: ast.Module, relative: Path) -> list[tuple[int, str]]:
     """Return every read of ``install_root`` outside the asset resolver."""
     if relative.as_posix() in INSTALL_ROOT_READERS:
@@ -267,6 +307,7 @@ def main() -> int:
             + _tempfile_violations(tree)
             + _env_read_violations(tree, relative)
             + _install_root_violations(tree, relative)
+            + _name_literal_violations(tree, relative)
         )
         key = relative.as_posix()
         for lineno, reason in sorted(found):

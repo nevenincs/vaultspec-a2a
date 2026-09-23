@@ -238,19 +238,35 @@ def checkpoint_wal(
 
 
 def _resolve_database_url(database: Path | str | None) -> str:
-    """Resolve a database path or URL into a SQLAlchemy async URL."""
+    """Resolve a database path or URL into a SQLAlchemy async URL.
+
+    A SQLite file's directory is part of the state layout rather than something
+    an operator creates first, so it is created here for a URL as much as for a
+    bare path.
+    """
     if database is None:
-        return settings.database_url
+        return _with_sqlite_parent(settings.database_url)
 
     raw = str(database)
     if "://" in raw:
-        return raw
+        return _with_sqlite_parent(raw)
     if raw == ":memory:":
         return "sqlite+aiosqlite:///:memory:"
 
     resolved = Path(raw).resolve()
     resolved.parent.mkdir(parents=True, exist_ok=True)
     return f"sqlite+aiosqlite:///{resolved}"
+
+
+def _with_sqlite_parent(url: str) -> str:
+    """Create a SQLite URL's file directory; return the URL unchanged."""
+    from sqlalchemy.engine.url import make_url
+
+    parsed = make_url(url)
+    database = parsed.database
+    if parsed.get_backend_name() == "sqlite" and database and database != ":memory:":
+        Path(database).parent.mkdir(parents=True, exist_ok=True)
+    return url
 
 
 def get_engine(

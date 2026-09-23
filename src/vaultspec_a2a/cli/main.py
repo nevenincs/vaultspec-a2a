@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 import click
 import httpx
 
-from ..control.config import settings
+from ..control.config import setting_env, settings
 from ..gateway_auth import gateway_auth_headers
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
 from ..utils.runtime_exec import DISPATCHABLE_MODULES, RUN_MODULE_VERB, self_command
@@ -218,13 +218,13 @@ def _prepare_desktop_serve(
     profile.ensure()
 
     env = {
-        "VAULTSPEC_A2A_DESKTOP_APP_HOME": str(profile.app_home),
-        "VAULTSPEC_A2A_CAPSULE_ASSETS": str(profile.capsule_assets_root),
+        setting_env("desktop_app_home"): str(profile.app_home),
+        setting_env("capsule_assets_root"): str(profile.capsule_assets_root),
     }
     if host is not None:
-        env["VAULTSPEC_A2A_HOST"] = host
+        env[setting_env("host")] = host
     if port is not None:
-        env["VAULTSPEC_A2A_PORT"] = str(port)
+        env[setting_env("port")] = str(port)
     return _DesktopServePlan(env=env, argv=self_command("serve"))
 
 

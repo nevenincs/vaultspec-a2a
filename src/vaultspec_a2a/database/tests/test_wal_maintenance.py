@@ -44,6 +44,7 @@ from ..session import (
     close_db,
     init_db,
     inspect_sqlite_database,
+    seat_sqlite_posture,
 )
 
 if TYPE_CHECKING:
@@ -120,36 +121,59 @@ async def test_the_production_engine_leaves_the_log_bounded(runtime_dir: Path) -
 
 
 @pytest.mark.asyncio
-async def test_initialisation_puts_a_fresh_store_in_wal_on_disk(
+async def test_migrating_initialisation_leaves_the_store_in_wal_on_disk(
     runtime_dir: Path,
 ) -> None:
-    """A store created on a rollback journal is WAL on disk once ``init_db`` returns.
+    """A store fresh from migration is WAL on disk once ``init_db`` returns.
 
     Migration leaves a new store on SQLite's default rollback journal, and WAL is
     requested per connection. The gateway's boot-time storage diagnostics read
     the file through a connection of their own right after initialisation, so
-    unless initialisation itself put WAL into the file header they report "WAL
+    unless initialisation put WAL into the file header they report "WAL
     unavailable" for a store that is about to run in WAL.
     """
     database = runtime_dir / "fresh.db"
-    seed = sqlite3.connect(database)
-    try:
-        seed.execute("CREATE TABLE seed (id INTEGER PRIMARY KEY)")
-        seed.commit()
-    finally:
-        seed.close()
-    assert inspect_sqlite_database(database)["journal_mode"] == "delete"
-
     # A leaked engine singleton would make init_db ignore ``database``.
     await close_db()
     try:
-        await init_db(database, apply_migrations=False)
+        await init_db(database)
         diagnostics = inspect_sqlite_database(database)
     finally:
         await close_db()
 
     assert diagnostics["journal_mode"] == "wal"
     assert diagnostics["wal_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_non_migrating_initialisation_leaves_the_store_untouched(
+    runtime_dir: Path,
+) -> None:
+    """Without migration, the store keeps its mode until the caller seats it.
+
+    The desktop boot validates a seated store before it touches it, so
+    initialisation must not rewrite the header of a store that validation may
+    still refuse. Seating the posture afterwards is the caller's explicit act.
+    """
+    database = runtime_dir / "seated.db"
+    seed = sqlite3.connect(database)
+    try:
+        seed.execute("CREATE TABLE seed (id INTEGER PRIMARY KEY)")
+        seed.commit()
+    finally:
+        seed.close()
+
+    await close_db()
+    try:
+        engine = await init_db(database, apply_migrations=False)
+        untouched = inspect_sqlite_database(database)["journal_mode"]
+        await seat_sqlite_posture(engine)
+        seated = inspect_sqlite_database(database)["journal_mode"]
+    finally:
+        await close_db()
+
+    assert untouched == "delete"
+    assert seated == "wal"
 
 
 def test_sustained_writes_settle_at_the_ceiling_rather_than_growing(

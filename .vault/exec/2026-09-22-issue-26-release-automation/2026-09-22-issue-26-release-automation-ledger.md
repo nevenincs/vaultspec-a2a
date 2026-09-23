@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:f346ee889d7c27079a0c62985c5bb5efdf58cd660674800e1dacbcb6e81e74bf'
+body_hash: 'sha256:a3fba579cbdb8981ac2e08866a33e9aad041ae79a7f6cad50f510d113dd8b79c'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -68,6 +68,12 @@ related:
 - `S05` `M` `src/vaultspec_a2a/database/tests/test_wal_maintenance.py`
 - `S05` `verify:` `Windows freeze + prove_artifact_lifecycle.sh on 63cac8ac` -> `pass`
 - `S05` `by:` `claude-opus`
+- `S03` `verify:` `plan-close review remediation: dev + database/api/control/desktop suites (1634)` -> `pass`
+- `S04` `verify:` `just check-workflow after review remediation` -> `pass`
+- `S05` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S05` `M` `src/vaultspec_a2a/api/app.py`
+- `S05` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S05` `verify:` `bare migrations leave a fresh store on the delete journal (probe)` -> `pass`
 
 ## Notes
 
@@ -77,3 +83,6 @@ related:
 - `S03` Root cause not yet identified: the failure reproduces only on the CI Linux runner, and every prior CI failure lost its gateway traceback to a truncated assertion message. S03 stays open pending that evidence.
 - `S03` Root cause confirmed from CI evidence; local Windows does not reproduce the race, so the fix is proven by the real-connection unit tests and the next Linux CI run.
 - `S04` The lockfile and merge-gate dispatch steps run only on the next release-please execution after this reaches main; their live exercise is pending.
+- `S03` Plan-close review: commit path rollback before the worker probe.
+- `S04` Plan-close review: guarded checkout ref; merge gate dispatched without a ref input so it validates the commit it reports on.
+- `S05` Plan-close review (high): warm-up moved behind migration and behind armed-boot validation as seat_sqlite_posture.

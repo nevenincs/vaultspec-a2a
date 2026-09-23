@@ -55,6 +55,7 @@ from ..database import (
     get_db,
     get_session_factory,
     init_db,
+    seat_sqlite_posture,
 )
 from ..database.checkpoints import Checkpointer, open_checkpointer
 from ..database.migrations import backfill_teamstate_sdd_fields
@@ -305,6 +306,7 @@ async def _initialize_gateway_database(app: FastAPI, *, armed: bool) -> AsyncEng
             database_url=settings.database_url,
             checkpoint_path=settings.checkpoint_path,
         )
+        await seat_sqlite_posture(engine)
         logger.info(
             "Desktop database schema validated (no migration performed, %s)",
             settings.resolved_database_backend,

@@ -41,6 +41,7 @@ __all__ = [
     "get_session_factory",
     "init_db",
     "inspect_sqlite_database",
+    "seat_sqlite_posture",
     "verify_wal_mode",
 ]
 
@@ -383,16 +384,25 @@ async def init_db(
         from .migrate import run_migrations
 
         await run_migrations(url)
-
-    if url.startswith("sqlite") and url != "sqlite+aiosqlite:///:memory:":
-        # WAL is applied by the connect listener, so a store fresh from
-        # migration stays on a rollback journal until a first connection.
-        # Opening one here makes the on-disk mode the serving mode before any
-        # caller inspects the file.
-        async with engine.connect():
-            pass
+        await seat_sqlite_posture(engine)
 
     return engine
+
+
+async def seat_sqlite_posture(engine: AsyncEngine) -> None:
+    """Put a SQLite file store into its serving journal mode now.
+
+    WAL is applied by the connect listener, so a store fresh from migration stays
+    on a rollback journal until its first connection, and anything inspecting the
+    file before then reads a mode the store will not serve in. This writes the
+    database header, so a caller that must not mutate a store calls it only once
+    the store is accepted. Other dialects and in-memory stores are left alone.
+    """
+    url = str(engine.url)
+    if engine.dialect.name != "sqlite" or url == "sqlite+aiosqlite:///:memory:":
+        return
+    async with engine.connect():
+        pass
 
 
 async def get_db(

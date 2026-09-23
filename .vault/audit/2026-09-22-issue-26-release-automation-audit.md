@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:a1a9fc71dc647b7e440032121876898610dbf007e6313eb399c742fe48c71161'
+body_hash: 'sha256:ac22bd4287a379a8f1da6990a25c0d568cc67ddb00141412be5f129f72b38895'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -142,3 +142,31 @@ Type: test isolation. Under `-n auto`, `init_db` in `database/tests/test_write_t
 ### worker-demand-signal-unconsumed | low | the armed gateway sets a demand-ready event that nothing awaits | open
 
 Type: dead capability. `control/dispatch.py:247-251` sets `LazyWorkerSpawner.demand_ready_event` after the first demand-driven worker start, and the docstrings at `control/worker_management.py:292-297` and `control/dispatch.py:170-174` describe it as releasing deferred boot reconciliation. No production code awaits `app.state.worker_demand_ready`, and boot reconciliation runs eagerly at `api/app.py:733`. Either the deferral was removed without its signal or it was never wired.
+
+### review-s03-s05-armed-boot-mutation | high | the S05 warm-up wrote to a seated desktop store before its compatibility check | resolved
+
+Type: safety. Plan-close review of `63cac8ac`..`0350a682`. S05 opened a connection in `database/session.py` `init_db` for every SQLite file URL, including the non-migrating desktop path, where `api/app.py` `_initialize_gateway_database` runs `validate_desktop_schema` only afterwards; the connect listener rewrites the header to WAL, and a connection creates an absent file, so a store validation might reject as foreign or newer was converted, or created, first. The warm-up is now `seat_sqlite_posture`, called by `init_db` only after migration and by the armed boot only after validation accepts the store. `database/tests/test_wal_maintenance.py` holds both: a migrated store is WAL on disk, and a non-migrating initialisation leaves a rollback-journal store untouched until it is seated.
+
+### review-commit-read-held | medium | the commit path held a read transaction across the live worker probe | resolved
+
+Type: concurrency and WAL retention. `api/routes/_gateway_run_start.py` `_run_commit_locked` left its replay read open through `_prepare_commit_eligibility`'s network probe and the broker commit, the same held-snapshot hazard S03 removed in `_create_run_core`. It now rolls back once the replay read finds no run.
+
+### review-release-please-guards | medium | the release-branch checkout evaluated `fromJSON` on a possibly empty output unguarded | resolved
+
+Type: CI robustness. The checkout `ref` in `release-please.yml` now uses the same `pr && fromJSON(...) || ''` guard as the dispatch step.
+
+### review-merge-gate-target | low | the dispatched merge gate named its commit by branch | resolved
+
+Type: CI correctness. A dispatched run reports its check on the run's own commit, the branch head at dispatch, while the gate checked out `inputs.ref`. The dispatch now passes no `ref` input, so `merge-gate.yml` checks out `github.sha`, the commit its check is reported on; passing a SHA instead would validate one commit and mark another green if the branch moved.
+
+### review-write-precondition-post-dispatch | medium | `begin_write_transaction` would fail a request after the worker already has its dispatch | accepted
+
+Type: defensive contract. The two post-dispatch calls in `control/thread_service.py` raise if a caller left a transaction open, which would 500 a request whose run is executing. The review verified every current path arrives clean. Rolling back a clean-looking transaction was rejected: `session.new`, `dirty`, and `deleted` do not reveal flushed but uncommitted writes, so it could silently discard them. The raise stays a loud contract.
+
+### review-lock-refresh-unbounded | low | the release lock refresh commits whatever `uv lock` produces | accepted
+
+Type: change control. `just deps-lock` is `uv lock` without `--upgrade`, which changes only what the metadata change requires; the commit lands on the release pull request, where its diff is reviewed and gated before merge.
+
+### review-facade-export | low | `configure_sqlite_engine` is in the module's public API but not the facade | accepted
+
+Type: API consistency. It mirrors `configure_sqlite_transactions`, which the facade also does not re-export; both serve engine construction by tests and by the module itself.

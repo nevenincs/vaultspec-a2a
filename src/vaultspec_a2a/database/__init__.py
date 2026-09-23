@@ -120,6 +120,7 @@ from .session import get_engine as get_engine
 from .session import get_session_factory as get_session_factory
 from .session import init_db as init_db
 from .session import inspect_sqlite_database as inspect_sqlite_database
+from .session import seat_sqlite_posture as seat_sqlite_posture
 from .session import verify_wal_mode as verify_wal_mode
 from .task_queue_repository import MarkCompleteResult as MarkCompleteResult
 from .task_queue_repository import get_queue_view as get_queue_view
@@ -245,6 +246,7 @@ __all__ = [
     "reset_permission_response_submission",
     "run_migrations",
     "save_model",
+    "seat_sqlite_posture",
     "seed_task_queue",
     "set_authoring_cursor",
     "set_thread_approval_state",

@@ -310,13 +310,19 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
 ) -> None:
     """Concurrent prepares bound capacity and start one worker; commit binds a run."""
     log_path = tmp_path / "gateway.log"
-    with _armed_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2") as (
-        base,
-        auth,
-    ):
+    # No warm-up: the subject is the first-demand race itself, so the worker
+    # must still be cold when the prepares arrive. The harness's worker-ready
+    # and first-demand budgets already absorb a slow cold start.
+    with _armed_gateway(
+        tmp_path, warm_first_demand=False, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2"
+    ) as (base, auth):
         # --- Concurrent first demand: hard reservation bound, one worker. ---
         # Four real parallel prepares race into the single-flight worker start and
         # the bounded reservation table (capacity two).
+        assert _SPAWN_LINE not in log_path.read_text(
+            encoding="utf-8", errors="replace"
+        ), "a worker was already spawned before the race, so it proves nothing"
+
         def _prepare_capacity(index: int) -> tuple[int, int, dict[str, Any]]:
             return (index, *_prepare(base, auth, run_id=f"run-capacity-{index}"))
 

@@ -16,7 +16,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from ...lifecycle import load_procs_config
-from ..children import await_child, child_tree_progress
+from ..children import await_child, child_tree_progress, measured_child_startup_s
 from ..ports import free_port
 from ..sessions import SESSION_LEASE_KEY, effective_worker_count
 
@@ -102,8 +102,14 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
     def _both_children() -> object:
         return (child_tree_progress(first.pid), child_tree_progress(second.pid))
 
-    assert await_child(first, what="first allocator", fingerprint=_both_children) == 0
-    assert await_child(second, what="second allocator", fingerprint=_both_children) == 0
+    # Both children poll at the barrier, which accrues CPU forever, so a pair
+    # wedged there is caught by a ceiling scaled to this host's start-up cost.
+    ceiling = max(60.0, 40 * measured_child_startup_s())
+    for child, what in ((first, "first allocator"), (second, "second allocator")):
+        exit_code = await_child(
+            child, what=what, fingerprint=_both_children, ceiling_s=ceiling
+        )
+        assert exit_code == 0, f"{what} failed"
     one = set(json.loads((tmp_path / "one.json").read_text()))
     two = set(json.loads((tmp_path / "two.json").read_text()))
     assert len(one) == 10 and len(two) == 10
@@ -141,18 +147,20 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
     suite = tmp_path / "suite"
     suite.mkdir()
     release_file = tmp_path / "release-the-holder"
-    # The cap is a safety net against an orphaned holder - a parent killed
-    # between the spawn and its `finally` - and never the mechanism: the parent
-    # releases this holder the moment the second session has been observed.
+    # The parent releases this holder the moment the second session has been
+    # observed. A holder whose parent is gone - killed between the spawn and
+    # its `finally` - stops holding rather than outliving it.
     (suite / "test_hold.py").write_text(
         "import os\n"
         "import time\n"
         "from pathlib import Path\n"
         "\n"
+        "import psutil\n"
+        "\n"
         "def test_hold() -> None:\n"
-        "    release = Path(os.environ['VAULTSPEC_A2A_TEST_HOLD_RELEASE'])\n"
-        "    deadline = time.monotonic() + 900\n"
-        "    while not release.exists() and time.monotonic() < deadline:\n"
+        f"    release = Path({str(release_file)!r})\n"
+        "    parent = os.getppid()\n"
+        "    while not release.exists() and psutil.pid_exists(parent):\n"
         "        time.sleep(0.1)\n"
     )
     (suite / "test_quick.py").write_text("def test_quick() -> None:\n    pass\n")
@@ -160,7 +168,6 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
     env.pop("PYTEST_ADDOPTS", None)
     env["VAULTSPEC_A2A_PROCS_HOME"] = str(home)
     env["VAULTSPEC_A2A_TEST_CPU_BUDGET"] = "4"
-    env["VAULTSPEC_A2A_TEST_HOLD_RELEASE"] = str(release_file)
     holder = subprocess.Popen(
         [
             sys.executable,
@@ -237,11 +244,11 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
             env=env,
         )
     finally:
-        # Released before the kill so the holder ends the way a session ends -
-        # unconfigure, lease release - rather than only under a signal.
+        # Released, then awaited: the holder ends the way a session ends -
+        # unconfigure, lease release - and a wedged teardown is reaped.
         release_file.write_text("released", encoding="utf-8")
-        holder.kill()
-        holder.wait(timeout=60)
+        holder_exit = await_child(holder, what="the released holding session")
+    assert holder_exit == 0, "the holding session did not end cleanly once released"
     assert second.returncode == 0, second.stdout + second.stderr
     assert "1 live peer test session(s); workers 4 -> 2" in second.stdout, second.stdout
 

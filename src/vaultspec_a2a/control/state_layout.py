@@ -22,6 +22,7 @@ singleton is still being constructed, so it imports nothing from the service.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,17 +67,51 @@ _SEAL_TEXT = (
 )
 
 
+logger = logging.getLogger(__name__)
+
+#: Homes already reported as unsealable, so the warning is said once per process.
+_UNSEALED_REPORTED: set[Path] = set()
+
+
 class UnsafeStateHomeError(ValueError):
     """A state home that is itself a repository, which sealing would hide whole."""
+
+
+def _holds_only_a2a_state(home: Path) -> bool:
+    """Whether every entry in an existing ``home`` is one the state layout writes.
+
+    Such a home is a2a's own even though a2a did not just create it - one made
+    before homes were sealed, or by a concurrent writer that won the race.
+    """
+    layout = state_layout(home)
+    owned = {
+        path.relative_to(layout.home).parts[0]
+        for path in (
+            getattr(layout, field) for field in StateLayout.__dataclass_fields__
+        )
+        if path != layout.home
+    }
+    owned.add(SEAL_FILE)
+    # The atomic writer stages the discovery record and its credential beside
+    # themselves, so their temporary siblings carry the same prefix.
+    staged = (DISCOVERY_RECORD, HANDOFF_CREDENTIAL)
+    return all(
+        entry.name in owned or entry.name.startswith(staged) for entry in home.iterdir()
+    )
 
 
 def seal_state_home(home: Path) -> None:
     """Create ``home`` and make it invisible to version control, idempotently.
 
+    The seal ignores everything beneath it, so it is written only into a home
+    a2a owns: one it creates here, or an existing one that holds nothing but
+    the state layout. An existing directory with anything else in it belongs
+    to the operator, who chose it; a2a writes no ignore file there, and says
+    once that the state it writes there is not kept out of version control.
+
     Raises:
-        UnsafeStateHomeError: If ``home`` is the root of a repository. The seal
-            ignores everything beneath it, so writing one there would silently
-            stop that repository from tracking anything at all.
+        UnsafeStateHomeError: If ``home`` is the root of a repository, which a
+            seal would stop from tracking anything at all.
     """
     if (home / ".git").exists():
         msg = (
@@ -85,9 +120,25 @@ def seal_state_home(home: Path) -> None:
             f"version control. Point {ENV_PREFIX}HOME at a directory of its own."
         )
         raise UnsafeStateHomeError(msg)
-    home.mkdir(parents=True, exist_ok=True)
+    try:
+        home.mkdir(parents=True)
+        created = True
+    except FileExistsError:
+        created = False
     seal = home / SEAL_FILE
     if seal.exists():
+        return
+    if not created and not _holds_only_a2a_state(home):
+        if home not in _UNSEALED_REPORTED:
+            _UNSEALED_REPORTED.add(home)
+            logger.warning(
+                "%s already holds files a2a did not write, so a2a leaves it "
+                "without an ignore file; keep the a2a state written there out of "
+                "version control yourself, or point %sHOME at a directory of its "
+                "own.",
+                home,
+                ENV_PREFIX,
+            )
         return
     try:
         with seal.open("x", encoding="utf-8") as handle:

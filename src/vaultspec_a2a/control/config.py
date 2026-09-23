@@ -277,10 +277,11 @@ class Settings(DomainSettingsConfig, InfraConfig):
 
         Every writer that creates a directory for a2a state goes through here.
         Inside the state home, the home is sealed first, whichever writer runs
-        first. A store relocated elsewhere inside the project is sealed at the
-        outermost directory a2a itself creates for it; a directory that already
-        existed is the operator's, and a2a writes no ignore file into it.
-        Outside the project, version control is not a2a's concern.
+        first, when a2a owns it (see :func:`seal_state_home`). A store relocated
+        elsewhere inside the project is sealed at the outermost directory a2a
+        itself creates for it. A directory that already existed is the
+        operator's, and a2a writes no ignore file into it. Outside the project,
+        version control is not a2a's concern.
         """
         home = self.a2a_home
         if directory == home or directory.is_relative_to(home):

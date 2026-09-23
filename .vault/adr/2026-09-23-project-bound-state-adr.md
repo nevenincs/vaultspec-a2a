@@ -108,7 +108,9 @@ P03 review, with the direction that every known issue be addressed and that noth
 in or be written to the user profile without an explicit override.
 
 - *The seal.* a2a keeps its state out of version control by writing a self-ignoring ignore file
-  into the state home before its first write. A directory a2a creates elsewhere inside the project
+  into the state home before its first write. It does so only when a2a owns the home: it creates
+  the home, or the existing home holds nothing but the state layout. An existing home holding
+  anything else is the operator's choice; it gets no ignore file, and a2a warns once. A directory a2a creates elsewhere inside the project
   root for a relocated store is sealed the same way, at the outermost directory a2a itself
   creates. A directory that already existed is the operator's, and a2a writes no ignore file into
   it. Outside the project root, version control is not a2a's concern.

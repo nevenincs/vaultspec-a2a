@@ -31,6 +31,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -123,6 +124,7 @@ def await_child(
     idle_window_s: float = DEFAULT_IDLE_WINDOW_S,
     fingerprint: Callable[[], object] | None = None,
     diagnostic: Callable[[], str] | None = None,
+    ceiling_s: float | None = None,
 ) -> int:
     """Wait for *process* to exit, failing on a stall and never on slowness.
 
@@ -133,8 +135,13 @@ def await_child(
     child is REAPED as a tree before :class:`~.progress.ProgressStalledError` is
     raised, so a failed wait never leaves a process holding its ports, its
     handles, and its share of the machine.
+
+    *ceiling_s* is for a child that polls: a poll loop burns CPU forever, so
+    CPU alone never calls it stalled. Derive it from
+    :func:`measured_child_startup_s`, never from a literal.
     """
     deadline = ProgressDeadline(idle_window_s=idle_window_s)
+    started = time.monotonic()
     observed: object = None
     while True:
         returncode = process.poll()
@@ -149,10 +156,11 @@ def await_child(
             deadline.touch()
         try:
             deadline.check()
+            if ceiling_s is not None and time.monotonic() - started > ceiling_s:
+                msg = f"still running after its {ceiling_s:.0f}s ceiling"
+                raise ProgressStalledError(msg)
         except ProgressStalledError as stalled:
-            from ..utils import kill_pid_tree_async
-
-            asyncio.run(kill_pid_tree_async(process.pid))
+            _reap_tree(process.pid)
             with contextlib.suppress(subprocess.TimeoutExpired):
                 process.wait(timeout=5.0)
             context = "" if diagnostic is None else f"\n{diagnostic()}"
@@ -160,6 +168,25 @@ def await_child(
                 f"{what} (pid {process.pid}) made no progress: {stalled}{context}"
             ) from stalled
         time.sleep(_POLL_INTERVAL_S)
+
+
+def _reap_tree(pid: int) -> None:
+    """Kill *pid*'s tree through the shared primitive, from any calling context.
+
+    The primitive is asynchronous. Called from a test that is itself running an
+    event loop, ``asyncio.run`` would refuse and leave the wedged tree alive, so
+    the reap then runs on a thread with a loop of its own.
+    """
+    from ..utils import kill_pid_tree_async
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(kill_pid_tree_async(pid))
+        return
+    reaper = threading.Thread(target=lambda: asyncio.run(kill_pid_tree_async(pid)))
+    reaper.start()
+    reaper.join()
 
 
 def file_size_fingerprint(*paths: os.PathLike[str] | str) -> Callable[[], object]:

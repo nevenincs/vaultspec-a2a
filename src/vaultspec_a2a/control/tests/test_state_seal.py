@@ -8,6 +8,7 @@ real ``git`` over a real repository with no vaultspec marker at all.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 from typing import TYPE_CHECKING, Protocol, cast
@@ -158,3 +159,52 @@ def test_sealing_is_idempotent_and_keeps_the_first_seal(tmp_path: Path) -> None:
 
     assert (home / SEAL_FILE).read_text(encoding="utf-8") == first
     assert "*" in first.splitlines()
+
+
+def test_an_operator_directory_named_as_home_is_never_sealed(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A tracked source directory chosen as the home keeps tracking new files."""
+    project = _git_repository(tmp_path)
+    source = project / "src"
+    source.mkdir()
+    (source / "tracked.py").write_text("x = 1\n", encoding="utf-8")
+    _git(project, "add", "-A")
+    _git(project, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c")
+    settings = _settings_for(project, home="src")
+
+    with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.control.state_layout"):
+        settings.prepare_state_dir(settings.state_layout.logs_dir)
+    (source / "new_module.py").write_text("y = 2\n", encoding="utf-8")
+
+    assert not (source / SEAL_FILE).exists()
+    assert "?? src/new_module.py" in _git(
+        project, "status", "--porcelain", "--untracked-files=all"
+    )
+    assert any(
+        "already holds files a2a did not write" in r.message for r in caplog.records
+    )
+
+
+def test_an_existing_home_holding_only_a2a_state_is_sealed(tmp_path: Path) -> None:
+    """A home written before homes were sealed is recognisably a2a's own."""
+    project = _git_repository(tmp_path)
+    home = project / "legacy-home"
+    (home / "state").mkdir(parents=True)
+    (home / "state" / "vaultspec.db").write_bytes(b"")
+    (home / "service.json").write_text("{}", encoding="utf-8")
+    (home / "service.json.4242.tmp").write_text("{}", encoding="utf-8")
+
+    seal_state_home(home)
+
+    assert (home / SEAL_FILE).is_file()
+    assert _git(project, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+def test_an_existing_empty_home_is_sealed(tmp_path: Path) -> None:
+    home = tmp_path / "prepared-by-a-launcher"
+    home.mkdir()
+
+    seal_state_home(home)
+
+    assert (home / SEAL_FILE).is_file()

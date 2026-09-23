@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:d7af0a696c8fe94dc0f537685219b6a6363ba42f63108097d18e7b07faa081f3'
+body_hash: 'sha256:6fef5f7ebdd5756387a68707f9d5c56f93bc84bbeab7ba3489987c300e10fd0e'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -397,9 +397,18 @@ related:
 - `S15` `M` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
 - `S15` `verify:` `pytest src/vaultspec_a2a/api/tests/test_gateway_live.py src/vaultspec_a2a/desktop_tests/test_readiness_model.py -n 4 --dist=loadgroup` -> `pass`
 - `S15` `verify:` `pytest src/vaultspec_a2a/testing/tests/test_default_safety.py::test_two_concurrent_processes_never_share_free_ports` -> `pass`
+- `S13` `verify:` `pytest src/vaultspec_a2a/control/tests/test_state_seal.py` -> `pass`
+- `S15` `M` `.vault/adr/2026-09-23-project-bound-state-adr.md`
+- `S15` `M` `.vault/exec/2026-09-23-project-bound-state/2026-09-23-project-bound-state-ledger.md`
+- `S15` `M` `docs/operations.rst`
+- `S15` `M` `src/vaultspec_a2a/control/config.py`
+- `S15` `M` `src/vaultspec_a2a/control/state_layout.py`
+- `S15` `M` `src/vaultspec_a2a/control/tests/test_state_seal.py`
+- `S15` `M` `src/vaultspec_a2a/testing/children.py`
+- `S15` `A` `src/vaultspec_a2a/testing/tests/test_children.py`
+- `S15` `verify:` `pytest src/vaultspec_a2a/testing/tests/test_children.py src/vaultspec_a2a/testing/tests/test_default_safety.py` -> `pass`
 
 ## Notes
 
 - `S11` Dashboard change implemented and verified in Y:/code/vaultspec-dashboard-worktrees/a2a-project-bound-state (branch a2a-project-bound-state): cargo test -p vaultspec-api and -p vaultspec-product, clippy -D warnings, fmt, tsc and eslint clean. Not committed: that repository's unscoped vault-fix pre-commit hook fails on 63 pre-existing errors in unrelated features. Skipping a hook needs the owner's authorization; the Step stays open.
 - `S11` Committed in vaultspec-dashboard branch a2a-project-bound-state: 3e446503 (vault backlog cleared, 0 errors), fe764e7f (engine discovery + product launcher), b2664aeb (agent E2E harness). cargo test -p vaultspec-api/-p vaultspec-product, clippy -D warnings, fmt, tsc, eslint pass. The live E2E lane was not run.
-

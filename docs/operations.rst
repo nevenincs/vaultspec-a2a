@@ -45,7 +45,9 @@ the process environment only.
 project root - the runtime subtree vaultspec ignores and never walks. a2a
 writes nothing to the user profile or the system temporary directory, and it
 seals the home with a self-ignoring ``.gitignore`` so a project without
-vaultspec's ignore rules cannot commit it. A store relocated elsewhere inside
+vaultspec's ignore rules cannot commit it. An existing directory named as the
+home that already holds other files is the operator's: it gets no ignore
+file, and a2a warns once. A store relocated elsewhere inside
 the project is sealed at the outermost directory a2a creates for it; a
 directory that already existed is left to the operator. A home that is the
 project root, one of its ancestors, or any repository root is refused, since

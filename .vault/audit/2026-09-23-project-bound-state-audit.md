@@ -375,6 +375,59 @@ Status: fixed in `P05.S14`; each tool removes its root once it is empty.
 Status: fixed in `P05.S15` together with `load-sensitive-runner-tests` and
 `load-sensitive-admission-tests`.
 
+### phase-close-review-p05 | info | Plan-close review of P05 and the merges: pass, two medium and six low findings
+
+The review re-checked S13 to S16 and both merges of `main`, including the boot
+helpers `main` moved into `lifecycle/boot.py`. It found no critical or high
+finding. Each finding below was fixed before the landing.
+
+### seal-writes-into-a-state-home-a2a-did-not-create | medium | An existing operator directory named as the home was sealed whole
+
+With `VAULTSPEC_A2A_HOME=src` in a real repository, `src/.gitignore` hid every new
+file under `src/`. Status: fixed. The seal is written only into a home a2a creates,
+or an existing one that holds nothing but the state layout. Any other existing
+home gets no ignore file and a single warning. The D4 amendment and the operator
+reference now state this. Covered by three new cases in
+`control/tests/test_state_seal.py`.
+
+### warm-first-demand-makes-the-single-flight-assertion-vacuous | medium | The concurrent-prepare test counted the harness's own warm-up spawn
+
+Status: fixed. The scenario no longer warms first demand, and it asserts that no
+spawn happened before the race.
+
+### client-facing-service-budget-is-no-longer-measured | low | Nothing measured the caller-side five-second contract
+
+Status: resolved by stating what is guaranteed, in `control/health.py`. The
+gateway guarantees and reports its probe phase. The margin up to the client
+budget is transport and scheduling, which no server can promise on a busy host.
+
+### await-child-cannot-reap-from-an-async-caller | low | A stall inside a running event loop could not reap the child
+
+Status: fixed. The reap runs on a thread with its own loop when one is already
+running. Covered in `testing/tests/test_children.py`.
+
+### progress-defined-as-cpu-accumulation-never-stalls-on-a-spin-wait | low | A poll-loop child never counted as stalled
+
+Status: fixed. `await_child` takes a ceiling for polling children, and the
+port-allocation proof derives its ceiling from the measured start-up cost.
+Covered in `testing/tests/test_children.py`.
+
+### holder-release-is-followed-immediately-by-a-kill | low | The admission holder was killed rather than allowed to end
+
+Status: fixed. The holder is awaited after release and must exit cleanly. Its
+release path is written into its own test file rather than passed through an
+undeclared `VAULTSPEC_A2A_TEST_` variable. It stops holding when its parent is
+gone, not after a fixed cap.
+
+### derived-budgets-lengthen-the-harness | low | Measured budgets made the runner tests slower on a loaded host
+
+Status: accepted. The derivation is correct, and the per-item backstop remains the
+guard. Watch it against that backstop.
+
+### api-reference-not-regenerated-for-the-new-public-names | low | New public names were missing from the API reference
+
+Status: fixed; `UnsafeStateHomeError` and the three health constants are listed.
+
 ## Recommendations
 
 - Keep the storage-anchor gate as the enforcement point for the new rules (no profile, temp or raw environment use in production) so regressions fail review rather than surface as leaks.

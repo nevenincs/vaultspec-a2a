@@ -333,6 +333,8 @@ Control services
 
 .. py:function:: seal_state_home(home)
 
+.. py:exception:: UnsafeStateHomeError
+
 .. py:module:: vaultspec_a2a.control.cancel_service
    :synopsis: Thread cancellation orchestration.
 
@@ -347,6 +349,12 @@ Control services
 
 .. py:module:: vaultspec_a2a.control.health
    :synopsis: Gateway diagnostics and desktop admission-readiness authority.
+
+.. py:data:: SERVICE_HEALTH_DEADLINE_SECONDS
+
+.. py:data:: SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS
+
+.. py:data:: SERVICE_WORKER_PROBE_TIMEOUT_SECONDS
 
 .. py:module:: vaultspec_a2a.control.run_discovery_service
    :synopsis: Bounded durable identity projection for active-run rebinding.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:9ad03bbfb18bfc1ae85ff3ba6dacfb76c1addcec5004ec29183a76834433847c'
+body_hash: 'sha256:b9f0a8a62a52aaa28166320854007ffa3eaa3f1162b919fe289f79969d045888'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -22,7 +22,7 @@ artifact publication.
 
 ## Findings
 
-### bot-pr-approval | medium | the first release proposal awaits administrator approval before its required check can run
+### bot-pr-approval | medium | resolved by S04, pending live proof
 
 Type: operational prerequisite. Status: open external acceptance blocker. GitHub
 documents that `GITHUB_TOKEN`-created pull-request events run in an
@@ -34,6 +34,8 @@ App token would make the later tag start `.github/workflows/release.yml`, which
 would violate the retained artifact-publication guard. This is not a code
 defect: an administrator must approve the bot-created release-PR run in the
 first live exercise.
+
+Superseded 2026-09-23 by S04. The premise that a dispatched run cannot satisfy the pull request's required context does not hold: a required status check is matched by name on the head commit, whatever event produced it, and vaultspec-core's release pull requests merge on exactly such a dispatched `Check: Merge gate (Linux)`. No administrator approval step exists for token-authored events; they start no runs at all. `release-please.yml` now dispatches the merge gate, so the first release proposal after S04 reaches `main` is the live proof.
 
 ### implementation-self-review | low | no in-scope automation defect found before independent review
 
@@ -184,13 +186,19 @@ Type: CI correctness. A dispatched run reports its check on the run's own commit
 
 Type: defensive contract. The two post-dispatch calls in `control/thread_service.py` raise if a caller left a transaction open, which would 500 a request whose run is executing. The review verified every current path arrives clean. Rolling back a clean-looking transaction was rejected: `session.new`, `dirty`, and `deleted` do not reveal flushed but uncommitted writes, so it could silently discard them. The raise stays a loud contract.
 
-### review-lock-refresh-unbounded | low | the release lock refresh commits whatever `uv lock` produces | accepted
+Re-weighed in S10 and kept: the only alternatives weaken safety, since an automatic rollback could discard flushed writes, hoisting the stat splits the availability check from the re-read it validates, and tolerating the mismatch restores the silent wrong-database behaviour S06 removed.
+
+### review-lock-refresh-unbounded | low | the release lock refresh commits whatever `uv lock` produces | resolved
 
 Type: change control. `just deps-lock` is `uv lock` without `--upgrade`, which changes only what the metadata change requires; the commit lands on the release pull request, where its diff is reviewed and gated before merge.
 
-### review-facade-export | low | `configure_sqlite_engine` is in the module's public API but not the facade | accepted
+Resolved in S10: the refresh step now fails unless the lock diff is exactly this package's version line moving to the `pyproject.toml` version. Verified against a scratch repository: a version-only change is accepted, and both extra drift and a mismatched version are refused.
+
+### review-facade-export | low | `configure_sqlite_engine` is in the module's public API but not the facade | resolved
 
 Type: API consistency. It mirrors `configure_sqlite_transactions`, which the facade also does not re-export; both serve engine construction by tests and by the module itself.
+
+Resolved in S10: `database/__init__.py` re-exports `configure_sqlite_engine` and `configure_sqlite_transactions`, so both are reachable from the facade like the rest of the session API.
 
 ### review-s06-s08-early-return-lock | medium | refusals after a write begin kept the SQLite write lock until the session closed | resolved
 
@@ -208,6 +216,24 @@ Type: diagnostics. `testing/runner_child.py` removed the session home with `igno
 
 Type: lock discipline. `control/direct_control_recovery.py` `_redrive_one_claim` reaches `Path(...).is_dir()` in `_reconstruct_dispatch` inside its write transaction. It is one local metadata stat, not network or checkpoint I/O; hoisting it would split the accepted-action re-read from the availability check it validates.
 
+Re-weighed in S10 and kept: the only alternatives weaken safety, since an automatic rollback could discard flushed writes, hoisting the stat splits the availability check from the re-read it validates, and tolerating the mismatch restores the silent wrong-database behaviour S06 removed.
+
 ### review-get-engine-raise-at-boot | low | a mismatched explicit engine request now aborts instead of warning | accepted
 
 Type: failure mode. The only production caller with an explicit URL is the gateway lifespan's `init_db`, which runs before anything seats a default engine; `get_engine()` without a URL still returns the seated engine. A process that seated a different store first is misconfigured, and refusing to boot on it is the intended correction.
+
+Re-weighed in S10 and kept: the only alternatives weaken safety, since an automatic rollback could discard flushed writes, hoisting the stat splits the availability check from the re-read it validates, and tolerating the mismatch restores the silent wrong-database behaviour S06 removed.
+
+### advisory-sentinels-red | medium | the code-health sentinels failed on every Full Validation run behind continue-on-error | resolved
+
+Type: code health. `test.yml` runs seven sentinels with `continue-on-error: true`, so their failures never turned a run red. Measured 2026-09-23, six failed: strict types (18 diagnostics), cognitive complexity (`lifecycle/manager.py` `_await_listener` 32 and `_health_probe_for` 16, `streaming/ingest.py` `IngestManager.ingest` 20, `testing/runner.py` `_completion_received` 16, `utils/process.py` `_win_job_process_ids` 17), cyclomatic complexity (five over 10, including S07's own `respond_to_clarification` at 12), limits (seven ruff C901 or PLR findings), shape, and module size (`providers/_acp_rpc_handlers.py` 1089, `worker/executor.py` 1077, `lifecycle/manager.py` 1022, and `control/thread_service.py` 1011 after S03 and S07). S09 owns the burn-down.
+
+Resolved in S09: every sentinel now exits 0 (`check-type-strict`, `check-complexity`, `check-cyclomatic`, `check-shape`, `check-limits`, `check-nesting`, `check-size`), with `check-anchors` and `check-workflow` also passing. `worker/executor.py` moved its settlement subsystem to `worker/_dispatch_settlement.py` (1077 to 672 lines); `lifecycle/manager.py` moved boot preparation to `lifecycle/boot.py` and `LifecycleError` to `lifecycle/errors.py` (1022 to 922); `providers/_acp_rpc_handlers.py` moved its terminal handlers to `providers/_acp_rpc_terminal_handlers.py`; `control/thread_service.py` moved the run listing to `control/thread_listing.py` (1011 to 732). The complex functions were decomposed in place, and the strict type diagnostics were fixed at their causes. Two corrections were made in review: helpers that cross a new module boundary carry public names rather than importing private ones back, and the storage-anchor guard's deferral for the repository-root serve command moved from `lifecycle/manager.py` to `lifecycle/boot.py` with the code. The guard had hidden the moved violation, because it exits on a stale deferral before it lists new violations.
+
+### s09-republished-names | medium | the S09 module splits left moved names published from their old modules | resolved
+
+Type: architecture rule regression, caught by the whole-tree run of `7b148012`. `tests/test_export_declaration_homes.py` enforces that a module publishes only names it declares; `control/thread_service.py` still listed `list_threads_service` and `lifecycle/manager.py` still listed `LifecycleError`, `render_command`, and `render_env` in `__all__` after those moved to `control/thread_listing.py`, `lifecycle/errors.py`, and `lifecycle/boot.py`. Both modules now keep only the imports they use, and every importer - the `lifecycle` facade, `lifecycle/engine_serve.py`, `cli/main.py`, `api/routes/_gateway_read_endpoints.py`, and the affected tests - imports from the declaring module. The same run's other failures were load: `worker/tests/test_state_projection_timeout_knob.py` passes in isolation, and the live gateway and desktop tests were re-run on their own.
+
+### windows-service-state-deadline | medium | service-state overruns its five-second client budget on Windows while the checkpointer is held | open
+
+Type: pre-existing platform defect, found by the S09 whole-tree run and not caused by this feature. `api/tests/test_gateway_live.py::test_service_state_deadline_returns_degraded_for_locked_real_checkpointer` fails on this Windows host on every run, and identically on `aa1d5034`, the commit before this session's work, checked out in a separate worktree; the Linux Full Validation runs pass it. With the checkpointer lock held, `control/health.py` `_checkpoint_health_check` times out at its 3-second deadline as designed (logged `checkpoint probe timed out`), yet the client's 5-second read deadline still fires, so another of the three concurrent probes in `build_full_health` outlives its own deadline on Windows. `api/routes/_gateway_action_endpoints.py` `service_state_endpoint` awaits nothing after `build_full_health`. The likely candidates are the database task (`_database_health_check`, whose journal-mode probe opens an engine connection) and the worker probe; per-probe timing on a Windows host is the next evidence. The other ten live, desktop and acceptance failures in that run passed on isolated reruns and were load, not regressions.

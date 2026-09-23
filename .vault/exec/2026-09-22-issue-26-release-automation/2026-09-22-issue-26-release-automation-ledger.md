@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:f15bd89341bdb596e335ebb7bf3c3bea04e13f2bd5723e60e44a0e777e1c2c4b'
+body_hash: 'sha256:b45a36a4d960d88d52162f4c92cac18c8e365e19ba33b7bea5a62fcdb00ced84'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -110,6 +110,47 @@ related:
 - `S07` `verify:` `api, control, database, worker suites (1609)` -> `pass`
 - `S06` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py`
 - `S06` `verify:` `test_worker_authoring_wiring.py with CLAUDE_CONFIG_DIR set (5)` -> `pass`
+- `S09` `M` `dev/guards/storage_anchors.py`
+- `S09` `M` `dev/tests/test_release_workflow_contract.py`
+- `S09` `M` `dev/vault_annotations_gate.py`
+- `S09` `M` `src/vaultspec_a2a/control/clarification_service.py`
+- `S09` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S09` `M` `src/vaultspec_a2a/control/tests/test_thread_list_bulk_checkpoints.py`
+- `S09` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S09` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S09` `M` `src/vaultspec_a2a/lifecycle/tests/test_manager.py`
+- `S09` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_acp_security.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S09` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S09` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S09` `M` `src/vaultspec_a2a/testing/plugin.py`
+- `S09` `M` `src/vaultspec_a2a/testing/runner.py`
+- `S09` `M` `src/vaultspec_a2a/testing/runner_child.py`
+- `S09` `M` `src/vaultspec_a2a/testing/tests/test_runner.py`
+- `S09` `M` `src/vaultspec_a2a/utils/process.py`
+- `S09` `M` `src/vaultspec_a2a/worker/_executor_state.py`
+- `S09` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S09` `A` `src/vaultspec_a2a/control/thread_listing.py`
+- `S09` `A` `src/vaultspec_a2a/lifecycle/boot.py`
+- `S09` `A` `src/vaultspec_a2a/lifecycle/errors.py`
+- `S09` `A` `src/vaultspec_a2a/providers/_acp_rpc_terminal_handlers.py`
+- `S09` `A` `src/vaultspec_a2a/worker/_dispatch_settlement.py`
+- `S09` `verify:` `per-area suites: lifecycle+cli 184, control+api 1065, testing/streaming/utils/providers 1305 (3 known sandbox failures), worker+api 694 (1 timing flake reproduced on unmodified code)` -> `pass`
+- `S09` `by:` `claude-opus`
+- `S10` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S10` `M` `.github/workflows/release-please.yml`
+- `S10` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S10` `verify:` `just check-workflow with the merged fleet checkers` -> `pass`
+- `S10` `by:` `claude-opus`
+- `S09` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S09` `M` `src/vaultspec_a2a/cli/main.py`
+- `S09` `M` `src/vaultspec_a2a/control/tests/test_deleting_thread_visibility.py`
+- `S09` `M` `src/vaultspec_a2a/control/tests/test_list_threads_service_live.py`
+- `S09` `M` `src/vaultspec_a2a/lifecycle/__init__.py`
+- `S09` `M` `src/vaultspec_a2a/lifecycle/engine_serve.py`
+- `S09` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S09` `verify:` `check-type-strict, check-size, check-shape, check-anchors` -> `pass`
 
 ## Notes
 
@@ -127,3 +168,5 @@ related:
 - `S07` Implemented by a dispatched executor from a read-only transaction map; reviewed by the orchestrator. Its files were written with CRLF and normalized to LF before commit.
 - `S07` Plan-close review (medium): refusals after a write begin now release the lock before returning; clarification 404 no longer pays a checkpoint read. A first attempt read an expired row after rollback in message_service (MissingGreenlet in two follow-up tests); fixed by capturing the status first.
 - `S06` Plan-close review (low): a test app home that survives deletion is now named on stderr.
+- `S09` Refactors by three dispatched executors on disjoint files, reviewed and corrected by the orchestrator (cross-module private names made public; storage-anchor deferral moved with the code). The final whole-tree run was still in progress at commit time; its result is reported separately.
+- `S09` Whole-tree run of 7b148012 on one admitted worker (1h35m): 14 failed, 4754 passed; the export-declaration failure was a real S09 regression fixed here.

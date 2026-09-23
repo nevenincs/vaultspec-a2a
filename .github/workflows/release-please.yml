@@ -59,6 +59,16 @@ jobs:
             echo "uv.lock already matches the proposed version"
             exit 0
           fi
+          # The proposal may move only this package's own version. Anything
+          # else means the lock drifted on main, which a release must not carry.
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
+          changed="$(git diff -U0 uv.lock | grep -E '^[-+][^-+]' || true)"
+          if [ "$(printf '%s\n' "$changed" | grep -c .)" -ne 2 ] \
+            || ! printf '%s\n' "$changed" | grep -qx "+version = \"$version\""; then
+            echo "::error::uv.lock changed beyond this package's version:" >&2
+            printf '%s\n' "$changed" >&2
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add uv.lock

@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 
 from ..utils._process_tree import detached_spawn_kwargs
 from ..utils.process import ProcessContainment, ProcessContainmentError
-from .manager import render_command
+from .boot import render_command
 from .procs_config import load_procs_config
 from .registration import (
     deregister_serve,

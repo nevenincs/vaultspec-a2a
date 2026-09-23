@@ -22,15 +22,24 @@ import contextlib
 import logging
 import os
 import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 import httpx
 
-from ..control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ..utils._process_tree import detached_spawn_kwargs, kill_pid_tree_async
+from .boot import (
+    build_cwd_for,
+    build_sha,
+    default_repo,
+    ensure_explicit_repo,
+    read_internal_token,
+    render_command,
+    serve_cwd_for,
+    serve_env,
+)
+from .errors import LifecycleError
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
     PortReservation,
@@ -58,7 +67,6 @@ if TYPE_CHECKING:
     from .procs_config import RoleConfig
 
 __all__ = [
-    "LifecycleError",
     "ProcVerdict",
     "attach",
     "default_procs_owner",
@@ -67,8 +75,6 @@ __all__ = [
     "list_verdicts",
     "reap",
     "rebuild",
-    "render_command",
-    "render_env",
     "rerun",
     "resolve",
     "resume",
@@ -83,10 +89,6 @@ __all__ = [
 _KILL_ESCALATION_WAIT = 5.0
 
 SPAWN_LOG_CAP_BYTES = 10 * 1024 * 1024
-
-
-class LifecycleError(RuntimeError):
-    """A lifecycle verb could not complete (unknown record, role, or command)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,66 +168,6 @@ def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
             pid, term_timeout=timeout, kill_timeout=_KILL_ESCALATION_WAIT
         )
     )
-
-
-def _subst(value: str, *, port: int, workspace: str) -> str:
-    """Substitute the ``{python}``/``{port}``/``{workspace}`` tokens in a value.
-
-    ``{python}`` resolves to :data:`sys.executable` - the interpreter of the
-    serving process - so a role that shells ``python`` always runs the SAME venv
-    interpreter (with ``vaultspec_a2a`` installed), never whatever bare ``python``
-    a PATH lookup would otherwise resolve to (a uv-managed base interpreter).
-    """
-    return (
-        value.replace("{python}", sys.executable)
-        .replace("{port}", str(port))
-        .replace("{workspace}", workspace)
-    )
-
-
-def render_command(template: list[str], *, port: int, workspace: str) -> list[str]:
-    """Substitute the ``{python}``/``{port}``/``{workspace}`` tokens in a command."""
-    return [_subst(arg, port=port, workspace=workspace) for arg in template]
-
-
-def render_env(
-    env_template: dict[str, str], *, port: int, workspace: str
-) -> dict[str, str]:
-    """Substitute the ``{port}``/``{workspace}`` tokens in each env-var value.
-
-    A role whose serve reads its port from the environment (the a2a gateway from
-    ``VAULTSPEC_A2A_PORT``, the worker from ``VAULTSPEC_A2A_WORKER_PORT``) declares an
-    ``env`` table in procs.toml; the boot verb renders it into the child's
-    environment rather than passing a ``--port`` flag the command does not accept.
-    """
-    return {
-        key: _subst(value, port=port, workspace=workspace)
-        for key, value in env_template.items()
-    }
-
-
-def _build_sha(cwd: Path) -> str | None:
-    """Best-effort short git SHA of *cwd*'s HEAD, or ``None`` outside a repo."""
-    # A SHA is ASCII, but the captured stderr beside it is not: git names the
-    # offending path when *cwd* is not a repository, and a non-ASCII path under a
-    # locale decode fails inside subprocess's reader thread rather than raising
-    # here. ``run`` would then return with ``stdout`` set to None and the strip
-    # below would raise AttributeError - out of a helper whose whole contract is
-    # to answer None on failure. Stating the encoding keeps it best-effort.
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    except OSError:
-        return None
-    sha = result.stdout.strip()
-    return sha or None
 
 
 def _rotate_log_if_over_cap(
@@ -414,14 +356,14 @@ def rebuild(
         raise LifecycleError(
             f"role {record.role!r} declares no build command in procs.toml"
         )
-    cwd = _build_cwd_for(record)
+    cwd = build_cwd_for(record)
     result = subprocess.run(role.build, cwd=str(cwd), check=False)
     if result.returncode != 0:
         raise LifecycleError(
             f"build for {record.role}-{record.name} failed "
             f"(exit {result.returncode}): {' '.join(role.build)}"
         )
-    sha = _build_sha(cwd)
+    sha = build_sha(cwd)
     if read_record(record_path(record.role, record.name, home=home)) is not None:
         from dataclasses import replace
 
@@ -481,7 +423,7 @@ def rerun(
     # Refuse a data-seating role with no explicit repo BEFORE any side effect, so a
     # rerun cannot kill the running process and then decline to restart it - serve_up
     # and resume both guard before acting, and rerun must match that ordering.
-    _ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
+    ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     tree_kill(record.pid)
     if not _confirm_terminated(record.pid):
         # The old tree did not confirm dead: refuse to spawn a replacement that
@@ -493,7 +435,7 @@ def rerun(
             "replacement (record left unchanged)"
         )
     if role.build:
-        cwd = _build_cwd_for(record)
+        cwd = build_cwd_for(record)
         result = subprocess.run(role.build, cwd=str(cwd), check=False)
         if result.returncode != 0:
             raise LifecycleError(
@@ -528,88 +470,6 @@ def reap(
         _delete_record_log(record)
         reaped.append(record)
     return reaped
-
-
-def _read_internal_token(token_file: str, *, label: str) -> str:
-    """Read the internal-IPC token from *token_file*, failing loudly on a bad file.
-
-    The record carries only the PATH (never the secret), so the token is read at
-    boot. A role that declares a token file but whose file is missing, unreadable,
-    or empty is refused with :class:`LifecycleError` rather than silently booting
-    with no token - a silent empty-token fallback would reintroduce the invisible
-    gateway/worker mismatch this pairing exists to close.
-    """
-    from pathlib import Path as _Path
-
-    try:
-        token = _Path(token_file).read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise LifecycleError(
-            f"{label}: internal token file {token_file!r} is unreadable: {exc}"
-        ) from exc
-    if not token:
-        raise LifecycleError(f"{label}: internal token file {token_file!r} is empty")
-    return token
-
-
-class _ServeEnvOptional(TypedDict, total=False):
-    engine_service_json: str
-    internal_token_file: str
-    gateway_url: str
-    worker_url: str
-
-
-class _ServeEnvArgs(_ServeEnvOptional):
-    port: int
-    workspace: str
-    name: str
-    owner: str
-
-
-def _serve_env(
-    role_cfg: RoleConfig, **options: Unpack[_ServeEnvArgs]
-) -> dict[str, str]:
-    """The env overlay for a boot: the role's rendered port/config vars plus identity.
-
-    Carrying the managed name and owner into the child means a serve process that
-    self-registers (a gateway/worker booted on a band port) converges onto THIS
-    record - same ``(role, name)`` and owner - and refreshes it, instead of writing
-    a second, foreign-owned record that the owner-check would then refuse.
-
-    A recorded *engine_service_json* is injected under
-    the ``engine_service_json`` setting's name so the worker's engine discovery no
-    longer
-    depends on the booting shell having exported it - the reseat-strands-worker gap.
-    *internal_token_file* (a PATH, read here) is injected as the internal-IPC token,
-    *gateway_url* as the paired gateway URL (worker -> gateway), and *worker_url* as
-    the paired worker URL (gateway -> worker dispatch), so a procs-managed gateway-dev
-    and worker-dev agree on all of them instead of leaning on shell state. Empty
-    values inject nothing, matching the prior behaviour for records predating them.
-    """
-    port = options["port"]
-    workspace = options["workspace"]
-    name = options["name"]
-    owner = options["owner"]
-    engine_service_json = options.get("engine_service_json", "")
-    internal_token_file = options.get("internal_token_file", "")
-    gateway_url = options.get("gateway_url", "")
-    worker_url = options.get("worker_url", "")
-    env = render_env(role_cfg.env, port=port, workspace=workspace)
-    from ..control.config import setting_env
-
-    env[setting_env("procs_name")] = name
-    env[setting_env("procs_owner")] = owner
-    if engine_service_json:
-        env[setting_env("engine_service_json")] = engine_service_json
-    if internal_token_file:
-        env[INTERNAL_TOKEN_ENV] = _read_internal_token(
-            internal_token_file, label=f"{role_cfg.name}-{name}"
-        )
-    if gateway_url:
-        env[GATEWAY_URL_ENV] = gateway_url
-    if worker_url:
-        env[WORKER_URL_ENV] = worker_url
-    return env
 
 
 class _ServeUpOptions(TypedDict, total=False):
@@ -660,9 +520,9 @@ def serve_up(
     role_cfg = resolved_config.role(role)
     if not role_cfg.serve:
         raise LifecycleError(f"role {role!r} declares no serve command in procs.toml")
-    _ensure_explicit_repo(role_cfg, options.get("repo", ""), f"{role}-{name}")
+    ensure_explicit_repo(role_cfg, options.get("repo", ""), f"{role}-{name}")
     owner_label = _serve_owner(options)
-    cwd = _Path(options.get("repo", "")) if options.get("repo", "") else _default_repo()
+    cwd = _Path(options.get("repo", "")) if options.get("repo", "") else default_repo()
     # The build tree captured for rebuild/rerun; the boot build_sha reflects it, not
     # the serve tree, when a role's build and serve repos differ (engine-dev).
     build_cwd = (
@@ -681,7 +541,7 @@ def serve_up(
                 port=reservation.port,
                 workspace=options.get("workspace", ""),
             )
-            child_env = _serve_env(
+            child_env = serve_env(
                 role_cfg,
                 port=reservation.port,
                 workspace=options.get("workspace", ""),
@@ -712,7 +572,7 @@ def serve_up(
                     repo=str(cwd) if options.get("repo", "") else "",
                     build_repo=options.get("build_repo", ""),
                     workspace=options.get("workspace", ""),
-                    build_sha=_build_sha(build_cwd),
+                    build_sha=build_sha(build_cwd),
                     command=command,
                     started_at_ms=stamp,
                     last_seen_ms=stamp,
@@ -779,6 +639,52 @@ def _release_held_reservations(held: list[PortReservation]) -> None:
         release_reservation(reservation)
 
 
+def _worker_auth_headers(
+    *, is_worker: bool, internal_token_file: str, label: str
+) -> dict[str, str]:
+    """The bearer header a worker's private ``status`` probe presents, if any.
+
+    A gateway probe (the public ``ready`` fact) never carries this header; only a
+    worker boot with a token file on record does, so a credentialed probe is never
+    sent to a listener whose role has no such file.
+    """
+    if not (is_worker and internal_token_file):
+        return {}
+    token = read_internal_token(internal_token_file, label=label)
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _health_payload_is_ready(payload: object, *, is_gateway: bool) -> bool:
+    """Whether a parsed ``/health`` JSON body proves THIS role is ready."""
+    if not isinstance(payload, dict):
+        return False
+    body = cast("dict[str, object]", payload)
+    if is_gateway:
+        return body.get("service") == "gateway" and body.get("ready") is True
+    return body.get("service") == "worker" and body.get("status") == "ok"
+
+
+def _probe_health(
+    port: int, *, headers: dict[str, str], is_gateway: bool, request_timeout: float
+) -> bool:
+    """One bounded ``GET /health``, reduced to a readiness bool."""
+    try:
+        response = httpx.get(
+            f"http://127.0.0.1:{port}/health",
+            headers=headers,
+            timeout=request_timeout,
+        )
+    except httpx.HTTPError:
+        return False
+    if response.status_code != 200:
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    return _health_payload_is_ready(payload, is_gateway=is_gateway)
+
+
 def _health_probe_for(
     role_cfg: RoleConfig,
     port: int,
@@ -799,35 +705,104 @@ def _health_probe_for(
     if not (is_gateway or is_worker):
         return None
 
-    headers: dict[str, str] = {}
-    if is_worker and internal_token_file:
-        headers["Authorization"] = (
-            f"Bearer {_read_internal_token(internal_token_file, label=role_cfg.name)}"
-        )
+    headers = _worker_auth_headers(
+        is_worker=is_worker,
+        internal_token_file=internal_token_file,
+        label=role_cfg.name,
+    )
 
     def _probe(request_timeout: float) -> bool:
-        try:
-            response = httpx.get(
-                f"http://127.0.0.1:{port}/health",
-                headers=headers,
-                timeout=request_timeout,
-            )
-        except httpx.HTTPError:
-            return False
-        if response.status_code != 200:
-            return False
-        try:
-            payload = response.json()
-        except ValueError:
-            return False
-        if not isinstance(payload, dict):
-            return False
-        body = cast("dict[str, object]", payload)
-        if is_gateway:
-            return body.get("service") == "gateway" and body.get("ready") is True
-        return body.get("service") == "worker" and body.get("status") == "ok"
+        return _probe_health(
+            port,
+            headers=headers,
+            is_gateway=is_gateway,
+            request_timeout=request_timeout,
+        )
 
     return _probe
+
+
+class _UnresolvedOwnershipLogger:
+    """Emits the ownership-unresolved warning at most once per ``_await_listener`` call.
+
+    A racer or orphan can hold *port* through many poll iterations; logging on
+    every iteration would flood the log with the same fact, so each outcome is
+    reported once per await, on its first occurrence.
+    """
+
+    def __init__(self, port: int, pid: int) -> None:
+        self._port = port
+        self._pid = pid
+        self._reported = False
+
+    def bound_port_fallback(self) -> None:
+        """A generic (non-HTTP) role accepted readiness on bound-port signal alone."""
+        if self._reported:
+            return
+        logger.warning(
+            "Readiness accepted port %d on the bound-port signal "
+            "alone: the listening pid could not be resolved, so it "
+            "was not confirmed to belong to pid %d. Ownership is "
+            "unverified for this boot; an orphan or a racer "
+            "holding the port would read as ready.",
+            self._port,
+            self._pid,
+        )
+        self._reported = True
+
+    def probe_withheld(self) -> None:
+        """An A2A role withheld its HTTP probe pending resolved ownership."""
+        if self._reported:
+            return
+        logger.warning(
+            "Readiness withheld on port %d: the listening pid could "
+            "not be resolved, so it was not confirmed to belong to "
+            "pid %d; the HTTP health probe was skipped.",
+            self._port,
+            self._pid,
+        )
+        self._reported = True
+
+
+def _listener_ready(
+    port: int,
+    process: subprocess.Popen[Any],
+    *,
+    deadline: float,
+    health_probe: Callable[[float], bool] | None,
+    unresolved_logger: _UnresolvedOwnershipLogger,
+) -> bool:
+    """One poll iteration's readiness verdict for *port*; ``False`` keeps waiting.
+
+    Does not accept a bound port until the listening pid is confirmed to be the
+    child or a descendant of it
+    (:func:`~vaultspec_a2a.utils.process.listener_belongs_to`). A foreign holder
+    of the port - an un-reaped orphan of a felled generation, or a racer on a
+    fixed resume/rerun port - therefore never reads as our process being ready.
+    """
+    from ..utils._process_tree import ListenerOwnership, classify_listener_ownership
+
+    if not _port_is_bound(port):
+        return False
+    ownership = classify_listener_ownership(port, process.pid)
+    if ownership is ListenerOwnership.CONFIRMED:
+        if health_probe is None:
+            return True
+        return health_probe(max(deadline - time.monotonic(), 0.001))
+    if ownership is ListenerOwnership.UNRESOLVED:
+        if health_probe is None:
+            # Generic roles remain listener-only. Failing a legitimate boot
+            # because a pid could not be read would change their settled
+            # readiness contract, so retain the bound-port fallback while
+            # reporting that ownership was unverified.
+            unresolved_logger.bound_port_fallback()
+            return True
+        # A2A readiness is an HTTP claim, and a credentialed worker probe must
+        # never be sent to a listener whose owner is unknown. Keep waiting
+        # until the deadline so serve_up refuses to publish a record rather
+        # than masking unresolved ownership as ours.
+        unresolved_logger.probe_withheld()
+    return False
 
 
 def _await_listener(
@@ -847,101 +822,21 @@ def _await_listener(
     a record is not published pointing at a listener we do not own. An A2A HTTP
     role additionally must satisfy *health_probe* within the same deadline.
     """
-    from ..utils._process_tree import ListenerOwnership, classify_listener_ownership
-
     deadline = time.monotonic() + timeout
-    unresolved_ownership_reported = False
+    unresolved_logger = _UnresolvedOwnershipLogger(port, process.pid)
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return False
-        if _port_is_bound(port):
-            ownership = classify_listener_ownership(port, process.pid)
-            if ownership is ListenerOwnership.CONFIRMED:
-                if health_probe is None:
-                    return True
-                if health_probe(max(deadline - time.monotonic(), 0.001)):
-                    return True
-            if ownership is ListenerOwnership.UNRESOLVED:
-                if health_probe is None:
-                    # Generic roles remain listener-only. Failing a legitimate
-                    # boot because a pid could not be read would change their
-                    # settled readiness contract, so retain the bound-port
-                    # fallback while reporting that ownership was unverified.
-                    if not unresolved_ownership_reported:
-                        logger.warning(
-                            "Readiness accepted port %d on the bound-port signal "
-                            "alone: the listening pid could not be resolved, so it "
-                            "was not confirmed to belong to pid %d. Ownership is "
-                            "unverified for this boot; an orphan or a racer "
-                            "holding the port would read as ready.",
-                            port,
-                            process.pid,
-                        )
-                        unresolved_ownership_reported = True
-                    return True
-                # A2A readiness is an HTTP claim, and a credentialed worker
-                # probe must never be sent to a listener whose owner is unknown.
-                # Keep waiting until the deadline so serve_up refuses to publish
-                # a record rather than masking unresolved ownership as ours.
-                if not unresolved_ownership_reported:
-                    logger.warning(
-                        "Readiness withheld on port %d: the listening pid could "
-                        "not be resolved, so it was not confirmed to belong to "
-                        "pid %d; the HTTP health probe was skipped.",
-                        port,
-                        process.pid,
-                    )
-                    unresolved_ownership_reported = True
+        if _listener_ready(
+            port,
+            process,
+            deadline=deadline,
+            health_probe=health_probe,
+            unresolved_logger=unresolved_logger,
+        ):
+            return True
         time.sleep(0.1)
     return False
-
-
-def _default_repo() -> Path:
-    """The repo root a serve command runs in when a record carries no explicit repo."""
-    from ..control.config import settings
-
-    return settings.project_root
-
-
-def _ensure_explicit_repo(role_cfg: RoleConfig, repo: str, label: str) -> None:
-    """Refuse to serve a data-seating role from an implicit default cwd.
-
-    A role that declares ``require_repo`` (engine-dev seats its data store from its
-    serve cwd) must be booted and resumed with an explicit repo, never defaulted to
-    the project root - defaulting there once seated a dev engine's store on top of
-    the resident engine's live store. Raises :class:`LifecycleError` when no repo is
-    given, so the silent-root fallback is impossible rather than merely discouraged.
-    """
-    if role_cfg.require_repo and not repo:
-        raise LifecycleError(
-            f"role {role_cfg.name!r} requires an explicit repo (it seats data from "
-            f"its serve cwd); {label} carries none - pass an explicit repo rather "
-            "than defaulting to the project root"
-        )
-
-
-def _serve_cwd_for(record: ProcRecord) -> Path:
-    """The dir a role's SERVE command runs in: the record's repo, else the root."""
-    from pathlib import Path as _Path
-
-    if record.repo:
-        return _Path(record.repo)
-    return _default_repo()
-
-
-def _build_cwd_for(record: ProcRecord) -> Path:
-    """The dir a role's BUILD command runs in.
-
-    A role whose build tree differs from its serve tree (engine-dev builds the
-    cargo workspace in the dashboard repo but serves the wrapper script from the
-    a2a repo) captures the build tree in ``build_repo`` at boot; it falls back to
-    the serve repo when unset, so single-tree roles need no extra field.
-    """
-    from pathlib import Path as _Path
-
-    if record.build_repo:
-        return _Path(record.build_repo)
-    return _serve_cwd_for(record)
 
 
 def _start_from_record(
@@ -969,9 +864,9 @@ def _start_from_record(
         raise LifecycleError(
             f"role {record.role!r} declares no serve command in procs.toml"
         )
-    _ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
+    ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     command = render_command(role.serve, port=record.port, workspace=record.workspace)
-    child_env = _serve_env(
+    child_env = serve_env(
         role,
         port=record.port,
         workspace=record.workspace,
@@ -982,7 +877,7 @@ def _start_from_record(
         gateway_url=record.gateway_url,
         worker_url=record.worker_url,
     )
-    cwd = _serve_cwd_for(record)
+    cwd = serve_cwd_for(record)
     process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)
     if not _await_listener(
         record.port,
@@ -1005,7 +900,7 @@ def _start_from_record(
         record,
         pid=process.pid,
         command=command,
-        build_sha=_build_sha(_build_cwd_for(record)) or record.build_sha,
+        build_sha=build_sha(build_cwd_for(record)) or record.build_sha,
         started_at_ms=stamp,
         last_seen_ms=stamp,
     )

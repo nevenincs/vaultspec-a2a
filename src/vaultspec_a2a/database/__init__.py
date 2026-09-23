@@ -115,6 +115,10 @@ from .permission_repository import (
 from .session import application_session_factory as application_session_factory
 from .session import begin_write_transaction as begin_write_transaction
 from .session import close_db as close_db
+from .session import configure_sqlite_engine as configure_sqlite_engine
+from .session import (
+    configure_sqlite_transactions as configure_sqlite_transactions,
+)
 from .session import get_db as get_db
 from .session import get_engine as get_engine
 from .session import get_session_factory as get_session_factory
@@ -201,6 +205,8 @@ __all__ = [
     "build_migration_config",
     "close_db",
     "commit_control_action_lease",
+    "configure_sqlite_engine",
+    "configure_sqlite_transactions",
     "count_pending_sdd_backfill",
     "create_artifact",
     "create_control_action",

@@ -6,7 +6,7 @@ import json
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -17,14 +17,14 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 def _workflow(name: str) -> dict[str, Any]:
     loaded = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
-    return loaded
+    return cast("dict[str, Any]", loaded)
 
 
-def _triggers(workflow: dict[str, Any]) -> dict[str, Any]:
+def _triggers(workflow: dict[Any, Any]) -> dict[str, Any]:
     # PyYAML 1.1 treats the plain scalar `on` as boolean true.
     value = workflow.get("on", workflow.get(True))
     assert isinstance(value, dict)
-    return value
+    return cast("dict[str, Any]", value)
 
 
 def test_release_please_owns_reviewable_version_proposals() -> None:

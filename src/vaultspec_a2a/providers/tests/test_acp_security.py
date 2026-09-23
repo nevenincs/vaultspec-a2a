@@ -8,12 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from .._acp_rpc_handlers import (
-    _ENV_NAME_RE,
-    _SHELL_METACHAR_RE,
-    _TERMINAL_COMMAND_ALLOWLIST,
-    on_terminal_create,
-    sandbox_path,
+from .._acp_rpc_handlers import on_terminal_create, sandbox_path
+from .._acp_rpc_terminal_handlers import (
+    ENV_NAME_RE,
+    SHELL_METACHAR_RE,
+    TERMINAL_COMMAND_ALLOWLIST,
 )
 from .._acp_types import AcpModelConfig, AcpSessionContext
 
@@ -94,7 +93,7 @@ class TestSandboxPath:
 
 
 # ---------------------------------------------------------------------------
-# _TERMINAL_COMMAND_ALLOWLIST — allowlist validation
+# TERMINAL_COMMAND_ALLOWLIST — allowlist validation
 # ---------------------------------------------------------------------------
 
 
@@ -102,31 +101,31 @@ class TestTerminalCommandAllowlist:
     """Tests for the terminal command allowlist."""
 
     def test_python_is_allowed(self) -> None:
-        assert "python" in _TERMINAL_COMMAND_ALLOWLIST
+        assert "python" in TERMINAL_COMMAND_ALLOWLIST
 
     def test_git_is_allowed(self) -> None:
-        assert "git" in _TERMINAL_COMMAND_ALLOWLIST
+        assert "git" in TERMINAL_COMMAND_ALLOWLIST
 
     def test_npm_is_allowed(self) -> None:
-        assert "npm" in _TERMINAL_COMMAND_ALLOWLIST
+        assert "npm" in TERMINAL_COMMAND_ALLOWLIST
 
     def test_curl_is_not_allowed(self) -> None:
-        assert "curl" not in _TERMINAL_COMMAND_ALLOWLIST
+        assert "curl" not in TERMINAL_COMMAND_ALLOWLIST
 
     def test_rm_is_not_allowed(self) -> None:
-        assert "rm" not in _TERMINAL_COMMAND_ALLOWLIST
+        assert "rm" not in TERMINAL_COMMAND_ALLOWLIST
 
     def test_wget_is_not_allowed(self) -> None:
-        assert "wget" not in _TERMINAL_COMMAND_ALLOWLIST
+        assert "wget" not in TERMINAL_COMMAND_ALLOWLIST
 
     def test_nc_is_not_allowed(self) -> None:
         """netcat / nc must not be in the allowlist (exfiltration risk)."""
-        assert "nc" not in _TERMINAL_COMMAND_ALLOWLIST
-        assert "netcat" not in _TERMINAL_COMMAND_ALLOWLIST
+        assert "nc" not in TERMINAL_COMMAND_ALLOWLIST
+        assert "netcat" not in TERMINAL_COMMAND_ALLOWLIST
 
 
 # ---------------------------------------------------------------------------
-# _SHELL_METACHAR_RE — shell metacharacter detection
+# SHELL_METACHAR_RE — shell metacharacter detection
 # ---------------------------------------------------------------------------
 
 
@@ -147,7 +146,7 @@ class TestShellMetacharPattern:
     )
     def test_detects_metachar(self, token: str) -> None:
         """Shell metacharacters are detected correctly."""
-        assert _SHELL_METACHAR_RE.search(token) is not None
+        assert SHELL_METACHAR_RE.search(token) is not None
 
     @pytest.mark.parametrize(
         "token",
@@ -163,11 +162,11 @@ class TestShellMetacharPattern:
     )
     def test_allows_safe_tokens(self, token: str) -> None:
         """Safe command tokens pass the metachar check."""
-        assert _SHELL_METACHAR_RE.search(token) is None
+        assert SHELL_METACHAR_RE.search(token) is None
 
 
 # ---------------------------------------------------------------------------
-# _ENV_NAME_RE — environment variable name validation
+# ENV_NAME_RE — environment variable name validation
 # ---------------------------------------------------------------------------
 
 
@@ -180,7 +179,7 @@ class TestEnvNamePattern:
     )
     def test_valid_names_match(self, name: str) -> None:
         """Valid POSIX env var names pass the pattern."""
-        assert _ENV_NAME_RE.match(name) is not None
+        assert ENV_NAME_RE.match(name) is not None
 
     @pytest.mark.parametrize(
         "name",
@@ -188,7 +187,7 @@ class TestEnvNamePattern:
     )
     def test_invalid_names_rejected(self, name: str) -> None:
         """Invalid env var names are rejected by the pattern."""
-        assert _ENV_NAME_RE.match(name) is None
+        assert ENV_NAME_RE.match(name) is None
 
 
 # ---------------------------------------------------------------------------

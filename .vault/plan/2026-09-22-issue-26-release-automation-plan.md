@@ -8,7 +8,7 @@ related:
   - '[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:d05077425f14f77f76da2788afe93678babff14f7e2c76b49031bc6d2a15abf2'
+body_hash: 'sha256:115ab664b35b55285e8ea6919beb654c310de9bb33668310e57346f64dd873b7'
 ---
 
 # `issue-26-release-automation` plan
@@ -42,6 +42,13 @@ the merge gate, so publication stays Dashboard-selected. S05 corrects a false
 "WAL unavailable" boot diagnostic found while re-verifying the Windows artifact.
 Both are corrections within settled constraints; no ADR is created.
 
+S06 through S08 approved 2026-09-23 - the user directed that every remaining
+medium and low audit finding be actioned in this session. S06 answers the engine
+leak, which turned out to reach the user's real app home; S07 extends S03's
+write-transaction fix to every other read-then-write transaction; S08 resolves
+the unconsumed worker demand-ready signal. All are corrections within settled
+constraints; no ADR is created.
+
 ## Steps
 
 - [x] `S01` - Give release-please exclusive ownership of version, lockfile, and changelog proposals while retaining guarded publication of an existing tag; `.github/workflows/release-please.yml, .github/workflows/release.yml, release-please-config.json, .release-please-manifest.json, CHANGELOG.md, Justfile, scripts/prepare_release.py, scripts/tests/test_prepare_release.py, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py`.
@@ -49,6 +56,9 @@ Both are corrections within settled constraints; no ADR is created.
 - [x] `S03` - Make the concurrent first-demand run-start failure in the lazy-worker certification diagnosable, identify its cause from real evidence, and remove the nondeterminism; `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py, src/vaultspec_a2a/database/session.py, src/vaultspec_a2a/database/__init__.py, src/vaultspec_a2a/database/tests/test_write_transaction.py, src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py`.
 - [x] `S04` - Make the release proposal mergeable: regenerate its lockfile and dispatch its required merge gate, and remove the remaining host-describing workflow text; `.github/workflows/release-please.yml, release-please-config.json, .github/ci-contract-allow.txt, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py, .github/workflows/test.yml, .github/workflows/release.yml, .github/workflows/migrations.yml, dev/toolchain.py`.
 - [x] `S05` - Make a fresh SQLite store report its serving journal mode at boot; `src/vaultspec_a2a/database/session.py, src/vaultspec_a2a/database/tests/test_wal_maintenance.py`.
+- [x] `S06` - Keep every test session off the user's real app home and refuse a mismatched engine request; `src/vaultspec_a2a/testing/runner_child.py, src/vaultspec_a2a/database/session.py`.
+- [ ] `S07` - Begin every read-then-write gateway transaction holding the SQLite write lock, without holding it across network or checkpoint I/O; `src/vaultspec_a2a/control/, src/vaultspec_a2a/api/routes/, src/vaultspec_a2a/database/reconciliation.py, src/vaultspec_a2a/worker/task_queue_port.py`.
+- [ ] `S08` - Resolve the worker demand-ready signal that nothing awaits; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/api/app.py`.
 
 ## Parallelization
 

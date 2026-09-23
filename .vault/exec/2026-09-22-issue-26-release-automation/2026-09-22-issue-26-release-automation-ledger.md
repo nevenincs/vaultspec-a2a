@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:a3fba579cbdb8981ac2e08866a33e9aad041ae79a7f6cad50f510d113dd8b79c'
+body_hash: 'sha256:8498d0b3d8302c60764942e0bf032bef0ed1bf11f459dc221816911dad237871'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -74,6 +74,12 @@ related:
 - `S05` `M` `src/vaultspec_a2a/api/app.py`
 - `S05` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
 - `S05` `verify:` `bare migrations leave a fresh store on the delete journal (probe)` -> `pass`
+- `S06` `M` `src/vaultspec_a2a/testing/runner_child.py`
+- `S06` `M` `src/vaultspec_a2a/database/session.py`
+- `S06` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S06` `M` `.vault/plan/2026-09-22-issue-26-release-automation-plan.md`
+- `S06` `verify:` `1742 passed; 3 testing/tests failures reproduce on HEAD (sandbox temp permission)` -> `pass`
+- `S06` `by:` `claude-opus`
 
 ## Notes
 
@@ -86,3 +92,4 @@ related:
 - `S03` Plan-close review: commit path rollback before the worker probe.
 - `S04` Plan-close review: guarded checkout ref; merge gate dispatched without a ref input so it validates the commit it reports on.
 - `S05` Plan-close review (high): warm-up moved behind migration and behind armed-boot validation as seat_sqlite_posture.
+- `S06` Data repair: dropped the rows table S03's first test draft created in C:/Users/hello/.vaultspec-a2a/vaultspec.db (verified schema, no a2a gateway running).

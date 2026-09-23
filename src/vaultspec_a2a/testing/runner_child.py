@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import tempfile
 
 import pytest
 
 from .runner import COMPLETION_OWNER_PID_ENV
+
+_A2A_HOME_ENV = "VAULTSPEC_A2A_HOME"
 
 
 def main() -> int:
@@ -15,6 +19,13 @@ def main() -> int:
     completion_endpoint = os.environ.pop("VAULTSPEC_PYTEST_COMPLETION_ENDPOINT", None)
     previous_owner = os.environ.pop(COMPLETION_OWNER_PID_ENV, None)
     os.environ.setdefault("VAULTSPEC_ENVIRONMENT", "development")
+    # Left unset, the app home defaults to the user's real ~/.vaultspec-a2a, and
+    # any code path that falls back to the default database would then open the
+    # user's live store. A session-private home makes that fallback harmless.
+    isolated_home: str | None = None
+    if _A2A_HOME_ENV not in os.environ:
+        isolated_home = tempfile.mkdtemp(prefix="vaultspec-a2a-test-home-")
+        os.environ[_A2A_HOME_ENV] = isolated_home
     try:
         if completion_endpoint:
             from .plugin import _send_completion_message
@@ -38,6 +49,9 @@ def main() -> int:
             )
         return int(exit_status)
     finally:
+        if isolated_home is not None:
+            os.environ.pop(_A2A_HOME_ENV, None)
+            shutil.rmtree(isolated_home, ignore_errors=True)
         if previous_environment is None:
             os.environ.pop("VAULTSPEC_ENVIRONMENT", None)
         else:

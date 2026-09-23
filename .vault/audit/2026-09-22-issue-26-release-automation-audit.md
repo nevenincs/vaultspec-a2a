@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:ac22bd4287a379a8f1da6990a25c0d568cc67ddb00141412be5f129f72b38895'
+body_hash: 'sha256:098df19b728d4e23f321653711fa75f45bb433cbce084dc2d535f6860cfc4745'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -135,9 +135,11 @@ Resolved: `database/session.py` `begin_write_transaction` opens a session's next
 
 Type: latent production concurrency defect, same class as lazy-worker-concurrency-flake. Only the run-start creation path now takes `begin_write_transaction`. Other read-then-write transactions keep the deferred `BEGIN` and fail immediately rather than wait when another connection commits between their read and their write; `control/action_lease.py` `record_dispatch_failure`, reached from callers other than initial dispatch, is one. Each such path should either take `begin_write_transaction` or be shown to write before it reads.
 
-### engine-singleton-test-leak | low | a database test leaves the module engine singleton seated | open
+### engine-singleton-test-leak | high | tests seated the process engine on the user's real app home | resolved
 
-Type: test isolation. Under `-n auto`, `init_db` in `database/tests/test_write_transaction.py`'s first draft returned an engine for a different file, logging `get_engine() called with URL ... but the engine singleton was already created`, because an earlier test on the same worker initialised the module engine and did not call `close_db`. The new test no longer uses the singleton. The leaking test was not identified.
+Type: test isolation and data safety; raised from low once measured. A per-test probe of `database.session._engine` found eleven tests leaving the engine seated on `sqlite+aiosqlite:///C:/Users/hello/.vaultspec-a2a/vaultspec.db`, the developer's live store. The route: `worker/graph_lifecycle.py:261-262` builds its task-queue and cost ports from `get_session_factory()` with no engine, which falls back to `get_engine()` and the settings default, and the test harness never relocated `VAULTSPEC_A2A_HOME`, whose default is the user's home. `get_engine` then compounded it: asked for a different explicit URL, it logged a warning and returned the seated engine, so a later `init_db(other)` ran against the wrong database. That is how S03's first test draft, which called `init_db` on its own file, created a `rows (id INTEGER PRIMARY KEY)` table with one row in the live store on 2026-09-23. The table was verified by schema and dropped with no a2a gateway running; no other test-shaped table was present, and the seating tests themselves were measured not to write the file.
+
+Resolved: `testing/runner_child.py` gives every test session a private temporary `VAULTSPEC_A2A_HOME` unless the caller set one, so a default-database fallback can only reach a throwaway store; re-probed, every seated engine points at `.../vaultspec-a2a-test-home-*/vaultspec.db` and the live store's hash is unchanged across the suites. `get_engine` now raises when an explicit URL names a different store than the seated engine. The three `testing/tests` failures seen in that run (`test_second_session_is_admitted_degraded`, `test_contended_pair_serializes_and_disjoint_groups_run_concurrently`, `test_runner_rejects_a_rebound_nested_xdist_receipt`) fail identically on `HEAD` without these changes: nested pytest sessions cannot create `%TEMP%\pytest-of-hello` in this sandbox.
 
 ### worker-demand-signal-unconsumed | low | the armed gateway sets a demand-ready event that nothing awaits | open
 

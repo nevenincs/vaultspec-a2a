@@ -266,18 +266,22 @@ def get_engine(
 
     Returns:
         The ``AsyncEngine`` instance.
+
+    Raises:
+        RuntimeError: If *database* names a different store than the engine
+            already seated; returning that engine would silently run every
+            later statement against the wrong database.
     """
     url = _resolve_database_url(database)
     global _engine
     if _engine is not None:
-        existing_url = str(_engine.url)
-        if existing_url != url:
-            logger.warning(
-                "get_engine() called with URL %r but the engine singleton was "
-                "already created with %r. Returning the existing engine.",
-                url,
-                existing_url,
+        existing_url = _engine.url.render_as_string(hide_password=False)
+        if database is not None and existing_url != url:
+            msg = (
+                f"get_engine() was asked for {url!r} but the engine is already "
+                f"seated on {existing_url!r}; call close_db() first."
             )
+            raise RuntimeError(msg)
         return _engine
 
     engine_kwargs: dict[str, object] = {"echo": echo}

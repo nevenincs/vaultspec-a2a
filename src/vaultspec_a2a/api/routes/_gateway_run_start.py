@@ -359,6 +359,10 @@ async def _create_run_core(
             frozen=_read_persisted_team_selection(existing.thread_metadata),
             replayed=True,
         )
+    # End the read before the awaits below: a snapshot held across admission
+    # goes stale under concurrent starts, and creation must open its own write
+    # transaction.
+    await db.rollback()
     run_id = body.run_id
 
     prepared = await _prepare_run_admission(request, body, commit_binding)

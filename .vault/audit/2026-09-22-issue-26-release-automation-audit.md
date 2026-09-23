@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#issue-26-release-automation'
 date: '2026-09-22'
-modified: '2026-09-22'
+modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:baf2169df37e71500862d285bbf5559ad7aa8e5f0761b58790a6fb4baa8dbcd9'
+body_hash: 'sha256:c9294089bb54fa08caf8c550c02f5d7de92e87d655b99ca35e2351601dbd8224'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -100,15 +100,24 @@ Type: operational prerequisite. `gw-laptop-linux-docker-arm64` and `gw-laptop-ma
 
 Type: release state. Every v0.3.0 Release run (last 2026-08-02) failed on the Windows lifecycle smoke on GitHub-hosted runners, and no v0.3.0 release exists. The tag is immutable and points at code 745 commits behind `main`. That Windows failure does not reproduce on `main` with S02 applied: on the Windows fleet host, the locked freeze, the workflow's frozen-tree check (1470 files accepted), and `scripts/prove_artifact_lifecycle.sh` (start, ready `/health`, stop, pid reaped) all pass. The intended recovery is the release-please lane: the next release PR from `main`, merged after its merge gate, then an explicit-tag `release.yml` dispatch once Dashboard selects it.
 
-### lazy-worker-concurrency-flake | medium | concurrent first-demand run starts intermittently return an unhandled 500 | open, evidence pending
+### lazy-worker-concurrency-flake | medium | concurrent first-demand run starts intermittently return an unhandled 500 | resolved
 
-Type: nondeterministic production or test behavior, root cause unconfirmed. `desktop_tests/test_lazy_worker.py::test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one` failed on the Linux runner on four commits across three branches (`a12fa422`, `7100df86`, `bc86a391`, `b88b1fd9`): one or two of four concurrent `POST /v1/runs` returned Starlette's generic `Internal Server Error`, and on `7100df86` a successful sibling returned `status: reconciling`. No source changed between the failing `b88b1fd9` and the passing `cd5979e1`.
+Type: production concurrency defect. `desktop_tests/test_lazy_worker.py::test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one` failed on the Linux runner on four commits across three branches (`a12fa422`, `7100df86`, `bc86a391`, `b88b1fd9`): one or two of four concurrent `POST /v1/runs` returned Starlette's generic `Internal Server Error`. Every earlier failure lost its gateway traceback to a tuple assertion message that pytest reduces to a short repr; the message is now a plain string carrying each response body and the full gateway log. About 90 local reproduction attempts on WSL2 Linux did not fail.
 
-Every failure lost its gateway traceback: the test passed a tuple as its assertion message, which pytest reduces to a short repr. The message is now a plain string carrying each response body and the full gateway log.
+The first CI failure carrying the full log (Full Validation run 35822419946 on `aa1d5034`) named the cause: `sqlite3.OperationalError: database is locked` raised from the INSERT in `database/thread_repository.py` `create_thread`, reached through `control/thread_service.py` `create_and_dispatch_thread`. Two defects combine:
 
-Local reproduction failed across about 90 runs on WSL2 Linux: isolated (15), all cores saturated (10), synchronous-write I/O plus CPU load (10), the CI ordering of the preceding desktop modules (6), four concurrent gateway/worker pairs (32), the whole tree pinned to one contended CPU (10), and inside the full serial suite. A passing trace shows the expected order: four acceptances, one single-flight worker start, four dispatches after readiness, and a mid-wait recovery pass that correctly examines nothing because the 90-second action lease holds.
+- Every SQLite transaction began with a deferred `BEGIN` (`database/session.py` `_begin_sqlite_transaction`). A deferred transaction that reads (the nickname check) and then writes fails at once, without consulting `busy_timeout`, when another connection commits between the two. Reproduced against the production engine posture: the upgrade fails in 0.001s with a 5s `busy_timeout`.
+- `api/routes/_gateway_run_start.py` `_create_run_core` opened that transaction with its idempotency read and held it across all of admission preparation (preset load, catalog selection validation), so the snapshot was stale by the time of the INSERT whenever a sibling run start committed first. The retry around creation waited 0.3s across four attempts, which concurrent siblings outlast.
 
-Ruled out by code reading: worker capacity (the default is 5, and refusals map to 503), `expire_on_commit` reloads (disabled), and startup-trigger reconciliation (startup only). A confirmed hazard remains unproven as the cause: the gateway opens SQLite transactions with a deferred `BEGIN` (`database/session.py:106-107`), and a deferred read-then-write fails immediately with `database is locked`, ignoring `busy_timeout`, when another connection commits in between; a scratch probe reproduced this at 0.000s. The run-start retry at `api/routes/_gateway_run_start.py:262-279` covers only the create-and-dispatch call. Next evidence: the first CI failure carrying the untruncated gateway log.
+Resolved: `database/session.py` `begin_write_transaction` opens a session's next transaction with `BEGIN IMMEDIATE` through a per-connection execution option, so the transaction holds the write lock before its first read and contention waits inside `busy_timeout`; the default remains a deferred `BEGIN`, so read paths are unchanged. `create_and_dispatch_thread` takes it for the acceptance transaction, the post-dispatch status election, and the initial dispatch-failure settlement. `_create_run_core` ends its idempotency read before preparation. `database/tests/test_write_transaction.py` holds both halves against real concurrent connections on a real file: the deferred refusal, the immediate transaction making a sibling wait, the mode not outliving its transaction, and refusal on a session already in a transaction. `configure_sqlite_engine` makes the production posture reusable so that test builds its own engine instead of relying on the module engine singleton.
+
+### deferred-read-then-write-elsewhere | medium | other gateway transactions read then write under a deferred BEGIN | open
+
+Type: latent production concurrency defect, same class as lazy-worker-concurrency-flake. Only the run-start creation path now takes `begin_write_transaction`. Other read-then-write transactions keep the deferred `BEGIN` and fail immediately rather than wait when another connection commits between their read and their write; `control/action_lease.py` `record_dispatch_failure`, reached from callers other than initial dispatch, is one. Each such path should either take `begin_write_transaction` or be shown to write before it reads.
+
+### engine-singleton-test-leak | low | a database test leaves the module engine singleton seated | open
+
+Type: test isolation. Under `-n auto`, `init_db` in `database/tests/test_write_transaction.py`'s first draft returned an engine for a different file, logging `get_engine() called with URL ... but the engine singleton was already created`, because an earlier test on the same worker initialised the module engine and did not call `close_db`. The new test no longer uses the singleton. The leaking test was not identified.
 
 ### worker-demand-signal-unconsumed | low | the armed gateway sets a demand-ready event that nothing awaits | open
 

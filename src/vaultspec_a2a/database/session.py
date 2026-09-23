@@ -31,8 +31,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "WalCheckpointResult",
     "application_session_factory",
+    "begin_write_transaction",
     "checkpoint_wal",
     "close_db",
+    "configure_sqlite_engine",
     "configure_sqlite_transactions",
     "get_db",
     "get_engine",
@@ -103,8 +105,34 @@ def _disable_driver_begin(dbapi_conn: sqlite3.Connection, _record: object) -> No
     dbapi_conn.isolation_level = None
 
 
+_SQLITE_BEGIN_MODE = "vaultspec_sqlite_begin"
+
+
 def _begin_sqlite_transaction(connection: Connection) -> None:
-    connection.exec_driver_sql("BEGIN")
+    if connection.get_execution_options().get(_SQLITE_BEGIN_MODE) == "IMMEDIATE":
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+    else:
+        connection.exec_driver_sql("BEGIN")
+
+
+async def begin_write_transaction(session: AsyncSession) -> None:
+    """Open *session*'s next transaction already holding the write lock.
+
+    A SQLite transaction begun deferred that reads before it writes cannot wait
+    for a concurrent writer: once another connection commits after that first
+    read, the upgrade to a write fails at once with ``database is locked`` and
+    ``busy_timeout`` is never consulted. ``BEGIN IMMEDIATE`` takes the write lock
+    before the first read, so contention waits inside ``busy_timeout`` instead.
+    Other dialects ignore the option.
+
+    Raises:
+        RuntimeError: If *session* already has a transaction open, whose begin
+            mode can no longer be chosen.
+    """
+    if session.in_transaction():
+        msg = "a write transaction must begin on a session with none open"
+        raise RuntimeError(msg)
+    await session.connection(execution_options={_SQLITE_BEGIN_MODE: "IMMEDIATE"})
 
 
 def configure_sqlite_transactions(engine: AsyncEngine) -> None:
@@ -115,6 +143,16 @@ def configure_sqlite_transactions(engine: AsyncEngine) -> None:
     """
     event.listen(engine.sync_engine, "connect", _disable_driver_begin)
     event.listen(engine.sync_engine, "begin", _begin_sqlite_transaction)
+
+
+def configure_sqlite_engine(engine: AsyncEngine) -> None:
+    """Apply the application's SQLite posture to *engine*.
+
+    SQLAlchemy owns transaction boundaries, and every connection runs in WAL
+    mode with the configured ``busy_timeout`` and foreign keys enforced.
+    """
+    configure_sqlite_transactions(engine)
+    event.listen(engine.sync_engine, "connect", _set_wal_mode)
 
 
 CheckpointMode = Literal["PASSIVE", "FULL", "RESTART", "TRUNCATE"]
@@ -250,8 +288,7 @@ def get_engine(
     _engine = create_async_engine(url, **engine_kwargs)
 
     if url.startswith("sqlite"):
-        configure_sqlite_transactions(_engine)
-        event.listen(_engine.sync_engine, "connect", _set_wal_mode)
+        configure_sqlite_engine(_engine)
 
     return _engine
 

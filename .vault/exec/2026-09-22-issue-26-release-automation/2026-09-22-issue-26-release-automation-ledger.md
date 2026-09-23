@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#issue-26-release-automation'
 date: '2026-09-22'
-modified: '2026-09-22'
+modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:42afb00bdc1f8b860c336f4bc8403eade118768ee2be48d37a10cf9f96aea6f8'
+body_hash: 'sha256:68c81f234186aaed4564dc68130845fe4c2eaf10af83ebec2823e1eb22ab2913'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -45,6 +45,13 @@ related:
 - `S03` `M` `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`
 - `S03` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
 - `S03` `verify:` `lazy-worker reproduction, ~90 runs across isolation, CPU, I/O, ordering, parallel, pinned-CPU conditions` -> `pass`
+- `S03` `M` `src/vaultspec_a2a/database/session.py`
+- `S03` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S03` `A` `src/vaultspec_a2a/database/tests/test_write_transaction.py`
+- `S03` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S03` `M` `src/vaultspec_a2a/api/routes/_gateway_run_start.py`
+- `S03` `verify:` `dev harness tests (130), ruff, ty on touched files` -> `pass`
+- `S03` `by:` `claude-opus`
 
 ## Notes
 
@@ -52,4 +59,4 @@ related:
 - `S02` Operator-owned blockers left open: gh-runner Docker access for the Windows Compose job; offline ARM64 Linux and macOS release runners.
 - `S02` Runner-placement contract test and host-describing workflow comments removed at the user's direction: the software does not test or describe its own infrastructure.
 - `S03` Root cause not yet identified: the failure reproduces only on the CI Linux runner, and every prior CI failure lost its gateway traceback to a truncated assertion message. S03 stays open pending that evidence.
-
+- `S03` Root cause confirmed from CI evidence; local Windows does not reproduce the race, so the fix is proven by the real-connection unit tests and the next Linux CI run.

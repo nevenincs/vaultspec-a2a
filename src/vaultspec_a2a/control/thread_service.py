@@ -38,6 +38,7 @@ from ..control.repair_transitions import (
 )
 from ..database import (
     ThreadStatusElectionOutcome,
+    begin_write_transaction,
     create_control_action,
     create_thread,
     elect_thread_status,
@@ -579,6 +580,7 @@ async def _failed_initial_dispatch(
     _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
     if typed_failure is None:
         raise RuntimeError("failed initial dispatch carries no failure type")
+    await begin_write_transaction(db)
     await record_dispatch_failure(
         db,
         claim,
@@ -651,6 +653,10 @@ async def create_and_dispatch_thread(
         if dispatch is not None
         else None
     )
+    # Concurrent run starts each read (the nickname check) before they write;
+    # only a transaction holding the write lock from its start can wait for
+    # a sibling's commit instead of failing on it.
+    await begin_write_transaction(db)
     thread = await create_thread(
         db,
         write_authority=RunWriteAuthority(
@@ -758,6 +764,7 @@ async def create_and_dispatch_thread(
 
     # -- Success ---------------------------------------------------------------
     expectation = thread_write_expectation(thread)
+    await begin_write_transaction(db)
     election = await elect_thread_status(
         db,
         thread.id,

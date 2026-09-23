@@ -384,6 +384,14 @@ async def init_db(
 
         await run_migrations(url)
 
+    if url.startswith("sqlite") and url != "sqlite+aiosqlite:///:memory:":
+        # WAL is applied by the connect listener, so a store fresh from
+        # migration stays on a rollback journal until a first connection.
+        # Opening one here makes the on-disk mode the serving mode before any
+        # caller inspects the file.
+        async with engine.connect():
+            pass
+
     return engine
 
 

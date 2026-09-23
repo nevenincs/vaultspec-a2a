@@ -43,6 +43,7 @@ from ..session import (
     checkpoint_wal,
     close_db,
     init_db,
+    inspect_sqlite_database,
 )
 
 if TYPE_CHECKING:
@@ -116,6 +117,39 @@ async def test_the_production_engine_leaves_the_log_bounded(runtime_dir: Path) -
 
     assert journal_mode == "wal"
     assert autocheckpoint > 0, "a zero autocheckpoint leaves the log unbounded"
+
+
+@pytest.mark.asyncio
+async def test_initialisation_puts_a_fresh_store_in_wal_on_disk(
+    runtime_dir: Path,
+) -> None:
+    """A store created on a rollback journal is WAL on disk once ``init_db`` returns.
+
+    Migration leaves a new store on SQLite's default rollback journal, and WAL is
+    requested per connection. The gateway's boot-time storage diagnostics read
+    the file through a connection of their own right after initialisation, so
+    unless initialisation itself put WAL into the file header they report "WAL
+    unavailable" for a store that is about to run in WAL.
+    """
+    database = runtime_dir / "fresh.db"
+    seed = sqlite3.connect(database)
+    try:
+        seed.execute("CREATE TABLE seed (id INTEGER PRIMARY KEY)")
+        seed.commit()
+    finally:
+        seed.close()
+    assert inspect_sqlite_database(database)["journal_mode"] == "delete"
+
+    # A leaked engine singleton would make init_db ignore ``database``.
+    await close_db()
+    try:
+        await init_db(database, apply_migrations=False)
+        diagnostics = inspect_sqlite_database(database)
+    finally:
+        await close_db()
+
+    assert diagnostics["journal_mode"] == "wal"
+    assert diagnostics["wal_enabled"] is True
 
 
 def test_sustained_writes_settle_at_the_ceiling_rather_than_growing(

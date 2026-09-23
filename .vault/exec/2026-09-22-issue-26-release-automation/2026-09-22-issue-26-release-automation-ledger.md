@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:a32d81d9bb7e4a37384027904908b2a041c55f9028af6110cdcd37d17db6d09b'
+body_hash: 'sha256:f346ee889d7c27079a0c62985c5bb5efdf58cd660674800e1dacbcb6e81e74bf'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -64,6 +64,10 @@ related:
 - `S04` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
 - `S04` `verify:` `PR #77 inspected: BLOCKED without merge gate, uv.lock 0.3.0 against pyproject 0.3.1` -> `pass`
 - `S04` `by:` `claude-opus`
+- `S05` `M` `src/vaultspec_a2a/database/session.py`
+- `S05` `M` `src/vaultspec_a2a/database/tests/test_wal_maintenance.py`
+- `S05` `verify:` `Windows freeze + prove_artifact_lifecycle.sh on 63cac8ac` -> `pass`
+- `S05` `by:` `claude-opus`
 
 ## Notes
 

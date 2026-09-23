@@ -16,6 +16,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from ...lifecycle import load_procs_config
+from ..children import await_child, child_tree_progress
 from ..ports import free_port
 from ..sessions import SESSION_LEASE_KEY, effective_worker_count
 
@@ -51,10 +52,13 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
     # peer has published too. The barrier is what makes the claim meaningful:
     # without it a fast child can finish and release before the slow one even
     # starts, and any overlap in the sets would be legitimate reuse, not a
-    # collision.
+    # collision. The barrier waits on observed conditions only: it fails the
+    # moment the peer exits without publishing, and gives up if the test that
+    # started it is gone, so no wall clock stands in for either.
     script = (
-        "import json, sys, time\n"
+        "import json, os, sys, time\n"
         "from pathlib import Path\n"
+        "import psutil\n"
         "from vaultspec_a2a.lifecycle import load_procs_config\n"
         "from vaultspec_a2a.testing.ports import free_port\n"
         "ports = [free_port() for _ in range(10)]\n"
@@ -63,11 +67,15 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
         "    'allocation fell back to ephemeral candidates; the reservation '\n"
         "    'path this proof exists to exercise never ran: %r' % ports)\n"
         "Path(sys.argv[1]).write_text(json.dumps(ports))\n"
-        "peer = Path(sys.argv[2])\n"
-        "deadline = time.monotonic() + 120\n"
-        "while not peer.exists() and time.monotonic() < deadline:\n"
+        "peer, peer_pid_file = Path(sys.argv[2]), Path(sys.argv[3])\n"
+        "parent = os.getppid()\n"
+        "while not peer.exists():\n"
+        "    text = peer_pid_file.read_text() if peer_pid_file.exists() else ''\n"
+        "    if text.strip().isdigit() and not psutil.pid_exists(int(text)):\n"
+        "        assert peer.exists(), 'peer exited without publishing'\n"
+        "    if not psutil.pid_exists(parent):\n"
+        "        sys.exit('the test that started this peer is gone')\n"
         "    time.sleep(0.05)\n"
-        "assert peer.exists(), 'peer never published; holds did not overlap'\n"
     )
     env = dict(os.environ)
     env["VAULTSPEC_A2A_PROCS_HOME"] = str(tmp_path / "procs")
@@ -80,13 +88,22 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
                 script,
                 str(tmp_path / f"{tag}.json"),
                 str(tmp_path / f"{peer}.json"),
+                str(tmp_path / f"{peer}.pid"),
             ],
             env=env,
         )
 
     first, second = _spawn("one", "two"), _spawn("two", "one")
-    assert first.wait(timeout=180) == 0
-    assert second.wait(timeout=180) == 0
+    (tmp_path / "one.pid").write_text(str(first.pid))
+    (tmp_path / "two.pid").write_text(str(second.pid))
+
+    # A child parked at the barrier makes no progress of its own while its peer
+    # is still importing, so each wait also watches the other child's tree.
+    def _both_children() -> object:
+        return (child_tree_progress(first.pid), child_tree_progress(second.pid))
+
+    assert await_child(first, what="first allocator", fingerprint=_both_children) == 0
+    assert await_child(second, what="second allocator", fingerprint=_both_children) == 0
     one = set(json.loads((tmp_path / "one.json").read_text()))
     two = set(json.loads((tmp_path / "two.json").read_text()))
     assert len(one) == 10 and len(two) == 10

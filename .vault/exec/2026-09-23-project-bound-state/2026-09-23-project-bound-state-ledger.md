@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:1a72796fef37e44800331c46f9b575a7ce7fa8e5581d6517c2e8eb18d3f6464e'
+body_hash: 'sha256:d7af0a696c8fe94dc0f537685219b6a6363ba42f63108097d18e7b07faa081f3'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -396,6 +396,7 @@ related:
 - `S15` `M` `src/vaultspec_a2a/control/health.py`
 - `S15` `M` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
 - `S15` `verify:` `pytest src/vaultspec_a2a/api/tests/test_gateway_live.py src/vaultspec_a2a/desktop_tests/test_readiness_model.py -n 4 --dist=loadgroup` -> `pass`
+- `S15` `verify:` `pytest src/vaultspec_a2a/testing/tests/test_default_safety.py::test_two_concurrent_processes_never_share_free_ports` -> `pass`
 
 ## Notes
 

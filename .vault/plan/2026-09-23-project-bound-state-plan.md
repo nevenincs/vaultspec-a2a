@@ -11,7 +11,7 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:4e4c3681aa5b38905d7a9b1ccb88c012282a05dc421711153f116b962095336b'
+body_hash: 'sha256:7a1d33d760b408f56a4a1cf9d258f4c07bca878b870dfe49661cbc0ee2f143ec'
 ---
 
 # `project-bound-state` plan
@@ -60,7 +60,7 @@ Every test session, script and generator writes only inside an ignored worktree 
 
 Compose, container, process-registry configuration, documentation and the dashboard engine and launcher speak the new names and locations.
 
-- [ ] `P04.S10` - Update compose files, container entrypoint, procs.toml and dev credential tooling to the new names and layout; `service/`.
+- [x] `P04.S10` - Update compose files, container entrypoint, procs.toml and dev credential tooling to the new names and layout; `service/`.
 - [ ] `P04.S11` - Patch the dashboard engine discovery, product launcher and agent E2E harness to the new names and location; `Y:/code/vaultspec-dashboard-worktrees/main/engine/`.
 - [ ] `P04.S12` - Update operator documentation for configuration and storage; `README.md`.
 

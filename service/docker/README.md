@@ -69,7 +69,7 @@ service-only volumes. Existing files in shipped named-volume workspaces are
 upgraded at worker startup for shared GID 1002 access without following
 symlinks; hard-linked, special, or foreign-owned files fail startup. Custom
 bind mounts must sit beneath the configured workspace root, set
-`VAULTSPEC_MANAGED_WORKSPACE_PERMISSIONS=false`, and be prepared by the operator
+`VAULTSPEC_A2A_MANAGED_WORKSPACE_PERMISSIONS=false`, and be prepared by the operator
 for group 1002 access. Their contents are not recursively rewritten. Set
 `VAULTSPEC_A2A_GATEWAY_TOKEN` to pin the bearer or read the
 generated `service.token` from the gateway volume. This is a trusted control

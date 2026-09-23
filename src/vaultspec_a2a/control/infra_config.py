@@ -242,6 +242,15 @@ class InfraConfig(ProjectSettings):
         ge=1,
         description="Unprivileged GID selected by provider_identity_launcher.",
     )
+    managed_workspace_permissions: bool = Field(
+        default=False,
+        description=(
+            "Compose only: let the container entrypoint take ownership of a "
+            "managed workspace volume and share it with the agent identity. "
+            "Leave false for an operator-prepared mount, which the entrypoint "
+            "then only validates."
+        ),
+    )
     project_root: Path = Field(
         default_factory=resolve_project_root,
         description=(

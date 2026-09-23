@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:80513fa7dd4b4b537340fc1a57d18dfcdfd1c2fe9ed3c19d2f626b5fe7a0097d'
+body_hash: 'sha256:d0c68e66d464bfd89d3372cf46a7acda302dd5fbcee42e4b2ec1a955b101d8c5'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -302,4 +302,15 @@ related:
 - `S09` `M` `src/vaultspec_a2a/workspace/tests/test_workspace.py`
 - `S09` `verify:` `pytest -n 6 full unit tier unpinned: 4655 passed, 5 failed, all load-sensitive timing tests that pass serially; after fixes testing/tests and tests -n 3: only the 30 s-budget runner tests and the degraded-admission test fail under load; no writes to ~/.vaultspec-a2a, ~/.vaultspec or C:\Users\hello\AppData\Local\Temp` -> `pass`
 - `S09` `by:` `claude`
+- `S10` `M` `.env.example`
+- `S10` `M` `service/README.md`
+- `S10` `M` `service/docker-compose.dev.yml`
+- `S10` `M` `service/docker-compose.integration.yml`
+- `S10` `M` `service/docker-compose.prod.yml`
+- `S10` `M` `service/docker/README.md`
+- `S10` `M` `service/docker/service_entrypoint.py`
+- `S10` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S10` `M` `src/vaultspec_a2a/service_tests/test_compose_provider_service_state_isolation.py`
+- `S10` `verify:` `docker: service_tests/test_compose_provider_service_state_isolation.py 3 passed against a freshly built prod image; test_compose_profile_regression.py 17 passed; test_env_example_coverage and lifecycle procs_config passed` -> `pass`
+- `S10` `by:` `claude`
 

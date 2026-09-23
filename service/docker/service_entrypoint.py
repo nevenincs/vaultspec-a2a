@@ -10,16 +10,24 @@ from typing import Any
 
 from sqlalchemy.engine import make_url
 
+from vaultspec_a2a.control.infra_config import InfraConfig
+from vaultspec_a2a.control.settings_base import env_name
+
 _DATA_ROOT = Path("/app/data")
 
 
+def _name(field: str) -> str:
+    """The environment name of a setting, taken from the schema that reads it."""
+    return env_name(InfraConfig, field)
+
+
 def _agent_gid() -> int:
-    raw = os.environ.get("VAULTSPEC_A2A_PROVIDER_AGENT_GID")
+    raw = os.environ.get(_name("provider_agent_gid"))
     if raw is None:
-        raise RuntimeError("VAULTSPEC_A2A_PROVIDER_AGENT_GID is required in the worker")
+        raise RuntimeError(f"{_name('provider_agent_gid')} is required in the worker")
     gid = int(raw)
     if gid < 1:
-        raise RuntimeError("VAULTSPEC_A2A_PROVIDER_AGENT_GID must be positive")
+        raise RuntimeError(f"{_name('provider_agent_gid')} must be positive")
     return gid
 
 
@@ -61,7 +69,7 @@ def _service_uid() -> int:
 def _migrate_managed_workspace(path: Path, agent_gid: int) -> None:
     """Upgrade one explicitly managed named-volume tree without following links."""
     service_uid = Path("/proc/self").stat().st_uid
-    allowed_owners = {service_uid, int(os.environ["VAULTSPEC_A2A_PROVIDER_AGENT_UID"])}
+    allowed_owners = {service_uid, int(os.environ[_name("provider_agent_uid")])}
     for directory, names, files, directory_fd in _required_posix("fwalk")(
         path, topdown=True, follow_symlinks=False
     ):
@@ -142,7 +150,7 @@ def _workspace_directory(path: Path) -> None:
     if not canonical_parent.is_relative_to(_DATA_ROOT):
         raise RuntimeError("Compose workspace root must remain beneath /app/data")
     agent_gid = _agent_gid()
-    managed = os.environ.get("VAULTSPEC_MANAGED_WORKSPACE_PERMISSIONS") == "true"
+    managed = os.environ.get(_name("managed_workspace_permissions")) == "true"
     if managed:
         _owned_directory(path, 0o2770)
         _migrate_managed_workspace(path, agent_gid)
@@ -193,20 +201,20 @@ def main() -> None:
     os.umask(0o077)
     _owned_directory(_DATA_ROOT, 0o711)
 
-    if os.environ.get("VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER"):
-        workspace = Path(os.environ["VAULTSPEC_A2A_WORKSPACE_ROOT"])
+    if os.environ.get(_name("provider_identity_launcher")):
+        workspace = Path(os.environ[_name("workspace_root")])
         _workspace_directory(workspace)
 
-    a2a_home = Path(os.environ["VAULTSPEC_A2A_HOME"])
+    a2a_home = Path(os.environ[_name("a2a_home")])
     if not a2a_home.is_absolute() or not a2a_home.parent.resolve(
         strict=True
     ).is_relative_to(Path("/app")):
-        raise RuntimeError("VAULTSPEC_A2A_HOME must name service state beneath /app")
+        raise RuntimeError(f"{_name('a2a_home')} must name service state beneath /app")
     _owned_directory(a2a_home, 0o700)
 
     for environment_name in (
-        "VAULTSPEC_A2A_DATABASE_URL",
-        "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
+        _name("database_url"),
+        _name("checkpoint_database_url"),
     ):
         database = _sqlite_path(environment_name)
         if database is not None:

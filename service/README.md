@@ -37,7 +37,7 @@ but cannot read the service-owned SQLite database or token handoff. Gateway and
 worker discovery state also use separate volumes. The worker safely upgrades
 existing files in shipped named volumes for shared GID 1002 access. Operators
 adding bind mounts must place them beneath the configured workspace root, set
-`VAULTSPEC_MANAGED_WORKSPACE_PERMISSIONS=false`, and prepare their contents for
+`VAULTSPEC_A2A_MANAGED_WORKSPACE_PERMISSIONS=false`, and prepare their contents for
 group 1002 access; startup validates the root rather than recursively changing
 host files. This remains a trusted single-control-plane profile, not a
 tenant-isolation boundary.

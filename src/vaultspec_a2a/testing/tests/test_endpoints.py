@@ -149,7 +149,7 @@ def test_environment_override_keeps_the_last_word(tmp_path: Path) -> None:
     )
     env = dict(os.environ)
     env["VAULTSPEC_A2A_GATEWAY_URL"] = "http://127.0.0.1:59999/"
-    env["VAULTSPEC_PROCS_HOME"] = str(tmp_path)
+    env["VAULTSPEC_A2A_PROCS_HOME"] = str(tmp_path)
     completed = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,

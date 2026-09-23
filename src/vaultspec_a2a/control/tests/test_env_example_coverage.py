@@ -29,11 +29,15 @@ from ...control.settings_base import field_env_names
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-# Settings that belong to the packaged desktop profile, which seats its own state
-# root and capsule assets. Neither is meaningful for a Compose deployment, so the
-# service example documents their absence rather than the settings.
+# Settings that belong to the packaged desktop profile, whose launcher sets its
+# state root, capsule assets and settlement receiver. None is meaningful for a
+# Compose deployment, so the service example documents their absence instead.
 _DESKTOP_ONLY = frozenset(
-    {"VAULTSPEC_A2A_DESKTOP_APP_HOME", "VAULTSPEC_A2A_CAPSULE_ASSETS"}
+    {
+        "VAULTSPEC_A2A_DESKTOP_APP_HOME",
+        "VAULTSPEC_A2A_CAPSULE_ASSETS",
+        "VAULTSPEC_A2A_DESKTOP_SETTLEMENT_URL",
+    }
 )
 
 # Compose's worker image owns these values. The example must describe them even

@@ -38,7 +38,6 @@ __all__ = [
 ]
 
 _PROCS_TOML_NAME = "procs.toml"
-_PROCS_TOML_ENV = "VAULTSPEC_PROCS_TOML"
 
 
 class ProcsConfigError(RuntimeError):
@@ -202,16 +201,12 @@ class ProcsConfig:
 
 
 def procs_config_path(path: str | os.PathLike[str] | None = None) -> Path:
-    """Resolve the procs.toml path: explicit arg, env override, or repo root."""
-    import os
+    """Resolve the procs.toml path: the explicit argument, else the configured one."""
     from pathlib import Path
 
     if path is not None:
         return Path(path)
-    override = os.environ.get(_PROCS_TOML_ENV)
-    if override:
-        return Path(override)
-    return settings.project_root / _PROCS_TOML_NAME
+    return settings.procs_table_path
 
 
 def _parse_band(role: str, raw: object) -> PortBand:

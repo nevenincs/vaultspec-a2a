@@ -27,7 +27,7 @@ from ...graph.enums import Provider
 from ..provider_catalog_service import _DISPLAY_NAMES, ProviderCatalogService
 
 _IN_PROCESS = {"deterministic", "mock"}
-_ARMING_ENV = "VAULTSPEC_SERVE_IN_PROCESS_LANES"
+_ARMING_ENV = "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"
 
 
 def _workspace() -> str:

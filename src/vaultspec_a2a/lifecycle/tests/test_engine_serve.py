@@ -19,12 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from ...testing import armed_environment as _environ
+from ...testing import settings_override
 from ...utils._process_tree import kill_pid_tree_async, pid_is_live
 from ..engine_serve import EngineSeatError, engine_command, resolve_data_seat, serve
-
-_SERVE_CMD_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
-_PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
 
 
 def test_resolve_data_seat_accepts_existing_dir_and_refuses_ambiguous(
@@ -40,8 +37,8 @@ def test_resolve_data_seat_accepts_existing_dir_and_refuses_ambiguous(
 
 
 def test_engine_command_substitutes_port_and_workspace() -> None:
-    with _environ(
-        VAULTSPEC_ENGINE_SERVE_CMD="engine --port {port} --data-dir {workspace}/store"
+    with settings_override(
+        engine_serve_cmd="engine --port {port} --data-dir {workspace}/store"
     ):
         cmd = engine_command(18761, "/seat")
     assert cmd == ["engine", "--port", "18761", "--data-dir", "/seat/store"]
@@ -51,7 +48,7 @@ def test_serve_refuses_an_ambiguous_seat_without_launching(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     # An empty seat is refused with exit 2 BEFORE any registry write or launch.
-    with _environ(**{_PROCS_HOME_ENV: str(tmp_path / "home")}):
+    with settings_override(procs_home=tmp_path / "home"):
         rc = serve(port=18760, name="probe", workspace="")
     assert rc == 2
     assert "refusing to launch" in capsys.readouterr().err
@@ -73,7 +70,7 @@ def test_serve_seats_the_engine_in_the_workspace_not_the_wrapper_cwd(
     fake_engine = f"{shlex.quote(sys.executable)} -c " + shlex.quote(
         "import os, pathlib; pathlib.Path('engine-store.txt').write_text(os.getcwd())"
     )
-    with _environ(**{_SERVE_CMD_ENV: fake_engine, _PROCS_HOME_ENV: str(home)}):
+    with settings_override(engine_serve_cmd=fake_engine, procs_home=home):
         rc = serve(port=18760, name="probe", workspace=str(seat))
     assert rc == 0
     landed = seat / "engine-store.txt"
@@ -98,9 +95,8 @@ def test_serve_reaps_descendants_when_engine_root_exits(tmp_path: Path) -> None:
     command = shlex.join([sys.executable, "-c", engine_code])
     descendant_pid: int | None = None
     try:
-        with _environ(
-            VAULTSPEC_ENGINE_SERVE_CMD=command,
-            VAULTSPEC_PROCS_HOME=str(tmp_path / "registry"),
+        with settings_override(
+            engine_serve_cmd=command, procs_home=tmp_path / "registry"
         ):
             exit_code = serve(port=18760, name="tree-probe", workspace=str(tmp_path))
         descendant_pid = int((tmp_path / "descendant.pid").read_text())

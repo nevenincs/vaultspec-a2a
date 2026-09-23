@@ -23,8 +23,11 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 
 from mcp.server.stdio import stdio_server
+from pydantic import Field
+from pydantic_settings import SettingsConfigDict
 
 from ...authoring import AuthoringClient
 from ...authoring.catalog import (
@@ -32,6 +35,7 @@ from ...authoring.catalog import (
     make_tool_dispatch,
     parse_catalog,
 )
+from ...control.settings_base import ENV_PREFIX, ProjectSettings, env_name
 from .tools.authoring_bridge import build_authoring_mcp_server
 
 __all__ = [
@@ -39,33 +43,58 @@ __all__ = [
     "ENV_BASE_URL",
     "ENV_BEARER",
     "ENV_CATALOG_JSON",
+    "ENV_DEBUG_MARKER",
     "ENV_RUN_ID",
     "ENV_SERVER_NAME",
+    "AuthoringBridgeSettings",
 ]
 
-# Env var names this bridge reads. The provider-side config builder writes the
-# same names (single source of truth: it imports these).
-ENV_BASE_URL = "VAULTSPEC_AUTHORING_BASE_URL"
-ENV_BEARER = "VAULTSPEC_AUTHORING_BEARER"
-ENV_ACTOR_TOKEN = "VAULTSPEC_AUTHORING_ACTOR_TOKEN"
-ENV_RUN_ID = "VAULTSPEC_AUTHORING_RUN_ID"
-ENV_SERVER_NAME = "VAULTSPEC_AUTHORING_SERVER_NAME"
-# The worker hands its already-fetched catalog snapshot (JSON) so the bridge
-# serves list_tools immediately without its own engine round-trip at spawn, and
-# so both sides serve the SAME snapshot (closing the independent-re-fetch drift
-# window). Carries only tool schemas, no secret. Absent = fall back to fetching.
-ENV_CATALOG_JSON = "VAULTSPEC_AUTHORING_CATALOG_JSON"
-# Debug-only: if set to a writable path, the bridge appends a value-free startup
-# line so an orchestrator can confirm the CLI actually spawned it. Never carries
-# tokens (R7); off unless explicitly enabled.
-ENV_DEBUG_MARKER = "VAULTSPEC_AUTHORING_DEBUG_MARKER"
+
+class AuthoringBridgeSettings(ProjectSettings):
+    """The bridge's configuration, handed to it by the provider-side builder.
+
+    Read from the process environment only, never from a dotenv: the bridge runs
+    in the agent's working directory, and a file there must not be able to point
+    the bridge at another engine or hand it another bearer.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=None,
+        env_prefix=f"{ENV_PREFIX}AUTHORING_",
+        extra="ignore",
+        env_ignore_empty=True,
+    )
+
+    base_url: str | None = None
+    bearer: str | None = Field(default=None, repr=False)
+    actor_token: str | None = Field(default=None, repr=False)
+    run_id: str | None = None
+    server_name: str | None = None
+    # The worker's already-fetched catalog snapshot (JSON), so the bridge serves
+    # list_tools without its own engine round-trip at spawn and both sides serve
+    # the SAME snapshot. Carries only tool schemas, no secret. Absent: fetch.
+    catalog_json: str | None = None
+    # Debug-only: a writable path the bridge appends a value-free startup line
+    # to, so an orchestrator can confirm the CLI actually spawned it. Never
+    # carries tokens; off unless set.
+    debug_marker: Path | None = None
+
+
+# The names the provider-side config builder writes, derived from the schema
+# above so the reader and the writer cannot disagree.
+ENV_BASE_URL = env_name(AuthoringBridgeSettings, "base_url")
+ENV_BEARER = env_name(AuthoringBridgeSettings, "bearer")
+ENV_ACTOR_TOKEN = env_name(AuthoringBridgeSettings, "actor_token")
+ENV_RUN_ID = env_name(AuthoringBridgeSettings, "run_id")
+ENV_SERVER_NAME = env_name(AuthoringBridgeSettings, "server_name")
+ENV_CATALOG_JSON = env_name(AuthoringBridgeSettings, "catalog_json")
+ENV_DEBUG_MARKER = env_name(AuthoringBridgeSettings, "debug_marker")
 
 _DEFAULT_SERVER_NAME = "vaultspec-authoring"
 
 
-def _write_startup_marker(stage: str) -> None:
-    path = os.environ.get(ENV_DEBUG_MARKER)
-    if not path:
+def _write_startup_marker(stage: str, path: Path | None) -> None:
+    if path is None:
         return
     try:
         with open(path, "a", encoding="utf-8") as fh:
@@ -75,12 +104,13 @@ def _write_startup_marker(stage: str) -> None:
 
 
 async def _amain() -> int:
-    _write_startup_marker("spawned")
-    base_url = os.environ.get(ENV_BASE_URL)
-    bearer = os.environ.get(ENV_BEARER)
-    actor_token = os.environ.get(ENV_ACTOR_TOKEN)
-    run_id = os.environ.get(ENV_RUN_ID)
-    server_name = os.environ.get(ENV_SERVER_NAME) or _DEFAULT_SERVER_NAME
+    configured = AuthoringBridgeSettings()
+    _write_startup_marker("spawned", configured.debug_marker)
+    base_url = configured.base_url
+    bearer = configured.bearer
+    actor_token = configured.actor_token
+    run_id = configured.run_id
+    server_name = configured.server_name or _DEFAULT_SERVER_NAME
 
     if not (base_url and bearer and actor_token and run_id):
         # R7: name the failure, never the values.
@@ -90,7 +120,7 @@ async def _amain() -> int:
         )
         return 2
 
-    handed = os.environ.get(ENV_CATALOG_JSON)
+    handed = configured.catalog_json
     async with AuthoringClient(base_url, bearer, actor_token=actor_token) as client:
         # Serve list_tools from the worker's handed snapshot when present (no
         # engine round-trip at spawn); the engine is reached only at execute time
@@ -103,7 +133,9 @@ async def _amain() -> int:
             client, run_id=run_id, actor_token=actor_token, snapshot=snapshot
         )
         server = build_authoring_mcp_server(snapshot, dispatch, server_name=server_name)
-        _write_startup_marker(f"serving tools={len(snapshot.tools)}")
+        _write_startup_marker(
+            f"serving tools={len(snapshot.tools)}", configured.debug_marker
+        )
         async with stdio_server() as (read_stream, write_stream):
             await server.run(
                 read_stream,

@@ -26,23 +26,6 @@ if TYPE_CHECKING:
 
     from .authoring.discovery import EngineEndpoint
 
-# Build no OTel exporter during tests. The trace SDK stays ACTIVE so
-# span-creation tests keep working; only the export side is off, so nothing
-# starts an export thread and no run competes with a collector that is not
-# there. A suite that needs real export - the Jaeger round-trip - overrides
-# both of these for its own subprocesses.
-#
-# These replace an earlier arrangement that left both exporters built and aimed
-# them at a non-routable TEST-NET address, on the theory that spans would then
-# be dropped silently. They are not: the gRPC exporter cannot distinguish an
-# unreachable collector from a slow one, so it retried on ten-second deadlines
-# and logged every failure for the life of the process. Worse, the metric half
-# was never off at all - OTEL_METRICS_EXPORTER is an SDK auto-configuration
-# variable, and this project builds its providers by hand, so until the
-# telemetry module began reading it the value changed nothing.
-os.environ.setdefault("OTEL_TRACES_EXPORTER", "none")
-os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
-
 
 # ---------------------------------------------------------------------------
 # The external-prerequisite rule — one rule, every suite
@@ -306,10 +289,10 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         what="the cross-repository dashboard serve command",
         supply=(
             "check out the dashboard repository, build its binary, and export "
-            "VAULTSPEC_ENGINE_SERVE_CMD as an absolute `... serve --no-seat "
+            "VAULTSPEC_A2A_ENGINE_SERVE_CMD as an absolute `... serve --no-seat "
             "--port {port} --workspace {workspace}` template"
         ),
-        probe=_env_set("VAULTSPEC_ENGINE_SERVE_CMD"),
+        probe=_env_set("VAULTSPEC_A2A_ENGINE_SERVE_CMD"),
     ),
     ExternalPrerequisite(
         "provider-catalog-live-selection",
@@ -329,7 +312,7 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
             "boot a workspace-local `vaultspec serve --no-seat` engine plus this "
             "branch's a2a gateway and worker with "
             "VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then export "
-            "VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
+            "VAULTSPEC_A2A_ENGINE_SERVICE_JSON and select -m service"
         ),
         probe=None,
     ),

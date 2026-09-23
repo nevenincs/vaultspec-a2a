@@ -243,6 +243,7 @@ class DomainSettingsConfig(DomainConfig):
         env_file_encoding="utf-8",
         env_prefix=ENV_PREFIX,
         extra="ignore",
+        env_ignore_empty=True,
     )
 
 

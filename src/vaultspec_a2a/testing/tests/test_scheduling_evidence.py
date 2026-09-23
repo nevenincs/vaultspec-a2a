@@ -141,7 +141,7 @@ def test_contended_pair_serializes_and_disjoint_groups_run_concurrently(
         "--dist=loadgroup",
         env_overrides={
             "EVIDENCE_DIR": str(evidence),
-            "VAULTSPEC_PROCS_HOME": str(tmp_path / "procs"),
+            "VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs"),
             # Pin the admission budget: this proof NEEDS its two workers, and
             # on a loaded box the capacity-derived count would rightly degrade
             # them away. The explicit operator budget is the sanctioned knob.
@@ -200,7 +200,7 @@ def test_group_names_merge_overlapping_exclusive_sets(tmp_path: Path) -> None:
     )
     completed = _run_pytest(
         suite,
-        env_overrides={"VAULTSPEC_PROCS_HOME": str(tmp_path / "procs")},
+        env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
@@ -220,7 +220,7 @@ def test_undeclared_live_tier_tests_join_the_serial_catchall(
     )
     completed = _run_pytest(
         suite,
-        env_overrides={"VAULTSPEC_PROCS_HOME": str(tmp_path / "procs")},
+        env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
@@ -240,7 +240,7 @@ def test_backstop_timeout_derives_from_the_claimed_resource(
     )
     completed = _run_pytest(
         suite,
-        env_overrides={"VAULTSPEC_PROCS_HOME": str(tmp_path / "procs")},
+        env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
@@ -256,7 +256,7 @@ def test_unknown_resource_keys_fail_collection_loudly(tmp_path: Path) -> None:
     )
     completed = _run_pytest(
         suite,
-        env_overrides={"VAULTSPEC_PROCS_HOME": str(tmp_path / "procs")},
+        env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
     assert completed.returncode != 0
     assert "loopback-stak" in completed.stdout + completed.stderr
@@ -271,7 +271,7 @@ def test_registry_backed_fixture_refuses_undeclared_use(tmp_path: Path) -> None:
     )
     completed = _run_pytest(
         suite,
-        env_overrides={"VAULTSPEC_PROCS_HOME": str(tmp_path / "procs")},
+        env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
     assert completed.returncode != 0
     assert "without declaring" in completed.stdout + completed.stderr

@@ -30,9 +30,7 @@ from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
 from ._worker_health import (
-    GATEWAY_LIFETIME_ENV,
     GATEWAY_LIFETIME_ID,
-    WORKER_GENERATION_ENV,
     WorkerState,
     _build_worker_restart_detail,
     _desktop_worker_port_clear,
@@ -52,8 +50,7 @@ from ._worker_readiness import (
     WorkerReadySpec,
     _await_worker_ready,
 )
-from .config import settings
-from .infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV
+from .config import setting_env, settings
 from .worker_status import WorkerConnectionStatus
 
 __all__ = [
@@ -138,14 +135,14 @@ async def _spawn_worker(
     # Injecting VAULTSPEC_A2A_GATEWAY_URL ensures the worker always points at
     # the correct gateway regardless of how it was started.
     spawn_env = os.environ.copy()
-    spawn_env[GATEWAY_URL_ENV] = settings.gateway_url
-    spawn_env["VAULTSPEC_A2A_PORT"] = str(settings.port)
-    spawn_env["VAULTSPEC_A2A_WORKER_PORT"] = str(settings.worker_port)
-    spawn_env["VAULTSPEC_A2A_WORKER_HOST"] = settings.worker_host
+    spawn_env[setting_env("gateway_url")] = settings.gateway_url
+    spawn_env[setting_env("port")] = str(settings.port)
+    spawn_env[setting_env("worker_port")] = str(settings.worker_port)
+    spawn_env[setting_env("worker_host")] = settings.worker_host
     if settings.internal_token is not None:
-        spawn_env[INTERNAL_TOKEN_ENV] = settings.internal_token
-    spawn_env[GATEWAY_LIFETIME_ENV] = GATEWAY_LIFETIME_ID
-    spawn_env[WORKER_GENERATION_ENV] = str(generation)
+        spawn_env[setting_env("internal_token")] = settings.internal_token
+    spawn_env[setting_env("gateway_lifetime_id")] = GATEWAY_LIFETIME_ID
+    spawn_env[setting_env("worker_generation")] = str(generation)
 
     stderr_log_path = _worker_stderr_log_path(worker_port)
     stderr_log_path.parent.mkdir(parents=True, exist_ok=True)

@@ -248,10 +248,12 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     # ${NAME} references and never the real values; the CLI expands each from
     # its own spawn environment at config-parse time. The sibling projection
     # test below asserts the other half - that the real values ARE hoisted.
-    assert env["VAULTSPEC_AUTHORING_BASE_URL"] == "${VAULTSPEC_AUTHORING_BASE_URL}"
+    assert (
+        env["VAULTSPEC_A2A_AUTHORING_BASE_URL"] == "${VAULTSPEC_A2A_AUTHORING_BASE_URL}"
+    )
     # The provider sets run_id to the run's thread_id.
-    assert env["VAULTSPEC_AUTHORING_RUN_ID"] == "${VAULTSPEC_AUTHORING_RUN_ID}"
-    assert env["VAULTSPEC_AUTHORING_BEARER"] == "${VAULTSPEC_AUTHORING_BEARER}"
+    assert env["VAULTSPEC_A2A_AUTHORING_RUN_ID"] == "${VAULTSPEC_A2A_AUTHORING_RUN_ID}"
+    assert env["VAULTSPEC_A2A_AUTHORING_BEARER"] == "${VAULTSPEC_A2A_AUTHORING_BEARER}"
     # The real bearer never rides the argv-serialized surface.
     assert "machine-bearer-xyz" not in json.dumps(servers)
 
@@ -316,8 +318,8 @@ async def test_stdio_binding_hoists_secrets_without_touching_the_workspace(
     # The real bearer is hoisted into the subprocess spawn env, which is where
     # the CLI expands the ${...} references the session surface carries.
     spawn_env = recorded["authoring_env"]
-    assert spawn_env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
-    assert spawn_env["VAULTSPEC_AUTHORING_RUN_ID"] == _THREAD_ID
+    assert spawn_env["VAULTSPEC_A2A_AUTHORING_BEARER"] == "machine-bearer-xyz"
+    assert spawn_env["VAULTSPEC_A2A_AUTHORING_RUN_ID"] == _THREAD_ID
     # Nothing is left behind in the run workspace either, on any path.
     assert not (tmp_path / ".mcp.json").exists()
     assert not (tmp_path / ".claude" / "settings.local.json").exists()

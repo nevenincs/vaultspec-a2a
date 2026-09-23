@@ -5,7 +5,7 @@ own discovery file, applying the reference discipline verbatim: a present file
 is trusted only when its heartbeat is fresh AND a real ``GET /health`` returns
 200. A stale or crashed file (the documented 20-hour-stale specimen) is skipped,
 never owned. Candidate order puts an explicit override
-(``VAULTSPEC_ENGINE_SERVICE_JSON``, which a ``--no-seat`` workspace-local serve
+(``VAULTSPEC_A2A_ENGINE_SERVICE_JSON``, which a ``--no-seat`` workspace-local serve
 writes) ahead of the machine-global ``~/.vaultspec/service.json``.
 
 The bearer is read out of the file and never logged.
@@ -15,11 +15,9 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import httpx
@@ -28,11 +26,11 @@ from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
 __all__ = [
     "DESKTOP_RECORD_VERSION",
     "HEARTBEAT_STALE_MS",
-    "SERVICE_JSON_ENV",
     "EngineEndpoint",
     "heartbeat_is_fresh",
     "parse_discovery_record",
@@ -42,7 +40,6 @@ __all__ = [
     "service_json_candidates",
 ]
 
-SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
 
 # The versioned desktop record's identifying version and profile. The producer
 # authority for this shape is ``lifecycle.discovery``; it is mirrored here (the
@@ -220,18 +217,16 @@ class EngineEndpoint:
 def service_json_candidates() -> list[Path]:
     """Return the ordered service.json candidate paths this process consults.
 
-    The explicit override (:data:`SERVICE_JSON_ENV`) is tried first, then the
-    machine-global ``~/.vaultspec/service.json``. Exported so every reader of
+    The configured ``engine_service_json`` is the one candidate: the engine
+    publishes its record per workspace, and the setting defaults to that record
+    inside the project a2a serves. Exported so every reader of
     the discovery file shares this ordering rather than restating it — a
     caller that only classifies freshness (never resolves a live endpoint)
     still needs the same candidate list.
     """
-    candidates: list[Path] = []
-    env_path = os.environ.get(SERVICE_JSON_ENV)
-    if env_path:
-        candidates.append(Path(env_path))
-    candidates.append(Path.home() / ".vaultspec" / "service.json")
-    return candidates
+    from ..control.config import settings
+
+    return [settings.engine_discovery_path]
 
 
 def resolve_engine(*, liveness_timeout: float = 3.0) -> EngineEndpoint | None:

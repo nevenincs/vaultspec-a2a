@@ -114,12 +114,12 @@ def test_declaring_an_absent_prerequisite_aborts_before_collection() -> None:
         "--require-prerequisite=dashboard-engine",
         "--collect-only",
         "-q",
-        without=("VAULTSPEC_ENGINE_SERVE_CMD",),
+        without=("VAULTSPEC_A2A_ENGINE_SERVE_CMD",),
     )
     assert result.returncode == _USAGE_ERROR, result.stdout + result.stderr
     combined = result.stdout + result.stderr
     assert "prerequisites this host does not have: dashboard-engine" in combined
-    assert "VAULTSPEC_ENGINE_SERVE_CMD" in combined, combined
+    assert "VAULTSPEC_A2A_ENGINE_SERVE_CMD" in combined, combined
 
 
 def test_absent_cross_repo_engine_is_disclosed_never_a_red_gate() -> None:
@@ -144,13 +144,13 @@ def test_absent_cross_repo_engine_is_disclosed_never_a_red_gate() -> None:
         "-m",
         "service",
         _LOST_ACK,
-        without=("VAULTSPEC_ENGINE_SERVE_CMD",),
+        without=("VAULTSPEC_A2A_ENGINE_SERVE_CMD",),
     )
     combined = result.stdout + result.stderr
     assert result.returncode == 0, combined
     assert "withheld 1 live proof(s)" in combined, combined
     assert "dashboard-engine" in combined, combined
-    assert "VAULTSPEC_ENGINE_SERVE_CMD" in combined, combined
+    assert "VAULTSPEC_A2A_ENGINE_SERVE_CMD" in combined, combined
 
 
 def test_live_provider_proofs_deselect_until_every_resource_is_declared() -> None:
@@ -164,7 +164,7 @@ def test_live_provider_proofs_deselect_until_every_resource_is_declared() -> Non
         "-q",
         *_LIVE_PROVIDER_TESTS,
         without=(
-            "VAULTSPEC_ENGINE_SERVE_CMD",
+            "VAULTSPEC_A2A_ENGINE_SERVE_CMD",
             "VAULTSPEC_LIVE_PROVIDER_ID",
             "VAULTSPEC_LIVE_EXECUTION_MODE",
             "VAULTSPEC_LIVE_ENTRY_ID",
@@ -209,7 +209,7 @@ def test_declared_live_provider_selector_fails_before_collection_when_unset() ->
 def test_live_provider_proofs_collect_only_after_all_resources_are_declared() -> None:
     """Collection requires explicit authorization, before either process can start."""
     required_env = {
-        "VAULTSPEC_ENGINE_SERVE_CMD": sys.executable,
+        "VAULTSPEC_A2A_ENGINE_SERVE_CMD": sys.executable,
         "VAULTSPEC_LIVE_PROVIDER_ID": "collection-authorized",
         "VAULTSPEC_LIVE_EXECUTION_MODE": "collection-authorized",
         "VAULTSPEC_LIVE_ENTRY_ID": "collection-authorized",

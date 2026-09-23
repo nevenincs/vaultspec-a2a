@@ -4,7 +4,7 @@ No mocks: these exercise the real ``AuthoringClient`` against a live engine on
 loopback, resolved through the discovery-file contract. They are ``service``
 marked and excluded from the default profile; when selected with no reachable
 engine they skip with a runbook pointer (an infrastructure gate, not a masked
-code failure). Set ``VAULTSPEC_ENGINE_SERVICE_JSON`` to point at the engine's
+code failure). Set ``VAULTSPEC_A2A_ENGINE_SERVICE_JSON`` to point at the engine's
 discovery file (a ``--no-seat`` serve writes a workspace-local one).
 
 Verified live at authoring time: catalog schema ``authoring.semantic_tools.v1``

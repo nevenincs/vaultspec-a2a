@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from .procs_config import ProcsConfigError, load_procs_config
 from .registry import (
-    NAME_ENV,
     ProcRecord,
     RegistryOwnershipError,
     now_ms,
@@ -88,7 +87,7 @@ def register_serve(
     Returns ``None`` - registering nothing - when procs.toml is unreadable, the
     role is unknown, or *port* is not inside the role's band (a resident or
     ad-hoc port). Otherwise writes a claiming record keyed on the port (or
-    ``VAULTSPEC_PROCS_NAME``) and returns it, so the caller can refresh and
+    ``VAULTSPEC_A2A_PROCS_NAME``) and returns it, so the caller can refresh and
     deregister it.
     """
     workspace = options.get("workspace", "")
@@ -101,9 +100,10 @@ def register_serve(
     resolved_config = _eligible_config(role, port, config)
     if resolved_config is None:
         return None
+    from ..control.config import settings
     from .manager import default_procs_owner
 
-    resolved_name = name or os.environ.get(NAME_ENV) or str(port)
+    resolved_name = name or settings.procs_name or str(port)
     resolved_owner = owner if owner is not None else default_procs_owner()
     stamp = now_ms()
     existing = read_record(record_path(role, resolved_name, home=home))

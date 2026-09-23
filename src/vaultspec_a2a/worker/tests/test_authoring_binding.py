@@ -234,7 +234,7 @@ async def test_binding_for_fetches_catalog_once_per_run_live() -> None:
     endpoint = resolve_engine()
     if endpoint is None:
         pytest.skip(
-            "no reachable authoring engine; set VAULTSPEC_ENGINE_SERVICE_JSON and "
+            "no reachable authoring engine; set VAULTSPEC_A2A_ENGINE_SERVICE_JSON and "
             "start `vaultspec serve` per the runbook"
         )
     run_id = f"binding-live-{uuid.uuid4().hex[:8]}"

@@ -60,7 +60,7 @@ def test_an_external_lane_is_never_returned_for_an_in_process_request() -> None:
     """
     with pytest.raises(NoSelectableLaneError) as refusal:
         in_process_selection(_payload(CODEX))
-    assert "VAULTSPEC_SERVE_IN_PROCESS_LANES" in str(refusal.value)
+    assert "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES" in str(refusal.value)
     # The refusal names what WAS served, because the cause is an environment
     # fact that is invisible from "no lane" alone.
     assert "codex/codex-app-server" in str(refusal.value)

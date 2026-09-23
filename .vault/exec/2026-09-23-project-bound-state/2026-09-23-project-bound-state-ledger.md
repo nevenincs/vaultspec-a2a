@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:8a758fad21adfada7ad50fb79c69766076517d8c8234b3570e2e32686b9af0f7'
+body_hash: 'sha256:7ff89f8bd4a18bb28937ce497a0cad63d6288a06dca63f89ea4549c920355538'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -108,4 +108,78 @@ related:
 - `S02` `M` `src/vaultspec_a2a/workspace/tests/test_environment.py`
 - `S02` `verify:` `pytest -n 8 unit tier: 4637 passed, 11 failed (4 nested-pytest C:\Users\hello\AppData\Local\Temp denial and 2 worktree-basetemp venv tests owned by P03.S08; 2 live tests pass in isolation; 3 env-example fixed)` -> `pass`
 - `S02` `by:` `claude`
+- `S03` `M` `.env.example`
+- `S03` `M` `.vault/audit/2026-09-23-project-bound-state-audit.md`
+- `S03` `M` `conftest.py`
+- `S03` `M` `pyproject.toml`
+- `S03` `M` `src/vaultspec_a2a/acceptance/tests/_harness.py`
+- `S03` `M` `src/vaultspec_a2a/acceptance/tests/test_deterministic_completion.py`
+- `S03` `M` `src/vaultspec_a2a/api/tests/test_catalog_restart_redispatch.py`
+- `S03` `M` `src/vaultspec_a2a/authoring/__init__.py`
+- `S03` `M` `src/vaultspec_a2a/authoring/discovery.py`
+- `S03` `M` `src/vaultspec_a2a/authoring/tests/test_client_reresolve.py`
+- `S03` `M` `src/vaultspec_a2a/authoring/tests/test_discovery_unit.py`
+- `S03` `M` `src/vaultspec_a2a/authoring/tests/test_discovery_versioned.py`
+- `S03` `M` `src/vaultspec_a2a/authoring/tests/test_live_engine.py`
+- `S03` `M` `src/vaultspec_a2a/authoring/tests/test_review_forward_live.py`
+- `S03` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_live.py`
+- `S03` `M` `src/vaultspec_a2a/cli/main.py`
+- `S03` `M` `src/vaultspec_a2a/conftest.py`
+- `S03` `M` `src/vaultspec_a2a/control/_worker_health.py`
+- `S03` `M` `src/vaultspec_a2a/control/config.py`
+- `S03` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_pairing_identity.py`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py`
+- `S03` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S03` `M` `src/vaultspec_a2a/desktop/settlement.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/_catalog.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/test_ownership_prerequisites.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/test_run_admission.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/test_service_state_pairing_echo.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py`
+- `S03` `M` `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`
+- `S03` `M` `src/vaultspec_a2a/domain_config.py`
+- `S03` `M` `src/vaultspec_a2a/graph/tests/acp_simulator.py`
+- `S03` `M` `src/vaultspec_a2a/graph/tests/nodes/test_feedback_grounding_live.py`
+- `S03` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py`
+- `S03` `M` `src/vaultspec_a2a/lifecycle/engine_serve.py`
+- `S03` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S03` `M` `src/vaultspec_a2a/lifecycle/procs_config.py`
+- `S03` `M` `src/vaultspec_a2a/lifecycle/registration.py`
+- `S03` `M` `src/vaultspec_a2a/lifecycle/registry.py`
+- `S03` `M` `src/vaultspec_a2a/lifecycle/tests/test_engine_serve.py`
+- `S03` `M` `src/vaultspec_a2a/lifecycle/tests/test_manager.py`
+- `S03` `M` `src/vaultspec_a2a/protocols/mcp/authoring_stdio.py`
+- `S03` `M` `src/vaultspec_a2a/providers/_acp_authoring.py`
+- `S03` `M` `src/vaultspec_a2a/providers/_codex_config_home.py`
+- `S03` `M` `src/vaultspec_a2a/providers/antigravity_catalog.py`
+- `S03` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S03` `M` `src/vaultspec_a2a/providers/in_process_catalog.py`
+- `S03` `M` `src/vaultspec_a2a/providers/tests/test_authoring_stdio_bridge.py`
+- `S03` `M` `src/vaultspec_a2a/providers/tests/test_catalog_service_posture.py`
+- `S03` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S03` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S03` `M` `src/vaultspec_a2a/providers/tests/test_in_process_catalog.py`
+- `S03` `M` `src/vaultspec_a2a/service_tests/harness.py`
+- `S03` `M` `src/vaultspec_a2a/service_tests/test_clarification_loop_stitched.py`
+- `S03` `M` `src/vaultspec_a2a/service_tests/test_dashboard_provider_catalog_live.py`
+- `S03` `M` `src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py`
+- `S03` `M` `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`
+- `S03` `M` `src/vaultspec_a2a/telemetry/instrumentation.py`
+- `S03` `M` `src/vaultspec_a2a/testing/leases.py`
+- `S03` `M` `src/vaultspec_a2a/testing/tests/_support/catalog_selection.py`
+- `S03` `M` `src/vaultspec_a2a/testing/tests/test_catalog_selection.py`
+- `S03` `M` `src/vaultspec_a2a/testing/tests/test_default_safety.py`
+- `S03` `M` `src/vaultspec_a2a/testing/tests/test_endpoints.py`
+- `S03` `M` `src/vaultspec_a2a/testing/tests/test_scheduling_evidence.py`
+- `S03` `M` `src/vaultspec_a2a/tests/test_prerequisite_rule.py`
+- `S03` `M` `src/vaultspec_a2a/worker/app.py`
+- `S03` `M` `src/vaultspec_a2a/worker/tests/test_authoring_binding.py`
+- `S03` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S03` `M` `src/vaultspec_a2a/workspace/environment.py`
+- `S03` `verify:` `pytest S03-affected files and lifecycle, telemetry, protocols: 437 passed; remaining failures are the nested-pytest C:\Users\hello\AppData\Local\Temp denial (P03.S08) and load-sensitive admission tests that pass in isolation; ty and ruff clean` -> `pass`
+- `S03` `by:` `claude`
 

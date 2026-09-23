@@ -15,7 +15,7 @@ in-process mock lane, and a "take whatever is selectable" derivation would pick 
 real, billable provider on any developer box that happens to hold a live session
 for one - silently substituting a lane none of these certifications asked for.
 Every armed desktop gateway this module is pointed at must serve the in-process
-lanes (``VAULTSPEC_SERVE_IN_PROCESS_LANES=true``); an unarmed gateway fails here
+lanes (``VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES=true``); an unarmed gateway fails here
 by naming the missing declaration rather than by picking something else.
 """
 

@@ -363,7 +363,7 @@ def test_dashboard_catalog_selection_completes_and_replays_with_frozen_assignmen
     with (
         armed_gateway(
             tmp_path,
-            VAULTSPEC_ENGINE_SERVICE_JSON=str(
+            VAULTSPEC_A2A_ENGINE_SERVICE_JSON=str(
                 scenario.workspace / ".vault" / "data" / "engine-data" / "service.json"
             ),
         ) as (gateway_base, auth),

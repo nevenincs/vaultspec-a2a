@@ -7,7 +7,7 @@ subscriber uses in production (``resolve_engine``) and reports an absent engine
 through the repository's one external-prerequisite rule - a skip naming the
 runbook line, or a failure when the caller declared ``loopback-stack`` present.
 ``service``-marked and excluded from the default profile. Point
-``VAULTSPEC_ENGINE_SERVICE_JSON`` at the engine's discovery file for a
+``VAULTSPEC_A2A_ENGINE_SERVICE_JSON`` at the engine's discovery file for a
 ``--no-seat`` workspace-local serve.
 
 What this proves live against the review-outbox engine build

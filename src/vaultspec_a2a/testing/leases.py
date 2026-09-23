@@ -22,7 +22,7 @@ retrying if one did, so the two acquisition orders cannot deadlock or admit an
 overlap.
 
 The lease home sits beside the dev-process registry (a ``leases`` subdirectory
-of the procs home), so ``VAULTSPEC_PROCS_HOME`` isolation and explicit
+of the procs home), so ``VAULTSPEC_A2A_PROCS_HOME`` isolation and explicit
 ``home:`` injection flow through unchanged, and leases arbitrate across
 concurrent test sessions on the whole machine, not only within one run.
 """

@@ -80,7 +80,7 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     - ``VAULTSPEC_*``: this service's OWN infrastructure state (gateway/internal
       bearer tokens, port wiring). Handing agents the tokens that authenticate
       the control plane would let a spawned agent impersonate the
-      infrastructure. Additive ``VAULTSPEC_AUTHORING_*`` bridge values are
+      infrastructure. Additive ``VAULTSPEC_A2A_AUTHORING_*`` bridge values are
       re-injected explicitly by the provider layer after this base.
     - ``ANTHROPIC_LOG``: ``debug`` makes the Anthropic SDK emit debug text to
       stdout, corrupting the ACP JSON-RPC stream (-32603 parse errors). The

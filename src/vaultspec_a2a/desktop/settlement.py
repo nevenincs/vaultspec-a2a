@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -38,9 +37,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# The dashboard publishes the absolute URL of its terminal-settlement receiver
-# here. Absent, settlement is not configured for this process and is skipped.
-SETTLEMENT_URL_ENV = "VAULTSPEC_DESKTOP_SETTLEMENT_URL"
 
 # Bounded delivery: at most this many attempts, each under this timeout, with an
 # exponentially backed-off pause capped so the total wait stays small.
@@ -70,11 +66,13 @@ class SettlementResult:
 def settlement_endpoint() -> str | None:
     """Return the configured dashboard settlement URL, or ``None`` if unset.
 
-    Reads the published endpoint from the environment and accepts it only when it
+    Reads the endpoint the dashboard published and accepts it only when it
     is a non-empty absolute HTTP(S) URL, so a blank or malformed value disables
     settlement fail-soft rather than producing an unusable target.
     """
-    raw = os.environ.get(SETTLEMENT_URL_ENV, "").strip()
+    from ..control.config import settings
+
+    raw = (settings.desktop_settlement_url or "").strip()
     if not raw:
         return None
     if not (raw.startswith("http://") or raw.startswith("https://")):

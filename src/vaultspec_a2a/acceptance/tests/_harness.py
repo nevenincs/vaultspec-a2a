@@ -325,9 +325,9 @@ def certified_gateway(
         # fixed content beside a real provider; certification is exactly the
         # deployment that must select one, because an executing run here may
         # never spend. Set before *extra_env* so a caller can still override it.
-        env["VAULTSPEC_SERVE_IN_PROCESS_LANES"] = "true"
+        env["VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"] = "true"
         if settlement_url is not None:
-            env["VAULTSPEC_DESKTOP_SETTLEMENT_URL"] = settlement_url
+            env["VAULTSPEC_A2A_DESKTOP_SETTLEMENT_URL"] = settlement_url
         env.update(extra_env)
         return spawn_gateway(
             script=script,

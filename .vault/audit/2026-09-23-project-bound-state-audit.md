@@ -87,6 +87,27 @@ worktrees no longer see each other; admission still bounds workers by sampled ma
 load. Status: accepted consequence of `2026-09-23-project-bound-state-adr`, refines
 `2026-08-02-resource-aware-test-execution-adr`.
 
+### antigravity-catalog-env-fixed | info | Antigravity catalog discovery now uses the agent scrub
+
+`providers/antigravity_catalog.py:147` builds the child environment through
+`workspace/environment.py:55` like every other catalog lane. Status: fixed in `P01.S03`.
+
+### load-sensitive-admission-tests | low | Admission and dashboard-contract tests fail under machine load
+
+`desktop_tests/test_run_admission.py::test_reservation_times_out_and_expired_commit_creates_no_run`
+runs a 3-second reservation lifetime against a cold lazy worker start, and
+`acceptance/tests/test_dashboard_contract.py` and `api/tests/test_gateway_live.py` share
+the same first-demand readiness race. Each passed in isolation and on repeat during
+`P01.S02` and `P01.S03`, and failed only while another session loaded the host.
+Status: open; not owned by this plan.
+
+### env-coverage-vacuous | medium | The env-example coverage test never checked prefix-derived names
+
+`control/tests/test_env_example_coverage.py` read only explicit aliases, so every
+un-aliased setting (nine at the time) could go undocumented while the test passed.
+Status: fixed in `P01.S02` by extracting names through `control/settings_base.py`
+`field_env_names`.
+
 ## Recommendations
 
 - Keep the storage-anchor gate as the enforcement point for the new rules (no profile, temp or raw environment use in production) so regressions fail review rather than surface as leaks.

@@ -73,7 +73,8 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance.tests._harness import certified_gateway
-from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine_with_retry
+from ..authoring.discovery import resolve_engine_with_retry
+from ..control.config import setting_env
 from ..team.team_config import load_team_config
 from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
@@ -127,7 +128,7 @@ _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 _ENGINE_RECORD = Path.home() / ".vaultspec" / "service.json"
 _SUPPLY_ENGINE = (
     f"start the vaultspec engine so it publishes {_ENGINE_RECORD} "
-    f"(or point {SERVICE_JSON_ENV} at a live record)"
+    f"(or point {setting_env('engine_service_json')} at a live record)"
 )
 
 _WORKER_READY_BUDGET_SECONDS = "120"

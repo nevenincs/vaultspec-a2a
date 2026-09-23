@@ -29,7 +29,9 @@ def _record_config_home(path: str) -> None:
         "workspace_mcp_json": None,
         "workspace_settings_json": None,
         "authoring_env": {
-            k: v for k, v in os.environ.items() if k.startswith("VAULTSPEC_AUTHORING_")
+            k: v
+            for k, v in os.environ.items()
+            if k.startswith("VAULTSPEC_A2A_AUTHORING_")
         },
     }
     if home:

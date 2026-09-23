@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from .procs_config import ProcsConfig, RoleConfig
 
 __all__ = [
-    "NAME_ENV",
     "PortReservation",
     "ProcRecord",
     "RegistryOwnershipError",
@@ -69,13 +68,6 @@ _RESERVATION_SUFFIX = ".reserved"
 # steals the port - a race observed live handing one scratch port to two
 # concurrent allocators. Genuine clock anomalies sit far outside this window.
 _FUTURE_SKEW_TOLERANCE_MS = 10_000
-
-_PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
-# The managed-process name env var: written into a self-registering child's
-# environment by the lifecycle serve path and read back by the registration path.
-# Single home here (both modules already import from registry) so writer and reader
-# never drift.
-NAME_ENV = "VAULTSPEC_PROCS_NAME"
 
 
 class RegistryOwnershipError(RuntimeError):
@@ -112,7 +104,7 @@ class ProcRecord:  # pylint: disable=too-many-instance-attributes
     last_seen_ms: int = 0
     log_path: str | None = None
     owner: str = ""
-    # The explicit engine discovery file (VAULTSPEC_ENGINE_SERVICE_JSON) the worker
+    # The explicit engine discovery file (VAULTSPEC_A2A_ENGINE_SERVICE_JSON) the worker
     # needs to find its engine. Recorded here - not committed to procs.toml, it is a
     # machine path - and re-injected on every boot/resume so an engine reseat can no
     # longer strand the worker via invisible shell-inherited env. Empty means unset.
@@ -142,20 +134,12 @@ def now_ms() -> int:
 
 
 def procs_home(home: Path | None = None) -> Path:
-    """Resolve the registry home: explicit arg, env override, or ``~/.vaultspec/procs``.
-
-    The ``VAULTSPEC_PROCS_HOME`` override exists for test isolation and for adopting
-    an interim state-file directory; the default is the machine-global home shared
-    with the engine's service.json.
-    """
-    from pathlib import Path as _Path
+    """Resolve the registry home: the explicit argument, else the configured one."""
+    from ..control.config import settings
 
     if home is not None:
         return home
-    override = os.environ.get(_PROCS_HOME_ENV)
-    if override:
-        return _Path(override)
-    return _Path.home() / ".vaultspec" / "procs"
+    return settings.registry_home
 
 
 def record_path(role: str, name: str, *, home: Path | None = None) -> Path:

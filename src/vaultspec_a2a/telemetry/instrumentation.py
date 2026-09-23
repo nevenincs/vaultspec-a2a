@@ -16,10 +16,9 @@ exactly ``"true"`` across four env names, where an open-coded truthiness check
 accepted ``1``/``yes`` and saw only one name.
 
 Credential safety: this module never reads, logs, or forwards
-``CLAUDE_CODE_OAUTH_TOKEN`` or any other secret. The only env vars it reads
-itself are the standard OTel vars listed below.
-
-OTel environment variables consumed (all read at import time):
+``CLAUDE_CODE_OAUTH_TOKEN`` or any other secret. Its configuration is the
+``otel_*`` settings, each read under a ``VAULTSPEC_A2A_OTEL_*`` name that wins
+over the standard OTel name listed below (all read once, at import time):
     OTEL_SERVICE_NAME: Service name emitted in every span (default: vaultspec-a2a).
     OTEL_SERVICE_VERSION: Version string (default: the installed package version).
     OTEL_EXPORTER_OTLP_ENDPOINT: gRPC endpoint (default: http://localhost:4317).
@@ -49,12 +48,11 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import logging
-import os
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast, override
 
 from opentelemetry import metrics, trace
 
-from ..control.infra_config import DEFAULT_OTLP_ENDPOINT
+from ..control.config import settings
 from ..utils.version import package_version
 
 if TYPE_CHECKING:
@@ -70,7 +68,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# These module-level env var reads are intentional.  OTel SDK
+# These module-level settings reads are intentional.  OTel SDK
 # configuration must be determined at import time so that ``get_tracer`` and
 # ``get_meter`` callers at module scope (e.g. the aggregator) receive a correctly
 # configured provider.  Changing telemetry config at runtime is explicitly out of
@@ -79,40 +77,27 @@ logger = logging.getLogger(__name__)
 # SDK_DISABLED (and other constants below) are evaluated once at import
 # time.  Tests that need to vary this behaviour must use subprocess isolation
 # (e.g. ``subprocess.run([sys.executable, ...])`` with a custom env dict) rather
-# than monkeypatching the env var after import — the constant will not re-evaluate.
-_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "vaultspec-a2a")
-_SERVICE_VERSION = os.environ.get("OTEL_SERVICE_VERSION", package_version())
-_OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_OTLP_ENDPOINT)
-SDK_DISABLED = os.environ.get("OTEL_SDK_DISABLED", "").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-_INSECURE = os.environ.get("OTEL_EXPORTER_OTLP_INSECURE", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-_CONSOLE_EXPORT = os.environ.get("OTEL_EXPORTER_CONSOLE", "").lower() in (
-    "1",
-    "true",
-    "yes",
-)
+# than changing the environment after import — the constant will not re-evaluate.
+_SERVICE_NAME = settings.otel_service_name
+_SERVICE_VERSION = settings.otel_service_version or package_version()
+_OTLP_ENDPOINT = settings.otel_exporter_otlp_endpoint
+SDK_DISABLED = settings.otel_sdk_disabled
+_INSECURE = settings.otel_exporter_otlp_insecure
+_CONSOLE_EXPORT = settings.otel_exporter_console
 
 
-def _signal_export_disabled(env_name: str) -> bool:
-    """Return whether *env_name* selects the specification's ``none`` exporter.
+def _signal_export_disabled(selected: str | None) -> bool:
+    """Return whether *selected* is the specification's ``none`` exporter.
 
     Unset is NOT ``none``: the specification's default is the OTLP exporter, and
-    an absent variable must keep meaning "export normally" so a deployment that
+    an absent value must keep meaning "export normally" so a deployment that
     never heard of this switch is unaffected.
     """
-    selected = os.environ.get(env_name, "").strip().lower()
-    return selected == "none"
+    return (selected or "").strip().lower() == "none"
 
 
-_TRACES_EXPORT_DISABLED = _signal_export_disabled("OTEL_TRACES_EXPORTER")
-_METRICS_EXPORT_DISABLED = _signal_export_disabled("OTEL_METRICS_EXPORTER")
+_TRACES_EXPORT_DISABLED = _signal_export_disabled(settings.otel_traces_exporter)
+_METRICS_EXPORT_DISABLED = _signal_export_disabled(settings.otel_metrics_exporter)
 
 _OTLP_EXPORTER_MODULES = (
     "opentelemetry.exporter",

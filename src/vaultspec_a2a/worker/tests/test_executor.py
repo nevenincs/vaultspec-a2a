@@ -1708,9 +1708,9 @@ class TestAuthoringBridgeFailClosed:
                 # ~/.vaultspec/service.json fallback resolves nothing either.
                 empty_home = tmp_path / "home"
                 empty_home.mkdir()
-                keys = ("VAULTSPEC_ENGINE_SERVICE_JSON", "USERPROFILE", "HOME")
+                keys = ("VAULTSPEC_A2A_ENGINE_SERVICE_JSON", "USERPROFILE", "HOME")
                 saved = {k: os.environ.get(k) for k in keys}
-                os.environ["VAULTSPEC_ENGINE_SERVICE_JSON"] = str(
+                os.environ["VAULTSPEC_A2A_ENGINE_SERVICE_JSON"] = str(
                     tmp_path / "nope.json"
                 )
                 os.environ["USERPROFILE"] = str(empty_home)

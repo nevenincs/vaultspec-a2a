@@ -29,12 +29,10 @@ from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 import httpx
 
-from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
 from ..control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ..utils._process_tree import detached_spawn_kwargs, kill_pid_tree_async
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
-    NAME_ENV,
     PortReservation,
     ProcRecord,
     StalenessState,
@@ -79,7 +77,6 @@ __all__ = [
     "tree_kill",
 ]
 
-_OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
 # The SIGKILL-escalation budget tree_kill's sync wrapper passes to the shared
 # async kill primitive's kill_timeout - kept here as this synchronous surface's
 # own declared second phase rather than left implicit in the async default.
@@ -104,8 +101,9 @@ class ProcVerdict:
 def default_procs_owner() -> str:
     """The owner label stamped on CLI-spawned registry records.
 
-    Honours ``VAULTSPEC_PROCS_OWNER`` (a session or agent label) so concurrent
-    operators claim distinct ownership; falls back to a process-scoped label.
+    Honours the configured ``procs_owner`` (a session or agent label) so
+    concurrent operators claim distinct ownership; falls back to a process-scoped
+    label.
 
     This is a *registry* label, not an operating-system principal: it identifies
     the session or agent that claimed a :class:`~.registry.ProcRecord`, and it
@@ -113,7 +111,9 @@ def default_procs_owner() -> str:
     different concept with a different lifetime -
     :func:`~.singleton.default_owner`.
     """
-    return os.environ.get(_OWNER_ENV) or f"cli-{os.getpid()}"
+    from ..control.config import settings
+
+    return settings.procs_owner or f"cli-{os.getpid()}"
 
 
 def endpoint_for(record: ProcRecord) -> str:
@@ -577,7 +577,8 @@ def _serve_env(
     a second, foreign-owned record that the owner-check would then refuse.
 
     A recorded *engine_service_json* is injected under
-    :data:`_ENGINE_SERVICE_JSON_ENV` so the worker's engine discovery no longer
+    the ``engine_service_json`` setting's name so the worker's engine discovery no
+    longer
     depends on the booting shell having exported it - the reseat-strands-worker gap.
     *internal_token_file* (a PATH, read here) is injected as the internal-IPC token,
     *gateway_url* as the paired gateway URL (worker -> gateway), and *worker_url* as
@@ -594,10 +595,12 @@ def _serve_env(
     gateway_url = options.get("gateway_url", "")
     worker_url = options.get("worker_url", "")
     env = render_env(role_cfg.env, port=port, workspace=workspace)
-    env[NAME_ENV] = name
-    env[_OWNER_ENV] = owner
+    from ..control.config import setting_env
+
+    env[setting_env("procs_name")] = name
+    env[setting_env("procs_owner")] = owner
     if engine_service_json:
-        env[_ENGINE_SERVICE_JSON_ENV] = engine_service_json
+        env[setting_env("engine_service_json")] = engine_service_json
     if internal_token_file:
         env[INTERNAL_TOKEN_ENV] = _read_internal_token(
             internal_token_file, label=f"{role_cfg.name}-{name}"
@@ -789,8 +792,10 @@ def _health_probe_for(
     ``status`` fact and therefore presents the paired IPC credential when one
     was supplied for the boot.
     """
-    is_gateway = "VAULTSPEC_A2A_PORT" in role_cfg.env
-    is_worker = "VAULTSPEC_A2A_WORKER_PORT" in role_cfg.env
+    from ..control.config import setting_env
+
+    is_gateway = setting_env("port") in role_cfg.env
+    is_worker = setting_env("worker_port") in role_cfg.env
     if not (is_gateway or is_worker):
         return None
 

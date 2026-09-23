@@ -17,7 +17,6 @@ bearer never silently degrades into an infinite quiet retry.
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -26,11 +25,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing import settings_override
 from ...testing.tests._support.http_handlers import JsonReplyHandler
 from .. import AuthoringClient
 from .._envelope import AuthoringResponse
 from .._errors import AuthoringError, AuthoringTransportError
-from ..discovery import SERVICE_JSON_ENV, resolve_engine
+from ..discovery import resolve_engine
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -136,25 +136,16 @@ def live_engine() -> Iterator[_LiveEngine]:
 
 @pytest.fixture
 def service_json(live_engine: _LiveEngine, tmp_path: Path) -> Iterator[Path]:
-    """A real discovery file for ``resolve_engine`` pinned via the env override.
+    """A real discovery file for ``resolve_engine`` pinned through settings.
 
-    The env var is the first (and here only) discovery candidate, so the real
+    The configured record is discovery's only candidate, so the real
     ``resolve_engine`` reads this file and confirms liveness against the live
-    loopback engine - the production path, not a stand-in. The override env var
-    is the discovery module's own public contract (:data:`SERVICE_JSON_ENV`); it
-    is saved and restored around the test rather than monkeypatched.
+    loopback engine - the production path, not a stand-in.
     """
     path = tmp_path / "service.json"
     _write_service_json(path, live_engine.port, _BOOT_BEARER)
-    previous = os.environ.get(SERVICE_JSON_ENV)
-    os.environ[SERVICE_JSON_ENV] = str(path)
-    try:
+    with settings_override(engine_service_json=path):
         yield path
-    finally:
-        if previous is None:
-            os.environ.pop(SERVICE_JSON_ENV, None)
-        else:
-            os.environ[SERVICE_JSON_ENV] = previous
 
 
 @pytest.mark.asyncio

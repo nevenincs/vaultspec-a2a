@@ -393,7 +393,11 @@ known-first-party = ["vaultspec_a2a"]
 # Pydantic resolves field annotations at class-build time, so imports used only
 # as model field types are runtime-required, not type-checking-only. Teaching
 # TCH this keeps such imports at module scope instead of a TYPE_CHECKING block.
-runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+runtime-evaluated-base-classes = [
+  "pydantic.BaseModel",
+  "pydantic_settings.BaseSettings",
+  "vaultspec_a2a.control.settings_base.ProjectSettings",
+]
 
 [tool.ruff.format]
 quote-style = "double"

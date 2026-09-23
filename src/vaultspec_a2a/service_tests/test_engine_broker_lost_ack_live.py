@@ -7,7 +7,7 @@ transport loss only: no response or application behavior is synthesized.
 
 The dashboard is a separate repository, so this proof carries an external
 prerequisite. It is reported under the repository's one rule (see the root
-conftest): absent ``VAULTSPEC_ENGINE_SERVE_CMD`` is an honest skip naming the
+conftest): absent ``VAULTSPEC_A2A_ENGINE_SERVE_CMD`` is an honest skip naming the
 runbook, exactly like the sibling live suites, and a caller that declares
 ``--require-prerequisite=dashboard-engine`` gets a failure instead.
 """
@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _RUN_ID = "run-cross-repo-lost-ack"
-_ENGINE_COMMAND_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
+_ENGINE_COMMAND_ENV = "VAULTSPEC_A2A_ENGINE_SERVE_CMD"
 _MAX_RELAY_MESSAGE_BYTES = 4 * 1024 * 1024
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 
@@ -655,7 +655,7 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
     with (
         armed_gateway(
             tmp_path,
-            VAULTSPEC_ENGINE_SERVICE_JSON=str(
+            VAULTSPEC_A2A_ENGINE_SERVICE_JSON=str(
                 workspace / ".vault" / "data" / "engine-data" / "service.json"
             ),
         ) as (

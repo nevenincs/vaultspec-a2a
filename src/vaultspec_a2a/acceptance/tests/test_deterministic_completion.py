@@ -27,10 +27,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from ...authoring import AuthoringClient, AuthoringResponse, Denial, mint_actor_token
-from ...authoring.discovery import (
-    SERVICE_JSON_ENV,
-    EngineEndpoint,
-)
+from ...control.config import setting_env, settings
 from ...control.run_start_policy import required_role_ids
 from ...team.team_config import load_team_config
 from ...thread.enums import TERMINAL_STATUS_VALUES
@@ -38,6 +35,7 @@ from ._harness import certified_gateway
 from .conftest import wait_for_run_status
 
 if TYPE_CHECKING:
+    from ...authoring.discovery import EngineEndpoint
     from ._harness import CertifiedGateway
 
 _BUNDLE_ROOT_ENV = "VAULTSPEC_ACCEPTANCE_BUNDLE_DIR"
@@ -311,9 +309,10 @@ def _build_completion_plan(live_engine: EngineEndpoint) -> _CompletionPlan:
     # line, and becomes a hard failure for a caller that declared `loopback-stack`
     # present - which is how this suite keeps "no engine is a failure, not a
     # skip" without a red gate that says nothing about THIS repository's health.
-    service_json = os.environ.get(SERVICE_JSON_ENV)
+    service_json = settings.engine_service_json
     assert service_json, (
-        f"deterministic completion requires {SERVICE_JSON_ENV} to bind its "
+        f"deterministic completion requires {setting_env('engine_service_json')} "
+        "to bind its "
         "materialized artifacts to the engine workspace"
     )
     vault_root = Path(service_json).parents[2]

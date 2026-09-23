@@ -805,11 +805,11 @@ def test_pin_leaves_a_non_registry_spec_untouched(tmp_path: Path) -> None:
         "name": "vaultspec-authoring",
         "command": "python",
         "args": ["-m", "example"],
-        "env": [{"name": "VAULTSPEC_AUTHORING_RUN_ID", "value": "run-1"}],
+        "env": [{"name": "VAULTSPEC_A2A_AUTHORING_RUN_ID", "value": "run-1"}],
     }
     pinned = pin_harness_mcp_servers([bridge], project_root=str(tmp_path))
     assert pinned[0]["env"] == [
-        {"name": "VAULTSPEC_AUTHORING_RUN_ID", "value": "run-1"}
+        {"name": "VAULTSPEC_A2A_AUTHORING_RUN_ID", "value": "run-1"}
     ]
 
 
@@ -873,7 +873,7 @@ def test_compose_pins_beside_an_existing_bridge_without_touching_it(
             {
                 "name": "vaultspec-authoring",
                 "command": "python",
-                "env": [{"name": "VAULTSPEC_AUTHORING_RUN_ID", "value": "run-1"}],
+                "env": [{"name": "VAULTSPEC_A2A_AUTHORING_RUN_ID", "value": "run-1"}],
             }
         ],
     )
@@ -881,7 +881,7 @@ def test_compose_pins_beside_an_existing_bridge_without_touching_it(
     assert isinstance(composed, AcpChatModel)
     by_name = {spec["name"]: spec for spec in composed.mcp_servers}
     assert by_name["vaultspec-authoring"]["env"] == [
-        {"name": "VAULTSPEC_AUTHORING_RUN_ID", "value": "run-1"}
+        {"name": "VAULTSPEC_A2A_AUTHORING_RUN_ID", "value": "run-1"}
     ]
     assert by_name[RAG]["env"] == [{"name": RAG_PIN_VARIABLE, "value": str(tmp_path)}]
 

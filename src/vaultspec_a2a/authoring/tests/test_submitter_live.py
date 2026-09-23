@@ -3,7 +3,7 @@
 Mock-free against the running dashboard engine on loopback, resolved through the
 discovery-file contract (``service`` marked, skipped when no engine is reachable
 — an infrastructure gate, not a masked failure). Set
-``VAULTSPEC_ENGINE_SERVICE_JSON`` to the engine's discovery file.
+``VAULTSPEC_A2A_ENGINE_SERVICE_JSON`` to the engine's discovery file.
 
 Proves the idempotency and replay-safety properties this submitter demands on
 real engine state:

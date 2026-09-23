@@ -42,7 +42,6 @@ from .codex_catalog import discover_codex_catalog
 from .in_process_catalog import (
     IN_PROCESS_EXECUTION_MODES,
     discover_in_process_catalog,
-    in_process_lane_serving_armed,
     served_in_process_lanes,
 )
 from .kimi_catalog import discover_kimi_catalog
@@ -773,7 +772,7 @@ class ProviderFactory:
         """
         discovery_root = workspace_root
         armed = (
-            in_process_lane_serving_armed()
+            settings.serve_in_process_lanes
             if serve_in_process_lanes is None
             else serve_in_process_lanes
         )

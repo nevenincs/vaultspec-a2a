@@ -3,7 +3,7 @@
 No mocks: this drives a real engine on loopback, resolved through the same
 discovery-file contract every other live-engine suite in this package uses
 (``service`` marked, skipped — never faked — when no engine is reachable). Set
-``VAULTSPEC_ENGINE_SERVICE_JSON`` to the engine's discovery file before
+``VAULTSPEC_A2A_ENGINE_SERVICE_JSON`` to the engine's discovery file before
 selecting ``-m service``.
 
 The audit finding this closes: a document proposal can reach ``needs_review``

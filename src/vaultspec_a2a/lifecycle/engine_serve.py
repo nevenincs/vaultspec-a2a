@@ -14,7 +14,7 @@ open - which is data corruption, not mere inconvenience. So the seat is an
 explicit, validated directory (``resolve_data_seat``) and the engine is launched
 with an explicit ``cwd`` there; an unset/missing seat is refused loudly rather
 than defaulted. The engine invocation stays configuration via
-``VAULTSPEC_ENGINE_SERVE_CMD`` (``{port}`` and ``{workspace}`` substituted), so a
+``VAULTSPEC_A2A_ENGINE_SERVE_CMD`` (``{port}`` and ``{workspace}`` substituted), so a
 template can also pass an explicit ``--data-dir {workspace}/...`` rather than lean
 on cwd alone.
 """
@@ -25,7 +25,6 @@ import argparse
 import asyncio
 import contextlib
 import logging
-import os
 import shlex
 import signal
 import subprocess
@@ -60,7 +59,6 @@ __all__ = [
 ]
 
 _ROLE = "engine-dev"
-_SERVE_CMD_ENV = "VAULTSPEC_ENGINE_SERVE_CMD"
 _DEFAULT_SERVE_CMD = "vaultspec serve --no-seat --port {port}"
 _HEARTBEAT_SECONDS = 15.0
 logger = logging.getLogger(__name__)
@@ -97,7 +95,7 @@ def resolve_data_seat(raw: str) -> str:
 def engine_command(port: int, workspace: str) -> list[str]:
     """The engine launch command with ``{port}``/``{workspace}`` substituted.
 
-    Shell-splits the ``VAULTSPEC_ENGINE_SERVE_CMD`` template, then delegates token
+    Shell-splits the configured ``engine_serve_cmd`` template, then delegates token
     substitution to the lifecycle's :func:`render_command` (the single substitution
     implementation - no parallel copy). Threading ``{workspace}`` lets a template
     seat the data store explicitly (``--scope {workspace}`` /
@@ -105,7 +103,9 @@ def engine_command(port: int, workspace: str) -> list[str]:
     ``{python}`` token render_command also resolves is simply absent from engine
     templates.
     """
-    template = os.environ.get(_SERVE_CMD_ENV) or _DEFAULT_SERVE_CMD
+    from ..control.config import settings
+
+    template = settings.engine_serve_cmd or _DEFAULT_SERVE_CMD
     return render_command(shlex.split(template), port=port, workspace=workspace)
 
 
@@ -152,7 +152,8 @@ def serve(*, port: int, name: str | None, workspace: str) -> int:
     except OSError as exc:
         print(
             f"engine-serve: cannot launch {command[0]!r}: {exc}. "
-            "Set VAULTSPEC_ENGINE_SERVE_CMD or ensure the engine binary is on PATH.",
+            "Set VAULTSPEC_A2A_ENGINE_SERVE_CMD or ensure the engine binary is on "
+            "PATH.",
             file=sys.stderr,
         )
         return 127

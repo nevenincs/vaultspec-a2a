@@ -25,7 +25,7 @@ from pydantic import SecretStr
 from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
-from ...testing import armed_desktop_app_home
+from ...testing import armed_desktop_app_home, settings_override
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs
@@ -654,9 +654,9 @@ def test_authoring_bridge_composition_seam_threads_into_codex_config_toml(
         assert set(bridge["enabled_tools"]) == {"read_context", "propose_changeset"}
         assert bridge["default_tools_approval_mode"] == "auto"
         env = bridge["env"]
-        assert env["VAULTSPEC_AUTHORING_BASE_URL"] == "http://127.0.0.1:8767"
-        assert env["VAULTSPEC_AUTHORING_RUN_ID"] == "run:codex-test"
-        assert env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
+        assert env["VAULTSPEC_A2A_AUTHORING_BASE_URL"] == "http://127.0.0.1:8767"
+        assert env["VAULTSPEC_A2A_AUTHORING_RUN_ID"] == "run:codex-test"
+        assert env["VAULTSPEC_A2A_AUTHORING_BEARER"] == "machine-bearer-xyz"
     finally:
         cleanup_codex_config_home(home)
 
@@ -743,38 +743,23 @@ def test_cleanup_is_none_safe_and_idempotent(tmp_path: Path) -> None:
 
 def test_cleanup_removes_home_by_default(tmp_path: Path) -> None:
     """Verify that cleanup_codex_config_home removes the home by default."""
-    # Ensure the env var is unset (preservation: cleanup still happens)
-    environment = dict(os.environ)
-    environment.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
-
     home = build_codex_config_home([], tmp_path, web_search=CodexWebSearchMode.DISABLED)
     assert home.exists()
-    # Run cleanup in a context where the env var is not set
-    saved_env = os.environ.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
-    try:
+    with settings_override(codex_config_home_retain=False):
         cleanup_codex_config_home(home)
-        assert not home.exists()
-    finally:
-        if saved_env is not None:
-            os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = saved_env
+    assert not home.exists()
 
 
-def test_cleanup_retains_home_when_env_var_set(tmp_path: Path) -> None:
-    """Verify that cleanup_codex_config_home retains the home when env var is set."""
+def test_cleanup_retains_home_when_configured_to(tmp_path: Path) -> None:
+    """Verify that cleanup_codex_config_home retains the home when configured to."""
     home = build_codex_config_home([], tmp_path, web_search=CodexWebSearchMode.DISABLED)
     assert home.exists()
-    # Save the original env var and set the retention flag
-    saved_env = os.environ.get("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN")
     try:
-        os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = "1"
-        cleanup_codex_config_home(home)
-        # Home should still exist (fix: home retention when flag is set)
+        with settings_override(codex_config_home_retain=True):
+            cleanup_codex_config_home(home)
         assert home.exists()
     finally:
-        if saved_env is not None:
-            os.environ["VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"] = saved_env
-        else:
-            os.environ.pop("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN", None)
+        cleanup_codex_config_home(home)
 
 
 def test_build_self_cleans_on_copy_failure(

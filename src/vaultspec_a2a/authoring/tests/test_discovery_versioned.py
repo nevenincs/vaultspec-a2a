@@ -17,10 +17,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...control.config import settings
+from ...testing import settings_override
 from ...testing.tests._support.listeners import health_listener
 from ..discovery import (
     DESKTOP_RECORD_VERSION,
-    SERVICE_JSON_ENV,
     EngineEndpoint,
     parse_discovery_record,
     resolve_engine,
@@ -34,18 +35,12 @@ if TYPE_CHECKING:
 @pytest.fixture
 def set_service_json() -> Iterator[Callable[[Path], None]]:
     """Yield a setter for the discovery override; restore the prior value after."""
-    previous = os.environ.get(SERVICE_JSON_ENV)
 
     def _set(path: Path) -> None:
-        os.environ[SERVICE_JSON_ENV] = str(path)
+        settings.engine_service_json = path
 
-    try:
+    with settings_override(engine_service_json=None):
         yield _set
-    finally:
-        if previous is None:
-            os.environ.pop(SERVICE_JSON_ENV, None)
-        else:
-            os.environ[SERVICE_JSON_ENV] = previous
 
 
 def _versioned_record(port: int, *, credential_reference: str) -> dict[str, object]:

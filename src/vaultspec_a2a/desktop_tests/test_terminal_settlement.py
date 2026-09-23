@@ -191,12 +191,12 @@ def _start_armed_gateway(harness: _SettlementHarness) -> _GatewayProcess:
                 gateway_port=gateway_port,
                 worker_port=worker_port,
                 extra={
-                    "VAULTSPEC_DESKTOP_SETTLEMENT_URL": (
+                    "VAULTSPEC_A2A_DESKTOP_SETTLEMENT_URL": (
                         f"http://127.0.0.1:{harness.receiver_port}/settle"
                     ),
                     # This module admits runs against the in-process mock lane
                     # (see ``_catalog.py``); the gateway must serve one to select.
-                    "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
+                    "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
                 },
             ),
             log_handle=harness.log_handle,

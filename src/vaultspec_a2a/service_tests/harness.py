@@ -434,7 +434,7 @@ class ServiceStack:
                 # unstartable. The mock lane additionally needs a tape server,
                 # which VAULTSPEC_A2A_MOCK_API_BASE above supplies, so both
                 # in-process lanes are served and the mock presets can select their own.
-                "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
+                "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"
                 ),

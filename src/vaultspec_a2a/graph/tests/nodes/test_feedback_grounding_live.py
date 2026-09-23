@@ -11,7 +11,7 @@ established graph-boundary pattern) so the assertion is exactly what the writer
 receives; everything upstream of it is real.
 
 ``service``-marked and skipped without a reachable engine (an infrastructure gate,
-not a masked failure). Set VAULTSPEC_ENGINE_SERVICE_JSON to the engine's discovery
+not a masked failure). Set VAULTSPEC_A2A_ENGINE_SERVICE_JSON to the engine's discovery
 file.
 """
 

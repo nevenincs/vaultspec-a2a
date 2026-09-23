@@ -8,7 +8,7 @@ read tool end-to-end through the engine under the run's actor token — the
 surfacing-reliable transport the CLI actually exposes to the model.
 
 ``service`` marked; skips with a runbook pointer when no engine is reachable.
-Set ``VAULTSPEC_ENGINE_SERVICE_JSON`` to the engine's discovery file.
+Set ``VAULTSPEC_A2A_ENGINE_SERVICE_JSON`` to the engine's discovery file.
 """
 
 from __future__ import annotations

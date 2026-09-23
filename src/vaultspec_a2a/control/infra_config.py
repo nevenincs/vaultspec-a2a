@@ -177,6 +177,7 @@ class InfraConfig(ProjectSettings):
         env_file_encoding="utf-8",
         env_prefix=ENV_PREFIX,
         extra="ignore",
+        env_ignore_empty=True,
     )
 
     environment: Environment = Field(default=Environment.DEVELOPMENT)
@@ -317,6 +318,139 @@ class InfraConfig(ProjectSettings):
             "an absolute path. Unset for the Compose/dev profiles, whose path "
             "resolution is unchanged."
         ),
+    )
+    procs_home: Path | None = Field(
+        default=None,
+        description=(
+            "Directory holding the development process registry, its port "
+            "reservations and the test-resource leases. Unset: the registry "
+            "directory inside the state home."
+        ),
+    )
+    procs_name: str | None = Field(
+        default=None,
+        description=(
+            "Name a self-registering managed process records itself under. "
+            "Written into a child's environment by the lifecycle serve path."
+        ),
+    )
+    procs_owner: str | None = Field(
+        default=None,
+        description=(
+            "Owner label stamped on registry records this process claims, so "
+            "concurrent operators hold distinct records. Unset: a label scoped to "
+            "this process."
+        ),
+    )
+    procs_toml: Path | None = Field(
+        default=None,
+        description="Managed-process table. Unset: procs.toml in the project root.",
+    )
+    engine_service_json: Path | None = Field(
+        default=None,
+        description=(
+            "The vaultspec engine's discovery record, read to attach to it. "
+            "Unset: the engine's record inside the project's .vault/data."
+        ),
+    )
+    engine_serve_cmd: str | None = Field(
+        default=None,
+        description=(
+            "Command template the dev process registry serves the engine with; "
+            "{port} and {workspace} are substituted."
+        ),
+    )
+    serve_in_process_lanes: bool = Field(
+        default=False,
+        description=(
+            "Serve the in-process provider lanes (deterministic and mock). Off "
+            "by default so a deployment sees them only when it arms them."
+        ),
+    )
+    codex_config_home_retain: bool = Field(
+        default=False,
+        description=(
+            "Keep each run's generated Codex config home after the run for "
+            "inspection instead of deleting it."
+        ),
+    )
+    desktop_settlement_url: str | None = Field(
+        default=None,
+        description=(
+            "Absolute HTTP(S) URL of the dashboard's terminal-settlement "
+            "receiver, published by the dashboard. Unset or malformed disables "
+            "settlement."
+        ),
+    )
+    gateway_lifetime_id: str = Field(
+        default="",
+        description=(
+            "Identity of the gateway process that spawned this worker. Written "
+            "by the gateway into its worker's environment; never set by hand."
+        ),
+    )
+    worker_generation: str = Field(
+        default="",
+        description=(
+            "Spawn generation this worker belongs to. Written by the gateway "
+            "into its worker's environment; never set by hand."
+        ),
+    )
+    otel_service_name: str = Field(
+        default="vaultspec-a2a",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OTEL_SERVICE_NAME", "OTEL_SERVICE_NAME"
+        ),
+        description="Service name emitted on every span.",
+    )
+    otel_service_version: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OTEL_SERVICE_VERSION", "OTEL_SERVICE_VERSION"
+        ),
+        description="Version emitted on every span. Unset: the package version.",
+    )
+    otel_exporter_otlp_endpoint: str = Field(
+        default=DEFAULT_OTLP_ENDPOINT,
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"
+        ),
+        description="gRPC endpoint of the OTLP collector.",
+    )
+    otel_exporter_otlp_insecure: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_INSECURE", "OTEL_EXPORTER_OTLP_INSECURE"
+        ),
+        description="Disable TLS toward the collector.",
+    )
+    otel_sdk_disabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OTEL_SDK_DISABLED", "OTEL_SDK_DISABLED"
+        ),
+        description="Force the no-op OpenTelemetry implementation.",
+    )
+    otel_exporter_console: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OTEL_EXPORTER_CONSOLE", "OTEL_EXPORTER_CONSOLE"
+        ),
+        description="Also log spans to stdout (development only).",
+    )
+    otel_traces_exporter: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OTEL_TRACES_EXPORTER", "OTEL_TRACES_EXPORTER"
+        ),
+        description="'none' builds no span exporter at all.",
+    )
+    otel_metrics_exporter: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OTEL_METRICS_EXPORTER", "OTEL_METRICS_EXPORTER"
+        ),
+        description="'none' builds no metric reader at all.",
     )
     mock_api_base: str | None = Field(
         default=None,

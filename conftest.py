@@ -42,6 +42,25 @@ from typing import TYPE_CHECKING
 # the session, it does not stand in for that coverage.
 os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
 
+# Build no OTel exporter during tests. Declared here, before the plugin import
+# below builds the settings singleton, because the telemetry module reads its
+# exporter choice from settings at import. The trace SDK stays ACTIVE so
+# span-creation tests keep working; only the export side is off, so nothing
+# starts an export thread and no run competes with a collector that is not
+# there. A suite that needs real export - the Jaeger round-trip - overrides
+# both of these for its own subprocesses.
+#
+# These replace an earlier arrangement that left both exporters built and aimed
+# them at a non-routable TEST-NET address, on the theory that spans would then
+# be dropped silently. They are not: the gRPC exporter cannot distinguish an
+# unreachable collector from a slow one, so it retried on ten-second deadlines
+# and logged every failure for the life of the process. Worse, the metric half
+# was never off at all - OTEL_METRICS_EXPORTER is an SDK auto-configuration
+# variable, and this project builds its providers by hand, so until the
+# telemetry module began reading it the value changed nothing.
+os.environ.setdefault("OTEL_TRACES_EXPORTER", "none")
+os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
+
 pytest_plugins = ("vaultspec_a2a.testing.plugin",)
 
 

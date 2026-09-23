@@ -708,7 +708,7 @@ class _ProcsUpArgs(TypedDict):
     "--engine-service-json",
     "engine_service_json",
     default="",
-    help="Path to the engine's service.json (VAULTSPEC_ENGINE_SERVICE_JSON) for a "
+    help="Path to the engine's service.json (VAULTSPEC_A2A_ENGINE_SERVICE_JSON) for a "
     "worker's engine discovery. Recorded per process and re-injected on "
     "resume/rerun so an engine reseat cannot strand the worker.",
 )

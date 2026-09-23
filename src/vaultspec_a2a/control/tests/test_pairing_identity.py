@@ -13,11 +13,8 @@ from __future__ import annotations
 
 import asyncio
 
-from ...control._worker_health import (
-    GATEWAY_LIFETIME_ENV,
-    GATEWAY_LIFETIME_ID,
-    WORKER_GENERATION_ENV,
-)
+from ...control._worker_health import GATEWAY_LIFETIME_ID
+from ...control.config import setting_env
 from ...control.worker_management import LazyWorkerSpawner
 
 
@@ -41,9 +38,11 @@ def test_the_lifetime_identity_is_a_stable_non_empty_value() -> None:
 
 def test_the_env_names_are_distinct_and_namespaced() -> None:
     """Two identities travel to the worker; they must not collide."""
-    assert GATEWAY_LIFETIME_ENV != WORKER_GENERATION_ENV
-    assert GATEWAY_LIFETIME_ENV.startswith("VAULTSPEC_")
-    assert WORKER_GENERATION_ENV.startswith("VAULTSPEC_")
+    lifetime = setting_env("gateway_lifetime_id")
+    generation = setting_env("worker_generation")
+    assert lifetime != generation
+    assert lifetime.startswith("VAULTSPEC_A2A_")
+    assert generation.startswith("VAULTSPEC_A2A_")
 
 
 def test_a_fresh_spawner_has_issued_no_generation() -> None:

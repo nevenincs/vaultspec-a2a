@@ -139,7 +139,7 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
                 worker_port=worker_port,
                 # This module admits runs against the in-process mock lane
                 # (see ``_catalog.py``); the gateway must serve one to select.
-                extra={"VAULTSPEC_SERVE_IN_PROCESS_LANES": "true"},
+                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"},
             ),
             log_handle=log_handle,
         )

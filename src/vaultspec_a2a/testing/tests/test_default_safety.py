@@ -70,7 +70,7 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
         "assert peer.exists(), 'peer never published; holds did not overlap'\n"
     )
     env = dict(os.environ)
-    env["VAULTSPEC_PROCS_HOME"] = str(tmp_path / "procs")
+    env["VAULTSPEC_A2A_PROCS_HOME"] = str(tmp_path / "procs")
 
     def _spawn(tag: str, peer: str) -> subprocess.Popen[bytes]:
         return subprocess.Popen(
@@ -120,7 +120,7 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
     (suite / "test_quick.py").write_text("def test_quick() -> None:\n    pass\n")
     env = dict(os.environ)
     env.pop("PYTEST_ADDOPTS", None)
-    env["VAULTSPEC_PROCS_HOME"] = str(home)
+    env["VAULTSPEC_A2A_PROCS_HOME"] = str(home)
     env["VAULTSPEC_TEST_CPU_BUDGET"] = "4"
     holder = subprocess.Popen(
         [

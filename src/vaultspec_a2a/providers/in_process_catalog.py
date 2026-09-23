@@ -29,7 +29,6 @@ cannot drift into disagreeing about what an in-process lane is called.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
@@ -54,16 +53,9 @@ __all__ = [
     "build_in_process_catalog",
     "discover_in_process_catalog",
     "in_process_catalog_key",
-    "in_process_lane_serving_armed",
     "served_in_process_lanes",
 ]
 
-# The environment declaration that arms in-process serving. Absent or falsey
-# means hidden, which is the default posture; only a deployment that
-# deliberately sets it sees these lanes.
-SERVE_IN_PROCESS_LANES_ENV: Final = "VAULTSPEC_SERVE_IN_PROCESS_LANES"
-
-_TRUE_VALUES: Final = frozenset({"1", "true", "yes", "on"})
 
 # The catalog TTL matches the external lanes'. A static catalog cannot go stale
 # in the sense a fetched one can, but selection revalidation requires a bounded
@@ -129,16 +121,6 @@ def in_process_catalog_key(provider: Provider) -> ProviderCatalogKey:
     if execution_mode is None:
         raise ValueError(f"provider {provider.value} is not an in-process lane")
     return ProviderCatalogKey(provider.value, execution_mode)
-
-
-def in_process_lane_serving_armed(environ: Mapping[str, str] | None = None) -> bool:
-    """Return whether this deployment has armed in-process lane serving.
-
-    *environ* is explicit so the arming policy is callable without mutating the
-    process environment; it defaults to the real one at the composition seam.
-    """
-    source = os.environ if environ is None else environ
-    return source.get(SERVE_IN_PROCESS_LANES_ENV, "").strip().casefold() in _TRUE_VALUES
 
 
 def served_in_process_lanes(

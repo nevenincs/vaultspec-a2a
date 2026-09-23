@@ -29,9 +29,7 @@ if TYPE_CHECKING:
     import httpx
 
 __all__ = [
-    "GATEWAY_LIFETIME_ENV",
     "GATEWAY_LIFETIME_ID",
-    "WORKER_GENERATION_ENV",
     "WorkerHealthProbe",
     "WorkerLiveness",
     "WorkerState",
@@ -252,12 +250,6 @@ def _worker_stderr_log_path(worker_port: int) -> Path:
     """Return the deterministic stderr log path for the auto-spawned worker."""
     return _runtime_dir() / f"worker-autospawn-{worker_port}.stderr.log"
 
-
-GATEWAY_LIFETIME_ENV = "VAULTSPEC_GATEWAY_LIFETIME_ID"
-"""Env name carrying the spawning gateway's lifetime identity to its worker."""
-
-WORKER_GENERATION_ENV = "VAULTSPEC_WORKER_GENERATION"
-"""Env name carrying the spawn generation this worker belongs to."""
 
 # One value per gateway PROCESS, not per port or per host. A gateway that
 # restarts on the same port is a different incarnation, and a worker still

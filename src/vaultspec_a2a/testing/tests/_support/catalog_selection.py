@@ -162,7 +162,7 @@ def in_process_selection(
         raise NoSelectableLaneError(
             "no selectable in-process lane is served, so this run cannot present "
             "a selection. Arm them on the gateway with "
-            "VAULTSPEC_SERVE_IN_PROCESS_LANES=true (the mock lane additionally "
+            "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES=true (the mock lane additionally "
             "needs VAULTSPEC_A2A_MOCK_API_BASE). Served: " + _served_summary(records)
         )
     record = next(

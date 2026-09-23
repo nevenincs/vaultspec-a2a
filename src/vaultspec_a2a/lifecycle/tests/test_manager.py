@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from ...authoring.discovery import SERVICE_JSON_ENV
+from ...control.config import setting_env
 from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ...testing.ports import free_port
 from ..discovery import is_pid_alive
@@ -829,8 +829,8 @@ def test_serve_env_carries_identity_and_rendered_role_env() -> None:
     # Rendered role env plus the managed identity, so a self-registering child
     # converges onto the same (role, name)/owner record instead of a rival one.
     assert env["VAULTSPEC_A2A_PORT"] == "18103"
-    assert env["VAULTSPEC_PROCS_NAME"] == "g1"
-    assert env["VAULTSPEC_PROCS_OWNER"] == "sess-a"
+    assert env["VAULTSPEC_A2A_PROCS_NAME"] == "g1"
+    assert env["VAULTSPEC_A2A_PROCS_OWNER"] == "sess-a"
 
 
 def test_serve_env_injects_engine_service_json_only_when_set() -> None:
@@ -851,11 +851,11 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
         owner="s",
         engine_service_json="C:/seat/service.json",
     )
-    assert with_seat[SERVICE_JSON_ENV] == "C:/seat/service.json"
+    assert with_seat[setting_env("engine_service_json")] == "C:/seat/service.json"
     assert with_seat["VAULTSPEC_A2A_WORKER_PORT"] == "18110"
     # An unset seat injects nothing (records predating the field keep prior behaviour).
     without = _serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
-    assert SERVICE_JSON_ENV not in without
+    assert setting_env("engine_service_json") not in without
 
 
 def _pairing_role() -> RoleConfig:
@@ -996,7 +996,7 @@ def test_serve_up_records_and_injects_the_worker_gateway_pairing(
 _ENV_PROBE_SERVE = (
     "import socket,os,sys,time,pathlib;"
     "pathlib.Path(sys.argv[2]).write_text("
-    "os.environ.get('VAULTSPEC_ENGINE_SERVICE_JSON',''));"
+    "os.environ.get('VAULTSPEC_A2A_ENGINE_SERVICE_JSON',''));"
     "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
     "s.bind(('127.0.0.1',int(sys.argv[1])));s.listen();time.sleep(60)"
 )

@@ -16,7 +16,6 @@ Or via the ``vaultspec-worker`` console script (once registered in
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
@@ -36,7 +35,6 @@ from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 
-from ..control._worker_health import GATEWAY_LIFETIME_ENV, WORKER_GENERATION_ENV
 from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
@@ -452,8 +450,8 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             # and which spawn attempt it was. Empty when the worker was started
             # by something other than a gateway spawn - Compose, an operator, or
             # a test - which is itself the honest answer rather than a default.
-            "paired_gateway_lifetime": os.environ.get(GATEWAY_LIFETIME_ENV, ""),
-            "worker_generation": os.environ.get(WORKER_GENERATION_ENV, ""),
+            "paired_gateway_lifetime": settings.gateway_lifetime_id,
+            "worker_generation": settings.worker_generation,
         }
 
     @app.post(

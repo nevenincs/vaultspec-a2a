@@ -476,7 +476,7 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
         environment = armed_gateway_env(
             case.app_home, gateway_port=gateway_port, worker_port=worker_port
         )
-        environment["VAULTSPEC_SERVE_IN_PROCESS_LANES"] = "true"
+        environment["VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"] = "true"
         environment["VAULTSPEC_REPAIR_ON_STARTUP"] = "false"
         return spawn_gateway(
             script=script,

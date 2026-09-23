@@ -33,7 +33,6 @@ from .catalog import fetch_catalog as fetch_catalog
 from .client import ACTOR_TOKEN_HEADER as ACTOR_TOKEN_HEADER
 from .client import BEARER_HEADER as BEARER_HEADER
 from .client import AuthoringClient as AuthoringClient
-from .discovery import SERVICE_JSON_ENV as SERVICE_JSON_ENV
 from .discovery import EngineEndpoint as EngineEndpoint
 from .discovery import resolve_engine as resolve_engine
 from .discovery import resolve_engine_with_retry as resolve_engine_with_retry
@@ -125,7 +124,6 @@ __all__ = [
     "REVIEW_DECISION_APPROVE",
     "REVIEW_DECISION_EDIT",
     "REVIEW_DECISION_REJECT",
-    "SERVICE_JSON_ENV",
     "AgentTool",
     "AuthoringClient",
     "AuthoringError",

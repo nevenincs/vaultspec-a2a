@@ -23,10 +23,10 @@ can produce.
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from ..workspace.environment import resolve_env_vars
 from ._catalog_fields import display_text, local_id, model_list_revision
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .antigravity_cli import resolve_antigravity_command
@@ -144,7 +144,7 @@ async def discover_antigravity_catalog(
     try:
         process = await spawn_acp_process(
             [str(executable), "models"],
-            env=os.environ.copy(),
+            env=resolve_env_vars(workspace_root),
             cwd=str(workspace_root),
             use_exec=True,
         )

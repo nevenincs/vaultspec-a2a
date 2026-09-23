@@ -32,7 +32,6 @@ inherits that root's OS containment. Nothing here spawns a process.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 from urllib.parse import urlparse
@@ -60,6 +59,7 @@ from ..protocols.mcp.authoring_stdio import (
 from ..protocols.mcp.authoring_stdio import (
     ENV_SERVER_NAME as STDIO_ENV_SERVER_NAME,
 )
+from ..protocols.mcp.authoring_stdio import AuthoringBridgeSettings
 from ..thread.errors import ConfigError
 from ..utils.runtime_exec import is_module_invocation, module_command
 
@@ -329,7 +329,7 @@ def build_authoring_stdio_mcp_servers(
     process listing never exposes them (R7); the subprocess reconstructs the
     run's dispatch and serves the bridged tools over stdio. The session seam
     surfaces this spec with its ``env`` values rewritten to
-    ``${VAULTSPEC_AUTHORING_*}`` placeholder references while
+    ``${VAULTSPEC_A2A_AUTHORING_*}`` placeholder references while
     ``config_home_authoring_entry`` hoists the real values into the CLI spawn
     env — the environment the CLI expands those references from — so the tokens
     stay off the CLI argv the adapter serializes the session set onto.
@@ -367,9 +367,9 @@ def build_authoring_stdio_mcp_servers(
     # Forward the debug startup marker to the subprocess when enabled (the MCP
     # SDK filters arbitrary parent env, so it must ride the explicit env list).
     # Off unless the orchestrator sets it; carries no token (R7).
-    debug_marker = os.environ.get(STDIO_ENV_DEBUG_MARKER)
-    if debug_marker:
-        env.append({"name": STDIO_ENV_DEBUG_MARKER, "value": debug_marker})
+    debug_marker = AuthoringBridgeSettings().debug_marker
+    if debug_marker is not None:
+        env.append({"name": STDIO_ENV_DEBUG_MARKER, "value": str(debug_marker)})
     environment: list[JsonValue] = []
     environment.extend(env)
     entry: JsonObject = {
@@ -500,7 +500,7 @@ def config_home_authoring_entry(
 
     - the validated bridge entry keyed by :data:`AUTHORING_MCP_SERVER_NAME` in
       the CLI config shape (``{"type": "stdio", "command", "args", "env"}``)
-      whose ``env`` values are ALL ``${VAULTSPEC_AUTHORING_*}`` placeholder
+      whose ``env`` values are ALL ``${VAULTSPEC_A2A_AUTHORING_*}`` placeholder
       strings — never the real tokens — and
     - the ``name -> real value`` map to hoist into the CLI spawn environment.
 
@@ -555,8 +555,8 @@ def config_home_authoring_entry(
         if not isinstance(raw_env, list) or not raw_env:
             raise ConfigError(
                 f"authoring bridge spec {AUTHORING_MCP_SERVER_NAME!r} carries no env; "
-                f"the bridge cannot reach the engine without its VAULTSPEC_AUTHORING_* "
-                f"variables"
+                "the bridge cannot reach the engine without its "
+                "VAULTSPEC_A2A_AUTHORING_* variables"
             )
         env_list = _json_object_list(spec, "env")
         home_env: JsonObject = {}

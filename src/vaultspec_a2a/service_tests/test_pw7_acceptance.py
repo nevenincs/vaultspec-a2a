@@ -88,11 +88,11 @@ if TYPE_CHECKING:
 from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
 from ..authoring._errors import AuthoringTransportError
-from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine
+from ..authoring.discovery import resolve_engine
 from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
 from ..team.team_config import load_team_config
-from ..testing import resolve_gateway_url
+from ..testing import resolve_gateway_url, settings_override
 from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
@@ -1054,8 +1054,6 @@ async def test_engine_client_reresolves_bearer_once_on_401(
         ),
         encoding="utf-8",
     )
-    prior = os.environ.get(SERVICE_JSON_ENV)
-    os.environ[SERVICE_JSON_ENV] = str(service_json)
     calls = 0
     try:
 
@@ -1071,18 +1069,15 @@ async def test_engine_client_reresolves_bearer_once_on_401(
             return "ok"
 
         client = _ResilientAuthoringClient("http://127.0.0.1:1", "stale-tok")
-        async with client:
-            result = await client._call_resilient(
-                lambda: denied_once(client), operation="denied_once"
-            )
-            assert result == "ok"
-            assert calls == 2  # 401 consumed one attempt, immediate retry
-            assert client._bearer_token == "rotated-tok"  # rotation really ran
+        with settings_override(engine_service_json=service_json):
+            async with client:
+                result = await client._call_resilient(
+                    lambda: denied_once(client), operation="denied_once"
+                )
+        assert result == "ok"
+        assert calls == 2  # 401 consumed one attempt, immediate retry
+        assert client._bearer_token == "rotated-tok"  # rotation really ran
     finally:
-        if prior is None:
-            os.environ.pop(SERVICE_JSON_ENV, None)
-        else:
-            os.environ[SERVICE_JSON_ENV] = prior
         server.shutdown()
         server.server_close()
         thread.join(timeout=5.0)
@@ -1878,7 +1873,7 @@ def _reachable_stack() -> tuple[str, str, str, Path] | None:
     gateway = resolve_gateway_url()
     if gateway is None:
         return None
-    service_json = os.environ.get("VAULTSPEC_ENGINE_SERVICE_JSON")
+    service_json = os.environ.get("VAULTSPEC_A2A_ENGINE_SERVICE_JSON")
     if not service_json:
         return None
     vault_root = Path(service_json).parents[2]  # <ws>/.vault

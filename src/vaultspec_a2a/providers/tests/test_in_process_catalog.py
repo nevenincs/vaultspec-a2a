@@ -13,8 +13,11 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
+from ...control.config import Settings
 from ...graph.enums import Provider
+from ...testing import armed_environment
 from ..deterministic_chat_model import DeterministicResearchAdrChatModel
 from ..factory import ProviderFactory, _discover_in_process_catalog
 from ..in_process_catalog import (
@@ -22,7 +25,6 @@ from ..in_process_catalog import (
     IN_PROCESS_MODEL_VALUES,
     build_in_process_catalog,
     in_process_catalog_key,
-    in_process_lane_serving_armed,
     served_in_process_lanes,
 )
 from ..lane_admission import (
@@ -70,22 +72,30 @@ def test_a_configured_tape_server_additionally_serves_the_mock_lane() -> None:
     ) == (_DETERMINISTIC, _MOCK)
 
 
+def _armed_by(value: str | None) -> bool:
+    """Read the arming the way the service does: from a fresh settings object."""
+    with armed_environment(VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES=value):
+        return Settings().serve_in_process_lanes
+
+
 @pytest.mark.parametrize("value", ("1", "true", "TRUE", "yes", "on"))
 def test_the_environment_declaration_arms_serving(value: str) -> None:
-    assert in_process_lane_serving_armed({"VAULTSPEC_SERVE_IN_PROCESS_LANES": value})
+    assert _armed_by(value)
 
 
-@pytest.mark.parametrize("value", ("", "0", "false", "no", " ", "maybe"))
-def test_anything_but_an_explicit_declaration_leaves_the_lanes_hidden(
-    value: str,
-) -> None:
-    assert not in_process_lane_serving_armed(
-        {"VAULTSPEC_SERVE_IN_PROCESS_LANES": value}
-    )
+@pytest.mark.parametrize("value", ("", "0", "false", "no", "off"))
+def test_a_negative_or_blank_declaration_leaves_the_lanes_hidden(value: str) -> None:
+    assert not _armed_by(value)
+
+
+def test_an_unreadable_declaration_is_refused_rather_than_guessed() -> None:
+    """A typo must not silently leave a deployment's lanes hidden or served."""
+    with pytest.raises(ValidationError, match="serve_in_process_lanes"):
+        _armed_by("maybe")
 
 
 def test_an_absent_declaration_leaves_the_lanes_hidden() -> None:
-    assert not in_process_lane_serving_armed({})
+    assert not _armed_by(None)
 
 
 # -- catalog shape ------------------------------------------------------------

@@ -26,10 +26,11 @@ from .infra_config import (
     _synchronous_url,
     _warn_seating_discard,
 )
-from .settings_base import ENV_PREFIX
+from .settings_base import ENV_PREFIX, env_name
 
 __all__ = [
     "Settings",
+    "setting_env",
     "settings",
 ]
 
@@ -50,6 +51,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         env_file_encoding="utf-8",
         env_prefix=ENV_PREFIX,
         extra="ignore",
+        env_ignore_empty=True,
     )
 
     @model_validator(mode="after")
@@ -258,6 +260,27 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return self
 
     @property
+    def registry_home(self) -> Path:
+        """The development process registry, its reservations and leases."""
+        if self.procs_home is not None:
+            return self.procs_home
+        return Path.home() / ".vaultspec" / "procs"
+
+    @property
+    def procs_table_path(self) -> Path:
+        """The managed-process table the registry serves roles from."""
+        if self.procs_toml is not None:
+            return self.procs_toml
+        return self.project_root / "procs.toml"
+
+    @property
+    def engine_discovery_path(self) -> Path:
+        """The vaultspec engine's discovery record a2a attaches through."""
+        if self.engine_service_json is not None:
+            return self.engine_service_json
+        return Path.home() / ".vaultspec" / "service.json"
+
+    @property
     def gateway_url_configured(self) -> bool:
         """Whether the gateway URL came from configuration rather than host+port."""
         return self._gateway_url_configured
@@ -457,6 +480,15 @@ class Settings(DomainSettingsConfig, InfraConfig):
             )
         if problems:
             raise ValueError("; ".join(problems))
+
+
+def setting_env(field: str) -> str:
+    """Return the environment name a setting is read from.
+
+    Every site that writes a setting into a child process's environment takes
+    the name from here, so the field declaration is its only spelling.
+    """
+    return env_name(Settings, field)
 
 
 # Global settings instance

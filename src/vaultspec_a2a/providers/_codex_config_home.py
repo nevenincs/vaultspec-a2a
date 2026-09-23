@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
 import tempfile
@@ -45,6 +44,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..control.config import settings
 from ..thread.errors import ConfigError
 from ..utils.enums import CodexWebSearchMode
 from ._config_home_roots import (
@@ -398,16 +398,13 @@ def build_codex_config_home(
 def cleanup_codex_config_home(home: Path | None) -> None:
     """Remove a per-run Codex config home, reporting failures to its cleanup owner.
 
-    If VAULTSPEC_CODEX_CONFIG_HOME_RETAIN is set, the home is retained for
-    inspection and troubleshooting. Default behavior (unset) removes the home.
+    When ``codex_config_home_retain`` is configured, the home is retained for
+    inspection and troubleshooting. By default the home is removed.
     """
     if home is None:
         return
-    if os.environ.get("VAULTSPEC_CODEX_CONFIG_HOME_RETAIN"):
-        logger.debug(
-            "Codex config home retained at %s per VAULTSPEC_CODEX_CONFIG_HOME_RETAIN",
-            home,
-        )
+    if settings.codex_config_home_retain:
+        logger.debug("Codex config home retained at %s by configuration", home)
         return
     try:
         shutil.rmtree(home)

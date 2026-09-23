@@ -33,11 +33,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
-from ..control._worker_health import (
-    GATEWAY_LIFETIME_ENV,
-    GATEWAY_LIFETIME_ID,
-    WORKER_GENERATION_ENV,
-)
+from ..control._worker_health import GATEWAY_LIFETIME_ID
+from ..control.config import setting_env
 from ..tests.gateway_boot import armed_gateway_env, reap_gateway
 from .test_ownership_prerequisites import (
     _armed_serve,
@@ -169,8 +166,8 @@ def test_service_state_reports_blank_for_a_worker_it_did_not_spawn(
             auto_spawn_worker=False,
         )
         stray_env["VAULTSPEC_A2A_INTERNAL_TOKEN"] = secret
-        stray_env.pop(GATEWAY_LIFETIME_ENV, None)
-        stray_env.pop(WORKER_GENERATION_ENV, None)
+        stray_env.pop(setting_env("gateway_lifetime_id"), None)
+        stray_env.pop(setting_env("worker_generation"), None)
         stray_log = (tmp_path / "stray-worker.log").open("wb")
         stray = subprocess.Popen(
             [sys.executable, "-m", "vaultspec_a2a.worker"],

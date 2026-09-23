@@ -196,8 +196,8 @@ def test_the_init_codes_match_the_agreed_allocation() -> None:
 
 
 def test_the_environment_switches_are_named_once() -> None:
-    assert FIX_STRICT_ENV == "VAULTSPEC_FIX_STRICT"
-    assert ALLOW_EMPTY_ENV == "VAULTSPEC_ALLOW_EMPTY_SELECTION"
+    assert FIX_STRICT_ENV == "VAULTSPEC_A2A_FIX_STRICT"
+    assert ALLOW_EMPTY_ENV == "VAULTSPEC_A2A_ALLOW_EMPTY_SELECTION"
 
 
 # --- 2. no hand-rolled swallows in any justfile -------------------------------

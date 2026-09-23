@@ -172,7 +172,7 @@ def test_tests_and_tooling_are_held_to_the_tempfile_rule_alone(tmp_path: Path) -
         "scratch = tempfile.mkdtemp()\n",
         encoding="utf-8",
     )
-    tooling = tmp_path / storage_anchors.TOOLING_ROOT
+    tooling = tmp_path / storage_anchors.TOOLING_ROOTS[0]
     tooling.mkdir()
     (tooling / "tool.py").write_text(
         "import os\n"

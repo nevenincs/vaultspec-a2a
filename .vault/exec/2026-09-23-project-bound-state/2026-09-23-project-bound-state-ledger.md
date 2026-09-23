@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#project-bound-state'
 date: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:193468c3192e42fee533bf8969404cebec9fd1ace92dd76f358bdf28e7be2db6'
+body_hash: 'sha256:1de632752993c7dce4f2c8fe303d4d54407225c7edf4efd904c22d44bb6946bc'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -347,6 +347,28 @@ related:
 - `S13` `M` `src/vaultspec_a2a/control/tests/test_state_seal.py`
 - `S13` `verify:` `pytest src/vaultspec_a2a/control/tests src/vaultspec_a2a/lifecycle/tests src/vaultspec_a2a/database -n 4 --dist=loadgroup` -> `pass`
 - `S13` `by:` `claude`
+- `S14` `M` `.env.example`
+- `S14` `M` `Justfile`
+- `S14` `M` `conftest.py`
+- `S14` `M` `dev/EXIT-CODES.md`
+- `S14` `M` `dev/audit/dependency_audit.py`
+- `S14` `M` `dev/audit/duplication.py`
+- `S14` `M` `dev/audit/tests/test_dependency_audit_gate.py`
+- `S14` `M` `dev/ci_formats.py`
+- `S14` `M` `dev/exit_codes.py`
+- `S14` `M` `dev/guards/storage_anchors.py`
+- `S14` `M` `dev/guards/test_exit_code_contract.py`
+- `S14` `M` `dev/init/README.md`
+- `S14` `M` `dev/init/__main__.py`
+- `S14` `M` `dev/init/contract.py`
+- `S14` `M` `dev/providers.py`
+- `S14` `A` `dev/tests/test_harness_env_names.py`
+- `S14` `M` `dev/tests/test_storage_anchors.py`
+- `S14` `M` `dev/vault/enroll.py`
+- `S14` `A` `src/vaultspec_a2a/control/tests/test_deployment_names.py`
+- `S14` `M` `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
+- `S14` `verify:` `pytest dev/tests dev/guards src/vaultspec_a2a/control/tests/test_deployment_names.py src/vaultspec_a2a/control/tests/test_env_example_coverage.py -n 4 --dist=loadgroup` -> `pass`
+- `S14` `by:` `claude`
 
 ## Notes
 

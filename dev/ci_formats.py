@@ -10,7 +10,7 @@ Two switches, deliberately separate:
 
 * ``GITHUB_ACTIONS`` turns on GitHub workflow annotations, which go to stdout
   and are meaningful only inside a workflow run.
-* ``VAULTSPEC_CI_REPORTS`` names a directory for report artifacts.
+* ``VAULTSPEC_A2A_CI_REPORTS`` names a directory for report artifacts.
 
 UNSET - every local run, and any CI job that has not opted in - every command
 runs exactly as it does today. The switch is additive on purpose: adopting it
@@ -30,7 +30,10 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 #: Names a directory for report artifacts, and enables machine-readable output.
-REPORTS_ENV = "VAULTSPEC_CI_REPORTS"
+REPORTS_ENV = "VAULTSPEC_A2A_CI_REPORTS"
+
+#: Names the report file of one test lane, so two lanes in a job do not collide.
+REPORT_NAME_ENV = "VAULTSPEC_A2A_CI_REPORT_NAME"
 
 #: Set by the Actions runner. Annotations are only meaningful under it.
 ANNOTATIONS_ENV = "GITHUB_ACTIONS"

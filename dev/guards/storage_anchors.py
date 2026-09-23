@@ -30,7 +30,8 @@ data lands somewhere nobody looks:
 Resolving package data through ``importlib.resources`` is the supported form and
 is never reported.
 
-Test modules and the repository's own tooling under ``dev/`` are held to the
+Test modules, the repository's own tooling under ``dev/`` and the container
+entrypoint under ``service/`` are held to the
 ``tempfile`` rule alone: they may read the checkout and the environment, but
 their scratch space belongs to the worktree (the test session's seat, or an
 ignored ``.tmp-*`` directory), never to a system directory a sandboxed host
@@ -61,8 +62,9 @@ PACKAGE = "vaultspec_a2a"
 #: Source root scanned by the gate.
 ROOT = Path("src") / PACKAGE
 
-#: Repository tooling, held to the ``tempfile`` rule only.
-TOOLING_ROOT = Path("dev")
+#: Repository tooling and the container entrypoint, held to the ``tempfile``
+#: rule only.
+TOOLING_ROOTS = (Path("dev"), Path("service"))
 
 #: Trailing comment that exempts a single line.
 ALLOW = "storage-anchor-ok"
@@ -331,7 +333,8 @@ def main() -> int:
     scanned: list[tuple[Path, Path | None]] = [
         (path, path.relative_to(ROOT)) for path in sorted(ROOT.rglob("*.py"))
     ]
-    scanned += [(path, None) for path in sorted(TOOLING_ROOT.rglob("*.py"))]
+    for tooling in TOOLING_ROOTS:
+        scanned += [(path, None) for path in sorted(tooling.rglob("*.py"))]
     for path, relative in scanned:
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()

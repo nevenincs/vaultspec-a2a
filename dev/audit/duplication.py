@@ -40,6 +40,7 @@ and only :data:`~dev.exit_codes.ADVISORY_BROKEN` when the scan could not run.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import tempfile
 from dataclasses import dataclass
@@ -291,6 +292,17 @@ def run_duplication_scan(
     # never the system temporary directory.
     scratch = repo_root / ".tmp-duplication"
     scratch.mkdir(exist_ok=True)
+    try:
+        return _scan(repo_root, scratch, include_tests=include_tests, timeout=timeout)
+    finally:
+        # Only an empty root is removed: a concurrent scan may still own a child.
+        with contextlib.suppress(OSError):
+            scratch.rmdir()
+
+
+def _scan(
+    repo_root: Path, scratch: Path, *, include_tests: bool, timeout: float
+) -> DuplicationResult:
     with tempfile.TemporaryDirectory(prefix="jscpd-", dir=scratch) as tmp:
         output_dir = Path(tmp)
         try:

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 __all__ = ["main"]
 
+import contextlib
 import subprocess
 import sys
 import tempfile
@@ -147,22 +148,35 @@ def main() -> None:
     # temporary directory.
     scratch = root / ".tmp-enroll"
     scratch.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix="vaultspec-core-adopt-", dir=scratch
-    ) as temporary:
-        staged = Path(temporary) / "workspace"
-        _run(root, "git", "clone", "--quiet", "--no-hardlinks", str(root), str(staged))
-        _core(
-            staged,
-            "install",
-            "all",
-            "--mode",
-            "dev",
-            "--force",
-            "--no-hints",
-        )
-        _assert_tracked_projection(root, staged)
-        _seed_runtime_without_overwrite(root, staged)
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="vaultspec-core-adopt-", dir=scratch
+        ) as temporary:
+            staged = Path(temporary) / "workspace"
+            _run(
+                root,
+                "git",
+                "clone",
+                "--quiet",
+                "--no-hardlinks",
+                str(root),
+                str(staged),
+            )
+            _core(
+                staged,
+                "install",
+                "all",
+                "--mode",
+                "dev",
+                "--force",
+                "--no-hints",
+            )
+            _assert_tracked_projection(root, staged)
+            _seed_runtime_without_overwrite(root, staged)
+    finally:
+        # The root is removed once empty, so enrollment leaves no folder behind.
+        with contextlib.suppress(OSError):
+            scratch.rmdir()
 
     _core(root, "sync", "all")
 

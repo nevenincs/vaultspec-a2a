@@ -11,8 +11,8 @@ Usage, one form per justfile recipe::
     python -m dev.init check-full  # just init-full-check
 
 The recipes are argument-free, so the two modifiers are environment variables
-as well as flags: ``VAULTSPEC_INIT_JSON=1`` for the NDJSON event stream and
-``VAULTSPEC_INIT_FORCE=1`` to ignore the stamp.
+as well as flags: ``VAULTSPEC_A2A_INIT_JSON=1`` for the NDJSON event stream and
+``VAULTSPEC_A2A_INIT_FORCE=1`` to ignore the stamp.
 
 Why `init` is fail-fast, when the fleet's `-all` aggregates are not
 --------------------------------------------------------------------

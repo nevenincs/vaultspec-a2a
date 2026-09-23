@@ -35,7 +35,7 @@ with the upstream cause named. A non-zero `init` names exactly one cause.
 
 **Machine-readable.** Every run writes `.venv/init-report.json` (or
 `.init-report.json` when the environment does not exist yet — the path is
-always printed). `VAULTSPEC_INIT_JSON=1`, or `--json`, additionally streams
+always printed). `VAULTSPEC_A2A_INIT_JSON=1`, or `--json`, additionally streams
 NDJSON events on stdout while human prose stays on stderr. Exit codes come from
 `dev/exit_codes.py` and are identical fleet-wide:
 

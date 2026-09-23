@@ -75,6 +75,18 @@ def _documented() -> str:
     return _ENV_EXAMPLE.read_text(encoding="utf-8")
 
 
+#: The heading of the section the repository's own tooling reads. Its names
+#: are held to the harness by ``dev/tests/test_harness_env_names.py``.
+_HARNESS_HEADING = "# Development harness\n"
+
+
+def _documented_for_the_service() -> str:
+    """The example up to the development-harness section."""
+    text = _documented()
+    assert _HARNESS_HEADING in text, "the harness section heading moved"
+    return text.split(_HARNESS_HEADING, 1)[0]
+
+
 def test_the_env_example_is_present() -> None:
     """A missing example file would make every other assertion vacuous."""
     assert _ENV_EXAMPLE.is_file(), _ENV_EXAMPLE
@@ -174,7 +186,7 @@ def test_every_documented_name_is_read_by_the_service() -> None:
     declared = _all_declared_env_names()
     dead = sorted(
         name
-        for name in set(_NAME.findall(_documented()))
+        for name in set(_NAME.findall(_documented_for_the_service()))
         if name not in declared and name not in _DOCUMENTED_BUT_NOT_READ
     )
 

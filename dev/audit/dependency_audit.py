@@ -39,7 +39,7 @@ in every repository.
 Output
 ------
 A human summary on stdout always. ``--json`` writes the machine-readable report
-to stdout instead; when ``VAULTSPEC_CI_REPORTS`` names a directory the same
+to stdout instead; when ``VAULTSPEC_A2A_CI_REPORTS`` names a directory the same
 report is additionally written to ``<dir>/dependency-audit.json``. With the
 variable unset nothing is written anywhere, which preserves cadrumo's
 deliberate zero-artifact posture.
@@ -65,6 +65,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
+
+from dev.ci_formats import REPORTS_ENV
 
 #: See the module docstring: these mirror ``dev/exit_codes.py`` (lane L9).
 EXIT_OK = 0
@@ -619,7 +621,7 @@ def write_artifact(report: Report, destination: str | None = None) -> Path | Non
     Args:
         report: The audit result to serialise.
         destination: Where to write. ``None`` -- the default, and what
-            :func:`main` passes -- reads ``VAULTSPEC_CI_REPORTS``. An empty
+            :func:`main` passes -- reads ``VAULTSPEC_A2A_CI_REPORTS``. An empty
             string means "nowhere", which is exactly what an unset variable
             amounts to. The parameter exists so a caller (a test included) can
             state the destination as a real value rather than reaching into
@@ -627,11 +629,11 @@ def write_artifact(report: Report, destination: str | None = None) -> Path | Non
 
     Returns:
         The path written, or ``None`` when no destination was named. With
-        ``VAULTSPEC_CI_REPORTS`` unset nothing is written anywhere: cadrumo
+        ``VAULTSPEC_A2A_CI_REPORTS`` unset nothing is written anywhere: cadrumo
         adopts the whole standard and simply never sets it.
     """
     if destination is None:
-        destination = os.environ.get("VAULTSPEC_CI_REPORTS", "")
+        destination = os.environ.get(REPORTS_ENV, "")
     if not destination:
         return None
     directory = Path(destination)

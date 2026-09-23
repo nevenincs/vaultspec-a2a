@@ -102,10 +102,10 @@ FINDINGS_CODES = frozenset({FAILED})
 PYTEST_NO_TESTS_COLLECTED = 5
 
 #: Set by CI. Makes `fix` report :data:`DRIFT` when it had to change something.
-FIX_STRICT_ENV = "VAULTSPEC_FIX_STRICT"
+FIX_STRICT_ENV = "VAULTSPEC_A2A_FIX_STRICT"
 
 #: Set by a lane that is legitimately allowed to collect nothing.
-ALLOW_EMPTY_ENV = "VAULTSPEC_ALLOW_EMPTY_SELECTION"
+ALLOW_EMPTY_ENV = "VAULTSPEC_A2A_ALLOW_EMPTY_SELECTION"
 
 
 def advisory_result(code: int, findings: Container[int] = FINDINGS_CODES) -> int:

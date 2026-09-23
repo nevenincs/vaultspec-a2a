@@ -121,7 +121,7 @@ def test_no_artifact_without_a_destination() -> None:
 
     The destination is passed as a value rather than patched into the
     environment, so this asserts the behaviour itself and not the plumbing
-    that reads ``VAULTSPEC_CI_REPORTS``.
+    that reads ``VAULTSPEC_A2A_CI_REPORTS``.
     """
     assert da.write_artifact(_report([]), "") is None
 

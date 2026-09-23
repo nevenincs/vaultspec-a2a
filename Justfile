@@ -127,7 +127,7 @@ default:
 # Idempotent: a second run costs a stamp comparison and touches nothing.
 # `just init-check` verifies without mutating, exiting 3 when the worktree is
 # not initialized, which is what a hook or a provisioner calls. Set
-# VAULTSPEC_INIT_JSON=1 for an NDJSON event stream, VAULTSPEC_INIT_FORCE=1 to
+# VAULTSPEC_A2A_INIT_JSON=1 for an NDJSON event stream, VAULTSPEC_A2A_INIT_FORCE=1 to
 # ignore the stamp. Every run writes `.venv/init-report.json`.
 #
 # The phases run in dependency order and stop at the first failure: unlike the

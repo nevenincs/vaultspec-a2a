@@ -31,7 +31,7 @@ whether that gates is already carried by the target's declaration.
 | Verb class | Gates? | 0 means | Non-zero means |
 |---|---|---|---|
 | `check-*` | yes | read-only inspection found nothing | a finding, or the checker could not run |
-| `fix-*` | on failure only | the repair pass completed | the repair pass failed; `5` under `VAULTSPEC_FIX_STRICT` when it had to change something |
+| `fix-*` | on failure only | the repair pass completed | the repair pass failed; `5` under `VAULTSPEC_A2A_FIX_STRICT` when it had to change something |
 | `test-*` | yes | tests ran and passed | a failure, or `8` when nothing ran |
 | `audit-*` | **no**, except dependency audit | the scan completed | `7` when the scanner could not run; for the dependency audit, `1` on a published advisory |
 | `build-*` | yes | artefacts produced | the build failed |
@@ -73,7 +73,7 @@ summary AND the exit code, never from the exit code alone.
 | 2 | `INIT_HOST_TOOL_MISSING` | `just init`: a required host tool is absent (L6) |
 | 3 | `INIT_STALE` | `just init`: environment stale relative to its inputs (L6) |
 | 4 | `INIT_STEP_FAILED` | `just init`: one bootstrap step failed (L6) |
-| 5 | `DRIFT` | managed content differs from its generated form (L6; also `fix` under `VAULTSPEC_FIX_STRICT`) |
+| 5 | `DRIFT` | managed content differs from its generated form (L6; also `fix` under `VAULTSPEC_A2A_FIX_STRICT`) |
 | 6 | `INIT_LOCKED` | `just init`: the environment is held open by another process (L6) |
 | 7 | `TOOL_BROKEN` (`ADVISORY_BROKEN`) | the tool failed to RUN: it started and could not do its job |
 | 8 | `NOTHING_SELECTED` | nothing ran: empty selection, or every test skipped |
@@ -174,7 +174,7 @@ A run that proved nothing must not read as a run that proved everything.
 - A test lane that collected no tests exits `8` (`NOTHING_SELECTED`). The
   runner maps pytest's own status `5` onto it.
 - A lane legitimately permitted to be empty sets
-  `VAULTSPEC_ALLOW_EMPTY_SELECTION=1`, which is a declaration in the toolchain
+  `VAULTSPEC_A2A_ALLOW_EMPTY_SELECTION=1`, which is a declaration in the toolchain
   table, not a flag typed at a prompt.
 - A hardware-gated lane whose tests all skip — `rag`'s GPU tiers on a host with
   no CUDA — is the case this rule exists for. pytest exits 0 for an all-skipped

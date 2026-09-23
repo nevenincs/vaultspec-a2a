@@ -26,6 +26,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dev.ci_formats import REPORT_NAME_ENV, REPORTS_ENV
+
 # DECLARE the environment this suite runs in, BEFORE `pytest_plugins` below
 # imports the plugin and with it the settings singleton - a declaration made
 # after that import is read too late to count.
@@ -80,7 +82,7 @@ if TYPE_CHECKING:
 #
 # A test lane's result is human-readable text and nothing else, so CI can only
 # learn "the process exited non-zero" and has to scrape scrollback for what
-# actually failed. `VAULTSPEC_CI_REPORTS` names a directory to write a JUnit
+# actually failed. `VAULTSPEC_A2A_CI_REPORTS` names a directory to write a JUnit
 # XML report into; when it is UNSET - every local run, and any CI job that does
 # not opt in - nothing changes and no artifact is produced.
 #
@@ -89,12 +91,12 @@ if TYPE_CHECKING:
 # last-registered-first, so this conftest's configure runs BEFORE the plugin
 # reads the option - which is what makes setting it here take effect.
 #
-# The filename distinguishes lanes: `VAULTSPEC_CI_REPORT_NAME` when the caller
+# The filename distinguishes lanes: `VAULTSPEC_A2A_CI_REPORT_NAME` when the caller
 # names one, otherwise a short digest of the invocation, so two lanes in one
 # job do not overwrite each other's report. An explicit `--junitxml` on the
 # command line always wins.
-_CI_REPORTS_ENV = "VAULTSPEC_CI_REPORTS"
-_CI_REPORT_NAME_ENV = "VAULTSPEC_CI_REPORT_NAME"
+_CI_REPORTS_ENV = REPORTS_ENV
+_CI_REPORT_NAME_ENV = REPORT_NAME_ENV
 
 
 def _ci_report_path(args: tuple[str, ...] | list[str]) -> str | None:

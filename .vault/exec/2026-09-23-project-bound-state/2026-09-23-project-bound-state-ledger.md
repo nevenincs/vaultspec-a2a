@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:e939d7926dbeb26b879756c42d3125ad93bd1214528d12fcab89693a8a32450b'
+body_hash: 'sha256:40faa2c055dbafe878f96f73a1b574ab9e6c82b68d136cab057e31ae1b89f3d1'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -388,7 +388,11 @@ related:
 - `S15` `M` `src/vaultspec_a2a/tests/gateway_boot.py`
 - `S15` `verify:` `pytest runner/default_safety/run_admission/credential_boundaries/codex_config_home/gateway_live/dashboard_contract -n 6 --dist=loadgroup under concurrent load` -> `pass`
 - `S15` `by:` `claude`
+- `S11` `M` `.vault/audit/2026-09-23-project-bound-state-audit.md`
+- `S11` `verify:` `cargo test -p vaultspec-api` -> `pass`
 
 ## Notes
 
 - `S11` Dashboard change implemented and verified in Y:/code/vaultspec-dashboard-worktrees/a2a-project-bound-state (branch a2a-project-bound-state): cargo test -p vaultspec-api and -p vaultspec-product, clippy -D warnings, fmt, tsc and eslint clean. Not committed: that repository's unscoped vault-fix pre-commit hook fails on 63 pre-existing errors in unrelated features. Skipping a hook needs the owner's authorization; the Step stays open.
+- `S11` Committed in vaultspec-dashboard branch a2a-project-bound-state: 3e446503 (vault backlog cleared, 0 errors), fe764e7f (engine discovery + product launcher), b2664aeb (agent E2E harness). cargo test -p vaultspec-api/-p vaultspec-product, clippy -D warnings, fmt, tsc, eslint pass. The live E2E lane was not run.
+

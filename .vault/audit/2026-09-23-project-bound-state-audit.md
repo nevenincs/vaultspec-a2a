@@ -97,7 +97,9 @@ runs a 3-second reservation lifetime against a cold lazy worker start, and
 `acceptance/tests/test_dashboard_contract.py` and `api/tests/test_gateway_live.py` share
 the same first-demand readiness race. Each passed in isolation and on repeat during
 `P01.S02` and `P01.S03`, and failed only while another session loaded the host.
-Status: open; not owned by this plan.
+Status: fixed in `P05.S15`. First demand is paid when the harness arms the
+gateway, the reservation lifetime outlives the prepares that fill the bound,
+and readiness is read once the gateway's own probe settles.
 
 ### env-coverage-vacuous | medium | The env-example coverage test never checked prefix-derived names
 
@@ -196,9 +198,10 @@ the checkpoint store into the same file.
 `VAULTSPEC_INIT_FORCE` (`dev/init/contract.py`). The CI, fix-strict, empty-selection
 and init names are shared with the dashboard's development harness, so they read as
 fleet conventions rather than a2a settings. Status: `VAULTSPEC_LIVE_*` and the other
-repository test variables renamed under `VAULTSPEC_A2A_` in `P03.S09`; the
-fleet-shared names are open pending the owner's call on whether D1
-covers the development harness.
+repository test variables renamed under `VAULTSPEC_A2A_` in `P03.S09`. The
+owner directed on 2026-09-23 that every a2a variable carry the prefix, and the
+remaining six moved under it in `P05.S14`. The dashboard keeps its own copies
+under its own prefix.
 
 ### capsule-root-tilde-regression | low | The capsule assets root no longer expanded a tilde
 
@@ -250,7 +253,10 @@ needs its 20-second holder alive while a second session boots. With Python
 itself taking four to seven seconds to start on this host, they fail in parallel
 and pass serially (`test_runner_reaps_descendants_left_after_pytest_exits` passed
 alone in 27.4 s). They could not run here at all before `P03.S08`, which is when the
-sandbox's `%TEMP%` denial stopped applying. Status: open; not owned by this plan.
+sandbox's `%TEMP%` denial stopped applying. Status: fixed in `P05.S15`. Child
+processes are awaited on real progress through `testing/children.py`, and the
+one bound that is part of a proof is derived from a measured interpreter
+start-up.
 
 ### workspace-venv-escapes-repository-fixed | info | The agent venv walk stops at the workspace's own repository
 
@@ -288,9 +294,10 @@ query keys are masked too, covered by the parametrised warning test.
 
 `Settings.prepare_state_dir` seals only the state home. A storage setting pointed
 elsewhere inside the project, such as `VAULTSPEC_A2A_PROCS_HOME=.vault/data/procs`
-or a relative SQLite URL, creates an unignored directory. Status: open. Sealing a
-directory the operator chose changes what a2a writes into operator space. That
-refines D4 and needs a decision; see Recommendations.
+or a relative SQLite URL, creates an unignored directory. Status: fixed in
+`P05.S13` under the owner-authorized amendment to D4. a2a seals the outermost
+directory it creates inside the project, and never writes into a directory that
+already existed.
 
 ### session-prune-races-on-a-vanishing-directory | medium | Two sessions starting together could crash seating at conftest import
 
@@ -325,8 +332,52 @@ Status: fixed in `P03.S09`; the test's directory is under the session seat.
 Status: accepted as the intended boundary and stated in the `resolve_venv`
 docstring (`P03.S09`).
 
+### phase-close-review-p04 | info | Plan-close review of P04 and the P03 corrections: pass, one medium and six low findings
+
+The review re-checked `20b69e63`, `7dd9377a` and `01d49bbc` and found each fixed as
+recorded, with no regression. It traced D1 to D6 end to end. The findings below
+became Phase `P05`.
+
+### state-home-seal-can-hide-an-operator-chosen-tree | medium | Sealing an operator-named home could hide a whole repository
+
+A state home set to the project root, or to any repository root, would receive an
+ignore-everything file at `setup` or at lock acquisition. Status: fixed in
+`P05.S13`. Settings refuse a home that contains the project root, and the seal
+refuses a repository root. Covered in `control/tests/test_state_seal.py`.
+
+### compose-and-entrypoint-names-are-proven-only-under-docker | low | A settings rename broke the container with no check outside Docker
+
+Status: fixed in `P05.S14`; `control/tests/test_deployment_names.py` binds every
+Compose name and every entrypoint field to the settings schema without Docker.
+
+### storage-anchor-gate-does-not-scan-service | low | The container entrypoint was outside the storage-anchor gate
+
+Status: fixed in `P05.S14`; `service/` joins `dev/` in the gate's tempfile lane.
+
+### session-scratch-directories-are-never-reclaimed | low | Each scratch call in the MCP pinning tests made a new directory
+
+Status: fixed in `P05.S16`; one directory per module.
+
+### step-id-in-a-test-scratch-prefix | low | A test named a plan Step in a directory prefix
+
+Status: fixed in `P05.S16`.
+
+### state-layout-table-is-partial | low | The operator table listed five of the nine layout entries
+
+Status: fixed in `P05.S16`.
+
+### tmp-scratch-roots-are-left-behind-in-the-checkout | low | The duplication scan and enrollment left empty scratch roots
+
+Status: fixed in `P05.S14`; each tool removes its root once it is empty.
+
+### load-sensitive-tests-reconfirmed | info | The recorded load-sensitive failures, reproduced again during review
+
+Status: fixed in `P05.S15` together with `load-sensitive-runner-tests` and
+`load-sensitive-admission-tests`.
+
 ## Recommendations
 
 - Keep the storage-anchor gate as the enforcement point for the new rules (no profile, temp or raw environment use in production) so regressions fail review rather than surface as leaks.
-- Decide whether the seal follows the state home or every directory a2a creates inside the project root. Choosing the project root refines D4, because a2a would then write an ignore file into a directory the operator chose, so it belongs in a follow-on ADR (`seal-follows-the-home-not-the-writer`).
-- Decide once whether the a2a settings authority governs the repository's own development harness, for names and storage together (`dev-tooling-names-outside-the-prefix`).
+- The seal and harness-scope decisions are settled: D4 was amended on the owner's
+  authority, and the owner's direction put every a2a variable, harness included,
+  under the prefix.

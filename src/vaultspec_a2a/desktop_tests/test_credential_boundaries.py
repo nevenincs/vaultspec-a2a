@@ -144,7 +144,6 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
                 # The credential planes are the subject; keep the worker cold so
                 # no worker process is started behind this test.
                 auto_spawn_worker=False,
-                extra={"VAULTSPEC_REPAIR_ON_STARTUP": "false"},
             ),
             log_handle=log_handle,
         )

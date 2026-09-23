@@ -161,7 +161,6 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
                 # Keep the worker cold: ordinary boot must not start it, so the
                 # gateway-ready yet not-execution-ready fact is observable.
                 auto_spawn_worker=False,
-                extra={"VAULTSPEC_REPAIR_ON_STARTUP": "false"},
             ),
             log_handle=log_handle,
         )

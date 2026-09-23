@@ -11,7 +11,7 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:a2b714898226c9164bcb42999bc0f7a4bd18e5bd2d106c51a9ac5626decb54b8'
+body_hash: 'sha256:d3b40d82687f72d38c4695db870d652d8c609a1e461d3fe8b1ea1ed8be167256'
 ---
 
 # `project-bound-state` plan
@@ -39,7 +39,7 @@ One settings module owns every a2a variable under VAULTSPEC_A2A_, resolves the p
 - [x] `P01.S01` - Resolve the project root by override, marker search, then working directory, split it from the install root, and read .env from it; `src/vaultspec_a2a/control/`.
 - [x] `P01.S02` - Rename every a2a settings field to the VAULTSPEC_A2A_ prefix with foreign-tool fallbacks and one name registry for child environments; `src/vaultspec_a2a/`.
 - [x] `P01.S03` - Enroll every raw environment read as a settings field and route consumers through settings; `src/vaultspec_a2a/`.
-- [ ] `P01.S04` - Regenerate .env.example from the settings fields and prove agreement with a contract test; `.env.example`.
+- [x] `P01.S04` - Regenerate .env.example from the settings fields and prove agreement with a contract test; `.env.example`.
 
 ### Phase `P02` - Project-bound storage
 

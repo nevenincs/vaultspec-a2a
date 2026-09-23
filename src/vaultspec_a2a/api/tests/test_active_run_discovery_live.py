@@ -66,7 +66,6 @@ async def _production_gateway(
             "VAULTSPEC_A2A_HOME": str(runtime_home),
             "VAULTSPEC_A2A_WORKSPACE_ROOT": str(tmp_path / "managed-workspaces"),
             "VAULTSPEC_A2A_AUTO_SPAWN_WORKER": "false",
-            "VAULTSPEC_REPAIR_ON_STARTUP": "false",
             "VAULTSPEC_A2A_WORKER_URL": f"http://127.0.0.1:{free_port()}",
             "VAULTSPEC_A2A_INTERNAL_TOKEN": _WORKER_TOKEN,
             "VAULTSPEC_A2A_GATEWAY_TOKEN": _SERVICE_TOKEN,

@@ -21,6 +21,7 @@ a visible decision in a diff rather than an accident.
 from __future__ import annotations
 
 import pathlib
+import re
 from typing import TYPE_CHECKING
 
 from ...control.config import Settings
@@ -117,6 +118,54 @@ def test_every_declared_environment_name_is_documented_or_excluded() -> None:
         f"undocumented settings in .env.example: {undocumented}. "
         "Document them, or add them to the desktop-only exclusion with a reason."
     )
+
+
+# Names the example documents that the service does not read, each with the
+# owner that does. Anything else in the file is a dead or misspelled setting.
+_DOCUMENTED_BUT_NOT_READ = {
+    # Read by the langsmith SDK straight from the process environment.
+    "LANGSMITH_API_KEY": "langsmith SDK",
+    "LANGSMITH_ENDPOINT": "langsmith SDK",
+    "LANGSMITH_PROJECT": "langsmith SDK",
+    "LANGSMITH_TRACING": "langsmith SDK",
+    "LANGCHAIN_TRACING_V2": "langsmith SDK",
+    # Documented as deliberately absent: the agent scrub strips it.
+    "ANTHROPIC_API_KEY": "documented absence",
+    # Substituted by the Postgres Compose profile, never read by the service.
+    "POSTGRES_PASSWORD": "docker compose",
+    # Named in the port table as the place a Postgres port is embedded.
+    "DATABASE_URL": "port table prose",
+}
+
+_NAME = re.compile(r"\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b")
+
+
+def test_every_documented_name_is_read_by_the_service() -> None:
+    """The reverse direction: the example must not advertise dead settings.
+
+    Four settings the service had stopped reading stayed in the example for
+    months, each still looking like a knob an operator could turn.
+    """
+    declared = _all_declared_env_names()
+    dead = sorted(
+        name
+        for name in set(_NAME.findall(_documented()))
+        if name not in declared and name not in _DOCUMENTED_BUT_NOT_READ
+    )
+
+    assert not dead, (
+        f".env.example documents names the service does not read: {dead}. "
+        "Remove them, or record which tool reads them."
+    )
+
+
+def test_the_integration_example_names_only_settings_the_service_reads() -> None:
+    """The integration profile's example is held to the same reverse check."""
+    integration = _ENV_EXAMPLE.with_name(".env.integration.example")
+    named = set(_NAME.findall(integration.read_text(encoding="utf-8")))
+
+    assert named, "the integration example names no settings at all"
+    assert named <= _all_declared_env_names(), sorted(named - _all_declared_env_names())
 
 
 def test_compose_provider_identity_defaults_are_documented() -> None:

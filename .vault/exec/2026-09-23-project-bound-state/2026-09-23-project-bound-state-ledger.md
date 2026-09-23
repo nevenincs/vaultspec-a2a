@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:7ff89f8bd4a18bb28937ce497a0cad63d6288a06dca63f89ea4549c920355538'
+body_hash: 'sha256:a5af47b7325cd429b67ab4cf197c934b4ee57972f2879f581d11730bdaf67d8c'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -182,4 +182,13 @@ related:
 - `S03` `M` `src/vaultspec_a2a/workspace/environment.py`
 - `S03` `verify:` `pytest S03-affected files and lifecycle, telemetry, protocols: 437 passed; remaining failures are the nested-pytest C:\Users\hello\AppData\Local\Temp denial (P03.S08) and load-sensitive admission tests that pass in isolation; ty and ruff clean` -> `pass`
 - `S03` `by:` `claude`
+- `S04` `M` `.env.example`
+- `S04` `M` `dev/credentials.py`
+- `S04` `M` `src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py`
+- `S04` `M` `src/vaultspec_a2a/api/tests/test_catalog_restart_redispatch.py`
+- `S04` `M` `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
+- `S04` `M` `src/vaultspec_a2a/desktop_tests/test_credential_boundaries.py`
+- `S04` `M` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
+- `S04` `verify:` `pytest control/tests/test_env_example_coverage.py (8 passed, both directions, both example files)` -> `pass`
+- `S04` `by:` `claude`
 

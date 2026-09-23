@@ -130,6 +130,11 @@ def resolve_against(root: Path, value: Path | str) -> Path:
     text = os.fspath(value)
     if is_absolute_path(text):
         return Path(text)
+    windows = PureWindowsPath(text)
+    if windows.drive and not windows.root:
+        # "C:foo" is relative to drive C's per-process working directory, which
+        # joining would silently keep; rebase what follows the drive instead.
+        text = str(PureWindowsPath(*windows.parts[1:])) if windows.parts[1:] else "."
     return Path(os.path.normpath(root / text))
 
 

@@ -105,6 +105,31 @@ def test_the_extraction_reads_past_the_plain_alias() -> None:
     }
 
 
+def _assigned_names(text: str) -> set[str]:
+    """Names given an assignment line an operator can uncomment and edit."""
+    return set(_ASSIGNMENT.findall(text))
+
+
+_ASSIGNMENT = re.compile(r"^(?:# )?([A-Z][A-Z0-9_]*)=", re.MULTILINE)
+
+
+def test_every_setting_has_a_line_an_operator_can_edit() -> None:
+    """A setting mentioned only in prose leaves the operator nothing to copy.
+
+    Each field needs at least one of its names as an assignment line; its other
+    spellings (the a2a name of another tool's variable, or the reverse) may be
+    documented in prose beside it.
+    """
+    assigned = _assigned_names(_documented())
+    missing = sorted(
+        field_env_names(Settings, field)[0]
+        for field in Settings.model_fields
+        if not set(field_env_names(Settings, field)) & (assigned | _DESKTOP_ONLY)
+    )
+
+    assert not missing, f"settings with no editable line in .env.example: {missing}"
+
+
 def test_every_declared_environment_name_is_documented_or_excluded() -> None:
     """A name that is neither documented nor excluded is drift."""
     text = _documented()

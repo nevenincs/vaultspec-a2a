@@ -4,9 +4,9 @@ Resolves a live dashboard engine (base URL + machine bearer) from the engine's
 own discovery file, applying the reference discipline verbatim: a present file
 is trusted only when its heartbeat is fresh AND a real ``GET /health`` returns
 200. A stale or crashed file (the documented 20-hour-stale specimen) is skipped,
-never owned. Candidate order puts an explicit override
-(``VAULTSPEC_A2A_ENGINE_SERVICE_JSON``, which a ``--no-seat`` workspace-local serve
-writes) ahead of the machine-global ``~/.vaultspec/service.json``.
+never owned. There is one candidate: the configured ``engine_service_json``,
+which defaults to the record the engine publishes inside the project a2a serves
+(``.vault/data/engine-data/service.json``).
 
 The bearer is read out of the file and never logged.
 """

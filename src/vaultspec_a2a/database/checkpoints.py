@@ -266,7 +266,7 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
             # The store's directory is part of the state layout, not something an
             # operator creates first - the same courtesy the application database
             # engine extends to its own file.
-            Path(connection).parent.mkdir(parents=True, exist_ok=True)
+            settings.prepare_state_dir(Path(connection).parent)
         async with AsyncSqliteSaver.from_conn_string(connection) as checkpointer:
             # Desktop profile boot must not mutate schema: ``setup()`` creates the
             # checkpointer tables, so it is suppressed when the profile is armed.

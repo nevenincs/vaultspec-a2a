@@ -72,6 +72,26 @@ def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
     ]
 
 
+def test_a_discarded_server_url_is_reported_without_its_password(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The warning names the displaced store but never echoes its credential."""
+    app_home = tmp_path / "app"
+    secret = "s3cr3t-db-password"
+    supplied = f"postgresql+asyncpg://postgres:{secret}@db.example:5432/vaultspec"
+
+    with (
+        caplog.at_level(logging.WARNING, logger=_CONFIG_LOGGER),
+        _armed(app_home, VAULTSPEC_A2A_DATABASE_URL=supplied),
+    ):
+        _settings()
+
+    messages = _warnings(caplog)
+    assert any("VAULTSPEC_A2A_DATABASE_URL" in message for message in messages)
+    assert all(secret not in message for message in messages), messages
+    assert any("db.example" in message for message in messages)
+
+
 def test_an_explicit_database_url_discarded_by_seating_is_reported(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

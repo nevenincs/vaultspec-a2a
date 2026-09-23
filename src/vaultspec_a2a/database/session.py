@@ -254,7 +254,7 @@ def _resolve_database_url(database: Path | str | None) -> str:
         return "sqlite+aiosqlite:///:memory:"
 
     resolved = Path(raw).resolve()
-    resolved.parent.mkdir(parents=True, exist_ok=True)
+    settings.prepare_state_dir(resolved.parent)
     return f"sqlite+aiosqlite:///{resolved}"
 
 
@@ -265,7 +265,7 @@ def _with_sqlite_parent(url: str) -> str:
     parsed = make_url(url)
     database = parsed.database
     if parsed.get_backend_name() == "sqlite" and database and database != ":memory:":
-        Path(database).parent.mkdir(parents=True, exist_ok=True)
+        settings.prepare_state_dir(Path(database).parent)
     return url
 
 

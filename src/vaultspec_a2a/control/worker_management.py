@@ -145,7 +145,7 @@ async def _spawn_worker(
     spawn_env[setting_env("worker_generation")] = str(generation)
 
     stderr_log_path = _worker_stderr_log_path(worker_port)
-    stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.prepare_state_dir(stderr_log_path.parent)
     # POSIX containment seats the worker in a new session/process group at fork;
     # passed explicitly (rather than via ``**kwargs``) so the ``Popen[bytes]``
     # overload is preserved. Windows contributes no spawn-time flag - it assigns

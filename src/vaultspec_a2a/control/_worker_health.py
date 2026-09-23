@@ -238,7 +238,7 @@ class WorkerHealthProbe:
 def _runtime_dir() -> Path:
     """Return the runtime directory gateway-managed process logs go to."""
     runtime_dir = settings.state_layout.logs_dir
-    runtime_dir.mkdir(parents=True, exist_ok=True)
+    settings.prepare_state_dir(runtime_dir)
     return runtime_dir
 
 

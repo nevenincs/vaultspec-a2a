@@ -39,6 +39,7 @@ import click
 import httpx
 
 from ..control.config import setting_env, settings
+from ..control.state_layout import seal_state_home
 from ..gateway_auth import gateway_auth_headers
 from ..lifecycle.discovery import (
     DiscoveryState,
@@ -201,7 +202,7 @@ def start_service(
     # not have to rediscover the project from where it was launched. Every
     # store then follows from the home through the one state layout, the same
     # one the desktop profile seats and setup initialises.
-    home.mkdir(parents=True, exist_ok=True)
+    seal_state_home(home)
     env: dict[str, str] = {
         setting_env("a2a_home"): str(home),
         setting_env("project_root"): str(settings.project_root),

@@ -31,7 +31,9 @@ __all__ = [
     "DISCOVERY_RECORD",
     "ENGINE_DISCOVERY_RECORD",
     "HANDOFF_CREDENTIAL",
+    "SEAL_FILE",
     "StateLayout",
+    "seal_state_home",
     "state_layout",
 ]
 
@@ -47,6 +49,32 @@ ENGINE_DISCOVERY_RECORD = Path(".vault") / "data" / "engine-data" / DISCOVERY_RE
 
 #: The bearer handoff credential's file name beside the discovery record.
 HANDOFF_CREDENTIAL = "service.token"
+
+
+#: The file that keeps a state home out of version control.
+SEAL_FILE = ".gitignore"
+
+# Ignores everything, itself included, so the home never shows as untracked. The
+# project a state home lives in need not be a vaultspec project that already
+# ignores .vault/data, and the home holds the gateway's handoff credential and
+# copies of provider logins.
+_SEAL_TEXT = (
+    "# Written by vaultspec-a2a: runtime state and credentials, never committed.\n*\n"
+)
+
+
+def seal_state_home(home: Path) -> None:
+    """Create ``home`` and make it invisible to version control, idempotently."""
+    home.mkdir(parents=True, exist_ok=True)
+    seal = home / SEAL_FILE
+    if seal.exists():
+        return
+    try:
+        with seal.open("x", encoding="utf-8") as handle:
+            handle.write(_SEAL_TEXT)
+    except FileExistsError:
+        # A concurrent writer sealed it first; the content is identical.
+        return
 
 
 @dataclass(frozen=True, slots=True)

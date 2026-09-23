@@ -138,6 +138,21 @@ def test_spelled_out_setting_names_are_reported_outside_the_settings() -> None:
     )
 
 
+def test_the_spellings_that_slipped_past_the_first_rules_are_reported() -> None:
+    """A None directory, an imported name, and a qualified Path all still count."""
+    tree = _parse(
+        "from tempfile import mkdtemp as make\n"
+        "a = tempfile.mkdtemp(dir=None)\n"
+        "b = make()\n"
+        "c = pathlib.Path.cwd()\n"
+        "d = pathlib.Path.home()\n"
+    )
+    temp = storage_anchors._tempfile_violations(tree)
+    assert [lineno for lineno, _ in temp] == [2, 3], temp
+    assert [lineno for lineno, _ in storage_anchors._cwd_violations(tree)] == [4]
+    assert [lineno for lineno, _ in storage_anchors._home_violations(tree)] == [5]
+
+
 def test_test_modules_are_out_of_scope() -> None:
     """Tests legitimately build paths against the checkout they run in."""
     assert storage_anchors._is_test_module(Path("control/tests/test_config.py"))

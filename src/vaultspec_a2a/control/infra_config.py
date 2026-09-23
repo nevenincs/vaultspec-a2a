@@ -110,9 +110,28 @@ def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> N
         "mutable path: the explicitly configured %s=%r is discarded in favour of "
         "%r. Unset one of the two to resolve the conflict.",
         env_name,
-        supplied,
-        derived,
+        _loggable(supplied),
+        _loggable(derived),
     )
+
+
+def _loggable(value: object) -> object:
+    """Return ``value`` safe to log: a URL's password is masked, never echoed.
+
+    A database URL routinely carries a password, and a server DSN displaced by
+    the desktop seating is exactly the value this warning reports.
+    """
+    text = str(value)
+    if "://" not in text:
+        return value
+    from sqlalchemy.engine.url import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        return make_url(text).render_as_string(hide_password=True)
+    except ArgumentError:
+        # Unparseable: report that a value was discarded without the value.
+        return "<unparseable URL>"
 
 
 def _valid_kimi_capability(token: str) -> bool:
@@ -260,7 +279,8 @@ class InfraConfig(ProjectSettings):
         alias="VAULTSPEC_A2A_CAPSULE_ASSETS",
         description=(
             "Root of the desktop capsule's owned runtime assets (Node.js and the "
-            "ACP adapter). When set, the provider factory resolves the default "
+            "ACP adapter), absolute or relative to the project root; a leading "
+            "~ is not expanded. When set, the provider factory resolves the default "
             "Node executable and ACP entry point ONLY from this root, with no "
             "checkout or PATH fallback. Unset for the Compose/dev profiles, where "
             "resolution is checkout-relative as before."

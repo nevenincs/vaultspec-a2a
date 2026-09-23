@@ -141,6 +141,84 @@ database URLs, but not the project root, so the child would rediscover its
 project from where it was launched. It now passes the state home and the project
 root and lets the layout place every store. Status: fixed in `P02.S07`.
 
+### phase-close-review-p01-p02 | info | Phase-close review of P01 and P02: revision required, two high findings
+
+Independent review of `7b874438..7fa45b01` against `2026-09-23-project-bound-state-adr`.
+Validator ordering, the dotenv swap, import layering, the agent scrub and the new
+tests were confirmed sound. The findings below were raised; each carries its status.
+
+### credential-in-seating-warning | high | The desktop seating warning logged a displaced database URL with its password
+
+`control/infra_config.py` `_warn_seating_discard` logged the supplied value with
+`%r`, so a Postgres DSN displaced by the desktop profile wrote its password into
+the service log and the rotating file under `runtime/`. Status: fixed in the
+review corrections; values are rendered through
+`sqlalchemy.engine.url.make_url(...).render_as_string(hide_password=True)` and
+`control/tests/test_desktop_seating_discard_warning.py` proves the secret never
+appears.
+
+### unignored-state-in-served-project | high | The default state home was not ignored in a project without vaultspec
+
+In a plain repository `.vault/data/agents` - holding `service.token` and provider
+login copies - was untracked and one `git add -A` from being committed. Status:
+fixed in the review corrections; `control/state_layout.py` `seal_state_home` writes
+a self-ignoring `.gitignore` (`*`) into the home, and every writer creates state
+directories through `Settings.prepare_state_dir`, so the home is sealed before
+anything lands in it. `control/tests/test_state_seal.py` drives a real `git init`
+repository and asserts `git status` stays clean.
+
+### drive-relative-storage-escape | medium | A Windows drive-relative path escaped the project root
+
+`control/settings_base.py` `resolve_against` joined `C:foo` onto the root, which
+pathlib turns back into `C:foo`. Status: fixed; the part after the drive is rebased
+onto the project root, covered in `control/tests/test_project_root.py`.
+
+### stale-discovery-docstrings | medium | Discovery modules still described home-directory rendezvous
+
+Status: fixed in `authoring/discovery.py`, `lifecycle/discovery.py` and
+`api/tests/test_app.py`.
+
+### env-example-default-changes-behaviour | medium | The documented database example silently merged the stores
+
+Status: fixed; `.env.example` shows a distinct path and says that setting it moves
+the checkpoint store into the same file.
+
+### gate-rule-gaps | medium | The storage-anchor gate missed three spellings
+
+`tempfile.*(dir=None)`, `from tempfile import ...` and `pathlib.Path.cwd()` /
+`.home()` slipped past. Status: fixed in `dev/guards/storage_anchors.py`, covered in
+`dev/tests/test_storage_anchors.py`. The gate still scans only
+`src/vaultspec_a2a`; widening it to `dev/` is part of the next finding.
+
+### dev-tooling-names-outside-the-prefix | medium | Repository harness variables sit under the bare prefix
+
+`VAULTSPEC_LIVE_*` (`dev/providers.py`), `VAULTSPEC_CI_REPORTS` and
+`VAULTSPEC_CI_REPORT_NAME` (`conftest.py`), `VAULTSPEC_FIX_STRICT` and
+`VAULTSPEC_ALLOW_EMPTY_SELECTION` (`dev/exit_codes.py`), `VAULTSPEC_INIT_JSON` and
+`VAULTSPEC_INIT_FORCE` (`dev/init/contract.py`). The CI, fix-strict, empty-selection
+and init names are shared with the dashboard's development harness, so they read as
+fleet conventions rather than a2a settings. Status: `VAULTSPEC_LIVE_*` owned by
+`P03.S09`; the fleet-shared names are open pending the owner's call on whether D1
+covers the development harness.
+
+### capsule-root-tilde-regression | low | The capsule assets root no longer expanded a tilde
+
+Status: resolved by documentation; the field description states the root is
+absolute or project-relative and that `~` is not expanded, matching every other path
+setting.
+
+### env-example-coverage-accepts-prose | low | A setting named only in prose counted as documented
+
+Status: fixed; `control/tests/test_env_example_coverage.py` requires every field to
+carry an editable `NAME=` line under at least one of its names.
+
+### workspace-venv-escapes-repository | medium | Agent environments walked past a workspace's own repository to find a virtualenv
+
+`workspace/environment.py` `resolve_venv` walks up ten levels for a `.git` beside a
+`.venv`, so a workspace nested in another repository (now every test workspace,
+and any operator workspace inside a larger checkout) receives the enclosing
+repository's interpreter. Status: owned by `P03.S09`.
+
 ## Recommendations
 
 - Keep the storage-anchor gate as the enforcement point for the new rules (no profile, temp or raw environment use in production) so regressions fail review rather than surface as leaks.

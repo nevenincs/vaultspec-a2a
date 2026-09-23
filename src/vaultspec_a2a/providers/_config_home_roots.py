@@ -48,9 +48,7 @@ def temp_home_root() -> Path:
     """
     from ..control.config import settings
 
-    root = settings.temp_homes_dir
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return settings.prepare_state_dir(settings.temp_homes_dir)
 
 
 def _orphan_home_is_collectable(

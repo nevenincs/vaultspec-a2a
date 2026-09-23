@@ -81,6 +81,9 @@ def test_relative_storage_values_join_the_root_and_absolute_ones_do_not(
     assert resolve_against(tmp_path, "../up") == tmp_path.parent / "up"
     # A container path named on a Windows host is still absolute.
     assert resolve_against(tmp_path, "/app/state") == Path("/app/state")
+    # A drive-relative value is relative, not a silent escape to another drive's
+    # working directory.
+    assert resolve_against(tmp_path, "C:state") == tmp_path / "state"
 
 
 def test_settings_read_the_project_roots_dotenv(tmp_path: Path) -> None:

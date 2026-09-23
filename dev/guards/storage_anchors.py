@@ -149,6 +149,13 @@ def _walk_violations(tree: ast.Module, relative: Path) -> list[tuple[int, str]]:
     ]
 
 
+def _names_path(node: ast.expr) -> bool:
+    """Whether ``node`` is ``Path`` itself or any attribute chain ending in it."""
+    if isinstance(node, ast.Name):
+        return node.id == "Path"
+    return isinstance(node, ast.Attribute) and node.attr == "Path"
+
+
 def _cwd_violations(tree: ast.Module) -> list[tuple[int, str]]:
     """Return every working-directory read."""
     found: list[tuple[int, str]] = []
@@ -158,11 +165,8 @@ def _cwd_violations(tree: ast.Module) -> list[tuple[int, str]]:
         func = node.func
         if not isinstance(func, ast.Attribute):
             continue
-        if func.attr == "cwd" and isinstance(func.value, ast.Name):
-            if func.value.id == "Path":
-                found.append(
-                    (node.lineno, "Path.cwd() anchors to the launch directory")
-                )
+        if func.attr == "cwd" and _names_path(func.value):
+            found.append((node.lineno, "Path.cwd() anchors to the launch directory"))
         elif func.attr == "getcwd":
             found.append((node.lineno, "os.getcwd() anchors to the launch directory"))
     return sorted(found)
@@ -175,29 +179,56 @@ def _home_violations(tree: ast.Module) -> list[tuple[int, str]]:
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
         func = node.func
-        if func.attr == "home" and isinstance(func.value, ast.Name):
-            if func.value.id == "Path":
-                found.append((node.lineno, "Path.home() anchors to the user profile"))
+        if func.attr == "home" and _names_path(func.value):
+            found.append((node.lineno, "Path.home() anchors to the user profile"))
         elif func.attr == "expanduser":
             found.append((node.lineno, "expanduser() anchors to the user profile"))
     return sorted(found)
 
 
+def _tempfile_aliases(tree: ast.Module) -> dict[str, str]:
+    """Map every local name bound by ``from tempfile import ...`` to its entry."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "tempfile":
+            for alias in node.names:
+                if alias.name in _TEMPFILE_CALLS:
+                    aliases[alias.asname or alias.name] = alias.name
+    return aliases
+
+
+def _places_under_a_directory(node: ast.Call) -> bool:
+    """Whether the call names a directory - and not ``None``, the system default."""
+    for keyword in node.keywords:
+        if keyword.arg == "dir":
+            value = keyword.value
+            return not (isinstance(value, ast.Constant) and value.value is None)
+    return False
+
+
 def _tempfile_violations(tree: ast.Module) -> list[tuple[int, str]]:
     """Return every ``tempfile`` call that lands in the system temp directory."""
+    aliases = _tempfile_aliases(tree)
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if not (isinstance(func.value, ast.Name) and func.value.id == "tempfile"):
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "tempfile"
+            and func.attr in _TEMPFILE_CALLS
+        ):
+            entry = func.attr
+        elif isinstance(func, ast.Name) and func.id in aliases:
+            entry = aliases[func.id]
+        else:
             continue
-        if func.attr not in _TEMPFILE_CALLS:
-            continue
-        if func.attr != "gettempdir" and any(k.arg == "dir" for k in node.keywords):
+        if entry != "gettempdir" and _places_under_a_directory(node):
             continue
         found.append(
-            (node.lineno, f"tempfile.{func.attr}() lands in the system temp directory")
+            (node.lineno, f"tempfile.{entry}() lands in the system temp directory")
         )
     return sorted(found)
 

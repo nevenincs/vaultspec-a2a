@@ -25,7 +25,12 @@ from .infra_config import (
     _warn_seating_discard,
 )
 from .settings_base import ENV_PREFIX, env_name, is_absolute_path, resolve_against
-from .state_layout import ENGINE_DISCOVERY_RECORD, StateLayout, state_layout
+from .state_layout import (
+    ENGINE_DISCOVERY_RECORD,
+    StateLayout,
+    seal_state_home,
+    state_layout,
+)
 
 __all__ = [
     "Settings",
@@ -244,6 +249,19 @@ class Settings(DomainSettingsConfig, InfraConfig):
     def state_layout(self) -> StateLayout:
         """Every mutable path a2a writes, derived from the state home."""
         return state_layout(self.a2a_home)
+
+    def prepare_state_dir(self, directory: Path) -> Path:
+        """Create ``directory``, sealing the state home first when it lies inside.
+
+        Every writer that creates a directory for a2a state goes through here, so
+        the state home is ignored by version control before anything is written
+        into it, whichever writer happens to be first.
+        """
+        home = self.a2a_home
+        if directory == home or directory.is_relative_to(home):
+            seal_state_home(home)
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
 
     @property
     def registry_home(self) -> Path:

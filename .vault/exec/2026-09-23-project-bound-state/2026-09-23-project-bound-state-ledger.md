@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:7ca0ddaf4795283f1d6c6d25c12583de88891de97193364fda38e36e55d3dfb2'
+body_hash: 'sha256:3dc4e53fa61fed5ad91af69e01456b4dfd8ea873a30b751182caa55ae1a87129'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -234,4 +234,23 @@ related:
 - `S07` `M` `src/vaultspec_a2a/database/session.py`
 - `S07` `verify:` `pytest cli and database (428 passed; 2 contention failures re-ran green alone: start cycle 1 passed, cli live 6 passed); gate tests 16 passed; storage-anchor gate exit 0` -> `pass`
 - `S07` `by:` `claude`
+- `S05` `M` `.vault/audit/2026-09-23-project-bound-state-audit.md`
+- `S05` `M` `dev/guards/storage_anchors.py`
+- `S05` `M` `dev/tests/test_storage_anchors.py`
+- `S05` `M` `src/vaultspec_a2a/api/tests/test_app.py`
+- `S05` `M` `src/vaultspec_a2a/authoring/discovery.py`
+- `S05` `M` `src/vaultspec_a2a/cli/service.py`
+- `S05` `M` `src/vaultspec_a2a/control/_worker_health.py`
+- `S05` `M` `src/vaultspec_a2a/control/state_layout.py`
+- `S05` `M` `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
+- `S05` `M` `src/vaultspec_a2a/control/tests/test_project_root.py`
+- `S05` `A` `src/vaultspec_a2a/control/tests/test_state_seal.py`
+- `S05` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S05` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S05` `M` `src/vaultspec_a2a/database/session.py`
+- `S05` `M` `src/vaultspec_a2a/lifecycle/discovery.py`
+- `S05` `M` `src/vaultspec_a2a/lifecycle/registry.py`
+- `S05` `M` `src/vaultspec_a2a/providers/_config_home_roots.py`
+- `S05` `M` `src/vaultspec_a2a/utils/logging.py`
+- `S05` `verify:` `phase-close review corrections: pytest control, database, lifecycle, utils, codex config home, dev/tests -n 4: 1397 passed; git-status seal test against a real repository; storage-anchor gate exit 0` -> `pass`
 

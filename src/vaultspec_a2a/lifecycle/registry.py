@@ -142,6 +142,13 @@ def procs_home(home: Path | None = None) -> Path:
     return settings.registry_home
 
 
+def _prepare_registry_dir(directory: Path) -> Path:
+    """Create a registry directory, sealing the state home when it is inside."""
+    from ..control.config import settings
+
+    return settings.prepare_state_dir(directory)
+
+
 def record_path(role: str, name: str, *, home: Path | None = None) -> Path:
     """Return the state-file path for ``<role>-<name>.json`` under the registry home."""
     return procs_home(home) / f"{role}-{name}.json"
@@ -263,7 +270,7 @@ def write_record(record: ProcRecord, *, home: Path | None = None) -> Path:
             f"record {record.role}-{record.name} is held by a live process "
             f"(pid {existing.pid}, owner {existing.owner!r}); refusing to overwrite"
         )
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _prepare_registry_dir(path.parent)
     atomic_write_text(path, json.dumps(record.to_dict(), indent=2))
     return path
 
@@ -489,8 +496,7 @@ def reserve_port(
     failure. A marker older than :data:`RESERVATION_TTL_MS` with no live record is
     stale and reclaimable. Raises :class:`RuntimeError` when the band is exhausted.
     """
-    root = procs_home(home)
-    root.mkdir(parents=True, exist_ok=True)
+    _prepare_registry_dir(procs_home(home))
     claimed = {rec.port for rec in list_records(home) if is_pid_alive(rec.pid)}
     resident_ports: set[int] = (
         set(config.resident.values()) if config is not None else set()

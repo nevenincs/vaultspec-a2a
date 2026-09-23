@@ -1,7 +1,8 @@
-"""Machine-global service discovery and heartbeat for the resident gateway (R8).
+"""Service discovery and heartbeat for the resident gateway (R8).
 
-The resident A2A gateway publishes ``~/.vaultspec-a2a/service.json`` so the engine
-can attach to it under the attach-never-own discipline. The record adopts the R8
+The A2A gateway publishes ``service.json`` at the root of its state home - by
+default ``.vault/data/agents`` in the project it serves - so the engine can
+attach to it under the attach-never-own discipline. The record adopts the R8
 ``ServiceInfo`` contract: ``port`` required; optional ``pid``, a non-secret
 ``handoff_reference``, and ``last_heartbeat`` (ms-epoch). The bearer lives in
 the referenced owner-restricted file, never in discovery. The producer refreshes the
@@ -40,7 +41,7 @@ from ..authoring.discovery import (
     heartbeat_is_fresh,
     read_service_json,
 )
-from ..control.state_layout import HANDOFF_CREDENTIAL, state_layout
+from ..control.state_layout import HANDOFF_CREDENTIAL, seal_state_home, state_layout
 from ..desktop._filesystem_authority import (
     DirectoryAuthority,
     assert_directory_authority,
@@ -394,6 +395,9 @@ def _harden_record_parent(parent: Path) -> None:
     there would add a new refusal on a platform this change cannot exercise.
     """
     parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # The discovery record sits at the root of a state home: seal it so the
+    # handoff credential beside it can never be committed with the project.
+    seal_state_home(parent)
     if os.name == "posix":
         _harden_credential_path(parent)
         return

@@ -64,25 +64,6 @@ jobs:
   test:
     name: "Check: Full CI (Linux)"
     runs-on: [self-hosted, Linux, X64]
-    # MEASURED, not guessed, and provisional until a run completes.
-    #
-    #   hosted ubuntu-latest              Run canonical CI  11m17s  completed
-    #   vaultspec-a2a-linux    (100/12G)  Run canonical CI  45m02s  CANCELLED
-    #   vaultspec-a2a-dev-runner (50/8G)  Run canonical CI  44m32s  CANCELLED
-    #
-    # Both self-hosted runners land within 30 seconds of each other, so this
-    # is not runner sizing - the cgroup shows no memory pressure at all
-    # (low/high/max/oom all 0, 7MB swap). It is I/O: the box sits ~81% idle
-    # with 9% iowait and pytest workers in D state. WSL2's ext4 lives in a
-    # vhdx on NTFS, and a suite doing many small file operations pays for
-    # every one of them.
-    #
-    # 45 was set for hosted hardware. Raising it is NOT a way of hiding the
-    # 4x - the numbers are above and the register carries them - it is what
-    # lets the job finish at all, which is the only way to learn the real
-    # duration. Three jobs `needs: test`, so the timeout was skipping the
-    # Windows and ARM64 certification legs entirely: the runners were never
-    # the problem, they were never reached.
     timeout-minutes: 90
     steps:
       - name: Checkout repository
@@ -100,16 +81,6 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          # `false` on purpose, and it is not a de-optimisation. These runners
-          # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a
-          # cache shared by every runner on its host - so the cache is already
-          # warm before the job starts and survives after it ends. `true` adds a
-          # GitHub-cache round trip on top of that, and its post step then tries
-          # to upload the whole shared directory: measured on this branch, the
-          # `Post Set up uv` step ran for 18 minutes and was still going when it
-          # hit the job's 20-minute budget, cancelling a run whose actual work
-          # had finished in 81 seconds. Every sibling repo on this fleet already
-          # calls setup-uv without it.
           enable-cache: false
           version: "0.11.29"
 
@@ -199,16 +170,6 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          # `false` on purpose, and it is not a de-optimisation. These runners
-          # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a
-          # cache shared by every runner on its host - so the cache is already
-          # warm before the job starts and survives after it ends. `true` adds a
-          # GitHub-cache round trip on top of that, and its post step then tries
-          # to upload the whole shared directory: measured on this branch, the
-          # `Post Set up uv` step ran for 18 minutes and was still going when it
-          # hit the job's 20-minute budget, cancelling a run whose actual work
-          # had finished in 81 seconds. Every sibling repo on this fleet already
-          # calls setup-uv without it.
           enable-cache: false
           version: "0.11.29"
 
@@ -245,16 +206,6 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          # `false` on purpose, and it is not a de-optimisation. These runners
-          # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a
-          # cache shared by every runner on its host - so the cache is already
-          # warm before the job starts and survives after it ends. `true` adds a
-          # GitHub-cache round trip on top of that, and its post step then tries
-          # to upload the whole shared directory: measured on this branch, the
-          # `Post Set up uv` step ran for 18 minutes and was still going when it
-          # hit the job's 20-minute budget, cancelling a run whose actual work
-          # had finished in 81 seconds. Every sibling repo on this fleet already
-          # calls setup-uv without it.
           enable-cache: false
           version: "0.11.29"
 

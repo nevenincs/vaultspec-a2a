@@ -94,16 +94,6 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
-          # `false` on purpose, and it is not a de-optimisation. These runners
-          # are self-hosted and persistent, and each one pins UV_CACHE_DIR at a
-          # cache shared by every runner on its host - so the cache is already
-          # warm before the job starts and survives after it ends. `true` adds a
-          # GitHub-cache round trip on top of that, and its post step then tries
-          # to upload the whole shared directory: measured on this branch, the
-          # `Post Set up uv` step ran for 18 minutes and was still going when it
-          # hit the job's 20-minute budget, cancelling a run whose actual work
-          # had finished in 81 seconds. Every sibling repo on this fleet already
-          # calls setup-uv without it.
           enable-cache: false
           version: "0.11.29"
 

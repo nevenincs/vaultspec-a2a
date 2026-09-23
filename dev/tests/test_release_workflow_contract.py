@@ -42,6 +42,7 @@ def test_release_please_owns_reviewable_version_proposals() -> None:
     workflow = _workflow("release-please.yml")
     assert _triggers(workflow) == {"push": {"branches": ["main"]}}
     assert workflow["permissions"] == {
+        "actions": "write",
         "contents": "write",
         "pull-requests": "write",
     }
@@ -49,10 +50,14 @@ def test_release_please_owns_reviewable_version_proposals() -> None:
     assert re.fullmatch(
         r"googleapis/release-please-action@[0-9a-f]{40}", steps[0]["uses"]
     )
-    assert len(steps) == 1
-    assert "gh workflow run" not in (WORKFLOWS / "release-please.yml").read_text(
-        encoding="utf-8"
-    )
+    # Only the proposal's own merge gate is dispatched; publication stays with
+    # the consumer that selects the release set.
+    source = (WORKFLOWS / "release-please.yml").read_text(encoding="utf-8")
+    assert re.findall(r"gh workflow run (\S+)", source) == ["merge-gate.yml"]
+    for step in steps[1:]:
+        assert step["if"] == (
+            "steps.release.outputs.pr && !steps.release.outputs.release_created"
+        )
 
 
 def test_release_proves_tag_and_publishes_complete_cohort_last() -> None:

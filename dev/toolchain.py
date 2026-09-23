@@ -1017,12 +1017,9 @@ CI = Verb(
                 uv_run("vaultspec-core", "vault", "check", "all"),
                 _verb("test", "harness"),
                 _verb("test", "unit"),
-                # BUILD IS PART OF CI. It was not, and in this repository the
-                # release path is the whole product: a frozen onedir that only
-                # release.yml has ever produced. A break in it surfaced at
-                # release, with the tag cut. The gates above prove the source
-                # is well-formed and the tests pass; only this one proves the
-                # artifact a user receives can still be produced from it.
+                # The package and documentation builds. This does NOT freeze
+                # the runtime: the onedir a user receives is still produced
+                # only by release.yml.
                 _verb("build", "all"),
             ),
         ),

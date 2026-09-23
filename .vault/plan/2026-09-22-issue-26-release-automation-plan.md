@@ -8,7 +8,7 @@ related:
   - '[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:c680d9b91c810236b5320ed4ce2ff037e8935cf74b708ac6d072243bf02127f5'
+body_hash: 'sha256:c53bee3dd402c895763300131352ba7b96e8ae9b79eb7300eda2b969534b4480'
 ---
 
 # `issue-26-release-automation` plan
@@ -47,7 +47,7 @@ Both are corrections within settled constraints; no ADR is created.
 - [x] `S01` - Give release-please exclusive ownership of version, lockfile, and changelog proposals while retaining guarded publication of an existing tag; `.github/workflows/release-please.yml, .github/workflows/release.yml, release-please-config.json, .release-please-manifest.json, CHANGELOG.md, Justfile, scripts/prepare_release.py, scripts/tests/test_prepare_release.py, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py`.
 - [x] `S02` - Place every CI and release job on the self-hosted fleet and repair the main-branch failures that block release qualification; `.github/workflows/test.yml, .github/workflows/merge-gate.yml, .github/workflows/release.yml, src/vaultspec_a2a/lifecycle/registry.py, src/vaultspec_a2a/providers/tests/test_project_confinement.py, src/vaultspec_a2a/testing/tests/test_runner.py`.
 - [x] `S03` - Make the concurrent first-demand run-start failure in the lazy-worker certification diagnosable, identify its cause from real evidence, and remove the nondeterminism; `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py, src/vaultspec_a2a/database/session.py, src/vaultspec_a2a/database/__init__.py, src/vaultspec_a2a/database/tests/test_write_transaction.py, src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py`.
-- [ ] `S04` - Make the release proposal mergeable: regenerate its lockfile and dispatch its required merge gate, and remove the remaining host-describing workflow text; `.github/workflows/release-please.yml, release-please-config.json, .github/ci-contract-allow.txt, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py, .github/workflows/test.yml, .github/workflows/release.yml, .github/workflows/migrations.yml, dev/toolchain.py`.
+- [x] `S04` - Make the release proposal mergeable: regenerate its lockfile and dispatch its required merge gate, and remove the remaining host-describing workflow text; `.github/workflows/release-please.yml, release-please-config.json, .github/ci-contract-allow.txt, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py, .github/workflows/test.yml, .github/workflows/release.yml, .github/workflows/migrations.yml, dev/toolchain.py`.
 - [ ] `S05` - Make a fresh SQLite store report its serving journal mode at boot; `src/vaultspec_a2a/database/session.py, src/vaultspec_a2a/database/tests/test_wal_maintenance.py`.
 
 ## Parallelization

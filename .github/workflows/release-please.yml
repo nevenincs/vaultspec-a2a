@@ -5,6 +5,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -24,3 +25,54 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Check out the release branch
+        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          # The lockfile commit below is pushed with this checkout's token.
+          persist-credentials: true
+
+      - name: Set up uv
+        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: false
+          version: "0.11.29"
+
+      - name: Set up just
+        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        uses: taiki-e/install-action@6012bba2f8e3e666a2b212f8823c06831704ce92 # just
+        with:
+          tool: just@1.38.0
+
+      # release-please bumps pyproject.toml but cannot rewrite the lock's own
+      # entry, so every `--locked` job would fail on main once the proposal
+      # merges. The branch is regenerated on each push to main, so this is
+      # re-applied each time and is a no-op when the lock already agrees.
+      - name: Refresh the release branch lockfile
+        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        run: |
+          just deps-lock
+          if git diff --quiet uv.lock; then
+            echo "uv.lock already matches the proposed version"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: update uv.lock for release"
+          git push
+
+      # Pushes and pull requests made with the default token start no workflow
+      # runs, so the proposal would never report its required merge gate. A
+      # dispatch is exempt, and its check lands on the branch head the pull
+      # request waits on. Last, so it validates the lockfile commit above.
+      # `pr` is guarded because a step's env is evaluated before its `if`.
+      - name: Dispatch the merge gate for the release pull request
+        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_BRANCH: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
+        run: gh workflow run merge-gate.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_BRANCH" -f "ref=$HEAD_BRANCH"

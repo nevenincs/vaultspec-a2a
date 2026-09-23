@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:c9294089bb54fa08caf8c550c02f5d7de92e87d655b99ca35e2351601dbd8224'
+body_hash: 'sha256:a1a9fc71dc647b7e440032121876898610dbf007e6313eb399c742fe48c71161'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -92,13 +92,33 @@ Type: correctness and test isolation. Since `a66e583f`, Full Validation failed o
 
 Type: CI efficiency. `Check: Workflow contract (Linux)` used `setup-uv` with `enable-cache: true`; its restore ran 8m35s on the self-hosted runner and the 10-minute job timeout cancelled it before the lint ran. It now uses `enable-cache: false` like every other self-hosted job.
 
-### release-native-runners-offline | high | two of the four native freeze targets have no online runner | open, operator-owned
+### release-native-runners-offline | high | two of the four native freeze targets have no online runner | resolved, operator-owned
 
-Type: operational prerequisite. `gw-laptop-linux-docker-arm64` and `gw-laptop-macos-native-arm64` were offline on 2026-09-22. `release.yml` builds each target natively and publishes only a complete four-archive cohort, so a publication run queues on the ARM64 Linux and macOS legs until the laptop hosts rejoin. No workflow change can substitute for them without violating the native-build rule.
+Type: operational prerequisite. `gw-laptop-linux-docker-arm64` and `gw-laptop-macos-native-arm64` were offline on 2026-09-22. `release.yml` builds each target natively and publishes only a complete four-archive cohort, so a publication run queues on the ARM64 Linux and macOS legs until the laptop hosts rejoin. No workflow change can substitute for them without violating the native-build rule. On 2026-09-23 all four release runners reported online.
 
 ### v0-3-0-undelivered | medium | the v0.3.0 tag has no GitHub release or artifacts | open
 
-Type: release state. Every v0.3.0 Release run (last 2026-08-02) failed on the Windows lifecycle smoke on GitHub-hosted runners, and no v0.3.0 release exists. The tag is immutable and points at code 745 commits behind `main`. That Windows failure does not reproduce on `main` with S02 applied: on the Windows fleet host, the locked freeze, the workflow's frozen-tree check (1470 files accepted), and `scripts/prove_artifact_lifecycle.sh` (start, ready `/health`, stop, pid reaped) all pass. The intended recovery is the release-please lane: the next release PR from `main`, merged after its merge gate, then an explicit-tag `release.yml` dispatch once Dashboard selects it.
+Type: release state. Every v0.3.0 Release run (last 2026-08-02) failed on the Windows lifecycle smoke on GitHub-hosted runners, and no v0.3.0 release exists. The tag is immutable and points at code 745 commits behind `main`. That Windows failure does not reproduce on `main` with S02 applied: on the Windows fleet host, the locked freeze, the workflow's frozen-tree check (1470 files accepted), and `scripts/prove_artifact_lifecycle.sh` (start, ready `/health`, stop, pid reaped) all pass. The intended recovery is the release-please lane: the next release PR from `main`, merged after its merge gate, then an explicit-tag `release.yml` dispatch once Dashboard selects it. Re-verified 2026-09-23 on `63cac8ac`: the locked Windows freeze and `scripts/prove_artifact_lifecycle.sh` pass on the Windows fleet host. The 0.3.1 proposal (PR #77) is that recovery path once S04 lets it carry a current lock and its merge gate.
+
+### release-proposal-gate-unreachable | high | the release pull request could never receive its required merge gate | resolved
+
+Type: CI correctness. Release please opens and updates its pull request with the default workflow token, and pull requests and pushes made with that token start no workflow runs, so `Check: Merge gate (Linux)` never reported on it. PR #77 (release 0.3.1) sat `BLOCKED` with only CodeQL checks and could merge only by administrator bypass. S01's verification assumed the gate would run "after administrator approval"; no approval path exists for token-authored events. `release-please.yml` now dispatches `merge-gate.yml` at the release branch head as its last step, following vaultspec-core; a dispatch is exempt from the token rule and its check lands on the head commit the pull request waits on. It dispatches nothing else: the contract tests pin the only `gh workflow run` target to `merge-gate.yml`, so artifact publication remains Dashboard-selected.
+
+### release-proposal-lock-stale | high | the release pull request left `uv.lock` at the previous version | resolved
+
+Type: release correctness. The `extra-files` TOML selector `$.package[?(@.name == 'vaultspec-a2a')].version` did not advance the lock: PR #77 changed `pyproject.toml` to 0.3.1 and left the `uv.lock` entry at 0.3.0, so merging it would fail every `--locked` job on `main`. The selector is removed; `release-please.yml` runs `just deps-lock` on the release branch and commits the lock when it changed, before dispatching the merge gate. The step is allowlisted in `.github/ci-contract-allow.txt` for its git bookkeeping.
+
+### host-description-residue | low | workflow comments still described runner hosts after the infrastructure removal | resolved
+
+Type: boundary hygiene. `7e3c8c3a` removed three host-describing comments but left the `test.yml` timing block naming runners, WSL2 and vhdx storage, and five copies of a comment about persistent runners and a shared `UV_CACHE_DIR` across `test.yml`, `release.yml`, and `migrations.yml`. All are removed; the `enable-cache: false` settings stay.
+
+### ci-build-claim-overstated | low | a toolchain comment claimed `ci all` proves the shipped artifact can be produced | resolved
+
+Type: misleading documentation. `dev/toolchain.py` said the `build all` step of `ci all` proves the artifact a user receives can be produced. `build all` builds the Python package and documentation only; the frozen onedir is produced only by `release.yml`. The comment now says so. Freezing in CI remains unowned.
+
+### boot-wal-diagnostic-false | medium | a fresh store reported "WAL unavailable" for the gateway's lifetime | resolved
+
+Type: diagnostic correctness. Found re-running the Windows artifact lifecycle proof: the frozen gateway's `/health` reported `checks.database.journal_mode: wal` while `sqlite_fallback.database` reported `journal_mode: delete` with "WAL unavailable; SQLite may be on a read-only or unsupported filesystem." `api/app.py` `_initialize_gateway_database` snapshots storage diagnostics once at boot, right after migrations, and migrations leave a new store on SQLite's rollback journal; WAL is applied only when the engine opens its first connection. `database/session.py` `init_db` now opens one connection for a SQLite file engine before returning, so the on-disk mode is the serving mode when the snapshot is taken. `database/tests/test_wal_maintenance.py` reproduces the false report on a rollback-journal store and fails without the fix.
 
 ### lazy-worker-concurrency-flake | medium | concurrent first-demand run starts intermittently return an unhandled 500 | resolved
 

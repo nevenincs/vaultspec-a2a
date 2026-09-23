@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:68c81f234186aaed4564dc68130845fe4c2eaf10af83ebec2823e1eb22ab2913'
+body_hash: 'sha256:a32d81d9bb7e4a37384027904908b2a041c55f9028af6110cdcd37d17db6d09b'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -52,6 +52,18 @@ related:
 - `S03` `M` `src/vaultspec_a2a/api/routes/_gateway_run_start.py`
 - `S03` `verify:` `dev harness tests (130), ruff, ty on touched files` -> `pass`
 - `S03` `by:` `claude-opus`
+- `S04` `M` `.github/workflows/release-please.yml`
+- `S04` `M` `release-please-config.json`
+- `S04` `M` `.github/ci-contract-allow.txt`
+- `S04` `M` `dev/tests/test_release_please_automation.py`
+- `S04` `M` `dev/tests/test_release_workflow_contract.py`
+- `S04` `M` `.github/workflows/test.yml`
+- `S04` `M` `.github/workflows/release.yml`
+- `S04` `M` `.github/workflows/migrations.yml`
+- `S04` `M` `dev/toolchain.py`
+- `S04` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S04` `verify:` `PR #77 inspected: BLOCKED without merge gate, uv.lock 0.3.0 against pyproject 0.3.1` -> `pass`
+- `S04` `by:` `claude-opus`
 
 ## Notes
 
@@ -60,3 +72,4 @@ related:
 - `S02` Runner-placement contract test and host-describing workflow comments removed at the user's direction: the software does not test or describe its own infrastructure.
 - `S03` Root cause not yet identified: the failure reproduces only on the CI Linux runner, and every prior CI failure lost its gateway traceback to a truncated assertion message. S03 stays open pending that evidence.
 - `S03` Root cause confirmed from CI evidence; local Windows does not reproduce the race, so the fix is proven by the real-connection unit tests and the next Linux CI run.
+- `S04` The lockfile and merge-gate dispatch steps run only on the next release-please execution after this reaches main; their live exercise is pending.

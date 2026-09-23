@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:785f2ac5832407f550bd1815b99be42bcd83d74579289791bb4232c9a63297f1'
+body_hash: 'sha256:9ad03bbfb18bfc1ae85ff3ba6dacfb76c1addcec5004ec29183a76834433847c'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -160,9 +160,9 @@ Addendum: with `get_engine` now refusing a mismatched URL, `database/tests/test_
 
 Type: dead capability. `a7ba047c` deliberately removed the waiter: recovery starts immediately because an accepted durable action is already execution demand, while an idle gateway still starts its worker lazily. The event, its setter in `control/dispatch.py`, the `LazyWorkerSpawner.demand_ready_event` attribute, `app.state.worker_demand_ready`, and the docstrings describing a parked boot reconciliation that no longer exists are removed, along with the `armed` parameter `api/app.py` `_start_worker_runtime` kept only to wire the event.
 
-### ambient-claude-config-test | low | a worker-authoring test fails whenever `CLAUDE_CONFIG_DIR` is set in the environment | open
+### ambient-claude-config-test | low | a worker-authoring test fails whenever `CLAUDE_CONFIG_DIR` is set in the environment | resolved
 
-Type: test isolation. `graph/tests/nodes/test_worker_authoring_wiring.py::test_stdio_binding_hoists_secrets_without_touching_the_workspace` asserts a value is `None` that is read from the ambient environment, so it fails in any shell where `CLAUDE_CONFIG_DIR` is set, including this development session; it fails identically on `fa27d194` without the S07 and S08 changes and passes on CI runners without the variable.
+Type: test isolation. `graph/tests/nodes/test_worker_authoring_wiring.py::test_stdio_binding_hoists_secrets_without_touching_the_workspace` asserts a value is `None` that is read from the ambient environment, so it fails in any shell where `CLAUDE_CONFIG_DIR` is set, including this development session; it fails identically on `fa27d194` without the S07 and S08 changes and passes on CI runners without the variable. The assertion meant that the product does not redirect the config home, so it now requires the child to see exactly the parent's `CLAUDE_CONFIG_DIR`, set or unset; a redirect still fails it.
 
 ### review-s03-s05-armed-boot-mutation | high | the S05 warm-up wrote to a seated desktop store before its compatibility check | resolved
 

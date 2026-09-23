@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:443f8b51e6b9b5c6b1e050715ae4af22c7eb9d1a3e537eb0e80e6f859f148373'
+body_hash: 'sha256:f15bd89341bdb596e335ebb7bf3c3bea04e13f2bd5723e60e44a0e777e1c2c4b'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -108,6 +108,8 @@ related:
 - `S08` `by:` `claude-opus`
 - `S07` `M` `src/vaultspec_a2a/control/tests/test_relay_write_contention.py`
 - `S07` `verify:` `api, control, database, worker suites (1609)` -> `pass`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py`
+- `S06` `verify:` `test_worker_authoring_wiring.py with CLAUDE_CONFIG_DIR set (5)` -> `pass`
 
 ## Notes
 

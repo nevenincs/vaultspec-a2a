@@ -11,6 +11,7 @@ new surface by default.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -302,8 +303,9 @@ async def test_stdio_binding_hoists_secrets_without_touching_the_workspace(
     await node(_make_state())
 
     recorded = json.loads(record_file.read_text(encoding="utf-8"))
-    # No config-home redirect: the child resolves the operator's real login.
-    assert recorded["config_home"] is None
+    # No config-home redirect: the child inherits the operator's own setting,
+    # whatever it is, and resolves the operator's real login.
+    assert recorded["config_home"] == os.environ.get("CLAUDE_CONFIG_DIR")
     # Nothing is projected into the run workspace for MCP surfacing any more:
     # the declared-surface invariant rides the session advertisement plus strict
     # MCP mode, and the workspace projection channel it replaced was removed. A

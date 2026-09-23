@@ -168,7 +168,7 @@ def test_service_state_reports_blank_for_a_worker_it_did_not_spawn(
             worker_port=worker_port,
             auto_spawn_worker=False,
         )
-        stray_env["VAULTSPEC_INTERNAL_TOKEN"] = secret
+        stray_env["VAULTSPEC_A2A_INTERNAL_TOKEN"] = secret
         stray_env.pop(GATEWAY_LIFETIME_ENV, None)
         stray_env.pop(WORKER_GENERATION_ENV, None)
         stray_log = (tmp_path / "stray-worker.log").open("wb")

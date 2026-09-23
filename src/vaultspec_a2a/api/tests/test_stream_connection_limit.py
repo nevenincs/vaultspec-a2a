@@ -38,7 +38,7 @@ def test_the_limit_has_a_bounded_positive_default() -> None:
 
 def test_the_limit_is_operator_overridable() -> None:
     """Deployments differ; the bound must be tunable without a code change."""
-    assert Settings(VAULTSPEC_MAX_STREAM_CONNECTIONS=8).max_stream_connections == 8
+    assert Settings(max_stream_connections=8).max_stream_connections == 8
 
 
 def test_the_subscriber_count_tracks_registration() -> None:

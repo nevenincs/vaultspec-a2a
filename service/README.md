@@ -46,7 +46,7 @@ Set `VAULTSPEC_A2A_GATEWAY_TOKEN` in the repository-root `.env` to pin the
 gateway bearer. If it is unset, the gateway generates one and writes it to the
 owner-restricted `service.token` handoff beside `service.json` in the
 gateway-only `VAULTSPEC_A2A_HOME` volume. Send it as
-`Authorization: Bearer <token>`; the separate `VAULTSPEC_INTERNAL_TOKEN` is
+`Authorization: Bearer <token>`; the separate `VAULTSPEC_A2A_INTERNAL_TOKEN` is
 only for gateway-to-worker traffic and is removed from provider environments.
 
 ## Integration stack
@@ -64,7 +64,7 @@ The stack publishes the gateway at <http://localhost:18000>, VidaiMock at
 
 ## Production-image stack
 
-Set a non-empty `VAULTSPEC_INTERNAL_TOKEN` in the repository-root `.env`, then
+Set a non-empty `VAULTSPEC_A2A_INTERNAL_TOKEN` in the repository-root `.env`, then
 run the SQLite-backed production images:
 
 ```console

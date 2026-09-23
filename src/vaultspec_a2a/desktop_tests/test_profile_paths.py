@@ -38,8 +38,8 @@ from ..testing import armed_environment
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-_APP_HOME_ENV = "VAULTSPEC_DESKTOP_APP_HOME"
-_CAPSULE_ENV = "VAULTSPEC_CAPSULE_ASSETS"
+_APP_HOME_ENV = "VAULTSPEC_A2A_DESKTOP_APP_HOME"
+_CAPSULE_ENV = "VAULTSPEC_A2A_CAPSULE_ASSETS"
 
 
 def _build_capsule(root: Path) -> Path:

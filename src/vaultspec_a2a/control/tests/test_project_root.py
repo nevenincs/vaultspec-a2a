@@ -84,8 +84,10 @@ def test_relative_storage_values_join_the_root_and_absolute_ones_do_not(
 
 
 def test_settings_read_the_project_roots_dotenv(tmp_path: Path) -> None:
-    (tmp_path / ".env").write_text("VAULTSPEC_PORT=12345\n", encoding="utf-8")
-    with armed_environment(**{PROJECT_ROOT_ENV: str(tmp_path), "VAULTSPEC_PORT": None}):
+    (tmp_path / ".env").write_text("VAULTSPEC_A2A_PORT=12345\n", encoding="utf-8")
+    with armed_environment(
+        **{PROJECT_ROOT_ENV: str(tmp_path), "VAULTSPEC_A2A_PORT": None}
+    ):
         configured = Settings()
     assert configured.project_root == tmp_path
     assert configured.port == 12345
@@ -93,9 +95,11 @@ def test_settings_read_the_project_roots_dotenv(tmp_path: Path) -> None:
 
 def test_domain_settings_read_the_same_dotenv(tmp_path: Path) -> None:
     """The domain singleton no longer reads a .env beside the launch directory."""
-    (tmp_path / ".env").write_text("VAULTSPEC_MAX_CACHED_GRAPHS=7\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "VAULTSPEC_A2A_MAX_CACHED_GRAPHS=7\n", encoding="utf-8"
+    )
     with armed_environment(
-        **{PROJECT_ROOT_ENV: str(tmp_path), "VAULTSPEC_MAX_CACHED_GRAPHS": None}
+        **{PROJECT_ROOT_ENV: str(tmp_path), "VAULTSPEC_A2A_MAX_CACHED_GRAPHS": None}
     ):
         assert DomainSettingsConfig().max_cached_graphs == 7
 

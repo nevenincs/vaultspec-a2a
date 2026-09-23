@@ -93,8 +93,8 @@ def test_runner_child_declares_test_environment_before_settings_import(
     )
 
     child_environment = os.environ.copy()
-    child_environment.pop("VAULTSPEC_ENVIRONMENT", None)
-    child_environment.pop("VAULTSPEC_INTERNAL_TOKEN", None)
+    child_environment.pop("VAULTSPEC_A2A_ENVIRONMENT", None)
+    child_environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
     child = subprocess.run(
         [
             sys.executable,

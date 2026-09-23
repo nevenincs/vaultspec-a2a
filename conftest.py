@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 # is proven directly, undeclared case included, in
 # src/vaultspec_a2a/utils/tests/test_ipc_auth.py - this declares a fact about
 # the session, it does not stand in for that coverage.
-os.environ.setdefault("VAULTSPEC_ENVIRONMENT", "development")
+os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
 
 pytest_plugins = ("vaultspec_a2a.testing.plugin",)
 

@@ -61,13 +61,14 @@ def verify_internal_bearer(
     if token is None:
         if environment != Environment.DEVELOPMENT:
             return BearerVerdict.MISCONFIGURED, (
-                f"VAULTSPEC_INTERNAL_TOKEN required in {environment.value} environment"
+                "VAULTSPEC_A2A_INTERNAL_TOKEN required in "
+                f"{environment.value} environment"
             )
         if not environment_declared:
             return BearerVerdict.MISCONFIGURED, (
-                "VAULTSPEC_INTERNAL_TOKEN required: no environment was declared, "
+                "VAULTSPEC_A2A_INTERNAL_TOKEN required: no environment was declared, "
                 "so the development bypass does not apply. Set "
-                "VAULTSPEC_ENVIRONMENT=development to run without an internal "
+                "VAULTSPEC_A2A_ENVIRONMENT=development to run without an internal "
                 "token, or supply the token."
             )
         return BearerVerdict.OK, ""

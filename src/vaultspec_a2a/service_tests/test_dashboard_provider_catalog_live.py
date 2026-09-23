@@ -244,7 +244,7 @@ def _dashboard_engine(
         **{
             key: value
             for key, value in os.environ.items()
-            if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_DESKTOP_APP_HOME"}
+            if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_A2A_DESKTOP_APP_HOME"}
         },
         "VAULTSPEC_A2A_HOME": str(discovery_home),
         "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),

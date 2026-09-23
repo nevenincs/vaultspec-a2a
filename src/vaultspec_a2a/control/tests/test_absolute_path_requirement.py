@@ -40,11 +40,11 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 _PATH_NAMES = (
-    "VAULTSPEC_DATABASE_URL",
-    "VAULTSPEC_CHECKPOINT_DATABASE_URL",
-    "VAULTSPEC_WORKSPACE_ROOT",
-    "VAULTSPEC_DESKTOP_APP_HOME",
-    "VAULTSPEC_PROJECT_ROOT",
+    "VAULTSPEC_A2A_DATABASE_URL",
+    "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
+    "VAULTSPEC_A2A_WORKSPACE_ROOT",
+    "VAULTSPEC_A2A_DESKTOP_APP_HOME",
+    "VAULTSPEC_A2A_INSTALL_ROOT",
     # The anchor for the database default. Cleared like the rest, or a developer
     # who has relocated their own state home makes the anchoring tests read false.
     "VAULTSPEC_A2A_HOME",
@@ -78,13 +78,15 @@ def _clean_environment(**values: str | None) -> Generator[None]:
 def test_an_explicitly_relative_database_url_is_refused() -> None:
     """The message names the hazard, not just the rule."""
     with (
-        _clean_environment(VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db"),
+        _clean_environment(
+            VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db"
+        ),
         pytest.raises(ValidationError) as raised,
     ):
         _settings()
 
     message = str(raised.value)
-    assert "VAULTSPEC_DATABASE_URL must be absolute" in message
+    assert "VAULTSPEC_A2A_DATABASE_URL must be absolute" in message
     assert "resolves against the process working directory" in message
     assert "silently open different files" in message
 
@@ -93,10 +95,11 @@ def test_an_explicitly_relative_checkpoint_url_is_refused() -> None:
     """The dedicated checkpoint store carries the identical defect class."""
     with (
         _clean_environment(
-            VAULTSPEC_CHECKPOINT_DATABASE_URL="sqlite+aiosqlite:///checkpoints.db"
+            VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL="sqlite+aiosqlite:///checkpoints.db"
         ),
         pytest.raises(
-            ValidationError, match="VAULTSPEC_CHECKPOINT_DATABASE_URL must be absolute"
+            ValidationError,
+            match="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL must be absolute",
         ),
     ):
         _settings()
@@ -105,26 +108,26 @@ def test_an_explicitly_relative_checkpoint_url_is_refused() -> None:
 def test_an_explicitly_relative_workspace_root_is_refused() -> None:
     """The workspace root is launch-relative in exactly the same way."""
     with (
-        _clean_environment(VAULTSPEC_WORKSPACE_ROOT="./workspaces"),
+        _clean_environment(VAULTSPEC_A2A_WORKSPACE_ROOT="./workspaces"),
         pytest.raises(ValidationError) as raised,
     ):
         _settings()
 
     message = str(raised.value)
-    assert "VAULTSPEC_WORKSPACE_ROOT must be absolute" in message
+    assert "VAULTSPEC_A2A_WORKSPACE_ROOT must be absolute" in message
     assert "silently open different directories" in message
 
 
 def test_a_relative_value_is_rejected_rather_than_relocated() -> None:
     """Rejection, not repair: no absolute value is invented from a relative one."""
-    with _clean_environment(VAULTSPEC_WORKSPACE_ROOT="./workspaces"):
+    with _clean_environment(VAULTSPEC_A2A_WORKSPACE_ROOT="./workspaces"):
         with pytest.raises(ValidationError):
             _settings()
 
         # The same construction with an absolute value succeeds untouched, which is
         # what makes the failure above a refusal rather than a missing feature.
         absolute = Path(os.getcwd()).resolve() / "workspaces"
-        with _environment(VAULTSPEC_WORKSPACE_ROOT=str(absolute)):
+        with _environment(VAULTSPEC_A2A_WORKSPACE_ROOT=str(absolute)):
             assert _settings().workspace_root == absolute
 
 
@@ -138,7 +141,7 @@ def test_the_untouched_database_default_is_anchored_to_the_a2a_home() -> None:
     against the tree rather than assumed:
 
     * ``project_root`` defaults to a ``__file__``-derived constant, so a
-      non-editable install with no ``VAULTSPEC_PROJECT_ROOT`` override would put
+      non-editable install with no ``VAULTSPEC_A2A_INSTALL_ROOT`` override would put
       the store inside the interpreter's own library tree, where a reinstall
       discards it.
     * The schema is built for ONE machine-global store: ``threads.workspace_key``
@@ -226,8 +229,10 @@ def test_a_relative_a2a_home_is_refused_with_its_own_message() -> None:
 def test_a_relative_project_root_is_refused_with_its_own_message() -> None:
     """The anchor itself must be absolute, or the anchored defaults are not."""
     with (
-        _clean_environment(VAULTSPEC_PROJECT_ROOT="./somewhere"),
-        pytest.raises(ValidationError, match="VAULTSPEC_PROJECT_ROOT must be absolute"),
+        _clean_environment(VAULTSPEC_A2A_INSTALL_ROOT="./somewhere"),
+        pytest.raises(
+            ValidationError, match="VAULTSPEC_A2A_INSTALL_ROOT must be absolute"
+        ),
     ):
         _settings()
 
@@ -243,7 +248,7 @@ def test_an_armed_desktop_profile_still_constructs(tmp_path: Path) -> None:
     app_home = tmp_path / "app"
     state = derive_state_paths(app_home)
 
-    with _clean_environment(VAULTSPEC_DESKTOP_APP_HOME=str(app_home)):
+    with _clean_environment(VAULTSPEC_A2A_DESKTOP_APP_HOME=str(app_home)):
         armed = _settings()
 
     assert armed.database_url == f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
@@ -267,9 +272,9 @@ def test_an_armed_profile_overrides_even_a_relative_supplied_value(
     state = derive_state_paths(app_home)
 
     with _clean_environment(
-        VAULTSPEC_DESKTOP_APP_HOME=str(app_home),
-        VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db",
-        VAULTSPEC_WORKSPACE_ROOT="./workspaces",
+        VAULTSPEC_A2A_DESKTOP_APP_HOME=str(app_home),
+        VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db",
+        VAULTSPEC_A2A_WORKSPACE_ROOT="./workspaces",
     ):
         armed = _settings()
 
@@ -285,9 +290,9 @@ def test_an_absolute_posix_path_is_accepted_on_any_host() -> None:
     a local-flavour check would reject the project's own production configuration.
     """
     with _clean_environment(
-        VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:////app/data/vaultspec.db",
-        VAULTSPEC_WORKSPACE_ROOT="/app/workspaces",
-        VAULTSPEC_PROJECT_ROOT="/app",
+        VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:////app/data/vaultspec.db",
+        VAULTSPEC_A2A_WORKSPACE_ROOT="/app/workspaces",
+        VAULTSPEC_A2A_INSTALL_ROOT="/app",
     ):
         settings = _settings()
 
@@ -300,12 +305,12 @@ def test_postgres_urls_are_exempt_from_the_absolute_requirement() -> None:
 
     with (
         _clean_environment(
-            VAULTSPEC_DATABASE_URL=url,
-            VAULTSPEC_WORKSPACE_ROOT=str(Path.cwd().resolve() / "workspaces"),
+            VAULTSPEC_A2A_DATABASE_URL=url,
+            VAULTSPEC_A2A_WORKSPACE_ROOT=str(Path.cwd().resolve() / "workspaces"),
         ),
         _environment(
-            VAULTSPEC_DATABASE_BACKEND="postgres",
-            VAULTSPEC_CHECKPOINT_BACKEND="postgres",
+            VAULTSPEC_A2A_DATABASE_BACKEND="postgres",
+            VAULTSPEC_A2A_CHECKPOINT_BACKEND="postgres",
         ),
     ):
         settings = _settings()
@@ -316,8 +321,8 @@ def test_postgres_urls_are_exempt_from_the_absolute_requirement() -> None:
 def test_an_in_memory_sqlite_url_is_exempt() -> None:
     """``:memory:`` names no file, so no working directory can relocate it."""
     with _clean_environment(
-        VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:///:memory:",
-        VAULTSPEC_WORKSPACE_ROOT=str(Path.cwd().resolve() / "workspaces"),
+        VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///:memory:",
+        VAULTSPEC_A2A_WORKSPACE_ROOT=str(Path.cwd().resolve() / "workspaces"),
     ):
         settings = _settings()
 
@@ -335,10 +340,10 @@ def test_backend_and_url_disagreement_is_refused_at_construction() -> None:
     """
     with (
         _clean_environment(
-            VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:////app/data/vaultspec.db"
+            VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:////app/data/vaultspec.db"
         ),
-        _environment(VAULTSPEC_DATABASE_BACKEND="postgres"),
-        pytest.raises(ValidationError, match="VAULTSPEC_DATABASE_BACKEND=postgres"),
+        _environment(VAULTSPEC_A2A_DATABASE_BACKEND="postgres"),
+        pytest.raises(ValidationError, match="VAULTSPEC_A2A_DATABASE_BACKEND=postgres"),
     ):
         _settings()
 
@@ -347,10 +352,12 @@ def test_a_postgres_backend_declared_over_a_sqlite_checkpoint_is_refused() -> No
     """The checkpoint store is held to the same agreement as the primary one."""
     with (
         _clean_environment(
-            VAULTSPEC_CHECKPOINT_DATABASE_URL="sqlite+aiosqlite:////app/cp.db"
+            VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL="sqlite+aiosqlite:////app/cp.db"
         ),
-        _environment(VAULTSPEC_CHECKPOINT_BACKEND="postgres"),
-        pytest.raises(ValidationError, match="VAULTSPEC_CHECKPOINT_BACKEND=postgres"),
+        _environment(VAULTSPEC_A2A_CHECKPOINT_BACKEND="postgres"),
+        pytest.raises(
+            ValidationError, match="VAULTSPEC_A2A_CHECKPOINT_BACKEND=postgres"
+        ),
     ):
         _settings()
 

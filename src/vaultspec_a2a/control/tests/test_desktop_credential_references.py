@@ -26,14 +26,14 @@ def _app_home(tmp_path: Path) -> Path:
 
 def test_unarmed_profile_exposes_no_credential_references() -> None:
     """The Compose and development profiles surface no credential paths."""
-    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=None)
+    settings = Settings(desktop_app_home=None)
     assert settings.desktop_credential_paths is None
 
 
 def test_armed_profile_models_three_distinct_planes(tmp_path: Path) -> None:
     """Arming the profile derives distinct attach, ownership, and worker IPC paths."""
     home = _app_home(tmp_path)
-    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=home)
+    settings = Settings(desktop_app_home=home)
 
     references = settings.desktop_credential_paths
     assert references is not None
@@ -62,7 +62,7 @@ def test_armed_profile_models_three_distinct_planes(tmp_path: Path) -> None:
 def test_credential_references_are_app_home_seated(tmp_path: Path) -> None:
     """Every credential path lives beneath the explicit application home."""
     home = _app_home(tmp_path)
-    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=home)
+    settings = Settings(desktop_app_home=home)
 
     references = settings.desktop_credential_paths
     assert references is not None
@@ -82,6 +82,6 @@ def test_unarmed_reference_lookup_does_not_import_desktop_credentials() -> None:
     circuit before importing the desktop credential module.
     """
     sys.modules.pop("vaultspec_a2a.desktop.credentials", None)
-    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=None)
+    settings = Settings(desktop_app_home=None)
     assert settings.desktop_credential_paths is None
     assert "vaultspec_a2a.desktop.credentials" not in sys.modules

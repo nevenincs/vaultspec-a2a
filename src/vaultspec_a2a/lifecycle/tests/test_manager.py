@@ -530,7 +530,7 @@ def _gateway_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
         staleness_ms=120000,
         build=[],
         serve=serve,
-        env={"VAULTSPEC_PORT": "{port}"},
+        env={"VAULTSPEC_A2A_PORT": "{port}"},
     )
     return ProcsConfig(resident={}, roles={"gateway-dev": role})
 
@@ -639,7 +639,7 @@ def test_worker_serve_up_rejects_a_foreign_listener_without_probe_or_record(
         staleness_ms=120000,
         build=[],
         serve=[sys.executable, "-c", _SLEEP_SERVE],
-        env={"VAULTSPEC_WORKER_PORT": "{port}"},
+        env={"VAULTSPEC_A2A_WORKER_PORT": "{port}"},
     )
     config = ProcsConfig(resident={}, roles={"worker-dev": role})
     capture = tmp_path / "foreign-request.bin"
@@ -808,11 +808,11 @@ def test_render_command_resolves_the_python_interpreter() -> None:
 
 def test_render_env_substitutes_port_and_workspace() -> None:
     env = render_env(
-        {"VAULTSPEC_PORT": "{port}", "WS": "{workspace}", "K": "v"},
+        {"VAULTSPEC_A2A_PORT": "{port}", "WS": "{workspace}", "K": "v"},
         port=18101,
         workspace="/w",
     )
-    assert env == {"VAULTSPEC_PORT": "18101", "WS": "/w", "K": "v"}
+    assert env == {"VAULTSPEC_A2A_PORT": "18101", "WS": "/w", "K": "v"}
 
 
 def test_serve_env_carries_identity_and_rendered_role_env() -> None:
@@ -823,12 +823,12 @@ def test_serve_env_carries_identity_and_rendered_role_env() -> None:
         staleness_ms=120000,
         build=[],
         serve=["x"],
-        env={"VAULTSPEC_PORT": "{port}"},
+        env={"VAULTSPEC_A2A_PORT": "{port}"},
     )
     env = _serve_env(role, port=18103, workspace="ws", name="g1", owner="sess-a")
     # Rendered role env plus the managed identity, so a self-registering child
     # converges onto the same (role, name)/owner record instead of a rival one.
-    assert env["VAULTSPEC_PORT"] == "18103"
+    assert env["VAULTSPEC_A2A_PORT"] == "18103"
     assert env["VAULTSPEC_PROCS_NAME"] == "g1"
     assert env["VAULTSPEC_PROCS_OWNER"] == "sess-a"
 
@@ -841,7 +841,7 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
         staleness_ms=120000,
         build=[],
         serve=["x"],
-        env={"VAULTSPEC_WORKER_PORT": "{port}"},
+        env={"VAULTSPEC_A2A_WORKER_PORT": "{port}"},
     )
     with_seat = _serve_env(
         role,
@@ -852,7 +852,7 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
         engine_service_json="C:/seat/service.json",
     )
     assert with_seat[SERVICE_JSON_ENV] == "C:/seat/service.json"
-    assert with_seat["VAULTSPEC_WORKER_PORT"] == "18110"
+    assert with_seat["VAULTSPEC_A2A_WORKER_PORT"] == "18110"
     # An unset seat injects nothing (records predating the field keep prior behaviour).
     without = _serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
     assert SERVICE_JSON_ENV not in without
@@ -944,9 +944,9 @@ def test_serve_env_fails_loud_on_a_missing_or_empty_token_file(tmp_path: Path) -
 _PAIRING_PROBE_SERVE = (
     "import socket,os,sys,time,pathlib;"
     "pathlib.Path(sys.argv[2]).write_text("
-    "os.environ.get('VAULTSPEC_INTERNAL_TOKEN','')+'|'"
-    "+os.environ.get('VAULTSPEC_GATEWAY_URL','')+'|'"
-    "+os.environ.get('VAULTSPEC_WORKER_URL',''));"
+    "os.environ.get('VAULTSPEC_A2A_INTERNAL_TOKEN','')+'|'"
+    "+os.environ.get('VAULTSPEC_A2A_GATEWAY_URL','')+'|'"
+    "+os.environ.get('VAULTSPEC_A2A_WORKER_URL',''));"
     "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
     "s.bind(('127.0.0.1',int(sys.argv[1])));s.listen();time.sleep(60)"
 )

@@ -9,12 +9,16 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import NoDecode, SettingsConfigDict
 
 from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
-from .settings_base import ProjectSettings, resolve_project_root
+from .settings_base import (
+    ENV_PREFIX,
+    ProjectSettings,
+    env_name,
+    resolve_project_root,
+)
 
 __all__ = [
     "DEFAULT_MOCK_API_BASE",
     "DEFAULT_OTLP_ENDPOINT",
-    "GATEWAY_URL_ALT_ENV",
     "GATEWAY_URL_ENV",
     "INTERNAL_TOKEN_ENV",
     "WORKER_URL_ENV",
@@ -37,21 +41,10 @@ _INSTALL_ROOT: Path = (
 # outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 _DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
 
-# Canonical env-var names for the worker<->gateway pairing. Defined here (the owner
-# of these settings) and imported wherever the value is written into a child
-# environment, so the name lives in exactly one place (never a mirrored literal).
-INTERNAL_TOKEN_ENV = "VAULTSPEC_INTERNAL_TOKEN"
-GATEWAY_URL_ENV = "VAULTSPEC_GATEWAY_URL"
-# The MCP-scoped alternate spelling of GATEWAY_URL_ENV (see the gateway_url Field
-# below): a single named constant so the alias lives in one place rather than as a
-# literal repeated at every explicit-configuration check.
-GATEWAY_URL_ALT_ENV = "VAULTSPEC_MCP_API_BASE_URL"
-WORKER_URL_ENV = "VAULTSPEC_WORKER_URL"
-
 # Canonical service-endpoint defaults. This module is the ONE home for every
 # production host:port literal; consumers import these rather than repeating
 # the value, and each remains environment-overridable at its point of use
-# (MOCK_API_BASE overrides the VidaiMock base through the mock_api_base field;
+# (VAULTSPEC_A2A_MOCK_API_BASE overrides the VidaiMock base;
 # OTEL_EXPORTER_OTLP_ENDPOINT is read by the telemetry module at import time
 # per the standard OTel contract).
 DEFAULT_MOCK_API_BASE = "http://localhost:8100"
@@ -118,7 +111,7 @@ def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> N
     signal that the latter never took effect.
     """
     logger.warning(
-        "VAULTSPEC_DESKTOP_APP_HOME is set, so the desktop profile derives every "
+        "VAULTSPEC_A2A_DESKTOP_APP_HOME is set, so the desktop profile derives every "
         "mutable path: the explicitly configured %s=%r is discarded in favour of "
         "%r. Unset one of the two to resolve the conflict.",
         env_name,
@@ -182,7 +175,7 @@ class InfraConfig(ProjectSettings):
     model_config = SettingsConfigDict(
         env_file=ProjectSettings.project_dotenv(),
         env_file_encoding="utf-8",
-        env_prefix="VAULTSPEC_",
+        env_prefix=ENV_PREFIX,
         extra="ignore",
     )
 
@@ -190,7 +183,6 @@ class InfraConfig(ProjectSettings):
     log_level: LogLevel = Field(default=LogLevel.INFO)
     access_log: bool = Field(
         default=False,
-        alias="VAULTSPEC_ACCESS_LOG",
         description=(
             "Enable uvicorn per-request access logging at both serve sites. Off "
             "by default: the gateway is polled permanently by design (worker "
@@ -200,7 +192,6 @@ class InfraConfig(ProjectSettings):
     )
     database_backend: Literal["sqlite", "postgres"] = Field(
         default="sqlite",
-        alias="VAULTSPEC_DATABASE_BACKEND",
         description=(
             "Primary application database backend.  SQLite is the local/dev "
             "default.  Production deployments set 'postgres' via env."
@@ -208,7 +199,6 @@ class InfraConfig(ProjectSettings):
     )
     checkpoint_backend: Literal["sqlite", "postgres"] = Field(
         default="sqlite",
-        alias="VAULTSPEC_CHECKPOINT_BACKEND",
         description=(
             "LangGraph checkpointer persistence backend.  Follows the same "
             "convention as database_backend: sqlite for dev, postgres for prod."
@@ -226,29 +216,24 @@ class InfraConfig(ProjectSettings):
     )
     checkpoint_database_url: str | None = Field(
         default=None,
-        alias="VAULTSPEC_CHECKPOINT_DATABASE_URL",
         description="Optional dedicated checkpoint database URL/DSN.",
     )
     sqlite_busy_timeout_ms: int = Field(
         default=5000,
         description="Busy timeout applied to SQLite connections.",
-        alias="VAULTSPEC_SQLITE_BUSY_TIMEOUT_MS",
     )
     postgres_required: bool = Field(
         default=False,
-        alias="VAULTSPEC_POSTGRES_REQUIRED",
         description=(
             "Fail startup loudly when Postgres-backed dependencies are required."
         ),
     )
     db_pool_size: int = Field(
         default=5,
-        alias="VAULTSPEC_DB_POOL_SIZE",
         description="SQLAlchemy QueuePool pool_size for Postgres engine.",
     )
     db_pool_max_overflow: int = Field(
         default=10,
-        alias="VAULTSPEC_DB_POOL_MAX_OVERFLOW",
         description="SQLAlchemy QueuePool max_overflow for Postgres engine.",
     )
     workspace_root: Path | None = Field(
@@ -265,7 +250,6 @@ class InfraConfig(ProjectSettings):
     )
     provider_identity_launcher: Path | None = Field(
         default=None,
-        alias="VAULTSPEC_PROVIDER_IDENTITY_LAUNCHER",
         description=(
             "Compose/Linux launcher that drops every provider and tool child to "
             "the configured agent identity. Unset outside the isolated worker."
@@ -273,19 +257,16 @@ class InfraConfig(ProjectSettings):
     )
     provider_agent_uid: int | None = Field(
         default=None,
-        alias="VAULTSPEC_PROVIDER_AGENT_UID",
         ge=1,
         description="Unprivileged UID selected by provider_identity_launcher.",
     )
     provider_agent_gid: int | None = Field(
         default=None,
-        alias="VAULTSPEC_PROVIDER_AGENT_GID",
         ge=1,
         description="Unprivileged GID selected by provider_identity_launcher.",
     )
     project_root: Path = Field(
         default_factory=resolve_project_root,
-        alias="VAULTSPEC_A2A_PROJECT_ROOT",
         description=(
             "The project a2a serves and keeps its state under. Unset, it is the "
             "nearest ancestor of the working directory holding .vaultspec/ or "
@@ -297,7 +278,6 @@ class InfraConfig(ProjectSettings):
     )
     install_root: Path = Field(
         default_factory=lambda: _INSTALL_ROOT,
-        alias="VAULTSPEC_PROJECT_ROOT",
         description=(
             "Absolute path of the checkout or install holding this service's "
             "shipped non-Python assets (the ACP adapter's node_modules). Computed "
@@ -318,7 +298,7 @@ class InfraConfig(ProjectSettings):
     )
     capsule_assets_root: Path | None = Field(
         default=None,
-        alias="VAULTSPEC_CAPSULE_ASSETS",
+        alias="VAULTSPEC_A2A_CAPSULE_ASSETS",
         description=(
             "Root of the desktop capsule's owned runtime assets (Node.js and the "
             "ACP adapter). When set, the provider factory resolves the default "
@@ -329,7 +309,6 @@ class InfraConfig(ProjectSettings):
     )
     desktop_app_home: Path | None = Field(
         default=None,
-        alias="VAULTSPEC_DESKTOP_APP_HOME",
         description=(
             "Explicit mutable-state root for the desktop product profile. When "
             "set, the profile is armed: the database, checkpoint, workspace, and "
@@ -341,7 +320,6 @@ class InfraConfig(ProjectSettings):
     )
     mock_api_base: str | None = Field(
         default=None,
-        alias="MOCK_API_BASE",
         description=(
             "Base URL for the VidaiMock tape-replay server.  Used by "
             "MockChatModel when Provider.MOCK is selected.  "
@@ -352,7 +330,8 @@ class InfraConfig(ProjectSettings):
         default=120,
         description="Global timeout (seconds) for LLM provider API calls.",
     )
-    # API Keys — bare ecosystem names only; no VAULTSPEC_ prefix aliases.
+    # Other tools' settings: the a2a name wins, and the owning tool's own name is
+    # read as a fallback so an existing login keeps working.
     # ANTHROPIC_API_KEY is deliberately absent. The Claude lane authenticates with
     # claude_code_oauth_token, and every agent subprocess has ANTHROPIC_API_KEY
     # stripped from its environment by the workspace scrub
@@ -368,42 +347,54 @@ class InfraConfig(ProjectSettings):
     # back to a PATH lookup and then to the installer's default location.
     antigravity_cli_path: str | None = Field(
         default=None,
-        validation_alias="ANTIGRAVITY_CLI_PATH",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_ANTIGRAVITY_CLI_PATH", "ANTIGRAVITY_CLI_PATH"
+        ),
     )
     # The CLI keeps its login beside its own state, not under the Antigravity
     # application directory; the default mirrors where the installer writes it.
     antigravity_cli_home: str | None = Field(
         default=None,
-        validation_alias="ANTIGRAVITY_CLI_HOME",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_ANTIGRAVITY_CLI_HOME", "ANTIGRAVITY_CLI_HOME"
+        ),
     )
     openai_api_key: str | None = Field(
         default=None,
-        validation_alias="OPENAI_API_KEY",
+        validation_alias=AliasChoices("VAULTSPEC_A2A_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
     openai_base_url: str = Field(
         default="https://api.openai.com/v1",
-        validation_alias="OPENAI_BASE_URL",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_OPENAI_BASE_URL", "OPENAI_BASE_URL"
+        ),
         description="Base URL for the OpenAI API execution and catalog lane.",
     )
     zhipu_api_key: str | None = Field(
         default=None,
-        validation_alias="ZHIPU_API_KEY",
+        validation_alias=AliasChoices("VAULTSPEC_A2A_ZHIPU_API_KEY", "ZHIPU_API_KEY"),
     )
     claude_code_oauth_token: str | None = Field(
         default=None,
-        validation_alias="CLAUDE_CODE_OAUTH_TOKEN",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"
+        ),
     )
     # Z.ai routes through the Claude ACP path against an Anthropic-Messages-
     # compatible endpoint. The base URL defaults to
     # Z.ai's documented Anthropic gateway; only the auth token must be supplied.
     zai_base_url: str = Field(
         default="https://api.z.ai/api/anthropic",
-        validation_alias=AliasChoices("ZAI_BASE_URL", "ZAI_ANTHROPIC_BASE_URL"),
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_ZAI_BASE_URL", "ZAI_BASE_URL", "ZAI_ANTHROPIC_BASE_URL"
+        ),
         description="Base URL for the Z.ai Anthropic-compatible endpoint.",
     )
     zai_auth_token: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("ZAI_AUTH_TOKEN", "ZAI_API_KEY"),
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_ZAI_AUTH_TOKEN", "ZAI_AUTH_TOKEN", "ZAI_API_KEY"
+        ),
     )
     # Codex `app-server` authenticates from a persisted local session in its Codex
     # home (~/.codex by default). This non-secret override points the subprocess at
@@ -411,7 +402,7 @@ class InfraConfig(ProjectSettings):
     # ChatGPT-session auth mode is file-based).
     codex_home: str | None = Field(
         default=None,
-        validation_alias="CODEX_HOME",
+        validation_alias=AliasChoices("VAULTSPEC_A2A_CODEX_HOME", "CODEX_HOME"),
     )
     # The Codex lane's web-grounding posture. Unset means a lane carrying web
     # proof serves live retrieval, which is what keeps a multi-provider graph's
@@ -422,7 +413,6 @@ class InfraConfig(ProjectSettings):
     # narrow a proven lane's reach, never grant reach to an unproven one.
     codex_web_search_mode: CodexWebSearchMode | None = Field(
         default=None,
-        validation_alias="VAULTSPEC_CODEX_WEB_SEARCH_MODE",
         description=(
             "Override the Codex lane's web-search mode (disabled, cached, "
             "indexed, live). Unset serves live on a web-proven lane."
@@ -435,7 +425,7 @@ class InfraConfig(ProjectSettings):
     # every served deployment; set it only to drive a provider-refusal proof.
     codex_base_url_override: str | None = Field(
         default=None,
-        validation_alias="VAULTSPEC_CODEX_BASE_URL",
+        validation_alias="VAULTSPEC_A2A_CODEX_BASE_URL",
         description=(
             "Point the Codex lane at an alternate API endpoint. Unset serves the "
             "provider's own endpoint."
@@ -447,35 +437,45 @@ class InfraConfig(ProjectSettings):
     # Runtime alias selection is not a setting; the factory uses `-m`.
     kimi_code_home: str | None = Field(
         default=None,
-        validation_alias="KIMI_CODE_HOME",
+        validation_alias=AliasChoices("VAULTSPEC_A2A_KIMI_CODE_HOME", "KIMI_CODE_HOME"),
     )
     kimi_model_api_key: SecretStr | None = Field(
         default=None,
-        validation_alias="KIMI_MODEL_API_KEY",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_KIMI_MODEL_API_KEY", "KIMI_MODEL_API_KEY"
+        ),
         exclude=True,
         repr=False,
     )
     kimi_model_base_url: str | None = Field(
         default=None,
-        validation_alias="KIMI_MODEL_BASE_URL",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_KIMI_MODEL_BASE_URL", "KIMI_MODEL_BASE_URL"
+        ),
         description="Base URL in a complete temporary Kimi model definition.",
     )
     kimi_temporary_model_name: str | None = Field(
         default=None,
-        validation_alias="KIMI_MODEL_NAME",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_KIMI_MODEL_NAME", "KIMI_MODEL_NAME"
+        ),
         description="Alias in a complete temporary Kimi model definition.",
     )
     kimi_temporary_model_max_context_size: int | None = Field(
         default=None,
         gt=0,
         le=2_147_483_647,
-        validation_alias="KIMI_MODEL_MAX_CONTEXT_SIZE",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_KIMI_MODEL_MAX_CONTEXT_SIZE", "KIMI_MODEL_MAX_CONTEXT_SIZE"
+        ),
         description="Provider-owned context-size value for a temporary Kimi model.",
     )
     kimi_temporary_model_capabilities: str | None = Field(
         default=None,
         max_length=512,
-        validation_alias="KIMI_MODEL_CAPABILITIES",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_KIMI_MODEL_CAPABILITIES", "KIMI_MODEL_CAPABILITIES"
+        ),
         description="Provider-owned capability value for a temporary Kimi model.",
     )
 
@@ -497,43 +497,34 @@ class InfraConfig(ProjectSettings):
 
     host: str = Field(
         default="127.0.0.1",
-        description="Bind host for the uvicorn server (VAULTSPEC_HOST).",
+        description="Bind host for the uvicorn server (VAULTSPEC_A2A_HOST).",
     )
     port: int = Field(
         default=18000,
-        description="Bind port for the uvicorn server (VAULTSPEC_PORT).",
+        description="Bind port for the uvicorn server (VAULTSPEC_A2A_PORT).",
     )
 
     gateway_url: str = Field(
         default="",
-        validation_alias=AliasChoices(
-            GATEWAY_URL_ENV,
-            GATEWAY_URL_ALT_ENV,
-        ),
         description=(
             "Base URL for reaching the gateway HTTP API. Used by the worker "
             "IPC bridge and the MCP tool server. Auto-derived from host+port "
-            "when not set explicitly. VAULTSPEC_MCP_API_BASE_URL is an alternate "
-            "spelling of the same single field rather than an MCP-scoped "
-            "override: it also moves the spawned worker's heartbeat and pairing "
-            "target, so a proxy set through either name redirects both."
+            "when not set explicitly. It also moves the spawned worker's "
+            "heartbeat and pairing target, so a proxy set here redirects both."
         ),
     )
     mcp_host: str = Field(
         default="0.0.0.0",
-        alias="VAULTSPEC_MCP_HOST",
         description="Bind host for MCP streamable-http transport.",
     )
     mcp_port: int = Field(
         default=8200,
-        alias="VAULTSPEC_MCP_PORT",
         description="Bind port for MCP streamable-http transport.",
     )
     # NoDecode: without it pydantic-settings JSON-decodes the env value before
     # any validator runs, so the comma form below could never be normalized.
     mcp_allowed_hosts: Annotated[list[str], NoDecode] = Field(
         default=["localhost:*", "127.0.0.1:*"],
-        alias="VAULTSPEC_MCP_ALLOWED_HOSTS",
         description=(
             "Host header values the MCP streamable-http transport accepts. "
             "Defaults to loopback only; a deployment that fronts MCP under a "
@@ -542,7 +533,6 @@ class InfraConfig(ProjectSettings):
     )
     mcp_allowed_origins: Annotated[list[str], NoDecode] = Field(
         default=["http://localhost:*", "http://127.0.0.1:*"],
-        alias="VAULTSPEC_MCP_ALLOWED_ORIGINS",
         description=(
             "Origin header values the MCP streamable-http transport accepts. "
             "Guards against DNS-rebinding from a browser context. A request "
@@ -554,12 +544,10 @@ class InfraConfig(ProjectSettings):
     worker_port: int = Field(
         default=18001,
         description="Internal worker HTTP port",
-        alias="VAULTSPEC_WORKER_PORT",
     )
     worker_host: str = Field(
         default="127.0.0.1",
         description="Bind host for locally managed worker processes.",
-        alias="VAULTSPEC_WORKER_HOST",
     )
     worker_url: str = Field(
         default="",
@@ -567,11 +555,9 @@ class InfraConfig(ProjectSettings):
             "Worker base URL for dispatch calls. "
             "Auto-derived from worker_host + worker_port."
         ),
-        alias=WORKER_URL_ENV,
     )
     internal_token: str | None = Field(
         default=None,
-        alias=INTERNAL_TOKEN_ENV,
         description=(
             "Bearer token for worker<->control IPC. It is never accepted by the "
             "engine-facing /v1 gateway."
@@ -589,12 +575,10 @@ class InfraConfig(ProjectSettings):
     auto_spawn_worker: bool = Field(
         default=True,
         description=("Auto-spawn worker as child process on gateway startup."),
-        alias="VAULTSPEC_AUTO_SPAWN_WORKER",
     )
     # Authoring verdict subscriber
     authoring_subscriber_enabled: bool = Field(
         default=False,
-        alias="VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED",
         description=(
             "Run the engine authoring-verdict subscriber as a gateway background "
             "task. Consumes GET /authoring/v1/events and resumes parked runs with "
@@ -604,7 +588,6 @@ class InfraConfig(ProjectSettings):
     )
     authoring_subscriber_poll_interval_seconds: float = Field(
         default=3.0,
-        alias="VAULTSPEC_AUTHORING_SUBSCRIBER_POLL_INTERVAL_SECONDS",
         description=(
             "Seconds to wait after an empty lifecycle page before re-opening the "
             "engine SSE stream (steady-state poll cadence)."
@@ -612,7 +595,6 @@ class InfraConfig(ProjectSettings):
     )
     authoring_subscriber_reconnect_base_seconds: float = Field(
         default=2.0,
-        alias="VAULTSPEC_AUTHORING_SUBSCRIBER_RECONNECT_BASE_SECONDS",
         description=(
             "Initial exponential back-off (seconds) when the engine is absent or "
             "the lifecycle stream fails."
@@ -620,7 +602,6 @@ class InfraConfig(ProjectSettings):
     )
     authoring_subscriber_reconnect_max_seconds: float = Field(
         default=30.0,
-        alias="VAULTSPEC_AUTHORING_SUBSCRIBER_RECONNECT_MAX_SECONDS",
         description="Maximum back-off (seconds) between subscriber reconnect attempts.",
     )
 
@@ -632,7 +613,6 @@ class InfraConfig(ProjectSettings):
             "'binary' uses the precompiled Bun executable in src/vaultspec_a2a/bin/. "
             "node is the default; binary mode is experimental."
         ),
-        alias="VAULTSPEC_ACP_BACKEND",
     )
 
     # LangSmith tracing is deliberately NOT a setting. Its only consumer is the
@@ -646,48 +626,40 @@ class InfraConfig(ProjectSettings):
     # Worker gateway — heartbeat & circuit-breaker
     worker_heartbeat_timeout_seconds: float = Field(
         default=90.0,
-        alias="VAULTSPEC_WORKER_HEARTBEAT_TIMEOUT_SECONDS",
         description=(
             "Seconds without a heartbeat before the worker is considered disconnected."
         ),
     )
     cb_failure_threshold: int = Field(
         default=3,
-        alias="VAULTSPEC_CB_FAILURE_THRESHOLD",
         description="Consecutive dispatch failures before the circuit breaker opens.",
     )
     cb_recovery_timeout_seconds: float = Field(
         default=30.0,
-        alias="VAULTSPEC_CB_RECOVERY_TIMEOUT_SECONDS",
         description="Seconds before a OPEN circuit breaker probes the worker again.",
     )
 
     # Worker health-poll adaptive back-off
     worker_poll_initial_interval_seconds: float = Field(
         default=0.1,
-        alias="VAULTSPEC_WORKER_POLL_INITIAL_INTERVAL_SECONDS",
         description=(
             "Initial poll interval when waiting for the worker to become ready."
         ),
     )
     worker_poll_max_interval_seconds: float = Field(
         default=2.0,
-        alias="VAULTSPEC_WORKER_POLL_MAX_INTERVAL_SECONDS",
         description="Maximum back-off poll interval when waiting for the worker.",
     )
     worker_poll_backoff_factor: float = Field(
         default=1.5,
-        alias="VAULTSPEC_WORKER_POLL_BACKOFF_FACTOR",
         description="Multiplicative back-off factor for worker health polling.",
     )
     worker_poll_log_interval_seconds: float = Field(
         default=5.0,
-        alias="VAULTSPEC_WORKER_POLL_LOG_INTERVAL_SECONDS",
         description="Seconds between 'still waiting for worker' log messages.",
     )
     worker_ready_timeout_seconds: float = Field(
         default=30.0,
-        alias="VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS",
         description=(
             "Seconds a spawned worker may take to become ready before the spawn"
             " is abandoned and its process tree reaped. Slow cold starts (first"
@@ -713,24 +685,20 @@ class InfraConfig(ProjectSettings):
     # Worker watchdog
     watchdog_poll_interval_seconds: float = Field(
         default=5.0,
-        alias="VAULTSPEC_WATCHDOG_POLL_INTERVAL_SECONDS",
         description="How often the watchdog checks worker liveness (seconds).",
     )
     watchdog_max_retries: int = Field(
         default=3,
-        alias="VAULTSPEC_WATCHDOG_MAX_RETRIES",
         description="Maximum restart attempts before the watchdog gives up.",
     )
     watchdog_backoff_base_seconds: float = Field(
         default=2.0,
-        alias="VAULTSPEC_WATCHDOG_BACKOFF_BASE_SECONDS",
         description=(
             "Exponential back-off base (seconds) between watchdog restart attempts."
         ),
     )
     watchdog_restart_cooldown_seconds: float = Field(
         default=30.0,
-        alias="VAULTSPEC_WATCHDOG_RESTART_COOLDOWN_SECONDS",
         description=(
             "Minimum seconds between watchdog restart CYCLES (not attempts within a "
             "cycle). Rate-limits a persistent crash signal so the watchdog cannot "
@@ -741,7 +709,6 @@ class InfraConfig(ProjectSettings):
     # Progress stream
     stream_heartbeat_interval_seconds: float = Field(
         default=30.0,
-        alias="VAULTSPEC_STREAM_HEARTBEAT_INTERVAL_SECONDS",
         description=(
             "Idle cadence at which the progress stream emits a keepalive frame "
             "(seconds). Bounds how long a quiet run can look indistinguishable "
@@ -752,12 +719,10 @@ class InfraConfig(ProjectSettings):
     # Internal IPC frame/body limits
     internal_max_frame_bytes: int = Field(
         default=1_048_576,
-        alias="VAULTSPEC_INTERNAL_MAX_FRAME_BYTES",
         description="Maximum worker→gateway WebSocket frame size (bytes).",
     )
     internal_max_http_body_bytes: int = Field(
         default=1_048_576,
-        alias="VAULTSPEC_INTERNAL_MAX_HTTP_BODY_BYTES",
         description=(
             "Maximum HTTP body accepted on internal /dispatch and /events endpoints."
         ),
@@ -766,41 +731,34 @@ class InfraConfig(ProjectSettings):
     # Worker IPC bridge
     ipc_flush_interval_seconds: float = Field(
         default=0.05,
-        alias="VAULTSPEC_IPC_FLUSH_INTERVAL_SECONDS",
         description="Batch flush cadence for the worker→gateway event bridge.",
     )
     ipc_max_flush_retries: int = Field(
         default=3,
-        alias="VAULTSPEC_IPC_MAX_FLUSH_RETRIES",
         description="Maximum relay retry attempts per event batch.",
     )
     ipc_retry_backoff_base_seconds: float = Field(
         default=0.1,
-        alias="VAULTSPEC_IPC_RETRY_BACKOFF_BASE_SECONDS",
         description=(
             "Back-off base (seconds) between relay retries (doubles each attempt)."
         ),
     )
     ipc_max_event_buffer: int = Field(
         default=10_000,
-        alias="VAULTSPEC_IPC_MAX_EVENT_BUFFER",
         description="Drop-oldest cap on the in-memory event buffer.",
     )
 
     # ACP provider
     acp_startup_timeout_seconds: float = Field(
         default=300.0,
-        alias="VAULTSPEC_ACP_STARTUP_TIMEOUT_SECONDS",
         description="Seconds to wait for the ACP subprocess to become ready.",
     )
     acp_fs_read_max_bytes: int = Field(
         default=10_485_760,
-        alias="VAULTSPEC_ACP_FS_READ_MAX_BYTES",
         description="Maximum file read size (bytes) surfaced through ACP tool calls.",
     )
     acp_rpc_timeout_seconds: float = Field(
         default=15.0,
-        alias="VAULTSPEC_ACP_RPC_TIMEOUT_SECONDS",
         description=(
             "Seconds to wait for a quick ACP management RPC response"
             " (list_sessions, set_mode, authenticate)."
@@ -808,7 +766,6 @@ class InfraConfig(ProjectSettings):
     )
     acp_interactive_auth_timeout_seconds: float = Field(
         default=900.0,
-        alias="VAULTSPEC_ACP_INTERACTIVE_AUTH_TIMEOUT_SECONDS",
         description=(
             "Watchdog timeout (seconds) for interactive ACP browser auth flows."
             " This is a backstop for authenticate/login prompts, not the normal"
@@ -817,7 +774,6 @@ class InfraConfig(ProjectSettings):
     )
     acp_turn_idle_timeout_seconds: float = Field(
         default=600.0,
-        alias="VAULTSPEC_ACP_TURN_IDLE_TIMEOUT_SECONDS",
         description=(
             "Backstop (seconds) on a single ACP turn with no protocol activity."
             " The clock resets on every frame the agent writes, so a working"
@@ -827,7 +783,6 @@ class InfraConfig(ProjectSettings):
     )
     acp_chunk_queue_maxsize: int = Field(
         default=1024,
-        alias="VAULTSPEC_ACP_CHUNK_QUEUE_MAXSIZE",
         description=(
             "Bound on the per-session chunk queue used to buffer ACP streaming"
             " output before it is consumed by the model invocation loop."
@@ -837,34 +792,32 @@ class InfraConfig(ProjectSettings):
     # MCP server
     mcp_create_timeout_seconds: float = Field(
         default=30.0,
-        alias="VAULTSPEC_MCP_CREATE_TIMEOUT_SECONDS",
         description="MCP tool: timeout (seconds) for thread-create operations.",
     )
     mcp_query_timeout_seconds: float = Field(
         default=15.0,
-        alias="VAULTSPEC_MCP_QUERY_TIMEOUT_SECONDS",
         description=(
             "MCP tool: timeout (seconds) for thread-query and status operations."
         ),
     )
     mcp_max_initial_message_chars: int = Field(
         default=32_000,
-        alias="VAULTSPEC_MCP_MAX_INITIAL_MESSAGE_CHARS",
         description=(
             "MCP tool: maximum characters in the initial message before truncation."
         ),
     )
     mcp_preview_truncate_len: int = Field(
         default=200,
-        alias="VAULTSPEC_MCP_PREVIEW_TRUNCATE_LEN",
         description="MCP tool: character limit for inline message previews.",
     )
 
     # Environment Flags
-    ci: bool = Field(default=False, validation_alias=AliasChoices("VAULTSPEC_CI", "CI"))
+    ci: bool = Field(
+        default=False, validation_alias=AliasChoices("VAULTSPEC_A2A_CI", "CI")
+    )
     no_color: bool = Field(
         default=False,
-        validation_alias=AliasChoices("VAULTSPEC_NO_COLOR", "NO_COLOR"),
+        validation_alias=AliasChoices("VAULTSPEC_A2A_NO_COLOR", "NO_COLOR"),
     )
 
     @field_validator("project_root", mode="before")
@@ -926,3 +879,11 @@ class InfraConfig(ProjectSettings):
         if text.startswith("["):
             return json.loads(text)
         return [item.strip() for item in text.split(",") if item.strip()]
+
+
+# Canonical names for the settings a2a writes into its own children's
+# environments (the worker<->gateway pairing). Derived from the schema, so the
+# field declaration is the one place each name is spelled.
+INTERNAL_TOKEN_ENV = env_name(InfraConfig, "internal_token")
+GATEWAY_URL_ENV = env_name(InfraConfig, "gateway_url")
+WORKER_URL_ENV = env_name(InfraConfig, "worker_url")

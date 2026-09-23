@@ -139,8 +139,8 @@ def _desktop_arm_env(app_home: Path, capsule_root: Path) -> dict[str, str]:
     profile = DesktopProfile.resolve(app_home, capsule_root)
     profile.ensure()
     return {
-        "VAULTSPEC_DESKTOP_APP_HOME": str(profile.app_home),
-        "VAULTSPEC_CAPSULE_ASSETS": str(profile.capsule_assets_root),
+        "VAULTSPEC_A2A_DESKTOP_APP_HOME": str(profile.app_home),
+        "VAULTSPEC_A2A_CAPSULE_ASSETS": str(profile.capsule_assets_root),
     }
 
 
@@ -213,16 +213,16 @@ def start_service(
         state = derive_state_paths(home)
         state.database_path.parent.mkdir(parents=True, exist_ok=True)
         state.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        env["VAULTSPEC_DATABASE_URL"] = (
+        env["VAULTSPEC_A2A_DATABASE_URL"] = (
             f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
         )
-        env["VAULTSPEC_CHECKPOINT_DATABASE_URL"] = (
+        env["VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL"] = (
             f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
         )
     if host is not None:
-        env["VAULTSPEC_HOST"] = host
+        env["VAULTSPEC_A2A_HOST"] = host
     if port is not None:
-        env["VAULTSPEC_PORT"] = str(port)
+        env["VAULTSPEC_A2A_PORT"] = str(port)
     # Spawn from the home's PARENT, never from inside the home: a child whose
     # working directory sits inside the application home holds an open handle
     # on it, and the Windows directory lease the discovery publication takes

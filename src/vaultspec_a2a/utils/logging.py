@@ -5,7 +5,7 @@ contract per process kind. The contracts are the
 audit surface: each lane is created here, not in the discipline of every caller.
 
 - ``service`` (gateway/worker): structured JSON to ``stderr`` plus a size-capped
-  rotating file lane under the runtime dir, honoring ``VAULTSPEC_LOG_LEVEL``.
+  rotating file lane under the runtime dir, honoring ``VAULTSPEC_A2A_LOG_LEVEL``.
 - ``cli``: human-readable diagnostics to ``stderr`` at WARNING; ``stdout`` is left
   for command output and ``--json`` payloads.
 - ``protocol`` (stdio MCP bridge): ``stderr``-only at WARNING, with an explicit

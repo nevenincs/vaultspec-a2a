@@ -163,7 +163,7 @@ def in_process_selection(
             "no selectable in-process lane is served, so this run cannot present "
             "a selection. Arm them on the gateway with "
             "VAULTSPEC_SERVE_IN_PROCESS_LANES=true (the mock lane additionally "
-            "needs MOCK_API_BASE). Served: " + _served_summary(records)
+            "needs VAULTSPEC_A2A_MOCK_API_BASE). Served: " + _served_summary(records)
         )
     record = next(
         (item for item in candidates if item["provider_id"] == prefer_provider_id),

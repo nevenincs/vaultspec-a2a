@@ -265,7 +265,10 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
 ) -> None:
     """Concurrent prepares bound capacity and start one worker; commit binds a run."""
     log_path = tmp_path / "gateway.log"
-    with _armed_gateway(tmp_path, VAULTSPEC_MAX_CONCURRENT_THREADS="2") as (base, auth):
+    with _armed_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2") as (
+        base,
+        auth,
+    ):
         # --- Concurrent first demand: hard reservation bound, one worker. ---
         # Four real parallel prepares race into the single-flight worker start and
         # the bounded reservation table (capacity two).
@@ -341,8 +344,8 @@ def test_reservation_times_out_and_expired_commit_creates_no_run(
     """An uncommitted reservation expires, freeing capacity; expired commit refused."""
     with _armed_gateway(
         tmp_path,
-        VAULTSPEC_MAX_CONCURRENT_THREADS="2",
-        VAULTSPEC_ADMISSION_RESERVATION_TTL_SECONDS="3",
+        VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2",
+        VAULTSPEC_A2A_ADMISSION_RESERVATION_TTL_SECONDS="3",
     ) as (base, auth):
         # Fill the bound: two reservations, then a third refused.
         first_status, first_body = _prepare(base, auth, run_id="run-expiring-first")
@@ -471,7 +474,7 @@ def test_exact_commit_replay_role_binding_and_release_are_linearized(
     tmp_path: Path,
 ) -> None:
     """Exact replays converge while mismatches and release stay atomic."""
-    with _armed_gateway(tmp_path, VAULTSPEC_MAX_CONCURRENT_THREADS="3") as (
+    with _armed_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3") as (
         base,
         auth,
     ):
@@ -481,7 +484,7 @@ def test_exact_commit_replay_role_binding_and_release_are_linearized(
 
 def test_release_commit_race_is_linearized(tmp_path: Path) -> None:
     """The release/commit race starts with a fresh worker and reservation."""
-    with _armed_gateway(tmp_path, VAULTSPEC_MAX_CONCURRENT_THREADS="3") as (
+    with _armed_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3") as (
         base,
         auth,
     ):
@@ -492,7 +495,7 @@ def test_prepare_refuses_when_real_worker_is_not_execution_ready(
     tmp_path: Path,
 ) -> None:
     """A cold externally managed worker yields no reservation or durable run."""
-    with _armed_gateway(tmp_path, VAULTSPEC_AUTO_SPAWN_WORKER="false") as (
+    with _armed_gateway(tmp_path, VAULTSPEC_A2A_AUTO_SPAWN_WORKER="false") as (
         base,
         auth,
     ):

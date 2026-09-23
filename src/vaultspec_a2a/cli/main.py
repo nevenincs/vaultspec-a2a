@@ -218,13 +218,13 @@ def _prepare_desktop_serve(
     profile.ensure()
 
     env = {
-        "VAULTSPEC_DESKTOP_APP_HOME": str(profile.app_home),
-        "VAULTSPEC_CAPSULE_ASSETS": str(profile.capsule_assets_root),
+        "VAULTSPEC_A2A_DESKTOP_APP_HOME": str(profile.app_home),
+        "VAULTSPEC_A2A_CAPSULE_ASSETS": str(profile.capsule_assets_root),
     }
     if host is not None:
-        env["VAULTSPEC_HOST"] = host
+        env["VAULTSPEC_A2A_HOST"] = host
     if port is not None:
-        env["VAULTSPEC_PORT"] = str(port)
+        env["VAULTSPEC_A2A_PORT"] = str(port)
     return _DesktopServePlan(env=env, argv=self_command("serve"))
 
 
@@ -717,7 +717,8 @@ class _ProcsUpArgs(TypedDict):
     "internal_token_file",
     default="",
     help="Path to a file holding the internal-IPC token. Recorded per process (the "
-    "PATH, never the token) and read at boot to inject VAULTSPEC_INTERNAL_TOKEN, so "
+    "PATH, never the token) and read at boot to inject "
+    "VAULTSPEC_A2A_INTERNAL_TOKEN, so "
     "a procs-managed gateway-dev and worker-dev share one token. Boot fails loudly "
     "if the file is missing or empty.",
 )
@@ -725,7 +726,7 @@ class _ProcsUpArgs(TypedDict):
     "--gateway-url",
     "gateway_url",
     default="",
-    help="Paired gateway base URL (VAULTSPEC_GATEWAY_URL) a worker heartbeats to. "
+    help="Paired gateway base URL (VAULTSPEC_A2A_GATEWAY_URL) a worker heartbeats to. "
     "Recorded per process so the worker targets the dev gateway rather than "
     "auto-deriving the owner's resident gateway.",
 )
@@ -733,7 +734,7 @@ class _ProcsUpArgs(TypedDict):
     "--worker-url",
     "worker_url",
     default="",
-    help="Paired worker base URL (VAULTSPEC_WORKER_URL) a gateway dispatches to. "
+    help="Paired worker base URL (VAULTSPEC_A2A_WORKER_URL) a gateway dispatches to. "
     "Recorded per process so the gateway targets the dev worker rather than "
     "auto-deriving the owner's resident worker (port 18001).",
 )

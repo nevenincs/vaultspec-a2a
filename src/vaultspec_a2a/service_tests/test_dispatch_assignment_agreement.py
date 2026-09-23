@@ -63,7 +63,7 @@ if TYPE_CHECKING:
     from ..acceptance.tests._harness import CertifiedGateway
 
 _TAPE_SERVER_DEFAULT = "http://127.0.0.1:8100"
-_TAPE_SERVER_ENV = "MOCK_API_BASE"
+_TAPE_SERVER_ENV = "VAULTSPEC_A2A_MOCK_API_BASE"
 _SUPPLY_TAPE_SERVER = (
     "docker compose -f service/docker-compose.integration.yml up -d vidaimock"
 )
@@ -158,7 +158,7 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
         tmp_path,
         **{
             _TAPE_SERVER_ENV: tape_server,
-            "VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
+            "VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
         },
     ) as gateway:
         workspace_root = str(tmp_path)

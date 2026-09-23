@@ -179,8 +179,8 @@ print(json.dumps({{
 }}))
 """
     env = os.environ.copy()
-    env["VAULTSPEC_CAPSULE_ASSETS"] = str(configured_root)
-    env["VAULTSPEC_PROJECT_ROOT"] = str(repository_root)
+    env["VAULTSPEC_A2A_CAPSULE_ASSETS"] = str(configured_root)
+    env["VAULTSPEC_A2A_INSTALL_ROOT"] = str(repository_root)
 
     completed = subprocess.run(
         [sys.executable, "-I", "-c", script],

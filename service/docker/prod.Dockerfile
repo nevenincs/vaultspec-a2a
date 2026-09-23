@@ -85,9 +85,9 @@ ENTRYPOINT ["/app/.venv/bin/python", "/app/service_entrypoint.py"]
 FROM python-base AS gateway
 
 # Worker runs as a separate container — never auto-spawn inside Docker.
-ENV VAULTSPEC_WORKER_URL=http://worker:18001 \
-    VAULTSPEC_PROJECT_ROOT=/app \
-    VAULTSPEC_AUTO_SPAWN_WORKER=false
+ENV VAULTSPEC_A2A_WORKER_URL=http://worker:18001 \
+    VAULTSPEC_A2A_INSTALL_ROOT=/app \
+    VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false
 
 EXPOSE 18000
 CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "18000"]
@@ -123,10 +123,10 @@ COPY --from=node-deps /app/node_modules ./node_modules/
 # Docker support does not depend on a host-level gemini binary.
 COPY --from=gemini-cli /usr/local/lib/node_modules/@google /usr/local/lib/node_modules/@google
 
-# PROV-O02: VAULTSPEC_PROJECT_ROOT prevents path traversal resolving into
+# PROV-O02: VAULTSPEC_A2A_INSTALL_ROOT prevents path traversal resolving into
 # site-packages in non-editable installs (factory.py _PROJECT_ROOT).
-ENV VAULTSPEC_GATEWAY_URL=http://gateway:18000 \
-    VAULTSPEC_PROJECT_ROOT=/app
+ENV VAULTSPEC_A2A_GATEWAY_URL=http://gateway:18000 \
+    VAULTSPEC_A2A_INSTALL_ROOT=/app
 
 EXPOSE 18001
 CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.worker.app:create_worker_app", "--factory", "--host", "0.0.0.0", "--port", "18001"]

@@ -23,55 +23,46 @@ from __future__ import annotations
 import pathlib
 from typing import TYPE_CHECKING
 
-from pydantic import AliasChoices
-
 from ...control.config import Settings
+from ...control.settings_base import field_env_names
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from pydantic.fields import FieldInfo
-
 # Settings that belong to the packaged desktop profile, which seats its own state
 # root and capsule assets. Neither is meaningful for a Compose deployment, so the
 # service example documents their absence rather than the settings.
-_DESKTOP_ONLY = frozenset({"VAULTSPEC_DESKTOP_APP_HOME", "VAULTSPEC_CAPSULE_ASSETS"})
+_DESKTOP_ONLY = frozenset(
+    {"VAULTSPEC_A2A_DESKTOP_APP_HOME", "VAULTSPEC_A2A_CAPSULE_ASSETS"}
+)
 
 # Compose's worker image owns these values. The example must describe them even
 # though host and desktop profiles leave the execution boundary unset.
 _COMPOSE_PROVIDER_IDENTITY_DEFAULTS = {
-    "VAULTSPEC_PROVIDER_IDENTITY_LAUNCHER": "/usr/local/bin/vaultspec-agent-launch",
-    "VAULTSPEC_PROVIDER_AGENT_UID": "1002",
-    "VAULTSPEC_PROVIDER_AGENT_GID": "1002",
+    "VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER": "/usr/local/bin/vaultspec-agent-launch",
+    "VAULTSPEC_A2A_PROVIDER_AGENT_UID": "1002",
+    "VAULTSPEC_A2A_PROVIDER_AGENT_GID": "1002",
 }
 
 _ENV_EXAMPLE = pathlib.Path(__file__).resolve().parents[3].parent / ".env.example"
 
 
-def _declared_env_names(field: FieldInfo) -> Iterator[str]:
-    """Yield every environment name a field declares, across all alias forms.
+def _declared_env_names(field_name: str) -> Iterator[str]:
+    """Yield every environment name a field is read from, across all forms.
 
-    ``AliasChoices`` may also carry ``AliasPath`` entries, which address a
-    position inside an already-parsed structure rather than naming an
-    environment variable; only the string choices are operator-facing names.
+    Delegates to the settings module's own extraction, so the names this test
+    checks are exactly the names the service reads: explicit aliases, every
+    string choice of an ``AliasChoices``, and the prefix-derived name of an
+    un-aliased field.
     """
-    if field.alias:
-        yield field.alias
-
-    validation_alias = field.validation_alias
-    if isinstance(validation_alias, str):
-        yield validation_alias
-    elif isinstance(validation_alias, AliasChoices):
-        for choice in validation_alias.choices:
-            if isinstance(choice, str):
-                yield choice
+    yield from field_env_names(Settings, field_name)
 
 
 def _all_declared_env_names() -> set[str]:
     return {
         name
-        for field in Settings.model_fields.values()
-        for name in _declared_env_names(field)
+        for field_name in Settings.model_fields
+        for name in _declared_env_names(field_name)
     }
 
 
@@ -93,14 +84,17 @@ def test_the_extraction_reads_past_the_plain_alias() -> None:
     fields that each declare their name a different way makes that narrowing
     fail here rather than pass silently.
     """
-    fields = Settings.model_fields
-
+    # prefix-derived name of an un-aliased field
+    assert set(_declared_env_names("mcp_port")) == {"VAULTSPEC_A2A_MCP_PORT"}
     # plain alias
-    assert "VAULTSPEC_MCP_PORT" in set(_declared_env_names(fields["mcp_port"]))
-    # plain validation_alias
-    assert "OPENAI_API_KEY" in set(_declared_env_names(fields["openai_api_key"]))
-    # every name of an AliasChoices
-    assert set(_declared_env_names(fields["zai_auth_token"])) == {
+    assert set(_declared_env_names("a2a_home")) == {"VAULTSPEC_A2A_HOME"}
+    # every name of an AliasChoices, the a2a name first
+    assert tuple(_declared_env_names("openai_api_key")) == (
+        "VAULTSPEC_A2A_OPENAI_API_KEY",
+        "OPENAI_API_KEY",
+    )
+    assert set(_declared_env_names("zai_auth_token")) == {
+        "VAULTSPEC_A2A_ZAI_AUTH_TOKEN",
         "ZAI_AUTH_TOKEN",
         "ZAI_API_KEY",
     }

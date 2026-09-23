@@ -635,7 +635,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
     run_id = f"clarify-stitch-{uuid.uuid4().hex[:12]}"
     with certified_gateway(
         tmp_path,
-        VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
+        VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         started = _start_document_run(
             gateway, run_id, selection=_served_in_process_selection(gateway)
@@ -731,7 +731,7 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
     run_id = f"clarify-scope-{uuid.uuid4().hex[:12]}"
     with certified_gateway(
         tmp_path,
-        VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
+        VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         started = _start_document_run(
             gateway, run_id, selection=_served_in_process_selection(gateway)
@@ -813,7 +813,7 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
     winning_marker: str
     with certified_gateway(
         tmp_path,
-        VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
+        VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         selection = selection_from_served_catalog(_served_catalog(gateway))
         assert selection.provider_id == "codex", (

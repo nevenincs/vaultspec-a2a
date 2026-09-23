@@ -240,7 +240,7 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
     with _worker_like(body) as (url, port, observer):
         child_environment = os.environ.copy()
         child_environment.pop(INTERNAL_TOKEN_ENV, None)
-        child_environment["VAULTSPEC_ENVIRONMENT"] = "development"
+        child_environment["VAULTSPEC_A2A_ENVIRONMENT"] = "development"
         if internal_token is not None:
             child_environment[INTERNAL_TOKEN_ENV] = internal_token
         child_program = textwrap.dedent(

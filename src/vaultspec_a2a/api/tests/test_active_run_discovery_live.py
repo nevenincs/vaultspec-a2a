@@ -55,20 +55,20 @@ async def _production_gateway(
     environment = os.environ.copy()
     environment.update(
         {
-            "VAULTSPEC_HOST": "127.0.0.1",
-            "VAULTSPEC_PORT": str(port),
-            "VAULTSPEC_DATABASE_BACKEND": "sqlite",
-            "VAULTSPEC_DATABASE_URL": database_url,
-            "VAULTSPEC_CHECKPOINT_BACKEND": "sqlite",
-            "VAULTSPEC_CHECKPOINT_DATABASE_URL": (
+            "VAULTSPEC_A2A_HOST": "127.0.0.1",
+            "VAULTSPEC_A2A_PORT": str(port),
+            "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
+            "VAULTSPEC_A2A_DATABASE_URL": database_url,
+            "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
+            "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": (
                 f"sqlite+aiosqlite:///{checkpoint_path}"
             ),
             "VAULTSPEC_A2A_HOME": str(runtime_home),
-            "VAULTSPEC_WORKSPACE_ROOT": str(tmp_path / "managed-workspaces"),
-            "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
+            "VAULTSPEC_A2A_WORKSPACE_ROOT": str(tmp_path / "managed-workspaces"),
+            "VAULTSPEC_A2A_AUTO_SPAWN_WORKER": "false",
             "VAULTSPEC_REPAIR_ON_STARTUP": "false",
-            "VAULTSPEC_WORKER_URL": f"http://127.0.0.1:{free_port()}",
-            "VAULTSPEC_INTERNAL_TOKEN": _WORKER_TOKEN,
+            "VAULTSPEC_A2A_WORKER_URL": f"http://127.0.0.1:{free_port()}",
+            "VAULTSPEC_A2A_INTERNAL_TOKEN": _WORKER_TOKEN,
             "VAULTSPEC_A2A_GATEWAY_TOKEN": _SERVICE_TOKEN,
         }
     )

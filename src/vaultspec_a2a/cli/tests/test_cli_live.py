@@ -172,7 +172,7 @@ def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
                 service_token=token,
             )
             environment = os.environ.copy()
-            environment.pop("VAULTSPEC_INTERNAL_TOKEN", None)
+            environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
             environment["VAULTSPEC_A2A_HOME"] = str(a2a_home)
             result = _run_cli("presets", "--url", srv.base, env=environment)
 
@@ -196,7 +196,7 @@ def test_configured_cli_token_precedes_matching_discovery_token(tmp_path: Any) -
                 service_token="discovery-token-must-not-win",
             )
             environment = os.environ.copy()
-            environment.pop("VAULTSPEC_INTERNAL_TOKEN", None)
+            environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
             environment["VAULTSPEC_A2A_HOME"] = str(a2a_home)
             environment["VAULTSPEC_A2A_GATEWAY_TOKEN"] = configured
             result = _run_cli("presets", "--url", srv.base, env=environment)

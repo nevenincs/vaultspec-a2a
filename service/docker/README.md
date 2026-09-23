@@ -54,13 +54,13 @@ just stack-prod-config
 just stack-database-config
 ```
 
-The gateway and worker share one `VAULTSPEC_INTERNAL_TOKEN` in production
+The gateway and worker share one `VAULTSPEC_A2A_INTERNAL_TOKEN` in production
 profiles. The PostgreSQL overlay additionally requires `POSTGRES_PASSWORD`.
 Mutable runtime state belongs to the configured volumes or application runtime
 directories, not the image layers.
 
 The engine-facing gateway bearer is separate from
-`VAULTSPEC_INTERNAL_TOKEN`. The shipped profiles admit only canonical
+`VAULTSPEC_A2A_INTERNAL_TOKEN`. The shipped profiles admit only canonical
 descendants of `/app/data/workspaces`. Provider, MCP, and terminal descendants
 are launched as UID/GID 1002 with no supplementary groups, capabilities, or
 privilege-regain path; the service retains UID/GID 1001 for SQLite and runtime

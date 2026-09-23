@@ -72,8 +72,8 @@ def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
         {
             "COMPOSE_PROJECT_NAME": project_name,
             "COMPOSE_DISABLE_ENV_FILE": "1",
-            "VAULTSPEC_PORT": str(ports["gateway"]),
-            "VAULTSPEC_WORKER_PORT": str(ports["worker"]),
+            "VAULTSPEC_A2A_PORT": str(ports["gateway"]),
+            "VAULTSPEC_A2A_WORKER_PORT": str(ports["worker"]),
             "VIDAIMOCK_PORT": str(ports["vidaimock"]),
             "JAEGER_UI_PORT": str(ports["jaeger_ui"]),
             "JAEGER_OTLP_PORT": str(ports["jaeger_otlp"]),
@@ -410,30 +410,30 @@ class ServiceStack:
         env = os.environ.copy()
         env.update(
             {
-                "VAULTSPEC_ENVIRONMENT": "production",
-                "VAULTSPEC_DATABASE_URL": (
+                "VAULTSPEC_A2A_ENVIRONMENT": "production",
+                "VAULTSPEC_A2A_DATABASE_URL": (
                     "sqlite+aiosqlite:///"
                     f"{(self.runtime_dir / 'service.db').as_posix()}"
                 ),
-                "VAULTSPEC_DATABASE_BACKEND": "sqlite",
-                "VAULTSPEC_CHECKPOINT_BACKEND": "sqlite",
-                "VAULTSPEC_GATEWAY_URL": self.gateway_url,
-                "VAULTSPEC_WORKER_URL": self.worker_url,
-                "VAULTSPEC_WORKER_HOST": "127.0.0.1",
-                "VAULTSPEC_WORKER_PORT": str(self.ports["worker"]),
-                "VAULTSPEC_PORT": str(self.ports["gateway"]),
-                "VAULTSPEC_INTERNAL_TOKEN": _INTERNAL_TOKEN,
+                "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
+                "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
+                "VAULTSPEC_A2A_GATEWAY_URL": self.gateway_url,
+                "VAULTSPEC_A2A_WORKER_URL": self.worker_url,
+                "VAULTSPEC_A2A_WORKER_HOST": "127.0.0.1",
+                "VAULTSPEC_A2A_WORKER_PORT": str(self.ports["worker"]),
+                "VAULTSPEC_A2A_PORT": str(self.ports["gateway"]),
+                "VAULTSPEC_A2A_INTERNAL_TOKEN": _INTERNAL_TOKEN,
                 "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
-                "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
-                "VAULTSPEC_PROJECT_ROOT": str(REPO_ROOT),
-                "MOCK_API_BASE": self.vidaimock_url,
+                "VAULTSPEC_A2A_AUTO_SPAWN_WORKER": "false",
+                "VAULTSPEC_A2A_INSTALL_ROOT": str(REPO_ROOT),
+                "VAULTSPEC_A2A_MOCK_API_BASE": self.vidaimock_url,
                 # Arm the in-process lanes. This stack has no provider
                 # credentials, and a run now has to present a selection naming a
                 # lane the gateway reports selectable - so without this the
                 # catalog offers nothing selectable at all and every run here is
                 # unstartable. The mock lane additionally needs a tape server,
-                # which MOCK_API_BASE above supplies, so both in-process lanes
-                # are served and the mock presets can select their own.
+                # which VAULTSPEC_A2A_MOCK_API_BASE above supplies, so both
+                # in-process lanes are served and the mock presets can select their own.
                 "VAULTSPEC_SERVE_IN_PROCESS_LANES": "true",
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"

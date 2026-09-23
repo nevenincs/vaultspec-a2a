@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 def _start_lazy_gateway(stack: ServiceStack) -> None:
     env = stack._local_env()
-    env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true"
+    env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true"
     process, log = _spawn_process(
         sys.executable,
         "-m",

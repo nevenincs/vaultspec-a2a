@@ -18,22 +18,22 @@ services:
       target: gateway
     restart: unless-stopped
     ports:
-      - '${VAULTSPEC_PORT:-18000}:18000'
+      - '${VAULTSPEC_A2A_PORT:-18000}:18000'
     volumes:
       - db-data:/app/data
       - gateway-state:/app/gateway-state
     environment:
-      VAULTSPEC_ENVIRONMENT: 'production'
-      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_DATABASE_BACKEND: sqlite
-      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      VAULTSPEC_A2A_ENVIRONMENT: 'production'
+      VAULTSPEC_A2A_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_A2A_DATABASE_BACKEND: sqlite
+      VAULTSPEC_A2A_CHECKPOINT_BACKEND: sqlite
       # Durable gateway discovery and bearer handoff are isolated from the
       # worker-visible database volume.
       VAULTSPEC_A2A_HOME: '/app/gateway-state'
-      VAULTSPEC_WORKSPACE_ROOT: '/app/data/workspaces'
-      VAULTSPEC_WORKER_URL: 'http://worker:18001'
-      VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
-      VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?VAULTSPEC_INTERNAL_TOKEN is required}'
+      VAULTSPEC_A2A_WORKSPACE_ROOT: '/app/data/workspaces'
+      VAULTSPEC_A2A_WORKER_URL: 'http://worker:18001'
+      VAULTSPEC_A2A_AUTO_SPAWN_WORKER: 'false'
+      VAULTSPEC_A2A_INTERNAL_TOKEN: '${VAULTSPEC_A2A_INTERNAL_TOKEN:?VAULTSPEC_A2A_INTERNAL_TOKEN is required}'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
       OTEL_EXPORTER_OTLP_INSECURE: 'true'
     depends_on:
@@ -66,19 +66,19 @@ services:
     cap_drop: ['ALL']
     cap_add: ['SETUID', 'SETGID']
     environment:
-      VAULTSPEC_ENVIRONMENT: 'production'
-      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_DATABASE_BACKEND: sqlite
-      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      VAULTSPEC_A2A_ENVIRONMENT: 'production'
+      VAULTSPEC_A2A_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_A2A_DATABASE_BACKEND: sqlite
+      VAULTSPEC_A2A_CHECKPOINT_BACKEND: sqlite
       # Worker discovery state is durable but cannot expose the gateway bearer.
       VAULTSPEC_A2A_HOME: '/app/worker-state'
-      VAULTSPEC_WORKSPACE_ROOT: '/app/data/workspaces'
-      VAULTSPEC_PROVIDER_IDENTITY_LAUNCHER: '/usr/local/bin/vaultspec-agent-launch'
-      VAULTSPEC_PROVIDER_AGENT_UID: '1002'
-      VAULTSPEC_PROVIDER_AGENT_GID: '1002'
+      VAULTSPEC_A2A_WORKSPACE_ROOT: '/app/data/workspaces'
+      VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER: '/usr/local/bin/vaultspec-agent-launch'
+      VAULTSPEC_A2A_PROVIDER_AGENT_UID: '1002'
+      VAULTSPEC_A2A_PROVIDER_AGENT_GID: '1002'
       VAULTSPEC_MANAGED_WORKSPACE_PERMISSIONS: 'true'
-      VAULTSPEC_GATEWAY_URL: 'http://gateway:18000'
-      VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?VAULTSPEC_INTERNAL_TOKEN is required}'
+      VAULTSPEC_A2A_GATEWAY_URL: 'http://gateway:18000'
+      VAULTSPEC_A2A_INTERNAL_TOKEN: '${VAULTSPEC_A2A_INTERNAL_TOKEN:?VAULTSPEC_A2A_INTERNAL_TOKEN is required}'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
       OTEL_EXPORTER_OTLP_INSECURE: 'true'
     depends_on:
@@ -90,7 +90,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import os, urllib.request; tok = os.environ['VAULTSPEC_INTERNAL_TOKEN']; req = urllib.request.Request('http://localhost:18001/health', headers={'Authorization': 'Bearer ' + tok}); urllib.request.urlopen(req)",
+          "import os, urllib.request; tok = os.environ['VAULTSPEC_A2A_INTERNAL_TOKEN']; req = urllib.request.Request('http://localhost:18001/health', headers={'Authorization': 'Bearer ' + tok}); urllib.request.urlopen(req)",
         ]
       interval: 10s
       timeout: 5s

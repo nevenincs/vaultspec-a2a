@@ -98,7 +98,7 @@ def private_home_root(tmp_path: Path) -> Iterator[Path]:
 
 def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
-    environment["VAULTSPEC_CODEX_WEB_SEARCH_MODE"] = web_search_mode
+    environment["VAULTSPEC_A2A_CODEX_WEB_SEARCH_MODE"] = web_search_mode
     return subprocess.run(
         [
             sys.executable,
@@ -119,9 +119,9 @@ def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[st
 def _config_home_parent_from_child(base: Path, app_home: Path | None) -> Path:
     environment = dict(os.environ)
     if app_home is None:
-        environment.pop("VAULTSPEC_DESKTOP_APP_HOME", None)
+        environment.pop("VAULTSPEC_A2A_DESKTOP_APP_HOME", None)
     else:
-        environment["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+        environment["VAULTSPEC_A2A_DESKTOP_APP_HOME"] = str(app_home)
     proc = subprocess.run(
         [
             sys.executable,
@@ -995,9 +995,9 @@ def _override_config_from_child(base: Path, base_url: str | None) -> dict[str, A
     """
     environment = dict(os.environ)
     if base_url is None:
-        environment.pop("VAULTSPEC_CODEX_BASE_URL", None)
+        environment.pop("VAULTSPEC_A2A_CODEX_BASE_URL", None)
     else:
-        environment["VAULTSPEC_CODEX_BASE_URL"] = base_url
+        environment["VAULTSPEC_A2A_CODEX_BASE_URL"] = base_url
     proc = subprocess.run(
         [
             sys.executable,

@@ -120,31 +120,31 @@ _TELEMETRY: Final[tuple[str, ...]] = (
 #: belong to the same file and the same commands, and a service started without
 #: them silently runs on defaults that disagree with the operator's `.env`.
 _SERVICE_RUNTIME: Final[tuple[str, ...]] = (
-    "VAULTSPEC_ACCESS_LOG",
-    "VAULTSPEC_ACP_BACKEND",
-    "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED",
-    "VAULTSPEC_AUTO_SPAWN_WORKER",
-    "VAULTSPEC_CHECKPOINT_BACKEND",
-    "VAULTSPEC_DATABASE_BACKEND",
-    "VAULTSPEC_DB_POOL_MAX_OVERFLOW",
-    "VAULTSPEC_DB_POOL_SIZE",
-    "VAULTSPEC_ENVIRONMENT",
-    "VAULTSPEC_HOST",
-    "VAULTSPEC_LOG_LEVEL",
-    "VAULTSPEC_MAX_CONCURRENT_THREADS",
-    "VAULTSPEC_MCP_ALLOWED_HOSTS",
-    "VAULTSPEC_MCP_ALLOWED_ORIGINS",
-    "VAULTSPEC_MCP_HOST",
-    "VAULTSPEC_MCP_PORT",
-    "VAULTSPEC_PORT",
-    "VAULTSPEC_POSTGRES_REQUIRED",
-    "VAULTSPEC_PROVIDER_TIMEOUT_SECONDS",
+    "VAULTSPEC_A2A_ACCESS_LOG",
+    "VAULTSPEC_A2A_ACP_BACKEND",
+    "VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED",
+    "VAULTSPEC_A2A_AUTO_SPAWN_WORKER",
+    "VAULTSPEC_A2A_CHECKPOINT_BACKEND",
+    "VAULTSPEC_A2A_DATABASE_BACKEND",
+    "VAULTSPEC_A2A_DB_POOL_MAX_OVERFLOW",
+    "VAULTSPEC_A2A_DB_POOL_SIZE",
+    "VAULTSPEC_A2A_ENVIRONMENT",
+    "VAULTSPEC_A2A_HOST",
+    "VAULTSPEC_A2A_LOG_LEVEL",
+    "VAULTSPEC_A2A_MAX_CONCURRENT_THREADS",
+    "VAULTSPEC_A2A_MCP_ALLOWED_HOSTS",
+    "VAULTSPEC_A2A_MCP_ALLOWED_ORIGINS",
+    "VAULTSPEC_A2A_MCP_HOST",
+    "VAULTSPEC_A2A_MCP_PORT",
+    "VAULTSPEC_A2A_PORT",
+    "VAULTSPEC_A2A_POSTGRES_REQUIRED",
+    "VAULTSPEC_A2A_PROVIDER_TIMEOUT_SECONDS",
     "VAULTSPEC_REPAIR_JOURNAL_RETENTION_BOOTS",
     "VAULTSPEC_REPAIR_ON_STARTUP",
     "VAULTSPEC_REPAIR_STRATEGY",
-    "VAULTSPEC_SQLITE_BUSY_TIMEOUT_MS",
-    "VAULTSPEC_WORKER_HOST",
-    "VAULTSPEC_WORKER_PORT",
+    "VAULTSPEC_A2A_SQLITE_BUSY_TIMEOUT_MS",
+    "VAULTSPEC_A2A_WORKER_HOST",
+    "VAULTSPEC_A2A_WORKER_PORT",
 )
 
 #: The scopes, keyed by the name a recipe passes.
@@ -155,7 +155,7 @@ SCOPES: Final[dict[str, Scope]] = {
         # started without it does not degrade - it cannot accept the worker's
         # calls at all - so this is the one place a missing name is worth
         # stopping for.
-        required=("VAULTSPEC_INTERNAL_TOKEN",),
+        required=("VAULTSPEC_A2A_INTERNAL_TOKEN",),
         optional=(*_PROVIDER_CREDENTIALS, *_TELEMETRY, *_SERVICE_RUNTIME),
     ),
     "compose": Scope(
@@ -165,11 +165,11 @@ SCOPES: Final[dict[str, Scope]] = {
         # for a database password means a Postgres that either refuses every
         # connection or accepts anonymous ones. Neither is a state to discover
         # later.
-        required=("POSTGRES_PASSWORD", "VAULTSPEC_INTERNAL_TOKEN"),
+        required=("POSTGRES_PASSWORD", "VAULTSPEC_A2A_INTERNAL_TOKEN"),
         optional=(
             "JAEGER_OTLP_PORT",
             "JAEGER_UI_PORT",
-            "VAULTSPEC_PORT",
+            "VAULTSPEC_A2A_PORT",
             "VIDAIMOCK_PORT",
             *_SERVICE_RUNTIME,
         ),

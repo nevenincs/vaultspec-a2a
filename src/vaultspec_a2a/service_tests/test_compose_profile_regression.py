@@ -137,10 +137,10 @@ def _wait_for_health_field(
 
 
 def test_prod_worker_healthcheck_carries_ipc_bearer() -> None:
-    """Prod worker healthcheck reads VAULTSPEC_INTERNAL_TOKEN as IPC bearer."""
+    """Prod worker healthcheck reads VAULTSPEC_A2A_INTERNAL_TOKEN as IPC bearer."""
     cmd = _worker_healthcheck_cmd(PROD_COMPOSE)
-    assert "VAULTSPEC_INTERNAL_TOKEN" in cmd, (
-        "prod worker healthcheck must reference VAULTSPEC_INTERNAL_TOKEN"
+    assert "VAULTSPEC_A2A_INTERNAL_TOKEN" in cmd, (
+        "prod worker healthcheck must reference VAULTSPEC_A2A_INTERNAL_TOKEN"
     )
     assert "Authorization" in cmd, (
         "prod worker healthcheck must set Authorization header"
@@ -149,10 +149,10 @@ def test_prod_worker_healthcheck_carries_ipc_bearer() -> None:
 
 
 def test_dev_worker_healthcheck_carries_ipc_bearer() -> None:
-    """Dev worker healthcheck is auth-aware using optional VAULTSPEC_INTERNAL_TOKEN."""
+    """Dev worker healthcheck presents the optional VAULTSPEC_A2A_INTERNAL_TOKEN."""
     cmd = _worker_healthcheck_cmd(DEV_COMPOSE)
-    assert "VAULTSPEC_INTERNAL_TOKEN" in cmd, (
-        "dev worker healthcheck must reference VAULTSPEC_INTERNAL_TOKEN"
+    assert "VAULTSPEC_A2A_INTERNAL_TOKEN" in cmd, (
+        "dev worker healthcheck must reference VAULTSPEC_A2A_INTERNAL_TOKEN"
     )
     assert "Authorization" in cmd, (
         "dev worker healthcheck must set Authorization header"
@@ -164,10 +164,10 @@ def test_dev_worker_healthcheck_carries_ipc_bearer() -> None:
 
 
 def test_integration_worker_healthcheck_carries_ipc_bearer() -> None:
-    """Integration worker healthcheck reads VAULTSPEC_INTERNAL_TOKEN."""
+    """Integration worker healthcheck reads VAULTSPEC_A2A_INTERNAL_TOKEN."""
     cmd = _worker_healthcheck_cmd(INTEGRATION_COMPOSE)
-    assert "VAULTSPEC_INTERNAL_TOKEN" in cmd, (
-        "integration worker healthcheck must reference VAULTSPEC_INTERNAL_TOKEN"
+    assert "VAULTSPEC_A2A_INTERNAL_TOKEN" in cmd, (
+        "integration worker healthcheck must reference VAULTSPEC_A2A_INTERNAL_TOKEN"
     )
     assert "Authorization" in cmd, (
         "integration worker healthcheck must set Authorization header"
@@ -215,11 +215,11 @@ def test_integration_vidaimock_service_present() -> None:
 
 
 def test_prod_gateway_does_not_auto_spawn_worker() -> None:
-    """Prod gateway sets VAULTSPEC_AUTO_SPAWN_WORKER=false — independently managed."""
+    """Prod gateway sets VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false: managed separately."""
     doc = _load_compose(PROD_COMPOSE)
     gateway_env: dict[str, str] = doc["services"]["gateway"].get("environment", {})
-    assert gateway_env.get("VAULTSPEC_AUTO_SPAWN_WORKER") == "false", (
-        "prod gateway must declare VAULTSPEC_AUTO_SPAWN_WORKER=false so it never "
+    assert gateway_env.get("VAULTSPEC_A2A_AUTO_SPAWN_WORKER") == "false", (
+        "prod gateway must declare VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false so it never "
         "spawns or adopts the independently managed Compose worker"
     )
 
@@ -236,11 +236,11 @@ def test_prod_worker_topology_excludes_desktop_lifecycle() -> None:
 
 
 def test_integration_gateway_does_not_auto_spawn_worker() -> None:
-    """Integration gateway sets VAULTSPEC_AUTO_SPAWN_WORKER=false."""
+    """Integration gateway sets VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false."""
     doc = _load_compose(INTEGRATION_COMPOSE)
     gateway_env: dict[str, str] = doc["services"]["gateway"].get("environment", {})
-    assert gateway_env.get("VAULTSPEC_AUTO_SPAWN_WORKER") == "false", (
-        "integration gateway must declare VAULTSPEC_AUTO_SPAWN_WORKER=false"
+    assert gateway_env.get("VAULTSPEC_A2A_AUTO_SPAWN_WORKER") == "false", (
+        "integration gateway must declare VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false"
     )
 
 
@@ -268,7 +268,7 @@ def compose_integration_stack() -> Any:
         **os.environ,
         "COMPOSE_PROJECT_NAME": project,
         "COMPOSE_DISABLE_ENV_FILE": "1",
-        "VAULTSPEC_PORT": str(gateway_port),
+        "VAULTSPEC_A2A_PORT": str(gateway_port),
         "JAEGER_UI_PORT": str(jaeger_ui_port),
         "JAEGER_OTLP_PORT": str(jaeger_otlp_port),
         "VIDAIMOCK_PORT": str(vidaimock_port),
@@ -395,7 +395,7 @@ def test_compose_vidaimock_reachable(compose_integration_stack: Any) -> None:
 # Real-process provenance — the Compose gateway attaches, never spawns/evicts
 # ---------------------------------------------------------------------------
 #
-# The Compose gateway runs with VAULTSPEC_AUTO_SPAWN_WORKER=false (asserted
+# The Compose gateway runs with VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false (asserted
 # structurally above): it attaches to an independently managed worker and must
 # never spawn or evict one. These drive the production attach seam
 # (``LazyWorkerSpawner.ensure_worker`` with ``auto_spawn=False``) in-process,

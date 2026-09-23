@@ -135,13 +135,13 @@ async def _spawn_worker(
     # the gateway may have auto-derived gateway_url from host+port.  That
     # computed value is NOT in os.environ, so the child would re-derive it
     # and potentially get a different result (e.g. 0.0.0.0 vs 127.0.0.1).
-    # Injecting VAULTSPEC_GATEWAY_URL ensures the worker always points at
+    # Injecting VAULTSPEC_A2A_GATEWAY_URL ensures the worker always points at
     # the correct gateway regardless of how it was started.
     spawn_env = os.environ.copy()
     spawn_env[GATEWAY_URL_ENV] = settings.gateway_url
-    spawn_env["VAULTSPEC_PORT"] = str(settings.port)
-    spawn_env["VAULTSPEC_WORKER_PORT"] = str(settings.worker_port)
-    spawn_env["VAULTSPEC_WORKER_HOST"] = settings.worker_host
+    spawn_env["VAULTSPEC_A2A_PORT"] = str(settings.port)
+    spawn_env["VAULTSPEC_A2A_WORKER_PORT"] = str(settings.worker_port)
+    spawn_env["VAULTSPEC_A2A_WORKER_HOST"] = settings.worker_host
     if settings.internal_token is not None:
         spawn_env[INTERNAL_TOKEN_ENV] = settings.internal_token
     spawn_env[GATEWAY_LIFETIME_ENV] = GATEWAY_LIFETIME_ID

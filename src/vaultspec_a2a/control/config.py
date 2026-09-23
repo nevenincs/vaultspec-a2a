@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import (
+    PrivateAttr,
     model_validator,
 )
 from pydantic_settings import SettingsConfigDict
@@ -25,6 +26,7 @@ from .infra_config import (
     _synchronous_url,
     _warn_seating_discard,
 )
+from .settings_base import ENV_PREFIX
 
 __all__ = [
     "Settings",
@@ -46,7 +48,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
     model_config = SettingsConfigDict(
         env_file=InfraConfig.project_dotenv(),
         env_file_encoding="utf-8",
-        env_prefix="VAULTSPEC_",
+        env_prefix=ENV_PREFIX,
         extra="ignore",
     )
 
@@ -59,14 +61,21 @@ class Settings(DomainSettingsConfig, InfraConfig):
             and self.gateway_service_token == self.internal_token
         ):
             msg = (
-                "VAULTSPEC_A2A_GATEWAY_TOKEN must differ from VAULTSPEC_INTERNAL_TOKEN"
+                "VAULTSPEC_A2A_GATEWAY_TOKEN must differ from "
+                "VAULTSPEC_A2A_INTERNAL_TOKEN"
             )
             raise ValueError(msg)
         return self
 
+    # Whether the gateway URL was configured rather than derived. Captured before
+    # the derivation below assigns the field, because an assignment marks a field
+    # as set and would make the two cases indistinguishable afterwards.
+    _gateway_url_configured: bool = PrivateAttr(default=False)
+
     @model_validator(mode="after")
     def _derive_service_urls(self) -> Self:
         """Auto-derive gateway_url and worker_url from host+port when not set."""
+        self._gateway_url_configured = bool(self.gateway_url)
         if not self.gateway_url:
             host = "127.0.0.1" if self.host in ("0.0.0.0", "::") else self.host
             self.gateway_url = f"http://{host}:{self.port}"
@@ -110,15 +119,17 @@ class Settings(DomainSettingsConfig, InfraConfig):
             _warn_seating_discard("VAULTSPEC_A2A_HOME", self.a2a_home, state.app_home)
         if "workspace_root" in explicit:
             _warn_seating_discard(
-                "VAULTSPEC_WORKSPACE_ROOT", self.workspace_root, state.workspaces_root
+                "VAULTSPEC_A2A_WORKSPACE_ROOT",
+                self.workspace_root,
+                state.workspaces_root,
             )
         if "database_url" in explicit:
             _warn_seating_discard(
-                "VAULTSPEC_DATABASE_URL", self.database_url, derived_database_url
+                "VAULTSPEC_A2A_DATABASE_URL", self.database_url, derived_database_url
             )
         if "checkpoint_database_url" in explicit:
             _warn_seating_discard(
-                "VAULTSPEC_CHECKPOINT_DATABASE_URL",
+                "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
                 self.checkpoint_database_url,
                 derived_checkpoint_url,
             )
@@ -143,11 +154,11 @@ class Settings(DomainSettingsConfig, InfraConfig):
         that follows only ever swaps a relative SQLite path for an absolute one, so
         it cannot change the backend or driver this validator just accepted.
         """
-        _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
+        _synchronous_url(self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL")
         if self.checkpoint_database_url is not None:
             _synchronous_url(
                 self.checkpoint_database_url,
-                setting="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+                setting="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
             )
         return self
 
@@ -204,7 +215,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
             raise ValueError(msg)
         if not _is_absolute_path(self.install_root.as_posix()):
             msg = (
-                "VAULTSPEC_PROJECT_ROOT must be absolute: shipped assets are "
+                "VAULTSPEC_A2A_INSTALL_ROOT must be absolute: shipped assets are "
                 "resolved against it."
             )
             raise ValueError(msg)
@@ -223,7 +234,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         # discarded binding a later cleanup would take for dead code.
         if self.resolved_database_backend == "sqlite":
             _require_absolute_sqlite_path(
-                self.database_url, setting="VAULTSPEC_DATABASE_URL"
+                self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL"
             )
         if (
             self.checkpoint_database_url is not None
@@ -231,7 +242,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         ):
             _require_absolute_sqlite_path(
                 self.checkpoint_database_url,
-                setting="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+                setting="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
             )
         # Nothing to anchor: the field carries no default to repair, so a value
         # here is always one an operator or the desktop seating actually supplied.
@@ -239,12 +250,17 @@ class Settings(DomainSettingsConfig, InfraConfig):
             self.workspace_root.as_posix()
         ):
             msg = (
-                "VAULTSPEC_WORKSPACE_ROOT must be absolute. A relative path "
+                "VAULTSPEC_A2A_WORKSPACE_ROOT must be absolute. A relative path "
                 "resolves against the process working directory, so the gateway "
                 "and CLI can silently open different directories."
             )
             raise ValueError(msg)
         return self
+
+    @property
+    def gateway_url_configured(self) -> bool:
+        """Whether the gateway URL came from configuration rather than host+port."""
+        return self._gateway_url_configured
 
     @property
     def environment_declared(self) -> bool:
@@ -326,14 +342,14 @@ class Settings(DomainSettingsConfig, InfraConfig):
         url = self.database_url
         if self.database_backend == "sqlite" and not url.startswith("sqlite"):
             msg = (
-                "VAULTSPEC_DATABASE_BACKEND=sqlite requires "
-                "VAULTSPEC_DATABASE_URL to use a sqlite SQLAlchemy URL."
+                "VAULTSPEC_A2A_DATABASE_BACKEND=sqlite requires "
+                "VAULTSPEC_A2A_DATABASE_URL to use a sqlite SQLAlchemy URL."
             )
             raise ValueError(msg)
         if self.database_backend == "postgres" and not url.startswith("postgresql"):
             msg = (
-                "VAULTSPEC_DATABASE_BACKEND=postgres requires "
-                "VAULTSPEC_DATABASE_URL to use a postgresql SQLAlchemy URL."
+                "VAULTSPEC_A2A_DATABASE_BACKEND=postgres requires "
+                "VAULTSPEC_A2A_DATABASE_URL to use a postgresql SQLAlchemy URL."
             )
             raise ValueError(msg)
         return self.database_backend
@@ -344,13 +360,13 @@ class Settings(DomainSettingsConfig, InfraConfig):
         url = self.checkpoint_database_url or self.database_url
         if self.checkpoint_backend == "sqlite" and not url.startswith("sqlite"):
             msg = (
-                "VAULTSPEC_CHECKPOINT_BACKEND=sqlite requires the checkpoint URL "
+                "VAULTSPEC_A2A_CHECKPOINT_BACKEND=sqlite requires the checkpoint URL "
                 "to use a sqlite-compatible scheme."
             )
             raise ValueError(msg)
         if self.checkpoint_backend == "postgres" and not url.startswith("postgresql"):
             msg = (
-                "VAULTSPEC_CHECKPOINT_BACKEND=postgres requires the checkpoint URL "
+                "VAULTSPEC_A2A_CHECKPOINT_BACKEND=postgres requires the checkpoint URL "
                 "to use a postgresql-compatible scheme."
             )
             raise ValueError(msg)
@@ -404,7 +420,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         URL/backend agreement is enforced at construction rather than here, so this
         reads as the pure derivation it is.
         """
-        return _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
+        return _synchronous_url(self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL")
 
     @property
     def checkpoint_sync_url(self) -> str:
@@ -415,10 +431,12 @@ class Settings(DomainSettingsConfig, InfraConfig):
         by default and split only when explicitly configured.
         """
         if self.checkpoint_database_url is None:
-            return _synchronous_url(self.database_url, setting="VAULTSPEC_DATABASE_URL")
+            return _synchronous_url(
+                self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL"
+            )
         return _synchronous_url(
             self.checkpoint_database_url,
-            setting="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+            setting="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
         )
 
     def validate_postgres_requirement(self) -> None:
@@ -429,13 +447,13 @@ class Settings(DomainSettingsConfig, InfraConfig):
         problems: list[str] = []
         if self.resolved_database_backend != "postgres":
             problems.append(
-                "VAULTSPEC_POSTGRES_REQUIRED=true requires "
-                "VAULTSPEC_DATABASE_BACKEND=postgres"
+                "VAULTSPEC_A2A_POSTGRES_REQUIRED=true requires "
+                "VAULTSPEC_A2A_DATABASE_BACKEND=postgres"
             )
         if self.resolved_checkpoint_backend != "postgres":
             problems.append(
-                "VAULTSPEC_POSTGRES_REQUIRED=true requires "
-                "VAULTSPEC_CHECKPOINT_BACKEND=postgres"
+                "VAULTSPEC_A2A_POSTGRES_REQUIRED=true requires "
+                "VAULTSPEC_A2A_CHECKPOINT_BACKEND=postgres"
             )
         if problems:
             raise ValueError("; ".join(problems))

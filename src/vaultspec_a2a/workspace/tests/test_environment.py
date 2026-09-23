@@ -17,9 +17,9 @@ def test_service_and_database_credentials_never_reach_provider_environment(
 ) -> None:
     values = {
         "VAULTSPEC_A2A_GATEWAY_TOKEN": "gateway-secret",
-        "VAULTSPEC_INTERNAL_TOKEN": "internal-secret",
-        "VAULTSPEC_DATABASE_URL": "postgresql://service:secret@db/runtime",
-        "VAULTSPEC_CHECKPOINT_DATABASE_URL": "postgresql://checkpoint:secret@db/cp",
+        "VAULTSPEC_A2A_INTERNAL_TOKEN": "internal-secret",
+        "VAULTSPEC_A2A_DATABASE_URL": "postgresql://service:secret@db/runtime",
+        "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": "postgresql://checkpoint:secret@db/cp",
         "VAULTSPEC_A2A_HOME": "/service/discovery",
         "DATABASE_URL": "postgresql://generic:secret@db/runtime",
         "CHECKPOINT_DATABASE_URL": "postgresql://generic:secret@db/checkpoint",

@@ -194,7 +194,7 @@ def render_env(
     """Substitute the ``{port}``/``{workspace}`` tokens in each env-var value.
 
     A role whose serve reads its port from the environment (the a2a gateway from
-    ``VAULTSPEC_PORT``, the worker from ``VAULTSPEC_WORKER_PORT``) declares an
+    ``VAULTSPEC_A2A_PORT``, the worker from ``VAULTSPEC_A2A_WORKER_PORT``) declares an
     ``env`` table in procs.toml; the boot verb renders it into the child's
     environment rather than passing a ``--port`` flag the command does not accept.
     """
@@ -789,8 +789,8 @@ def _health_probe_for(
     ``status`` fact and therefore presents the paired IPC credential when one
     was supplied for the boot.
     """
-    is_gateway = "VAULTSPEC_PORT" in role_cfg.env
-    is_worker = "VAULTSPEC_WORKER_PORT" in role_cfg.env
+    is_gateway = "VAULTSPEC_A2A_PORT" in role_cfg.env
+    is_worker = "VAULTSPEC_A2A_WORKER_PORT" in role_cfg.env
     if not (is_gateway or is_worker):
         return None
 

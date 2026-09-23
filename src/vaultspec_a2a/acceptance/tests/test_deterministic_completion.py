@@ -429,7 +429,7 @@ async def _run_completion(tmp_path: Path, plan: _CompletionPlan) -> _ReviewBundl
         await _set_autonomous_mode(authoring, reviewer_token)
 
         with certified_gateway(
-            tmp_path, VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED="true"
+            tmp_path, VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED="true"
         ) as gateway:
             _start_completion_run(gateway, plan, tokens)
             materialized = await _await_materialized_documents(

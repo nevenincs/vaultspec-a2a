@@ -74,4 +74,4 @@ def test_internal_route_500s_when_token_unset_outside_development() -> None:
     ):
         resp = client.post("/internal/heartbeat", json={"active_threads": []})
     assert resp.status_code == 500
-    assert "VAULTSPEC_INTERNAL_TOKEN required" in resp.json()["detail"]
+    assert "VAULTSPEC_A2A_INTERNAL_TOKEN required" in resp.json()["detail"]

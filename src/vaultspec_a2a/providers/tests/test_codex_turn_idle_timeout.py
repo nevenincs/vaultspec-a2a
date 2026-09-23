@@ -96,7 +96,7 @@ def _run_probe(
 ) -> dict[str, str]:
     """Run one scenario in its own process with the idle knob set in the env."""
     env = os.environ.copy()
-    env["VAULTSPEC_ACP_TURN_IDLE_TIMEOUT_SECONDS"] = idle_limit
+    env["VAULTSPEC_A2A_ACP_TURN_IDLE_TIMEOUT_SECONDS"] = idle_limit
     result = subprocess.run(
         [
             sys.executable,

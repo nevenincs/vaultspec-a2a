@@ -150,7 +150,7 @@ def test_failed_boot_releases_the_gateway_log_handle(tmp_path: Path) -> None:
         certified_gateway(
             workdir,
             log_name="gateway.log",
-            VAULTSPEC_WORKER_PORT="not-a-port",
+            VAULTSPEC_A2A_WORKER_PORT="not-a-port",
         ),
     ):
         pass  # pragma: no cover - the boot must never yield

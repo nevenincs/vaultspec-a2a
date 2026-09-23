@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
-_APP_HOME_ENV = "VAULTSPEC_DESKTOP_APP_HOME"
+_APP_HOME_ENV = "VAULTSPEC_A2A_DESKTOP_APP_HOME"
 
 
 @contextmanager

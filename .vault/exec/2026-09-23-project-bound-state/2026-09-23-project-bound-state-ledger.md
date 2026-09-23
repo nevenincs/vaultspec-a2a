@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:45c69e9e017c4a74eb115d086f18ea339f9598e3fd17eea86970f29076a4dc66'
+body_hash: 'sha256:8a758fad21adfada7ad50fb79c69766076517d8c8234b3570e2e32686b9af0f7'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -24,4 +24,88 @@ related:
 - `S01` `M` `src/vaultspec_a2a/providers/_factory_commands.py`
 - `S01` `verify:` `pytest control/tests/test_project_root.py test_env_example_coverage.py test_sync_url_derivation.py` -> `pass`
 - `S01` `by:` `claude`
+- `S02` `M` `.env.example`
+- `S02` `M` `.env.integration.example`
+- `S02` `A` `.vault/audit/2026-09-23-project-bound-state-audit.md`
+- `S02` `M` `conftest.py`
+- `S02` `M` `dev/credentials.py`
+- `S02` `M` `dev/providers.py`
+- `S02` `M` `procs.toml`
+- `S02` `M` `service/README.md`
+- `S02` `M` `service/docker-compose.dev.yml`
+- `S02` `M` `service/docker-compose.integration.yml`
+- `S02` `M` `service/docker-compose.prod.postgres.yml`
+- `S02` `M` `service/docker-compose.prod.yml`
+- `S02` `M` `service/docker/README.md`
+- `S02` `M` `service/docker/prod.Dockerfile`
+- `S02` `M` `service/docker/service_entrypoint.py`
+- `S02` `M` `src/vaultspec_a2a/acceptance/tests/_harness.py`
+- `S02` `M` `src/vaultspec_a2a/acceptance/tests/test_deterministic_completion.py`
+- `S02` `M` `src/vaultspec_a2a/acceptance/tests/test_harness_boot_reaping.py`
+- `S02` `M` `src/vaultspec_a2a/api/tests/test_active_run_discovery_live.py`
+- `S02` `M` `src/vaultspec_a2a/api/tests/test_internal_auth.py`
+- `S02` `M` `src/vaultspec_a2a/api/tests/test_stream_connection_limit.py`
+- `S02` `M` `src/vaultspec_a2a/cli/main.py`
+- `S02` `M` `src/vaultspec_a2a/cli/service.py`
+- `S02` `M` `src/vaultspec_a2a/cli/tests/test_cli_live.py`
+- `S02` `M` `src/vaultspec_a2a/cli/tests/test_desktop_serve.py`
+- `S02` `M` `src/vaultspec_a2a/conftest.py`
+- `S02` `M` `src/vaultspec_a2a/control/config.py`
+- `S02` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S02` `M` `src/vaultspec_a2a/control/settings_base.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_absolute_path_requirement.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_desktop_credential_references.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_desktop_profile_seating.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_desktop_seating_discard_warning.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_gateway_credential_separation.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_mcp_allowlist_parsing.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_project_root.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_sync_url_derivation.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_worker_provenance.py`
+- `S02` `M` `src/vaultspec_a2a/control/tests/test_worker_watchdog_reconcile.py`
+- `S02` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S02` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_pragmas.py`
+- `S02` `M` `src/vaultspec_a2a/database/tests/test_wal_maintenance.py`
+- `S02` `M` `src/vaultspec_a2a/desktop_tests/test_ownership_prerequisites.py`
+- `S02` `M` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
+- `S02` `M` `src/vaultspec_a2a/desktop_tests/test_run_admission.py`
+- `S02` `M` `src/vaultspec_a2a/desktop_tests/test_service_state_pairing_echo.py`
+- `S02` `M` `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`
+- `S02` `M` `src/vaultspec_a2a/domain_config.py`
+- `S02` `M` `src/vaultspec_a2a/lifecycle/manager.py`
+- `S02` `M` `src/vaultspec_a2a/lifecycle/registry.py`
+- `S02` `M` `src/vaultspec_a2a/lifecycle/tests/test_manager.py`
+- `S02` `M` `src/vaultspec_a2a/lifecycle/tests/test_procs_config.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_acp_temp_home_root.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_acp_turn_deadline.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_codex_turn_idle_timeout.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/harness.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_blocked_stream_cancellation.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_clarification_loop_stitched.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_compose_profile_regression.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_compose_provider_service_state_isolation.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_dashboard_provider_catalog_live.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_dispatch_assignment_agreement.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_harness_worker_auth.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py`
+- `S02` `M` `src/vaultspec_a2a/service_tests/test_real_worker_run_completion.py`
+- `S02` `M` `src/vaultspec_a2a/testing/runner_child.py`
+- `S02` `M` `src/vaultspec_a2a/testing/tests/_support/catalog_selection.py`
+- `S02` `M` `src/vaultspec_a2a/testing/tests/test_endpoints.py`
+- `S02` `M` `src/vaultspec_a2a/testing/tests/test_runner.py`
+- `S02` `M` `src/vaultspec_a2a/tests/gateway_boot.py`
+- `S02` `M` `src/vaultspec_a2a/utils/ipc_auth.py`
+- `S02` `M` `src/vaultspec_a2a/utils/logging.py`
+- `S02` `M` `src/vaultspec_a2a/utils/tests/test_ipc_auth.py`
+- `S02` `M` `src/vaultspec_a2a/utils/tests/test_logging_entrypoints.py`
+- `S02` `M` `src/vaultspec_a2a/worker/app.py`
+- `S02` `M` `src/vaultspec_a2a/worker/tests/test_app.py`
+- `S02` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
+- `S02` `M` `src/vaultspec_a2a/workspace/tests/test_environment.py`
+- `S02` `verify:` `pytest -n 8 unit tier: 4637 passed, 11 failed (4 nested-pytest C:\Users\hello\AppData\Local\Temp denial and 2 worktree-basetemp venv tests owned by P03.S08; 2 live tests pass in isolation; 3 env-example fixed)` -> `pass`
+- `S02` `by:` `claude`
 

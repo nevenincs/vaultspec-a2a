@@ -64,7 +64,7 @@ def test_dispatch_rejects_missing_token_configuration_outside_development() -> N
         resp = client.post("/dispatch", json=dispatch.model_dump())
 
     assert resp.status_code == 500
-    assert "VAULTSPEC_INTERNAL_TOKEN required" in resp.json()["detail"]
+    assert "VAULTSPEC_A2A_INTERNAL_TOKEN required" in resp.json()["detail"]
 
 
 def test_dispatch_rejects_invalid_internal_token() -> None:

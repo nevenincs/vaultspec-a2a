@@ -57,7 +57,7 @@ Infrastructure gate, not a masked failure: the test skips with a runbook pointer
 when no loopback engine is reachable (resolved through the discovery contract) or
 the a2a gateway is not up. Boot the stack per the runbook - a workspace-
 local ``vaultspec serve --no-seat`` engine plus the a2a gateway/worker with
-``VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true`` - then select ``-m service``.
+``VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED=true`` - then select ``-m service``.
 """
 
 from __future__ import annotations

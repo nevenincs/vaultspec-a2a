@@ -9,19 +9,19 @@ services:
       dockerfile: service/docker/prod.Dockerfile
       target: gateway
     ports:
-      - '${VAULTSPEC_PORT:-18000}:18000'
+      - '${VAULTSPEC_A2A_PORT:-18000}:18000'
     volumes:
       - db-data:/app/data
       - gateway-state:/app/gateway-state
     environment:
-      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_DATABASE_BACKEND: sqlite
-      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      VAULTSPEC_A2A_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_A2A_DATABASE_BACKEND: sqlite
+      VAULTSPEC_A2A_CHECKPOINT_BACKEND: sqlite
       # Discovery and bearer handoff stay outside worker-visible database state.
       VAULTSPEC_A2A_HOME: '/app/gateway-state'
-      VAULTSPEC_WORKSPACE_ROOT: '/app/data/workspaces'
-      VAULTSPEC_WORKER_URL: 'http://worker:18001'
-      VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
+      VAULTSPEC_A2A_WORKSPACE_ROOT: '/app/data/workspaces'
+      VAULTSPEC_A2A_WORKER_URL: 'http://worker:18001'
+      VAULTSPEC_A2A_AUTO_SPAWN_WORKER: 'false'
     depends_on:
       worker:
         condition: service_healthy
@@ -49,24 +49,24 @@ services:
     cap_drop: ['ALL']
     cap_add: ['SETUID', 'SETGID']
     environment:
-      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_DATABASE_BACKEND: sqlite
-      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      VAULTSPEC_A2A_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_A2A_DATABASE_BACKEND: sqlite
+      VAULTSPEC_A2A_CHECKPOINT_BACKEND: sqlite
       # Worker discovery state is isolated from the gateway bearer handoff.
       VAULTSPEC_A2A_HOME: '/app/worker-state'
-      VAULTSPEC_WORKSPACE_ROOT: '/app/data/workspaces'
-      VAULTSPEC_PROVIDER_IDENTITY_LAUNCHER: '/usr/local/bin/vaultspec-agent-launch'
-      VAULTSPEC_PROVIDER_AGENT_UID: '1002'
-      VAULTSPEC_PROVIDER_AGENT_GID: '1002'
+      VAULTSPEC_A2A_WORKSPACE_ROOT: '/app/data/workspaces'
+      VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER: '/usr/local/bin/vaultspec-agent-launch'
+      VAULTSPEC_A2A_PROVIDER_AGENT_UID: '1002'
+      VAULTSPEC_A2A_PROVIDER_AGENT_GID: '1002'
       VAULTSPEC_MANAGED_WORKSPACE_PERMISSIONS: 'true'
-      VAULTSPEC_GATEWAY_URL: 'http://gateway:18000'
+      VAULTSPEC_A2A_GATEWAY_URL: 'http://gateway:18000'
     healthcheck:
       test:
         [
           'CMD',
           'python',
           '-c',
-          "import os, urllib.request; tok = os.environ.get('VAULTSPEC_INTERNAL_TOKEN'); req = urllib.request.Request('http://localhost:18001/health', headers={'Authorization': 'Bearer ' + tok} if tok else {}); urllib.request.urlopen(req)",
+          "import os, urllib.request; tok = os.environ.get('VAULTSPEC_A2A_INTERNAL_TOKEN'); req = urllib.request.Request('http://localhost:18001/health', headers={'Authorization': 'Bearer ' + tok} if tok else {}); urllib.request.urlopen(req)",
         ]
       interval: 10s
       timeout: 5s

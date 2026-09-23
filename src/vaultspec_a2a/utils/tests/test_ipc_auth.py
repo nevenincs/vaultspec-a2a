@@ -19,7 +19,7 @@ def test_unset_token_outside_dev_is_misconfigured() -> None:
         "Bearer anything", token=None, environment=Environment.PRODUCTION
     )
     assert verdict is BearerVerdict.MISCONFIGURED
-    assert "VAULTSPEC_INTERNAL_TOKEN required" in detail
+    assert "VAULTSPEC_A2A_INTERNAL_TOKEN required" in detail
     assert "production" in detail
 
 
@@ -102,7 +102,7 @@ class TestOmissionIsNotConsent:
         assert verdict is BearerVerdict.MISCONFIGURED
         # The refusal names the two ways out rather than only the failure.
         assert "no environment was declared" in detail
-        assert "VAULTSPEC_ENVIRONMENT=development" in detail
+        assert "VAULTSPEC_A2A_ENVIRONMENT=development" in detail
 
     def test_a_token_authorizes_regardless_of_declaration(self) -> None:
         """The bypass is the only thing the distinction gates."""

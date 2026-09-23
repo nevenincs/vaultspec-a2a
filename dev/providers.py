@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # The suite declares a development environment for itself; discovery reads
     # the same settings, so this reporter must not describe a different posture.
-    os.environ.setdefault("VAULTSPEC_ENVIRONMENT", "development")
+    os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
 
     lanes = _as_payload(asyncio.run(_discover(Path.cwd())))
 

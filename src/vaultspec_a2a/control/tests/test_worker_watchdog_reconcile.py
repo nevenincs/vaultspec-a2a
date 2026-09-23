@@ -163,7 +163,7 @@ async def test_unowned_down_worker_is_reported_not_restarted() -> None:
     ws = app_state.worker_state
     # An unreachable worker we do NOT own is reported down, never restarted, and the
     # breaker is never force-opened (that would 503 dispatches for a worker whose
-    # lifecycle we do not control). This pins the VAULTSPEC_AUTO_SPAWN_WORKER=false
+    # lifecycle we do not control). This pins the VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false
     # gate onto the watchdog's respawn path, not just startup.
     assert ws.worker_restart_count == 0
     assert app_state.circuit_breaker.state == "closed"

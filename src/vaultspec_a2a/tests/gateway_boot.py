@@ -345,11 +345,11 @@ def armed_gateway_env(
     ``**extra_env``, which is exactly what several callers do.
     """
     env = os.environ.copy()
-    env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-    env["VAULTSPEC_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_PORT"] = str(gateway_port)
-    env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
-    env["VAULTSPEC_AUTO_SPAWN_WORKER"] = "true" if auto_spawn_worker else "false"
+    env["VAULTSPEC_A2A_DESKTOP_APP_HOME"] = str(app_home)
+    env["VAULTSPEC_A2A_ENVIRONMENT"] = "production"
+    env["VAULTSPEC_A2A_PORT"] = str(gateway_port)
+    env["VAULTSPEC_A2A_WORKER_PORT"] = str(worker_port)
+    env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true" if auto_spawn_worker else "false"
     if extra:
         env.update(extra)
     return env

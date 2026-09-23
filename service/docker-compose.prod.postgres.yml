@@ -21,11 +21,11 @@ services:
 
   gateway:
     environment:
-      VAULTSPEC_DATABASE_BACKEND: postgres
-      VAULTSPEC_CHECKPOINT_BACKEND: postgres
-      VAULTSPEC_DATABASE_URL: postgresql+asyncpg://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec
-      VAULTSPEC_CHECKPOINT_DATABASE_URL: postgresql://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec?sslmode=disable
-      VAULTSPEC_POSTGRES_REQUIRED: "true"
+      VAULTSPEC_A2A_DATABASE_BACKEND: postgres
+      VAULTSPEC_A2A_CHECKPOINT_BACKEND: postgres
+      VAULTSPEC_A2A_DATABASE_URL: postgresql+asyncpg://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec
+      VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL: postgresql://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec?sslmode=disable
+      VAULTSPEC_A2A_POSTGRES_REQUIRED: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,11 +36,11 @@ services:
 
   worker:
     environment:
-      VAULTSPEC_DATABASE_BACKEND: postgres
-      VAULTSPEC_CHECKPOINT_BACKEND: postgres
-      VAULTSPEC_DATABASE_URL: postgresql+asyncpg://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec
-      VAULTSPEC_CHECKPOINT_DATABASE_URL: postgresql://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec?sslmode=disable
-      VAULTSPEC_POSTGRES_REQUIRED: "true"
+      VAULTSPEC_A2A_DATABASE_BACKEND: postgres
+      VAULTSPEC_A2A_CHECKPOINT_BACKEND: postgres
+      VAULTSPEC_A2A_DATABASE_URL: postgresql+asyncpg://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec
+      VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL: postgresql://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec?sslmode=disable
+      VAULTSPEC_A2A_POSTGRES_REQUIRED: "true"
     depends_on:
       postgres:
         condition: service_healthy

@@ -316,7 +316,7 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
             worker_port=stray_port,
             auto_spawn_worker=False,
         )
-        stray_env["VAULTSPEC_INTERNAL_TOKEN"] = secret
+        stray_env["VAULTSPEC_A2A_INTERNAL_TOKEN"] = secret
         stray_env.pop(GATEWAY_LIFETIME_ENV, None)
         stray_env.pop(WORKER_GENERATION_ENV, None)
         stray_log = (tmp_path / "stray-worker.log").open("wb")

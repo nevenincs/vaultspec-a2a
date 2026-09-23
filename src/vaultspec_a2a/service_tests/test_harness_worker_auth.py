@@ -24,4 +24,4 @@ def test_worker_env_and_probe_share_one_token() -> None:
     """The injected worker token and the probe bearer come from one source."""
     stack = ServiceStack(project_name="harness-unit-env", ports=dict(_PORTS))
     env = stack._local_env()
-    assert env["VAULTSPEC_INTERNAL_TOKEN"] == _INTERNAL_TOKEN
+    assert env["VAULTSPEC_A2A_INTERNAL_TOKEN"] == _INTERNAL_TOKEN

@@ -470,11 +470,11 @@ def _run_admin(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
     would only prove that the singleton can be overwritten.
     """
     env = dict(os.environ)
-    env["VAULTSPEC_DATABASE_URL"] = f"sqlite+aiosqlite:///{database.as_posix()}"
+    env["VAULTSPEC_A2A_DATABASE_URL"] = f"sqlite+aiosqlite:///{database.as_posix()}"
     # The blocked-checkpoint proof needs a nonzero wait, not the production
     # default's five seconds of idle time. The administrative connection must
     # honor the same setting as every other SQLite connection authority.
-    env["VAULTSPEC_SQLITE_BUSY_TIMEOUT_MS"] = "50"
+    env["VAULTSPEC_A2A_SQLITE_BUSY_TIMEOUT_MS"] = "50"
     return subprocess.run(
         [sys.executable, "-m", "vaultspec_a2a.database.admin", *args],
         capture_output=True,

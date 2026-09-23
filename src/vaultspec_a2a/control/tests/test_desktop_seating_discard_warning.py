@@ -1,7 +1,7 @@
 """Seating a desktop path over an explicit configuration must be audible.
 
 The desktop profile is the single derivation authority for mutable paths, so it
-overriding ``VAULTSPEC_DATABASE_URL`` is correct and stays correct — the precedence
+overriding ``VAULTSPEC_A2A_DATABASE_URL`` is correct and stays correct — the precedence
 is not what these tests pin. What they pin is that the override announces itself:
 an operator who sets both an application home and an explicit database URL used to
 get no diagnostic at all, and would look for their data in a file the process never
@@ -49,9 +49,9 @@ _CONFIG_LOGGER = "vaultspec_a2a.control.config"
 # Every environment name the desktop seating can displace, cleared by default so a
 # developer's own environment cannot make an "untouched default" test lie.
 _SEATED_NAMES = (
-    "VAULTSPEC_DATABASE_URL",
-    "VAULTSPEC_CHECKPOINT_DATABASE_URL",
-    "VAULTSPEC_WORKSPACE_ROOT",
+    "VAULTSPEC_A2A_DATABASE_URL",
+    "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
+    "VAULTSPEC_A2A_WORKSPACE_ROOT",
     "VAULTSPEC_A2A_HOME",
 )
 
@@ -59,7 +59,7 @@ _SEATED_NAMES = (
 def _armed(app_home: Path, **explicit: str | None) -> AbstractContextManager[None]:
     """Return the environment for an armed desktop profile plus any explicit values."""
     values: dict[str, str | None] = dict.fromkeys(_SEATED_NAMES)
-    values["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
+    values["VAULTSPEC_A2A_DESKTOP_APP_HOME"] = str(app_home)
     values.update(explicit)
     return _environment(**values)
 
@@ -82,13 +82,13 @@ def test_an_explicit_database_url_discarded_by_seating_is_reported(
 
     with (
         caplog.at_level(logging.WARNING, logger=_CONFIG_LOGGER),
-        _armed(app_home, VAULTSPEC_DATABASE_URL=supplied),
+        _armed(app_home, VAULTSPEC_A2A_DATABASE_URL=supplied),
     ):
         armed = _settings()
 
     messages = _warnings(caplog)
     assert len(messages) == 1, messages
-    assert "VAULTSPEC_DATABASE_URL" in messages[0]
+    assert "VAULTSPEC_A2A_DATABASE_URL" in messages[0]
     assert supplied in messages[0]
     assert state.database_path.as_posix() in messages[0]
 
@@ -124,9 +124,9 @@ def test_every_displaced_setting_is_named_individually(
         caplog.at_level(logging.WARNING, logger=_CONFIG_LOGGER),
         _armed(
             app_home,
-            VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:///operator.db",
-            VAULTSPEC_CHECKPOINT_DATABASE_URL="sqlite+aiosqlite:///operator-cp.db",
-            VAULTSPEC_WORKSPACE_ROOT=str(elsewhere / "workspaces"),
+            VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///operator.db",
+            VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL="sqlite+aiosqlite:///operator-cp.db",
+            VAULTSPEC_A2A_WORKSPACE_ROOT=str(elsewhere / "workspaces"),
             VAULTSPEC_A2A_HOME=str(elsewhere / "home"),
         ),
     ):
@@ -149,8 +149,8 @@ def test_an_unarmed_profile_never_warns(
     with (
         caplog.at_level(logging.WARNING, logger=_CONFIG_LOGGER),
         _environment(
-            VAULTSPEC_DESKTOP_APP_HOME=None,
-            VAULTSPEC_DATABASE_URL=supplied,
+            VAULTSPEC_A2A_DESKTOP_APP_HOME=None,
+            VAULTSPEC_A2A_DATABASE_URL=supplied,
         ),
     ):
         unarmed = _settings()

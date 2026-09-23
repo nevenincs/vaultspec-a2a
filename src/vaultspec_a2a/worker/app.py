@@ -38,7 +38,6 @@ from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 
 from ..control._worker_health import GATEWAY_LIFETIME_ENV, WORKER_GENERATION_ENV
 from ..control.config import settings
-from ..control.infra_config import GATEWAY_URL_ALT_ENV, GATEWAY_URL_ENV
 from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
@@ -172,9 +171,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # log noise. Learn a live band gateway when it is unambiguous, and refuse to
     # boot (mirroring the gateway's own dispatch-pairing guard) rather than run
     # broken when the pairing cannot be resolved safely.
-    gateway_url_explicit = bool(
-        os.environ.get(GATEWAY_URL_ENV) or os.environ.get(GATEWAY_URL_ALT_ENV)
-    )
+    gateway_url_explicit = settings.gateway_url_configured
     resolved_gateway_url, pairing_status, pairing_message = (
         resolve_worker_gateway_target(
             settings.gateway_url,

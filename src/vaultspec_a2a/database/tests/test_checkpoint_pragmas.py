@@ -53,7 +53,7 @@ async def test_saver_connection_carries_the_configured_posture(
     """The saver applies WAL, the configured busy timeout, and FK enforcement.
 
     The busy timeout was hardcoded to 5000 here, silently discarding
-    ``VAULTSPEC_SQLITE_BUSY_TIMEOUT_MS``; the override below is deliberately not
+    ``VAULTSPEC_A2A_SQLITE_BUSY_TIMEOUT_MS``; the override below is deliberately not
     the default so a regression to a literal cannot pass.
     """
     db_file = runtime_dir / "posture.sqlite"

@@ -14,12 +14,12 @@ _DATA_ROOT = Path("/app/data")
 
 
 def _agent_gid() -> int:
-    raw = os.environ.get("VAULTSPEC_PROVIDER_AGENT_GID")
+    raw = os.environ.get("VAULTSPEC_A2A_PROVIDER_AGENT_GID")
     if raw is None:
-        raise RuntimeError("VAULTSPEC_PROVIDER_AGENT_GID is required in the worker")
+        raise RuntimeError("VAULTSPEC_A2A_PROVIDER_AGENT_GID is required in the worker")
     gid = int(raw)
     if gid < 1:
-        raise RuntimeError("VAULTSPEC_PROVIDER_AGENT_GID must be positive")
+        raise RuntimeError("VAULTSPEC_A2A_PROVIDER_AGENT_GID must be positive")
     return gid
 
 
@@ -61,7 +61,7 @@ def _service_uid() -> int:
 def _migrate_managed_workspace(path: Path, agent_gid: int) -> None:
     """Upgrade one explicitly managed named-volume tree without following links."""
     service_uid = Path("/proc/self").stat().st_uid
-    allowed_owners = {service_uid, int(os.environ["VAULTSPEC_PROVIDER_AGENT_UID"])}
+    allowed_owners = {service_uid, int(os.environ["VAULTSPEC_A2A_PROVIDER_AGENT_UID"])}
     for directory, names, files, directory_fd in _required_posix("fwalk")(
         path, topdown=True, follow_symlinks=False
     ):
@@ -193,8 +193,8 @@ def main() -> None:
     os.umask(0o077)
     _owned_directory(_DATA_ROOT, 0o711)
 
-    if os.environ.get("VAULTSPEC_PROVIDER_IDENTITY_LAUNCHER"):
-        workspace = Path(os.environ["VAULTSPEC_WORKSPACE_ROOT"])
+    if os.environ.get("VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER"):
+        workspace = Path(os.environ["VAULTSPEC_A2A_WORKSPACE_ROOT"])
         _workspace_directory(workspace)
 
     a2a_home = Path(os.environ["VAULTSPEC_A2A_HOME"])
@@ -205,8 +205,8 @@ def main() -> None:
     _owned_directory(a2a_home, 0o700)
 
     for environment_name in (
-        "VAULTSPEC_DATABASE_URL",
-        "VAULTSPEC_CHECKPOINT_DATABASE_URL",
+        "VAULTSPEC_A2A_DATABASE_URL",
+        "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
     ):
         database = _sqlite_path(environment_name)
         if database is not None:

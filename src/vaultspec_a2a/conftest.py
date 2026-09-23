@@ -328,7 +328,7 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         supply=(
             "boot a workspace-local `vaultspec serve --no-seat` engine plus this "
             "branch's a2a gateway and worker with "
-            "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then export "
+            "VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then export "
             "VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
         ),
         probe=None,
@@ -338,7 +338,7 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         what="a reachable a2a gateway, with no engine and no worker required",
         supply=(
             "boot this branch's a2a gateway and worker on matching ports and "
-            "export VAULTSPEC_GATEWAY_URL (or leave it to the process registry's "
+            "export VAULTSPEC_A2A_GATEWAY_URL (or leave it to the process registry's "
             "gateway-dev entry)"
         ),
         probe=None,

@@ -15,10 +15,10 @@ _A2A_HOME_ENV = "VAULTSPEC_A2A_HOME"
 
 
 def main() -> int:
-    previous_environment = os.environ.get("VAULTSPEC_ENVIRONMENT")
+    previous_environment = os.environ.get("VAULTSPEC_A2A_ENVIRONMENT")
     completion_endpoint = os.environ.pop("VAULTSPEC_PYTEST_COMPLETION_ENDPOINT", None)
     previous_owner = os.environ.pop(COMPLETION_OWNER_PID_ENV, None)
-    os.environ.setdefault("VAULTSPEC_ENVIRONMENT", "development")
+    os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
     # Left unset, the app home defaults to the user's real ~/.vaultspec-a2a, and
     # any code path that falls back to the default database would then open the
     # user's live store. A session-private home makes that fallback harmless.
@@ -61,9 +61,9 @@ def main() -> int:
                     flush=True,
                 )
         if previous_environment is None:
-            os.environ.pop("VAULTSPEC_ENVIRONMENT", None)
+            os.environ.pop("VAULTSPEC_A2A_ENVIRONMENT", None)
         else:
-            os.environ["VAULTSPEC_ENVIRONMENT"] = previous_environment
+            os.environ["VAULTSPEC_A2A_ENVIRONMENT"] = previous_environment
         if completion_endpoint is not None:
             os.environ["VAULTSPEC_PYTEST_COMPLETION_ENDPOINT"] = completion_endpoint
         if previous_owner is None:

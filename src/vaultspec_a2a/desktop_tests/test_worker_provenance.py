@@ -118,7 +118,7 @@ def _armed_gateway_on_worker_port(
 ) -> Generator[tuple[str, str, Path]]:
     """Boot a real armed gateway whose private worker port is pinned.
 
-    Unlike the general boot helper this pins ``VAULTSPEC_WORKER_PORT`` so the
+    Unlike the general boot helper this pins ``VAULTSPEC_A2A_WORKER_PORT`` so the
     test controls who holds the worker port; the gateway port itself is still
     allocated with bind-race retry. Yields ``(base, bearer, gateway_log)``.
     """
@@ -454,10 +454,10 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
     result_file = tmp_path / "result.json"
 
     env = os.environ.copy()
-    env["VAULTSPEC_DESKTOP_APP_HOME"] = str(app_home)
-    env["VAULTSPEC_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_PORT"] = str(free_port())
-    env["VAULTSPEC_WORKER_PORT"] = str(worker_port)
+    env["VAULTSPEC_A2A_DESKTOP_APP_HOME"] = str(app_home)
+    env["VAULTSPEC_A2A_ENVIRONMENT"] = "production"
+    env["VAULTSPEC_A2A_PORT"] = str(free_port())
+    env["VAULTSPEC_A2A_WORKER_PORT"] = str(worker_port)
 
     driver = subprocess.run(
         [

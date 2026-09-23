@@ -15,12 +15,12 @@ scenarios drive.
 
 The deterministic provider backend the worker proxies to (VidaiMock) is a
 separate real process. Where a certifying environment runs it, pass its base URL
-as ``MOCK_API_BASE`` through the keyword environment and the gateway-owned worker
-inherits it, so runs complete against a real deterministic provider. The
-provider is not required to certify the provider-independent gateway contract -
-run creation, status, cancellation routing, streaming, deletion, and
-authentication all hold whether a run ultimately completes or fails - so those
-scenarios drive this stack without it.
+as ``VAULTSPEC_A2A_MOCK_API_BASE`` through the keyword environment and the
+gateway-owned worker inherits it, so runs complete against a real deterministic
+provider. The provider is not required to certify the provider-independent
+gateway contract - run creation, status, cancellation routing, streaming,
+deletion, and authentication all hold whether a run ultimately completes or
+fails - so those scenarios drive this stack without it.
 
 ``CertifiedGateway`` is the authenticated handle scenarios drive. Its request
 helpers are the one place the public verbs are shaped, so a scenario asserts on
@@ -296,9 +296,10 @@ def certified_gateway(
     application home, spawns the production gateway with worker auto-spawn so the
     gateway owns its worker, waits for readiness, and yields an authenticated
     :class:`CertifiedGateway`. A certifying environment that runs the
-    deterministic provider passes ``MOCK_API_BASE`` through *extra_env* so the
-    gateway-owned worker reaches it. The gateway-owned process tree is reaped in
-    a ``finally`` regardless of scenario outcome, so no worker or gateway leaks.
+    deterministic provider passes ``VAULTSPEC_A2A_MOCK_API_BASE`` through
+    *extra_env* so the gateway-owned worker reaches it. The gateway-owned process
+    tree is reaped in a ``finally`` regardless of scenario outcome, so no worker
+    or gateway leaks.
     """
     app_home = workdir / "app-home"
     app_home.mkdir(parents=True, exist_ok=True)

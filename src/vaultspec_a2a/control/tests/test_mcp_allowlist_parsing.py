@@ -25,8 +25,8 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-_HOSTS = "VAULTSPEC_MCP_ALLOWED_HOSTS"
-_ORIGINS = "VAULTSPEC_MCP_ALLOWED_ORIGINS"
+_HOSTS = "VAULTSPEC_A2A_MCP_ALLOWED_HOSTS"
+_ORIGINS = "VAULTSPEC_A2A_MCP_ALLOWED_ORIGINS"
 
 # Reads both allowlists back out of a freshly imported settings module and
 # prints them as JSON, so the assertion sees what a booting service would.

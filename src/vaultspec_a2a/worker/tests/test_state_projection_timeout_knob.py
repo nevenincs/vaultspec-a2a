@@ -4,7 +4,7 @@
 kept a hardcoded ``timeout=10.0`` instead of reading
 ``domain_config.aget_state_timeout_seconds`` -- the same knob ``Executor``
 and ``streaming/transformer.py`` already honour, settable via the
-``VAULTSPEC_AGET_STATE_TIMEOUT_SECONDS`` env var. The two call sites read the
+``VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS`` env var. The two call sites read the
 same numeric default today, so nothing looked broken; an operator who raised
 the knob to fix a slow checkpointer would see the executor's own read obey and
 this sibling keep timing out at the stale 10.0.
@@ -126,7 +126,7 @@ _PROBE = textwrap.dedent(
 def _run_probe(*, timeout_env: str, sleep_seconds: float) -> dict[str, Any]:
     """Run the probe in a fresh process with the timeout knob set in the env."""
     env = os.environ.copy()
-    env["VAULTSPEC_AGET_STATE_TIMEOUT_SECONDS"] = timeout_env
+    env["VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS"] = timeout_env
     result = subprocess.run(
         [sys.executable, "-c", _PROBE, str(sleep_seconds)],
         capture_output=True,
@@ -156,7 +156,7 @@ def test_state_projection_honors_the_operator_configured_aget_state_timeout() ->
     elapsed = float(probe["elapsed"])
 
     assert probe["degraded_reasons"] == ["execution_state_projection_timeout"], (
-        "the projection path must honour VAULTSPEC_AGET_STATE_TIMEOUT_SECONDS, "
+        "the projection path must honour VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS, "
         f"not a hardcoded 10.0s default: {probe}"
     )
     assert elapsed < 0.9, (

@@ -145,11 +145,11 @@ def test_postgres_database_sync_url_names_a_shipped_driver(
 ) -> None:
     """Every admitted Postgres URL form derives a psycopg-driven synchronous URL."""
     with _environment(
-        VAULTSPEC_DATABASE_BACKEND="postgres",
-        VAULTSPEC_DATABASE_URL=configured,
-        VAULTSPEC_CHECKPOINT_BACKEND=None,
-        VAULTSPEC_CHECKPOINT_DATABASE_URL=None,
-        VAULTSPEC_DESKTOP_APP_HOME=None,
+        VAULTSPEC_A2A_DATABASE_BACKEND="postgres",
+        VAULTSPEC_A2A_DATABASE_URL=configured,
+        VAULTSPEC_A2A_CHECKPOINT_BACKEND=None,
+        VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL=None,
+        VAULTSPEC_A2A_DESKTOP_APP_HOME=None,
     ):
         derived = _settings().database_sync_url
 
@@ -173,11 +173,11 @@ def test_postgres_checkpoint_sync_url_names_a_shipped_driver(
     This is the path ``db clear`` takes, and the one the shipped example broke.
     """
     with _environment(
-        VAULTSPEC_DATABASE_BACKEND="postgres",
-        VAULTSPEC_DATABASE_URL=f"postgresql+asyncpg://{_PG_TAIL}",
-        VAULTSPEC_CHECKPOINT_BACKEND="postgres",
-        VAULTSPEC_CHECKPOINT_DATABASE_URL=configured,
-        VAULTSPEC_DESKTOP_APP_HOME=None,
+        VAULTSPEC_A2A_DATABASE_BACKEND="postgres",
+        VAULTSPEC_A2A_DATABASE_URL=f"postgresql+asyncpg://{_PG_TAIL}",
+        VAULTSPEC_A2A_CHECKPOINT_BACKEND="postgres",
+        VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL=configured,
+        VAULTSPEC_A2A_DESKTOP_APP_HOME=None,
     ):
         derived = _settings().checkpoint_sync_url
 
@@ -204,11 +204,11 @@ def test_sqlite_sync_urls_drop_the_asynchronous_driver(
 ) -> None:
     """SQLite URLs lose ``aiosqlite`` and land on the stdlib synchronous driver."""
     with _environment(
-        VAULTSPEC_DATABASE_BACKEND="sqlite",
-        VAULTSPEC_DATABASE_URL=configured,
-        VAULTSPEC_CHECKPOINT_BACKEND=None,
-        VAULTSPEC_CHECKPOINT_DATABASE_URL=None,
-        VAULTSPEC_DESKTOP_APP_HOME=None,
+        VAULTSPEC_A2A_DATABASE_BACKEND="sqlite",
+        VAULTSPEC_A2A_DATABASE_URL=configured,
+        VAULTSPEC_A2A_CHECKPOINT_BACKEND=None,
+        VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL=None,
+        VAULTSPEC_A2A_DESKTOP_APP_HOME=None,
     ):
         settings = _settings()
         derived = settings.database_sync_url
@@ -232,11 +232,11 @@ def test_conversion_does_not_corrupt_a_password_containing_the_driver_text() -> 
     configured = "postgresql://postgres:pw+asyncpg@127.0.0.1:5432/vaultspec"
 
     with _environment(
-        VAULTSPEC_DATABASE_BACKEND="postgres",
-        VAULTSPEC_DATABASE_URL=configured,
-        VAULTSPEC_CHECKPOINT_BACKEND=None,
-        VAULTSPEC_CHECKPOINT_DATABASE_URL=None,
-        VAULTSPEC_DESKTOP_APP_HOME=None,
+        VAULTSPEC_A2A_DATABASE_BACKEND="postgres",
+        VAULTSPEC_A2A_DATABASE_URL=configured,
+        VAULTSPEC_A2A_CHECKPOINT_BACKEND=None,
+        VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL=None,
+        VAULTSPEC_A2A_DESKTOP_APP_HOME=None,
     ):
         derived = _settings().database_sync_url
 
@@ -257,14 +257,15 @@ def test_an_unconvertible_url_fails_at_settings_construction() -> None:
     """
     with (
         _environment(
-            VAULTSPEC_DATABASE_BACKEND="sqlite",
-            VAULTSPEC_DATABASE_URL="not-a-sqlalchemy-url",
-            VAULTSPEC_CHECKPOINT_BACKEND=None,
-            VAULTSPEC_CHECKPOINT_DATABASE_URL=None,
-            VAULTSPEC_DESKTOP_APP_HOME=None,
+            VAULTSPEC_A2A_DATABASE_BACKEND="sqlite",
+            VAULTSPEC_A2A_DATABASE_URL="not-a-sqlalchemy-url",
+            VAULTSPEC_A2A_CHECKPOINT_BACKEND=None,
+            VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL=None,
+            VAULTSPEC_A2A_DESKTOP_APP_HOME=None,
         ),
         pytest.raises(
-            ValueError, match="VAULTSPEC_DATABASE_URL is not a parseable SQLAlchemy URL"
+            ValueError,
+            match="VAULTSPEC_A2A_DATABASE_URL is not a parseable SQLAlchemy URL",
         ),
     ):
         _settings()
@@ -274,13 +275,13 @@ def test_a_backend_without_a_synchronous_driver_fails_at_construction() -> None:
     """A parseable URL naming an unsupported backend is refused with its name."""
     with (
         _environment(
-            VAULTSPEC_DATABASE_BACKEND="sqlite",
-            VAULTSPEC_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db",
-            VAULTSPEC_CHECKPOINT_BACKEND=None,
-            VAULTSPEC_CHECKPOINT_DATABASE_URL="mysql+aiomysql://u:p@127.0.0.1/db",
-            VAULTSPEC_DESKTOP_APP_HOME=None,
+            VAULTSPEC_A2A_DATABASE_BACKEND="sqlite",
+            VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db",
+            VAULTSPEC_A2A_CHECKPOINT_BACKEND=None,
+            VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL="mysql+aiomysql://u:p@127.0.0.1/db",
+            VAULTSPEC_A2A_DESKTOP_APP_HOME=None,
         ),
-        pytest.raises(ValueError, match="VAULTSPEC_CHECKPOINT_DATABASE_URL"),
+        pytest.raises(ValueError, match="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL"),
     ):
         _settings()
 
@@ -295,11 +296,11 @@ def test_the_construction_failure_never_echoes_the_credential() -> None:
     """
     with (
         _environment(
-            VAULTSPEC_DATABASE_BACKEND="sqlite",
-            VAULTSPEC_DATABASE_URL="::not-a-url::hunter2::",
-            VAULTSPEC_CHECKPOINT_BACKEND=None,
-            VAULTSPEC_CHECKPOINT_DATABASE_URL=None,
-            VAULTSPEC_DESKTOP_APP_HOME=None,
+            VAULTSPEC_A2A_DATABASE_BACKEND="sqlite",
+            VAULTSPEC_A2A_DATABASE_URL="::not-a-url::hunter2::",
+            VAULTSPEC_A2A_CHECKPOINT_BACKEND=None,
+            VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL=None,
+            VAULTSPEC_A2A_DESKTOP_APP_HOME=None,
         ),
         pytest.raises(ValidationError) as raised,
     ):
@@ -346,13 +347,13 @@ def test_the_shipped_postgres_example_yields_working_synchronous_urls() -> None:
     block = _shipped_postgres_block()
 
     assert block.keys() >= {
-        "VAULTSPEC_DATABASE_BACKEND",
-        "VAULTSPEC_CHECKPOINT_BACKEND",
-        "VAULTSPEC_DATABASE_URL",
-        "VAULTSPEC_CHECKPOINT_DATABASE_URL",
+        "VAULTSPEC_A2A_DATABASE_BACKEND",
+        "VAULTSPEC_A2A_CHECKPOINT_BACKEND",
+        "VAULTSPEC_A2A_DATABASE_URL",
+        "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
     }, block
 
-    with _environment(VAULTSPEC_DESKTOP_APP_HOME=None, **block):
+    with _environment(VAULTSPEC_A2A_DESKTOP_APP_HOME=None, **block):
         settings = _settings()
         _assert_synchronously_connectable(settings.database_sync_url)
         _assert_synchronously_connectable(settings.checkpoint_sync_url)

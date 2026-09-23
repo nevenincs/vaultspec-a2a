@@ -15,7 +15,7 @@ The settings govern :mod:`vaultspec_a2a.context`, :mod:`vaultspec_a2a.graph`,
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from .control.settings_base import ProjectSettings
+from .control.settings_base import ENV_PREFIX, ProjectSettings
 
 
 class DomainConfig(ProjectSettings):
@@ -77,7 +77,6 @@ class DomainConfig(ProjectSettings):
     )
     max_stream_connections: int = Field(
         default=256,
-        alias="VAULTSPEC_MAX_STREAM_CONNECTIONS",
         description=(
             "Maximum concurrent progress-stream subscribers this gateway admits. "
             "Each holds a bounded queue and a delivery path, so an unbounded "
@@ -234,7 +233,7 @@ class DomainConfig(ProjectSettings):
 class DomainSettingsConfig(DomainConfig):
     """Env-reading subclass of DomainConfig.
 
-    Reads ``VAULTSPEC_``-prefixed environment variables and the project's
+    Reads ``VAULTSPEC_A2A_``-prefixed environment variables and the project's
     ``.env`` so that Layer 1 consumers get production values without importing
     the full infrastructure ``Settings`` object from ``control.config``.
     """
@@ -242,7 +241,7 @@ class DomainSettingsConfig(DomainConfig):
     model_config = SettingsConfigDict(
         env_file=ProjectSettings.project_dotenv(),
         env_file_encoding="utf-8",
-        env_prefix="VAULTSPEC_",
+        env_prefix=ENV_PREFIX,
         extra="ignore",
     )
 

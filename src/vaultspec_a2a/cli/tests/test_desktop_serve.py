@@ -55,8 +55,8 @@ def test_prepare_desktop_serve_arms_a_real_settings(tmp_path: Path) -> None:
     plan = _prepare_desktop_serve(app_home, capsule, host=None, port=None)
 
     assert isinstance(plan, _DesktopServePlan)
-    assert plan.env["VAULTSPEC_DESKTOP_APP_HOME"] == str(app_home)
-    assert plan.env["VAULTSPEC_CAPSULE_ASSETS"] == str(capsule)
+    assert plan.env["VAULTSPEC_A2A_DESKTOP_APP_HOME"] == str(app_home)
+    assert plan.env["VAULTSPEC_A2A_CAPSULE_ASSETS"] == str(capsule)
     assert plan.argv[-1] == "serve"
     # The mutable-state directories are materialised as a side effect.
     assert app_home.is_dir()
@@ -78,8 +78,8 @@ def test_prepare_desktop_serve_carries_host_and_port(tmp_path: Path) -> None:
         tmp_path / "app", capsule, host="127.0.0.1", port=18042
     )
 
-    assert plan.env["VAULTSPEC_HOST"] == "127.0.0.1"
-    assert plan.env["VAULTSPEC_PORT"] == "18042"
+    assert plan.env["VAULTSPEC_A2A_HOST"] == "127.0.0.1"
+    assert plan.env["VAULTSPEC_A2A_PORT"] == "18042"
 
 
 def test_prepare_desktop_serve_rejects_relative_app_home(tmp_path: Path) -> None:

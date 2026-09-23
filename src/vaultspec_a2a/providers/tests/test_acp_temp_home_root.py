@@ -34,7 +34,7 @@ def test_the_armed_profile_declares_a_root_inside_its_application_home(
     """An armed install keeps ephemeral homes under its own application home."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()
-    settings = Settings(VAULTSPEC_DESKTOP_APP_HOME=app_home)
+    settings = Settings(desktop_app_home=app_home)
 
     resolved = settings.desktop_temp_homes_dir
 

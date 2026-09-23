@@ -114,8 +114,8 @@ def test_protocol_lane_keeps_stdout_pure_json_rpc(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("which", "port_env", "expected_log"),
     [
-        ("gateway", "VAULTSPEC_PORT", "gateway.log"),
-        ("worker", "VAULTSPEC_WORKER_PORT", "worker.log"),
+        ("gateway", "VAULTSPEC_A2A_PORT", "gateway.log"),
+        ("worker", "VAULTSPEC_A2A_WORKER_PORT", "worker.log"),
     ],
 )
 def test_service_entrypoint_creates_named_file_lane(
@@ -136,9 +136,9 @@ def test_service_entrypoint_creates_named_file_lane(
     # already created the service file lane.
     env = {
         "VAULTSPEC_A2A_HOME": str(home),
-        "VAULTSPEC_ENVIRONMENT": "production",
-        "VAULTSPEC_HOST": "256.256.256.256",
-        "VAULTSPEC_WORKER_HOST": "256.256.256.256",
+        "VAULTSPEC_A2A_ENVIRONMENT": "production",
+        "VAULTSPEC_A2A_HOST": "256.256.256.256",
+        "VAULTSPEC_A2A_WORKER_HOST": "256.256.256.256",
         port_env: "8123",
     }
     _run_child(child, env_extra=env, timeout=40.0)
@@ -175,7 +175,7 @@ def test_authoring_bridge_stdio_entrypoint_keeps_stdout_clean(tmp_path: Path) ->
         child,
         env_extra={
             "VAULTSPEC_A2A_HOME": str(home),
-            "VAULTSPEC_ENVIRONMENT": "production",
+            "VAULTSPEC_A2A_ENVIRONMENT": "production",
         },
         timeout=40.0,
     )

@@ -23,6 +23,7 @@ import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, override
 
+from pydantic import AliasChoices
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -31,18 +32,24 @@ from pydantic_settings import (
 )
 
 __all__ = [
+    "ENV_PREFIX",
     "PROJECT_DOTENV",
     "PROJECT_MARKERS",
     "PROJECT_ROOT_ENV",
     "ProjectSettings",
+    "env_name",
+    "field_env_names",
     "is_absolute_path",
     "resolve_against",
     "resolve_project_root",
 ]
 
+#: The prefix every a2a-owned environment variable carries.
+ENV_PREFIX = "VAULTSPEC_A2A_"
+
 #: The one variable that names the project root. Read from the process
 #: environment only; see the module docstring.
-PROJECT_ROOT_ENV = "VAULTSPEC_A2A_PROJECT_ROOT"
+PROJECT_ROOT_ENV = f"{ENV_PREFIX}PROJECT_ROOT"
 
 #: Directories whose presence marks a vaultspec project root, searched before
 #: the version-control fallback.
@@ -58,6 +65,42 @@ PROJECT_DOTENV = ".env"
 # ``settings_customise_sources`` can tell the class default apart from a caller's
 # explicit ``_env_file`` (including ``_env_file=None``, which disables the file).
 _PROJECT_DOTENV_MARKER = Path("<vaultspec-a2a project dotenv>")
+
+
+def field_env_names(
+    settings_cls: type[BaseSettings], field_name: str
+) -> tuple[str, ...]:
+    """Return every environment name a settings field is read from, canonical first.
+
+    An explicit alias or validation alias names the field outright; an
+    un-aliased field is read as the class's ``env_prefix`` plus its name. The
+    first entry is the canonical a2a name; any later ones are another tool's own
+    spelling kept as a fallback.
+    """
+    field = settings_cls.model_fields[field_name]
+    names: list[str] = []
+    if field.alias:
+        names.append(field.alias)
+    validation_alias = field.validation_alias
+    if isinstance(validation_alias, str):
+        names.append(validation_alias)
+    elif isinstance(validation_alias, AliasChoices):
+        names.extend(
+            choice for choice in validation_alias.choices if isinstance(choice, str)
+        )
+    if not names:
+        prefix = settings_cls.model_config.get("env_prefix") or ""
+        names.append(f"{prefix}{field_name}".upper())
+    return tuple(dict.fromkeys(names))
+
+
+def env_name(settings_cls: type[BaseSettings], field_name: str) -> str:
+    """Return the canonical environment name of a settings field.
+
+    Every place that WRITES a setting into a child environment takes the name
+    from here, so the schema is the only declaration of it.
+    """
+    return field_env_names(settings_cls, field_name)[0]
 
 
 def is_absolute_path(raw: str) -> bool:

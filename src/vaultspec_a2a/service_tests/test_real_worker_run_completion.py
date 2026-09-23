@@ -75,7 +75,7 @@ if TYPE_CHECKING:
 # it on this loopback port; an environment that already runs one points at it with
 # the same variable the production provider reads.
 _TAPE_SERVER_DEFAULT = "http://127.0.0.1:8100"
-_TAPE_SERVER_ENV = "MOCK_API_BASE"
+_TAPE_SERVER_ENV = "VAULTSPEC_A2A_MOCK_API_BASE"
 
 _SUPPLY_TAPE_SERVER = (
     "docker compose -f service/docker-compose.integration.yml up -d vidaimock"
@@ -194,7 +194,7 @@ def test_real_worker_run_reaches_terminal_state_with_scripted_content(
         tmp_path,
         **{
             _TAPE_SERVER_ENV: tape_server,
-            "VAULTSPEC_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
+            "VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
         },
     ) as gateway:
         started = gateway.start(run_id, message="Complete the task and stop.")

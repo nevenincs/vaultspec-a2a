@@ -119,14 +119,14 @@ class ProcRecord:  # pylint: disable=too-many-instance-attributes
     engine_service_json: str = ""
     # The internal-IPC token FILE path (never the token itself - this record must
     # not carry a secret). Read at boot/resume and injected as
-    # VAULTSPEC_INTERNAL_TOKEN so a procs-managed gateway-dev and worker-dev share
+    # VAULTSPEC_A2A_INTERNAL_TOKEN so a procs-managed gateway-dev and worker-dev share
     # one token and the worker's heartbeats authenticate. Empty means unset.
     internal_token_file: str = ""
-    # The paired gateway base URL (VAULTSPEC_GATEWAY_URL) a worker heartbeats to. A
+    # The paired gateway base URL (VAULTSPEC_A2A_GATEWAY_URL) a worker heartbeats to. A
     # plain URL, not a secret; recorded so a procs-managed worker targets the dev
     # gateway rather than auto-deriving the owner's resident gateway (port 18000).
     gateway_url: str = ""
-    # The paired worker base URL (VAULTSPEC_WORKER_URL) a gateway DISPATCHES to. A
+    # The paired worker base URL (VAULTSPEC_A2A_WORKER_URL) a gateway DISPATCHES to. A
     # plain URL; recorded so a procs-managed gateway targets the dev worker rather
     # than auto-deriving the owner's resident worker (port 18001) - the campaign's
     # master bug, where dispatch silently ran to a foreign worker.

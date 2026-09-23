@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:80cf06a57db6a00e7d336cca7a045d256c9a5999321434e3aed50b9629f62bd1'
+body_hash: 'sha256:6e888b8cc98c1e604d34fdb10c4b792d4e7dd1a1d7491dd20f32e4d6d59d884d'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -410,6 +410,8 @@ related:
 - `S16` `M` `.vault/audit/2026-09-23-project-bound-state-audit.md`
 - `S16` `M` `docs/api/modules.rst`
 - `S16` `verify:` `sphinx-build -n -W docs` -> `pass`
+- `S15` `M` `openapi.json`
+- `S15` `verify:` `pytest src/vaultspec_a2a/api/tests/test_openapi_artifact.py` -> `pass`
 
 ## Notes
 

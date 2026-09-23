@@ -4596,6 +4596,17 @@
             ],
             "title": "Active Run Capacity"
           },
+          "probe_elapsed_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probe Elapsed Ms"
+          },
           "degraded_reasons": {
             "items": {
               "type": "string"

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:1e466fb311082dd08b44013a1f72ae2c9a8205e7e31f948e6b0b21dc38f20358'
+body_hash: 'sha256:0be158e20970ab71b4f0af34ec1a2ecc1e07a7e2b2b590e7a25a04e6227b4ab1'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -327,6 +327,8 @@ related:
 - `S07` `M` `src/vaultspec_a2a/desktop/profile.py`
 - `S07` `M` `src/vaultspec_a2a/lifecycle/singleton.py`
 - `S07` `verify:` `pytest src/vaultspec_a2a/desktop_tests src/vaultspec_a2a/desktop src/vaultspec_a2a/cli src/vaultspec_a2a/control/tests src/vaultspec_a2a/lifecycle -n 6 --dist=loadgroup` -> `pass`
+- `S08` `M` `src/vaultspec_a2a/testing/session_root.py`
+- `S08` `verify:` `pytest src/vaultspec_a2a/testing/tests/test_session_root.py` -> `pass`
 
 ## Notes
 

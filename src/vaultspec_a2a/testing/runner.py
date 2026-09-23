@@ -184,6 +184,9 @@ def _spawn_pytest_process(
     python_executable = sys.executable
     if not python_executable:
         raise OSError("Python executable is unavailable for pytest ownership")
+    # Launched with -m, never -c: an xdist worker is recognised by execnet's
+    # `python -c` bootstrap, and a nested session launched that way would take
+    # its parent's seat and clear the parent's live basetemp.
     command = [
         python_executable,
         "-m",

@@ -93,14 +93,22 @@ class SessionSeat:
 
 
 def _prune(sessions: Path, keep: Path) -> None:
+    # Another session starting at the same moment may be deleting these very
+    # directories, so an entry that vanishes mid-scan is skipped, never fatal:
+    # this runs at conftest import, where an error fails the whole session.
+    stamped: list[tuple[float, Path]] = []
+    for entry in sessions.iterdir():
+        if entry == keep:
+            continue
+        try:
+            if entry.is_dir():
+                stamped.append((entry.stat().st_mtime, entry))
+        except OSError:
+            continue
+    stamped.sort(reverse=True)
     now = time.time()
-    entries = sorted(
-        (entry for entry in sessions.iterdir() if entry.is_dir() and entry != keep),
-        key=lambda entry: entry.stat().st_mtime,
-        reverse=True,
-    )
-    for entry in entries[_SESSIONS_KEPT:]:
-        if now - entry.stat().st_mtime > _SESSION_RETENTION_SECONDS:
+    for modified, entry in stamped[_SESSIONS_KEPT:]:
+        if now - modified > _SESSION_RETENTION_SECONDS:
             shutil.rmtree(entry, ignore_errors=True)
 
 

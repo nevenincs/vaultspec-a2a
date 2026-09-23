@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:1de632752993c7dce4f2c8fe303d4d54407225c7edf4efd904c22d44bb6946bc'
+body_hash: 'sha256:9c7801b50706a8367e070450b633fabda2288a0e4d2978d9c10719fd35a7e681'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -369,6 +369,11 @@ related:
 - `S14` `M` `src/vaultspec_a2a/control/tests/test_env_example_coverage.py`
 - `S14` `verify:` `pytest dev/tests dev/guards src/vaultspec_a2a/control/tests/test_deployment_names.py src/vaultspec_a2a/control/tests/test_env_example_coverage.py -n 4 --dist=loadgroup` -> `pass`
 - `S14` `by:` `claude`
+- `S16` `M` `docs/operations.rst`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S16` `verify:` `pytest src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py` -> `pass`
+- `S16` `by:` `claude`
 
 ## Notes
 

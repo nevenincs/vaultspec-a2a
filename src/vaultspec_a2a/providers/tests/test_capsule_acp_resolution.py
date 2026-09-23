@@ -104,7 +104,7 @@ def test_unresolvable_user_root_has_stable_config_error() -> None:
 def test_relative_capsule_root_returns_absolute_canonical_assets() -> None:
     """A relative capsule root becomes one absolute canonical authority."""
     with TemporaryDirectory(
-        prefix="capsule-s09-", dir=session_scratch_dir("capsule-")
+        prefix="capsule-root-", dir=session_scratch_dir("capsule-")
     ) as temp_dir:
         root = Path(temp_dir)
         relative_root = Path(os.path.relpath(root, Path.cwd()))

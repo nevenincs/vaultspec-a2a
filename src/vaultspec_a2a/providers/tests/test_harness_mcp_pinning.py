@@ -19,6 +19,7 @@ asserting it from inside would prove nothing about the run.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import io
 import json
@@ -241,6 +242,12 @@ def _locked_rag_requirement(project_root: Path) -> str:
     return f"vaultspec-rag[mcp]=={versions[0]}"
 
 
+@functools.cache
+def _scratch() -> Path:
+    """One scratch directory in the session seat for every captured stream here."""
+    return session_scratch_dir("mcp-pinning-")
+
+
 def _reserve_loopback_port() -> int:
     """Ask the OS for a currently-free loopback port for an owned test service."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
@@ -278,8 +285,8 @@ async def _run_rag_cli(
         return f"{rendered}\n[output truncated]" if truncated else rendered
 
     with (
-        tempfile.TemporaryFile(dir=session_scratch_dir("rag-cli-")) as stdout_handle,
-        tempfile.TemporaryFile(dir=session_scratch_dir("rag-cli-")) as stderr_handle,
+        tempfile.TemporaryFile(dir=_scratch()) as stdout_handle,
+        tempfile.TemporaryFile(dir=_scratch()) as stderr_handle,
     ):
         try:
             async with asyncio.timeout_at(operation_deadline):
@@ -990,7 +997,7 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
         # (the runner's captured stderr has none), and a wedged launch stays
         # diagnosable rather than silent.
         with io.TextIOWrapper(
-            tempfile.TemporaryFile(dir=session_scratch_dir("rag-stdio-")),
+            tempfile.TemporaryFile(dir=_scratch()),
             encoding="utf-8",
             errors="replace",
         ) as captured_stderr:

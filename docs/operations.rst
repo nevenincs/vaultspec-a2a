@@ -73,6 +73,14 @@ beneath the home:
        unless ``VAULTSPEC_A2A_PROCS_HOME`` names another directory.
    * - ``tmp/homes/``
      - Per-run provider configuration homes.
+   * - ``credentials/``
+     - Desktop profile only: the attach credential, the ownership capability
+       and the worker's IPC secret, each restricted to its owner.
+   * - ``receipts/``, ``snapshots/``
+     - Desktop profile only, reserved for settlement receipts and pre-update
+       store snapshots; not created until a consumer writes them.
+   * - ``workspaces/``
+     - Desktop profile only: the managed agent workspaces.
 
 **Relative paths.** Every path setting accepts an absolute path or one relative
 to the project root - never to the working directory, so two processes of one

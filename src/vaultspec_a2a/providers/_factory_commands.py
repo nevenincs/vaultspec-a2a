@@ -25,13 +25,11 @@ __all__ = [
     "kimi_temporary_model_configuration_reason",
 ]
 
-# Resolve the claude-agent-acp entry point from the project-level node_modules.
-# VAULTSPEC_PROJECT_ROOT controls the base; see Settings.project_root.
-# project_root resolves THIS SERVICE's own installed assets here, never a place
-# to put data and never a directory an agent runs in - the two roles the
-# storage-anchor gate exists to separate.
+# Resolve the claude-agent-acp entry point from the checkout's node_modules.
+# install_root names THIS SERVICE's own shipped assets, never a place to put
+# data and never a directory an agent runs in; see Settings.install_root.
 _CLAUDE_ACP_JS = (
-    settings.project_root  # storage-anchor-ok
+    settings.install_root
     / "node_modules"
     / "@agentclientprotocol"
     / "claude-agent-acp"

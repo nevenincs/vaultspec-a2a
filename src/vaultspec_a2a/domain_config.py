@@ -13,10 +13,12 @@ The settings govern :mod:`vaultspec_a2a.context`, :mod:`vaultspec_a2a.graph`,
 """
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
+
+from .control.settings_base import ProjectSettings
 
 
-class DomainConfig(BaseSettings):
+class DomainConfig(ProjectSettings):
     """Behavioural knobs consumed by Layer 1 (domain) modules.
 
     Based on ``BaseSettings`` rather than ``BaseModel`` so that this class and
@@ -232,13 +234,13 @@ class DomainConfig(BaseSettings):
 class DomainSettingsConfig(DomainConfig):
     """Env-reading subclass of DomainConfig.
 
-    Reads ``VAULTSPEC_``-prefixed environment variables and ``.env`` files so
-    that Layer 1 consumers get production values without importing the full
-    infrastructure ``Settings`` object from ``control.config``.
+    Reads ``VAULTSPEC_``-prefixed environment variables and the project's
+    ``.env`` so that Layer 1 consumers get production values without importing
+    the full infrastructure ``Settings`` object from ``control.config``.
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=ProjectSettings.project_dotenv(),
         env_file_encoding="utf-8",
         env_prefix="VAULTSPEC_",
         extra="ignore",

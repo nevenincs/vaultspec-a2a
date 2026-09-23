@@ -19,7 +19,6 @@ from pydantic_settings import SettingsConfigDict
 from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment
 from .infra_config import (
-    _CHECKOUT_ENV_FILE,
     InfraConfig,
     _is_absolute_path,
     _require_absolute_sqlite_path,
@@ -45,7 +44,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
     """
 
     model_config = SettingsConfigDict(
-        env_file=_CHECKOUT_ENV_FILE,
+        env_file=InfraConfig.project_dotenv(),
         env_file_encoding="utf-8",
         env_prefix="VAULTSPEC_",
         extra="ignore",
@@ -169,10 +168,10 @@ class Settings(DomainSettingsConfig, InfraConfig):
         without the working-directory dependence. ``model_fields_set`` separates
         the two cases.
 
-        The anchor is ``a2a_home``, NOT ``project_root``. Two reasons, and the
+        The anchor is ``a2a_home``, NOT ``install_root``. Two reasons, and the
         second is the decisive one:
 
-        * ``project_root`` defaults to a ``__file__``-derived constant. In a
+        * ``install_root`` defaults to a ``__file__``-derived constant. In a
           non-editable install that constant resolves into the Python library
           directory, so anchoring there writes the default store to
           ``.../lib/vaultspec.db`` — inside the interpreter's own tree, where an
@@ -203,10 +202,10 @@ class Settings(DomainSettingsConfig, InfraConfig):
                 "database location and every runtime-state directory."
             )
             raise ValueError(msg)
-        if not _is_absolute_path(self.project_root.as_posix()):
+        if not _is_absolute_path(self.install_root.as_posix()):
             msg = (
-                "VAULTSPEC_PROJECT_ROOT must be absolute: checkout-relative "
-                "assets are resolved against it."
+                "VAULTSPEC_PROJECT_ROOT must be absolute: shipped assets are "
+                "resolved against it."
             )
             raise ValueError(msg)
 

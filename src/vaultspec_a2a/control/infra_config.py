@@ -6,9 +6,10 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Annotated, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import NoDecode, SettingsConfigDict
 
 from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
+from .settings_base import ProjectSettings, resolve_project_root
 
 __all__ = [
     "DEFAULT_MOCK_API_BASE",
@@ -17,7 +18,6 @@ __all__ = [
     "GATEWAY_URL_ENV",
     "INTERNAL_TOKEN_ENV",
     "WORKER_URL_ENV",
-    "_CHECKOUT_ENV_FILE",
     "InfraConfig",
     "_is_absolute_path",
     "_require_absolute_sqlite_path",
@@ -25,28 +25,17 @@ __all__ = [
     "_warn_seating_discard",
 ]
 
-# Defaults for path-override fields.  Computed once at module import relative to
-# this file: control/infra_config.py → control → vaultspec_a2a → src → project-root.
-# This walk leaves the installed package, which is exactly what the storage-anchor
-# gate refuses everywhere else.  It is allowed HERE and only here because this is
-# the override seam itself: the value exists to be replaced by
-# VAULTSPEC_PROJECT_ROOT, and a deployment that does not replace it holds no
-# canonical data at this path — the database and the A2A home anchor elsewhere.
-_DEFAULT_PROJECT_ROOT: Path = (
+# The checkout (or install) root holding this service's shipped non-Python
+# assets, such as the ACP adapter's node_modules. Derived from this file:
+# control/infra_config.py -> control -> vaultspec_a2a -> src -> checkout root.
+# This walk leaves the installed package, which is why it is allowed HERE and
+# only here: it is the override seam itself, and it names assets, never state.
+_INSTALL_ROOT: Path = (
     Path(__file__).resolve().parent.parent.parent.parent  # storage-anchor-ok
 )
 # Machine-global A2A home for runtime state.  Kept outside the repo and
 # outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 _DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
-# The ONE dotenv file this package ever reads, resolved from __file__ rather than
-# from the process working directory.  pydantic-settings resolves a bare ".env"
-# against the launch directory, so any directory a process happened to start in
-# could inject configuration — ports, endpoints, API keys — into a served process.
-# Anchoring the lookup here keeps a checkout-local .env working for developers
-# while making the launch directory irrelevant; in a non-editable install the
-# path lands beside the installed package, where no such file is shipped, so a
-# deployed process is configured only by its real environment.
-_CHECKOUT_ENV_FILE: Path = _DEFAULT_PROJECT_ROOT / ".env"
 
 # Canonical env-var names for the worker<->gateway pairing. Defined here (the owner
 # of these settings) and imported wherever the value is written into a child
@@ -187,11 +176,11 @@ def _valid_kimi_capability(token: str) -> bool:
     )
 
 
-class InfraConfig(BaseSettings):
+class InfraConfig(ProjectSettings):
     """Infrastructure fields — ports, hosts, URLs, keys, filesystem paths."""
 
     model_config = SettingsConfigDict(
-        env_file=_CHECKOUT_ENV_FILE,
+        env_file=ProjectSettings.project_dotenv(),
         env_file_encoding="utf-8",
         env_prefix="VAULTSPEC_",
         extra="ignore",
@@ -295,12 +284,26 @@ class InfraConfig(BaseSettings):
         description="Unprivileged GID selected by provider_identity_launcher.",
     )
     project_root: Path = Field(
-        default_factory=lambda: _DEFAULT_PROJECT_ROOT,
+        default_factory=resolve_project_root,
+        alias="VAULTSPEC_A2A_PROJECT_ROOT",
+        description=(
+            "The project a2a serves and keeps its state under. Unset, it is the "
+            "nearest ancestor of the working directory holding .vaultspec/ or "
+            ".vault/, then one holding .git, else the working directory. A "
+            "relative value resolves against the working directory. Read from "
+            "the process environment only: the project's .env is found through "
+            "this value, so it cannot also choose it."
+        ),
+    )
+    install_root: Path = Field(
+        default_factory=lambda: _INSTALL_ROOT,
         alias="VAULTSPEC_PROJECT_ROOT",
         description=(
-            "Absolute path to the repository root.  Computed from __file__ by "
-            "default; override in Docker non-editable installs where __file__ "
-            "resolves inside site-packages."
+            "Absolute path of the checkout or install holding this service's "
+            "shipped non-Python assets (the ACP adapter's node_modules). Computed "
+            "from __file__ by default; override in non-editable container "
+            "installs where __file__ resolves inside site-packages. Never a "
+            "storage location."
         ),
     )
     a2a_home: Path = Field(
@@ -863,6 +866,14 @@ class InfraConfig(BaseSettings):
         default=False,
         validation_alias=AliasChoices("VAULTSPEC_NO_COLOR", "NO_COLOR"),
     )
+
+    @field_validator("project_root", mode="before")
+    @classmethod
+    def _resolve_project_root(cls, value: object) -> object:
+        """Resolve an explicitly supplied project root exactly as the default is."""
+        if isinstance(value, str | Path) and str(value).strip():
+            return resolve_project_root({"VAULTSPEC_A2A_PROJECT_ROOT": str(value)})
+        return value
 
     @field_validator("internal_token", "gateway_service_token", mode="before")
     @classmethod

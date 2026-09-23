@@ -62,7 +62,9 @@ jobs:
           # The proposal may move only this package's own version. Anything
           # else means the lock drifted on main, which a release must not carry.
           version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
-          changed="$(git diff -U0 uv.lock | grep -E '^[-+][^-+]' || true)"
+          # --text: .gitattributes marks *.lock -diff, which otherwise
+          # reduces this diff to "Binary files differ".
+          changed="$(git diff --text -U0 uv.lock | grep -E '^[-+][^-+]' || true)"
           if [ "$(printf '%s\n' "$changed" | grep -c .)" -ne 2 ] \
             || ! printf '%s\n' "$changed" | grep -qx "+version = \"$version\""; then
             echo "::error::uv.lock changed beyond this package's version:" >&2

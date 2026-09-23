@@ -115,11 +115,16 @@ def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> N
     )
 
 
-def _loggable(value: object) -> object:
-    """Return ``value`` safe to log: a URL's password is masked, never echoed.
+#: Query parameters libpq and the async drivers accept a secret through.
+_SECRET_QUERY_KEYS = frozenset({"password", "sslpassword", "token"})
 
-    A database URL routinely carries a password, and a server DSN displaced by
-    the desktop seating is exactly the value this warning reports.
+
+def _loggable(value: object) -> object:
+    """Return ``value`` safe to log: a URL's secrets are masked, never echoed.
+
+    A database URL routinely carries a password, in its userinfo or as a query
+    parameter, and a server DSN displaced by the desktop seating is exactly the
+    value this warning reports.
     """
     text = str(value)
     if "://" not in text:
@@ -128,7 +133,12 @@ def _loggable(value: object) -> object:
     from sqlalchemy.exc import ArgumentError
 
     try:
-        return make_url(text).render_as_string(hide_password=True)
+        url = make_url(text)
+        masked = {
+            key: ("***" if key.lower() in _SECRET_QUERY_KEYS else item)
+            for key, item in url.query.items()
+        }
+        return url.set(query=masked).render_as_string(hide_password=True)
     except ArgumentError:
         # Unparseable: report that a value was discarded without the value.
         return "<unparseable URL>"

@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
-from ..control.state_layout import state_layout
+from ..control.state_layout import seal_state_home, state_layout
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -428,6 +428,7 @@ class DesktopProfile:
         """
         from ._platform_acl import harden_credential_path
 
+        seal_state_home(self.app_home)
         for directory in self.state.provisioned_directories:
             directory.mkdir(parents=True, exist_ok=True)
             # Best effort: a filesystem that cannot express owner-only access

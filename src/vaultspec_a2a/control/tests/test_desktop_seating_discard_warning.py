@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol, cast
 
+import pytest
+
 from ...control.config import Settings
 from ...desktop.profile import derive_state_paths
 from ...testing import armed_environment as _environment
@@ -25,8 +27,6 @@ from ...testing import armed_environment as _environment
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
     from pathlib import Path
-
-    import pytest
 
 
 class _SettingsEnvFileFactory(Protocol):
@@ -72,13 +72,24 @@ def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
     ]
 
 
+_SECRET = "s3cr3t-db-password"
+
+
+@pytest.mark.parametrize(
+    "supplied",
+    [
+        f"postgresql+asyncpg://postgres:{_SECRET}@db.example:5432/vaultspec",
+        f"postgresql+asyncpg://postgres@db.example:5432/vaultspec?password={_SECRET}",
+        f"postgresql+asyncpg://postgres@db.example/vaultspec?sslpassword={_SECRET}",
+    ],
+    ids=["userinfo", "query-password", "query-sslpassword"],
+)
 def test_a_discarded_server_url_is_reported_without_its_password(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, supplied: str
 ) -> None:
     """The warning names the displaced store but never echoes its credential."""
     app_home = tmp_path / "app"
-    secret = "s3cr3t-db-password"
-    supplied = f"postgresql+asyncpg://postgres:{secret}@db.example:5432/vaultspec"
+    secret = _SECRET
 
     with (
         caplog.at_level(logging.WARNING, logger=_CONFIG_LOGGER),

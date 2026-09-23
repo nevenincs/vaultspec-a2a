@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..control.state_layout import seal_state_home
 from ..database.checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
     install_checkpoint_schema_identity,
@@ -372,6 +373,7 @@ async def migrate_stores(
             ),
         )
     state = derive_state_paths(app_home)
+    seal_state_home(state.app_home)
     if expect_from is not None:
         observed = _read_revision(state.database_path)
         if observed != expect_from:
@@ -404,6 +406,7 @@ async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
 
     started = time.monotonic()
     state = derive_state_paths(app_home)
+    seal_state_home(state.app_home)
     observed = _read_revision(state.database_path)
     if observed is not None:
         return _failed_result(

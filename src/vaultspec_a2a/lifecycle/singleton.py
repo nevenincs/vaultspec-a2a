@@ -40,7 +40,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import NoReturn, TypeGuard, cast
 
-from ..control.state_layout import state_layout
+from ..control.state_layout import seal_state_home, state_layout
 from ..utils.atomic_write import atomic_write_text
 from .discovery import is_pid_alive
 from .registry import now_ms
@@ -544,6 +544,7 @@ def acquire_singleton(app_home: Path, *, owner: str | None = None) -> RuntimeSin
     principal = owner if owner is not None else default_owner()
     lock_path = singleton_lock_path(app_home)
     record_path = singleton_record_path(app_home)
+    seal_state_home(app_home)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:

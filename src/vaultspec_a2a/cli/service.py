@@ -367,8 +367,6 @@ def setup_service(
     home = _resolved_app_home(app_home)
     if capsule_root is not None:
         _desktop_arm_env(home, capsule_root)
-    else:
-        home.mkdir(parents=True, exist_ok=True)
     result = asyncio.run(initialize_fresh_stores(home))
     payload = result.model_dump(mode="json")
     payload["app_home"] = str(home)

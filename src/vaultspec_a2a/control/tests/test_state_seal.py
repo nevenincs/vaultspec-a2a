@@ -12,6 +12,8 @@ import shutil
 import subprocess
 from typing import TYPE_CHECKING, Protocol, cast
 
+from ...cli.service import setup_service
+from ...lifecycle.singleton import acquire_singleton
 from ...testing import armed_environment
 from ..config import Settings
 from ..settings_base import PROJECT_ROOT_ENV
@@ -57,6 +59,24 @@ def test_state_written_into_a_plain_repository_stays_untracked(tmp_path: Path) -
     settings.state_layout.handoff_credential_path.write_text("bearer", "utf-8")
 
     assert settings.a2a_home.is_relative_to(project)
+    assert _git(project, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+def test_setup_and_the_runtime_lock_leave_a_plain_repository_clean(
+    tmp_path: Path,
+) -> None:
+    """The store initialiser and the singleton write before any serve does."""
+    project = tmp_path / "plain-repo"
+    project.mkdir()
+    _git(project, "init", "-q")
+    home = _settings_for(project).a2a_home
+
+    result = setup_service(home)
+    with acquire_singleton(home):
+        pass
+
+    assert result["status"] == "succeeded", result
+    assert (home / "state").is_dir()
     assert _git(project, "status", "--porcelain", "--untracked-files=all") == ""
 
 

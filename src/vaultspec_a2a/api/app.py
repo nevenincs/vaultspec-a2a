@@ -263,7 +263,7 @@ def _load_desktop_credentials(app: FastAPI) -> None:
     references = settings.desktop_credential_paths
     if references is None:
         return
-    credentials_dir = references.credentials_dir
+    credentials_dir = settings.prepare_state_dir(references.credentials_dir)
     app.state.v1_service_token = load_attach_credential(credentials_dir)
     app.state.lifecycle_capability = load_ownership_capability(credentials_dir)
     settings.internal_token = create_worker_ipc_credential(credentials_dir)

@@ -11,8 +11,6 @@ related:
   - "[[2026-09-23-project-bound-state-adr]]"
 ---
 
-
-
 # `project-bound-state` audit: `persistence and configuration surface`
 
 ## Scope
@@ -259,6 +257,76 @@ sandbox's `%TEMP%` denial stopped applying. Status: open; not owned by this plan
 Status: fixed in `P03.S09` (`workspace/environment.py`), covered in
 `workspace/tests/test_workspace.py`.
 
+### phase-close-review-p03 | info | Phase-close review of P03 and the P01-P02 corrections: revision required, one high finding
+
+Reviewed `6a933d7d..fe30ff24` against `2026-09-23-project-bound-state-adr` D4 and D6.
+Confirmed sound: the seal's git semantics, including a nested repository inside a
+sealed home; the import order of the session seat; seat idempotence and
+parent-seat replacement; the `VAULTSPEC_A2A_LIVE_*` renames; and the smoke
+script's containment. The findings follow. The high one reopened `P02.S07`.
+
+### state-home-seal-bypassed-by-setup | high | `setup` wrote both stores into an unsealed, committable state home
+
+In a plain `git init` project, `setup_service()` succeeded and `git status`
+listed `.vault/data/agents/state/vaultspec.db` and `checkpoints.db` as untracked.
+The home was created by a bare `mkdir` at `cli/service.py` and `_ensure_unlocked`
+at `desktop/migration.py`, and the runtime singleton, `DesktopProfile.ensure` and
+the worker IPC credential directory bypassed the seal the same way. Status:
+fixed in `P02.S07`. `migrate_stores` and `initialize_fresh_stores` seal the home
+before touching a store; `acquire_singleton` and `DesktopProfile.ensure` seal
+their home; the gateway prepares the credential directory through
+`Settings.prepare_state_dir`. Covered by a real-git setup-and-lock case in
+`control/tests/test_state_seal.py`.
+
+### seating-warning-leaks-query-string-credentials | medium | The seating warning echoed a password carried as a query parameter
+
+`_loggable` masked only the userinfo password, so `?password=` and
+`?sslpassword=` reached the log. Status: fixed in `P02.S07`; the credential
+query keys are masked too, covered by the parametrised warning test.
+
+### seal-follows-the-home-not-the-writer | medium | A store relocated elsewhere inside the project is created unsealed
+
+`Settings.prepare_state_dir` seals only the state home. A storage setting pointed
+elsewhere inside the project, such as `VAULTSPEC_A2A_PROCS_HOME=.vault/data/procs`
+or a relative SQLite URL, creates an unignored directory. Status: open. Sealing a
+directory the operator chose changes what a2a writes into operator space. That
+refines D4 and needs a decision; see Recommendations.
+
+### session-prune-races-on-a-vanishing-directory | medium | Two sessions starting together could crash seating at conftest import
+
+`_prune` called `stat()` on entries a sibling session could be deleting. The
+`FileNotFoundError` escaped the root conftest import and failed collection.
+Status: fixed in `P03.S08`; a vanished entry is skipped.
+
+### os-temp-writes-remain-in-tests-and-tooling | medium | D6 was neither complete nor enforced for tests and tooling
+
+Three `TemporaryFile()` handles in `providers/tests/test_harness_mcp_pinning.py`,
+and `dev/actionlint.py`, `dev/audit/duplication.py` and `dev/vault/enroll.py`,
+still used the system temp directory. The gate scanned neither test modules nor
+`dev/`. Status: fixed in `P03.S09`:
+
+- The tests take scratch space from the session seat.
+- The tools use the cache root or an ignored `.tmp-*` directory in the checkout.
+- `dev/guards/storage_anchors.py` now holds test modules and `dev/` to the
+  `tempfile` rule; two read-only `gettempdir()` assertions are annotated.
+- Covered by a gate-lane case in `dev/tests/test_storage_anchors.py`.
+
+### nested-pytest-classification-rests-on-an-undocumented-launch-form | low | A nested run started with `python -c` would take its parent's seat
+
+Status: fixed in `P03.S08`. The runner's child launch states the `-m`
+requirement next to the command it guards.
+
+### cwd-anchored-temp-directory-lands-in-the-checkout | low | A capsule test made unignored directories in the repository root
+
+Status: fixed in `P03.S09`; the test's directory is under the session seat.
+
+### venv-boundary-refuses-a-workspace-that-is-itself-a-repository | low | A workspace that became its own repository gets no inherited interpreter
+
+Status: accepted as the intended boundary and stated in the `resolve_venv`
+docstring (`P03.S09`).
+
 ## Recommendations
 
 - Keep the storage-anchor gate as the enforcement point for the new rules (no profile, temp or raw environment use in production) so regressions fail review rather than surface as leaks.
+- Decide whether the seal follows the state home or every directory a2a creates inside the project root. Choosing the project root refines D4, because a2a would then write an ignore file into a directory the operator chose, so it belongs in a follow-on ADR (`seal-follows-the-home-not-the-writer`).
+- Decide once whether the a2a settings authority governs the repository's own development harness, for names and storage together (`dev-tooling-names-outside-the-prefix`).

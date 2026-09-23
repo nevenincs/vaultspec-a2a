@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:9430db082fb846471f3f8fbd5da37ccf932a928e73132b6ccf467ba9f05254b4'
+body_hash: 'sha256:785f2ac5832407f550bd1815b99be42bcd83d74579289791bb4232c9a63297f1'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -191,3 +191,23 @@ Type: change control. `just deps-lock` is `uv lock` without `--upgrade`, which c
 ### review-facade-export | low | `configure_sqlite_engine` is in the module's public API but not the facade | accepted
 
 Type: API consistency. It mirrors `configure_sqlite_transactions`, which the facade also does not re-export; both serve engine construction by tests and by the module itself.
+
+### review-s06-s08-early-return-lock | medium | refusals after a write begin kept the SQLite write lock until the session closed | resolved
+
+Type: contention regression introduced by S07. Plan-close review of `fa27d194`..`3ecc0b6c` passed with this finding: `control/cancel_service.py` `cancel_thread` returned its preflight refusals, `control/thread_service.py` delete and archive their not-found and ineligible refusals, `control/message_service.py` `send_followup_message` its four guard refusals, and `api/routes/_gateway_action_endpoints.py` its permission 404 with the `BEGIN IMMEDIATE` transaction still open, so the lock outlived the refusal until session teardown, across the cancel route's awaited admission release. Each refusal writes nothing and now rolls back first. `control/clarification_service.py` `respond_to_clarification` releases any transaction still open on every exit through a `finally`; no caller commits after it, so that is what teardown would have done, sooner. `control/tests/test_relay_write_contention.py` refuses an archive for an unknown and an ineligible run, then shows a sibling write committing at once while the refused session is still open; it fails without the fix.
+
+### review-clarification-unknown-run-cost | low | an unknown run paid a checkpoint read before its 404 | resolved
+
+Type: behaviour change from S07. Moving the checkpoint read ahead of the write transaction put it ahead of the run lookup. `respond_to_clarification` now checks the run exists in a short read transaction first, and still re-reads it inside the write transaction.
+
+### review-test-home-not-reclaimed | low | a test app home that could not be deleted vanished silently | resolved
+
+Type: diagnostics. `testing/runner_child.py` removed the session home with `ignore_errors=True`; on Windows a store still held open by a surviving process leaves it behind. The runner now names a surviving home on stderr. The parent pytest process holds no engine under xdist, so no close is attempted there.
+
+### review-recovery-stat-under-lock | low | the recovery redrive checks the project directory while holding the write lock | accepted
+
+Type: lock discipline. `control/direct_control_recovery.py` `_redrive_one_claim` reaches `Path(...).is_dir()` in `_reconstruct_dispatch` inside its write transaction. It is one local metadata stat, not network or checkpoint I/O; hoisting it would split the accepted-action re-read from the availability check it validates.
+
+### review-get-engine-raise-at-boot | low | a mismatched explicit engine request now aborts instead of warning | accepted
+
+Type: failure mode. The only production caller with an explicit URL is the gateway lifespan's `init_db`, which runs before anything seats a default engine; `get_engine()` without a URL still returns the seated engine. A process that seated a different store first is misconfigured, and refusing to boot on it is the intended correction.

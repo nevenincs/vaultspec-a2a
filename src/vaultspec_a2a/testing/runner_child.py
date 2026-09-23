@@ -52,6 +52,14 @@ def main() -> int:
         if isolated_home is not None:
             os.environ.pop(_A2A_HOME_ENV, None)
             shutil.rmtree(isolated_home, ignore_errors=True)
+            if os.path.exists(isolated_home):
+                # On Windows a store still held open by a surviving process
+                # cannot be removed; name it rather than leak it silently.
+                print(
+                    f"test app home was not removed: {isolated_home}",
+                    file=sys.stderr,
+                    flush=True,
+                )
         if previous_environment is None:
             os.environ.pop("VAULTSPEC_ENVIRONMENT", None)
         else:

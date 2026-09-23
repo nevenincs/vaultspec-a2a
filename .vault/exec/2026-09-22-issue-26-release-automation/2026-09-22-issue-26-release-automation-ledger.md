@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:a0c6da88323c0d41e945c280567ed2db4a0317d12a0506d66c6c7e64abd43533'
+body_hash: 'sha256:443f8b51e6b9b5c6b1e050715ae4af22c7eb9d1a3e537eb0e80e6f859f148373'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -106,6 +106,8 @@ related:
 - `S08` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
 - `S08` `verify:` `full dev + src suite (same run as S07)` -> `pass`
 - `S08` `by:` `claude-opus`
+- `S07` `M` `src/vaultspec_a2a/control/tests/test_relay_write_contention.py`
+- `S07` `verify:` `api, control, database, worker suites (1609)` -> `pass`
 
 ## Notes
 
@@ -121,3 +123,5 @@ related:
 - `S06` Data repair: dropped the rows table S03's first test draft created in C:/Users/hello/.vaultspec-a2a/vaultspec.db (verified schema, no a2a gateway running).
 - `S06` Follow-up: tests that seat the engine via init_db now close any seated engine first, since get_engine refuses a mismatched URL.
 - `S07` Implemented by a dispatched executor from a read-only transaction map; reviewed by the orchestrator. Its files were written with CRLF and normalized to LF before commit.
+- `S07` Plan-close review (medium): refusals after a write begin now release the lock before returning; clarification 404 no longer pays a checkpoint read. A first attempt read an expired row after rollback in message_service (MissingGreenlet in two follow-up tests); fixed by capturing the status first.
+- `S06` Plan-close review (low): a test app home that survives deletion is now named on stderr.

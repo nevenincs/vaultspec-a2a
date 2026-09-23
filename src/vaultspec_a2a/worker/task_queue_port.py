@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..database import get_queue_view, mark_task_complete
+from ..database import begin_write_transaction, get_queue_view, mark_task_complete
 from ..graph.protocols import MarkCompleteOutcome, QueueEntryView
 
 if TYPE_CHECKING:
@@ -55,6 +55,7 @@ class SqlTaskQueuePort:
     ) -> MarkCompleteOutcome:
         """Apply an idempotent mark-complete transition and commit."""
         async with self._session_factory() as session:
+            await begin_write_transaction(session)
             result = await mark_task_complete(session, thread_id, task_key)
             await session.commit()
             return MarkCompleteOutcome(

@@ -201,6 +201,7 @@ async def commit_proven_application(
     from ..database import (
         ControlActionModel,
         ThreadModel,
+        begin_write_transaction,
         mark_control_action_applied,
         update_thread_status,
     )
@@ -208,6 +209,9 @@ async def commit_proven_application(
     from .dispatch_receipts import validate_current_graph_receipt
     from .repair_transitions import mark_message_followup_applied
 
+    # ``proven_application_receipt`` ends its read transaction before the
+    # checkpoint proof, so this settlement owns the whole re-read and write.
+    await begin_write_transaction(db)
     thread = await db.scalar(
         select(ThreadModel)
         .where(ThreadModel.id == thread_id)

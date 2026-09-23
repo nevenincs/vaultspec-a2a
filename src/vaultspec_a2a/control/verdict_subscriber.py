@@ -40,6 +40,7 @@ from ..authoring import (
     verdict_from_event,
 )
 from ..database import (
+    begin_write_transaction,
     get_authoring_cursor,
     get_pending_permission_requests,
     get_thread,
@@ -671,6 +672,7 @@ class VerdictSubscriber:
             return
         dispatch = setup.dispatch
         async with self._dependencies.session_factory() as db:
+            await begin_write_transaction(db)
             claim = await prepare_control_action_claim(
                 db,
                 request=ControlActionClaimRequest(
@@ -731,6 +733,7 @@ class VerdictSubscriber:
             async with self._dependencies.session_factory() as db:
                 if failure_type is None:
                     raise RuntimeError("failed dispatch carries no failure type")
+                await begin_write_transaction(db)
                 await record_dispatch_failure(
                     db, claim, failure_type, detail=outcome.detail
                 )

@@ -21,6 +21,7 @@ import httpx
 
 from ..database import (
     ThreadStatusElectionOutcome,
+    begin_write_transaction,
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_session_factory,
@@ -300,6 +301,7 @@ async def _refuse_incompatible_authority(
 ) -> None:
     """Fail one incompatible stored run while allowing the sweep to continue."""
     expectation = thread_write_expectation(thread)
+    await begin_write_transaction(db)
     election = await elect_thread_status(
         db,
         thread.id,
@@ -340,6 +342,7 @@ async def _refuse_missing_project(
 ) -> None:
     """Fail one run with no active project and keep healthy runs moving."""
     expectation = thread_write_expectation(thread)
+    await begin_write_transaction(db)
     election = await elect_thread_status(
         db,
         thread.id,
@@ -444,6 +447,13 @@ async def redispatch_reconciling_threads(
             )
             if not threads:
                 return
+            # End the listing read before anything dispatches. A read
+            # transaction held across a worker spawn and its HTTP call pins the
+            # write-ahead log for that long and leaves every per-thread refusal
+            # below upgrading a stale read into a write. Committing rather than
+            # rolling back keeps the loaded rows usable: this factory does not
+            # expire on commit, and a rollback would expire every one of them.
+            await db.commit()
             # Start a worker only for a dispatch that survives stored-authority
             # validation; dispatch_to_worker owns that demand.
             logger.info("Re-dispatching %d reconciling threads", len(threads))
@@ -478,6 +488,9 @@ async def redispatch_reconciling_threads(
                 dispatch = await _restore_reconciling_dispatch(
                     db, thread, frozen_map, workspace_root
                 )
+                # The restore above read the accepted action; release that read
+                # before the worker call rather than holding it across delivery.
+                await db.commit()
                 if dispatch is None:
                     continue
                 headers = trace_headers_fn() if trace_headers_fn else {}

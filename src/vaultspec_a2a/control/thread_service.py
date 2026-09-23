@@ -854,6 +854,7 @@ async def delete_thread_service(
     Commits the session at each durable boundary — the service owns its
     transaction boundaries. Does **not** raise ``HTTPException``.
     """
+    await begin_write_transaction(db)
     thread = await get_thread(db, thread_id)
     if thread is None:
         return DeleteResult(deleted=False, not_found=True)
@@ -884,6 +885,10 @@ async def delete_thread_service(
                     error_detail="Thread state changed before deletion could begin",
                 )
         await db.commit()
+    else:
+        # Rejoining a saga another request began writes nothing here, so release
+        # the write lock before the saga claim takes its own.
+        await db.rollback()
 
     return await _run_deletion_saga(db, thread_id, checkpointer=checkpointer)
 
@@ -904,6 +909,7 @@ async def _run_deletion_saga(
     than executing a second pass over a result snapshot taken before the owner's
     progress was recorded.
     """
+    await begin_write_transaction(db)
     saga = await claim_deletion_saga(db, thread_id=thread_id)
     await db.commit()
     if saga is None:
@@ -914,6 +920,7 @@ async def _run_deletion_saga(
         return DeleteResult(deleted=False, cleanup_incomplete=True)
 
     async def _advance(result: CleanupItemResult) -> None:
+        await begin_write_transaction(db)
         await advance_deletion_cleanup_item(db, thread_id=thread_id, result=result)
         await db.commit()
 
@@ -924,6 +931,7 @@ async def _run_deletion_saga(
         advance=_advance,
     )
 
+    await begin_write_transaction(db)
     outcome = await finalize_deletion_saga(db, thread_id=thread_id)
     await db.commit()
     if outcome.finalized:
@@ -968,6 +976,7 @@ async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
     Commits the session before returning — the service owns its
     transaction boundary.
     """
+    await begin_write_transaction(db)
     thread = await get_thread(db, thread_id)
     if thread is None:
         return ArchiveResult(archived=False, not_found=True)

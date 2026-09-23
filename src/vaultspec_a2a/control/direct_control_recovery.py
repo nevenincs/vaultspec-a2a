@@ -16,6 +16,7 @@ from ..database import (
     ControlActionModel,
     ThreadModel,
     ThreadStatusElectionOutcome,
+    begin_write_transaction,
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
@@ -133,11 +134,13 @@ async def _expire_overdue_actions(
             .limit(_RECOVERY_PAGE_SIZE)
         )
     ).all()
-    expired = 0
-    for row, _thread in rows:
-        if row.dispatch_id is None or row.recovery_deadline_at is None:
-            continue
-        stored = _StoredAction(
+    # Every overdue row is snapshotted before the first settlement, because a
+    # refused item rolls the session back and a rollback expires every loaded
+    # row: reading one afterwards would attempt implicit async I/O. Each
+    # settlement then owns its own transaction, so one refusal discards its own
+    # work and never the items already settled in this pass.
+    overdue = [
+        _StoredAction(
             identity=_StoredActionIdentity(
                 dispatch_id=row.dispatch_id,
                 request_id=row.request_id,
@@ -149,10 +152,17 @@ async def _expire_overdue_actions(
             worker_generation=row.worker_generation,
             recovery_deadline_at=row.recovery_deadline_at,
         )
-        refusal = _Refusal(
-            FailureType.DEADLINE_EXCEEDED,
-            "accepted run deadline expired before application",
-        )
+        for row, _thread in rows
+        if row.dispatch_id is not None and row.recovery_deadline_at is not None
+    ]
+    await db.rollback()
+    refusal = _Refusal(
+        FailureType.DEADLINE_EXCEEDED,
+        "accepted run deadline expired before application",
+    )
+    expired = 0
+    for stored in overdue:
+        await begin_write_transaction(db)
         if not await _settle_permanent_refusal(
             db,
             stored,
@@ -161,8 +171,8 @@ async def _expire_overdue_actions(
         ):
             await db.rollback()
             continue
+        await db.commit()
         expired += 1
-    await db.commit()
     return expired
 
 
@@ -488,6 +498,7 @@ async def _settle_delivery_failure(
     _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
     if failure_type is None:
         raise RuntimeError("failed dispatch carries no failure type")
+    await begin_write_transaction(db)
     if failure_type is FailureType.INCOMPATIBLE_STATE:
         refusal = _Refusal(
             failure_type,
@@ -589,6 +600,7 @@ async def _dispatch_prepared_claim(
     )
     if not outcome.success:
         return await _settle_delivery_failure(db, recovery_claim, prepared, outcome)
+    await begin_write_transaction(db)
     delivered_at = datetime.now(UTC)
     if delivered_at >= recovery_claim.deadline_at:
         await release_recovery_attempt(db, recovery_claim, released_at=delivered_at)
@@ -665,6 +677,10 @@ async def _prepare_recovery_action(
             FailureType.INCOMPATIBLE_STATE,
             "accepted recovery payload changed after acceptance",
         )
+        if not db.in_transaction():
+            # A losing claim already rolled the acceptance back; the refusal
+            # below reads before it writes and needs the lock from the start.
+            await begin_write_transaction(db)
         return await _settle_action_refusal(
             db,
             recovery_claim,
@@ -699,6 +715,7 @@ async def _redrive_one_claim(
     runtime: _RecoveryRuntime,
 ) -> _RecoveryOutcome:
     async with session_factory() as db:
+        await begin_write_transaction(db)
         row = await get_control_action_by_dispatch_id(
             db,
             thread_id=recovery_claim.thread_id,
@@ -736,6 +753,7 @@ async def redrive_direct_control_actions(
     async with session_factory() as db:
         expired = await _expire_overdue_actions(db, observed_at=instant)
     async with session_factory() as db:
+        await begin_write_transaction(db)
         await seed_recovery_attempts(
             db,
             observed_at=instant,

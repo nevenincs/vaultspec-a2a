@@ -19,6 +19,7 @@ from sqlalchemy import select
 from ..database import (
     ControlActionModel,
     ThreadModel,
+    begin_write_transaction,
     get_control_action_by_idempotency_key,
     get_thread,
     mark_control_action_applied,
@@ -426,6 +427,16 @@ async def respond_to_clarification(
     checkpoint receipt settles the journal row.
     """
     checkpointer = runtime.checkpointer
+    fingerprint = clarification_resolution_fingerprint(resolution)
+    payload = resolution.as_resume_value()
+    idempotency_key = _idempotency_key(request_id)
+    # The checkpoint read is remote I/O, so it happens before the durable
+    # transaction opens: holding the write lock across it would block every
+    # other writer for the length of a checkpoint round trip.
+    checkpoint_snapshot = await read_run_snapshot(checkpointer, thread_id)
+    parked = pending_clarification(checkpoint_snapshot, thread_id=thread_id)
+
+    await begin_write_transaction(db)
     thread = await get_thread(db, thread_id)
     if thread is None:
         return ClarificationResult(
@@ -437,12 +448,6 @@ async def respond_to_clarification(
             error_detail="Run not found",
             error_status_code=404,
         )
-
-    fingerprint = clarification_resolution_fingerprint(resolution)
-    payload = resolution.as_resume_value()
-    idempotency_key = _idempotency_key(request_id)
-    checkpoint_snapshot = await read_run_snapshot(checkpointer, thread_id)
-    parked = pending_clarification(checkpoint_snapshot, thread_id=thread_id)
 
     existing = await get_control_action_by_idempotency_key(
         db,
@@ -645,6 +650,7 @@ async def _dispatch_claimed(
         detail = outcome.detail or "Worker dispatch failed"
         if failure_type is None:
             raise RuntimeError("failed dispatch carries no failure type")
+        await begin_write_transaction(db)
         settlement = await record_dispatch_failure(
             db, claim, failure_type, detail=detail
         )

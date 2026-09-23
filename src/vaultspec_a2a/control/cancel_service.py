@@ -33,6 +33,7 @@ from ..control.repair_transitions import (
 )
 from ..database import (
     ThreadStatusElectionOutcome,
+    begin_write_transaction,
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
@@ -360,6 +361,10 @@ async def cancel_thread(
     Returns a :class:`CancelResult` describing what happened.  Commits the
     session before returning — the service owns its transaction boundary.
     """
+    # The preflight reads before the claim writes, so the acceptance transaction
+    # has to hold the write lock from its first statement to wait for a racing
+    # canceller instead of failing on its commit.
+    await begin_write_transaction(db)
     preflight = await _cancel_preflight(db, thread_id)
     if isinstance(preflight, CancelResult):
         return preflight
@@ -624,6 +629,7 @@ async def _dispatch_cancellation(
         _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
         if typed_failure is None:
             raise RuntimeError("failed dispatch carries no failure type")
+        await begin_write_transaction(db)
         settlement = await record_dispatch_failure(
             db, claim, typed_failure, detail=outcome.detail
         )

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from ..database import (
     append_permission_log,
+    begin_write_transaction,
     create_control_action,
     get_control_action_by_idempotency_key,
     get_pending_permission_requests,
@@ -875,6 +876,7 @@ async def _failed_permission_dispatch(
     policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
     if typed_failure is None:
         raise RuntimeError("failed dispatch carries no failure type")
+    await begin_write_transaction(db)
     settlement = await record_dispatch_failure(
         db, claim, typed_failure, detail=outcome.detail
     )

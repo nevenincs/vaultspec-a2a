@@ -54,7 +54,8 @@ from ...database import (
     get_thread,
     record_permission_request,
 )
-from ...database.models import Base, RecoveryAttemptModel
+from ...database.models import Base, RecoveryAttemptModel, ThreadModel
+from ...database.session import begin_write_transaction, configure_sqlite_engine
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...tests._write_authority import make_test_write_authority
@@ -770,3 +771,98 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
             idempotency_key=default_cancel_key(thread_id),
         )
     assert action is None
+
+
+@pytest_asyncio.fixture
+async def posture_session_factory(
+    tmp_path: Path,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Sessions on the production SQLite posture, on a real file.
+
+    The default fixture above leaves journal mode and lock waiting at driver
+    defaults, which is enough for the election proofs. Contention between a
+    service's read and its write is only faithful under the posture the product
+    actually serves on: write-ahead logging, the configured busy timeout, and
+    SQLAlchemy owning every ``BEGIN``.
+    """
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'posture.db'}")
+    configure_sqlite_engine(engine)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
+    posture_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A commit landing between the cancel preflight and its claim must not refuse.
+
+    The preflight reads the run and its owning action before the claim writes.
+    Begun deferred, that upgrade is refused outright the moment another
+    connection commits in between - ``busy_timeout`` is never consulted - and the
+    operator sees a 500 for an entirely ordinary race.
+    """
+    thread_id = "cancel-under-contention"
+    await _running_thread(posture_session_factory, thread_id)
+    app = FastAPI()
+
+    @app.post("/dispatch")
+    async def accept_dispatch() -> JSONResponse:
+        return JSONResponse({"status": "accepted"})
+
+    async with posture_session_factory() as sibling:
+        sibling_thread = await sibling.get(ThreadModel, thread_id)
+        assert sibling_thread is not None
+        await sibling.rollback()
+
+        # Hold the write lock on an unrelated projection, exactly as another
+        # relay write would.
+        await begin_write_transaction(sibling)
+        held = await sibling.get(ThreadModel, thread_id)
+        assert held is not None
+        held.last_sequence = 7
+        await sibling.flush()
+
+        async def _cancel() -> CancelResult:
+            async with (
+                httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://worker"
+                ) as worker_client,
+                posture_session_factory() as db,
+            ):
+                return await cancel_thread(
+                    db,
+                    thread_id=thread_id,
+                    idempotency_key="contended-cancel",
+                    runtime=CancelRuntime(
+                        _circuit_breaker(), _spawner(), worker_client, 25
+                    ),
+                )
+
+        cancelling = asyncio.create_task(_cancel())
+        await asyncio.sleep(0.3)
+        assert not cancelling.done(), "the cancel must queue behind the write lock"
+        await sibling.commit()
+        result = await asyncio.wait_for(cancelling, timeout=10.0)
+
+    assert result.accepted is True
+    assert result.cancelled is True
+    assert result.failure_type is None
+    assert result.thread_status == ThreadStatus.CANCELLING.value
+
+    async with posture_session_factory() as db:
+        thread = await get_thread(db, thread_id)
+        action = await get_control_action_by_idempotency_key(
+            db,
+            thread_id=thread_id,
+            idempotency_key=default_cancel_key(thread_id),
+        )
+    assert thread is not None
+    assert thread.status == ThreadStatus.CANCELLING.value
+    # The sibling's commit survived the cancellation that waited for it.
+    assert thread.last_sequence == 7
+    assert action is not None

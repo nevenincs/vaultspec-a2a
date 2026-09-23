@@ -128,6 +128,7 @@ async def _persist_proven_cancellation(
     """Elect and settle one exact current cancellation terminal."""
     from ..database import (
         ThreadStatusElectionOutcome,
+        begin_write_transaction,
         elect_thread_status,
         expire_pending_permission_requests,
         get_control_action_by_dispatch_id,
@@ -141,6 +142,7 @@ async def _persist_proven_cancellation(
     from ..thread.enums import ControlActionResultStatus, ControlActionType
 
     async with factory() as db:
+        await begin_write_transaction(db)
         thread = await get_thread(db, thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.dispatch_id
@@ -219,6 +221,7 @@ async def _persist_proven_failure(
     """Elect and settle one failure for the exact current graph action."""
     from ..database import (
         ThreadStatusElectionOutcome,
+        begin_write_transaction,
         elect_thread_status,
         expire_pending_permission_requests,
         get_control_action_by_dispatch_id,
@@ -233,6 +236,7 @@ async def _persist_proven_failure(
     from .dispatch_receipts import validate_current_graph_receipt
 
     async with factory() as db:
+        await begin_write_transaction(db)
         thread = await get_thread(db, thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.action.dispatch_id
@@ -824,11 +828,14 @@ async def _handle_permission_event(
         return
     event_value = payload.get("type")
     event_type = event_value if isinstance(event_value, str) else ""
+    from ..database import begin_write_transaction
+
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the durable permission journal", thread_id)
         return
     async with factory() as db:
+        await begin_write_transaction(db)
         if event_type in _PERMISSION_REQUEST_EVENT_TYPES:
             await _persist_permission_request(
                 db, thread_id, payload, event_type=event_type
@@ -881,7 +888,7 @@ async def _handle_execution_state_event(
     if payload.get("type") != "execution_state_projection":
         return
 
-    from ..database import record_thread_execution_state
+    from ..database import begin_write_transaction, record_thread_execution_state
 
     projection = ExecutionStateProjectionPayload.model_validate(payload)
     snapshot_created_at: datetime | None = None
@@ -896,6 +903,7 @@ async def _handle_execution_state_event(
         _skip_without_database("the execution-state projection", thread_id)
         return
     async with factory() as db:
+        await begin_write_transaction(db)
         await record_thread_execution_state(
             db,
             thread_id=thread_id,

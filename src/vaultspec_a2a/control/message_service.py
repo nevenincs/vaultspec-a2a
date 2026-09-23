@@ -27,6 +27,7 @@ from ..control.repair_transitions import (
     record_undelivered_dispatch,
 )
 from ..database import (
+    begin_write_transaction,
     get_thread,
     thread_write_expectation,
 )
@@ -109,6 +110,7 @@ async def _settle_failed_message_dispatch(
     detail = outcome.detail or "Worker dispatch failed"
     if typed_failure is None:
         raise RuntimeError("failed dispatch carries no failure type")
+    await begin_write_transaction(db)
     settlement = await record_dispatch_failure(db, claim, typed_failure, detail=detail)
     if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
         # Only definite non-delivery may be recorded; ambiguous delivery keeps
@@ -152,6 +154,10 @@ async def send_followup_message(
     into an appropriate HTTP response.  Commits the session before returning.
     """
     # -- Thread lookup & guard -------------------------------------------
+    # The guard reads the run before the claim writes it, so the acceptance
+    # transaction takes the write lock up front and waits for a racing sender
+    # rather than failing once that sender commits.
+    await begin_write_transaction(db)
     thread = await get_thread(db, options["thread_id"])
     if thread is None:
         return MessageResult(

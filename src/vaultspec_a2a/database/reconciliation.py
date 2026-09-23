@@ -13,6 +13,7 @@ from ..control.recovery_authority import (
 from ..domain_config import domain_config
 from ..thread.enums import ThreadStatus
 from .permission_repository import prune_repair_journal
+from .session import begin_write_transaction
 from .thread_repository import list_non_terminal_threads
 
 if TYPE_CHECKING:
@@ -63,6 +64,11 @@ async def reconcile_threads_on_startup(
         paused += int(observed.status is ThreadStatus.INPUT_REQUIRED)
         unavailable += int(observed.condition == "checkpoint_unavailable")
     if retain_repair_boots > 0 and thread_ids:
+        # The settlement loop above leaves whatever transaction it last opened;
+        # the prune reads before it deletes, so it takes a fresh one that holds
+        # the write lock from its first statement.
+        await session.commit()
+        await begin_write_transaction(session)
         await prune_repair_journal(
             session,
             thread_ids=thread_ids,

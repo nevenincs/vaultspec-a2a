@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:9c7801b50706a8367e070450b633fabda2288a0e4d2978d9c10719fd35a7e681'
+body_hash: 'sha256:e939d7926dbeb26b879756c42d3125ad93bd1214528d12fcab89693a8a32450b'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -374,6 +374,20 @@ related:
 - `S16` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
 - `S16` `verify:` `pytest src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py` -> `pass`
 - `S16` `by:` `claude`
+- `S15` `M` `src/vaultspec_a2a/acceptance/tests/_harness.py`
+- `S15` `M` `src/vaultspec_a2a/acceptance/tests/conftest.py`
+- `S15` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_credential_boundaries.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_run_admission.py`
+- `S15` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S15` `M` `src/vaultspec_a2a/testing/__init__.py`
+- `S15` `A` `src/vaultspec_a2a/testing/children.py`
+- `S15` `M` `src/vaultspec_a2a/testing/runner.py`
+- `S15` `M` `src/vaultspec_a2a/testing/tests/test_default_safety.py`
+- `S15` `M` `src/vaultspec_a2a/testing/tests/test_runner.py`
+- `S15` `M` `src/vaultspec_a2a/tests/gateway_boot.py`
+- `S15` `verify:` `pytest runner/default_safety/run_admission/credential_boundaries/codex_config_home/gateway_live/dashboard_contract -n 6 --dist=loadgroup under concurrent load` -> `pass`
+- `S15` `by:` `claude`
 
 ## Notes
 

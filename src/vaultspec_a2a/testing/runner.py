@@ -266,12 +266,18 @@ def _teardown_timeout_status(
 ) -> int | None:
     if completion_seen is None or now - completion_seen < timeout_s:
         return None
+    # The interval from the session result to this decision, measured by the
+    # owner itself. It is the only clock that says whether the teardown deadline
+    # or some unrelated wall ended the run, and unlike a caller's wall clock it
+    # excludes interpreter startup and collection - costs that vary by two
+    # orders of magnitude with host load and say nothing about ownership.
+    result_to_exit = now - completion_seen
     context = _timeout_context(process, containment)
     reaped = _terminate(containment, process)
     print(
         "pytest produced a session result but its owned process tree "
         f"did not exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()} "
-        f"{context}",
+        f"result_to_exit={result_to_exit:.3f}s {context}",
         file=sys.stderr,
         flush=True,
     )

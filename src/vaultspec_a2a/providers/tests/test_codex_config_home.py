@@ -11,7 +11,6 @@ import glob
 import inspect
 import os
 import stat
-import subprocess
 import sys
 import tempfile
 import time
@@ -26,6 +25,7 @@ from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
 from ...testing import settings_override
+from ...testing.children import run_child
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs
@@ -41,6 +41,7 @@ from .._config_home_roots import ORPHAN_HOME_MIN_AGE_SECONDS, temp_home_root
 from ..lane_admission import PROVEN_WEB_LANES, is_web_lane_proven
 
 if TYPE_CHECKING:
+    import subprocess
     from collections.abc import Iterator, Sequence
 
     from .._json_contract import JsonObject
@@ -79,7 +80,7 @@ def private_home_root(tmp_path: Path) -> Iterator[Path]:
 def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
     environment["VAULTSPEC_A2A_CODEX_WEB_SEARCH_MODE"] = web_search_mode
-    return subprocess.run(
+    return run_child(
         [
             sys.executable,
             "-c",
@@ -88,11 +89,8 @@ def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[st
                 "print(Settings().codex_web_search_mode)"
             ),
         ],
+        what="the child reading the Codex web-search setting",
         env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
     )
 
 
@@ -106,7 +104,11 @@ def _config_home_parent_from_child(
         environment.pop("VAULTSPEC_A2A_DESKTOP_APP_HOME", None)
     else:
         environment["VAULTSPEC_A2A_DESKTOP_APP_HOME"] = str(app_home)
-    proc = subprocess.run(
+    # Awaited on the child's own progress, not on a wall clock: this child is a
+    # real interpreter importing the provider stack, and what that costs is a
+    # property of the host's current load rather than of the resolution under
+    # proof. A wedged child is still caught - and reaped - by the progress wait.
+    proc = run_child(
         [
             sys.executable,
             "-c",
@@ -121,11 +123,8 @@ def _config_home_parent_from_child(
             ),
             str(base),
         ],
+        what="the child resolving the Codex configuration home",
         env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
     )
     assert proc.returncode == 0, proc.stderr
     return Path(proc.stdout.strip())
@@ -971,7 +970,7 @@ def _override_config_from_child(base: Path, base_url: str | None) -> dict[str, A
         environment.pop("VAULTSPEC_A2A_CODEX_BASE_URL", None)
     else:
         environment["VAULTSPEC_A2A_CODEX_BASE_URL"] = base_url
-    proc = subprocess.run(
+    proc = run_child(
         [
             sys.executable,
             "-c",
@@ -987,11 +986,8 @@ def _override_config_from_child(base: Path, base_url: str | None) -> dict[str, A
             ),
             str(base),
         ],
+        what="the child rendering the Codex configuration file",
         env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=60,
     )
     assert proc.returncode == 0, proc.stderr
     return tomllib.loads(proc.stdout)

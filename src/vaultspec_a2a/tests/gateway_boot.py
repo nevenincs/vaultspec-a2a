@@ -62,6 +62,7 @@ from ..desktop.credentials import (
     OWNERSHIP_CAPABILITY_NAME,
 )
 from ..desktop.profile import derive_state_paths
+from ..testing.children import run_child
 from ..testing.ports import (
     allocate_free_ports,
     hold_for_process_lifetime,
@@ -74,7 +75,10 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "FIRST_DEMAND_TIMEOUT",
+    "LOOPBACK_TIMEOUT",
     "READINESS_TIMEOUT",
+    "WORKER_READY_TIMEOUT",
     "GatewayBootError",
     "armed_gateway_env",
     "await_gateway_ready",
@@ -99,6 +103,28 @@ __all__ = [
 # Sizing the default for the slowest existing boot path costs a passing run
 # nothing, since readiness returns the moment ``/health`` answers.
 READINESS_TIMEOUT = 60.0
+
+# The worker-readiness budget a HARNESS gateway is armed with, and the budget a
+# caller must allow the verb that triggers first demand.
+#
+# The product's own default (30s) is sized for a desktop starting one worker for
+# one user. A harness host is a different machine: several certification stacks,
+# an xdist fan-out, and the suite itself start interpreters at the same moment,
+# and a worker cold start there legitimately runs past a budget that is generous
+# on an idle box. Past it the gateway does not merely answer slowly - it ABANDONS
+# the spawn and reaps the tree, so the next prepare is refused not-ready and
+# every admission proof downstream fails for a reason that is about host load
+# rather than about admission. Both values are applied before a caller's own
+# environment and keyword overrides, so a test ABOUT these budgets still sets
+# its own.
+WORKER_READY_TIMEOUT = 180.0
+FIRST_DEMAND_TIMEOUT = 300.0
+
+# A loopback client budget for a verb that asserts on a RESPONSE rather than on
+# latency. It exists only so a wedged gateway fails the call instead of hanging
+# the session; the per-item pytest-timeout backstop remains the real guard. A
+# test that genuinely measures response time states its own, smaller budget.
+LOOPBACK_TIMEOUT = 60.0
 
 # The larger of the two forked values. This budget is diagnostic only - it caps
 # how much of a dead child's log is quoted into the failure - so the wider tail
@@ -350,6 +376,7 @@ def armed_gateway_env(
     env["VAULTSPEC_A2A_PORT"] = str(gateway_port)
     env["VAULTSPEC_A2A_WORKER_PORT"] = str(worker_port)
     env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true" if auto_spawn_worker else "false"
+    env["VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS"] = f"{WORKER_READY_TIMEOUT:g}"
     if extra:
         env.update(extra)
     return env
@@ -397,13 +424,16 @@ def seed_credentials(app_home: Path, *, attach: str, ownership: str) -> Path:
 
 
 def seat_valid_database(app_home: Path) -> None:
-    """Seat a valid desktop database via the real ``migrate`` entrypoint."""
-    result = subprocess.run(
+    """Seat a valid desktop database via the real ``migrate`` entrypoint.
+
+    Awaited on its own progress rather than on a wall clock: a migration is a
+    real interpreter start plus real schema work, and how long that takes is a
+    property of the host, not of the migration. A child that stops working is
+    still caught, and reaped, by the progress wait.
+    """
+    result = run_child(
         [sys.executable, "-m", _MIGRATE_MODULE, "migrate", "--app-home", str(app_home)],
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
+        what="the desktop database migration",
     )
     if result.returncode != 0:
         raise GatewayBootError(

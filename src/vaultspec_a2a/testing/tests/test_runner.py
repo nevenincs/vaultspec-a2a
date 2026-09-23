@@ -6,10 +6,15 @@ import os
 import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from ..children import (
+    await_child,
+    file_size_fingerprint,
+    measured_child_startup_s,
+    run_child,
+)
 from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 from ..plugin import _send_completion_receipt
 from ..runner import (
@@ -29,27 +34,80 @@ class _RunnerResult(NamedTuple):
     stderr: str
 
 
+def _exit_timeout_s() -> float:
+    """The teardown budget these probes run the owner under.
+
+    DERIVED, not typed. The budget has to exceed what a real pytest teardown and
+    interpreter exit cost on this host RIGHT NOW, and that cost scales with load
+    exactly as a child's startup does - two orders of magnitude between an idle
+    box and a concurrent suite. A literal comfortable on an idle host turns an
+    honest slow exit into the very false exit-124 this module exists to prevent,
+    so the budget is a multiple of the measured cost instead. Every proof below
+    is stated relative to this value rather than to a number.
+
+    The floor keeps an idle host's tiny measurement from producing a budget too
+    small for a real teardown; the ceiling keeps one unlucky measurement from
+    making every proof below wait minutes, since a pytest interpreter that has
+    not exited half a minute after its session result is wedged on any host.
+    """
+    return min(30.0, max(5.0, 6.0 * measured_child_startup_s()))
+
+
+def _result_to_exit_s(stderr: str) -> float:
+    """The owner's OWN measurement of session result to teardown decision.
+
+    The owner reports this interval on its teardown diagnostic. It is the clock
+    the promptness proof needs: a caller's wall clock around the whole child
+    also measures interpreter startup and collection, which are host-load
+    artefacts and say nothing about whether ownership ended at the deadline.
+    """
+    marker = "result_to_exit="
+    index = stderr.find(marker)
+    assert index != -1, f"the owner reported no teardown interval: {stderr}"
+    return float(stderr[index + len(marker) :].split("s", 1)[0])
+
+
+def _readable(path: Path) -> str:
+    """The text written so far, for a stall diagnostic; never itself a failure."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:  # the owner still holds the handle
+        return f"<{path.name} unreadable: {exc}>"
+
+
 def _run_runner(
     probe: Path,
     tmp_path: Path,
     *,
     runner_args: tuple[str, ...] = (),
+    run_timeout_s: float | None = None,
 ) -> _RunnerResult:
+    """Run the owner over *probe* and wait for it on progress, not a wall clock.
+
+    The run timeout is opt-in: only the proof that the owner reaps a resultless
+    run needs one, and imposing a wall clock on the others reproduced the
+    failure mode under test - a loaded host's honest work exceeding a literal
+    budget - as a test failure. The wait itself fails only when the owner tree
+    stops burning CPU and stops writing, so an owner that is merely slow is
+    never killed and a wedged one is reaped with its output attached.
+    """
     stdout_path = tmp_path / "runner.stdout"
     stderr_path = tmp_path / "runner.stderr"
+    timeout_args = (
+        () if run_timeout_s is None else ("--run-timeout", f"{run_timeout_s:g}")
+    )
     with (
         stdout_path.open("w", encoding="utf-8") as stdout,
         stderr_path.open("w", encoding="utf-8") as stderr,
     ):
-        completed = subprocess.run(
+        process = subprocess.Popen(
             [
                 sys.executable,
                 "-m",
                 "vaultspec_a2a.testing.runner",
-                "--run-timeout",
-                "30",
+                *timeout_args,
                 "--exit-timeout",
-                "1",
+                f"{_exit_timeout_s():g}",
                 *runner_args,
                 "--",
                 f"--confcutdir={probe.parent}",
@@ -58,11 +116,15 @@ def _run_runner(
             ],
             stdout=stdout,
             stderr=stderr,
-            timeout=30,
-            check=False,
+        )
+        returncode = await_child(
+            process,
+            what=f"the pytest owner over {probe.name}",
+            fingerprint=file_size_fingerprint(stdout_path, stderr_path),
+            diagnostic=lambda: _readable(stderr_path),
         )
     return _RunnerResult(
-        completed.returncode,
+        returncode,
         stdout_path.read_text(encoding="utf-8"),
         stderr_path.read_text(encoding="utf-8"),
     )
@@ -94,7 +156,7 @@ def test_runner_child_declares_test_environment_before_settings_import(
     child_environment = os.environ.copy()
     child_environment.pop("VAULTSPEC_A2A_ENVIRONMENT", None)
     child_environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
-    child = subprocess.run(
+    child = run_child(
         [
             sys.executable,
             "-m",
@@ -103,12 +165,9 @@ def test_runner_child_declares_test_environment_before_settings_import(
             str(probe),
             "-q",
         ],
+        what="the runner child over the bootstrap probe",
         cwd=Path.cwd(),
         env=child_environment,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
     )
     assert child.returncode == 0, child.stdout + child.stderr
     assert "1 passed" in child.stdout
@@ -116,7 +175,7 @@ def test_runner_child_declares_test_environment_before_settings_import(
     # `just init` provisions the checkout `.env` from `.env.example`, which
     # declares the development environment; the probe must not inherit that
     # declaration or it cannot observe the undeclared, fail-closed state.
-    production = subprocess.run(
+    production = run_child(
         [
             sys.executable,
             "-c",
@@ -129,12 +188,9 @@ def test_runner_child_declares_test_environment_before_settings_import(
             "assert settings.environment_declared is False; "
             "assert verdict.value == 'misconfigured'; print('production-fail-closed')",
         ],
+        what="the undeclared-environment probe",
         cwd=Path.cwd(),
         env=child_environment,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
     )
     assert production.returncode == 0, production.stdout + production.stderr
     assert production.stdout.strip() == "production-fail-closed"
@@ -143,9 +199,18 @@ def test_runner_child_declares_test_environment_before_settings_import(
 def test_runner_reaps_a_process_that_hangs_after_its_passing_result(
     tmp_path: Path,
 ) -> None:
-    probe = Path(__file__).with_name("_runner_exit_probe.py")
+    """The owner reaps a hung teardown AT its deadline, neither early nor late.
 
-    started = time.monotonic()
+    The probe passes and then never exits, so the owner's teardown deadline is
+    the only thing that can end the run - it is given no run timeout at all
+    here. Promptness is read from the owner's own result-to-exit measurement
+    rather than from a wall clock around the child: the caller's clock also
+    contains interpreter startup and collection, which vary with host load and
+    would make this proof pass or fail on how busy the machine is.
+    """
+    probe = Path(__file__).with_name("_runner_exit_probe.py")
+    exit_timeout = _exit_timeout_s()
+
     completed = _run_runner(probe, tmp_path)
 
     assert completed.returncode == TEARDOWN_TIMEOUT_EXIT
@@ -154,7 +219,10 @@ def test_runner_reaps_a_process_that_hangs_after_its_passing_result(
     assert "tree_reaped=true" in completed.stderr
     assert "root_pid=" in completed.stderr
     assert "owned_pids=" in completed.stderr
-    assert time.monotonic() - started < 15
+    # Never early: the owner waited out the whole teardown budget before
+    # reaping. Never late: it acted on that budget, not on some other wall.
+    result_to_exit = _result_to_exit_s(completed.stderr)
+    assert exit_timeout <= result_to_exit < 2 * exit_timeout + 10, completed.stderr
 
 
 def test_nested_pytest_process_cannot_complete_its_parent_receipt() -> None:
@@ -226,16 +294,25 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
 
     The miniature child deliberately rebinds the former owner variable to its
     own PID, but the real runner child has already scrubbed the endpoint before
-    pytest can spawn it. The outer test remains active longer than the
-    one-second teardown budget, so a leaked nested completion channel would
-    recreate the canonical false exit-124 failure.
+    pytest can spawn it. The outer test then remains active for twice the
+    teardown budget, so a leaked nested completion channel would start the
+    owner's teardown clock early and recreate the canonical false exit-124
+    failure.
+
+    The hold is expressed as a multiple of the budget rather than as a literal
+    sleep, and the nested session is bounded by its own progress rather than by
+    a wall clock: the three interpreters this starts cost a hundred milliseconds
+    on an idle host and seconds on a loaded one, and a literal that spans both
+    does not exist.
     """
+    exit_timeout = _exit_timeout_s()
     outer = tmp_path / "test_nested_xdist_receipt.py"
     outer.write_text(
         "import os\n"
         "import subprocess\n"
         "import sys\n"
         "import time\n"
+        "from vaultspec_a2a.testing.children import await_child\n"
         "from vaultspec_a2a.testing.harness_names import COMPLETION_ENDPOINT_ENV\n"
         "\n"
         "def test_nested_xdist_cannot_finish_outer(tmp_path):\n"
@@ -251,15 +328,19 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
         "    (nested / 'test_inner.py').write_text(\n"
         "        'def test_one():\\n    assert True\\n'\n"
         "    )\n"
-        "    completed = subprocess.run(\n"
-        "        [sys.executable, '-m', 'pytest', str(nested), '-p',\n"
-        "         'vaultspec_a2a.testing.plugin', '-p', 'no:cacheprovider',\n"
-        "         '-n', '2', '--dist=loadgroup', '-q'],\n"
-        "        cwd=nested, env=dict(os.environ), capture_output=True, text=True,\n"
-        "        timeout=30, check=False,\n"
-        "    )\n"
-        "    assert completed.returncode == 0, completed.stdout + completed.stderr\n"
-        "    time.sleep(1.2)\n",
+        "    log = tmp_path / 'nested.log'\n"
+        "    with log.open('wb') as handle:\n"
+        "        nested_run = subprocess.Popen(\n"
+        "            [sys.executable, '-m', 'pytest', str(nested), '-p',\n"
+        "             'vaultspec_a2a.testing.plugin', '-p', 'no:cacheprovider',\n"
+        "             '-n', '2', '--dist=loadgroup', '-q'],\n"
+        "            cwd=nested, env=dict(os.environ),\n"
+        "            stdout=handle, stderr=subprocess.STDOUT,\n"
+        "        )\n"
+        "        returncode = await_child(nested_run, what='the nested xdist run')\n"
+        "    output = log.read_text(encoding='utf-8', errors='replace')\n"
+        "    assert returncode == 0, output\n"
+        f"    time.sleep({2 * exit_timeout:g})\n",
         encoding="utf-8",
     )
 
@@ -302,7 +383,7 @@ def test_runner_reports_progress_before_a_session_result(tmp_path: Path) -> None
 def test_runner_reaps_a_run_without_a_session_result(tmp_path: Path) -> None:
     probe = Path(__file__).with_name("_runner_progress_probe.py")
 
-    completed = _run_runner(probe, tmp_path, runner_args=("--run-timeout", "0.1"))
+    completed = _run_runner(probe, tmp_path, run_timeout_s=0.1)
 
     assert completed.returncode == RUN_TIMEOUT_EXIT
     assert "did not produce a session result" in completed.stderr

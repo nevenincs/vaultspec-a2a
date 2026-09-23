@@ -19,6 +19,14 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .children import (
+        DEFAULT_IDLE_WINDOW_S,
+        await_child,
+        child_tree_progress,
+        file_size_fingerprint,
+        measured_child_startup_s,
+        run_child,
+    )
     from .endpoints import (
         ResolvedService,
         resolve_gateway_url,
@@ -85,6 +93,12 @@ if TYPE_CHECKING:
 
 
 _LAZY_EXPORTS = {
+    "DEFAULT_IDLE_WINDOW_S": (".children", "DEFAULT_IDLE_WINDOW_S"),
+    "await_child": (".children", "await_child"),
+    "child_tree_progress": (".children", "child_tree_progress"),
+    "file_size_fingerprint": (".children", "file_size_fingerprint"),
+    "measured_child_startup_s": (".children", "measured_child_startup_s"),
+    "run_child": (".children", "run_child"),
     "ResolvedService": (".endpoints", "ResolvedService"),
     "resolve_gateway_url": (".endpoints", "resolve_gateway_url"),
     "resolve_service": (".endpoints", "resolve_service"),
@@ -156,6 +170,7 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "CPU_BUDGET_ENV",
+    "DEFAULT_IDLE_WINDOW_S",
     "IMPURE_FIXTURES",
     "LEASE_TTL_MS",
     "MARKER_NAME",
@@ -179,9 +194,12 @@ __all__ = [
     "apply_layer_markers",
     "armed_desktop_app_home",
     "armed_environment",
+    "await_child",
+    "child_tree_progress",
     "declared_claims",
     "effective_worker_count",
     "exclusive_keys",
+    "file_size_fingerprint",
     "forfeits_purity",
     "free_port",
     "hold_for_process_lifetime",
@@ -189,6 +207,7 @@ __all__ = [
     "lease_home",
     "live_peer_sessions",
     "machine_cpu_budget",
+    "measured_child_startup_s",
     "plant_link_to_file",
     "register_session",
     "registry_watch",
@@ -198,6 +217,7 @@ __all__ = [
     "resolve_service",
     "resolve_spec",
     "resolve_worker_url",
+    "run_child",
     "session_scratch_dir",
     "settings_override",
     "uses_impure_fixture",

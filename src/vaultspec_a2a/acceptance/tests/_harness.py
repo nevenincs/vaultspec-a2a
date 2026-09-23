@@ -42,6 +42,7 @@ from ...testing.tests._support.catalog_selection import (
     in_process_selection,
 )
 from ...tests.gateway_boot import (
+    FIRST_DEMAND_TIMEOUT,
     GatewayBootError,
     armed_gateway_env,
     gateway_script,
@@ -182,11 +183,37 @@ class CertifiedGateway:
 
     # -- versioned run-start verb (prepare / start / release) ------------------
 
+    def warm_first_demand(self) -> None:
+        """Pay the gateway-owned worker's cold start at ARM time, then free it.
+
+        First demand is the prepare that finds no worker: it triggers the spawn
+        and waits for a new interpreter to import the worker stack and answer.
+        Left inside the first scenario's verb, that cost lands inside the very
+        admission window the scenarios reason about, and a stack booting on a
+        loaded host then fails a readiness-gated prepare for a reason that has
+        nothing to do with the contract under certification. The reservation is
+        released immediately, so each scenario still meets the stack's full
+        bounded capacity.
+        """
+        run_id = "run-first-demand-warmup"
+        prepared = self.prepare(run_id)
+        if prepared.status_code != 201:
+            raise GatewayBootError(
+                f"the certification stack refused its warm-up prepare: "
+                f"{prepared.status_code} {prepared.text}"
+            )
+        released = self.release(run_id, prepared.json()["reservation_id"])
+        if released.status_code != 201:
+            raise GatewayBootError(
+                f"the certification stack could not release its warm-up "
+                f"reservation: {released.status_code} {released.text}"
+            )
+
     def prepare(
         self, run_id: str, *, team_preset: str = DEFAULT_TEAM_PRESET
     ) -> httpx.Response:
         """Reserve a bounded admission slot for *run_id* (readiness-gated)."""
-        with self.client(timeout=90.0) as client:
+        with self.client(timeout=FIRST_DEMAND_TIMEOUT) as client:
             return client.post(
                 "/v1/runs",
                 json={
@@ -228,7 +255,7 @@ class CertifiedGateway:
         message: str = "certify the assembled product",
     ) -> httpx.Response:
         """Drive the one-shot ``start`` stage: create and dispatch in one call."""
-        with self.client(timeout=90.0) as client:
+        with self.client(timeout=FIRST_DEMAND_TIMEOUT) as client:
             return client.post(
                 "/v1/runs",
                 json={
@@ -349,12 +376,14 @@ def certified_gateway(
         raise
 
     try:
-        yield CertifiedGateway(
+        running = CertifiedGateway(
             base_url=base,
             attach_token=attach_token,
             app_home=app_home,
             workspace_root=workspace_root,
         )
+        running.warm_first_demand()
+        yield running
     finally:
         reap_gateway(proc)
         log_handle.close()

@@ -605,6 +605,60 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     assert len(latest_tuple_reads) == 1, latest_tuple_reads
 
 
+async def _await_probe_backed_ready(
+    client: httpx.AsyncClient,
+    *,
+    path: str,
+    is_ready: Callable[[JsonObject], bool],
+    what: str,
+    idle_window_s: float = 60.0,
+) -> JsonObject:
+    """Read *path* until its LIVE probe reports the stack ready; return that body.
+
+    These readiness fields are probe-derived: the gateway asks the worker over
+    real HTTP inside a bounded budget, and a probe that does not answer inside it
+    is reported as indeterminate rather than as an observation of absence. On a
+    loaded host the very first probe can fall on the wrong side of that budget,
+    which is a fact about the host and not about the readiness model. Waiting for
+    the probe to settle keeps what these scenarios prove - readiness becomes true
+    with a real worker present, and is served truthfully on each surface - while
+    dropping a dependence on whether one probe won one race. The window is a
+    last-resort give-up bound, not the proof: a stack that is genuinely not ready
+    never satisfies *is_ready* and fails with its last body attached.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + idle_window_s
+    body: JsonObject = {}
+    while True:
+        response = await client.get(path)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        if is_ready(body):
+            return body
+        if loop.time() >= deadline:
+            raise AssertionError(f"{what} never became probe-ready; last: {body}")
+        await asyncio.sleep(0.1)
+
+
+def _health_worker_status(body: JsonObject) -> object:
+    """The worker check's status inside the ungated readiness aggregate."""
+    checks = body.get("checks")
+    if not isinstance(checks, dict):
+        return None
+    worker = checks.get("worker")
+    return worker.get("status") if isinstance(worker, dict) else None
+
+
+async def _await_service_worker_ready(client: httpx.AsyncClient) -> JsonObject:
+    """The service-state body once its worker probe has settled on ready."""
+    return await _await_probe_backed_ready(
+        client,
+        path="/v1/service",
+        is_ready=lambda body: body.get("worker_ready") is True,
+        what="service-state worker readiness",
+    )
+
+
 @asynccontextmanager
 async def _live_server(app: FastAPI) -> AsyncGenerator[str]:
     """Serve *app* on an ephemeral port and yield its base URL."""
@@ -677,9 +731,7 @@ async def _exercise_five_verbs(
     assert pbody["api_version"] == "v1"
     assert any(p["id"] == _PRESET for p in pbody["presets"])
 
-    service = await client.get("/v1/service")
-    assert service.status_code == 200
-    sbody = service.json()
+    sbody = await _await_service_worker_ready(client)
     assert sbody["api_version"] == "v1"
     # Status is probe-derived, not hardcoded: the in-process worker /health,
     # real DB, and real checkpointer all answer, so the service is ready.
@@ -1143,9 +1195,7 @@ async def test_service_state_is_probe_backed_and_distinguishes_readiness(
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        resp = await client.get("/v1/service")
-        assert resp.status_code == 200
-        body = resp.json()
+        body = await _await_service_worker_ready(client)
 
         # Versions, identity, capacity.
         assert body["service_version"]
@@ -2165,12 +2215,15 @@ async def test_pairing_identity_is_authenticated_surface_only(
         # The ungated probe surface, serving the unarmed full body rather than a
         # liveness stub, so the absences asserted against it are absences from a
         # payload that demonstrably carries the rest of the probe's findings.
-        health = await client.get("/health")
-        assert health.status_code == 200
-        hbody = health.json()
+        hbody = await _await_probe_backed_ready(
+            client,
+            path="/health",
+            is_ready=lambda body: _health_worker_status(body) == "ok",
+            what="the ungated readiness aggregate's worker probe",
+        )
         assert hbody["service"] == "gateway", hbody
         assert "checks" in hbody, hbody
-        assert hbody["checks"]["worker"]["status"] == "ok", hbody
+        assert _health_worker_status(hbody) == "ok", hbody
         assert "worker_status" in hbody, hbody
         assert "worker_paired_gateway_lifetime" not in hbody, hbody
         assert "worker_reported_generation" not in hbody, hbody
@@ -2179,9 +2232,7 @@ async def test_pairing_identity_is_authenticated_surface_only(
         # Served here, off the very same probe path that produced the two
         # bodies above: the difference is the authentication boundary, not the
         # availability of the evidence.
-        service = await client.get("/v1/service")
-        assert service.status_code == 200
-        sbody = service.json()
+        sbody = await _await_service_worker_ready(client)
         assert isinstance(sbody["gateway_lifetime_id"], str)
         assert sbody["gateway_lifetime_id"].strip(), sbody
         assert sbody["worker_ready"] is True, sbody

@@ -31,6 +31,7 @@ from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
 )
 from ..tests.gateway_boot import (
+    LOOPBACK_TIMEOUT,
     armed_gateway_env,
     gateway_script,
     reap_gateway,
@@ -154,7 +155,12 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
         worker_ipc = (credentials_dir / "worker-ipc.cred").read_text(encoding="utf-8")
         assert worker_ipc and worker_ipc not in (_ATTACH, _OWNERSHIP)
 
-        with httpx.Client(base_url=base, timeout=5.0) as client:
+        # Budgeted for a REPLY, not for promptness: every assertion below is
+        # about which credential a plane accepts, and none is about latency.
+        # Five seconds was a latency assertion by accident - a loaded host made
+        # the gateway answer these authenticated reads more slowly, and the
+        # isolation proof failed on a read timeout that proved nothing.
+        with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
             _assert_credential_planes(client, app_home, worker_ipc)
 
         # --- The process logs never printed a secret ---

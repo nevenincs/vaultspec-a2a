@@ -16,11 +16,11 @@ provider, live in the Compose service suite.
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from ...testing.progress import ProgressDeadline, ProgressStalledError, wait_for
 from ...thread.enums import TERMINAL_STATUS_VALUES
 from ._harness import CertifiedGateway, certified_gateway
 
@@ -47,19 +47,40 @@ def wait_for_run_status(
     timeout: float = 90.0,
     interval: float = 0.5,
 ) -> dict[str, Any]:
-    """Poll ``/v1/runs/{run_id}`` until *predicate* holds; return that snapshot."""
-    deadline = time.monotonic() + timeout
+    """Poll ``/v1/runs/{run_id}`` until *predicate* holds; return that snapshot.
+
+    The wait fails when the run STOPS MOVING, not when it takes a while: a
+    snapshot whose status or checkpoint cursor differs from the last one counts
+    as progress and renews the window, so *timeout* bounds a SILENCE rather than
+    the whole run. A real run on a loaded host is slow in a way no fixed total
+    budget can be written for; a wedged one repeats one snapshot and fails after
+    a single window with that snapshot attached.
+    """
     last: dict[str, Any] | None = None
-    while time.monotonic() < deadline:
+
+    def _poll() -> dict[str, Any] | None:
+        nonlocal last
         response = gateway.status(run_id)
-        if response.status_code == 200:
-            last = response.json()
-            if last is not None and predicate(last):
-                return last
-        time.sleep(interval)
-    raise AssertionError(
-        f"run {run_id} never satisfied the awaited status predicate; last: {last}"
-    )
+        if response.status_code != 200:
+            return None
+        last = response.json()
+        return last if last is not None and predicate(last) else None
+
+    def _fingerprint() -> object:
+        return None if last is None else (last.get("status"), last.get("last_sequence"))
+
+    try:
+        return wait_for(
+            _poll,
+            deadline=ProgressDeadline(idle_window_s=timeout),
+            fingerprint=_fingerprint,
+            interval_s=interval,
+        )
+    except ProgressStalledError as stalled:
+        raise AssertionError(
+            f"run {run_id} never satisfied the awaited status predicate; "
+            f"last: {last} ({stalled})"
+        ) from stalled
 
 
 def wait_for_terminal(

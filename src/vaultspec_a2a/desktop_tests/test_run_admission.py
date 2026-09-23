@@ -27,7 +27,6 @@ every child is reaped in a ``finally`` by killing the gateway process tree.
 from __future__ import annotations
 
 import json
-import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -36,7 +35,10 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from ..testing.progress import ProgressDeadline, wait_for
 from ..tests.gateway_boot import (
+    FIRST_DEMAND_TIMEOUT,
+    LOOPBACK_TIMEOUT,
     armed_gateway_env,
     gateway_script,
     reap_gateway,
@@ -109,8 +111,15 @@ def _running_gateway(
 
 
 @contextmanager
-def _armed_gateway(tmp_path: Path, **extra_env: str) -> Generator[tuple[str, str]]:
-    """Seat and boot a real armed desktop gateway over a migrated app home."""
+def _armed_gateway(
+    tmp_path: Path, *, warm_first_demand: bool = True, **extra_env: str
+) -> Generator[tuple[str, str]]:
+    """Seat and boot a real armed desktop gateway over a migrated app home.
+
+    *warm_first_demand* is opt-out for the one scenario whose subject IS the
+    unready worker: there, a successful warm-up is not a precondition but the
+    negation of what the scenario proves.
+    """
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
@@ -124,7 +133,33 @@ def _armed_gateway(tmp_path: Path, **extra_env: str) -> Generator[tuple[str, str
         # is not the place to discover the catalog for the first time.
         base, auth = gateway
         catalog_selection(base, auth, str(Path.cwd()))
+        if warm_first_demand:
+            _warm_first_demand(base, auth)
         yield gateway
+
+
+def _warm_first_demand(base: str, auth: str) -> None:
+    """Pay the gateway-owned worker's cold start at ARM time, then free the slot.
+
+    First demand is the prepare that finds no worker: it triggers the spawn and
+    waits for the new interpreter to import the worker stack and answer. That
+    cost belongs to nobody's reservation. Left inside a scenario's first
+    prepare, it runs INSIDE the admission window the scenarios then reason
+    about - a reservation whose time-to-live is spent waiting for a process to
+    boot, and a commit budget spent the same way - so every timing property
+    proven downstream became a property of how fast the host boots an
+    interpreter. Warming here is also what the product does at arm time.
+
+    The warm-up prepare is released immediately, so the bounded capacity each
+    scenario reasons about is exactly the capacity it was configured with.
+    """
+    run_id = "run-first-demand-warmup"
+    status, prepared = _prepare(base, auth, run_id=run_id)
+    assert status == 201, prepared
+    released_status, released = _release(
+        base, auth, prepared["reservation_id"], run_id=run_id
+    )
+    assert released_status == 201 and released["released"] is True, released
 
 
 def _prepare(
@@ -140,7 +175,7 @@ def _prepare(
     readiness, so parallel calls model concurrent first demand.
     """
     workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
-    with httpx.Client(base_url=base, timeout=60.0) as client:
+    with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
         resp = client.post(
             "/v1/runs",
             headers={"Authorization": auth},
@@ -174,7 +209,7 @@ def _commit(
     roles = options.roles if options is not None else None
     metadata = options.metadata if options is not None else None
     workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
-    with httpx.Client(base_url=base, timeout=60.0) as client:
+    with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
         resp = client.post(
             "/v1/runs",
             headers={"Authorization": auth},
@@ -224,7 +259,7 @@ def _release(
     reservation it cannot recognise.
     """
     workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
-    with httpx.Client(base_url=base, timeout=60.0) as client:
+    with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
         resp = client.post(
             "/v1/runs",
             headers={"Authorization": auth},
@@ -241,20 +276,30 @@ def _release(
     return resp.status_code, resp.json()
 
 
+def _admitted_prepare(base: str, auth: str, run_id: str) -> int | None:
+    """Fire one prepare; return its status once admitted, ``None`` while refused.
+
+    A capacity refusal consumes nothing, so polling this neither holds a slot
+    nor disturbs the bound it is waiting on.
+    """
+    status, _body = _prepare(base, auth, run_id=run_id)
+    return status if status != 503 else None
+
+
 def _run_exists(base: str, auth: str, run_id: str) -> bool:
     """Return whether the gateway has a durable run under *run_id*.
 
     Uses run-status, which returns a run whether it is still active or already
     terminal - robust against a fast mock run completing before the check.
     """
-    with httpx.Client(base_url=base, timeout=10.0) as client:
+    with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
         resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": auth})
     return resp.status_code == 200
 
 
 def _active_run_count(base: str, auth: str) -> int:
     """Return the number of active (non-terminal) runs the gateway discovers."""
-    with httpx.Client(base_url=base, timeout=10.0) as client:
+    with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
         resp = client.get("/v1/runs", headers={"Authorization": auth})
     assert resp.status_code == 200, resp.text
     return len(resp.json()["runs"])
@@ -341,11 +386,21 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
 def test_reservation_times_out_and_expired_commit_creates_no_run(
     tmp_path: Path,
 ) -> None:
-    """An uncommitted reservation expires, freeing capacity; expired commit refused."""
+    """An uncommitted reservation expires, freeing capacity; expired commit refused.
+
+    The configured lifetime has to outlive the FILL - three prepare round-trips
+    against a real gateway - or the proof inverts: the third prepare finds a
+    slot the first reservation has already vacated, is admitted, and the refusal
+    this test exists to observe never happens. Three seconds was shorter than
+    the round-trips themselves once the suite ran concurrently. It is still far
+    below the product default, so the expiry under proof is still the
+    configured one and not the product's.
+    """
+    ttl_s = 20.0
     with _armed_gateway(
         tmp_path,
         VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2",
-        VAULTSPEC_A2A_ADMISSION_RESERVATION_TTL_SECONDS="3",
+        VAULTSPEC_A2A_ADMISSION_RESERVATION_TTL_SECONDS=f"{ttl_s:g}",
     ) as (base, auth):
         # Fill the bound: two reservations, then a third refused.
         first_status, first_body = _prepare(base, auth, run_id="run-expiring-first")
@@ -358,11 +413,17 @@ def test_reservation_times_out_and_expired_commit_creates_no_run(
         assert third_status == 503, third_status
         assert _active_run_count(base, auth) == 0
 
-        # Wait past the reservation time-to-live: the uncommitted slots expire.
-        time.sleep(5.0)
-
-        # Capacity is free again - a fresh prepare is admitted.
-        fourth_status, _ = _prepare(base, auth, run_id="run-expiring-fourth")
+        # Capacity comes back by EXPIRY, observed rather than slept for: keep
+        # asking for a slot until one is granted. A refusal costs no capacity,
+        # so the admitted attempt is the fourth reservation and the evidence
+        # that the first one's slot was released without any commit. The wait
+        # is bounded by a multiple of the configured lifetime - the product's
+        # own number - because expiry cannot take longer than that plus a poll.
+        fourth_status = wait_for(
+            lambda: _admitted_prepare(base, auth, "run-expiring-fourth"),
+            deadline=ProgressDeadline(idle_window_s=ttl_s * 3),
+            interval_s=0.5,
+        )
         assert fourth_status == 201, fourth_status
 
         # A commit against the now-expired first reservation is refused and creates
@@ -425,7 +486,7 @@ def _assert_exact_replay_and_release(
     assert len({body["run_id"] for body in bodies}) == 1
     assert len({body["lease_id"] for body in bodies}) == 1
 
-    with httpx.Client(base_url=base, timeout=10.0) as client:
+    with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
         response = client.get(f"/v1/runs/{run_id}", headers={"Authorization": auth})
     assert response.status_code == 200, response.text
     assert response.json()["lease_id"] == bodies[0]["lease_id"]
@@ -495,7 +556,9 @@ def test_prepare_refuses_when_real_worker_is_not_execution_ready(
     tmp_path: Path,
 ) -> None:
     """A cold externally managed worker yields no reservation or durable run."""
-    with _armed_gateway(tmp_path, VAULTSPEC_A2A_AUTO_SPAWN_WORKER="false") as (
+    with _armed_gateway(
+        tmp_path, warm_first_demand=False, VAULTSPEC_A2A_AUTO_SPAWN_WORKER="false"
+    ) as (
         base,
         auth,
     ):
@@ -580,7 +643,7 @@ def test_gateway_restart_recovers_durable_lease_and_exact_commit_replay(
         base,
         auth,
     ):
-        with httpx.Client(base_url=base, timeout=10.0) as client:
+        with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
             status_response = client.get(
                 f"/v1/runs/{run_id}", headers={"Authorization": auth}
             )

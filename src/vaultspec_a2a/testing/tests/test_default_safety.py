@@ -106,22 +106,44 @@ def test_effective_worker_count_splits_the_budget_across_peers() -> None:
 def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
     """While one session is live, a second distributed run reduces its workers.
 
-    The first real pytest session registers and parks; the second, launched
-    with a pinned four-core budget, must report one live peer and admit
-    itself with two workers instead of four. Read from the second run's own
-    report header - the operator-visible surface.
+    The first real pytest session registers and PARKS UNTIL RELEASED; the
+    second, launched with a pinned four-core budget, must report one live peer
+    and admit itself with two workers instead of four. Read from the second
+    run's own report header - the operator-visible surface.
+
+    The holder is held by an observed condition, not by a fixed sleep. What the
+    proof requires is that the holder's session lease outlive the second run's
+    admission, and how long that takes is a property of the host: booting four
+    xdist workers costs a moment on an idle box and tens of seconds under a
+    concurrent suite. A sleep long enough for the loaded case is dead time in
+    every other run, and one short enough to be cheap silently inverts the
+    proof - the holder exits first, the second run sees no peer, and the
+    assertion below fails for a reason that has nothing to do with admission.
     """
     home = tmp_path / "procs"
     suite = tmp_path / "suite"
     suite.mkdir()
+    release_file = tmp_path / "release-the-holder"
+    # The cap is a safety net against an orphaned holder - a parent killed
+    # between the spawn and its `finally` - and never the mechanism: the parent
+    # releases this holder the moment the second session has been observed.
     (suite / "test_hold.py").write_text(
-        "import time\n\ndef test_hold() -> None:\n    time.sleep(20)\n"
+        "import os\n"
+        "import time\n"
+        "from pathlib import Path\n"
+        "\n"
+        "def test_hold() -> None:\n"
+        "    release = Path(os.environ['VAULTSPEC_A2A_TEST_HOLD_RELEASE'])\n"
+        "    deadline = time.monotonic() + 900\n"
+        "    while not release.exists() and time.monotonic() < deadline:\n"
+        "        time.sleep(0.1)\n"
     )
     (suite / "test_quick.py").write_text("def test_quick() -> None:\n    pass\n")
     env = dict(os.environ)
     env.pop("PYTEST_ADDOPTS", None)
     env["VAULTSPEC_A2A_PROCS_HOME"] = str(home)
     env["VAULTSPEC_A2A_TEST_CPU_BUDGET"] = "4"
+    env["VAULTSPEC_A2A_TEST_HOLD_RELEASE"] = str(release_file)
     holder = subprocess.Popen(
         [
             sys.executable,
@@ -147,16 +169,34 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
     )
     try:
         # The holder's session marker appears once its configure ran.
+        from ..children import child_tree_progress, run_child
         from ..leases import live_shared_holder_count
-        from ..progress import ProgressDeadline, wait_for
+        from ..progress import LivenessWatch, ProgressDeadline, wait_for
 
-        deadline = ProgressDeadline(idle_window_s=30.0)
+        # The holder's own work is the progress signal, so a cold pytest boot on
+        # a loaded host is never mistaken for a holder that failed to register.
+        # A holder that EXITED fails the wait within one interval instead, since
+        # its marker can no longer appear.
+        deadline = ProgressDeadline(
+            idle_window_s=30.0,
+            watches=(
+                LivenessWatch(
+                    label="the holding pytest session",
+                    verdict=lambda: (
+                        None
+                        if holder.poll() is None
+                        else f"the holder exited with {holder.returncode}"
+                    ),
+                ),
+            ),
+        )
         wait_for(
             lambda: live_shared_holder_count(SESSION_LEASE_KEY, home=home) or None,
             deadline=deadline,
+            fingerprint=lambda: child_tree_progress(holder.pid),
             interval_s=0.25,
         )
-        second = subprocess.run(
+        second = run_child(
             [
                 sys.executable,
                 "-m",
@@ -175,13 +215,14 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
                 "4",
                 "--dist=loadgroup",
             ],
+            what="the second, degraded-admission pytest session",
             cwd=suite,
             env=env,
-            capture_output=True,
-            text=True,
-            timeout=180,
         )
     finally:
+        # Released before the kill so the holder ends the way a session ends -
+        # unconfigure, lease release - rather than only under a signal.
+        release_file.write_text("released", encoding="utf-8")
         holder.kill()
         holder.wait(timeout=60)
     assert second.returncode == 0, second.stdout + second.stderr

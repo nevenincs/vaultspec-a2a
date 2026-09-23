@@ -711,6 +711,8 @@ async def _run_commit_locked(
     existing = await get_thread(db, run_id)
     if existing is not None:
         return await _commit_replay(existing, body, broker, reservation_id)
+    # Not held across the live worker probe below.
+    await db.rollback()
     canonical_body, commit_digest = await _prepare_commit_eligibility(
         request, body, runtime, reservation_id
     )

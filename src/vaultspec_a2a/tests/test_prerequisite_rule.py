@@ -273,6 +273,10 @@ def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
             "pytest",
             "-p",
             "vaultspec_a2a.conftest",
+            # This run loads no session seat of its own, so its temporary trees
+            # are placed under this test's directory explicitly.
+            "--basetemp",
+            str(tmp_path / "nested-basetemp"),
             "--require-prerequisite=codex-cli",
             "-ra",
             str(target),

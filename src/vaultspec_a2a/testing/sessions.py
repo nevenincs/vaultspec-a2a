@@ -30,12 +30,14 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+from ..control.settings_base import env_name
 from .leases import (
     Lease,
     LeaseAcquisitionTimeoutError,
     acquire,
     live_shared_holder_count,
 )
+from .session_root import TestSessionSettings
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -55,7 +57,7 @@ SESSION_LEASE_KEY = "pytest-session"
 # Operator override: the number of cores this run may assume are its own.
 # Explicit and environment-driven, per the strict production policy; when set
 # it replaces the sampled load estimate entirely.
-CPU_BUDGET_ENV = "VAULTSPEC_TEST_CPU_BUDGET"
+CPU_BUDGET_ENV = env_name(TestSessionSettings, "cpu_budget")
 
 # Registration must never wedge a run: admission is throughput bookkeeping,
 # not a correctness gate, so a contended session key (which would take a
@@ -137,16 +139,13 @@ def _sampled_load_percent() -> int | None:
 
 def _explicit_cpu_budget() -> int | None:
     """The operator's declared machine core budget for test work, or ``None``."""
-    override = (os.environ.get(CPU_BUDGET_ENV) or "").strip()
-    if override.isdigit() and int(override) > 0:
-        return int(override)
-    return None
+    return TestSessionSettings().cpu_budget
 
 
 def machine_cpu_budget() -> int:
     """The whole-machine core budget test work may divide among sessions.
 
-    The operator's explicit ``VAULTSPEC_TEST_CPU_BUDGET`` wins outright; else
+    The operator's explicit ``VAULTSPEC_A2A_TEST_CPU_BUDGET`` wins outright; else
     the plain core count. Deliberately NOT load-discounted: the peer division
     in :func:`effective_worker_count` accounts for peer sessions, and folding
     an instantaneous load sample (which already includes those peers' own

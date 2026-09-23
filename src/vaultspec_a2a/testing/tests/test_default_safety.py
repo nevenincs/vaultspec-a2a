@@ -121,7 +121,7 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
     env = dict(os.environ)
     env.pop("PYTEST_ADDOPTS", None)
     env["VAULTSPEC_A2A_PROCS_HOME"] = str(home)
-    env["VAULTSPEC_TEST_CPU_BUDGET"] = "4"
+    env["VAULTSPEC_A2A_TEST_CPU_BUDGET"] = "4"
     holder = subprocess.Popen(
         [
             sys.executable,

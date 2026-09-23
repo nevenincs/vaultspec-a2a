@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:3dc4e53fa61fed5ad91af69e01456b4dfd8ea873a30b751182caa55ae1a87129'
+body_hash: 'sha256:c7db4f41a753d631c10be08bf6682d9a9fe7914729bb7af983ce10aa5c31292d'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -253,4 +253,16 @@ related:
 - `S05` `M` `src/vaultspec_a2a/providers/_config_home_roots.py`
 - `S05` `M` `src/vaultspec_a2a/utils/logging.py`
 - `S05` `verify:` `phase-close review corrections: pytest control, database, lifecycle, utils, codex config home, dev/tests -n 4: 1397 passed; git-status seal test against a real repository; storage-anchor gate exit 0` -> `pass`
+- `S08` `M` `conftest.py`
+- `S08` `M` `src/vaultspec_a2a/testing/plugin.py`
+- `S08` `M` `src/vaultspec_a2a/testing/runner.py`
+- `S08` `M` `src/vaultspec_a2a/testing/runner_child.py`
+- `S08` `A` `src/vaultspec_a2a/testing/session_root.py`
+- `S08` `M` `src/vaultspec_a2a/testing/sessions.py`
+- `S08` `M` `src/vaultspec_a2a/testing/tests/test_default_safety.py`
+- `S08` `M` `src/vaultspec_a2a/testing/tests/test_scheduling_evidence.py`
+- `S08` `A` `src/vaultspec_a2a/testing/tests/test_session_root.py`
+- `S08` `M` `src/vaultspec_a2a/tests/test_prerequisite_rule.py`
+- `S08` `verify:` `pytest testing/tests, tests/ -n 3 unpinned (97 passed), test_session_root 5 passed, test_project_root; no writes to ~/.vaultspec-a2a or ~/.vaultspec and basetemp inside the seat` -> `pass`
+- `S08` `by:` `claude`
 

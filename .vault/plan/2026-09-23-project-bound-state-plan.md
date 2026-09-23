@@ -11,7 +11,7 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:03632a74653cecc6189795094a8db4cca984c2fa81475a3cf066d657ad9364f5'
+body_hash: 'sha256:c179db7590a187c09207e326754986a7e6fcac4ba6403e267c144f1d488c79ca'
 ---
 
 # `project-bound-state` plan
@@ -53,7 +53,7 @@ One layout derivation places all a2a state under the project-bound home and ever
 
 Every test session, script and generator writes only inside an ignored worktree location with a unique per-session root.
 
-- [ ] `P03.S08` - Give every pytest session a unique worktree root holding basetemp, state home and process registry; `src/vaultspec_a2a/testing/`.
+- [x] `P03.S08` - Give every pytest session a unique worktree root holding basetemp, state home and process registry; `src/vaultspec_a2a/testing/`.
 - [ ] `P03.S09` - Remove test and tooling leaks into the profile and OS temp and close ignore gaps; `src/vaultspec_a2a/`.
 
 ### Phase `P04` - Deployment and cross-repo contract

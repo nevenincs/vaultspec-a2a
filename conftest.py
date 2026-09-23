@@ -61,6 +61,14 @@ os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
 os.environ.setdefault("OTEL_TRACES_EXPORTER", "none")
 os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
 
+# SEAT the session inside this worktree, also before `pytest_plugins` imports the
+# settings singleton: the state home, the process registry and pytest's own
+# basetemp all land under the ignored `.pytest-tmp/`, never in the user profile
+# or the system temporary directory. See vaultspec_a2a.testing.session_root.
+from vaultspec_a2a.testing.session_root import seat_test_session
+
+seat_test_session(Path(__file__).resolve().parent)
+
 pytest_plugins = ("vaultspec_a2a.testing.plugin",)
 
 

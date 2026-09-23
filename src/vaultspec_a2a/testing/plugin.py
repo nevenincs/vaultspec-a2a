@@ -85,12 +85,12 @@ def _send_completion_message(
 
 def _send_completion_receipt(exitstatus: int, *, endpoint: str | None = None) -> None:
     """Notify the containing runner that pytest has produced its result."""
-    from .runner import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
+    from .session_root import TestSessionSettings
 
     if endpoint is None:
-        endpoint = os.environ.get(COMPLETION_ENDPOINT_ENV)
-        owner_pid = os.environ.get(COMPLETION_OWNER_PID_ENV)
-        if not endpoint or owner_pid != str(os.getpid()):
+        harness = TestSessionSettings()
+        endpoint = harness.completion_endpoint
+        if not endpoint or harness.completion_owner_pid != os.getpid():
             return
     _send_completion_message(endpoint, "complete", exitstatus)
 
@@ -107,6 +107,24 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             file=sys.stderr,
             flush=True,
         )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_cmdline_main(config: pytest.Config) -> None:
+    """Seat pytest's own temporary trees inside this session's seat.
+
+    The seat is private to this controller: a second concurrent session, or a
+    nested run a test starts, gets its own and can never clear this one's, and
+    nothing lands in the system temporary directory. It has to be decided here,
+    before any ``pytest_configure``, because the tmpdir plugin reads
+    ``--basetemp`` during its own configure. xdist hands each worker a directory
+    beneath it; an explicit ``--basetemp`` still wins.
+    """
+    if hasattr(config, "workerinput") or config.option.basetemp is not None:
+        return
+    from .session_root import seat_test_session
+
+    config.option.basetemp = str(seat_test_session(config.rootpath).basetemp)
 
 
 @pytest.hookimpl(trylast=True)

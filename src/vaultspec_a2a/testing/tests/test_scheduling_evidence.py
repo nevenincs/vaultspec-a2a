@@ -145,7 +145,7 @@ def test_contended_pair_serializes_and_disjoint_groups_run_concurrently(
             # Pin the admission budget: this proof NEEDS its two workers, and
             # on a loaded box the capacity-derived count would rightly degrade
             # them away. The explicit operator budget is the sanctioned knob.
-            "VAULTSPEC_TEST_CPU_BUDGET": "8",
+            "VAULTSPEC_A2A_TEST_CPU_BUDGET": "8",
         },
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr

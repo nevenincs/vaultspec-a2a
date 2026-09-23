@@ -2,7 +2,7 @@
 
 import json
 import logging
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
@@ -15,6 +15,7 @@ from .settings_base import (
     env_name,
     resolve_project_root,
 )
+from .state_layout import DEFAULT_HOME
 
 __all__ = [
     "DEFAULT_MOCK_API_BASE",
@@ -23,8 +24,6 @@ __all__ = [
     "INTERNAL_TOKEN_ENV",
     "WORKER_URL_ENV",
     "InfraConfig",
-    "_is_absolute_path",
-    "_require_absolute_sqlite_path",
     "_synchronous_url",
     "_warn_seating_discard",
 ]
@@ -37,10 +36,6 @@ __all__ = [
 _INSTALL_ROOT: Path = (
     Path(__file__).resolve().parent.parent.parent.parent  # storage-anchor-ok
 )
-# Machine-global A2A home for runtime state.  Kept outside the repo and
-# outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
-_DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
-
 # Canonical service-endpoint defaults. This module is the ONE home for every
 # production host:port literal; consumers import these rather than repeating
 # the value, and each remains environment-overridable at its point of use
@@ -120,43 +115,6 @@ def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> N
     )
 
 
-def _is_absolute_path(raw: str) -> bool:
-    """Return whether ``raw`` is absolute under either path convention.
-
-    These settings name paths on the DEPLOYMENT host, which is not necessarily the
-    host validating them: a Windows workstation legitimately reads a container
-    configuration naming ``/app/data``, and ``pathlib`` there calls that relative.
-    Accepting either convention keeps the check aimed at the hazard — a path
-    resolved against whatever working directory the process inherited — rather than
-    at the validating machine's operating system.
-    """
-    return PurePosixPath(raw).is_absolute() or PureWindowsPath(raw).is_absolute()
-
-
-def _require_absolute_sqlite_path(url: str, *, setting: str) -> None:
-    """Reject a SQLite URL whose file path is working-directory relative.
-
-    Call only for a store whose RESOLVED backend is sqlite. A Postgres URL's path
-    component names a database on a server rather than a file, so it has no
-    absoluteness to check; ``:memory:`` names no file either. Neither can be
-    relocated by a working directory, so neither carries the hazard.
-
-    Assumes the URL already parses — the synchronous-derivation validator runs
-    first and refuses anything that does not.
-    """
-    from sqlalchemy.engine.url import make_url
-
-    database = make_url(url).database
-    if database is None or database == ":memory:" or _is_absolute_path(database):
-        return
-
-    msg = (
-        f"{setting} must be absolute. A relative URL resolves against the process "
-        "working directory, so the gateway and CLI can silently open different files."
-    )
-    raise ValueError(msg)
-
-
 def _valid_kimi_capability(token: str) -> bool:
     return (
         len(token) <= 64
@@ -210,9 +168,8 @@ class InfraConfig(ProjectSettings):
         description=(
             "SQLAlchemy async database URL.  Must match the selected "
             "database_backend scheme (sqlite+aiosqlite or postgresql+asyncpg).  "
-            "Left unset, the bare file name above is anchored to a2a_home, so "
-            "the store is ~/.vaultspec-a2a/vaultspec.db rather than a "
-            "launch-relative file."
+            "Left unset, the store is state/vaultspec.db in the state home. A "
+            "relative SQLite path resolves against the project root."
         ),
     )
     checkpoint_database_url: str | None = Field(
@@ -288,13 +245,14 @@ class InfraConfig(ProjectSettings):
         ),
     )
     a2a_home: Path = Field(
-        default_factory=lambda: _DEFAULT_A2A_HOME,
+        default=DEFAULT_HOME,
         alias="VAULTSPEC_A2A_HOME",
         description=(
-            "Machine-global A2A home for runtime state (process logs, graph "
-            "cache, queues, tmp) and the service discovery file.  Defaults to "
-            "~/.vaultspec-a2a.  Relocated out of .vault/ because "
-            "vaultspec firmware rejects foreign directories inside the vault."
+            "State home: the databases, logs, discovery record and its handoff "
+            "credential, the process registry and per-run provider homes. "
+            "Defaults to .vault/data/agents in the project root, the runtime "
+            "subtree vaultspec ignores and never walks. A relative value "
+            "resolves against the project root."
         ),
     )
     capsule_assets_root: Path | None = Field(

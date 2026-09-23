@@ -109,8 +109,15 @@ def is_absolute_path(raw: str) -> bool:
     Storage settings name paths on the DEPLOYMENT host, which is not always the
     host validating them: a Windows workstation legitimately reads a container
     configuration naming ``/app/data``, and ``pathlib`` there calls that relative.
+    A rooted path without a drive (``\\app\\data``, which is how a ``Path`` built
+    from ``/app/data`` prints on Windows) is absolute for the same reason.
     """
-    return PurePosixPath(raw).is_absolute() or PureWindowsPath(raw).is_absolute()
+    windows = PureWindowsPath(raw)
+    return (
+        PurePosixPath(raw.replace("\\", "/")).is_absolute()
+        or windows.is_absolute()
+        or bool(windows.root)
+    )
 
 
 def resolve_against(root: Path, value: Path | str) -> Path:

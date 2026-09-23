@@ -11,7 +11,7 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:d3b40d82687f72d38c4695db870d652d8c609a1e461d3fe8b1ea1ed8be167256'
+body_hash: 'sha256:1f33f583d440c9af923730d395f07c0d30a9acc2f746dec78f95215d7db9384f'
 ---
 
 # `project-bound-state` plan
@@ -45,7 +45,7 @@ One settings module owns every a2a variable under VAULTSPEC_A2A_, resolves the p
 
 One layout derivation places all a2a state under the project-bound home and every writer resolves its location through it.
 
-- [ ] `P02.S05` - Derive one state layout for default and desktop homes, default the home to .vault/data/agents, and resolve relative storage paths against the project root; `src/vaultspec_a2a/control/`.
+- [x] `P02.S05` - Derive one state layout for default and desktop homes, default the home to .vault/data/agents, and resolve relative storage paths against the project root; `src/vaultspec_a2a/control/`.
 - [ ] `P02.S06` - Route logs, discovery, singleton, process registry, worker-log sweep, provider temp homes and engine discovery through the layout; `src/vaultspec_a2a/`.
 - [ ] `P02.S07` - Align start, serve, setup and migrate on the single layout; `src/vaultspec_a2a/cli/`.
 

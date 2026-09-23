@@ -89,7 +89,8 @@ def test_an_explicit_database_url_discarded_by_seating_is_reported(
     messages = _warnings(caplog)
     assert len(messages) == 1, messages
     assert "VAULTSPEC_A2A_DATABASE_URL" in messages[0]
-    assert supplied in messages[0]
+    # Reported as the value it resolved to, so the operator sees which file lost.
+    assert "operator-chosen.db" in messages[0]
     assert state.database_path.as_posix() in messages[0]
 
     # The precedence itself is unchanged: the desktop derivation still wins.

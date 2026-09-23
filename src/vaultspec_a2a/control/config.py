@@ -21,12 +21,11 @@ from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment
 from .infra_config import (
     InfraConfig,
-    _is_absolute_path,
-    _require_absolute_sqlite_path,
     _synchronous_url,
     _warn_seating_discard,
 )
-from .settings_base import ENV_PREFIX, env_name
+from .settings_base import ENV_PREFIX, env_name, is_absolute_path, resolve_against
+from .state_layout import StateLayout, state_layout
 
 __all__ = [
     "Settings",
@@ -53,6 +52,16 @@ class Settings(DomainSettingsConfig, InfraConfig):
         extra="ignore",
         env_ignore_empty=True,
     )
+
+    # The fields a source actually supplied, captured before any validator below
+    # assigns one: an assignment marks a field as set, after which a configured
+    # value and a derived one are indistinguishable.
+    _configured_fields: frozenset[str] = PrivateAttr(default=frozenset())
+
+    @model_validator(mode="after")
+    def _record_configured_fields(self) -> Self:
+        self._configured_fields = frozenset(self.model_fields_set)
+        return self
 
     @model_validator(mode="after")
     def _separate_gateway_and_worker_credentials(self) -> Self:
@@ -86,6 +95,41 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return self
 
     @model_validator(mode="after")
+    def _resolve_against_project_root(self) -> Self:
+        """Resolve every relative path setting against the project root.
+
+        One rule for every path setting, operator-supplied or defaulted: an
+        absolute value is taken as is, and a relative one is joined onto the
+        project root - never onto the working directory, which is how two
+        processes of one project would otherwise open two different stores.
+        The state home's own default is the relative ``.vault/data/agents``, so
+        it lands in the project by the same rule a relative override does.
+
+        Runs before the desktop seating, which derives from the application home
+        and therefore needs it absolute first.
+        """
+        root = self.project_root
+        self.a2a_home = resolve_against(root, self.a2a_home)
+        self.install_root = resolve_against(root, self.install_root)
+        for field in (
+            "desktop_app_home",
+            "capsule_assets_root",
+            "workspace_root",
+            "procs_home",
+            "procs_toml",
+            "engine_service_json",
+        ):
+            value = getattr(self, field)
+            if value is not None:
+                setattr(self, field, resolve_against(root, value))
+        self.database_url = _resolve_sqlite_url(root, self.database_url)
+        if self.checkpoint_database_url is not None:
+            self.checkpoint_database_url = _resolve_sqlite_url(
+                root, self.checkpoint_database_url
+            )
+        return self
+
+    @model_validator(mode="after")
     def _seat_desktop_profile(self) -> Self:
         """Seat every mutable path under the explicit desktop application home.
 
@@ -98,7 +142,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         from the application home through the desktop profile's single derivation
         authority, so no mutable path resolves relative to the launch directory.
         That derivation outranks an explicitly configured value by design; when it
-        actually displaces one, it says so. ``model_fields_set`` distinguishes a
+        actually displaces one, it says so. ``_configured_fields`` distinguishes a
         genuinely supplied value from an untouched default, so an unconfigured boot
         stays silent rather than emitting noise every operator learns to ignore.
         """
@@ -115,8 +159,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
             f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
         )
 
-        # Read before any assignment below: assigning a field marks it as set.
-        explicit = self.model_fields_set
+        explicit = self._configured_fields
         if "a2a_home" in explicit:
             _warn_seating_discard("VAULTSPEC_A2A_HOME", self.a2a_home, state.app_home)
         if "workspace_root" in explicit:
@@ -165,99 +208,42 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return self
 
     @model_validator(mode="after")
-    def _anchor_and_require_absolute_paths(self) -> Self:
-        """Anchor unset mutable paths, then refuse any that stayed relative.
+    def _place_default_stores(self) -> Self:
+        """Put the stores nobody configured into the state home's layout.
 
-        A working-directory-relative store is a silent split-brain: the gateway and
-        the CLI resolve the same configured value against different directories and
-        open different files, each convinced it holds the whole picture. The ruling
-        is to fail loud rather than resolve quietly, so an explicitly supplied
-        relative value is rejected and never rewritten.
+        Left unset, the application database and the checkpoint store are two
+        files under ``<state home>/state``, the same layout the desktop profile
+        and ``start`` use, so every entrypoint opens the same pair. A configured
+        database URL with no checkpoint URL keeps the one-store arrangement it
+        always had: the checkpoint store follows the configured database.
 
-        The shipped database DEFAULT was itself relative, and
-        ``settings = Settings()`` runs at module import — rejecting it would make
-        the package unimportable on a fresh checkout. So a default the operator
-        never touched is anchored instead, which keeps the store in one place
-        without the working-directory dependence. ``model_fields_set`` separates
-        the two cases.
-
-        The anchor is ``a2a_home``, NOT ``install_root``. Two reasons, and the
-        second is the decisive one:
-
-        * ``install_root`` defaults to a ``__file__``-derived constant. In a
-          non-editable install that constant resolves into the Python library
-          directory, so anchoring there writes the default store to
-          ``.../lib/vaultspec.db`` — inside the interpreter's own tree, where an
-          upgrade or a reinstall discards it.
-        * The schema is already built for ONE machine-global store. Runs are
-          partitioned by ``threads.workspace_key``, hashed from the per-run
-          ``metadata.workspace_root`` the caller supplies, and the ``0008``/``0009``
-          migrations backfill and index on exactly that column. A per-checkout
-          database fragments that partitioned store across as many files as there
-          happen to be checkouts. ``a2a_home`` is where the machine-global runtime
-          state already lives — process logs, the discovery ``service.json`` — so
-          the database joins its own kind rather than founding a third convention.
-
-        ORDERING: declared after ``_seat_desktop_profile``, which replaces every
-        mutable path with an absolute derived from the application home. Run before
-        it — or as a field validator, which fires earlier still — and every armed
-        desktop boot would be rejected on the relative default it was about to
-        discard. ``cli.service`` injects absolute URLs into the child environment for
-        the same reason, and those arrive as explicitly-set values that pass here
-        untouched.
+        Configured means supplied by a source, as recorded before any validator
+        assigned a field. The armed desktop profile seats both stores itself, so
+        this leaves an armed profile's stores alone.
         """
-        # ``as_posix`` before the check, never ``str``: a container path arriving on
-        # a Windows host is a ``WindowsPath`` whose ``str`` uses backslashes, which
-        # neither pure flavour then reads as absolute.
-        if not _is_absolute_path(self.a2a_home.as_posix()):
-            msg = (
-                "VAULTSPEC_A2A_HOME must be absolute: it anchors the default "
-                "database location and every runtime-state directory."
-            )
-            raise ValueError(msg)
-        if not _is_absolute_path(self.install_root.as_posix()):
-            msg = (
-                "VAULTSPEC_A2A_INSTALL_ROOT must be absolute: shipped assets are "
-                "resolved against it."
-            )
-            raise ValueError(msg)
+        configured = self._configured_fields
+        layout = self.state_layout
+        if self.desktop_profile_armed:
+            return self._check_backends()
+        if "database_url" not in configured:
+            self.database_url = _sqlite_url(layout.database_path)
+            if "checkpoint_database_url" not in configured:
+                self.checkpoint_database_url = _sqlite_url(layout.checkpoint_path)
+        return self._check_backends()
 
-        explicit = self.model_fields_set
-        if "database_url" not in explicit:
-            anchored = (self.a2a_home / "vaultspec.db").as_posix()
-            self.database_url = f"sqlite+aiosqlite:///{anchored}"
-
-        # Resolving the backends here is load-bearing twice over. It raises when a
-        # declared backend and its URL disagree — the synchronous admin engines
-        # built from these values have no other validation seam — and it decides
-        # which stores carry a filesystem path at all, since only a SQLite store
-        # can be relocated by a working directory. Reading it here rather than in
-        # the sync-URL properties keeps that enforcement at boot and out of a
-        # discarded binding a later cleanup would take for dead code.
-        if self.resolved_database_backend == "sqlite":
-            _require_absolute_sqlite_path(
-                self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL"
-            )
-        if (
-            self.checkpoint_database_url is not None
-            and self.resolved_checkpoint_backend == "sqlite"
-        ):
-            _require_absolute_sqlite_path(
-                self.checkpoint_database_url,
-                setting="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
-            )
-        # Nothing to anchor: the field carries no default to repair, so a value
-        # here is always one an operator or the desktop seating actually supplied.
-        if self.workspace_root is not None and not _is_absolute_path(
-            self.workspace_root.as_posix()
-        ):
-            msg = (
-                "VAULTSPEC_A2A_WORKSPACE_ROOT must be absolute. A relative path "
-                "resolves against the process working directory, so the gateway "
-                "and CLI can silently open different directories."
-            )
-            raise ValueError(msg)
+    def _check_backends(self) -> Self:
+        # Resolving the backends here raises when a declared backend and its URL
+        # disagree, which the synchronous admin engines built from these values
+        # have no other seam to catch.
+        _ = self.resolved_database_backend
+        if self.checkpoint_database_url is not None:
+            _ = self.resolved_checkpoint_backend
         return self
+
+    @property
+    def state_layout(self) -> StateLayout:
+        """Every mutable path a2a writes, derived from the state home."""
+        return state_layout(self.a2a_home)
 
     @property
     def registry_home(self) -> Path:
@@ -480,6 +466,38 @@ class Settings(DomainSettingsConfig, InfraConfig):
             )
         if problems:
             raise ValueError("; ".join(problems))
+
+
+def _sqlite_url(path: Path) -> str:
+    return f"sqlite+aiosqlite:///{path.as_posix()}"
+
+
+def _resolve_sqlite_url(root: Path, url: str) -> str:
+    """Return ``url`` with a relative SQLite file path resolved against ``root``.
+
+    Anything that is not a relative SQLite file - a server URL, an in-memory
+    store, an absolute path, an unparseable value - is returned unchanged; the
+    synchronous-derivation validator reports an unparseable one.
+    """
+    from sqlalchemy.engine.url import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        parsed = make_url(url)
+    except ArgumentError:
+        return url
+    database = parsed.database
+    if (
+        parsed.get_backend_name() != "sqlite"
+        or not database
+        or database == ":memory:"
+        or is_absolute_path(database)
+    ):
+        return url
+    resolved = resolve_against(root, database)
+    return parsed.set(database=resolved.as_posix()).render_as_string(
+        hide_password=False
+    )
 
 
 def setting_env(field: str) -> str:

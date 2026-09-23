@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import ValidationError
 
 from ..control.config import Settings
 from ..desktop.profile import (
@@ -115,44 +114,48 @@ def test_state_is_invariant_under_capsule_relocation(tmp_path: Path) -> None:
     assert after.capsule_assets_root != before.capsule_assets_root
 
 
-def test_relative_app_home_is_refused_when_armed(tmp_path: Path) -> None:
-    """A launch-directory-relative application home is refused when arming."""
+def test_a_relative_app_home_is_resolved_before_the_profile_sees_it(
+    tmp_path: Path,
+) -> None:
+    """The profile itself still refuses a relative home; settings never hand one.
+
+    Settings resolve a relative application home against the project root before
+    the desktop profile derives from it, so the profile's own refusal is the
+    guard for callers that bypass settings.
+    """
     capsule = _build_capsule(tmp_path / "capsule")
 
     with pytest.raises(DesktopProfileError, match="absolute"):
         DesktopProfile.resolve(Path("relative/app"), capsule)
 
-    with (
-        _armed_env("relative/app", str(capsule)),
-        pytest.raises(ValidationError, match="absolute"),
-    ):
-        Settings()
+    with _armed_env("relative/app", str(capsule)):
+        armed = Settings()
+    assert armed.a2a_home == armed.project_root / "relative" / "app"
 
 
-def test_a_launch_relative_database_url_is_refused(tmp_path: Path) -> None:
-    """A relative database URL is rejected rather than resolved per launch dir.
+def test_a_relative_database_url_names_one_file_from_any_launch_folder(
+    tmp_path: Path,
+) -> None:
+    """A relative database URL resolves against the project root.
 
-    This asserted the opposite: that an unarmed profile KEPT its launch-relative
-    form, and that the same URL read from two directories yielded two different
-    files. That behaviour is exactly the hazard the settings validator now
-    refuses - the gateway and the CLI resolve against their own working
-    directories, so one relative URL silently becomes two databases and each
-    process is certain it holds the only one.
-
-    The refusal is the contract now, so the drift the old test pinned as
-    expected is what this one proves impossible. Both launch directories are
-    still exercised, because the defect only ever showed itself as a difference
-    between two of them.
+    The defect this guards only ever showed itself as a difference between two
+    launch folders - the gateway and the CLI each opening their own file - so
+    both are exercised, and both must name the same file inside the project.
     """
     launch_a = tmp_path / "launch-a"
     launch_b = tmp_path / "launch-b"
     launch_a.mkdir()
     launch_b.mkdir()
 
+    resolved = []
     for launch in (launch_a, launch_b):
-        with _working_directory(launch), pytest.raises(ValidationError) as raised:
-            Settings(database_url="sqlite+aiosqlite:///vaultspec.db")
-        assert "must be absolute" in str(raised.value)
+        with _working_directory(launch):
+            resolved.append(
+                Settings(database_url="sqlite+aiosqlite:///vaultspec.db").database_path
+            )
+
+    assert resolved[0] == resolved[1]
+    assert not resolved[0].is_relative_to(launch_a.resolve())
 
 
 def test_discovery_path_matches_the_discovery_authority(tmp_path: Path) -> None:

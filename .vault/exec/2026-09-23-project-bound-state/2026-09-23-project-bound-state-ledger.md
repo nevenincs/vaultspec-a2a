@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:a5af47b7325cd429b67ab4cf197c934b4ee57972f2879f581d11730bdaf67d8c'
+body_hash: 'sha256:031a6797ace16dc2c46134a7084a3d2226b4407f7439ed2ff1fe7fa39304d801'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -191,4 +191,17 @@ related:
 - `S04` `M` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
 - `S04` `verify:` `pytest control/tests/test_env_example_coverage.py (8 passed, both directions, both example files)` -> `pass`
 - `S04` `by:` `claude`
+- `S05` `M` `.env.example`
+- `S05` `M` `src/vaultspec_a2a/control/config.py`
+- `S05` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S05` `M` `src/vaultspec_a2a/control/settings_base.py`
+- `S05` `A` `src/vaultspec_a2a/control/state_layout.py`
+- `S05` `D` `src/vaultspec_a2a/control/tests/test_absolute_path_requirement.py`
+- `S05` `M` `src/vaultspec_a2a/control/tests/test_desktop_profile_seating.py`
+- `S05` `M` `src/vaultspec_a2a/control/tests/test_desktop_seating_discard_warning.py`
+- `S05` `A` `src/vaultspec_a2a/control/tests/test_storage_paths.py`
+- `S05` `M` `src/vaultspec_a2a/desktop/profile.py`
+- `S05` `M` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
+- `S05` `verify:` `pytest control, desktop_tests, database, cli, utils, desktop -n 8: all failures timeouts under host load; the 14 re-ran green at -n 3 except one readiness test that passes alone; test_storage_paths 16 passed` -> `pass`
+- `S05` `by:` `claude`
 

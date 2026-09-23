@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
+from ..control.state_layout import state_layout
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -39,15 +41,6 @@ __all__ = [
     "DesktopStatePaths",
     "derive_state_paths",
 ]
-
-# The gateway discovery record filename. This mirrors the canonical placement owned
-# by ``lifecycle.discovery.service_json_path`` (``<app_home>/service.json``). It is
-# restated here as a leaf constant so ``derive_state_paths`` — which the settings
-# profile calls from a model validator while ``control.config`` is still being
-# constructed — never imports the lifecycle/HTTP stack, which would close a circular
-# import back through ``control.config``. ``test_profile_paths`` guards the two names
-# against drift.
-_DISCOVERY_RECORD_FILENAME = "service.json"
 
 logger = logging.getLogger(__name__)
 
@@ -273,26 +266,12 @@ class DesktopStatePaths:
         )
 
 
-def _discovery_path(app_home: Path) -> Path:
-    """Return the gateway discovery record path for ``app_home``.
-
-    Uses the leaf ``_DISCOVERY_RECORD_FILENAME`` constant rather than importing the
-    discovery authority, so this stays callable from the settings model validator
-    during ``control.config`` construction without closing an import cycle. The
-    placement mirrors ``lifecycle.discovery.service_json_path``; a guard test keeps
-    the two in sync.
-    """
-    return app_home / _DISCOVERY_RECORD_FILENAME
-
-
 def derive_state_paths(app_home: Path) -> DesktopStatePaths:
     """Derive the explicit mutable-state layout from an explicit application home.
 
-    This is the single authority for the desktop application-home layout. The
-    seated paths mirror the operative ``a2a_home`` derivation (runtime logs under
-    ``a2a_home/runtime``, the discovery ``service.json`` at the root) so the
-    profile describes where state actually lands; the reserved paths fix the
-    layout their future consumers will bind. ``app_home`` must be an absolute path
+    The layout itself is :func:`~vaultspec_a2a.control.state_layout.state_layout`,
+    the one shape every state home takes; this adds the desktop profile's
+    refusal of a relative application home. ``app_home`` must be an absolute path
     so that no mutable path can resolve relative to the launch directory.
 
     Raises:
@@ -303,19 +282,18 @@ def derive_state_paths(app_home: Path) -> DesktopStatePaths:
             f"desktop application home must be an absolute path, got {app_home!r}; "
             "the desktop profile forbids launch-directory-relative state roots."
         )
-    home = Path(os.path.normpath(app_home))
-    state = home / "state"
+    layout = state_layout(app_home)
     return DesktopStatePaths(
-        app_home=home,
-        database_path=state / "vaultspec.db",
-        checkpoint_path=state / "checkpoints.db",
-        logs_dir=home / "runtime",
-        discovery_path=_discovery_path(home),
-        workspaces_root=home / "workspaces",
-        credentials_dir=home / "credentials",
-        receipts_dir=home / "receipts",
-        temp_homes_dir=home / "tmp" / "homes",
-        snapshots_dir=home / "snapshots",
+        app_home=layout.home,
+        database_path=layout.database_path,
+        checkpoint_path=layout.checkpoint_path,
+        logs_dir=layout.logs_dir,
+        discovery_path=layout.discovery_path,
+        workspaces_root=layout.workspaces_root,
+        credentials_dir=layout.credentials_dir,
+        receipts_dir=layout.receipts_dir,
+        temp_homes_dir=layout.temp_homes_dir,
+        snapshots_dir=layout.snapshots_dir,
     )
 
 

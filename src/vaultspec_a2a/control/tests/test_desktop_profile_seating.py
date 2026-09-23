@@ -11,9 +11,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-import pytest
-from pydantic import ValidationError
-
 from ...control.config import Settings
 from ...desktop.profile import derive_state_paths
 from ...testing import armed_environment
@@ -63,13 +60,14 @@ def test_armed_database_path_round_trips_to_app_home_seat(tmp_path: Path) -> Non
     assert armed.database_path.is_relative_to(app_home)
 
 
-def test_armed_profile_rejects_relative_app_home() -> None:
-    """A launch-directory-relative application home fails construction loudly."""
-    with (
-        _armed_env("relative/app-home"),
-        pytest.raises(ValidationError, match="absolute"),
-    ):
-        Settings()
+def test_armed_profile_resolves_a_relative_app_home_against_the_project() -> None:
+    """A relative application home joins the project root, not the launch folder."""
+    with _armed_env("relative/app-home"):
+        armed = Settings()
+
+    home = armed.project_root / "relative" / "app-home"
+    assert armed.a2a_home == home
+    assert armed.database_path.is_relative_to(home)
 
 
 def test_unarmed_profile_leaves_paths_untouched(tmp_path: Path) -> None:

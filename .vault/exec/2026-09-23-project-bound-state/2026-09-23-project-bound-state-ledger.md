@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:d6ea53d6576b751dd9f7002672b86f809731193b813f085d3a1522e2e7b16761'
+body_hash: 'sha256:80cf06a57db6a00e7d336cca7a045d256c9a5999321434e3aed50b9629f62bd1'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -415,3 +415,5 @@ related:
 
 - `S11` Dashboard change implemented and verified in Y:/code/vaultspec-dashboard-worktrees/a2a-project-bound-state (branch a2a-project-bound-state): cargo test -p vaultspec-api and -p vaultspec-product, clippy -D warnings, fmt, tsc and eslint clean. Not committed: that repository's unscoped vault-fix pre-commit hook fails on 63 pre-existing errors in unrelated features. Skipping a hook needs the owner's authorization; the Step stays open.
 - `S11` Committed in vaultspec-dashboard branch a2a-project-bound-state: 3e446503 (vault backlog cleared, 0 errors), fe764e7f (engine discovery + product launcher), b2664aeb (agent E2E harness). cargo test -p vaultspec-api/-p vaultspec-product, clippy -D warnings, fmt, tsc, eslint pass. The live E2E lane was not run.
+- `S13` The seal-ownership correction from the P05 plan-close review (control/state_layout.py, control/config.py, control/tests/test_state_seal.py, the ADR amendment, docs/operations.rst) was committed in 2da505ee together with the S15 corrections: its own commit attempt failed a hook and left the paths staged. Its path rows are therefore recorded under S15.
+

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:9ec9e79a41e3f53b996ad92d0fcb13d12c192d2ebc5dbc693f75f8dfede088bb'
+body_hash: 'sha256:b9f0a8a62a52aaa28166320854007ffa3eaa3f1162b919fe289f79969d045888'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -233,3 +233,7 @@ Resolved in S09: every sentinel now exits 0 (`check-type-strict`, `check-complex
 ### s09-republished-names | medium | the S09 module splits left moved names published from their old modules | resolved
 
 Type: architecture rule regression, caught by the whole-tree run of `7b148012`. `tests/test_export_declaration_homes.py` enforces that a module publishes only names it declares; `control/thread_service.py` still listed `list_threads_service` and `lifecycle/manager.py` still listed `LifecycleError`, `render_command`, and `render_env` in `__all__` after those moved to `control/thread_listing.py`, `lifecycle/errors.py`, and `lifecycle/boot.py`. Both modules now keep only the imports they use, and every importer - the `lifecycle` facade, `lifecycle/engine_serve.py`, `cli/main.py`, `api/routes/_gateway_read_endpoints.py`, and the affected tests - imports from the declaring module. The same run's other failures were load: `worker/tests/test_state_projection_timeout_knob.py` passes in isolation, and the live gateway and desktop tests were re-run on their own.
+
+### windows-service-state-deadline | medium | service-state overruns its five-second client budget on Windows while the checkpointer is held | open
+
+Type: pre-existing platform defect, found by the S09 whole-tree run and not caused by this feature. `api/tests/test_gateway_live.py::test_service_state_deadline_returns_degraded_for_locked_real_checkpointer` fails on this Windows host on every run, and identically on `aa1d5034`, the commit before this session's work, checked out in a separate worktree; the Linux Full Validation runs pass it. With the checkpointer lock held, `control/health.py` `_checkpoint_health_check` times out at its 3-second deadline as designed (logged `checkpoint probe timed out`), yet the client's 5-second read deadline still fires, so another of the three concurrent probes in `build_full_health` outlives its own deadline on Windows. `api/routes/_gateway_action_endpoints.py` `service_state_endpoint` awaits nothing after `build_full_health`. The likely candidates are the database task (`_database_health_check`, whose journal-mode probe opens an engine connection) and the worker probe; per-probe timing on a Windows host is the next evidence. The other ten live, desktop and acceptance failures in that run passed on isolated reruns and were load, not regressions.

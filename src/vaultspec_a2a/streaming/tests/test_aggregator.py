@@ -23,6 +23,7 @@ from ...graph.enums import (
 from ...graph.events import (
     AgentStatus,
     ArtifactUpdate,
+    DomainEvent,
     ErrorOccurred,
     MessageChunk,
     PermissionRequest,
@@ -136,7 +137,7 @@ async def test_cancel_during_post_read_callback_drops_event(
         on_graph_started=cancel_after_read,
     )
     assert outcome == ThreadStatus.CANCELLED
-    frames = []
+    frames: list[DomainEvent] = []
     while not queue.empty():
         frames.append(queue.get_nowait().event)
     # Agent lifecycle emission also publishes its authoritative team projection.

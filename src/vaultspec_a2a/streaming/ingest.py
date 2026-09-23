@@ -176,6 +176,23 @@ def summarize_ingest_exception(exc: BaseException) -> str:
     return f"Graph event stream failed unexpectedly: {describe_exception_chain(exc)}"
 
 
+def _pending_graph_started_signal(
+    cancelled: bool,
+    cancel_event: asyncio.Event,
+    on_graph_started: Callable[[], Awaitable[None]] | None,
+) -> bool:
+    """Whether this event is the one that should fire the started callback."""
+    return not cancelled and not cancel_event.is_set() and on_graph_started is not None
+
+
+def _finalized_outcome(outcome: str, interrupt_emitted: bool, span: Any) -> str:
+    """Fold a state-observed interrupt into the outcome that already completed."""
+    if outcome == ThreadStatus.COMPLETED and interrupt_emitted:
+        span.set_attribute("interrupted_via_state", True)
+        return "interrupted"
+    return outcome
+
+
 def _resolve_provider_condition(exc: BaseException) -> ProviderCondition:
     """Read the provider condition off an uncaught ingest exception's chain.
 
@@ -317,6 +334,48 @@ class IngestManager:
     # LangGraph graph ingest (research Â§1.3)
     # ------------------------------------------------------------------
 
+    async def _next_ingest_event(
+        self,
+        event_stream: AsyncIterator[dict[str, Any]],
+        cancel_event: asyncio.Event,
+        stall_timeout: float,
+    ) -> tuple[dict[str, Any] | None, bool, bool]:
+        """Return ``(raw_event, cancelled, exhausted)`` for one loop iteration.
+
+        ``exhausted`` is set only on a genuine end of stream (not a
+        cancellation racing it), which is the caller's cue to end the ingest
+        loop as a normal completion rather than a cancellation.
+        """
+        try:
+            raw_event, cancelled = await _next_event_or_cancel(
+                event_stream, cancel_event, stall_timeout=stall_timeout
+            )
+        except StopAsyncIteration:
+            if not cancel_event.is_set():
+                return None, False, True
+            return None, True, False
+        return raw_event, cancelled, False
+
+    async def _handle_ingest_cancellation(
+        self,
+        event_stream: AsyncIterator[dict[str, Any]],
+        thread_id: str,
+        agent_id: str,
+        span: Any,
+    ) -> None:
+        close = getattr(event_stream, "aclose", None)
+        if close is not None:
+            await close()
+        logger.info("Ingest cancelled for thread %s", thread_id)
+        span.set_attribute("cancelled", True)
+        await self._emitters.emit_agent_status(
+            thread_id=thread_id,
+            agent_id=agent_id,
+            node_name="supervisor",
+            state=AgentLifecycleState.CANCELLED,
+            detail="Terminated by user",
+        )
+
     async def ingest(self, request: IngestRequest) -> str:
         """Start consuming ``astream_events`` from a compiled graph.
 
@@ -352,37 +411,22 @@ class IngestManager:
                     self._emitters, self._buffering, self._telemetry
                 )
                 while True:
-                    try:
-                        raw_event, cancelled = await _next_event_or_cancel(
-                            event_stream,
-                            cancel_event,
-                            stall_timeout=stall_timeout,
-                        )
-                    except StopAsyncIteration:
-                        if not cancel_event.is_set():
-                            break
-                        raw_event, cancelled = None, True
-                    if (
-                        not cancelled
-                        and not cancel_event.is_set()
-                        and on_graph_started is not None
+                    raw_event, cancelled, exhausted = await self._next_ingest_event(
+                        event_stream, cancel_event, stall_timeout
+                    )
+                    if exhausted:
+                        break
+                    if _pending_graph_started_signal(
+                        cancelled, cancel_event, on_graph_started
                     ):
+                        assert on_graph_started is not None
                         await on_graph_started()
                         on_graph_started = None
                     if cancelled or cancel_event.is_set():
-                        close = getattr(event_stream, "aclose", None)
-                        if close is not None:
-                            await close()
-                        logger.info("Ingest cancelled for thread %s", thread_id)
-                        _outcome = ThreadStatus.CANCELLED
-                        span.set_attribute("cancelled", True)
-                        await self._emitters.emit_agent_status(
-                            thread_id=thread_id,
-                            agent_id=agent_id,
-                            node_name="supervisor",
-                            state=AgentLifecycleState.CANCELLED,
-                            detail="Terminated by user",
+                        await self._handle_ingest_cancellation(
+                            event_stream, thread_id, agent_id, span
                         )
+                        _outcome = ThreadStatus.CANCELLED
                         break
                     if raw_event is None:
                         raise RuntimeError("event read completed without an event")
@@ -403,9 +447,7 @@ class IngestManager:
                 interrupt_emitted = await emit_interrupt_events(
                     thread_id, agent_id, graph, config, self._emitters
                 )
-                if _outcome == ThreadStatus.COMPLETED and interrupt_emitted:
-                    _outcome = "interrupted"
-                    span.set_attribute("interrupted_via_state", True)
+                _outcome = _finalized_outcome(_outcome, interrupt_emitted, span)
                 self._telemetry.record_histogram(
                     "aggregator.ingest_duration_seconds",
                     time.monotonic() - start,

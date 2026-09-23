@@ -64,7 +64,7 @@ TEST_DIRS = frozenset(
 #: the reason it is still open. Delete an entry when its module is fixed; do not
 #: add one without an owner for the work.
 DEFERRED: dict[str, str] = {
-    "lifecycle/manager.py": (
+    "lifecycle/boot.py": (
         "the managed-process registry seats a serve command at the repository "
         "root; the registry is development harness shipped inside the package "
         "and its home is unresolved"

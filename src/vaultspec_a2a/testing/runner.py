@@ -46,6 +46,15 @@ class _CompletionContainment(Protocol):
     def is_designated_child(self, pid: int) -> bool: ...
 
 
+@dataclass(frozen=True)
+class _CompletionChannel:
+    """The fixed identity of one run's completion socket, bundled for passing."""
+
+    listener: socket.socket
+    token: str
+    containment: _CompletionContainment
+
+
 @dataclass
 class _ProgressReporter:
     started: float
@@ -70,24 +79,12 @@ class _ProgressReporter:
         self.next_progress = now + self.interval_s
 
 
-def _completion_received(
-    listener: socket.socket,
-    token: str,
-    containment: _CompletionContainment,
-    designated_pid: int | None,
-) -> tuple[int | None, bool]:
-    """Accept completion only from the designated runner child.
-
-    The endpoint token authenticates the owner channel, but environment values
-    are inherited by ordinary nested subprocesses.  The receipt therefore also
-    carries the sender's actual process id. The initial ``hello`` pins the
-    runner child's verified launcher descendant before pytest can spawn nested
-    processes; a later ``complete`` must come from that exact identity.
-    """
+def _receive_completion_payload(listener: socket.socket) -> str | None:
+    """Read one bounded, newline-terminated payload, or ``None`` on any failure."""
     try:
         connection, _address = listener.accept()
     except BlockingIOError:
-        return designated_pid, False
+        return None
     with connection:
         connection.settimeout(0.1)
         received = bytearray()
@@ -97,12 +94,16 @@ def _completion_received(
                 if not chunk:
                     break
                 received.extend(chunk)
-            payload = bytes(received).decode("ascii")
+            return bytes(received).decode("ascii")
         except (OSError, UnicodeDecodeError):
-            return designated_pid, False
+            return None
+
+
+def _parsed_completion_fields(payload: str, token: str) -> tuple[int, str, str] | None:
+    """Return ``(sender_pid, message_type, exitstatus)`` once the token checks out."""
     fields = payload.rstrip("\n").split(":")
     if len(fields) not in {3, 4}:
-        return designated_pid, False
+        return None
     supplied, sender_text, message_type, *status_fields = fields
     exitstatus = status_fields[0] if len(status_fields) == 1 else ""
     if not (
@@ -110,29 +111,40 @@ def _completion_received(
         and message_type in {"hello", "complete"}
         and hmac.compare_digest(supplied, token)
     ):
-        return designated_pid, False
-    sender_pid = int(sender_text)
-    if message_type == "hello":
-        invalid_hello = (
-            exitstatus
-            or designated_pid is not None
-            or not containment.is_designated_child(sender_pid)
-        )
-        if invalid_hello:
-            print(
-                "pytest completion hello rejected: "
-                f"sender_pid={sender_pid} designated_pid={designated_pid}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return designated_pid, False
+        return None
+    return int(sender_text), message_type, exitstatus
+
+
+def _handle_completion_hello(
+    sender_pid: int,
+    exitstatus: str,
+    containment: _CompletionContainment,
+    designated_pid: int | None,
+) -> tuple[int | None, bool]:
+    invalid_hello = (
+        exitstatus
+        or designated_pid is not None
+        or not containment.is_designated_child(sender_pid)
+    )
+    if invalid_hello:
         print(
-            "pytest completion hello accepted: "
-            f"designated_runner_child_pid={sender_pid}",
+            "pytest completion hello rejected: "
+            f"sender_pid={sender_pid} designated_pid={designated_pid}",
             file=sys.stderr,
             flush=True,
         )
-        return sender_pid, False
+        return designated_pid, False
+    print(
+        f"pytest completion hello accepted: designated_runner_child_pid={sender_pid}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return sender_pid, False
+
+
+def _handle_completion_complete(
+    sender_pid: int, exitstatus: str, designated_pid: int | None
+) -> tuple[int | None, bool]:
     valid_status = exitstatus.rstrip("\n").lstrip("-").isdigit()
     if not valid_status or sender_pid != designated_pid:
         print(
@@ -149,6 +161,34 @@ def _completion_received(
         flush=True,
     )
     return designated_pid, True
+
+
+def _completion_received(
+    listener: socket.socket,
+    token: str,
+    containment: _CompletionContainment,
+    designated_pid: int | None,
+) -> tuple[int | None, bool]:
+    """Accept completion only from the designated runner child.
+
+    The endpoint token authenticates the owner channel, but environment values
+    are inherited by ordinary nested subprocesses.  The receipt therefore also
+    carries the sender's actual process id. The initial ``hello`` pins the
+    runner child's verified launcher descendant before pytest can spawn nested
+    processes; a later ``complete`` must come from that exact identity.
+    """
+    payload = _receive_completion_payload(listener)
+    if payload is None:
+        return designated_pid, False
+    parsed = _parsed_completion_fields(payload, token)
+    if parsed is None:
+        return designated_pid, False
+    sender_pid, message_type, exitstatus = parsed
+    if message_type == "hello":
+        return _handle_completion_hello(
+            sender_pid, exitstatus, containment, designated_pid
+        )
+    return _handle_completion_complete(sender_pid, exitstatus, designated_pid)
 
 
 def _terminate(
@@ -296,9 +336,7 @@ def _run_timeout_status(
 
 
 def _completion_time(
-    listener: socket.socket,
-    token: str,
-    containment: ProcessContainment,
+    channel: _CompletionChannel,
     designated_pid: int | None,
     completion_seen: float | None,
     now: float,
@@ -306,7 +344,7 @@ def _completion_time(
     if completion_seen is not None:
         return designated_pid, completion_seen
     designated_pid, received = _completion_received(
-        listener, token, containment, designated_pid
+        channel.listener, channel.token, channel.containment, designated_pid
     )
     return designated_pid, now if received else completion_seen
 
@@ -322,6 +360,7 @@ def _await_pytest_exit(
     progress = _ProgressReporter(
         started, started + limits.progress_interval_s, limits.progress_interval_s
     )
+    channel = _CompletionChannel(listener, token, containment)
     completion_seen: float | None = None
     designated_pid: int | None = None
     root_exit_seen: float | None = None
@@ -340,7 +379,7 @@ def _await_pytest_exit(
             returncode = process.poll()
             now = time.monotonic()
             designated_pid, completion_seen = _completion_time(
-                listener, token, containment, designated_pid, completion_seen, now
+                channel, designated_pid, completion_seen, now
             )
             # A root may terminate between the first poll and receipt
             # observation. Re-sample before applying the post-receipt timeout;

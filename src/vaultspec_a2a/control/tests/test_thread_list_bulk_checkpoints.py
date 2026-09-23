@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from ...control.thread_service import (
+from ...control.thread_listing import (
     _bulk_read_checkpoints,
     _CheckpointProbe,
 )

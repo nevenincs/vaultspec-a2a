@@ -405,39 +405,14 @@ async def test_exact_cancellation_evidence_settles_current_action(
     assert thread.last_applied_action == ControlActionType.CANCEL.value
 
 
-@pytest.mark.asyncio
-async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) -> None:
-    """A busy terminal election can recover through the bounded bridge retry."""
-    db_file = materialize_schema(tmp_path / "terminal-election-contention.db")
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{db_file}",
-        connect_args={"timeout": 0},
-    )
-    configure_sqlite_transactions(engine)
-    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    blocker = sqlite3.connect(str(db_file), isolation_level=None, timeout=0)
-    attempts: list[dict[str, Any]] = []
-    busy_errors: list[str] = []
+def _busy_once_control_app(
+    sessions: async_sessionmaker[AsyncSession],
+    blocker: sqlite3.Connection,
+    attempts: list[dict[str, Any]],
+    busy_errors: list[str],
+) -> FastAPI:
+    """Serve the event batch route, refusing once while *blocker* holds the lock."""
     app = FastAPI()
-
-    action_id = await _seed_current_cancel(
-        sessions,
-        thread_id="terminal-election-contention",
-        dispatch_id="terminal-election-receipt",
-    )
-    payload: dict[str, object] = {
-        "event_type": "thread_terminal",
-        "status": "cancelled",
-        "cancellation_evidence": {
-            "schema_version": "cancellation-evidence-v1",
-            "dispatch_id": "terminal-election-receipt",
-            "outcome": "no_active_work",
-        },
-    }
-
-    blocker.execute("PRAGMA journal_mode=WAL")
-    blocker.execute("PRAGMA busy_timeout=0")
-    blocker.execute("BEGIN IMMEDIATE")
 
     @app.post("/internal/events/batch")
     async def receive_batch(request: Request) -> Response:
@@ -461,6 +436,70 @@ async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) 
             media_type="application/json",
         )
 
+    return app
+
+
+async def _assert_cancel_applied(db_file: Path, action_id: str, thread_id: str) -> None:
+    """Read the durable outcome back through a fresh engine and check it."""
+    verification_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    verification_sessions = async_sessionmaker(
+        verification_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    try:
+        async with verification_sessions() as session:
+            action = await session.get(ControlActionModel, action_id)
+            thread = await session.get(ThreadModel, thread_id)
+    finally:
+        await verification_engine.dispose()
+
+    assert action is not None
+    assert action.applied_at is not None
+    assert (
+        action.result_status == ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK.value
+    )
+    assert action.claim_token is None
+    assert thread is not None
+    assert thread.status == ThreadStatus.CANCELLED.value
+    assert thread.run_revision == 1
+    assert thread.last_applied_action == ControlActionType.CANCEL.value
+
+
+@pytest.mark.asyncio
+async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) -> None:
+    """A busy terminal election can recover through the bounded bridge retry."""
+    db_file = materialize_schema(tmp_path / "terminal-election-contention.db")
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{db_file}",
+        connect_args={"timeout": 0},
+    )
+    configure_sqlite_transactions(engine)
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    blocker = sqlite3.connect(str(db_file), isolation_level=None, timeout=0)
+    attempts: list[dict[str, Any]] = []
+    busy_errors: list[str] = []
+    app = _busy_once_control_app(sessions, blocker, attempts, busy_errors)
+
+    action_id = await _seed_current_cancel(
+        sessions,
+        thread_id="terminal-election-contention",
+        dispatch_id="terminal-election-receipt",
+    )
+    payload: dict[str, object] = {
+        "event_type": "thread_terminal",
+        "status": "cancelled",
+        "cancellation_evidence": {
+            "schema_version": "cancellation-evidence-v1",
+            "dispatch_id": "terminal-election-receipt",
+            "outcome": "no_active_work",
+        },
+    }
+
+    blocker.execute("PRAGMA journal_mode=WAL")
+    blocker.execute("PRAGMA busy_timeout=0")
+    blocker.execute("BEGIN IMMEDIATE")
+
     bridge = WorkerBridge("http://control", "terminal-election-contention")
     await bridge._client.aclose()
     bridge._client = httpx.AsyncClient(
@@ -483,32 +522,7 @@ async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) 
         "terminal-election-receipt"
     )
 
-    verification_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    verification_sessions = async_sessionmaker(
-        verification_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    try:
-        async with verification_sessions() as session:
-            action = await session.get(ControlActionModel, action_id)
-            thread = await session.get(
-                ThreadModel,
-                "terminal-election-contention",
-            )
-    finally:
-        await verification_engine.dispose()
-
-    assert action is not None
-    assert action.applied_at is not None
-    assert (
-        action.result_status == ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK.value
-    )
-    assert action.claim_token is None
-    assert thread is not None
-    assert thread.status == ThreadStatus.CANCELLED.value
-    assert thread.run_revision == 1
-    assert thread.last_applied_action == ControlActionType.CANCEL.value
+    await _assert_cancel_applied(db_file, action_id, "terminal-election-contention")
 
 
 @pytest.mark.asyncio

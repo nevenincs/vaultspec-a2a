@@ -30,9 +30,7 @@ async def test_cancel_dispatch_bypasses_open_circuit() -> None:
     circuit.force_open()
     spawner = cast(
         "LazyWorkerSpawner",
-        SimpleNamespace(
-            ensure_worker=AsyncMock(), demand_ready_event=None, spawned=True
-        ),
+        SimpleNamespace(ensure_worker=AsyncMock(), spawned=True),
     )
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(respond), base_url="http://worker"

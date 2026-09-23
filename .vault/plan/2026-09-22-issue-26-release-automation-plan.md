@@ -8,7 +8,7 @@ related:
   - '[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:115ab664b35b55285e8ea6919beb654c310de9bb33668310e57346f64dd873b7'
+body_hash: 'sha256:f10797640cb8c3013654712350f836e84a2822cc73c52fd8ce27f906b13279b7'
 ---
 
 # `issue-26-release-automation` plan
@@ -57,8 +57,8 @@ constraints; no ADR is created.
 - [x] `S04` - Make the release proposal mergeable: regenerate its lockfile and dispatch its required merge gate, and remove the remaining host-describing workflow text; `.github/workflows/release-please.yml, release-please-config.json, .github/ci-contract-allow.txt, dev/tests/test_release_please_automation.py, dev/tests/test_release_workflow_contract.py, .github/workflows/test.yml, .github/workflows/release.yml, .github/workflows/migrations.yml, dev/toolchain.py`.
 - [x] `S05` - Make a fresh SQLite store report its serving journal mode at boot; `src/vaultspec_a2a/database/session.py, src/vaultspec_a2a/database/tests/test_wal_maintenance.py`.
 - [x] `S06` - Keep every test session off the user's real app home and refuse a mismatched engine request; `src/vaultspec_a2a/testing/runner_child.py, src/vaultspec_a2a/database/session.py`.
-- [ ] `S07` - Begin every read-then-write gateway transaction holding the SQLite write lock, without holding it across network or checkpoint I/O; `src/vaultspec_a2a/control/, src/vaultspec_a2a/api/routes/, src/vaultspec_a2a/database/reconciliation.py, src/vaultspec_a2a/worker/task_queue_port.py`.
-- [ ] `S08` - Resolve the worker demand-ready signal that nothing awaits; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/api/app.py`.
+- [x] `S07` - Begin every read-then-write gateway transaction holding the SQLite write lock, without holding it across network or checkpoint I/O; `src/vaultspec_a2a/control/, src/vaultspec_a2a/api/routes/, src/vaultspec_a2a/database/reconciliation.py, src/vaultspec_a2a/worker/task_queue_port.py`.
+- [x] `S08` - Resolve the worker demand-ready signal that nothing awaits; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/api/app.py`.
 
 ## Parallelization
 

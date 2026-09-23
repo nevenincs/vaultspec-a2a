@@ -289,12 +289,6 @@ class LazyWorkerSpawner:
         # asyncio lock below does not help: the watchdog reaches this from a
         # worker thread, not the event loop.
         self._synchronization = _WorkerSynchronization()
-        # Optional demand-readiness signal wired by the armed desktop gateway. It
-        # is fired once, on the authenticated demand path, after the single-flight
-        # worker start reaches readiness, so deferred boot reconciliation runs only
-        # after real execution demand. Unset (``None``) for Compose and dev, whose
-        # boot reconciliation is eager.
-        self.demand_ready_event: asyncio.Event | None = None
         if auto_spawn:
             # Startup sweep (once per gateway process, before this port's own log
             # is ever (re)opened): clear stale worker-autospawn stderr logs left

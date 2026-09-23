@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:8498d0b3d8302c60764942e0bf032bef0ed1bf11f459dc221816911dad237871'
+body_hash: 'sha256:a0c6da88323c0d41e945c280567ed2db4a0317d12a0506d66c6c7e64abd43533'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -80,6 +80,32 @@ related:
 - `S06` `M` `.vault/plan/2026-09-22-issue-26-release-automation-plan.md`
 - `S06` `verify:` `1742 passed; 3 testing/tests failures reproduce on HEAD (sandbox temp permission)` -> `pass`
 - `S06` `by:` `claude-opus`
+- `S06` `M` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `S06` `M` `src/vaultspec_a2a/database/tests/test_wal_maintenance.py`
+- `S07` `M` `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`
+- `S07` `M` `src/vaultspec_a2a/control/_event_application.py`
+- `S07` `M` `src/vaultspec_a2a/control/cancel_service.py`
+- `S07` `M` `src/vaultspec_a2a/control/clarification_service.py`
+- `S07` `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `S07` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S07` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S07` `M` `src/vaultspec_a2a/control/message_service.py`
+- `S07` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S07` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S07` `M` `src/vaultspec_a2a/control/verdict_subscriber.py`
+- `S07` `M` `src/vaultspec_a2a/database/reconciliation.py`
+- `S07` `M` `src/vaultspec_a2a/worker/task_queue_port.py`
+- `S07` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `S07` `A` `src/vaultspec_a2a/control/tests/test_relay_write_contention.py`
+- `S07` `verify:` `ruff, ruff format, ty on 20 changed files` -> `pass`
+- `S07` `by:` `claude-opus`
+- `S08` `M` `src/vaultspec_a2a/api/app.py`
+- `S08` `M` `src/vaultspec_a2a/control/worker_management.py`
+- `S08` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S08` `M` `src/vaultspec_a2a/control/tests/test_dispatch_cancel_bypass.py`
+- `S08` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
+- `S08` `verify:` `full dev + src suite (same run as S07)` -> `pass`
+- `S08` `by:` `claude-opus`
 
 ## Notes
 
@@ -93,3 +119,5 @@ related:
 - `S04` Plan-close review: guarded checkout ref; merge gate dispatched without a ref input so it validates the commit it reports on.
 - `S05` Plan-close review (high): warm-up moved behind migration and behind armed-boot validation as seat_sqlite_posture.
 - `S06` Data repair: dropped the rows table S03's first test draft created in C:/Users/hello/.vaultspec-a2a/vaultspec.db (verified schema, no a2a gateway running).
+- `S06` Follow-up: tests that seat the engine via init_db now close any seated engine first, since get_engine refuses a mismatched URL.
+- `S07` Implemented by a dispatched executor from a read-only transaction map; reviewed by the orchestrator. Its files were written with CRLF and normalized to LF before commit.

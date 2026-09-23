@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:098df19b728d4e23f321653711fa75f45bb433cbce084dc2d535f6860cfc4745'
+body_hash: 'sha256:9430db082fb846471f3f8fbd5da37ccf932a928e73132b6ccf467ba9f05254b4'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -131,9 +131,22 @@ The first CI failure carrying the full log (Full Validation run 35822419946 on `
 
 Resolved: `database/session.py` `begin_write_transaction` opens a session's next transaction with `BEGIN IMMEDIATE` through a per-connection execution option, so the transaction holds the write lock before its first read and contention waits inside `busy_timeout`; the default remains a deferred `BEGIN`, so read paths are unchanged. `create_and_dispatch_thread` takes it for the acceptance transaction, the post-dispatch status election, and the initial dispatch-failure settlement. `_create_run_core` ends its idempotency read before preparation. `database/tests/test_write_transaction.py` holds both halves against real concurrent connections on a real file: the deferred refusal, the immediate transaction making a sibling wait, the mode not outliving its transaction, and refusal on a session already in a transaction. `configure_sqlite_engine` makes the production posture reusable so that test builds its own engine instead of relying on the module engine singleton.
 
-### deferred-read-then-write-elsewhere | medium | other gateway transactions read then write under a deferred BEGIN | open
+### deferred-read-then-write-elsewhere | medium | other gateway transactions read then write under a deferred BEGIN | resolved
 
-Type: latent production concurrency defect, same class as lazy-worker-concurrency-flake. Only the run-start creation path now takes `begin_write_transaction`. Other read-then-write transactions keep the deferred `BEGIN` and fail immediately rather than wait when another connection commits between their read and their write; `control/action_lease.py` `record_dispatch_failure`, reached from callers other than initial dispatch, is one. Each such path should either take `begin_write_transaction` or be shown to write before it reads.
+Type: latent production concurrency defect, same class as lazy-worker-concurrency-flake. A read-only map of every production transaction found nineteen that read and then write on SQLite under the deferred `BEGIN`, three of which held that transaction across checkpoint or worker I/O. Each now takes `begin_write_transaction` where no transaction is open, and none holds the write lock across I/O:
+
+- relay handlers in `control/event_handlers.py` (proven cancellation and failure, permission and execution-state events) and `control/_event_application.py` `commit_proven_application`;
+- `control/cancel_service.py` `cancel_thread` and its dispatch-failure settlement; `control/message_service.py` follow-up acceptance and failure settlement; the permission response, begun in `api/routes/_gateway_action_endpoints.py` before its first read, and its failure settlement;
+- `control/clarification_service.py` `respond_to_clarification`, restructured so the checkpoint read runs before any transaction and the durable part re-reads the thread inside its write transaction; its failure settlement;
+- `control/thread_service.py` archive, delete, deletion-saga claim, advance and finalize;
+- `control/direct_control_recovery.py` overdue expiry, seed and acquire, claim redrive, delivery-failure and post-delivery settlement;
+- `control/dispatch.py` `redispatch_reconciling_threads`, which now ends its listing and restore reads before any worker call, with its two refusal writes taking their own write transaction; `control/verdict_subscriber.py` claim and failure blocks; `database/reconciliation.py` before the repair-journal prune; `worker/task_queue_port.py` `mark_complete`.
+
+`control/tests/test_relay_write_contention.py` holds a sibling on the write lock and shows a relay handler queuing behind it and succeeding; it fails without the fix with `database is locked`. `control/tests/test_direct_control_leases.py` adds the same proof through the real `cancel_thread` against a real ASGI worker on the production engine posture. The lock-retry loops in `cancel_service.py` and `_gateway_run_start.py` remain as defence for a genuine `busy_timeout` expiry.
+
+### expire-overdue-rollback-discards | medium | overdue-action expiry could discard earlier settlements and lazy-load expired rows | resolved
+
+Type: correctness, found while mapping transactions. `control/direct_control_recovery.py` `_expire_overdue_actions` settled every overdue row in one transaction and rolled that transaction back when one item was refused, which discarded the items already settled while still counting them as expired, and expired every loaded row so a later `row.*` read would attempt implicit I/O (`MissingGreenlet`). Rows are now snapshotted before the first settlement and each settlement commits in its own write transaction.
 
 ### engine-singleton-test-leak | high | tests seated the process engine on the user's real app home | resolved
 
@@ -141,9 +154,15 @@ Type: test isolation and data safety; raised from low once measured. A per-test 
 
 Resolved: `testing/runner_child.py` gives every test session a private temporary `VAULTSPEC_A2A_HOME` unless the caller set one, so a default-database fallback can only reach a throwaway store; re-probed, every seated engine points at `.../vaultspec-a2a-test-home-*/vaultspec.db` and the live store's hash is unchanged across the suites. `get_engine` now raises when an explicit URL names a different store than the seated engine. The three `testing/tests` failures seen in that run (`test_second_session_is_admitted_degraded`, `test_contended_pair_serializes_and_disjoint_groups_run_concurrently`, `test_runner_rejects_a_rebound_nested_xdist_receipt`) fail identically on `HEAD` without these changes: nested pytest sessions cannot create `%TEMP%\pytest-of-hello` in this sandbox.
 
-### worker-demand-signal-unconsumed | low | the armed gateway sets a demand-ready event that nothing awaits | open
+Addendum: with `get_engine` now refusing a mismatched URL, `database/tests/test_compatibility.py` and `database/tests/test_wal_maintenance.py` failed intermittently under xdist wherever an earlier executor-building test left the engine seated on the session home; every test that seats the engine through `init_db` now begins with `close_db()`, as `database/tests/test_database.py` already did. Executor-building tests still seat the engine through the worker's default session factory, and only ever onto the session-private home.
 
-Type: dead capability. `control/dispatch.py:247-251` sets `LazyWorkerSpawner.demand_ready_event` after the first demand-driven worker start, and the docstrings at `control/worker_management.py:292-297` and `control/dispatch.py:170-174` describe it as releasing deferred boot reconciliation. No production code awaits `app.state.worker_demand_ready`, and boot reconciliation runs eagerly at `api/app.py:733`. Either the deferral was removed without its signal or it was never wired.
+### worker-demand-signal-unconsumed | low | the armed gateway sets a demand-ready event that nothing awaits | resolved
+
+Type: dead capability. `a7ba047c` deliberately removed the waiter: recovery starts immediately because an accepted durable action is already execution demand, while an idle gateway still starts its worker lazily. The event, its setter in `control/dispatch.py`, the `LazyWorkerSpawner.demand_ready_event` attribute, `app.state.worker_demand_ready`, and the docstrings describing a parked boot reconciliation that no longer exists are removed, along with the `armed` parameter `api/app.py` `_start_worker_runtime` kept only to wire the event.
+
+### ambient-claude-config-test | low | a worker-authoring test fails whenever `CLAUDE_CONFIG_DIR` is set in the environment | open
+
+Type: test isolation. `graph/tests/nodes/test_worker_authoring_wiring.py::test_stdio_binding_hoists_secrets_without_touching_the_workspace` asserts a value is `None` that is read from the ambient environment, so it fails in any shell where `CLAUDE_CONFIG_DIR` is set, including this development session; it fails identically on `fa27d194` without the S07 and S08 changes and passes on CI runners without the variable.
 
 ### review-s03-s05-armed-boot-mutation | high | the S05 warm-up wrote to a seated desktop store before its compatibility check | resolved
 

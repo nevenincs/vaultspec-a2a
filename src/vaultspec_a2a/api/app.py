@@ -539,7 +539,7 @@ async def _shutdown_gateway(
 
 
 def _start_worker_runtime(
-    app: FastAPI, *, armed: bool
+    app: FastAPI,
 ) -> tuple[
     httpx.AsyncClient,
     LazyWorkerSpawner,
@@ -580,13 +580,6 @@ def _start_worker_runtime(
 
     watchdog = WorkerWatchdog(worker_spawner, circuit_breaker, worker_state, app.state)
     watchdog_task = asyncio.create_task(watchdog.run())
-
-    # Accepted durable actions create immediate recovery demand while idle
-    # gateways retain lazy worker startup.
-    worker_demand_ready = asyncio.Event()
-    app.state.worker_demand_ready = worker_demand_ready
-    if armed:
-        worker_spawner.demand_ready_event = worker_demand_ready
     return worker_client, worker_spawner, circuit_breaker, liveness, watchdog_task
 
 
@@ -748,7 +741,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             circuit_breaker,
             liveness,
             watchdog_task,
-        ) = _start_worker_runtime(app, armed=armed)
+        ) = _start_worker_runtime(app)
 
         reconcile_task = _start_gateway_recovery(
             app,

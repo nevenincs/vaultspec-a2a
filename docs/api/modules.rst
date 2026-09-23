@@ -321,6 +321,18 @@ Control services
 .. py:module:: vaultspec_a2a.control.config
    :synopsis: Runtime application settings.
 
+.. py:module:: vaultspec_a2a.control.settings_base
+   :synopsis: Project-root resolution and the settings base every class shares.
+
+.. py:function:: resolve_project_root(environ=None, cwd=None)
+
+.. py:module:: vaultspec_a2a.control.state_layout
+   :synopsis: The one layout of a2a's mutable state beneath a state home.
+
+.. py:function:: state_layout(home)
+
+.. py:function:: seal_state_home(home)
+
 .. py:module:: vaultspec_a2a.control.cancel_service
    :synopsis: Thread cancellation orchestration.
 

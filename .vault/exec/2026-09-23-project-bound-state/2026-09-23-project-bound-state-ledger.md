@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:d0c68e66d464bfd89d3372cf46a7acda302dd5fbcee42e4b2ec1a955b101d8c5'
+body_hash: 'sha256:ef7d6cd097e9d64a397de717039ea3500feddbf4db3e81490e54f55496a3b8b0'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -313,4 +313,10 @@ related:
 - `S10` `M` `src/vaultspec_a2a/service_tests/test_compose_provider_service_state_isolation.py`
 - `S10` `verify:` `docker: service_tests/test_compose_provider_service_state_isolation.py 3 passed against a freshly built prod image; test_compose_profile_regression.py 17 passed; test_env_example_coverage and lifecycle procs_config passed` -> `pass`
 - `S10` `by:` `claude`
+- `S12` `M` `docs/api/modules.rst`
+- `S12` `M` `docs/architecture.rst`
+- `S12` `M` `docs/glossary.rst`
+- `S12` `M` `docs/operations.rst`
+- `S12` `verify:` `sphinx-build -n -W --keep-going clean build exit 0; docs/tests 6 passed` -> `pass`
+- `S12` `by:` `claude`
 

@@ -42,7 +42,7 @@ Persistence and operations
 :mod:`vaultspec_a2a.desktop` defines the stable desktop component contract
 the dashboard verifies, plus the runtime profile, credential, settlement, and
 cross-release state-lifecycle authorities.
-:mod:`vaultspec_a2a.lifecycle` manages machine-global development processes.
+:mod:`vaultspec_a2a.lifecycle` manages the project's development processes.
 :mod:`vaultspec_a2a.workspace` manages Git worktrees and environments.
 
 :mod:`vaultspec_a2a.telemetry` instruments API and worker execution.

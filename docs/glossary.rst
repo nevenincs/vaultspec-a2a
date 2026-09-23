@@ -58,7 +58,7 @@ Glossary
       rather than only an operating-system process identifier.
 
    process registry
-      The machine-global owner of named host-process allocation, registration,
+      The project's owner of named host-process allocation, registration,
       liveness, restart state, and tree termination.
 
    product CLI

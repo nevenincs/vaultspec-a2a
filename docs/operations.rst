@@ -23,6 +23,59 @@ Command discovery
 Just selects frozen project dependencies and routes arguments. It owns no
 product behavior.
 
+Configuration and state
+-----------------------
+
+Every setting is read by one settings authority,
+:mod:`vaultspec_a2a.control.config`, under the ``VAULTSPEC_A2A_`` prefix. A
+variable that names another tool's configuration (``OPENAI_API_KEY``,
+``CODEX_HOME``, ``CI``, the ``OTEL_*`` names) is also read under that tool's own
+spelling, with the ``VAULTSPEC_A2A_`` name winning when both are set. The
+repository's ``.env.example`` lists every setting, and a test holds the example
+and the settings to each other in both directions.
+
+**Project root.** ``VAULTSPEC_A2A_PROJECT_ROOT`` names the project a2a serves;
+unset, it is the nearest ancestor of the working directory holding
+``.vaultspec/`` or ``.vault/``, then one holding ``.git``, else the working
+directory. The project's ``.env`` is read from that root, so a process started
+anywhere inside the project reads the same file. The root itself is read from
+the process environment only.
+
+**State home.** ``VAULTSPEC_A2A_HOME`` defaults to ``.vault/data/agents`` in the
+project root - the runtime subtree vaultspec ignores and never walks. a2a
+writes nothing to the user profile or the system temporary directory, and it
+seals the home with a self-ignoring ``.gitignore`` so a project without
+vaultspec's ignore rules cannot commit it. One layout,
+:func:`vaultspec_a2a.control.state_layout.state_layout`, places everything
+beneath the home:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - Path
+     - Contents
+   * - ``state/vaultspec.db``, ``state/checkpoints.db``
+     - Application database and LangGraph checkpoints, unless
+       ``VAULTSPEC_A2A_DATABASE_URL`` or ``VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL``
+       names another store.
+   * - ``runtime/``
+     - Gateway, worker and MCP logs and the gateway singleton lock.
+   * - ``service.json``, ``service.token``
+     - The discovery record the engine attaches through, and its
+       owner-restricted handoff credential.
+   * - ``procs/``
+     - The named host-process registry, its port reservations and test leases,
+       unless ``VAULTSPEC_A2A_PROCS_HOME`` names another directory.
+   * - ``tmp/homes/``
+     - Per-run provider configuration homes.
+
+**Relative paths.** Every path setting accepts an absolute path or one relative
+to the project root - never to the working directory, so two processes of one
+project open the same files wherever each was launched. The armed desktop
+profile (``VAULTSPEC_A2A_DESKTOP_APP_HOME``, set by the dashboard) derives the
+same layout from its application home instead.
+
 Product command-line interface (CLI)
 ------------------------------------
 
@@ -60,8 +113,8 @@ Gateway bearer authentication
 The engine-facing ``/v1`` routes require a gateway bearer token. The gateway
 uses its configured service token or generates a fresh token when none is
 configured. It publishes the credential in the adjacent, owner-restricted
-``service.token`` handoff file. The machine-global ``service.json`` discovery
-record is secret-free: its ``handoff_reference`` names that file but never
+``service.token`` handoff file. The ``service.json`` discovery record in the
+state home is secret-free: its ``handoff_reference`` names that file but never
 embeds the token.
 
 Product CLI calls use :func:`vaultspec_a2a.lifecycle.discovery.read_resident_service`
@@ -111,7 +164,7 @@ status surface to obtain its current recovery state. The route uses the same
 Named host-process registry
 ---------------------------
 
-The :mod:`vaultspec_a2a.lifecycle` machine-global registry exclusively owns
+The :mod:`vaultspec_a2a.lifecycle` project registry exclusively owns
 named development-process allocation, registration, liveness, restart state,
 and process-tree termination. The ``service-*`` recipes pass through to
 ``vaultspec-a2a procs``.

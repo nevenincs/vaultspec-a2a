@@ -11,7 +11,7 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
 modified: '2026-09-23'
 body_schema: body-v2
-body_hash: 'sha256:7a1d33d760b408f56a4a1cf9d258f4c07bca878b870dfe49661cbc0ee2f143ec'
+body_hash: 'sha256:29beb3a4e94b6969a3e0048f364094be895ee846eab2f1d3e96261fb80974de6'
 ---
 
 # `project-bound-state` plan
@@ -62,7 +62,7 @@ Compose, container, process-registry configuration, documentation and the dashbo
 
 - [x] `P04.S10` - Update compose files, container entrypoint, procs.toml and dev credential tooling to the new names and layout; `service/`.
 - [ ] `P04.S11` - Patch the dashboard engine discovery, product launcher and agent E2E harness to the new names and location; `Y:/code/vaultspec-dashboard-worktrees/main/engine/`.
-- [ ] `P04.S12` - Update operator documentation for configuration and storage; `README.md`.
+- [x] `P04.S12` - Update operator documentation for configuration and storage; `README.md`.
 
 ## Parallelization
 

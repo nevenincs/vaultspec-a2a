@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:b45a36a4d960d88d52162f4c92cac18c8e365e19ba33b7bea5a62fcdb00ced84'
+body_hash: 'sha256:e262c910f296bfa6f93474fa3d551ecc9687fe7769f97cf483632b133224cbb4'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -151,6 +151,7 @@ related:
 - `S09` `M` `src/vaultspec_a2a/lifecycle/engine_serve.py`
 - `S09` `M` `.vault/audit/2026-09-22-issue-26-release-automation-audit.md`
 - `S09` `verify:` `check-type-strict, check-size, check-shape, check-anchors` -> `pass`
+- `S10` `verify:` `lock guard with the repo's *.lock -diff attribute: version-only accepted, drift and wrong version refused` -> `pass`
 
 ## Notes
 
@@ -170,3 +171,4 @@ related:
 - `S06` Plan-close review (low): a test app home that survives deletion is now named on stderr.
 - `S09` Refactors by three dispatched executors on disjoint files, reviewed and corrected by the orchestrator (cross-module private names made public; storage-anchor deferral moved with the code). The final whole-tree run was still in progress at commit time; its result is reported separately.
 - `S09` Whole-tree run of 7b148012 on one admitted worker (1h35m): 14 failed, 4754 passed; the export-declaration failure was a real S09 regression fixed here.
+- `S10` The first live Release Please run refused a correct lock refresh: *.lock is -diff, so the guard read an empty diff. Fixed with git diff --text.

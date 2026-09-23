@@ -5,7 +5,7 @@ tags:
 date: '2026-09-22'
 modified: '2026-09-23'
 body_schema: 'body-v2'
-body_hash: 'sha256:b9f0a8a62a52aaa28166320854007ffa3eaa3f1162b919fe289f79969d045888'
+body_hash: 'sha256:2cba2ee838f4ebb2a449da7859d684a43ebd87603f56ea157585216a1209b609'
 related:
   - "[[2026-09-22-issue-26-release-automation-plan]]"
 ---
@@ -237,3 +237,11 @@ Type: architecture rule regression, caught by the whole-tree run of `7b148012`. 
 ### windows-service-state-deadline | medium | service-state overruns its five-second client budget on Windows while the checkpointer is held | open
 
 Type: pre-existing platform defect, found by the S09 whole-tree run and not caused by this feature. `api/tests/test_gateway_live.py::test_service_state_deadline_returns_degraded_for_locked_real_checkpointer` fails on this Windows host on every run, and identically on `aa1d5034`, the commit before this session's work, checked out in a separate worktree; the Linux Full Validation runs pass it. With the checkpointer lock held, `control/health.py` `_checkpoint_health_check` times out at its 3-second deadline as designed (logged `checkpoint probe timed out`), yet the client's 5-second read deadline still fires, so another of the three concurrent probes in `build_full_health` outlives its own deadline on Windows. `api/routes/_gateway_action_endpoints.py` `service_state_endpoint` awaits nothing after `build_full_health`. The likely candidates are the database task (`_database_health_check`, whose journal-mode probe opens an engine connection) and the worker probe; per-probe timing on a Windows host is the next evidence. The other ten live, desktop and acceptance failures in that run passed on isolated reruns and were load, not regressions.
+
+### lock-guard-binary-diff | high | the S10 lock guard refused every release proposal | resolved
+
+Type: CI defect introduced by S10, caught by the first live Release Please run on `98470937` (run 35917331964). `uv lock` correctly moved `vaultspec-a2a` from 0.3.0 to 0.3.1, but the guard read an empty change set and refused it: `.gitattributes` marks `*.lock` as `-diff`, so `git diff -U0 uv.lock` prints only `Binary files differ`. The S10 scratch-repository proof passed because that repository had no `.gitattributes`. The guard now diffs with `--text`; repeated against a scratch repository carrying the real `*.lock text -diff linguist-generated` attribute, a version-only change is accepted and both extra drift and a wrong version are refused. The merge-gate dispatch after it was skipped on that run, so PR #77 still waits on the next push.
+
+### bot-pr-approval-correction | low | the S04 audit note misstated how token-authored pull-request events behave | resolved
+
+Type: record correction. The superseding note on `bot-pr-approval` said token-authored events start no runs. The live record shows otherwise: the Merge Gate for PR #77's head `8e5ede06` exists and ended `action_required`, so such events do create runs, held for approval. S04's dispatch remains the path that produces the required check without that approval.

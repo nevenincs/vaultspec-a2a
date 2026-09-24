@@ -1,10 +1,10 @@
 [project]
-name = "vaultspec-a2a"
-version = "0.3.0"
 description = "Headless agent-to-agent orchestration for Vaultspec."
-requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
+name = "vaultspec-a2a"
+requires-python = ">=3.13"
+version = "0.3.0"
 
 dependencies = [
   "anyio>=4.9.0",
@@ -41,56 +41,52 @@ dependencies = [
   "langsmith>=0.3.1",
 ]
 
-[project.optional-dependencies]
-# The locked PostgreSQL/Compose server profile. PostgreSQL-dependent checks use a
-# task-owned environment, then run without mutating or resolving it during pytest:
-#   $env:UV_PROJECT_ENVIRONMENT = "$PWD/tmp/s04-server-env"
-#   uv sync --locked --no-default-groups --extra server --group tooling
-#   uv run --no-sync python -m pytest \
-#     src/vaultspec_a2a/control/tests/test_sync_url_derivation.py
-# Keep these drivers out of both the base dependencies and the `freeze` group. The
-# dashboard binary is SQLite-only, and its PyInstaller spec separately excludes the
-# same modules so a contaminated build environment cannot pull them into the artifact.
-server = [
-  "asyncpg>=0.30.0",
-  "langgraph-checkpoint-postgres>=2.0.0",
-  "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
-  "psycopg[binary,pool]>=3.2.9",
-]
-# Semantic search over the vault and the codebase. NOT a runtime dependency of
-# the gateway: no module here imports `vaultspec_rag` or `torch`, and the presets
-# that use it name `vaultspec-rag` as an out-of-process MCP SERVER rather than
-# importing anything. This project orchestrates agents; it runs no model itself
-# and needs no tensor runtime.
-#
-# Kept out of the base install because it is not free. `vaultspec-rag` pulls
-# `sentence-transformers`, which pulls `transformers`, and `langchain_core`
-# imports `transformers` at module scope inside a try/except purely to record
-# whether it is available - so merely HAVING it installed added roughly thirteen
-# seconds to any import that reached the language-model package, in a process
-# that never used a tokenizer.
-rag = [
-  "torch>=2.4",
-  "vaultspec-rag[mcp]>=0.3.8",
-]
+  [project.optional-dependencies]
+  # The locked PostgreSQL/Compose server profile. PostgreSQL-dependent checks use a
+  # task-owned environment, then run without mutating or resolving it during pytest:
+  #   $env:UV_PROJECT_ENVIRONMENT = "$PWD/tmp/s04-server-env"
+  #   uv sync --locked --no-default-groups --extra server --group tooling
+  #   uv run --no-sync python -m pytest \
+  #     src/vaultspec_a2a/control/tests/test_sync_url_derivation.py
+  # Keep these drivers out of both the base dependencies and the `freeze` group. The
+  # dashboard binary is SQLite-only, and its PyInstaller spec separately excludes the
+  # same modules so a contaminated build environment cannot pull them into the artifact.
+  server = [
+    "asyncpg>=0.30.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
+    "psycopg[binary,pool]>=3.2.9",
+  ]
+  # Semantic search over the vault and the codebase. NOT a runtime dependency of
+  # the gateway: no module here imports `vaultspec_rag` or `torch`, and the presets
+  # that use it name `vaultspec-rag` as an out-of-process MCP SERVER rather than
+  # importing anything. This project orchestrates agents; it runs no model itself
+  # and needs no tensor runtime.
+  #
+  # Kept out of the base install because it is not free. `vaultspec-rag` pulls
+  # `sentence-transformers`, which pulls `transformers`, and `langchain_core`
+  # imports `transformers` at module scope inside a try/except purely to record
+  # whether it is available - so merely HAVING it installed added roughly thirteen
+  # seconds to any import that reached the language-model package, in a process
+  # that never used a tokenizer.
+  rag = ["torch>=2.4", "vaultspec-rag[mcp]>=0.3.8"]
 
-[project.scripts]
-vaultspec-a2a = "vaultspec_a2a.cli.main:main"
+  [project.scripts]
+  vaultspec-a2a = "vaultspec_a2a.cli.main:main"
 
-# No `[project.entry-points.pytest11]` here, deliberately. The resource-aware
-# execution plugin must survive a lane that replaces addopts wholesale (the
-# toolchain's service target does, via --override-ini), but a pytest11 entry
-# point buys that at the price of a GLOBAL side effect: it auto-loads into
-# every pytest session in any environment that installs this package, where the
-# plugin's refusal of non-loadgroup distribution breaks a consumer's
-# `pytest -n auto` and its session registration writes leases under their home.
-# The repository-root conftest.py loads it instead - equally unreachable from
-# addopts, and scoped to this checkout.
+  # No `[project.entry-points.pytest11]` here, deliberately. The resource-aware
+  # execution plugin must survive a lane that replaces addopts wholesale (the
+  # toolchain's service target does, via --override-ini), but a pytest11 entry
+  # point buys that at the price of a GLOBAL side effect: it auto-loads into
+  # every pytest session in any environment that installs this package, where the
+  # plugin's refusal of non-loadgroup distribution breaks a consumer's
+  # `pytest -n auto` and its session registration writes leases under their home.
+  # The repository-root conftest.py loads it instead - equally unreachable from
+  # addopts, and scoped to this checkout.
 
 [dependency-groups]
-docs = [
-  "sphinx>=8.2",
-]
+dev = [{ include-group = "tooling" }]
+docs = ["sphinx>=8.2"]
 tooling = [
   "actionlint-py==1.7.12.24",
   # Security posture over production code. Advisory: it reports this project's
@@ -155,47 +151,38 @@ tooling = [
   "websockets>=16.0",
   "zstandard>=0.25.0",
 ]
-dev = [
-  { include-group = "tooling" },
-]
 # The frozen-binary build closure: PyInstaller itself plus vaultspec-core,
 # which the binary dispatches via its run-module verb (never a static import,
 # so the spec collects it explicitly). Installed by scripts/build_binary.py's
 # caller (the dashboard release pipeline), not by ordinary development.
-freeze = [
-  "pyinstaller>=6.11",
-  "vaultspec-core>=0.1.56,<0.3",
-]
-all = [
-  { include-group = "docs" },
-  { include-group = "tooling" },
-]
+all = [{ include-group = "docs" }, { include-group = "tooling" }]
+freeze = ["pyinstaller>=6.11", "vaultspec-core>=0.1.56,<0.3"]
 
 [tool.uv]
 default-groups = []
 
-[tool.uv.sources]
-# uv-only project metadata. `tool.uv.sources` is NOT emitted into the wheel's
-# Requires-Dist, and PEP 508 has no way to express an index, so this override
-# reaches uv-managed resolution ONLY. A consumer running `pip install
-# vaultspec-a2a[rag]` against the built wheel resolves torch from the default
-# index and gets whatever CUDA build PyPI serves, not cu130. Anything that needs
-# the pinned CUDA build must therefore resolve through the uv-managed lock
-# rather than wheel metadata; do not restate this override as a property of the
-# published package.
-torch = [
+  [tool.uv.sources]
+  # uv-only project metadata. `tool.uv.sources` is NOT emitted into the wheel's
+  # Requires-Dist, and PEP 508 has no way to express an index, so this override
+  # reaches uv-managed resolution ONLY. A consumer running `pip install
+  # vaultspec-a2a[rag]` against the built wheel resolves torch from the default
+  # index and gets whatever CUDA build PyPI serves, not cu130. Anything that needs
+  # the pinned CUDA build must therefore resolve through the uv-managed lock
+  # rather than wheel metadata; do not restate this override as a property of the
+  # published package.
+  torch = [
     { index = "pytorch-cu130", extra = "rag", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-# Starlette 1.6.0 was released before AnyIO 4.15 began warning on its
-# long-deprecated BlockingPortal alias. This immutable upstream commit includes
-# the reviewed three-access TestClient correction and keeps the locked binary
-# build off the deprecated alias until Starlette publishes it in a release.
-starlette = { git = "https://github.com/Kludex/starlette.git", rev = "bbee894422c6cc1306327335ae385b901ccfec13" }
+  ]
+  # Starlette 1.6.0 was released before AnyIO 4.15 began warning on its
+  # long-deprecated BlockingPortal alias. This immutable upstream commit includes
+  # the reviewed three-access TestClient correction and keeps the locked binary
+  # build off the deprecated alias until Starlette publishes it in a release.
+  starlette = { git = "https://github.com/Kludex/starlette.git", rev = "bbee894422c6cc1306327335ae385b901ccfec13" }
 
-[[tool.uv.index]]
-name = "pytorch-cu130"
-url = "https://download.pytorch.org/whl/cu130"
-explicit = true
+  [[tool.uv.index]]
+  explicit = true
+  name = "pytorch-cu130"
+  url = "https://download.pytorch.org/whl/cu130"
 
 [tool.vaultspec-rag.mcp-extra]
 # Points at the optional extra, not the base dependency list. The entry was
@@ -204,12 +191,12 @@ explicit = true
 # every install of an agent-orchestration service that imports neither. This
 # key is the tool's own bookkeeping, so it has to name the extra or the entry
 # gets re-added to the base list on the next managed sync.
+added = true
 location = "[project].optional-dependencies.rag"
 managed = "vaultspec-rag[mcp]"
-added = true
 [build-system]
-requires = ["hatchling"]
 build-backend = "hatchling.build"
+requires = ["hatchling"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vaultspec_a2a"]
@@ -277,8 +264,8 @@ exclude = [
   "src/vaultspec_a2a/team/presets/agents/deterministic-relay-burst.toml",
 ]
 
-[tool.hatch.build.targets.wheel.force-include]
-"schemas/desktop-capsule-manifest.json" = "vaultspec_a2a/desktop/schemas/desktop-capsule-manifest.json"
+  [tool.hatch.build.targets.wheel.force-include]
+  "schemas/desktop-capsule-manifest.json" = "vaultspec_a2a/desktop/schemas/desktop-capsule-manifest.json"
 
 [tool.pytest.ini_options]
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
@@ -310,24 +297,22 @@ addopts = [
 # `-o log_cli=true` (or add `-o log_cli_level=DEBUG` to raise the level) when
 # debugging a specific run; the format below still applies once enabled.
 log_cli = false
-log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
 log_cli_date_format = "%H:%M:%S"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
 # Under `.pytest-tmp/` rather than the repository root, so a run cannot dirty
 # the root; pytest creates the missing parent for `log_file` itself.
 log_file = ".pytest-tmp/test-debug.log"
 log_file_level = "DEBUG"
 # Drop a test's `tmp_path` as soon as it PASSES and keep it when it fails,
 # which is where triage looks.
-tmp_path_retention_count = 1
-tmp_path_retention_policy = "failed"
 norecursedirs = [".venv", "knowledge", "node_modules"]
 strict_xfail = true
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"
 # OTEL_SDK_DISABLED=true is set in the root conftest.py (collection-time)
 # to silence gRPC exporter noise.  Service tests override this via CI env.
-testpaths = ["src/vaultspec_a2a"]
-asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
-timeout = "300"
+asyncio_mode = "strict"
 markers = [
   "core: marks Layer 1 + Layer 1.5 tests — pure domain, zero infrastructure (run with '-m core')",
   "middleware: marks middleware-layer tests — protocol adapters + infra services, no orchestration deps (run with '-m middleware')",
@@ -335,134 +320,136 @@ markers = [
   "service: marks Layer 3 certification tests — most require Docker compose services, though some members are engine-free and run fully in-process. Run with pytest -m service.",
   "resource(key, shared=False): declares a contended real resource this test uses; drives scheduling groups, machine-global leases, and timeout backstops (vaultspec_a2a.testing).",
 ]
+testpaths = ["src/vaultspec_a2a"]
+timeout = "300"
 
 [tool.ruff]
 line-length = 88
 target-version = "py313"
 
-[tool.ruff.lint]
-select = [
-  "E",   # pycodestyle errors
-  "W",   # pycodestyle warnings
-  "F",   # pyflakes
-  "I",   # isort
-  "B",   # flake8-bugbear
-  "C4",  # flake8-comprehensions
-  "UP",  # pyupgrade
-  "ARG", # flake8-unused-arguments
-  "SIM", # flake8-simplify
-  "TCH", # flake8-type-checking
-  "RUF", # ruff-specific rules
-  "N",   # pep8-naming
-]
-unfixable = ["B"]
+  [tool.ruff.lint]
+  select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "RUF", # ruff-specific rules
+    "N",   # pep8-naming
+  ]
+  unfixable = ["B"]
 
-[tool.ruff.lint.per-file-ignores]
-"**/test_*.py" = ["ARG"]
-"**/tests/**/*.py" = ["ARG"]
-# FastAPI endpoints use Depends() in function defaults
-"src/vaultspec_a2a/api/dependencies.py" = ["B008"]
-"src/vaultspec_a2a/api/routes/*.py" = ["B008"]
-"src/vaultspec_a2a/api/internal.py" = ["B008"]
-"src/vaultspec_a2a/worker/app.py" = ["B008"]
+    [tool.ruff.lint.per-file-ignores]
+    "**/test_*.py" = ["ARG"]
+    "**/tests/**/*.py" = ["ARG"]
+    # FastAPI endpoints use Depends() in function defaults
+    "src/vaultspec_a2a/api/dependencies.py" = ["B008"]
+    "src/vaultspec_a2a/api/internal.py" = ["B008"]
+    "src/vaultspec_a2a/api/routes/*.py" = ["B008"]
+    "src/vaultspec_a2a/worker/app.py" = ["B008"]
 
-# INDUSTRY DEFAULTS, NOT CALIBRATED TO THIS TREE. The rules these two tables
-# configure are deliberately absent from `select` above, so they do not fire on
-# the everyday `just check-python` gate. They are selected explicitly by
-# `just check-limits` and `just check-nesting`, which are the burndown
-# dimensions: keeping them out of the base gate is what stops an unfinished
-# burndown from hiding a real style or correctness regression behind it.
-#
-# Every number below is the tool's own published default. Nothing here was
-# raised to accommodate the current worst offender - `just health-report` reports
-# the distance, and the number to move is the code.
-[tool.ruff.lint.mccabe]
-# McCabe's own recommendation, and the flake8, ruff, and SonarQube default.
-max-complexity = 10
+    # INDUSTRY DEFAULTS, NOT CALIBRATED TO THIS TREE. The rules these two tables
+    # configure are deliberately absent from `select` above, so they do not fire on
+    # the everyday `just check-python` gate. They are selected explicitly by
+    # `just check-limits` and `just check-nesting`, which are the burndown
+    # dimensions: keeping them out of the base gate is what stops an unfinished
+    # burndown from hiding a real style or correctness regression behind it.
+    #
+    # Every number below is the tool's own published default. Nothing here was
+    # raised to accommodate the current worst offender - `just health-report` reports
+    # the distance, and the number to move is the code.
+    [tool.ruff.lint.mccabe]
+    # McCabe's own recommendation, and the flake8, ruff, and SonarQube default.
+    max-complexity = 10
 
-[tool.ruff.lint.pylint]
-max-args = 5       # PLR0913 default
-max-branches = 12  # PLR0912 default
-max-returns = 6    # PLR0911 default
-max-statements = 50 # PLR0915 default
+    [tool.ruff.lint.pylint]
+    max-args = 5        # PLR0913 default
+    max-branches = 12   # PLR0912 default
+    max-returns = 6     # PLR0911 default
+    max-statements = 50 # PLR0915 default
 
-[tool.ruff.lint.isort]
-known-first-party = ["vaultspec_a2a"]
+    [tool.ruff.lint.isort]
+    known-first-party = ["vaultspec_a2a"]
 
-[tool.ruff.lint.flake8-type-checking]
-# Pydantic resolves field annotations at class-build time, so imports used only
-# as model field types are runtime-required, not type-checking-only. Teaching
-# TCH this keeps such imports at module scope instead of a TYPE_CHECKING block.
-runtime-evaluated-base-classes = [
-  "pydantic.BaseModel",
-  "pydantic_settings.BaseSettings",
-  "vaultspec_a2a.control.settings_base.ProjectSettings",
-]
+    [tool.ruff.lint.flake8-type-checking]
+    # Pydantic resolves field annotations at class-build time, so imports used only
+    # as model field types are runtime-required, not type-checking-only. Teaching
+    # TCH this keeps such imports at module scope instead of a TYPE_CHECKING block.
+    runtime-evaluated-base-classes = [
+      "pydantic.BaseModel",
+      "pydantic_settings.BaseSettings",
+      "vaultspec_a2a.control.settings_base.ProjectSettings",
+    ]
 
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
+  [tool.ruff.format]
+  indent-style = "space"
+  quote-style = "double"
 
 [tool.deptry]
 extend_exclude = ["knowledge"]
 known_first_party = ["vaultspec_a2a"]
 
-[tool.deptry.package_module_name_map]
-opentelemetry-sdk = "opentelemetry"
-opentelemetry-exporter-otlp-proto-grpc = "opentelemetry"
-opentelemetry-instrumentation-fastapi = "opentelemetry"
-pytest-asyncio = "pytest_asyncio"
-torch = "torch"
+  [tool.deptry.package_module_name_map]
+  opentelemetry-exporter-otlp-proto-grpc = "opentelemetry"
+  opentelemetry-instrumentation-fastapi = "opentelemetry"
+  opentelemetry-sdk = "opentelemetry"
+  pytest-asyncio = "pytest_asyncio"
+  torch = "torch"
 
-[tool.deptry.per_rule_ignores]
-# DEP002: packages invoked as CLI tools or loaded via URL scheme (not direct Python imports)
-DEP002 = [
-  "actionlint-py",
-  "ruff",
-  "ty",
-  "prek",
-  "identify",
-  "nodeenv",
-  "pytest-timeout",
-  "pytest-cov",
-  "deptry",
-  "vaultspec-core",
-  # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
-  # "sqlite+aiosqlite://..." — never imported directly.
-  "aiosqlite",
-  # Uvicorn loads websockets as its protocol backend.
-  "websockets",
-  # The server profile loads PostgreSQL drivers through SQLAlchemy URLs.
-  "asyncpg",
-  "psycopg",
-  # The RAG profile provisions its runtime and MCP service out of process.
-  "torch",
-  "vaultspec-rag",
-  # langsmith is the LangGraph/LangChain tracing backend, activated at runtime
-  # via LANGCHAIN_TRACING_V2 / LANGSMITH_* env and consumed by the langgraph
-  # runtime — never imported directly.
-  "langsmith",
-]
-# DEP004: tests, documentation extensions, and the dev/ tooling harness import
-# their owning development groups. The harness is not shipped - the wheel packs
-# only `src/vaultspec_a2a` - so a development-group import there is correct by
-# construction rather than an exception being carved out.
-DEP004 = [
-  "jsonschema",
-  "packaging",
-  "pytest",
-  "pytest_asyncio",
-  # dev/health/report.py uses radon's library API to measure this tree.
-  "radon",
-  "sphinx",
-  "tenacity",
-  "tomlkit",
-  # The grounding-parity test drives the real vaultspec-core CLI, which the
-  # `freeze` group owns because the frozen binary dispatches it. Importing it
-  # from a test is the same construction as every entry above: the wheel packs
-  # only `src/vaultspec_a2a`, so nothing shipped depends on it.
-  "vaultspec_core",
-]
+  [tool.deptry.per_rule_ignores]
+  # DEP002: packages invoked as CLI tools or loaded via URL scheme (not direct Python imports)
+  DEP002 = [
+    "actionlint-py",
+    "ruff",
+    "ty",
+    "prek",
+    "identify",
+    "nodeenv",
+    "pytest-timeout",
+    "pytest-cov",
+    "deptry",
+    "vaultspec-core",
+    # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
+    # "sqlite+aiosqlite://..." — never imported directly.
+    "aiosqlite",
+    # Uvicorn loads websockets as its protocol backend.
+    "websockets",
+    # The server profile loads PostgreSQL drivers through SQLAlchemy URLs.
+    "asyncpg",
+    "psycopg",
+    # The RAG profile provisions its runtime and MCP service out of process.
+    "torch",
+    "vaultspec-rag",
+    # langsmith is the LangGraph/LangChain tracing backend, activated at runtime
+    # via LANGCHAIN_TRACING_V2 / LANGSMITH_* env and consumed by the langgraph
+    # runtime — never imported directly.
+    "langsmith",
+  ]
+  # DEP004: tests, documentation extensions, and the dev/ tooling harness import
+  # their owning development groups. The harness is not shipped - the wheel packs
+  # only `src/vaultspec_a2a` - so a development-group import there is correct by
+  # construction rather than an exception being carved out.
+  DEP004 = [
+    "jsonschema",
+    "packaging",
+    "pytest",
+    "pytest_asyncio",
+    # dev/health/report.py uses radon's library API to measure this tree.
+    "radon",
+    "sphinx",
+    "tenacity",
+    "tomlkit",
+    # The grounding-parity test drives the real vaultspec-core CLI, which the
+    # `freeze` group owns because the frozen binary dispatches it. Importing it
+    # from a test is the same construction as every entry above: the wheel packs
+    # only `src/vaultspec_a2a`, so nothing shipped depends on it.
+    "vaultspec_core",
+  ]
 
 [tool.ty.environment]
 python-version = "3.13"
@@ -477,10 +464,10 @@ root = [".", "src"]
 # a fast checker earns its place by being fast, which means it declines to
 # prove the expensive things, and those are exactly what the strict pass adds.
 [tool.basedpyright]
-include = ["src", "dev"]
 exclude = ["**/__pycache__", "**/node_modules", ".venv"]
-stubPath = "typings"
+include = ["src", "dev"]
 pythonVersion = "3.13"
+stubPath = "typings"
 typeCheckingMode = "strict"
 
 # Individual rules enabled beyond `strict`, curated rather than a blanket
@@ -488,11 +475,11 @@ typeCheckingMode = "strict"
 # An override that drops `@override` loses its link to the base method
 # silently: rename the base method and the override becomes a dead sibling
 # instead of a type error.
+reportIgnoreCommentWithoutRule = "error"
 reportImplicitOverride = "error"
 reportPropertyTypeMismatch = "error"
 reportUninitializedInstanceVariable = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
-reportIgnoreCommentWithoutRule = "error"
 # A symbol imported into a module but not re-exported is that module's private
 # implementation detail; a second module reaching past it is a trust-boundary
 # violation, and this is the non-underscore half of that boundary.
@@ -506,7 +493,9 @@ executionEnvironments = [
   # extraPaths keeps the repo root on this environment's import path: declaring
   # an executionEnvironment resets resolution for that directory, and `dev.*` is
   # imported as a top-level package from the repo root.
-  { root = "dev/tests", extraPaths = ["."], reportPrivateUsage = false },
+  { root = "dev/tests", extraPaths = [
+    ".",
+  ], reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/api/tests", reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/authoring/tests", reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/cli/tests", reportPrivateUsage = false },
@@ -542,15 +531,18 @@ max-complexity = 15
 # would report is already covered by ruff, so enabling more would mean two
 # tools disagreeing about the same finding.
 [tool.pylint.main]
+ignore-paths = [
+  "^.*[\\\\/]tests[\\\\/].*$",
+  "^.*[\\\\/]service_tests[\\\\/].*$",
+]
 py-version = "3.13"
-ignore-paths = ["^.*[\\\\/]tests[\\\\/].*$", "^.*[\\\\/]service_tests[\\\\/].*$"]
 
 [tool.pylint."messages control"]
 disable = ["all"]
 enable = [
-  "too-many-lines",           # C0302 - module length
+  "too-many-lines",               # C0302 - module length
   "too-many-instance-attributes", # R0902
-  "too-many-public-methods",  # R0904
+  "too-many-public-methods",      # R0904
   "too-many-boolean-expressions", # R0916
 ]
 
@@ -560,16 +552,16 @@ max-module-lines = 1000
 
 [tool.pylint.design]
 max-attributes = 7      # R0902 default
-max-public-methods = 20 # R0904 default
 max-bool-expr = 5       # R0916 default
+max-public-methods = 20 # R0904 default
 
 # ── Dead code ────────────────────────────────────────────────────────────────
 # Advisory. vulture infers reachability it cannot always see - a name reached
 # only through a registry, a plugin lookup, or a framework callback reads as
 # dead - so a finding here is a lead to confirm, never a verdict.
 [tool.vulture]
-paths = ["src/vaultspec_a2a"]
 exclude = ["*/tests/*", "*/service_tests/*"]
+paths = ["src/vaultspec_a2a"]
 # The tool's own default. Raising it to 80 would hide the whole class of
 # genuinely-unused imports and variables this scan exists to surface.
 min_confidence = 60
@@ -592,6 +584,7 @@ skips = [
 # ── Docstring coverage ───────────────────────────────────────────────────────
 # Advisory. 80% is the conventional floor for a public-surface docstring gate.
 [tool.interrogate]
+exclude = ["src/vaultspec_a2a/tests", "src/vaultspec_a2a/service_tests"]
 fail-under = 80
 ignore-init-method = true
 ignore-magic = true
@@ -599,5 +592,4 @@ ignore-module = false
 ignore-nested-functions = true
 ignore-private = true
 ignore-property-decorators = true
-exclude = ["src/vaultspec_a2a/tests", "src/vaultspec_a2a/service_tests"]
 omit-covered-files = true

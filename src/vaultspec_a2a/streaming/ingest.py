@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from langgraph.errors import NodeTimeoutError
 from langgraph.types import Command
 
 from ..domain_config import domain_config
@@ -140,11 +141,12 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
     the run's own operator would recognise as a fault.
 
     ``graph.step_timeout`` is the compiled Pregel attribute the compiler sets
-    from the team TOML (``graph/compiler.py``); it is absent from the
-    ``StreamableGraph`` protocol (a test double, or a graph compiled without a
-    configured step_timeout, need not carry it), so it is read defensively
-    and the global default is kept whenever it is missing or not the wider
-    bound.
+    from the team TOML (``graph/compiler.py``) as a backstop a grace above the
+    per-node run budget, so this bound always sits outside both. It is absent
+    from the ``StreamableGraph`` protocol (a test double, or a graph compiled
+    without a configured step_timeout, need not carry it), so it is read
+    defensively and the global default is kept whenever it is missing or not
+    the wider bound.
     """
     global_default = domain_config.ingest_event_stall_timeout_seconds
     node_step_timeout = getattr(graph, "step_timeout", None)
@@ -528,6 +530,27 @@ class IngestManager:
                 identity,
                 span,
                 (str(exc), "INGEST_STALL_TIMEOUT", True, "ingest_stall_timeout"),
+            )
+        if isinstance(exc, NodeTimeoutError):
+            # Reported under the step-timeout code clients already know; the
+            # message is what gains the node and the limit it hit.
+            logger.warning(
+                "Node %s exceeded its %s timeout after %.0fs for thread %s",
+                exc.node,
+                exc.kind,
+                exc.elapsed,
+                thread_id,
+            )
+            return await self._report_ingest_error(
+                identity,
+                span,
+                (
+                    f"Graph node {exc.node!r} exceeded its {exc.kind} timeout "
+                    f"after {exc.elapsed:.0f}s - the operation may be retried",
+                    "STEP_TIMEOUT",
+                    True,
+                    "node_timeout",
+                ),
             )
         if isinstance(exc, TimeoutError):
             logger.warning("Graph step_timeout fired for thread %s", thread_id)

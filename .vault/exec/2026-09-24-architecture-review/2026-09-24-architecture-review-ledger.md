@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:1a1aaa7658481a308e938ee9d55cf431366309b38772b3e590725dfc6a0eedfb'
+body_hash: 'sha256:013d3431e16638b24cb2651bc8b7474fedf4727fb994ca1d28a35ccd373d1cc4'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -24,6 +24,16 @@ related:
 - `S02` `M` `src/vaultspec_a2a/graph/tests/test_research_adr_clarification.py`
 - `S02` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
 - `S02` `by:` `orchestrator`
+- `S03` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S03` `M` `src/vaultspec_a2a/graph/_compiler_retry.py`
+- `S03` `M` `src/vaultspec_a2a/graph/nodes/action_completion.py`
+- `S03` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S03` `A` `src/vaultspec_a2a/streaming/tests/test_ingest_node_timeout.py`
+- `S03` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S03` `M` `src/vaultspec_a2a/graph/tests/nodes/test_action_completion.py`
+- `S03` `M` `src/vaultspec_a2a/worker/tests/test_frozen_graph_authority.py`
+- `S03` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/graph src/vaultspec_a2a/worker` -> `pass`
+- `S03` `by:` `orchestrator`
 
 ## Notes
 

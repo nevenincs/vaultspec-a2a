@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from langgraph.errors import GraphRecursionError
+from langgraph.errors import GraphRecursionError, NodeTimeoutError
 from langgraph.types import RetryPolicy
 
 from ..providers.conditions import ProviderCondition, condition_is_retryable
@@ -19,9 +19,12 @@ _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ConnectionRefusedError,
 )
 
-# Exceptions that must never trigger a retry.
+# Exceptions that must never trigger a retry. A node that spent its whole run
+# budget is not a transient fault, and a provider turn that long may already
+# have acted through its tools.
 _NO_RETRY_EXCEPTIONS: tuple[type[BaseException], ...] = (
     GraphRecursionError,
+    NodeTimeoutError,
     ProviderSessionError,
 )
 
@@ -139,12 +142,17 @@ def _worker_retry_on(exc: Exception) -> bool:
 #: field is explicit so a LangGraph dependency update cannot silently widen the
 #: number of attempts or the elapsed retry budget. The served ACP wire exposes
 #: no retry delay and Codex exposes only ``willRetry``, so there is no provider
-#: duration to merge into this fixed local schedule.
+#: duration to merge into this fixed local schedule. Jittered because the
+#: failures it retries are mostly a provider refusing load: concurrent runs and
+#: parallel researcher branches that hit one limit together would otherwise
+#: all retry in lockstep and hit it together again. LangGraph's jitter adds up
+#: to one second to each wait, so the elapsed retry budget is 1.5 to 3.5
+#: seconds rather than a fixed 1.5.
 _NODE_RETRY_POLICY = RetryPolicy(
     initial_interval=0.5,
     backoff_factor=2.0,
     max_interval=1.0,
     max_attempts=3,
-    jitter=False,
+    jitter=True,
     retry_on=_worker_retry_on,
 )

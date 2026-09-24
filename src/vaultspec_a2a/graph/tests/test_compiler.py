@@ -43,6 +43,7 @@ from ...thread.state import TeamState
 from .._compiler_research import _make_research_producer
 from .._compiler_retry import _NODE_RETRY_POLICY, _worker_retry_on
 from ..compiler import (
+    STEP_BACKSTOP_GRACE_SECONDS,
     _build_supervisor_prompt,
     _loop_route,
     _parse_catalog_preferences,
@@ -715,7 +716,7 @@ def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) -> None:
-    """compile_team_graph sets step_timeout on the compiled Pregel graph."""
+    """The step budget caps every node, and the graph backstop sits above it."""
     team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
@@ -728,7 +729,8 @@ async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) 
             provider_factory=pf,
             model_assignment=deterministic_model_assignment(team),
         )
-    assert graph.step_timeout == 42.0
+    assert _node_run_timeouts(graph) == {42.0}
+    assert graph.step_timeout == 42.0 + STEP_BACKSTOP_GRACE_SECONDS
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -749,7 +751,17 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
             provider_factory=pf,
             model_assignment=deterministic_model_assignment(team),
         )
-    assert graph.step_timeout == 120.0
+    assert _node_run_timeouts(graph) == {120.0}
+    assert graph.step_timeout == 120.0 + STEP_BACKSTOP_GRACE_SECONDS
+
+
+def _node_run_timeouts(graph: Any) -> set[float | None]:
+    """The run budgets the compiled graph enforces on its user-defined nodes."""
+    return {
+        node.timeout.run_timeout
+        for name, node in graph.nodes.items()
+        if not name.startswith("__")
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1063,7 +1075,7 @@ async def test_a_throttled_failure_retries_under_the_shipped_backoff() -> None:
             _FAILURE_BY_CONDITION[ProviderCondition.THROTTLED],
             policy=_NODE_RETRY_POLICY,
         ),
-        timeout=3.0,
+        timeout=5.0,
     )
     elapsed = time.monotonic() - started
 
@@ -1076,9 +1088,11 @@ async def test_a_throttled_failure_retries_under_the_shipped_backoff() -> None:
         )
         for retry_index in range(_NODE_RETRY_POLICY.max_attempts - 1)
     )
-    assert _NODE_RETRY_POLICY.jitter is False
+    retries = _NODE_RETRY_POLICY.max_attempts - 1
+    # LangGraph's jitter adds at most one second to each wait.
+    jitter_ceiling = float(retries) if _NODE_RETRY_POLICY.jitter else 0.0
     assert expected_delay == 1.5
-    assert expected_delay <= elapsed < 3.0
+    assert expected_delay <= elapsed < expected_delay + jitter_ceiling + 0.5
 
 
 @pytest.mark.asyncio(loop_scope="function")

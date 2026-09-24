@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langchain_core.runnables.graph import Graph as DrawableGraph
     from langgraph.checkpoint.base import BaseCheckpointSaver
-    from langgraph.types import Command, RetryPolicy, TimeoutPolicy
+    from langgraph.types import Command, RetryPolicy
 
     from ..authoring import FeedbackContextReader
     from ..worker.authoring_binding import AuthoringBindingProvider
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
 
 from langgraph.graph import END, StateGraph
+from langgraph.types import TimeoutPolicy
 
 from ..authoring.contract import is_document_authoring_role
 from ..providers.factory import (
@@ -66,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "STEP_BACKSTOP_GRACE_SECONDS",
     "_ROLE_TO_PHASE",
     "CompiledTeamGraph",
     "_add_node",
@@ -200,9 +202,9 @@ class CompiledTeamGraph(Protocol):
     def get_graph(self) -> DrawableGraph: ...
 
     # Not a property: this function SETS it on the compiled graph a few lines
-    # below, from the team's configured step budget, and the compiler's tests
-    # read back what was set. A protocol that omits it describes a graph this
-    # module does not actually produce.
+    # below, and the compiler's tests read back what was set. It is the
+    # superstep backstop, a grace above the per-node run budget every node
+    # carries, so the node's own timeout fires first and names the node.
     step_timeout: float | None
 
     async def ainvoke(
@@ -222,6 +224,12 @@ class CompiledTeamGraph(Protocol):
         # keys and reading it is exactly what a parked-run assertion does.
     ) -> Mapping[str, Any]: ...
 
+
+#: Seconds the graph-wide superstep bound sits above each node's own run budget.
+#: Both are measured from roughly the same instant, so at equal values the
+#: superstep bound would win the race and report an anonymous step timeout
+#: instead of the node's own, which names the node and which limit it hit.
+STEP_BACKSTOP_GRACE_SECONDS = 30.0
 
 # Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
@@ -929,6 +937,10 @@ def compile_team_graph(
     _validate_frozen_assignment_inventory(model_assignment)
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    # Every node attempt is capped at the preset's step budget. No idle limit:
+    # a provider CLI running a long tool call relays no LangChain callback while
+    # it works, so an idle clock would fell agents that are making progress.
+    builder.set_node_defaults(timeout=TimeoutPolicy(run_timeout=step_timeout))
     _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
@@ -1007,7 +1019,6 @@ def compile_team_graph(
         interrupt_before=interrupt_nodes,
     )
 
-    # Apply per-preset graph settings.
-    graph.step_timeout = step_timeout
+    graph.step_timeout = step_timeout + STEP_BACKSTOP_GRACE_SECONDS
 
     return graph

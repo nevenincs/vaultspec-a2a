@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-24'
 body_schema: body-v2
-body_hash: 'sha256:7a4f3fea5a24ff3f83bb07fc879beb5a385c6f2277929bbb76bce923b1cde1f8'
+body_hash: 'sha256:02d43244aee91100bfaf4b819bd1be23202f49fd523c82263b07883ddcd63af8'
 ---
 
 # `architecture-review` plan
@@ -46,7 +46,7 @@ The LangGraph family runs at its latest release and the graph layer uses the 1.2
 
 - [x] `P01.S01` - Bump the LangGraph family, langchain-core, langchain-openai, langsmith, and langgraph-sdk to their latest releases and raise the declared floors to the APIs the code uses; `pyproject.toml, uv.lock`.
 - [x] `P01.S02` - Widen the typed graph builder to the LangGraph 1.2 node options and declare destinations on every Command-returning node; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes/`.
-- [ ] `P01.S03` - Put model-calling nodes under node-level TimeoutPolicy and jittered RetryPolicy defaults and reconcile the graph-wide step timeout and stall watchdog with them; `src/vaultspec_a2a/graph/_compiler_retry.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/streaming/ingest.py`.
+- [x] `P01.S03` - Put model-calling nodes under node-level TimeoutPolicy and jittered RetryPolicy defaults and reconcile the graph-wide step timeout and stall watchdog with them; `src/vaultspec_a2a/graph/_compiler_retry.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/streaming/ingest.py`.
 - [ ] `P01.S04` - Stop checkpointing mounted vault content by recomputing it per invocation instead of carrying it in a tracked channel; `src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/thread/state.py, src/vaultspec_a2a/graph/nodes/worker.py`.
 - [ ] `P01.S05` - Carry run identity in a typed LangGraph Runtime context passed on ingest and resume; `src/vaultspec_a2a/graph/, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/executor.py`.
 - [ ] `P01.S06` - Drain in-flight runs at a superstep boundary with RunControl on worker shutdown so a restart resumes a checkpoint instead of a torn node; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/worker/app.py`.

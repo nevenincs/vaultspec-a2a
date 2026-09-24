@@ -8,8 +8,12 @@ from ...thread.state import TeamState  # noqa: TC001 - LangGraph inspects node i
 GRAPH_COMPLETION_NODE = "_record_graph_completion"
 
 
-def record_graph_completion(state: TeamState) -> dict[str, object]:
-    """Commit completion only for the explicitly active incorporated action."""
+async def record_graph_completion(state: TeamState) -> dict[str, object]:
+    """Commit completion only for the explicitly active incorporated action.
+
+    Async although it does no I/O: LangGraph enforces a node run budget only on
+    async nodes, and the compiler gives every node one.
+    """
     active = GraphActionReceipt.model_validate(state.get("active_graph_action_receipt"))
     incorporated = state.get("graph_action_receipts", {}).get(active.dispatch_id)
     if incorporated != active.model_dump(mode="json"):

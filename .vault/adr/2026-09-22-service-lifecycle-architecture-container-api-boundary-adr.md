@@ -3,107 +3,59 @@ tags:
   - '#adr'
   - '#service-lifecycle-architecture'
 date: '2026-09-22'
-modified: '2026-09-22'
+modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:93b2a021662ad41b945407fd5ffb570d307673b9fe25e771581e97848822bcd6'
+body_hash: 'sha256:4f0c95be901fc42cb5eb3db2cb705266658973a36e3750066e251496e3b50a14'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-09-22-service-lifecycle-architecture-container-api-comparison-research]]"
   - "[[2026-09-22-service-lifecycle-architecture-compose-host-lifecycle-reference]]"
-  - "[[2026-09-22-service-lifecycle-architecture-issue18-evidence-review-audit]]"
   - "[[2026-07-15-dev-process-registry-adr]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
+  - '[[2026-09-24-service-lifecycle-architecture-independent-revalidation-audit]]'
+  - '[[2026-07-19-repository-tooling-hardening-adr]]'
 ---
-
-# `service-lifecycle-architecture` adr: `Programmatic container API ownership boundary` | (**status:** `proposed`)
+# `service-lifecycle-architecture` adr: `Compose CLI as the programmatic container boundary` | (**status:** `proposed`)
 
 ## Problem Statement
 
-Issue #18 retains its original container-orchestration and Bollard investigation
-scope. The merged lifecycle slice does not close it. The accepted
-`2026-03-20-service-lifecycle-architecture-adr` already assigns server stack
-lifecycle to Docker Compose, but does not decide whether a programmatic Docker
-Engine client may complement that stack. Whether direct Engine create, start,
-stop, health, logs, and restart can coexist with Compose topology ownership is
-unresolved. This proposal frames the decision; it does not narrow issue #18.
+Issue #18 asks whether a direct Docker Engine client should provide programmatic control of the containerized gateway, worker, and supporting services. The accepted `2026-03-20-service-lifecycle-architecture-adr` assigns server stack topology and lifecycle to Compose, but leaves the proposed control interface and Engine-client question open. A second mutating owner would change that boundary.
+
+**Proposed decision:** use Docker Compose CLI as the programmatic control boundary for explicitly selected server-stack projects. Repository-owned recipes and code invoke Compose directly, as they do today. Do not add a direct Engine client, a Python supervisor, or a Rust helper for the current issue scope. This is a proposed answer to the issue's API question, not an accepted reduction of its scope.
 
 ## Considerations
 
-- Preserve Compose project identity, topology, health ordering, restart, and
-  cleanup as accepted in `2026-03-20-service-lifecycle-architecture-adr`.
-- Keep named host processes and the Docker-free desktop profile outside this
-  decision (`2026-07-15-dev-process-registry-adr`,
-  `2026-07-18-desktop-product-profile-adr`).
-- The unclosed capability questions and unmeasured client costs are grounded
-  in `2026-09-22-service-lifecycle-architecture-container-api-comparison-research`
-  and `2026-09-22-service-lifecycle-architecture-compose-host-lifecycle-reference`.
+- The current project mapping and subprocess seam are grounded in `2026-09-22-service-lifecycle-architecture-compose-host-lifecycle-reference`.
+- Compose's lifecycle commands and structured observations cover the presently named container operations; the comparison and bounded Engine mutation experiment are in `2026-09-22-service-lifecycle-architecture-container-api-comparison-research`.
+- The accepted `2026-07-19-repository-tooling-hardening-adr` keeps Justfile as a delegating command surface and Compose as the stack owner.
+- Named host processes and the Docker-free desktop profile retain their accepted owners (`2026-07-15-dev-process-registry-adr`, `2026-07-18-desktop-product-profile-adr`).
+- Application health aggregation, port-owner diagnosis, and configuration convergence remain separate requirements of issue #18; the client choice alone does not prove them.
 
 ## Considered options
 
-- **Compose CLI or python-on-whales facade — current baseline, not a final
-  selection.** Keeps topology and lifecycle under one owner, but may leave a
-  programmatic Engine requirement unsatisfied.
-- **Bollard or docker-py for project-scoped Engine lifecycle — open.** Could
-  supply direct create/start/stop/health/logs/restart, but must show how it
-  handles Compose project state, recovery, and cross-platform access. The
-  comparison evidence has no prototype that settles those costs.
-- **Hybrid Compose topology plus bounded Engine lifecycle — open.** May retain
-  Compose declarations while adding programmatic operations against only an
-  identified project. Whether Compose and Engine can reconcile those mutations
-  safely is the central prototype question.
-- **Close #18 on the merged lifecycle slice — ruled out by the owner's scope
-  choice.** It leaves the original API and aggregation criteria unevaluated.
+- **Direct Compose CLI invocation — proposed.** Reuses the existing stack owner and exposes lifecycle, status, and logs to host callers. Justfile already delegates directly, and the certifier uses subprocess argv. python-on-whales could wrap the same CLI but adds a dependency without a demonstrated need.
+- **Compose plus read-only Engine client — not selected.** It can inspect Compose-created containers, but the known inventory, health-state, and log needs are available through Compose. It adds a second client without a demonstrated missing capability.
+- **Compose plus project-scoped mutating Engine client — not selected.** Docker SDK for Python or Bollard could operate on identified containers. A small stop/removal experiment reconciled through Compose, but full-stack ownership, recovery, and platform behavior are unproven. This path requires a concrete need and a later decision.
+- **Replace Compose with a direct Engine orchestrator — rejected.** It would assume ownership of topology and recovery already assigned to Compose, requiring a reversal of the accepted server-stack decision.
 
 ## Constraints
 
-- No Docker daemon socket, named pipe, or equivalent authority enters the
-  gateway, worker, provider tree, or desktop product. Any client is host-side
-  and operator-invoked; see the security boundary in
-  `2026-09-22-service-lifecycle-architecture-container-api-comparison-research`.
-- A facade must address only containers in an explicitly selected Compose
-  project; it may not identify targets by image name or global container scan.
-- The accepted Compose lifecycle remains in force while the alternatives are
-  evaluated. Direct Engine mutation is neither adopted nor rejected here; if
-  selected, its ownership effect requires an explicit approved amendment to
-  `2026-03-20-service-lifecycle-architecture-adr` or a superseding decision.
-- No dependency or public command is selected without a capability-specific
-  prototype and Windows/Linux behavior evidence.
+- Until this proposal is accepted, the existing Compose topology and commands remain authoritative. This record neither approves an Engine client nor closes issue #18.
+- If accepted, the interface addresses only an explicitly selected project and its declared Compose files. It does not discover targets by image name or scan unrelated containers.
+- Docker daemon authority remains with the host operator. Do not mount or pass it into gateway, worker, provider processes, or the Docker-free desktop profile. This preserves the service/profile boundaries and the security evidence in `2026-09-22-service-lifecycle-architecture-container-api-comparison-research`.
+- Resolved Compose configuration is internal input, not a raw status response: it may contain interpolated secrets. Any future public output must omit those values.
 
 ## Implementation
 
-Keep the existing Compose path unchanged during evaluation. Test the original
-#18 criteria one by one: registry, create/start, stop, restart, health, logs,
-environment propagation, port preflight, stale-container cleanup, and
-Windows/Linux parity. Prototype Compose CLI, python-on-whales, docker-py, and
-Bollard against an isolated project, including direct Engine mutation and
-Compose reconciliation after it. Compare project identity, ordering, failure
-recovery, daemon authority, packaging, and operator ergonomics. Then present
-a concrete ownership selection for authorization; any selection that changes
-Compose's accepted lifecycle contract needs its own approved amendment or
-superseding decision. The implementation seams are mapped in
-`2026-09-22-service-lifecycle-architecture-compose-host-lifecycle-reference`.
-This proposed ADR does not authorize implementation or close #18; closure
-requires an approved decision and reviewed behavior against the retained
-issue criteria.
+Keep the existing Justfile recipes as direct Compose passthroughs. A programmatic caller that needs the issue's create/start, stop/down, restart, status, or log operations invokes Compose with argv and the explicit project/file set, using the certifier's subprocess seam as an analogue. It can read `config --services` and JSON status to build a service view; application-level probes and port-owner diagnostics belong to the specific caller that needs them. Configuration changes use Compose `up` rather than assuming `restart` applies new environment values. The code seams are mapped in `2026-09-22-service-lifecycle-architecture-compose-host-lifecycle-reference`. Named host processes continue through their registry.
 
 ## Rationale
 
-The ownership boundary is the deciding question. Compose expresses the
-current topology and recovery policy, while direct Engine operations are
-container-level. A bounded hybrid may be possible, but the comparison alone
-cannot establish safe reconciliation after Engine mutation. The untested
-limits are in
-`2026-09-22-service-lifecycle-architecture-container-api-comparison-research`;
-the independent evidence review is
-`2026-09-22-service-lifecycle-architecture-issue18-evidence-review-audit`.
+The comparison in `2026-09-22-service-lifecycle-architecture-container-api-comparison-research` shows a programmatic Compose path for the operations currently specified, while no demonstrated unmet capability requires direct Engine access. Direct invocation keeps the existing repository control surface and accepted topology. The bounded experiment prevents a blanket claim that Engine mutation cannot reconcile with Compose; it does not justify adding a second repository-owned mutating path to the full service stack. Both CLI and SDK approaches carry Docker daemon authority, so the choice rests on lifecycle ownership and demonstrated capability, not an assumed privilege reduction.
 
 ## Consequences
 
-The original #18 programmatic lifecycle scope stays visible rather than being
-silently replaced by the merged Compose slice. The price is a prototype and a
-subsequent explicit choice before implementation. Direct Engine lifecycle may
-prove useful, or it may impose unacceptable reconciliation and packaging costs;
-neither outcome is claimed yet. Any client will need daemon access control,
-project identity checks, and Windows/Linux proof. This proposal does not choose
-Bollard, docker-py, or python-on-whales and cannot be used as implementation
-approval.
+- The proposal gives issue #18 a concrete programmatic path without a new controller, Docker SDK, Rust build, or duplicate topology model.
+- It does not supply a direct Docker Engine API. If that is a hard requirement of issue #18, the owner must reject this proposal or explicitly revise the issue scope; this document cannot silently do so.
+- The implementation must still prove meaningful health aggregation, port preflight, log behavior, environment handling, and Windows/Linux operation before issue closure. The current evidence includes only a small Windows-host reconciliation experiment, not a full-stack certification.
+- A future demonstrated need for direct Engine observations or mutations warrants a separate evidence-backed ownership decision. This proposed ADR does not pre-approve that path.

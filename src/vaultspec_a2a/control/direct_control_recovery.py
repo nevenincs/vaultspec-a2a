@@ -530,7 +530,14 @@ async def _settle_delivery_failure(
         )
         await db.commit()
         return _RecoveryOutcome.DEFERRED
-    retry_at = failure_observed_at + _retry_delay(recovery_claim.attempt_count)
+    # The worker's own Retry-After, when it gave one, is better information than
+    # the backoff curve: it comes from the side that knows when it expects room.
+    # The later of the two wins, so the hint can bring a retry no earlier than
+    # the curve already allows and can only hold one back.
+    delay = _retry_delay(recovery_claim.attempt_count)
+    if outcome.retry_after_seconds is not None:
+        delay = max(delay, timedelta(seconds=outcome.retry_after_seconds))
+    retry_at = failure_observed_at + delay
     retry_at = min(retry_at, recovery_claim.deadline_at)
     await reschedule_recovery_attempt(
         db,

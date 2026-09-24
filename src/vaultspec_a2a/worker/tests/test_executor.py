@@ -50,6 +50,9 @@ from ...thread.executable_graph import freeze_graph_definition
 from .._dispatch_contract import (
     _INGEST_GUARDS,
     _RESUME_GUARDS,
+    CAPACITY_ACCEPTED,
+    CAPACITY_FULL,
+    CAPACITY_THREAD_ACTIVE,
     DispatchCapacityReservation,
 )
 from ..executor import Executor
@@ -291,8 +294,9 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                result = await executor.reserve_dispatch_capacity("t-1")
+                result, reason = await executor.reserve_dispatch_capacity("t-1")
                 assert result is not None
+                assert reason == CAPACITY_ACCEPTED
             finally:
                 await bridge.close()
 
@@ -304,8 +308,9 @@ class TestIngestGating:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 await executor.reserve_dispatch_capacity("t-1")
-                result = await executor.reserve_dispatch_capacity("t-1")
+                result, reason = await executor.reserve_dispatch_capacity("t-1")
                 assert result is None
+                assert reason == CAPACITY_THREAD_ACTIVE
             finally:
                 await bridge.close()
 
@@ -319,7 +324,7 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                first = await executor.reserve_dispatch_capacity("aba-thread")
+                first, _reason = await executor.reserve_dispatch_capacity("aba-thread")
                 assert first is not None
 
                 # Queue A's terminal release and B's reserve on the production
@@ -334,7 +339,7 @@ class TestIngestGating:
                 )
                 executor._ingest_lock.release()
                 assert await release_first is True
-                second = await reserve_second
+                second, _second_reason = await reserve_second
                 assert second is not None
                 assert second != first
 
@@ -344,13 +349,18 @@ class TestIngestGating:
                 assert await executor.release_dispatch_capacity(first) is False
                 others: list[DispatchCapacityReservation] = []
                 for index in range(domain_config.max_concurrent_threads - 1):
-                    owned = await executor.reserve_dispatch_capacity(f"other-{index}")
+                    owned, _owned_reason = await executor.reserve_dispatch_capacity(
+                        f"other-{index}"
+                    )
                     assert owned is not None
                     others.append(owned)
                 assert (
                     executor.active_ingest_count == domain_config.max_concurrent_threads
                 )
-                assert await executor.reserve_dispatch_capacity("over-capacity") is None
+                assert await executor.reserve_dispatch_capacity("over-capacity") == (
+                    None,
+                    CAPACITY_FULL,
+                )
 
                 assert await executor.release_dispatch_capacity(second) is True
                 for owned in others:
@@ -366,8 +376,8 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                assert await executor.reserve_dispatch_capacity("t-1") is not None
-                assert await executor.reserve_dispatch_capacity("t-2") is not None
+                assert (await executor.reserve_dispatch_capacity("t-1"))[0] is not None
+                assert (await executor.reserve_dispatch_capacity("t-2"))[0] is not None
             finally:
                 await bridge.close()
 
@@ -378,13 +388,13 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                reservation = await executor.reserve_dispatch_capacity("t-1")
+                reservation, _reason = await executor.reserve_dispatch_capacity("t-1")
                 assert reservation is not None
                 await executor._mark_ingest_done(
                     "t-1", ThreadStatus.COMPLETED, reservation
                 )
                 # Slot is now free -- can re-acquire
-                result = await executor.reserve_dispatch_capacity("t-1")
+                result, _retry_reason = await executor.reserve_dispatch_capacity("t-1")
                 assert result is not None
             finally:
                 await bridge.close()
@@ -672,7 +682,9 @@ class TestHandleDispatch:
             bridge = _make_bridge(relayed=relayed)
             executor = Executor(checkpointer=cp, bridge=bridge)
             try:
-                reservation = await executor.reserve_dispatch_capacity(thread_id)
+                reservation, _reason = await executor.reserve_dispatch_capacity(
+                    thread_id
+                )
                 assert reservation is not None
                 graph = _terminal_graph(executor)
                 if outcome == ThreadStatus.COMPLETED:
@@ -1876,7 +1888,9 @@ class TestUnhandledDispatchTerminal:
             try:
                 # The slot the ingest took before it died, taken through the
                 # executor's own gate rather than by reaching into its state.
-                reservation = await executor.reserve_dispatch_capacity(thread_id)
+                reservation, _reason = await executor.reserve_dispatch_capacity(
+                    thread_id
+                )
                 assert reservation is not None
                 await executor._fail_unhandled_dispatch(
                     _current_ingest_dispatch(thread_id),
@@ -1926,7 +1940,9 @@ class TestUnhandledDispatchTerminal:
             try:
                 # The slot a live ingest would hold, taken through the executor's
                 # own gate rather than by reaching into its state.
-                assert await executor.reserve_dispatch_capacity(thread_id) is not None
+                assert (await executor.reserve_dispatch_capacity(thread_id))[
+                    0
+                ] is not None
                 await executor._fail_unhandled_dispatch(
                     DispatchRequest(
                         action="cancel",

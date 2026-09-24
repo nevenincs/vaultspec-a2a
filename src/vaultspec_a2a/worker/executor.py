@@ -22,12 +22,12 @@ from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from ._authoring_close import close_authoring_session_best_effort
 from ._dispatch_contract import (
-    _CAPACITY_ACCEPTED,
-    _CAPACITY_FULL,
-    _CAPACITY_THREAD_ACTIVE,
     _INGEST_GUARDS,
     _RESUME_GUARDS,
     _SLOT_OWNING_ACTIONS,
+    CAPACITY_ACCEPTED,
+    CAPACITY_FULL,
+    CAPACITY_THREAD_ACTIVE,
     DispatchCapacityReservation,
 )
 from ._dispatch_receipts import emit_dispatch_application_receipt
@@ -236,10 +236,16 @@ class Executor(SettlementMixin):
 
     async def reserve_dispatch_capacity(
         self, thread_id: str
-    ) -> DispatchCapacityReservation | None:
-        """Atomically reserve pre-compile capacity for one thread dispatch."""
-        reservation, _reason = await self._reserve_dispatch_capacity(thread_id)
-        return reservation
+    ) -> tuple[DispatchCapacityReservation | None, str]:
+        """Atomically reserve pre-compile capacity for one thread dispatch.
+
+        Returns the reservation, or ``None`` with the bounded reason it was
+        refused. The reason is part of the result because the two refusals mean
+        opposite things to the caller: a thread that is already running is a
+        semantic conflict about one run, while a full worker is backpressure
+        about all of them.
+        """
+        return await self._reserve_dispatch_capacity(thread_id)
 
     async def _reserve_dispatch_capacity(
         self, thread_id: str
@@ -247,16 +253,16 @@ class Executor(SettlementMixin):
         """Return the bounded reason for one atomic capacity decision."""
         async with self._terminal_arbitration(thread_id), self._ingest_lock:
             if thread_id in self._active_ingests:
-                return None, _CAPACITY_THREAD_ACTIVE
+                return None, CAPACITY_THREAD_ACTIVE
             if len(self._active_ingests) >= domain_config.max_concurrent_threads:
-                return None, _CAPACITY_FULL
+                return None, CAPACITY_FULL
             self._capacity.next_generation += 1
             reservation = DispatchCapacityReservation(
                 thread_id=thread_id,
                 generation=self._capacity.next_generation,
             )
             self._active_ingests[thread_id] = reservation
-            return reservation, _CAPACITY_ACCEPTED
+            return reservation, CAPACITY_ACCEPTED
 
     @override
     async def release_dispatch_capacity(
@@ -319,9 +325,9 @@ class Executor(SettlementMixin):
         reservation, refusal_reason = (
             await self._reserve_dispatch_capacity(req.thread_id)
             if owns_slot
-            else (None, _CAPACITY_ACCEPTED)
+            else (None, CAPACITY_ACCEPTED)
         )
-        if refusal_reason != _CAPACITY_ACCEPTED:
+        if refusal_reason != CAPACITY_ACCEPTED:
             guards = (
                 _INGEST_GUARDS
                 if req.action == ControlActionType.INGEST
@@ -329,12 +335,12 @@ class Executor(SettlementMixin):
             )
             action = (
                 guards.slot_held_action
-                if refusal_reason == _CAPACITY_THREAD_ACTIVE
+                if refusal_reason == CAPACITY_THREAD_ACTIVE
                 else "dispatch_capacity_refused"
             )
             logger.warning(
                 guards.slot_held
-                if refusal_reason == _CAPACITY_THREAD_ACTIVE
+                if refusal_reason == CAPACITY_THREAD_ACTIVE
                 else "Worker capacity refused dispatch for thread %s",
                 req.thread_id,
                 extra=self._dispatch_log_extra(

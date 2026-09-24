@@ -16,9 +16,9 @@ if TYPE_CHECKING:
     from ..ipc.schemas import DispatchRequest
 
 __all__ = [
-    "_CAPACITY_ACCEPTED",
-    "_CAPACITY_FULL",
-    "_CAPACITY_THREAD_ACTIVE",
+    "CAPACITY_ACCEPTED",
+    "CAPACITY_FULL",
+    "CAPACITY_THREAD_ACTIVE",
     "_EXECUTOR_CONDITION",
     "_INGEST_GUARDS",
     "_RESUME_GUARDS",
@@ -139,9 +139,9 @@ _EXECUTOR_CONDITION = ProviderCondition.UNKNOWN
 # either is that dispatch's own to settle; a cancel or an unrecognised action
 # never held the slot, so a held slot there belongs to a concurrent run.
 _SLOT_OWNING_ACTIONS = frozenset({ControlActionType.INGEST, ControlActionType.RESUME})
-_CAPACITY_ACCEPTED = "accepted"
-_CAPACITY_THREAD_ACTIVE = "thread_active"
-_CAPACITY_FULL = "capacity_full"
+CAPACITY_ACCEPTED = "accepted"
+CAPACITY_THREAD_ACTIVE = "thread_active"
+CAPACITY_FULL = "capacity_full"
 
 
 @dataclass(frozen=True, slots=True)

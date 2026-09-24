@@ -72,6 +72,12 @@ _POLICY: dict[str, FailureAction] = {
         should_mark_failed=True, is_circuit_open=False
     ),
     FailureType.REJECTED: FailureAction(should_mark_failed=True, is_circuit_open=False),
+    # The worker already holds this run's slot, so the dispatch was a duplicate
+    # of work that IS being done. Failing the run here would kill the very turn
+    # the refusal is reporting as alive.
+    FailureType.RUN_BUSY: FailureAction(
+        should_mark_failed=False, is_circuit_open=False
+    ),
 }
 
 _DEFAULT = FailureAction(should_mark_failed=True, is_circuit_open=False)

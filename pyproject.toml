@@ -17,10 +17,16 @@ dependencies = [
   "typing-extensions>=4.16.0",
   "fastapi>=0.133.1",
   "httpx>=0.28.1",
-  "langchain-core>=1.2.16",
-  "langchain-openai>=1.1.10",
-  "langgraph>=0.2.16",
-  "langgraph-checkpoint-sqlite>=2.0.0",
+  "langchain-core>=1.6.4,<2",
+  "langchain-openai>=1.6.6,<2",
+  # The graph layer uses 1.2 node options (timeout, error_handler,
+  # destinations), Runtime context, and RunControl, and the savers rely on the
+  # checkpoint 4.x prune and copy API, so the floors are the releases that
+  # carry them. The majors are capped because each LangGraph major has changed
+  # checkpoint and injection semantics this code depends on.
+  "langgraph>=1.2.12,<2",
+  "langgraph-checkpoint>=4.2.0,<5",
+  "langgraph-checkpoint-sqlite>=3.1.1,<4",
   # 2.x only: the server targets the `mcp.server.mcpserver` surface that replaced
   # `mcp.server.fastmcp`, so a 1.x resolve fails at import. The upper bound keeps
   # the next major from repeating that break on an unpinned install.
@@ -38,7 +44,7 @@ dependencies = [
   "websockets>=16.0",
   "alembic>=1.15.1",
   "click>=8.1",
-  "langsmith>=0.3.1",
+  "langsmith>=0.14.0",
 ]
 
   [project.optional-dependencies]
@@ -53,7 +59,7 @@ dependencies = [
   # same modules so a contaminated build environment cannot pull them into the artifact.
   server = [
     "asyncpg>=0.30.0",
-    "langgraph-checkpoint-postgres>=2.0.0",
+    "langgraph-checkpoint-postgres>=3.1.2,<4",
     "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
     "psycopg[binary,pool]>=3.2.9",
   ]

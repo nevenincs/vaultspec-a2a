@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-24'
 body_schema: body-v2
-body_hash: 'sha256:b6302293c21b3845e23eb88c4ac8b28154f7dcee4d505136e9afc159d3b02830'
+body_hash: 'sha256:1acd8ed54ee5ed471c903e843108c43c634672aa4221320d334161953950c681'
 ---
 
 # `architecture-review` plan
@@ -44,7 +44,7 @@ Several findings are also owned by open Steps of other plans, chiefly `2026-09-0
 
 The LangGraph family runs at its latest release and the graph layer uses the 1.2 node, channel, runtime, and drain primitives instead of hand-built equivalents.
 
-- [ ] `P01.S01` - Bump the LangGraph family, langchain-core, langchain-openai, langsmith, and langgraph-sdk to their latest releases and raise the declared floors to the APIs the code uses; `pyproject.toml, uv.lock`.
+- [x] `P01.S01` - Bump the LangGraph family, langchain-core, langchain-openai, langsmith, and langgraph-sdk to their latest releases and raise the declared floors to the APIs the code uses; `pyproject.toml, uv.lock`.
 - [ ] `P01.S02` - Widen the typed graph builder to the LangGraph 1.2 node options and declare destinations on every Command-returning node; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes/`.
 - [ ] `P01.S03` - Put model-calling nodes under node-level TimeoutPolicy and jittered RetryPolicy defaults and reconcile the graph-wide step timeout and stall watchdog with them; `src/vaultspec_a2a/graph/_compiler_retry.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/streaming/ingest.py`.
 - [ ] `P01.S04` - Stop checkpointing mounted vault content by recomputing it per invocation instead of carrying it in a tracked channel; `src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/thread/state.py, src/vaultspec_a2a/graph/nodes/worker.py`.

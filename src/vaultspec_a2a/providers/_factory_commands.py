@@ -8,7 +8,7 @@ from pathlib import Path
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
-from .cli_resolution import resolve_provider_cli_executable
+from .cli_resolution import resolve_provider_cli_executable, resolve_trusted_executable
 
 __all__ = [
     "_BIN_PATH",
@@ -314,11 +314,23 @@ def _classify_acp_command(
             f"Claude ACP entry point not found: {_CLAUDE_ACP_JS}. "
             "Run 'npm install' to install @agentclientprotocol/claude-agent-acp."
         )
-    return ["node", str(_CLAUDE_ACP_JS)], {
+    # The adapter is a Node entry point, so the Node runtime is part of the
+    # launch and is resolved from the service's own environment here, once, to an
+    # absolute path. Resolving it at spawn time instead would resolve it from the
+    # child's environment, which leads with the agent workspace.
+    node_executable = resolve_trusted_executable("node")
+    if node_executable is None:
+        raise ConfigError(
+            "Node.js runtime not found on this service's PATH, so the Claude ACP "
+            f"entry point {_CLAUDE_ACP_JS} cannot be launched. Install the Node "
+            "version named by .node-version and make it reachable from the "
+            "service environment."
+        )
+    return [node_executable, str(_CLAUDE_ACP_JS)], {
         "runtime_authority": "project_local",
         "command_origin": "project_node_modules_entry",
         "command_kind": "node_entry",
-        "command_executable": "node",
+        "command_executable": Path(node_executable).name,
         "command_target": str(_CLAUDE_ACP_JS),
         "acp_backend": "node",
     }

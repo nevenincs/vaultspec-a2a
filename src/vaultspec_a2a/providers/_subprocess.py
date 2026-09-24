@@ -162,6 +162,23 @@ def _provider_execution_command(command: list[str]) -> list[str]:
     return [str(launcher_path), str(uid), str(gid), "--", *command]
 
 
+def _confined_search_env(env: dict[str, str]) -> dict[str, str]:
+    """Return the child environment with Windows working-directory search off.
+
+    Windows resolves a bare program name against the working directory before
+    PATH, both in ``CreateProcess`` and in the ``cmd.exe`` shim path this module
+    takes for ``.cmd`` launchers, and the working directory of every provider
+    child is the agent's own workspace. ``NoDefaultCurrentDirectoryInExePath``
+    is the documented way to turn that lookup off, and it is inherited, so it
+    also covers the tools the child launches. Provider launchers are already
+    resolved to absolute paths before they reach here; this closes the same hole
+    for the names a child resolves for itself.
+    """
+    if sys.platform != "win32":
+        return env
+    return {**env, "NoDefaultCurrentDirectoryInExePath": "1"}
+
+
 async def spawn_acp_process(
     command: list[str],
     env: dict[str, str],
@@ -238,6 +255,7 @@ async def _spawn_acp_process(
     # the equivalent leak survive elsewhere in this codebase.
     try:
         command = _provider_execution_command(command)
+        env = _confined_search_env(env)
         if sys.platform == "win32":
             if use_exec:
                 process = await asyncio.create_subprocess_exec(

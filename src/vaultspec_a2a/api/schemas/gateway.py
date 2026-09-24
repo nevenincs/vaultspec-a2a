@@ -43,6 +43,7 @@ from ...thread.clarification import (
     QuestionId,
 )
 from ...thread.constants import MAX_FEATURE_TAG_LENGTH
+from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     ApprovalStatus,
     CleanupKind,
@@ -76,6 +77,8 @@ __all__ = [
     "RunClarificationRespondRequest",
     "RunClarificationRespondResponse",
     "RunCommitResponse",
+    "RunMessageRefusalDetail",
+    "RunMessageRefusalResponse",
     "RunPrepareResponse",
     "RunReleaseResponse",
     "RunStage",
@@ -707,6 +710,27 @@ class RunMessageResponse(BaseModel):
     action_status: str
     action_id: str | None = None
     idempotency_key: str | None = None
+
+
+class RunMessageRefusalDetail(BaseModel):
+    """Why a follow-up turn was refused, in terms a program can match.
+
+    The refusals this verb can raise are several distinct conditions sharing one
+    status code, and a prose message is the wrong place for a consumer to learn
+    which one it met. ``code`` is the closed refusal vocabulary; ``message`` is
+    the same sentence an operator reads. A refused follow-up changed nothing, so
+    the consumer's next move is always to re-read run-status rather than to
+    reconcile from this body.
+    """
+
+    code: FailureType
+    message: str = Field(max_length=1024)
+
+
+class RunMessageRefusalResponse(BaseModel):
+    """The body served for a refused follow-up turn."""
+
+    detail: RunMessageRefusalDetail
 
 
 class RunPermissionRespondRequest(BaseModel):

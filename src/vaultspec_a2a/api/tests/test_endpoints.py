@@ -34,8 +34,9 @@ from ...database import (
     create_artifact,
     create_control_action,
     create_thread,
-    get_control_action_by_dispatch_id,
     get_control_action_by_idempotency_key,
+    get_latest_control_action,
+    get_thread,
     record_permission_request,
     record_permission_response_submission,
 )
@@ -46,7 +47,12 @@ from ...database.models import (
 )
 from ...streaming.aggregator import EventAggregator
 from ...tests._write_authority import make_test_write_authority
-from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
+from ...thread.dispatch_policy import FailureType
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    ThreadStatus,
+)
 from .conftest import catalog_run_fields, make_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -1414,11 +1420,30 @@ class TestSendMessage:
             )
         assert resp.status_code == 404
 
-    def test_202_accepted_dispatches_to_worker(
+    def test_refuses_a_follow_up_while_the_run_is_busy(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Returns 202 and dispatches ingest to worker."""
+        """A run whose turn has not finished refuses, reserving nothing.
+
+        The refusal is the whole behaviour: admitting the turn used to make the
+        follow-up the run's writer, after which the executing turn's own
+        completion was refused as superseded and the run quarantined. So this
+        asserts the negative side too - no journal action, no writer transition,
+        no dispatch - because a refusal that still wrote would be the same bug
+        wearing a 409.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _thread_state() -> tuple[str, str | None, str | None]:
+            async with session_factory() as session:
+                thread = await get_thread(session, "endpoints-run-07")
+                assert thread is not None
+                latest = await get_latest_control_action(session, thread_id=thread.id)
+                return (
+                    thread.status,
+                    thread.last_requested_action,
+                    latest.id if latest is not None else None,
+                )
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -1430,165 +1455,23 @@ class TestSendMessage:
                     **catalog_run_fields(client),
                 },
             )
-            thread_id = create_resp.json()["run_id"]
-            worker.clear()  # Clear the create dispatch if any
-
-            resp = client.post(
-                f"/v1/runs/{thread_id}/messages",
-                json={"content": "Follow-up message"},
-            )
-        assert resp.status_code == 202
-        data = resp.json()
-        assert data["accepted"] is True
-        assert data["action_status"]
-        assert data["run_id"] == thread_id
-
-        # Verify dispatch was sent to worker
-        assert len(worker.dispatches) == 1
-        dispatch = worker.dispatches[0]
-        assert dispatch["action"] == "ingest"
-        assert dispatch["thread_id"] == thread_id
-        assert dispatch["content"] == "Follow-up message"
-        assert dispatch["agent_id"] == "vaultspec-supervisor"
-
-    def test_followup_dispatch_marks_message_followup_as_applied(
-        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
-    ) -> None:
-        """The worker's application receipt - not its acknowledgement - stamps applied.
-
-        A 202 only proves the worker accepted the dispatch for scheduling; the
-        turn is applied when the graph actually starts consuming it, which the
-        worker reports by returning the dispatch identity on the private
-        ``dispatch_applied`` receipt. The receipt travels the production relay
-        (``/internal/events`` -> ``relay_event`` -> the progress handler), so
-        this drives both halves of the settlement rather than asserting the
-        acknowledgement alone.
-        """
-        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-
-        async def _applied_action() -> tuple[str | None, datetime | None]:
-            async with session_factory() as session:
-                thread = await session.get(ThreadModel, thread_id)
-                assert thread is not None
-                assert thread.repair_status == "healthy"
-                assert thread.execution_readiness == "healthy"
-                assert (
-                    thread.last_requested_action
-                    == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value
-                )
-                action = await get_control_action_by_dispatch_id(
-                    session, thread_id=thread_id, dispatch_id=dispatch_id
-                )
-                assert action is not None
-                return thread.last_applied_action, action.applied_at
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            create_resp = client.post(
-                "/v1/runs",
-                json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
-                    "message": "Hello",
-                    "run_id": "endpoints-run-08",
-                    **catalog_run_fields(client),
-                },
-            )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
+            before = asyncio.run(_thread_state())
             worker.clear()
 
             resp = client.post(
                 f"/v1/runs/{thread_id}/messages",
                 json={"content": "Follow-up message"},
             )
-            assert resp.status_code == 202
-            assert len(worker.dispatches) == 1
-            dispatch_id = cast("str", worker.dispatches[0]["dispatch_id"])
 
-            # Accepted is not applied: the acknowledgement leaves the journal
-            # action unsettled, so nothing may claim the follow-up was applied.
-            before_applied, before_stamp = asyncio.run(_applied_action())
-            assert before_applied != ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
-            assert before_stamp is None
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == FailureType.RUN_BUSY.value
+        assert "in flight" in detail["message"] or "dispatched" in detail["message"]
 
-            # The application event is proof only when its named checkpoint
-            # incorporates the same durable graph action receipt.
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            graph_receipt = cast(
-                "dict[str, object]", worker.dispatches[0]["graph_action_receipt"]
-            )
-            assert isinstance(graph_receipt, dict)
-            checkpoint_id = "cp-followup-applied"
-
-            async def _record_applied_checkpoint() -> None:
-                checkpoint = empty_checkpoint()
-                checkpoint["id"] = checkpoint_id
-                checkpoint["channel_values"] = {
-                    "active_graph_action_receipt": graph_receipt,
-                    "graph_action_receipts": {dispatch_id: graph_receipt},
-                }
-                checkpoint["channel_versions"] = {
-                    "active_graph_action_receipt": 1,
-                    "graph_action_receipts": 1,
-                }
-                await checkpointer.aput(
-                    _checkpoint_config(thread_id, ""),
-                    checkpoint,
-                    {"source": "loop", "step": 1, "parents": {}},
-                    checkpoint["channel_versions"],
-                )
-
-            asyncio.run(_record_applied_checkpoint())
-
-            receipt = client.post(
-                "/internal/events",
-                json={
-                    "thread_id": thread_id,
-                    "payload": {
-                        "type": "dispatch_applied",
-                        "dispatch_id": dispatch_id,
-                        "action": "ingest",
-                        "graph_action_receipt": graph_receipt,
-                        "checkpoint_id": checkpoint_id,
-                    },
-                },
-            )
-            assert receipt.status_code == 200
-
-        after_applied, after_stamp = asyncio.run(_applied_action())
-        assert after_applied == ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
-        assert after_stamp is not None
-
-    def test_dispatch_includes_team_preset(
-        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
-    ) -> None:
-        """Ingest DispatchRequest includes team_preset from DB for lazy recompile."""
-        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            create_resp = client.post(
-                "/v1/runs",
-                json={
-                    "message": "Hello",
-                    "team_preset": _BUNDLE_FREE_PRESET,
-                    "run_id": "endpoints-run-09",
-                    **catalog_run_fields(client),
-                },
-            )
-            assert create_resp.status_code == 201
-            thread_id = create_resp.json()["run_id"]
-            worker.dispatches.clear()
-
-            resp = client.post(
-                f"/v1/runs/{thread_id}/messages",
-                json={"content": "Follow-up"},
-            )
-
-        assert resp.status_code == 202
-        assert len(worker.dispatches) == 1
-        dispatch = worker.dispatches[0]
-        assert dispatch["action"] == "ingest"
-        assert dispatch["team_preset"] == _BUNDLE_FREE_PRESET
+        assert worker.dispatches == []
+        assert asyncio.run(_thread_state()) == before
 
     def test_content_length_limit(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -1641,10 +1524,12 @@ class TestSendMessage:
             )
 
         assert resp.status_code == 409
-        assert (
-            resp.json()["detail"]
-            == "Cannot send messages while thread is in 'repair_needed' repair state"
-        )
+        assert resp.json()["detail"] == {
+            "code": FailureType.TERMINAL.value,
+            "message": (
+                "Cannot send messages while thread is in 'repair_needed' repair state"
+            ),
+        }
 
     def test_rejects_followup_while_thread_is_reconciling(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -1673,10 +1558,12 @@ class TestSendMessage:
             )
 
         assert resp.status_code == 409
-        assert (
-            resp.json()["detail"]
-            == "Cannot send messages while thread is in 'reconciling' repair state"
-        )
+        assert resp.json()["detail"] == {
+            "code": FailureType.TERMINAL.value,
+            "message": (
+                "Cannot send messages while thread is in 'reconciling' repair state"
+            ),
+        }
 
 
 # ---------------------------------------------------------------------------

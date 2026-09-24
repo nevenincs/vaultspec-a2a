@@ -35,6 +35,11 @@ class FailureType(StrEnum):
     TERMINAL = "terminal"
     INPUT_REQUIRED = "input_required"
     CONFLICT = "conflict"
+    # A run whose current turn has not finished. Distinct from CONFLICT, which
+    # means the supplied idempotency key is already bound to different content:
+    # this one is about the run's occupancy and nothing was reserved, so a caller
+    # reconciles from run-status rather than resending under a new key.
+    RUN_BUSY = "run_busy"
     # A stored run whose metadata names no active project. Distinct from the
     # dispatch failures above: nothing was attempted and no worker was involved,
     # so it carries the same status as the equivalent refusal at run creation

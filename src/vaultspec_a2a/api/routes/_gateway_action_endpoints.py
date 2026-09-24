@@ -75,6 +75,8 @@ from ..schemas.gateway import (
     PresetSummary,
     RunClarificationRespondRequest,
     RunClarificationRespondResponse,
+    RunMessageRefusalDetail,
+    RunMessageRefusalResponse,
     RunMessageRequest,
     RunMessageResponse,
     RunPermissionRespondRequest,
@@ -176,6 +178,32 @@ __all__ = ["_summarize_preset", "route_signature"]
 # ---------------------------------------------------------------------------
 
 
+# The refusals this verb answers with 409. Each says the run cannot take the
+# turn now and nothing was reserved, so they share one status and are told apart
+# by the typed code in the body rather than by parsing the message.
+_MESSAGE_REFUSALS: frozenset[FailureType] = frozenset(
+    {
+        FailureType.INPUT_REQUIRED,
+        FailureType.TERMINAL,
+        FailureType.CONFLICT,
+        FailureType.INCOMPATIBLE_STATE,
+        FailureType.RUN_BUSY,
+    }
+)
+
+
+def _message_refusal(result: MessageResult) -> HTTPException:
+    """Build the typed 409 for a follow-up the run cannot accept."""
+    failure_type = result.failure_type
+    if failure_type is None:
+        raise RuntimeError("refused follow-up carries no failure type")
+    detail = RunMessageRefusalDetail(
+        code=failure_type,
+        message=result.error_detail or "The run cannot accept a follow-up turn",
+    )
+    return HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
+
+
 async def _raise_for_message_dispatch_failure(
     request: Request, result: MessageResult
 ) -> None:
@@ -195,6 +223,16 @@ async def _raise_for_message_dispatch_failure(
     "/runs/{run_id}/messages",
     status_code=202,
     response_model=RunMessageResponse,
+    responses={
+        409: {
+            "model": RunMessageRefusalResponse,
+            "description": (
+                "The run cannot accept a follow-up turn. Nothing was reserved "
+                "and nothing was dispatched; the typed code names which "
+                "condition refused it."
+            ),
+        }
+    },
 )
 async def run_message_endpoint(
     run_id: PathSafeRunId,
@@ -208,8 +246,18 @@ async def run_message_endpoint(
     this verb the versioned surface can start a run and watch it, but never say
     anything further to it.
 
-    Accepted is not applied: the turn is handed to the worker and execution
-    continues asynchronously, so a caller reconciles from the stream or
+    A run whose current turn has not finished refuses with a typed 409 rather
+    than taking the turn. Admitting it would hand the run's write authority to
+    the new turn while the old one is still executing, after which the executing
+    turn's own completion is refused as superseded and the run quarantines. The
+    refusal reserves nothing and dispatches nothing, so the caller loses no
+    state by meeting it; a queued continuation is a separate capability.
+
+    A parked run is likewise refused: a pause is answered through its own typed
+    respond verb, and a message here would start a new turn and orphan the pause.
+
+    Accepted is not applied: an accepted turn is handed to the worker and
+    execution continues asynchronously, so a caller reconciles from the stream or
     run-status rather than from this response.
     """
     dependencies = context.dependencies
@@ -232,13 +280,8 @@ async def run_message_endpoint(
         # Same status the run-creation seam returns for the same missing
         # invariant, so one rule reads identically at both entry points.
         raise HTTPException(status_code=422, detail=result.error_detail)
-    if result.failure_type in (
-        FailureType.INPUT_REQUIRED,
-        FailureType.TERMINAL,
-        FailureType.CONFLICT,
-        FailureType.INCOMPATIBLE_STATE,
-    ):
-        raise HTTPException(status_code=409, detail=result.error_detail)
+    if result.failure_type in _MESSAGE_REFUSALS:
+        raise _message_refusal(result)
 
     if result.dispatched:
         worker_liveness(context.request.app.state).record_contact()

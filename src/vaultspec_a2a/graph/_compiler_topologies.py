@@ -16,10 +16,12 @@ if TYPE_CHECKING:
     # provider factory, which imports the model stack at construction time.
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
+    from langgraph.runtime import Runtime
 
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.worker import WorkerNode
     from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
+    from .run_context import RunContext
 
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
@@ -142,7 +144,7 @@ class _TopologyOptions(_TopologyOptional):
 
 
 def _compile_star(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     supervisor_agent_config: Any | None,
@@ -286,7 +288,7 @@ def _validated_pipeline_order(team_config: Any) -> list[str]:
 
 
 def _compile_pipeline(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     **options: Unpack[_TopologyOptions],
@@ -423,9 +425,10 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
     async def _loop_node_with_counter(
         state: TeamState,
         config: RunnableConfig | None = None,
+        runtime: Runtime[RunContext] | None = None,
         _inner: WorkerNode = worker_node,
     ) -> dict[str, Any] | Command[Any]:
-        result = await _inner(state, config=config)
+        result = await _inner(state, config=config, runtime=runtime)
         if isinstance(result, Command):
             # Routing nodes never wrap the loop counter: only plain state
             # updates need it incremented before ``_loop_router`` reads it.
@@ -437,7 +440,7 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
 
 
 def _compile_pipeline_loop(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     _supervisor_agent_config: Any | None,

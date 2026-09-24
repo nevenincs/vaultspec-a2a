@@ -29,9 +29,11 @@ from typing import Any, Protocol, TypeIs, cast, override
 from urllib.parse import urlsplit
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
 from langgraph.types import Command, Send
 
 from ...thread.state import TeamState
+from ..run_context import RunContext
 from ._config_contract import accepting_runnable_config
 from .worker import WorkerNode
 
@@ -315,9 +317,12 @@ def create_researcher_node(
     """
 
     async def researcher_node(
-        state: TeamState, config: RunnableConfig | None = None
+        state: TeamState,
+        config: RunnableConfig | None = None,
+        runtime: Runtime[RunContext] | None = None,
     ) -> dict[str, Any]:
         """Produce this thread's finding and append it to research_findings."""
+        del runtime
         if config is None:
             produced = await producer(state, spec)
         elif _supports_runnable_config(producer):

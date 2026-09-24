@@ -350,7 +350,7 @@ def _research_harness_servers(team_config: Any) -> list[str]:
 
 
 def _compile_research_adr(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     **options: Unpack[_CompileResearchAdrOptions],

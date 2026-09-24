@@ -63,6 +63,7 @@ from .nodes.diverge import (
 )
 from .nodes.vault_reader import create_context_mounter
 from .nodes.worker import WorkerNode, create_worker_node
+from .run_context import RunContext
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class _TypedBuilder(Protocol):
 
 
 def _add_node(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     name: str,
     node: Callable[..., Any],
     *,
@@ -156,7 +157,7 @@ def _add_node(
 
 
 def _compile_graph(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     *,
     checkpointer: BaseCheckpointSaver[str] | None,
     interrupt_before: list[str] | None,
@@ -562,7 +563,7 @@ class _DivergeStageArgs(TypedDict):
 
 
 def _wire_diverge_stage(
-    builder: StateGraph[Any, None, Any, Any], **kwargs: Unpack[_DivergeStageArgs]
+    builder: StateGraph[Any, Any, Any, Any], **kwargs: Unpack[_DivergeStageArgs]
 ) -> str:
     """Wire a Send-based diverge stage into ``builder``.
 
@@ -942,7 +943,9 @@ def compile_team_graph(
 
     _validate_frozen_assignment_inventory(model_assignment)
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, RunContext, Any, Any] = StateGraph(
+        cast("Any", TeamState), context_schema=RunContext
+    )
     # Every node attempt is capped at the preset's step budget. No idle limit:
     # a provider CLI running a long tool call relays no LangChain callback while
     # it works, so an idle clock would fell agents that are making progress.

@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-24'
 body_schema: body-v2
-body_hash: 'sha256:b6ad38d06d2b0217da0c79c4db3d20a3c32f47f1f4af7df3276dc85f5cd25ec7'
+body_hash: 'sha256:61f1e187a8a7555ee51e835a479f22a81d572f2bfc94d706b67cad1636f45bfb'
 ---
 
 # `architecture-review` plan
@@ -48,7 +48,7 @@ The LangGraph family runs at its latest release and the graph layer uses the 1.2
 - [x] `P01.S02` - Widen the typed graph builder to the LangGraph 1.2 node options and declare destinations on every Command-returning node; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes/`.
 - [x] `P01.S03` - Put model-calling nodes under node-level TimeoutPolicy and jittered RetryPolicy defaults and reconcile the graph-wide step timeout and stall watchdog with them; `src/vaultspec_a2a/graph/_compiler_retry.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/streaming/ingest.py`.
 - [x] `P01.S04` - Stop checkpointing mounted vault content by recomputing it per invocation instead of carrying it in a tracked channel; `src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/thread/state.py, src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P01.S05` - Carry run identity in a typed LangGraph Runtime context passed on ingest and resume; `src/vaultspec_a2a/graph/, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/executor.py`.
+- [x] `P01.S05` - Carry run identity in a typed LangGraph Runtime context passed on ingest and resume; `src/vaultspec_a2a/graph/, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/executor.py`.
 - [ ] `P01.S06` - Drain in-flight runs at a superstep boundary with RunControl on worker shutdown so a restart resumes a checkpoint instead of a torn node; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/worker/app.py`.
 - [ ] `P01.S07` - Drop langsmith nostream-tagged model events from the relayed stream; `src/vaultspec_a2a/streaming/transformer.py`.
 - [ ] `P01.S08` - Prune superseded checkpoints of settled runs while keeping each run's latest checkpoint; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/control/event_handlers.py`.

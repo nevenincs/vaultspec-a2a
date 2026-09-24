@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast, override
 from langgraph.types import Command
 
 from ..domain_config import domain_config
+from ..graph.run_context import RunContext
 from ..ipc.serializers import sequenced_to_dict
 from ..providers.team_selection import model_assignment_digest
 from ..streaming.node_metadata import node_metadata_from_graph
@@ -59,6 +60,34 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def _invocation_config(req: DispatchRequest, *, action: str) -> dict[str, Any]:
+    """The LangGraph config one ingest or resume runs under.
+
+    The metadata and tags are what let a trace backend group every model and
+    tool call of an invocation under the run and dispatch that caused it; with
+    only the thread id, a resumed run's calls were indistinguishable from the
+    ingest's.
+    """
+    return {
+        "configurable": {"thread_id": req.thread_id},
+        "recursion_limit": req.recursion_limit,
+        "run_name": f"vaultspec-a2a {action}",
+        "metadata": {
+            "thread_id": req.thread_id,
+            "dispatch_id": req.dispatch_id,
+            "action": action,
+        },
+        "tags": ["vaultspec-a2a", f"action:{action}"],
+    }
+
+
+def _run_context(req: DispatchRequest, *, action: str) -> RunContext:
+    """The Runtime context the graph's nodes read their run identity from."""
+    return RunContext(
+        thread_id=req.thread_id, dispatch_id=req.dispatch_id, action=action
+    )
 
 
 class Executor(SettlementMixin):
@@ -512,10 +541,7 @@ class Executor(SettlementMixin):
                 await self._reject_missing_graph(req, span, _INGEST_GUARDS)
                 return
 
-            config = {
-                "configurable": {"thread_id": req.thread_id},
-                "recursion_limit": req.recursion_limit,
-            }
+            config = _invocation_config(req, action="ingest")
             self._bridge.track_thread(req.thread_id)
             # Hold the run's per-role tokens for this active window only.
             self._token_store.register(req.thread_id, req.actor_tokens)
@@ -550,6 +576,7 @@ class Executor(SettlementMixin):
                     on_graph_started=lambda: self._emit_dispatch_application_receipt(
                         req
                     ),
+                    context=_run_context(req, action="ingest"),
                 )
                 span.set_attribute("outcome", outcome)
             except Exception:
@@ -601,10 +628,7 @@ class Executor(SettlementMixin):
             # A resumed turn re-provisions the run's tokens for its window.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
-            config = {
-                "configurable": {"thread_id": req.thread_id},
-                "recursion_limit": req.recursion_limit,
-            }
+            config = _invocation_config(req, action="resume")
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
             # Stays None unless the catch-all below fires, so a resume that
@@ -645,6 +669,7 @@ class Executor(SettlementMixin):
                     on_graph_started=lambda: self._emit_dispatch_application_receipt(
                         req
                     ),
+                    context=_run_context(req, action="resume"),
                 )
                 span.set_attribute("outcome", outcome)
             except Exception:

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:c7ea8ef7afa60b933599b96873ab2e42fcc1d8d375455684af37b7a7a03e3095'
+body_hash: 'sha256:ba4b88390fd7626784881e3fbf1b6ffa00082ca2501361d446a3dc9144104684'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -45,6 +45,21 @@ related:
 - `S04` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
 - `S04` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/thread src/vaultspec_a2a/worker` -> `pass`
 - `S04` `by:` `orchestrator`
+- `S05` `A` `src/vaultspec_a2a/graph/run_context.py`
+- `S05` `A` `src/vaultspec_a2a/graph/tests/test_run_context.py`
+- `S05` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S05` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S05` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S05` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S05` `M` `src/vaultspec_a2a/graph/nodes/diverge.py`
+- `S05` `M` `src/vaultspec_a2a/streaming/aggregator.py`
+- `S05` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S05` `M` `src/vaultspec_a2a/streaming/types.py`
+- `S05` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S05` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S05` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
+- `S05` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/thread src/vaultspec_a2a/team` -> `pass`
+- `S05` `by:` `orchestrator`
 
 ## Notes
 

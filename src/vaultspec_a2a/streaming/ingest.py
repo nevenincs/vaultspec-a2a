@@ -242,6 +242,8 @@ class IngestRequest:
     graph_input: dict[str, Any] | Command[Any] | None
     config: dict[str, Any]
     on_graph_started: Callable[[], Awaitable[None]] | None = None
+    # The graph's LangGraph Runtime context for this invocation.
+    context: object | None = None
 
 
 @dataclass(slots=True)
@@ -408,6 +410,7 @@ class IngestManager:
                     graph_input,
                     config,
                     version="v2",
+                    context=request.context,
                 ).__aiter__()
                 services = EventProjectionServices(
                     self._emitters, self._buffering, self._telemetry

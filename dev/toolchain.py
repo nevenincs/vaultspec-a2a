@@ -57,10 +57,14 @@ PACKAGE = "src/vaultspec_a2a"
 #: folder from linting itself into an exception by simply existing.
 PYTHON_PATHS = ("src", "dev", "docs", "scripts", "packaging")
 
-#: Shell scripts a workflow step calls out to. actionlint shellchecks a
+#: Shell scripts invoked from outside any Python entry point: by a workflow
+#: step, or as a cloud environment's setup script. actionlint shellchecks a
 #: `run:` block inline, but not a script the block invokes, so these would
 #: otherwise carry no coverage at all.
-SHELL_PATHS = ("scripts/prove_artifact_lifecycle.sh",)
+SHELL_PATHS = (
+    "scripts/prove_artifact_lifecycle.sh",
+    "scripts/cloud_session_setup.sh",
+)
 
 #: complexipy emits status glyphs; Windows consoles default to a codepage that
 #: cannot encode them, which aborts the run before any finding is reported.

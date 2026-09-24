@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#project-bound-state'
 date: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:17d3f75778c4ee75fe018e24ff1479240c8d677898e07fd285e78a83961ad9e9'
+body_hash: 'sha256:9908b06ac355bf3593b3c98bac29fdfe6aa01723ebbe4d7f4cecb0d17a8cd866'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
   - "[[2026-09-23-project-bound-state-adr]]"

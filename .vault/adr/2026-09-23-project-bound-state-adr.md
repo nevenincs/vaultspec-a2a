@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#project-bound-state'
 date: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:318eb242f7408fa9135b0bc27777beb48d400465dffa1c810199e61acbc1af48'
+body_hash: 'sha256:ecbab74cb6fa62f3b3b66198cb49cfa7e74af4c017dff126a429b54f88f9754d'
 related:
   - "[[2026-09-23-project-bound-state-reference]]"
   - "[[2026-08-04-canonical-homes-adr]]"

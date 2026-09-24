@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-24'
 body_schema: body-v2
-body_hash: 'sha256:012267d820044ffefc88501afce181d04ccfea526b900f6b3b9a85519c0ede33'
+body_hash: 'sha256:c4c726c734f773a5fad3423770d965491e2841e910f9f6465a51776a409792c7'
 ---
 
 # `architecture-review` plan
@@ -50,7 +50,7 @@ The LangGraph family runs at its latest release and the graph layer uses the 1.2
 - [x] `P01.S04` - Stop checkpointing mounted vault content by recomputing it per invocation instead of carrying it in a tracked channel; `src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/thread/state.py, src/vaultspec_a2a/graph/nodes/worker.py`.
 - [x] `P01.S05` - Carry run identity in a typed LangGraph Runtime context passed on ingest and resume; `src/vaultspec_a2a/graph/, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/executor.py`.
 - [x] `P01.S06` - Drain in-flight runs at a superstep boundary with RunControl on worker shutdown so a restart resumes a checkpoint instead of a torn node; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/worker/app.py`.
-- [ ] `P01.S07` - Drop langsmith nostream-tagged model events from the relayed stream; `src/vaultspec_a2a/streaming/transformer.py`.
+- [x] `P01.S07` - Drop langsmith nostream-tagged model events from the relayed stream; `src/vaultspec_a2a/streaming/transformer.py`.
 - [ ] `P01.S08` - Prune superseded checkpoints of settled runs while keeping each run's latest checkpoint; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/control/event_handlers.py`.
 
 ### Phase `P02` - graph-layer defects

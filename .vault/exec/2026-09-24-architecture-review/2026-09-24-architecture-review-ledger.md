@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:4841b2adff055893000b1f9f366462b8ab02c2f3576073ec6b161948ecf321b4'
+body_hash: 'sha256:3e1ef417883c853d9fddf649651c3b9bc079f5c259e91a5f8a77d6d25c7de0e2'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -71,6 +71,10 @@ related:
 - `S06` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
 - `S06` `verify:` `pytest src/vaultspec_a2a/worker src/vaultspec_a2a/streaming src/vaultspec_a2a/graph` -> `pass`
 - `S06` `by:` `orchestrator`
+- `S07` `M` `src/vaultspec_a2a/streaming/transformer.py`
+- `S07` `A` `src/vaultspec_a2a/streaming/tests/test_transformer_nostream.py`
+- `S07` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/graph` -> `pass`
+- `S07` `by:` `orchestrator`
 
 ## Notes
 

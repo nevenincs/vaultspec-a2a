@@ -5,11 +5,12 @@
 #
 #   bash scripts/cloud_session_setup.sh --cloud
 #
-# Unlike `just init`, this installs host packages and a Node release, which is
-# only acceptable on a machine that exists to be thrown away. It therefore does
-# nothing unless it is told it is on one, by `--cloud` or by the harness's own
-# CLAUDE_CODE_REMOTE=true. Idempotent: every step checks before it installs,
-# and `just init-full` is stamp-guarded.
+# Unlike `just init`, this installs host packages and a Node release and pins
+# uv's interpreter in the shell profile, which is only acceptable on a machine
+# that exists to be thrown away. It therefore does nothing unless it is told it
+# is on one, by `--cloud` or by the harness's own CLAUDE_CODE_REMOTE=true.
+# Idempotent: every step checks before it installs, and `just init-full` is
+# stamp-guarded.
 set -euo pipefail
 
 if [ "${1:-}" != "--cloud" ] && [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
@@ -98,10 +99,20 @@ if ! uv run --no-sync actionlint --version >/dev/null 2>&1; then
   done
 fi
 
+# Harness MCP servers launch through `uvx`, which resolves its interpreter from
+# the host default rather than this project's pin; on an image whose default is
+# older than the pin, the servers are unresolvable and every test that composes
+# them fails. Pin uv to the project's version for this and every later shell.
+python_version="$(tr -d '[:space:]' < .python-version)"
+export UV_PYTHON="$python_version"
+for rc in "$HOME/.bashrc" "$HOME/.profile"; do
+  if ! grep -qs '^export UV_PYTHON=' "$rc"; then
+    printf 'export UV_PYTHON=%s\n' "$python_version" >> "$rc"
+  fi
+done
+
 # The repository's own initializer: locked uv sync of the tooling, server, and
 # composed dev profiles; npm ci of the pinned ACP runtime; Vaultspec enrollment;
 # and the prek pre-commit hook.
 log "running just init-full"
 just init-full >&2
-
-echo "export PATH=\"$LOCAL_BIN:\$PATH\"" >> "${CLAUDE_ENV_FILE:-/dev/null}"

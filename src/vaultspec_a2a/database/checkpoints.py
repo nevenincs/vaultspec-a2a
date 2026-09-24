@@ -21,11 +21,12 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from ..control.config import settings
+from .checkpoint_retention import prune_settled_checkpoints
 from .checkpoint_schema import checkpoint_pragmas
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Checkpointer", "open_checkpointer"]
+__all__ = ["Checkpointer", "open_checkpointer", "prune_settled_thread"]
 
 
 # Type alias: every LangGraph checkpointer (SQLite, Postgres, in-memory) is a
@@ -196,6 +197,15 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
     async def aprune(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("aprune", *args, **kwargs)
 
+    async def prune_settled_thread(self, thread_id: str) -> bool:
+        """Prune a settled thread on the selector loop that owns the connection."""
+        return bool(await self._run_async("_prune_settled_thread", thread_id))
+
+    async def _prune_settled_thread(self, thread_id: str) -> bool:
+        if self._saver is None:
+            raise RuntimeError("AsyncPostgresSaver is not initialized")
+        return await prune_settled_checkpoints(self._saver, thread_id)
+
     async def _collect_alist(
         self, *args: object, **kwargs: object
     ) -> builtins.list[Any]:
@@ -253,6 +263,18 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         if self._saver is not None:
             self.serde = self._saver.serde
         return self
+
+
+async def prune_settled_thread(checkpointer: Checkpointer, thread_id: str) -> bool:
+    """Drop a settled thread's superseded checkpoints from the saver backing it.
+
+    Returns:
+        ``True`` when the history was pruned, ``False`` when the saver is one
+        the retention statements do not cover and was left untouched.
+    """
+    if isinstance(checkpointer, _SelectorThreadPostgresCheckpointer):
+        return await checkpointer.prune_settled_thread(thread_id)
+    return await prune_settled_checkpoints(checkpointer, thread_id)
 
 
 @asynccontextmanager

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:3e1ef417883c853d9fddf649651c3b9bc079f5c259e91a5f8a77d6d25c7de0e2'
+body_hash: 'sha256:468cb4a7e8de6ecc5a7846ee0c3c4d0dfb8a9fcc6682400fb1094984a8c2dac1'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -75,9 +75,21 @@ related:
 - `S07` `A` `src/vaultspec_a2a/streaming/tests/test_transformer_nostream.py`
 - `S07` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/graph` -> `pass`
 - `S07` `by:` `orchestrator`
+- `S08` `A` `src/vaultspec_a2a/database/checkpoint_retention.py`
+- `S08` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S08` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S08` `M` `src/vaultspec_a2a/conftest.py`
+- `S08` `A` `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py`
+- `S08` `A` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
+- `S08` `verify:` `runner database control gateway suites 1039` -> `pass`
+- `S08` `by:` `vaultspec-high-executor`
+- `S08` `verify:` `pytest database/tests/test_checkpoint_retention.py on sqlite and postgres connection, pool, selector-thread` -> `pass`
+- `S08` `verify:` `pytest control/tests/test_settled_history_pruning.py` -> `pass`
+- `S08` `by:` `orchestrator`
 
 ## Notes
 
 - `S01` pyproject.toml had drifted from taplo.toml, so the pre-commit format check refused any edit to it; a separate formatting-only commit (fa6d93c, parse-identical) landed first.
 - `S06` LangGraph 1.2.12 astream_events drops its control keyword for version v2; the RunControl is seated as the parent runtime through the private CONFIG_KEY_RUNTIME, with the drain test as the tripwire.
+- `S08` Closed by the orchestrator; the vaultspec-high-executor by-row above was a logging slip. Pruning runs on the gateway after terminal acceptance, not in the worker, because application receipts pin checkpoint ids the gateway reads in relay order.
 

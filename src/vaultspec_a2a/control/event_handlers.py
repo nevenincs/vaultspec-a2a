@@ -607,6 +607,34 @@ async def _accept_terminal_event(
     return await _confirm_failed_terminal(thread_id, payload, factory, last_sequence)
 
 
+async def _prune_settled_history(
+    thread_id: str, checkpointer: Checkpointer | None
+) -> None:
+    """Drop a settled run's superseded checkpoints; never fails the relay.
+
+    Runs here rather than in the worker because the relay applies a thread's
+    events in order: every application receipt the run emitted, each pinned to
+    the checkpoint it names, has been checked by the time its terminal lands.
+    """
+    if checkpointer is None:
+        return
+    from ..database.checkpoints import prune_settled_thread
+    from ..domain_config import domain_config
+
+    try:
+        await asyncio.wait_for(
+            prune_settled_thread(checkpointer, thread_id),
+            timeout=domain_config.aget_state_timeout_seconds,
+        )
+    except Exception:
+        logger.warning(
+            "Could not prune the settled checkpoint history of %s",
+            thread_id,
+            exc_info=True,
+            extra={"thread_id": thread_id, "action": "checkpoint_prune_failed"},
+        )
+
+
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
@@ -642,6 +670,7 @@ async def _handle_terminal_event(
     if not accepted or factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
+    await _prune_settled_history(thread_id, checkpointer)
     if drain_gate is not None:
         await drain_gate.release(thread_id)
     if aggregator is not None:

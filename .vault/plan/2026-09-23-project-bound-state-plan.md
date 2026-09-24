@@ -9,9 +9,9 @@ related:
   - '[[2026-08-04-canonical-homes-adr]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-15-dev-process-registry-adr]]'
-modified: '2026-09-23'
+modified: '2026-09-24'
 body_schema: body-v2
-body_hash: 'sha256:0633a3b32d9548e46531c2075fbc5c5f1fae57ac18e62249859f1a7226ef14a3'
+body_hash: 'sha256:03d746ffb1321f04502adbb6b9d15c9cb77752fe6cebe909402c0801554a6e68'
 ---
 
 # `project-bound-state` plan
@@ -72,7 +72,7 @@ Authorized by the owner on 2026-09-23 after the P03 review: every known issue is
 - [x] `P05.S14` - Move the harness variables still under the bare prefix to VAULTSPEC_A2A_, remove tooling scratch roots after use, gate service/ and bind the compose files to the schema without Docker; `dev/`.
 - [x] `P05.S15` - Make the load-sensitive runner, admission, gateway, codex-home and credential-boundary tests correct on a loaded host; `src/vaultspec_a2a/`.
 - [x] `P05.S16` - Reuse one scratch directory per test lane, drop the step-named capsule prefix, and complete the operator state-layout table; `src/vaultspec_a2a/`.
-- [ ] `P05.S17` - Merge the branch into main, move the legacy user-profile state out of the profile, and remove the working trees; `Y:/code/vaultspec-a2a-worktrees/main`.
+- [x] `P05.S17` - Merge the branch into main, move the legacy user-profile state out of the profile, and remove the working trees; `Y:/code/vaultspec-a2a-worktrees/main`.
 
 ## Parallelization
 

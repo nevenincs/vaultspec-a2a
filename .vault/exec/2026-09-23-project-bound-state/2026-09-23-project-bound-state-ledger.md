@@ -5,7 +5,7 @@ tags:
 date: '2026-09-23'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:6e888b8cc98c1e604d34fdb10c4b792d4e7dd1a1d7491dd20f32e4d6d59d884d'
+body_hash: 'sha256:6af129e51698e010f632a2187639bbbd7184c8c61707453308631db6530f96cf'
 related:
   - "[[2026-09-23-project-bound-state-plan]]"
 ---
@@ -412,10 +412,12 @@ related:
 - `S16` `verify:` `sphinx-build -n -W docs` -> `pass`
 - `S15` `M` `openapi.json`
 - `S15` `verify:` `pytest src/vaultspec_a2a/api/tests/test_openapi_artifact.py` -> `pass`
+- `S17` `by:` `claude`
 
 ## Notes
 
 - `S11` Dashboard change implemented and verified in Y:/code/vaultspec-dashboard-worktrees/a2a-project-bound-state (branch a2a-project-bound-state): cargo test -p vaultspec-api and -p vaultspec-product, clippy -D warnings, fmt, tsc and eslint clean. Not committed: that repository's unscoped vault-fix pre-commit hook fails on 63 pre-existing errors in unrelated features. Skipping a hook needs the owner's authorization; the Step stays open.
 - `S11` Committed in vaultspec-dashboard branch a2a-project-bound-state: 3e446503 (vault backlog cleared, 0 errors), fe764e7f (engine discovery + product launcher), b2664aeb (agent E2E harness). cargo test -p vaultspec-api/-p vaultspec-product, clippy -D warnings, fmt, tsc, eslint pass. The live E2E lane was not run.
 - `S13` The seal-ownership correction from the P05 plan-close review (control/state_layout.py, control/config.py, control/tests/test_state_seal.py, the ADR amendment, docs/operations.rst) was committed in 2da505ee together with the S15 corrections: its own commit attempt failed a hook and left the paths staged. Its path rows are therefore recorded under S15.
+- `S17` Landed: a2a main fast-forwarded to d4f694ef and the dashboard's main to b2664aeb (both local, nothing pushed); main's .env gained the commented a2a block. Legacy profile state: ~/.vaultspec-a2a copied to .vault/data/agents-legacy-profile/ in the main worktree (git-ignored; file inventory and vaultspec.db verified identical), then removed from the profile with the owner's permission; ~/.vaultspec/procs (stale reservation markers, empty leases) removed. Working trees project-bound-state and the dashboard's a2a-project-bound-state removed with their merged branches. Full unit gate on the final tree: 4677 passed, with the OpenAPI artifact regenerated; the profile and C:\Users\hello\AppData\Local\Temp were untouched by the suite.
 

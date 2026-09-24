@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:aca0e42f32271ce3135f3d362797d56e1f6194c1ea8864bf8b73f5490e223874'
+body_hash: 'sha256:1a1aaa7658481a308e938ee9d55cf431366309b38772b3e590725dfc6a0eedfb'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -19,6 +19,11 @@ related:
 - `S01` `M` `uv.lock`
 - `S01` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/streaming src/vaultspec_a2a/thread` -> `pass`
 - `S01` `by:` `orchestrator`
+- `S02` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S02` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S02` `M` `src/vaultspec_a2a/graph/tests/test_research_adr_clarification.py`
+- `S02` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
+- `S02` `by:` `orchestrator`
 
 ## Notes
 

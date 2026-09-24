@@ -321,3 +321,38 @@ async def test_a_resumed_run_does_not_ask_again(
     # gate - not a second questionnaire.
     assert resumed.get("clarification_request") is None
     assert resumed["__interrupt__"][0].value["type"] == "document_approval_request"
+
+
+@pytest.mark.asyncio
+async def test_every_command_routing_node_draws_the_edges_it_can_take(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """A node that routes by returning ``Command`` has no static edge.
+
+    Unless it declares where it can go, the compiled topology draws it as ending
+    the run and every node it actually jumps to as unreachable - so the graph's
+    own reachability disagrees with how the run behaves. This compiles the preset
+    that arms every routing node the phase machine has (the clarification pair,
+    the research fan-out, and each phase's submit and gate) and asserts that each
+    one's drawn edges are exactly the targets it can route to.
+    """
+    graph = _compile(_team(_ASKING_PRESET), checkpointer, pf, _FakeSubmitter())
+
+    drawn: dict[str, set[str]] = {}
+    for edge in graph.get_graph().edges:
+        drawn.setdefault(edge.source, set()).add(edge.target)
+
+    expected = {
+        "clarification_request": {"clarification_gate", "research_dispatch"},
+        "clarification_gate": {"research_dispatch"},
+        "research_dispatch": {"research_dispatch_researcher_00"},
+        "research_submit": {"research_gate", "synthesis"},
+        "research_gate": {"adr_author", "synthesis"},
+        "adr_submit": {"adr_gate", "adr_author"},
+        "adr_gate": {"plan_author", "adr_author"},
+        "plan_submit": {"plan_gate", "plan_author"},
+        "plan_gate": {"_record_graph_completion", "plan_author"},
+    }
+    for node, targets in expected.items():
+        assert drawn.get(node) == targets, (node, drawn.get(node))

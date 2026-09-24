@@ -28,8 +28,9 @@ if TYPE_CHECKING:
     # provider factory, which imports the model stack at construction time.
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
+    from langchain_core.runnables.graph import Graph as DrawableGraph
     from langgraph.checkpoint.base import BaseCheckpointSaver
-    from langgraph.types import Command, RetryPolicy
+    from langgraph.types import Command, RetryPolicy, TimeoutPolicy
 
     from ..authoring import FeedbackContextReader
     from ..worker.authoring_binding import AuthoringBindingProvider
@@ -101,6 +102,9 @@ class _TypedBuilder(Protocol):
         *,
         metadata: dict[str, str] | None = ...,
         retry_policy: RetryPolicy | Sequence[RetryPolicy] | None = ...,
+        error_handler: Callable[..., Any] | None = ...,
+        destinations: tuple[str, ...] | None = ...,
+        timeout: TimeoutPolicy | None = ...,
     ) -> object: ...
 
     def compile(
@@ -118,6 +122,9 @@ def _add_node(
     *,
     metadata: dict[str, str] | None = None,
     retry_policy: RetryPolicy | Sequence[RetryPolicy] | None = None,
+    error_handler: Callable[..., Any] | None = None,
+    destinations: tuple[str, ...] | None = None,
+    timeout: TimeoutPolicy | None = None,
 ) -> None:
     """Add a node to ``builder`` behind one fully-typed call boundary.
 
@@ -128,9 +135,20 @@ def _add_node(
     module routes through here instead of the library method directly, so
     that irreducible diagnostic is paid once, at this boundary, rather than at
     each of the two dozen call sites that would otherwise repeat it.
+
+    ``destinations`` is required in practice for any node that routes by
+    returning ``Command``: such a node has no static outgoing edge, so without
+    it the compiled graph's own topology reports the node as ending the run and
+    every node it actually jumps to as unreachable.
     """
     cast("_TypedBuilder", builder).add_node(
-        name, node, metadata=metadata, retry_policy=retry_policy
+        name,
+        node,
+        metadata=metadata,
+        retry_policy=retry_policy,
+        error_handler=error_handler,
+        destinations=destinations,
+        timeout=timeout,
     )
 
 
@@ -175,6 +193,11 @@ class CompiledTeamGraph(Protocol):
 
     @property
     def interrupt_before_nodes(self) -> Sequence[str]: ...
+
+    # The drawable topology, including the edges a ``Command``-routing node
+    # declares. It is how a compiled graph's reachability is asserted: a routing
+    # node without declared destinations draws as ending the run.
+    def get_graph(self) -> DrawableGraph: ...
 
     # Not a property: this function SETS it on the compiled graph a few lines
     # below, from the team's configured step budget, and the compiler's tests
@@ -578,7 +601,12 @@ def _wire_diverge_stage(
         builder.add_edge(name, synthesis_name)
         researcher_names.append(name)
 
-    _add_node(builder, dispatch_name, create_research_dispatch_node(researcher_names))
+    _add_node(
+        builder,
+        dispatch_name,
+        create_research_dispatch_node(researcher_names),
+        destinations=tuple(researcher_names),
+    )
     return dispatch_name
 
 

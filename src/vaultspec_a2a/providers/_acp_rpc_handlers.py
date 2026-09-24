@@ -431,6 +431,56 @@ def _rejection_option_id(options: list[JsonObject]) -> str:
     return _option_id_at(options, -1, default="reject")
 
 
+def _is_always_option(option: JsonObject) -> bool:
+    """Whether one offered option commits the CLI to remember an approval."""
+    option_id = option_id_of(option) or ""
+    return option.get("kind") == "allow_always" or "always" in option_id.lower()
+
+
+def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str:
+    """Return the once-only spelling of a chosen approval.
+
+    An "always" approval is not this project's to give. The CLI persists it as a
+    permission rule in the operator's own settings, outside anything a run can
+    see or retract, and a rule written that way widens every later run on that
+    machine - including the unattended ones, whose whole posture is that nothing
+    is approved that was not approved for them. A human at the prompt is
+    answering for THIS call, so this call is what the answer is applied to.
+
+    The narrowest offered approval is chosen through the same reader the
+    autonomous rung uses, so both rungs answer the same way about the same
+    option list. If a session offers no once-only approval at all, the choice is
+    left as made rather than converted into a refusal the human did not give -
+    and that case is logged, because it is the one where an approval outlives
+    its call.
+    """
+    chosen = next(
+        (
+            option
+            for option in options
+            if option_id_of(option) == option_id and _is_always_option(option)
+        ),
+        None,
+    )
+    if chosen is None:
+        return option_id
+    narrowed = _approval_option_id(options)
+    if narrowed == option_id:
+        logger.warning(
+            "Permission option %r remembers the approval and the session offers "
+            "no single-use alternative; the CLI will persist a rule this run "
+            "cannot retract",
+            option_id,
+        )
+        return option_id
+    logger.info(
+        "Narrowed a remembered permission approval to a single use: %r -> %r",
+        option_id,
+        narrowed,
+    )
+    return narrowed
+
+
 def _autonomous_option_id(
     name: str, config: AcpModelConfig, options: list[JsonObject]
 ) -> str:
@@ -580,7 +630,9 @@ async def on_request_permission(
 
     if config.permission_callback:
         try:
-            option_id = await config.permission_callback(name, args, options)
+            option_id = _narrowed_to_one_use(
+                await config.permission_callback(name, args, options), options
+            )
         except GraphBubbleUp as exc:
             ctx.interrupt_exc.append(exc)
             try:

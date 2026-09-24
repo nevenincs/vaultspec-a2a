@@ -232,3 +232,46 @@ def test_the_kimi_autonomous_lane_reads_snake_case_options() -> None:
 
     assert _autonomous_option_id("ReadFile: a.py", config, options) == "approve"
     assert _autonomous_option_id("WriteFile: a.py", config, options) == "reject"
+
+
+@pytest.mark.asyncio
+async def test_a_remembered_approval_is_answered_as_a_single_use(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """An "always" answer reaches the CLI as the once-only option it offered.
+
+    The CLI persists a remembered approval as a permission rule in the
+    operator's own settings, where it widens later runs this one cannot see.
+    """
+    options: list[JsonObject] = [
+        {"optionId": "allow_always", "kind": "allow_always"},
+        {"optionId": "allow_once", "kind": "allow_once"},
+        {"optionId": "reject_once", "kind": "reject_once"},
+    ]
+
+    decision = await _decide(
+        options,
+        _config(permission_callback=_returning("allow_always")),
+        acp_session_context,
+    )
+
+    assert decision == "allow_once"
+
+
+@pytest.mark.asyncio
+async def test_a_single_use_approval_is_forwarded_unchanged(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """Narrowing touches only the answers that would outlive their own call."""
+    options: list[JsonObject] = [
+        {"optionId": "allow_always", "kind": "allow_always"},
+        {"optionId": "allow_once", "kind": "allow_once"},
+    ]
+
+    decision = await _decide(
+        options,
+        _config(permission_callback=_returning("allow_once")),
+        acp_session_context,
+    )
+
+    assert decision == "allow_once"

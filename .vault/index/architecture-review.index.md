@@ -6,9 +6,10 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:e46de4fe650f4da72104cd62681d606580105d59532717366eef3cfbaefc6b50'
+body_hash: 'sha256:db6bd6a595afb9b8f7e0a96979952eded5b2f40b278939aff6e69524a27884b8'
 related:
   - '[[2026-09-24-architecture-review-audit]]'
+  - '[[2026-09-24-architecture-review-plan]]'
   - '[[2026-09-24-architecture-review-research]]'
 ---
 
@@ -21,6 +22,10 @@ Auto-generated index of all documents tagged with `#architecture-review`.
 ### audit
 
 - `2026-09-24-architecture-review-audit` - `architecture-review` audit: `architecture review against modern agent orchestration standards`
+
+### plan
+
+- `2026-09-24-architecture-review-plan` - `architecture-review` plan
 
 ### research
 

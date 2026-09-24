@@ -1,0 +1,110 @@
+---
+tags:
+  - '#plan'
+  - '#architecture-review'
+date: '2026-09-24'
+tier: L2
+related:
+  - '[[2026-07-15-graph-agent-framework-harness-adr]]'
+  - '[[2026-03-03-phase-artifact-gates-adr]]'
+  - '[[2026-03-03-plan-approval-interrupt-adr]]'
+  - '[[2026-03-03-blackboard-content-mounting-adr]]'
+  - '[[2026-03-04-worker-process-architecture-adr]]'
+  - '[[2026-08-02-control-action-leases-adr]]'
+  - '[[2026-08-05-served-capability-contract-state-truthfulness-adr]]'
+  - '[[2026-07-14-a2a-edge-conformance-adr]]'
+  - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
+  - '[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]'
+  - '[[2026-07-15-agent-harness-provisioning-adr]]'
+  - '[[2026-07-17-tool-cores-adr]]'
+  - '[[2026-08-03-current-project-binding-adr]]'
+  - '[[2026-07-19-observability-lanes-adr]]'
+modified: '2026-09-24'
+body_schema: body-v2
+body_hash: 'sha256:b6302293c21b3845e23eb88c4ac8b28154f7dcee4d505136e9afc159d3b02830'
+---
+
+# `architecture-review` plan
+
+Upgrade the LangGraph family, enroll the graph layer in LangGraph 1.2 primitives, and fix the major findings of the architecture review.
+
+## Description
+
+Approved 2026-09-24. Basis: the user's instruction in the review session of 2026-09-24 to bump the LangGraph dependencies to the latest version, enroll the codebase in the newer LangGraph features, and then enumerate and fix all of the major architectural bugs and issues identified, using subagents where appropriate with the orchestrator as principal coder.
+
+Scope is the high and medium defect findings of `2026-09-24-architecture-review-audit`, measured against `2026-09-24-architecture-review-research`, plus the upgrade and enrollment. Each Step restores an accepted decision or closes a defect within it; no Step makes a new costly decision. Governing decisions by Phase: `P01` and `P02` by `2026-07-15-graph-agent-framework-harness-adr`, `2026-03-03-phase-artifact-gates-adr`, `2026-03-03-plan-approval-interrupt-adr`, `2026-03-03-blackboard-content-mounting-adr` (P01.S04 restores its section 2.1), and `2026-03-04-worker-process-architecture-adr`; `P03` by `2026-08-02-control-action-leases-adr` (P03.S15 restores its breaker rule), `2026-08-05-served-capability-contract-state-truthfulness-adr`, and `2026-07-14-a2a-edge-conformance-adr` R6; `P04` by `2026-02-25-llm-context-provider-abstraction-adr`, `2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr`, `2026-07-15-agent-harness-provisioning-adr`, `2026-07-17-tool-cores-adr`, and `2026-08-03-current-project-binding-adr`; `P05` by `2026-07-19-observability-lanes-adr`.
+
+Coverage assessment: the dependency bump stays inside the LangGraph 1.x major and is a routine update within settled constraints, so no ADR is added for it. The following audit items are decisions, not defects, and are out of scope until the user decides them: A2A protocol capability (`no-a2a-protocol`, which would reverse the 2026-07-15 amendment to `2026-02-26-protocol-ecosystem-bridge-adr`), the busy-run continuation and multitask model beyond the typed refusal of P03.S14, persisted compaction and context-window policy, the default Claude binary and provider-session resumption policy beyond the single-resolver consistency of P04.S26, a unified durable permission model and decision log, and a durable per-run event log. `DeltaChannel` is not adopted: it is beta and its write-chain dependency conflicts with the pruning of P01.S08.
+
+Several findings are also owned by open Steps of other plans, chiefly `2026-09-05-embedded-runtime-remediation-plan` (W02.P04.S16-S18, W02.P05.S23-S24, W04.P09.S46) and `2026-08-02-llm-context-provider-abstraction-plan`. This plan lands the defect fix; an owning Step is closed only when its own full scope is met, and the ledger records any partial landing.
+
+## Steps
+
+### Phase `P01` - LangGraph 1.2 upgrade and feature enrollment
+
+The LangGraph family runs at its latest release and the graph layer uses the 1.2 node, channel, runtime, and drain primitives instead of hand-built equivalents.
+
+- [ ] `P01.S01` - Bump the LangGraph family, langchain-core, langchain-openai, langsmith, and langgraph-sdk to their latest releases and raise the declared floors to the APIs the code uses; `pyproject.toml, uv.lock`.
+- [ ] `P01.S02` - Widen the typed graph builder to the LangGraph 1.2 node options and declare destinations on every Command-returning node; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes/`.
+- [ ] `P01.S03` - Put model-calling nodes under node-level TimeoutPolicy and jittered RetryPolicy defaults and reconcile the graph-wide step timeout and stall watchdog with them; `src/vaultspec_a2a/graph/_compiler_retry.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/streaming/ingest.py`.
+- [ ] `P01.S04` - Stop checkpointing mounted vault content by recomputing it per invocation instead of carrying it in a tracked channel; `src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/thread/state.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [ ] `P01.S05` - Carry run identity in a typed LangGraph Runtime context passed on ingest and resume; `src/vaultspec_a2a/graph/, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/executor.py`.
+- [ ] `P01.S06` - Drain in-flight runs at a superstep boundary with RunControl on worker shutdown so a restart resumes a checkpoint instead of a torn node; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/worker/app.py`.
+- [ ] `P01.S07` - Drop langsmith nostream-tagged model events from the relayed stream; `src/vaultspec_a2a/streaming/transformer.py`.
+- [ ] `P01.S08` - Prune superseded checkpoints of settled runs while keeping each run's latest checkpoint; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/control/event_handlers.py`.
+
+### Phase `P02` - graph-layer defects
+
+Graph routing, human-in-the-loop resume, crash recovery, and per-run isolation behave as the accepted gate, interrupt, and worker decisions require.
+
+- [ ] `P02.S09` - Route blocked HARD phase gates and unparseable supervisor output back to the supervisor under a bounded re-ask counter; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/compiler.py`.
+- [ ] `P02.S10` - Honour each preset recursion limit on served runs and bound document review loops per phase; `src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py`.
+- [ ] `P02.S11` - Bind a tool-permission approval to a fingerprint of the exact tool call and re-park when a replayed turn asks for a different call; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [ ] `P02.S12` - Resume an interrupted run from its checkpoint through receipt evidence instead of replaying its input; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/action_receipts.py`.
+- [ ] `P02.S13` - Give each invocation its own model instances and move rule loading and engine discovery off the worker event loop; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/graph/nodes/, src/vaultspec_a2a/worker/_authoring_close.py`.
+
+### Phase `P03` - run, session, and edge robustness
+
+Busy runs, worker backpressure, event streams, checkpoint storage, the event bridge, and container shutdown fail typed and bounded instead of wedging.
+
+- [ ] `P03.S14` - Refuse a follow-up on a busy run with a typed conflict that installs no writer; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/worker/app.py`.
+- [ ] `P03.S15` - Split worker refusals by reason and feed the circuit breaker only transport failures and server errors, with a single half-open probe; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/worker/app.py`.
+- [ ] `P03.S16` - Scope the stream database session to the handler so an open stream holds no connection or read transaction; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py`.
+- [ ] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, sequence frames with SSE ids, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.
+- [ ] `P03.S18` - Back the Postgres checkpointer with a sized connection pool; `src/vaultspec_a2a/database/checkpoints.py`.
+- [ ] `P03.S19` - Bound, serialize, and split worker event batches and protect terminal events from eviction; `src/vaultspec_a2a/worker/ipc.py, src/vaultspec_a2a/worker/state_projection.py`.
+- [ ] `P03.S20` - Start containers through the owned serve entry with a stop grace period longer than the shutdown budget; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.
+
+### Phase `P04` - provider lane security and fidelity
+
+Provider launchers, the Claude and Codex permission posture, native tool scope, credentials, and the ACP wire are confined and faithful on every served lane.
+
+- [ ] `P04.S21` - Resolve provider launchers to absolute paths from the service trusted PATH or the capsule, never the agent PATH or working directory; `src/vaultspec_a2a/providers/_factory_commands.py, src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/_subprocess.py`.
+- [ ] `P04.S22` - Pin the Claude lane permission posture: no ambient setting sources, persona-derived disallowed tools, dontAsk on autonomous runs verified against the reported mode, and allow-once for always options; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [ ] `P04.S23` - Scope native read tools to the workspace, stop pre-approving project-addressable rag tools, and scan Codex tool arguments for foreign projects; `src/vaultspec_a2a/providers/_native_read_tools.py, src/vaultspec_a2a/providers/_codex_permission.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [ ] `P04.S24` - Fail closed when a permission callback names an option that was not offered; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [ ] `P04.S25` - Write refreshed Codex credentials back to their source home under a lock; `src/vaultspec_a2a/providers/_codex_config_home.py`.
+- [ ] `P04.S26` - Use one Claude binary resolver for catalog discovery and execution and record the adapter and CLI identity each run used; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py`.
+- [ ] `P04.S27` - Render ACP prompts with roles, speaker names, and tool results through the renderer the Codex lane shares; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_codex_protocol.py`.
+- [ ] `P04.S28` - Retain a redacted ACP stderr tail, attach it to provider errors, and log provider session ids per turn; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [ ] `P04.S29` - Pin the harness MCP launch interpreter to the project Python; `src/vaultspec_a2a/providers/_harness_mcp_registry.py`.
+
+### Phase `P05` - context and observability
+
+Transcripts carry real event times, logs are loss-free and correlated, and token accounting keeps what providers report.
+
+- [ ] `P05.S30` - Stamp message creation times when messages are produced and project an unknown time instead of the read time; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/thread/snapshots.py`.
+- [ ] `P05.S31` - Make the JSON log formatter loss-free, UTC, schema-versioned, and redacting, with a context-variable correlation scope; `src/vaultspec_a2a/utils/logging.py, src/vaultspec_a2a/worker/executor.py`.
+- [ ] `P05.S32` - Keep cache-read, cache-write, and reasoning token counts through turn usage into cost tracking; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/migrations/versions/`.
+
+## Parallelization
+
+`P01` runs first and alone, because P01.S01 changes the lock every other Step builds on and P01 reshapes the graph builder that P02 edits. After P01.S01 lands, `P03` and `P04` run in parallel with `P01`/`P02`, each in an isolated worktree owned by one executor: `P03` owns `src/vaultspec_a2a/api/`, `src/vaultspec_a2a/streaming/` (except `transformer.py`, which P01.S07 owns), `src/vaultspec_a2a/control/`, `src/vaultspec_a2a/thread/message_policy.py`, `src/vaultspec_a2a/worker/app.py`, `src/vaultspec_a2a/worker/ipc.py`, the Postgres saver in `src/vaultspec_a2a/database/checkpoints.py`, and `service/`; `P04` owns `src/vaultspec_a2a/providers/` and `src/vaultspec_a2a/workspace/environment.py`. The orchestrator owns `P01`, `P02`, and `P05`, every edit to `src/vaultspec_a2a/graph/nodes/worker.py` (P04.S22 and P04.S23 hand their worker-side wiring to the orchestrator), all `.vault/` records, ledger rows, Step closure, and integration merges. Executors commit code only on their worktree branches; the orchestrator merges each branch, reruns the gates on the merged tree, and closes the Steps.
+
+## Verification
+
+- `just check-python`, `just check-type`, and `just check-shell` pass on the integrated tree.
+- `just test-unit` passes in full on the integrated tree, with `UV_PYTHON` pinned to the project Python.
+- Each Step lands with a test that fails on the pre-fix code and passes after it, driving the real component (a compiled graph, the FastAPI app with real uvicorn and SQLite, a real subprocess), with no mocks or monkeypatching.
+- The locked `langgraph` resolves to the latest release and `pyproject.toml` floors admit no version below the APIs the code imports.
+- An integrated review against this plan and its governing decisions passes, and its findings are appended to `2026-09-24-architecture-review-audit`.

@@ -1,6 +1,6 @@
 [project]
 name = "vaultspec-a2a"
-version = "0.3.0"
+version = "0.4.0"
 description = "Headless agent-to-agent orchestration for Vaultspec."
 requires-python = ">=3.13"
 license = "MIT"

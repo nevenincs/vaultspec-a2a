@@ -241,13 +241,6 @@ class TeamState(TypedDict):
     vault_index: NotRequired[Annotated[dict[str, list[str]], merge_vault_index]]
     validation_errors: NotRequired[Annotated[list[str], append_validation_errors]]
 
-    # --- transient: mounted .vault/ document content ---
-    # Populated by mount_node before worker invocation;
-    # cleared by worker_node after reading.
-    # None when active_feature is unset, vault_index is
-    # empty, or workspace_root is None.
-    mounted_context: NotRequired[str | None]
-
     # --- task queue pointer ---
     # ID of the task currently assigned to the worker. None when no feature is active
     # or no task has been assigned. Updated via

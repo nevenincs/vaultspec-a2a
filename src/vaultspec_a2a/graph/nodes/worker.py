@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from ...thread.state import TeamState
     from ...worker.authoring_binding import AuthoringBindingProvider
     from ..protocols import CostPort, TaskQueuePort
+    from .vault_reader import ContextMounter
 
 _logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ def _build_worker_messages(
     workspace_root: Path | None,
     role: str | None = None,
     feedback_grounding: str | None = None,
+    mounted_context: str | None = None,
 ) -> list[BaseMessage]:
     """Build the worker prompt/message list before model invocation.
 
@@ -144,9 +146,8 @@ def _build_worker_messages(
         messages.append(rule_message)
     if anchoring:
         messages.append(SystemMessage(content=anchoring))
-    mounted = state.get("mounted_context")
-    if mounted:
-        messages.append(SystemMessage(content=mounted))
+    if mounted_context:
+        messages.append(SystemMessage(content=mounted_context))
     # Feedback-loop grounding: on a revision run the writer sees the reviewer's
     # authoritative comments, retrieved by id from the engine and
     # rendered upstream. Placed after the mounted corpus so the revision
@@ -601,7 +602,6 @@ def _finalize_worker_response(
     response.name = worker_name
     update: dict[str, Any] = {
         "messages": [response],
-        "mounted_context": None,
         # Approval outcomes are consumed by the worker turn they routed.
         "approval_status": None,
         "approval_request_id": None,
@@ -784,6 +784,7 @@ class _WorkerNodeOptions(TypedDict, total=False):
     harness_mcp_servers: list[str] | None
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
+    context_mounter: ContextMounter | None
 
 
 class _WorkerNodeSettings(TypedDict):
@@ -796,6 +797,7 @@ class _WorkerNodeSettings(TypedDict):
     harness_mcp_servers: list[str] | None
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
+    context_mounter: ContextMounter | None
 
 
 def _bind_worker_node_settings(
@@ -814,6 +816,7 @@ def _bind_worker_node_settings(
         "harness_mcp_servers": None,
         "feedback_reader": None,
         "cost_port": None,
+        "context_mounter": None,
     }
     for index, value in enumerate(args):
         name = names[index]
@@ -863,6 +866,8 @@ def create_worker_node(
                            the ACP session (ADD-only, unioned with any authoring
                            servers) so the spawned CLI's session/new advertises
                            them; ignored by non-ACP models.
+        context_mounter:   Optional expander of the phase-scoped vault documents
+                           this worker is grounded in, run at every invocation.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -885,6 +890,10 @@ def create_worker_node(
         feedback_grounding = await _feedback_for_state(
             state, settings["feedback_reader"]
         )
+        # Expanded per invocation, never carried in state: a resumed or retried
+        # attempt re-derives it rather than finding it absent or stale.
+        mounter = settings["context_mounter"]
+        mounted_context = await mounter(state) if mounter is not None else None
 
         messages = _build_worker_messages(
             state=state,
@@ -892,6 +901,7 @@ def create_worker_node(
             workspace_root=settings["workspace_root"],
             role=settings["role"],
             feedback_grounding=feedback_grounding,
+            mounted_context=mounted_context,
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
         effective_model = _resolve_effective_worker_model(

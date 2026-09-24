@@ -287,8 +287,6 @@ class TestTeamStateStructure:
             "pipeline_phase",
             "vault_index",
             "validation_errors",
-            # transient mounted document content
-            "mounted_context",
             # task queue pointer
             "current_task_id",
             # authoring proposal references

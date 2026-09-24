@@ -214,9 +214,7 @@ def _compile_star(
         )
         builder.add_edge(agent_cfg.id, "supervisor")
         # Insert mount node between supervisor routing and worker invocation.
-        mount_fn = create_mount_node(
-            options.get("workspace_root"), options.get("task_queue_port")
-        )
+        mount_fn = create_mount_node(options.get("workspace_root"))
         _add_node(builder, f"mount_{agent_cfg.id}", mount_fn)
         builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
         compiled_worker_ids.append(agent_cfg.id)
@@ -334,9 +332,7 @@ def _compile_pipeline(
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         # Insert mount node between pipeline stages.
-        mount_fn = create_mount_node(
-            options.get("workspace_root"), options.get("task_queue_port")
-        )
+        mount_fn = create_mount_node(options.get("workspace_root"))
         mount_id = f"mount_{agent_cfg.id}"
         _add_node(builder, mount_id, mount_fn)
         _add_node(
@@ -491,9 +487,7 @@ def _compile_pipeline_loop(
 
         # Insert mount node before each worker.
         mount_id = f"mount_{agent_cfg.id}"
-        mount_fn = create_mount_node(
-            options.get("workspace_root"), options.get("task_queue_port")
-        )
+        mount_fn = create_mount_node(options.get("workspace_root"))
         _add_node(builder, mount_id, mount_fn)
         _add_node(
             builder,

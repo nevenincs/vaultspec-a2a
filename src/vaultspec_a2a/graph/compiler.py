@@ -61,6 +61,7 @@ from .nodes.diverge import (
     create_research_dispatch_node,
     researcher_node_name,
 )
+from .nodes.vault_reader import create_context_mounter
 from .nodes.worker import WorkerNode, create_worker_node
 
 logger = logging.getLogger(__name__)
@@ -542,6 +543,11 @@ def _compile_worker_node(
         authoring_binding_provider=options["authoring_binding_provider"],
         role=agent_cfg.role,
         harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
+        # Every worker these topologies compile sits behind a mount node that
+        # refreshes the vault index; the worker expands the documents itself.
+        context_mounter=create_context_mounter(
+            workspace_root, options["task_queue_port"]
+        ),
     )
     metadata = _agent_node_metadata(agent_cfg, used_provider, model_name)
     return worker_node, metadata

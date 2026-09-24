@@ -12,7 +12,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from langgraph.errors import NodeTimeoutError
+from langgraph._internal._constants import CONFIG_KEY_RUNTIME
+from langgraph.errors import GraphDrained, NodeTimeoutError
+from langgraph.runtime import RunControl, Runtime
 from langgraph.types import Command
 
 from ..domain_config import domain_config
@@ -34,7 +36,12 @@ from .transformer import (
 )
 from .types import StreamableGraph
 
-__all__ = ["IngestManager", "summarize_ingest_exception"]
+__all__ = ["INGEST_DRAINED", "IngestManager", "summarize_ingest_exception"]
+
+#: The outcome of a run that stopped at a superstep boundary because its worker
+#: asked it to drain. Not terminal: the checkpoint is resumable and the run's
+#: action stays open for recovery to deliver again.
+INGEST_DRAINED = "drained"
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +164,26 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
     return global_default
 
 
+def _config_carrying_control(
+    config: dict[str, Any], control: object | None
+) -> dict[str, Any]:
+    """Seat *control* as the run's parent runtime so a drain reaches the loop.
+
+    LangGraph 1.2's ``astream_events`` honours its ``control`` keyword only for
+    the v3 event API and drops it for v2, which is what this ingest consumes.
+    The graph loop takes its control from the parent runtime in the config when
+    no keyword reaches it, so that is where it is placed; ``control`` is still
+    passed as a keyword, so a release that forwards it needs no change here.
+    The import of the key is private and deliberately so: a rename then fails at
+    import rather than silently leaving every drain request unheard.
+    """
+    if not isinstance(control, RunControl):
+        return config
+    configurable = dict(config.get("configurable") or {})
+    configurable[CONFIG_KEY_RUNTIME] = Runtime(control=control)
+    return {**config, "configurable": configurable}
+
+
 def summarize_ingest_exception(exc: BaseException) -> str:
     """A client-visible, single-line summary of an uncaught ingest exception.
 
@@ -244,6 +271,8 @@ class IngestRequest:
     on_graph_started: Callable[[], Awaitable[None]] | None = None
     # The graph's LangGraph Runtime context for this invocation.
     context: object | None = None
+    # The RunControl its worker can ask to drain the run through.
+    control: object | None = None
 
 
 @dataclass(slots=True)
@@ -408,9 +437,10 @@ class IngestManager:
                 # cancellation never depends on the graph yielding another frame.
                 event_stream = graph.astream_events(
                     graph_input,
-                    config,
+                    _config_carrying_control(config, request.control),
                     version="v2",
                     context=request.context,
+                    control=request.control,
                 ).__aiter__()
                 services = EventProjectionServices(
                     self._emitters, self._buffering, self._telemetry
@@ -591,6 +621,14 @@ class IngestManager:
                 detail="Provider cancelled the turn",
             )
             return ThreadStatus.CANCELLED
+        if isinstance(exc, GraphDrained):
+            logger.info(
+                "Graph drained for thread %s at a superstep boundary (%s)",
+                thread_id,
+                exc.reason,
+            )
+            span.set_attribute("drained", True)
+            return INGEST_DRAINED
         if (GraphInterrupt is not None and isinstance(exc, GraphInterrupt)) or (
             exc.__class__.__name__ == "GraphInterrupt"
         ):

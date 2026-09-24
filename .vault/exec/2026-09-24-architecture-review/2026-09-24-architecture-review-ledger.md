@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-24'
 body_schema: 'body-v2'
-body_hash: 'sha256:ba4b88390fd7626784881e3fbf1b6ffa00082ca2501361d446a3dc9144104684'
+body_hash: 'sha256:4841b2adff055893000b1f9f366462b8ab02c2f3576073ec6b161948ecf321b4'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -60,7 +60,20 @@ related:
 - `S05` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
 - `S05` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/thread src/vaultspec_a2a/team` -> `pass`
 - `S05` `by:` `orchestrator`
+- `S06` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S06` `M` `src/vaultspec_a2a/worker/_dispatch_settlement.py`
+- `S06` `M` `src/vaultspec_a2a/worker/app.py`
+- `S06` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S06` `M` `src/vaultspec_a2a/streaming/aggregator.py`
+- `S06` `M` `src/vaultspec_a2a/streaming/types.py`
+- `S06` `A` `src/vaultspec_a2a/worker/tests/test_executor_drain.py`
+- `S06` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S06` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
+- `S06` `verify:` `pytest src/vaultspec_a2a/worker src/vaultspec_a2a/streaming src/vaultspec_a2a/graph` -> `pass`
+- `S06` `by:` `orchestrator`
 
 ## Notes
 
 - `S01` pyproject.toml had drifted from taplo.toml, so the pre-commit format check refused any edit to it; a separate formatting-only commit (fa6d93c, parse-identical) landed first.
+- `S06` LangGraph 1.2.12 astream_events drops its control keyword for version v2; the RunControl is seated as the parent runtime through the private CONFIG_KEY_RUNTIME, with the drain test as the tripwire.
+

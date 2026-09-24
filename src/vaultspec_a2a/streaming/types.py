@@ -50,8 +50,9 @@ class StreamableGraph(Protocol):
         *,
         version: str,
         context: object | None = None,
+        control: object | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Yield raw LangGraph event dicts, running under Runtime *context*."""
+        """Yield raw LangGraph event dicts under Runtime *context* and *control*."""
         ...
 
     async def aget_state(self, config: dict[str, Any]) -> object:

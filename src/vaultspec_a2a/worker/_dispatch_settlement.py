@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from ..graph.enums import AgentLifecycleState
+from ..streaming.ingest import INGEST_DRAINED
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ThreadStatus
@@ -366,6 +367,12 @@ class SettlementMixin(_SettlementHost):
         # for the next run reusing this thread id. The guarantee therefore sits
         # outside this function, in the dispatch backstop that catches whatever
         # killed the settle - see ``_fail_unhandled_dispatch``.
+        if outcome == INGEST_DRAINED:
+            # Stopped at a superstep boundary by this worker's own shutdown: the
+            # checkpoint resumes and the run is not over, so no terminal status
+            # is sent; its open action is delivered again after restart.
+            await self._mark_ingest_done(req.thread_id, outcome)
+            return
         failure_reason = self._aggregator.take_failure_reason(req.thread_id)
         # The condition ingest resolved from the failing lane. Both stashes are
         # drained on every settle, not only on a failure, so a completed run

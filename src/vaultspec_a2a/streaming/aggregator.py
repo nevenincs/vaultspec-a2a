@@ -67,13 +67,14 @@ class _IngestOptions(TypedDict, total=False):
     config: dict[str, Any]
     on_graph_started: Callable[[], Awaitable[None]] | None
     context: object | None
+    control: object | None
 
 
 def _validate_ingest_arguments(
     args: tuple[object, ...], options: _IngestOptions
 ) -> None:
     unknown = set(options).difference(
-        {"graph_input", "config", "on_graph_started", "context"}
+        {"graph_input", "config", "on_graph_started", "context", "control"}
     )
     if unknown:
         unexpected = next(iter(unknown))
@@ -445,6 +446,7 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
                 config,
                 options.get("on_graph_started"),
                 options.get("context"),
+                options.get("control"),
             )
         )
 

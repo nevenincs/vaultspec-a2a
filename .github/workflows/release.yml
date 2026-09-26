@@ -66,7 +66,9 @@ jobs:
     name: Freeze ${{ matrix.target }}
     needs: health
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 165
+    env:
+      CI_EXEC_BUDGET_MINUTES: 45
     strategy:
       fail-fast: false
       matrix:
@@ -343,7 +345,9 @@ jobs:
     name: "Build: Release provenance (Linux)"
     needs: build
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 15
+    timeout-minutes: 135
+    env:
+      CI_EXEC_BUDGET_MINUTES: 15
     permissions:
       contents: read
       id-token: write
@@ -394,7 +398,9 @@ jobs:
     name: Publish to the release
     needs: [build, provenance]
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 15
+    timeout-minutes: 135
+    env:
+      CI_EXEC_BUDGET_MINUTES: 15
     permissions:
       contents: write
     steps:

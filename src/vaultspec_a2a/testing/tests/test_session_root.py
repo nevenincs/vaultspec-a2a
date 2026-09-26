@@ -125,3 +125,78 @@ def test_a_nested_run_under_a_worker_marker_is_not_taken_for_a_worker(
     )
 
     assert Path(completed.stdout.strip()).is_relative_to(tmp_path / "nested")
+
+
+_OPERATOR_PORT = "17742"
+_DEFAULT_PORT = 18000
+
+_SEATED_PROBE = """
+import os
+import sys
+from pathlib import Path
+
+from vaultspec_a2a.control.settings_base import ENV_FILE_ENV
+from vaultspec_a2a.testing.session_root import seat_test_session
+
+seat_test_session(Path(sys.argv[1]))
+
+from vaultspec_a2a.control.config import Settings
+
+print(os.environ.get(ENV_FILE_ENV, "<removed>"))
+print(Settings().port)
+"""
+
+
+def _seated_session(rootdir: Path, named: str) -> subprocess.CompletedProcess[str]:
+    """Seat a session in a real child process that inherits *named* as its env file."""
+    probe = rootdir / "probe.py"
+    probe.write_text(_SEATED_PROBE, encoding="utf-8")
+    inherited = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("VAULTSPEC_A2A_")
+    }
+    return subprocess.run(
+        [sys.executable, str(probe), str(rootdir)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=300,
+        check=False,
+        env={
+            **inherited,
+            "PYTHONIOENCODING": "utf-8",
+            env_name(InfraConfig, "project_root"): str(rootdir),
+            "VAULTSPEC_A2A_ENV_FILE": named,
+        },
+    )
+
+
+def test_a_session_ignores_an_operator_settings_file_it_inherited(
+    tmp_path: Path,
+) -> None:
+    """A developer's exported settings file has no say in what a test reads.
+
+    The operator reference tells developers to export it, so a session started
+    from such a shell would otherwise take that file's ports, database and
+    timeouts for the whole run - values no test declared and none can see.
+    """
+    operator = tmp_path / "operator.env"
+    operator.write_text(f"VAULTSPEC_A2A_PORT={_OPERATOR_PORT}\n", encoding="utf-8")
+
+    seated = _seated_session(tmp_path, str(operator))
+
+    assert seated.returncode == 0, seated.stderr
+    named, port = seated.stdout.split()
+    assert named == "<removed>"
+    assert int(port) == _DEFAULT_PORT
+
+
+def test_a_session_survives_an_operator_settings_file_that_is_not_there(
+    tmp_path: Path,
+) -> None:
+    """A stale export breaks a developer's run, not their whole test session."""
+    seated = _seated_session(tmp_path, str(tmp_path / "absent.env"))
+
+    assert seated.returncode == 0, seated.stderr
+    assert seated.stdout.split()[0] == "<removed>"

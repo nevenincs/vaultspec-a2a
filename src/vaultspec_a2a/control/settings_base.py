@@ -33,13 +33,24 @@ root would make the answer depend on which file was read first.
 """
 
 import os
+import re
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import UnionType
-from typing import Any, Final, Union, cast, final, get_args, get_origin, override
+from typing import (
+    Any,
+    Final,
+    Never,
+    Union,
+    cast,
+    final,
+    get_args,
+    get_origin,
+    override,
+)
 
-from pydantic import AliasChoices, ValidationError
+from pydantic import AliasChoices, SecretStr, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -487,6 +498,56 @@ def _field_behind(settings_cls: type[BaseSettings], location: object) -> str | N
     )
 
 
+#: Words that name a secret when they appear in a settings field's name. Read
+#: together with the field's type: an ``int`` called ``context_limit_tokens``
+#: is a size, and redacting it would cost the operator the one fact the
+#: message exists to carry.
+_SECRET_WORDS: Final = ("password", "secret", "token", "key", "credential")
+
+#: The userinfo of a URL, which is where a DSN carries its password. Matched
+#: on any scheme, because the value that must not be echoed is not always in a
+#: field this module can recognise as a credential.
+_URL_USERINFO: Final = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)[^/\s@]*@")
+
+
+def _carries_text(annotation: object) -> bool:
+    """Whether a field's declared type can hold a string, and so a secret."""
+    origin = get_origin(annotation)
+    if origin in (Union, UnionType):
+        return any(_carries_text(argument) for argument in get_args(annotation))
+    return isinstance(annotation, type) and issubclass(annotation, (str, SecretStr))
+
+
+def _holds_a_secret(field_name: str, field: FieldInfo) -> bool:
+    """Whether a field's VALUE must never appear in a message.
+
+    Four ways to be one, because no single one of them catches every field
+    that holds a secret: the registry declares it a credential, the schema
+    keeps it out of a repr, its type is a :class:`~pydantic.SecretStr`, or its
+    name says so and its type can hold a string.
+    """
+    return (
+        field_name in CREDENTIAL_VARIABLES
+        or field.repr is False
+        or _shape_of(field.annotation) == SecretStr.__name__
+        or (
+            any(word in field_name for word in _SECRET_WORDS)
+            and _carries_text(field.annotation)
+        )
+    )
+
+
+def _without_userinfo(message: str) -> str:
+    """Strip the userinfo out of every URL in *message*.
+
+    A database URL is a plain string on a field no name test calls a secret,
+    and it routinely carries a password between the scheme and the host. The
+    host and the scheme are what the operator needs to see; the credential in
+    front of them is not, on any field and in any message.
+    """
+    return _URL_USERINFO.sub(r"\g<scheme>***@", message)
+
+
 def _refusal(settings_cls: type[BaseSettings], invalid: ValidationError) -> str:
     """Render every rejected value as one line naming variable, shape and value."""
     lines: list[str] = []
@@ -499,15 +560,16 @@ def _refusal(settings_cls: type[BaseSettings], invalid: ValidationError) -> str:
             lines.append(str(problem["msg"]))
             continue
         field = settings_cls.model_fields[field_name]
-        # A field the registry declares a credential, or one the schema keeps
-        # out of a repr, holds a secret: name it, never quote it.
-        secret = field_name in CREDENTIAL_VARIABLES or field.repr is False
-        shown = "a redacted value" if secret else repr(problem.get("input"))
+        shown = (
+            "a redacted value"
+            if _holds_a_secret(field_name, field)
+            else repr(problem.get("input"))
+        )
         lines.append(
             f"{field_env_names(settings_cls, field_name)[0]} must be "
             f"{_shape_of(field.annotation)}, got {shown}"
         )
-    return "\n".join(dict.fromkeys(lines))
+    return _without_userinfo("\n".join(dict.fromkeys(lines)))
 
 
 def read_configuration[T: BaseSettings](settings_cls: type[T], **values: Any) -> T:
@@ -553,7 +615,7 @@ class _BuiltAtFirstUse[T: BaseSettings]:
     def __init__(self, build: Callable[[], T]) -> None:
         object.__setattr__(self, "_build", build)
         object.__setattr__(self, "_instance", None)
-        object.__setattr__(self, "_lock", threading.Lock())
+        object.__setattr__(self, "_lock", threading.RLock())
 
     def _settings(self) -> T:
         built: T | None = object.__getattribute__(self, "_instance")
@@ -561,6 +623,8 @@ class _BuiltAtFirstUse[T: BaseSettings]:
             return built
         # Two threads racing the first read would otherwise each build one,
         # and every mutation of the loser's copy would be silently discarded.
+        # Re-entrant because the build reads settings itself - a validator
+        # that consults the singleton would deadlock on a plain lock.
         with object.__getattribute__(self, "_lock"):
             built = object.__getattribute__(self, "_instance")
             if built is None:
@@ -579,6 +643,30 @@ class _BuiltAtFirstUse[T: BaseSettings]:
 
     def __dir__(self) -> list[str]:
         return dir(self._settings())
+
+    def __eq__(self, other: object) -> bool:
+        # Forwarded rather than left to identity: a caller comparing the
+        # singleton to a settings object it built is asking about the values,
+        # and identity would answer a different question every time.
+        return self._settings() == other
+
+    def __hash__(self) -> int:
+        return hash(self._settings())
+
+    def __bool__(self) -> bool:
+        return bool(self._settings())
+
+    def __reduce__(self) -> Never:
+        # Pickling the proxy would carry the FACTORY across the boundary, and
+        # the receiving process would rebuild the settings from ITS own
+        # environment while believing it received this process's. Refuse by
+        # name instead of handing over an object that lies about its origin.
+        message = (
+            "the settings singleton cannot be pickled; it is a stand-in that "
+            "reads this process's environment. Send the values a child needs, "
+            "or let the child build its own settings."
+        )
+        raise TypeError(message)
 
 
 def built_at_first_use[T: BaseSettings](build: Callable[[], T]) -> T:

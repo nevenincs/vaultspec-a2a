@@ -146,13 +146,13 @@ _TRUST_AXES = ("read_only", "network_egress")
 _ROOT_PIN_AXIS = "root_pin"
 _EXACT_SURFACE_AXIS = "exact_surface"
 RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
-# The restricted launch is served from 0.1.56 onward. NO version constraint,
+# The restricted launch is served from vaultspec-core 0.2.4 onward, when the
+# `vaultspec-core-mcp` executable was introduced. NO version constraint,
 # per the registry's standing policy (asserted by its own test): the boundary
 # is the SERVED SURFACE, checked before every launch. An older resolution
 # rejects `--read-only` and is refused at the contract seam rather than
 # surfaced wide. Operationally that means a stale `uvx` cache fails the lane
-# loudly and repeatedly until it refreshes - accepted as fail-loud, and the
-# reason a2a's own dependency floor names 0.1.56.
+# loudly and repeatedly until it refreshes - accepted as fail-loud.
 CORE_MCP_REQUIREMENT = "vaultspec-core"
 
 

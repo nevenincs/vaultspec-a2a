@@ -293,7 +293,12 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
             # vault behind every deny that guards the filesystem path. The
             # restricted launch registers only non-mutating handlers, so no
             # write-capable tool exists in the process to be handed or approved.
-            "args": ["--from", CORE_MCP_REQUIREMENT, "vaultspec-mcp", "--read-only"],
+            "args": [
+                "--from",
+                CORE_MCP_REQUIREMENT,
+                "vaultspec-core-mcp",
+                "--read-only",
+            ],
             # Exactly what the restricted launch registers. ``check`` is safe to
             # declare ONLY here: unrestricted it takes a repair argument that a
             # tool-name allowlist cannot see, while the read-only launch registers

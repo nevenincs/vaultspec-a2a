@@ -53,6 +53,27 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
     ]
 
 
+def test_vaultspec_core_launch_names_vaultspec_core_mcp_entrypoint() -> None:
+    """The vaultspec-core MCP launch command names the correct console script.
+
+    vaultspec-core's console script is 'vaultspec-core-mcp', not the retired
+    'vaultspec-mcp' name. This test asserts the registry builds the command
+    with the current entry point name.
+    """
+    specs = resolve_harness_mcp_servers(["vaultspec-core"])
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec["name"] == "vaultspec-core"
+    assert spec["command"] == "uvx"
+    # The args must include the correct console script name and read-only flag.
+    assert spec["args"] == [
+        "--from",
+        "vaultspec-core",
+        "vaultspec-core-mcp",
+        "--read-only",
+    ]
+
+
 def test_harness_specs_are_provider_child_launch_specs_not_self_spawned() -> None:
     """Audit lock: the harness registry emits launch SPECS only, never a spawn.
 

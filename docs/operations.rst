@@ -43,6 +43,33 @@ then a file secret, then the field's default.
 against the project root. It is never discovered: a file nobody named is never
 read, and a named file that does not exist is refused by name rather than
 ignored. Because the operator named it, it ranks with the session environment.
+Starting the service directly, name it on the process::
+
+   VAULTSPEC_A2A_ENV_FILE=.env vaultspec-a2a serve
+
+An absolute path works the same way. Under ``just``, the recipes that run the
+service name this checkout's ``.env`` for you, so nothing extra is needed
+there.
+
+.. rubric:: Moving a checkout to the settings file
+
+*What changed.* A workspace ``.env`` used to supply every setting, to any
+process started anywhere inside the project. It no longer supplies any: it is
+content that arrives with a clone, and reading settings from it let the
+repository decide which ports the service binds, which database it opens and
+which endpoint it talks to. Only the credentials listed at the head of
+``.env.example`` are still read from it, under the gate above.
+
+*Why.* A setting now comes from somewhere a person chose on this machine - the
+process environment, or a file named outright - so trusting a file is a
+decision rather than a side effect of the working directory.
+
+*What to do.* Keep the settings where they are and name the file:
+``VAULTSPEC_A2A_ENV_FILE=.env``, exported in your shell or given per command,
+or point it at a settings file outside the checkout. Export the settings in
+the process environment instead if you prefer. Either way, a value in neither
+place falls back to its documented default, and a named file that is missing
+stops the service by name rather than starting it on defaults.
 
 **The project's ``.env``.** It is content of the project a2a serves, so it
 configures nothing. Only the credentials listed at the head of

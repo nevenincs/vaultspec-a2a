@@ -127,3 +127,35 @@ def test_a_rejected_credential_is_named_without_its_value(tmp_path: Path) -> Non
         str(refusal.value)
         == "VAULTSPEC_A2A_INTERNAL_TOKEN must be str, got a redacted value"
     )
+
+
+def test_the_worker_entry_point_reports_one_named_error(tmp_path: Path) -> None:
+    """The worker is its own startup site: the gateway spawns it as its own process.
+
+    Its import chain reaches the telemetry module and the provider factory,
+    both of which used to read settings while being imported - so a refusal
+    arrived as a traceback from inside the settings library, in a process
+    whose stderr the gateway forwards to an operator.
+    """
+    completed = _run(
+        ["-m", "vaultspec_a2a.worker"],
+        _child_environment(tmp_path, **{ENV_FILE_ENV: _ABSENT}),
+    )
+    reported = completed.stderr
+    assert completed.returncode == 1
+    assert "Traceback" not in reported
+    assert reported.count("Error:") == 1
+    assert ENV_FILE_ENV in reported
+    assert str(tmp_path / _ABSENT) in reported
+
+
+def test_importing_the_worker_survives_a_settings_file_that_is_not_there(
+    tmp_path: Path,
+) -> None:
+    """Nothing on the worker's import chain reads a setting while being imported."""
+    completed = _run(
+        ["-c", "import vaultspec_a2a.worker.app"],
+        _child_environment(tmp_path, **{ENV_FILE_ENV: _ABSENT}),
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "Traceback" not in completed.stderr

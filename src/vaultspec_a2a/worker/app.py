@@ -16,6 +16,7 @@ Or via the ``vaultspec-worker`` console script (once registered in
 from __future__ import annotations
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
@@ -34,6 +35,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
+from vaultspec_core.config import ConfigurationError
 
 from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
@@ -478,7 +480,23 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
 
 
 def main() -> None:
-    """Entry point for the ``vaultspec-worker`` console script."""
+    """Entry point for the worker process, refusals rendered by name.
+
+    The worker is started as its own process - by the gateway's worker
+    management, with the environment it inherited - so it is a startup site in
+    its own right. A configuration it cannot read is reported here the way the
+    operator CLI reports one: a single named message on stderr and a non-zero
+    status, not a traceback from inside the settings library.
+    """
+    try:
+        _serve()
+    except ConfigurationError as refused:
+        print(f"Error: {refused}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from refused
+
+
+def _serve() -> None:
+    """Configure the process and run the worker's server until shutdown."""
     reconfigure_console_utf8()
     configure_logging("service", service_name="worker")
     configure_asyncio_runtime()

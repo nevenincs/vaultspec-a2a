@@ -46,6 +46,7 @@ real transport fault indistinguishable from the arrangement.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import importlib
 import logging
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast, override
@@ -59,31 +60,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 __all__ = [
-    "SDK_DISABLED",
     "TelemetryConfig",
     "configure_telemetry",
     "get_meter",
     "get_tracer",
+    "telemetry_settings",
 ]
 
 logger = logging.getLogger(__name__)
-
-# These module-level settings reads are intentional.  OTel SDK
-# configuration must be determined at import time so that ``get_tracer`` and
-# ``get_meter`` callers at module scope (e.g. the aggregator) receive a correctly
-# configured provider.  Changing telemetry config at runtime is explicitly out of
-# scope for this service — operators restart the process to pick up new settings.
-#
-# SDK_DISABLED (and other constants below) are evaluated once at import
-# time.  Tests that need to vary this behaviour must use subprocess isolation
-# (e.g. ``subprocess.run([sys.executable, ...])`` with a custom env dict) rather
-# than changing the environment after import — the constant will not re-evaluate.
-_SERVICE_NAME = settings.otel_service_name
-_SERVICE_VERSION = settings.otel_service_version or package_version()
-_OTLP_ENDPOINT = settings.otel_exporter_otlp_endpoint
-SDK_DISABLED = settings.otel_sdk_disabled
-_INSECURE = settings.otel_exporter_otlp_insecure
-_CONSOLE_EXPORT = settings.otel_exporter_console
 
 
 def _signal_export_disabled(selected: str | None) -> bool:
@@ -96,8 +80,48 @@ def _signal_export_disabled(selected: str | None) -> bool:
     return (selected or "").strip().lower() == "none"
 
 
-_TRACES_EXPORT_DISABLED = _signal_export_disabled(settings.otel_traces_exporter)
-_METRICS_EXPORT_DISABLED = _signal_export_disabled(settings.otel_metrics_exporter)
+@dataclasses.dataclass(frozen=True)
+class _TelemetrySettings:
+    """The telemetry configuration this process runs on, read once."""
+
+    service_name: str
+    service_version: str
+    otlp_endpoint: str
+    sdk_disabled: bool
+    insecure: bool
+    console_export: bool
+    traces_export_disabled: bool
+    metrics_export_disabled: bool
+
+
+@functools.cache
+def telemetry_settings() -> _TelemetrySettings:
+    """Read the telemetry configuration once, at the first use rather than at import.
+
+    Determined ONCE per process and then frozen: ``get_tracer`` and
+    ``get_meter`` callers must all receive the same provider, and changing
+    telemetry configuration at runtime is out of scope - operators restart the
+    process to pick up new settings. A test that varies this must use
+    subprocess isolation (``subprocess.run([sys.executable, ...])`` with its
+    own environment), because nothing here re-reads.
+
+    Reading it at IMPORT is what this replaces. The worker is started as
+    ``python -m vaultspec_a2a.worker``, which imports this module on the way
+    in, so an import-time read handed a refused configuration to the import
+    machinery - a traceback inside pydantic-settings - instead of to the entry
+    point that can name it.
+    """
+    return _TelemetrySettings(
+        service_name=settings.otel_service_name,
+        service_version=settings.otel_service_version or package_version(),
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+        sdk_disabled=settings.otel_sdk_disabled,
+        insecure=settings.otel_exporter_otlp_insecure,
+        console_export=settings.otel_exporter_console,
+        traces_export_disabled=_signal_export_disabled(settings.otel_traces_exporter),
+        metrics_export_disabled=_signal_export_disabled(settings.otel_metrics_exporter),
+    )
+
 
 _OTLP_EXPORTER_MODULES = (
     "opentelemetry.exporter",
@@ -361,7 +385,7 @@ def _build_sdk_provider(
     Args:
         otlp_available: Whether the OTLP gRPC exporter package is installed.
         service_name: Override ``service.name`` in the OTel Resource. Defaults
-            to ``_SERVICE_NAME`` (resolved from ``OTEL_SERVICE_NAME`` env var).
+            to the configured service name (``OTEL_SERVICE_NAME``).
 
     Returns:
         A configured SDK ``TracerProvider``.
@@ -377,15 +401,16 @@ def _build_sdk_provider(
         ConsoleSpanExporter,
     )
 
+    configured = telemetry_settings()
     resource = Resource.create(
         {
-            "service.name": service_name or _SERVICE_NAME,
-            "service.version": _SERVICE_VERSION,
+            "service.name": service_name or configured.service_name,
+            "service.version": configured.service_version,
         }
     )
     provider = SdkTracerProvider(resource=resource)
 
-    if _TRACES_EXPORT_DISABLED:
+    if configured.traces_export_disabled:
         # No processor at all: spans are still created, so instrumentation and
         # the correlation filter keep working, but nothing leaves the process
         # and no export thread is started.
@@ -395,13 +420,15 @@ def _build_sdk_provider(
             OTLPSpanExporter,
         )
 
-        exporter = OTLPSpanExporter(endpoint=_OTLP_ENDPOINT, insecure=_INSECURE)
+        exporter = OTLPSpanExporter(
+            endpoint=configured.otlp_endpoint, insecure=configured.insecure
+        )
         provider.add_span_processor(BatchSpanProcessor(exporter))
         logger.info(
             "OTel OTLP exporter configured endpoint=%s",
-            _OTLP_ENDPOINT,
+            configured.otlp_endpoint,
         )
-    elif _CONSOLE_EXPORT:
+    elif configured.console_export:
         provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
         logger.debug("OTel console exporter active (no OTLP package found)")
 
@@ -418,7 +445,7 @@ def _build_sdk_meter_provider(
     Args:
         otlp_available: Whether the OTLP gRPC metric exporter is installed.
         service_name: Override ``service.name`` in the OTel Resource. Defaults
-            to ``_SERVICE_NAME`` (resolved from ``OTEL_SERVICE_NAME`` env var).
+            to the configured service name (``OTEL_SERVICE_NAME``).
     """
     from opentelemetry.sdk.metrics import (
         MeterProvider,
@@ -431,22 +458,25 @@ def _build_sdk_meter_provider(
         Resource,
     )
 
+    configured = telemetry_settings()
     resource = Resource.create(
         {
-            "service.name": service_name or _SERVICE_NAME,
-            "service.version": _SERVICE_VERSION,
+            "service.name": service_name or configured.service_name,
+            "service.version": configured.service_version,
         }
     )
     readers: list[MetricReader] = []
 
-    if _METRICS_EXPORT_DISABLED:
+    if configured.metrics_export_disabled:
         logger.info("OTel metric export disabled via OTEL_METRICS_EXPORTER=none")
     elif otlp_available:
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
             OTLPMetricExporter,
         )
 
-        exporter = OTLPMetricExporter(endpoint=_OTLP_ENDPOINT, insecure=_INSECURE)
+        exporter = OTLPMetricExporter(
+            endpoint=configured.otlp_endpoint, insecure=configured.insecure
+        )
         readers.append(PeriodicExportingMetricReader(exporter))
 
     meter_provider = MeterProvider(resource=resource, metric_readers=readers)
@@ -461,6 +491,7 @@ def _configure_sdk(
     langsmith_enabled: bool,
 ) -> None:
     """Configure SDK providers and report the selected SDK mode."""
+    configured = telemetry_settings()
     if sdk_enabled:
         provider = _build_sdk_provider(
             otlp_available=otlp_available, service_name=effective_service
@@ -474,11 +505,11 @@ def _configure_sdk(
             "metrics=%s langsmith=%s",
             effective_service,
             otlp_available,
-            not _TRACES_EXPORT_DISABLED,
-            not _METRICS_EXPORT_DISABLED,
+            not configured.traces_export_disabled,
+            not configured.metrics_export_disabled,
             langsmith_enabled,
         )
-    elif SDK_DISABLED:
+    elif configured.sdk_disabled:
         logger.info("OTel SDK explicitly disabled via OTEL_SDK_DISABLED")
     else:
         logger.info(
@@ -517,12 +548,13 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
             yield
         ```
     """
+    configured = telemetry_settings()
     sdk_available = _check_sdk()
     otlp_available = _check_otlp() if sdk_available else False
-    sdk_enabled = sdk_available and not SDK_DISABLED
+    sdk_enabled = sdk_available and not configured.sdk_disabled
     langsmith_enabled, langsmith_project = _resolve_langsmith()
 
-    effective_service = service_name or _SERVICE_NAME
+    effective_service = service_name or configured.service_name
 
     _configure_sdk(
         sdk_enabled=sdk_enabled,
@@ -549,15 +581,15 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
         otlp_available=otlp_available,
         sdk_enabled=sdk_enabled,
         service_name=effective_service,
-        otlp_endpoint=_OTLP_ENDPOINT,
+        otlp_endpoint=configured.otlp_endpoint,
         langsmith_enabled=langsmith_enabled,
         traces_exporting=(
             sdk_enabled
-            and not _TRACES_EXPORT_DISABLED
-            and (otlp_available or _CONSOLE_EXPORT)
+            and not configured.traces_export_disabled
+            and (otlp_available or configured.console_export)
         ),
         metrics_exporting=(
-            sdk_enabled and not _METRICS_EXPORT_DISABLED and otlp_available
+            sdk_enabled and not configured.metrics_export_disabled and otlp_available
         ),
     )
 
@@ -586,7 +618,7 @@ def get_tracer(name: str) -> trace.Tracer:
                 span.set_attribute("key", "value")
         ```
     """
-    return trace.get_tracer(name, _SERVICE_VERSION)
+    return trace.get_tracer(name, telemetry_settings().service_version)
 
 
 def get_meter(name: str) -> metrics.Meter:
@@ -598,4 +630,4 @@ def get_meter(name: str) -> metrics.Meter:
     Returns:
         An OTel ``Meter`` instance.
     """
-    return metrics.get_meter(name, _SERVICE_VERSION)
+    return metrics.get_meter(name, telemetry_settings().service_version)

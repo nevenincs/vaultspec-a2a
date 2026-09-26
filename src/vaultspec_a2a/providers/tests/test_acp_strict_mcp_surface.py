@@ -48,7 +48,7 @@ from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
     from ...conftest import ExternalPrerequisiteRule
-from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
+from .._factory_commands import _classify_acp_command, claude_acp_entry
 from ..factory import ProviderFactory
 
 _RAG = "vaultspec-rag"
@@ -76,7 +76,7 @@ if __name__ == "__main__":
 
 
 def _require_acp_entry() -> None:
-    if settings.acp_backend != "binary" and not _CLAUDE_ACP_JS.exists():
+    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
         pytest.skip(
             "Claude ACP node entry not installed; run 'npm install' "
             "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"

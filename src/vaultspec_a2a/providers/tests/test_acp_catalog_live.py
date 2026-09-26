@@ -12,7 +12,7 @@ import pytest
 from ...control.config import settings
 from ...graph.enums import Provider
 from ...workspace.environment import resolve_env_vars
-from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
+from .._factory_commands import _classify_acp_command, claude_acp_entry
 from ..acp_catalog import discover_acp_catalog
 from ..cli_resolution import resolve_provider_cli_executable
 from ..provider_catalog import (
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 def _real_adapter_inputs() -> tuple[
     tuple[str, ...], dict[str, str], Mapping[str, object]
 ]:
-    if settings.acp_backend != "binary" and not _CLAUDE_ACP_JS.exists():
+    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
         pytest.fail(
             "ACP adapter is not installed; run 'npm install' per the ACP runbook"
         )

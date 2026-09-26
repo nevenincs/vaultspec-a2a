@@ -23,7 +23,12 @@ from vaultspec_core.config import ConfigurationError
 from ...testing import armed_environment
 from ..config import Settings
 from ..env_registry import CREDENTIAL_VARIABLES
-from ..settings_base import ENV_FILE_ENV, PROJECT_ROOT_ENV, field_env_names
+from ..settings_base import (
+    ENV_FILE_ENV,
+    PROJECT_ROOT_ENV,
+    field_env_names,
+    resolve_project_root,
+)
 
 #: The source root of the package under test, as this file's own location
 #: reports it: src/vaultspec_a2a/control/tests/.
@@ -48,7 +53,9 @@ import sys
 
 from vaultspec_a2a.control.config import Settings
 
-configured = Settings()
+# argv[2], when given, is the project root named in the CONSTRUCTION CALL
+# rather than in the environment, which the caller then leaves unset.
+configured = Settings(project_root=sys.argv[2]) if len(sys.argv) > 2 else Settings()
 print(
     json.dumps(
         {
@@ -98,8 +105,21 @@ def _interpreter_inside(root: Path) -> Path:
     return Path(context.env_exe)
 
 
-def _read_settings_with(interpreter: Path, root: Path) -> dict[str, object]:
-    """Build the settings in *interpreter* against *root* and report the outcome."""
+def _read_settings_with(
+    interpreter: Path, root: Path, *, name_the_root_in_the_call: bool = False
+) -> dict[str, object]:
+    """Build the settings in *interpreter* against *root* and report the outcome.
+
+    Args:
+        interpreter: The interpreter to build the settings in.
+        root: The project root.
+        name_the_root_in_the_call: Name *root* in the construction call and
+            leave it out of the environment, rather than the other way round.
+
+    Returns:
+        What that process read: whether the gated credential arrived, and the
+        port, which the same file also declares and may never supply.
+    """
     probe = root / "probe.py"
     probe.write_text(_PROBE, encoding="utf-8")
     # The interpreter is a bare environment, so the packages under test and
@@ -110,7 +130,8 @@ def _read_settings_with(interpreter: Path, root: Path) -> dict[str, object]:
         str(Path(vaultspec_core.__file__).parents[1]),
     )
     completed = subprocess.run(
-        [str(interpreter), str(probe), _SENTINEL],
+        [str(interpreter), str(probe), _SENTINEL]
+        + ([str(root)] if name_the_root_in_the_call else []),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -121,7 +142,7 @@ def _read_settings_with(interpreter: Path, root: Path) -> dict[str, object]:
             "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
             "PYTHONPATH": ";".join(path) if sys.platform == "win32" else ":".join(path),
             "PYTHONIOENCODING": "utf-8",
-            PROJECT_ROOT_ENV: str(root),
+            **({} if name_the_root_in_the_call else {PROJECT_ROOT_ENV: str(root)}),
         },
     )
     assert completed.returncode == 0, completed.stderr
@@ -243,6 +264,107 @@ def test_a_file_the_construction_call_names_that_is_not_there_is_refused(
     ):
         cast("_SettingsEnvFileFactory", Settings)(_env_file=absent)
     assert str(absent) in str(refusal.value)
+
+
+def test_the_construction_call_outranks_the_process_environment(
+    tmp_path: Path,
+) -> None:
+    """An invocation is the highest-ranked source, above the session it runs in."""
+    with armed_environment(
+        **{
+            PROJECT_ROOT_ENV: str(tmp_path),
+            ENV_FILE_ENV: None,
+            _SETTING_NAME: "19000",
+        }
+    ):
+        configured = Settings(port=19999)
+    assert configured.port == 19999
+
+
+def test_the_construction_call_steers_the_operator_file_lookup(tmp_path: Path) -> None:
+    """A root named in the call is what the operator file resolves against."""
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy" / "operator.env").write_text(
+        f"{_SETTING_NAME}={_SETTING_VALUE}\n", encoding="utf-8"
+    )
+    with armed_environment(
+        **{
+            PROJECT_ROOT_ENV: None,
+            ENV_FILE_ENV: "deploy/operator.env",
+            _SETTING_NAME: None,
+        }
+    ):
+        configured = Settings(project_root=tmp_path)
+    assert configured.project_root == tmp_path
+    assert configured.port == int(_SETTING_VALUE)
+
+
+def test_the_construction_call_steers_the_credential_gate(tmp_path: Path) -> None:
+    """The gated ``.env`` is the one under the root the call named."""
+    _workspace_dotenv(tmp_path)
+    _declare_dev_mode(tmp_path)
+    interpreter = _interpreter_inside(tmp_path)
+
+    read = _read_settings_with(interpreter, tmp_path, name_the_root_in_the_call=True)
+
+    assert read == {"credential_supplied": True, "port": _DEFAULT_PORT}
+
+
+def test_the_operator_file_cannot_name_the_project_root(tmp_path: Path) -> None:
+    """The operator source specifically: its own root value is dropped.
+
+    The file was resolved against the project root, so a value inside it
+    naming another root would contradict the lookup that found it. Named by
+    absolute path, so the answer cannot come from the lookup under test.
+    """
+    hijacked = tmp_path / "hijacked"
+    operator = tmp_path / "operator.env"
+    operator.write_text(
+        f"{PROJECT_ROOT_ENV}={hijacked}\n{_SETTING_NAME}={_SETTING_VALUE}\n",
+        encoding="utf-8",
+    )
+    with armed_environment(
+        **{
+            PROJECT_ROOT_ENV: None,
+            ENV_FILE_ENV: str(operator),
+            _SETTING_NAME: None,
+        }
+    ):
+        configured = Settings()
+        expected = resolve_project_root()
+    # The setting beside it did arrive, so the file was read and only the root
+    # was dropped.
+    assert configured.port == int(_SETTING_VALUE)
+    assert configured.project_root == expected
+    assert configured.project_root != hijacked
+
+
+@pytest.mark.parametrize(
+    "present",
+    [
+        ("VAULTSPEC_A2A_ZAI_AUTH_TOKEN", "ZAI_AUTH_TOKEN", "ZAI_API_KEY"),
+        ("ZAI_AUTH_TOKEN", "ZAI_API_KEY"),
+        ("ZAI_API_KEY",),
+    ],
+    ids=["all-three", "the-tools-two", "the-older-name-alone"],
+)
+def test_the_zai_token_prefers_the_a2a_name_then_the_tools_own(
+    tmp_path: Path, present: tuple[str, ...]
+) -> None:
+    """Three spellings, one order: the a2a name, then the tool's, then its older one."""
+    values = {name: f"{name}-value" for name in present}
+    with armed_environment(
+        **{
+            PROJECT_ROOT_ENV: str(tmp_path),
+            ENV_FILE_ENV: None,
+            "VAULTSPEC_A2A_ZAI_AUTH_TOKEN": None,
+            "ZAI_AUTH_TOKEN": None,
+            "ZAI_API_KEY": None,
+            **values,
+        }
+    ):
+        configured = Settings()
+    assert configured.zai_auth_token == values[present[0]]
 
 
 def test_every_declared_credential_is_spelled_by_its_field(tmp_path: Path) -> None:

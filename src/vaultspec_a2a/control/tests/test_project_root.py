@@ -116,8 +116,15 @@ def test_domain_settings_read_the_same_operator_file(tmp_path: Path) -> None:
         assert DomainSettingsConfig().max_cached_graphs == 7
 
 
-def test_an_env_file_cannot_name_a_different_project_root(tmp_path: Path) -> None:
-    """With no override in the environment, a file's own root value is dropped."""
+def test_a_construction_named_file_cannot_name_a_different_project_root(
+    tmp_path: Path,
+) -> None:
+    """The file the construction call names: its own root value is dropped.
+
+    Covers the construction-call source only. The operator file the process
+    environment names is held to the same rule by its own case in
+    ``test_settings_sources``.
+    """
     hijacked = tmp_path / "hijacked"
     env_file = tmp_path / ".env"
     env_file.write_text(f"{PROJECT_ROOT_ENV}={hijacked}\n", encoding="utf-8")

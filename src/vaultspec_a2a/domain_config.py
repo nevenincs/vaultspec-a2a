@@ -4,9 +4,9 @@
 configuration. :class:`vaultspec_a2a.domain_config.DomainSettingsConfig`
 defines environment-based settings behavior.
 
-Importing this module creates
-:data:`vaultspec_a2a.domain_config.domain_config`, initializes configuration,
-and reads environment-based settings.
+:data:`vaultspec_a2a.domain_config.domain_config` reads the environment-based
+settings the first time one of its values is read, not when this module is
+imported.
 
 The settings govern :mod:`vaultspec_a2a.context`, :mod:`vaultspec_a2a.graph`,
 :mod:`vaultspec_a2a.streaming`, and :mod:`vaultspec_a2a.control.config`.
@@ -16,7 +16,11 @@ from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from .control.env_prefix import ENV_PREFIX
-from .control.settings_base import ProjectSettings
+from .control.settings_base import (
+    ProjectSettings,
+    built_at_first_use,
+    read_configuration,
+)
 
 
 class DomainConfig(ProjectSettings):
@@ -240,7 +244,7 @@ class DomainSettingsConfig(DomainConfig):
     """
 
     model_config = SettingsConfigDict(
-        env_file=ProjectSettings.project_dotenv(),
+        env_file=ProjectSettings.operator_env_file(),
         env_file_encoding="utf-8",
         env_prefix=ENV_PREFIX,
         extra="ignore",
@@ -248,7 +252,10 @@ class DomainSettingsConfig(DomainConfig):
     )
 
 
-# Module-level singleton — Layer 1 modules import this directly.
-domain_config = DomainSettingsConfig()
+# Module-level singleton — Layer 1 modules import this directly. It is built
+# the first time one of its values is read, so importing this module cannot
+# fail on a configuration the settings refuse: that refusal belongs to the
+# process that starts the service, which renders it as one named error.
+domain_config = built_at_first_use(lambda: read_configuration(DomainSettingsConfig))
 
 __all__ = ["DomainSettingsConfig", "domain_config"]

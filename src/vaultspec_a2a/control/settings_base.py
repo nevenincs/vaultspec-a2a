@@ -33,14 +33,18 @@ root would make the answer depend on which file was read first.
 """
 
 import os
+import threading
+from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, override
+from types import UnionType
+from typing import Any, Final, Union, cast, final, get_args, get_origin, override
 
-from pydantic import AliasChoices
+from pydantic import AliasChoices, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
+    InitSettingsSource,
     PydanticBaseSettingsSource,
 )
 from pydantic_settings.sources import DotenvType
@@ -60,9 +64,12 @@ __all__ = [
     "PROJECT_MARKERS",
     "PROJECT_ROOT_ENV",
     "ProjectSettings",
+    "build_now",
+    "built_at_first_use",
     "env_name",
     "field_env_names",
     "is_absolute_path",
+    "read_configuration",
     "resolve_against",
     "resolve_project_root",
 ]
@@ -86,11 +93,37 @@ PROJECT_DOTENV = ".env"
 #: The variable an operator names their own settings file with.
 ENV_FILE_ENV = ENV_FILE_VARIABLE.env_name
 
-# Stands in for "this class takes the operator's environment file, if one is
-# named" in ``model_config`` so that ``settings_customise_sources`` can tell the
-# class default apart from a caller's explicit ``_env_file`` (including
-# ``_env_file=None``, which takes no file at all).
-_PROJECT_DOTENV_MARKER = Path("<vaultspec-a2a project dotenv>")
+
+@final
+class _OperatorEnvFileMarker:
+    """Stands in for "the operator's file, if this process names one".
+
+    It sits in ``model_config['env_file']`` so that
+    :meth:`ProjectSettings.settings_customise_sources` can tell the class
+    default apart from a caller's explicit ``_env_file`` - including
+    ``_env_file=None``, which takes no file at all.
+
+    Deliberately NOT a path. A path-shaped marker is a filename, and a
+    filename is something a workspace can create: whoever writes a file of
+    that name next to the process has written a settings source nobody named.
+    This object is compared by identity, so there is no name to collide with.
+
+    It reads as an empty sequence of files, because pydantic-settings builds
+    its own dotenv source - and opens whatever that source names - before
+    :meth:`ProjectSettings.settings_customise_sources` is given the chance to
+    replace it. Naming no file at all is what makes that eager pass a no-op.
+    """
+
+    __slots__ = ()
+
+    def __iter__(self) -> Iterator[Path]:
+        return iter(())
+
+    def __repr__(self) -> str:
+        return "<the operator's environment file, if one is named>"
+
+
+_OPERATOR_ENV_FILE: Final = _OperatorEnvFileMarker()
 
 
 def field_env_names(
@@ -246,8 +279,9 @@ class _WorkspaceCredentials(PydanticBaseSettingsSource):
     to the sources below it, so the file cannot reach a setting.
     """
 
-    def __init__(self, settings_cls: type[BaseSettings]) -> None:
+    def __init__(self, settings_cls: type[BaseSettings], root: Path) -> None:
         super().__init__(settings_cls)
+        self._root = root
         self._resolved: dict[str, Any] | None = None
 
     def _gated(self, root: Path, field_name: str) -> str | None:
@@ -267,7 +301,7 @@ class _WorkspaceCredentials(PydanticBaseSettingsSource):
         """Resolve each declared credential once per construction."""
         if self._resolved is not None:
             return self._resolved
-        root = resolve_project_root()
+        root = self._root
         resolved: dict[str, Any] = {}
         if (root / PROJECT_DOTENV).is_file():
             for field_name in CREDENTIAL_VARIABLES:
@@ -302,8 +336,28 @@ def _named_paths(named: DotenvType) -> tuple[Path, ...]:
     return tuple(Path(entry) for entry in named)
 
 
+def _construction_project_root(
+    init_settings: PydanticBaseSettingsSource,
+) -> Path | None:
+    """Return the project root the construction call named, if it named one.
+
+    An invocation outranks the session environment for every other field, and
+    the root is no exception: a caller that passes ``project_root=`` is naming
+    the project this object serves, so the files resolved against that root
+    must be that project's, not the launch directory's.
+    """
+    if not isinstance(init_settings, InitSettingsSource):
+        return None
+    named = init_settings.init_kwargs.get("project_root")
+    if named is None:
+        return None
+    # Routed through the resolver so a relative value is joined to the working
+    # directory exactly as the environment variable's would be.
+    return resolve_project_root({PROJECT_ROOT_ENV: os.fspath(named)})
+
+
 def _operator_env_file(
-    settings_cls: type[BaseSettings], declared: DotEnvSettingsSource
+    settings_cls: type[BaseSettings], declared: DotEnvSettingsSource, root: Path
 ) -> PydanticBaseSettingsSource | None:
     """Return the source for the operator's settings file, or ``None``.
 
@@ -313,6 +367,7 @@ def _operator_env_file(
             own ``model_config``, carrying either the marker that means "the
             operator's file, if this process names one" or a file the
             construction call named outright.
+        root: The project root a relative path is resolved against.
 
     Returns:
         A source reading the named file, or ``None`` when no file is named.
@@ -320,17 +375,17 @@ def _operator_env_file(
     Raises:
         ConfigurationError: If a named file does not exist.
     """
-    named: DotenvType | None = declared.env_file
-    if named is None:
+    declared_file: object = declared.env_file
+    if declared_file is None:
         return None
-    root = resolve_project_root()
-    if _named_paths(named) == (_PROJECT_DOTENV_MARKER,):
+    if declared_file is _OPERATOR_ENV_FILE:
         from_environment = env_value(ENV_FILE_VARIABLE)
         if from_environment is None:
             return None
-        named = resolve_against(root, from_environment)
+        named: DotenvType = Path(from_environment)
         source = ENV_FILE_ENV
     else:
+        named = declared_file
         source = "the construction call"
     paths = tuple(resolve_against(root, path) for path in _named_paths(named))
     missing = [str(path) for path in paths if not path.is_file()]
@@ -352,15 +407,15 @@ def _operator_env_file(
 class ProjectSettings(BaseSettings):
     """Base for every a2a settings class: the one resolution order.
 
-    Subclasses set ``env_file=_PROJECT_DOTENV_MARKER`` through
-    :meth:`project_dotenv` to take the operator's environment file when the
-    process names one, and the project's gated credentials either way.
+    Subclasses set ``env_file`` from :meth:`operator_env_file` to take the
+    operator's environment file when the process names one, and the project's
+    gated credentials either way.
     """
 
     @classmethod
-    def project_dotenv(cls) -> Path:
+    def operator_env_file(cls) -> DotenvType:
         """Return the marker a subclass's ``model_config`` names as its env file."""
-        return _PROJECT_DOTENV_MARKER
+        return cast("DotenvType", _OPERATOR_ENV_FILE)
 
     @classmethod
     def settings_customise_sources(
@@ -372,8 +427,9 @@ class ProjectSettings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Rank the sources: call, environment, operator file, credentials, secrets."""
+        root = _construction_project_root(init_settings) or resolve_project_root()
         operator = (
-            _operator_env_file(settings_cls, dotenv_settings)
+            _operator_env_file(settings_cls, dotenv_settings, root)
             if isinstance(dotenv_settings, DotEnvSettingsSource)
             else None
         )
@@ -382,6 +438,162 @@ class ProjectSettings(BaseSettings):
             ranked = (*ranked, operator)
         return (
             *ranked,
-            _WorkspaceCredentials(settings_cls),
+            _WorkspaceCredentials(settings_cls, root),
             file_secret_settings,
         )
+
+
+def _shape_of(annotation: object) -> str:
+    """Render a field's declared type the way an operator would say it.
+
+    The reader of the message is setting an environment variable, so the
+    useful half of a refusal is what the variable is FOR: an integer, a path,
+    one of a handful of words. Pydantic's own message describes the parse that
+    failed, which answers a different question.
+    """
+    if annotation is None or annotation is type(None):
+        return "unset"
+    origin = get_origin(annotation)
+    if origin in (Union, UnionType):
+        alternatives = [
+            _shape_of(argument)
+            for argument in get_args(annotation)
+            if argument is not type(None)
+        ]
+        return " or ".join(dict.fromkeys(alternatives)) or "unset"
+    if origin is not None:
+        return _shape_of(origin)
+    name = getattr(annotation, "__name__", None)
+    return str(name or annotation)
+
+
+def _field_behind(settings_cls: type[BaseSettings], location: object) -> str | None:
+    """Return the field name behind one validation-error location, if any.
+
+    A source files its value under the field's validation alias, so a location
+    arrives as either spelling; an error a whole-model validator raised carries
+    neither, and belongs to no single field.
+    """
+    key = str(location)
+    if key in settings_cls.model_fields:
+        return key
+    return next(
+        (
+            field_name
+            for field_name in settings_cls.model_fields
+            if key in field_env_names(settings_cls, field_name)
+        ),
+        None,
+    )
+
+
+def _refusal(settings_cls: type[BaseSettings], invalid: ValidationError) -> str:
+    """Render every rejected value as one line naming variable, shape and value."""
+    lines: list[str] = []
+    for problem in invalid.errors():
+        field_name = _field_behind(
+            settings_cls, problem["loc"][0] if problem["loc"] else ""
+        )
+        if field_name is None:
+            # A whole-model validator, which already says what it refused.
+            lines.append(str(problem["msg"]))
+            continue
+        field = settings_cls.model_fields[field_name]
+        # A field the registry declares a credential, or one the schema keeps
+        # out of a repr, holds a secret: name it, never quote it.
+        secret = field_name in CREDENTIAL_VARIABLES or field.repr is False
+        shown = "a redacted value" if secret else repr(problem.get("input"))
+        lines.append(
+            f"{field_env_names(settings_cls, field_name)[0]} must be "
+            f"{_shape_of(field.annotation)}, got {shown}"
+        )
+    return "\n".join(dict.fromkeys(lines))
+
+
+def read_configuration[T: BaseSettings](settings_cls: type[T], **values: Any) -> T:
+    """Build a settings object, or refuse with one error naming every problem.
+
+    Pydantic reports a rejected value by FIELD, with the parse that failed and
+    the value inline - which tells an operator neither which variable to edit
+    nor what to put in it, and puts a live credential in the traceback when the
+    rejected field holds one. This states the variable, the shape and the
+    value, once per problem and all of them together, so a misconfigured start
+    is fixed in one pass rather than one restart per mistake.
+
+    Args:
+        settings_cls: The settings class to build.
+        values: Values the construction call supplies, outranking every source.
+
+    Returns:
+        The settings object.
+
+    Raises:
+        ConfigurationError: If any value was rejected.
+    """
+    try:
+        return settings_cls(**values)
+    except ValidationError as invalid:
+        raise ConfigurationError(_refusal(settings_cls, invalid)) from invalid
+
+
+class _BuiltAtFirstUse[T: BaseSettings]:
+    """A settings singleton built when it is first read, not when it is imported.
+
+    A settings class refuses a configuration it cannot read: a named file that
+    is not there, a value of the wrong shape. Building the singleton while its
+    module is being imported hands that refusal to whoever imported the module
+    - as a traceback several frames inside pydantic-settings, and to every
+    importer rather than to the process that started the service. Deferring it
+    to the first read puts the refusal at a startup site, which renders it as
+    one named error.
+    """
+
+    __slots__ = ("_build", "_instance", "_lock")
+
+    def __init__(self, build: Callable[[], T]) -> None:
+        object.__setattr__(self, "_build", build)
+        object.__setattr__(self, "_instance", None)
+        object.__setattr__(self, "_lock", threading.Lock())
+
+    def _settings(self) -> T:
+        built: T | None = object.__getattribute__(self, "_instance")
+        if built is not None:
+            return built
+        # Two threads racing the first read would otherwise each build one,
+        # and every mutation of the loser's copy would be silently discarded.
+        with object.__getattribute__(self, "_lock"):
+            built = object.__getattribute__(self, "_instance")
+            if built is None:
+                built = object.__getattribute__(self, "_build")()
+                object.__setattr__(self, "_instance", built)
+        return built
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._settings(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._settings(), name, value)
+
+    def __repr__(self) -> str:
+        return repr(self._settings())
+
+    def __dir__(self) -> list[str]:
+        return dir(self._settings())
+
+
+def built_at_first_use[T: BaseSettings](build: Callable[[], T]) -> T:
+    """Return a stand-in for a settings singleton, built when it is first read."""
+    return cast("T", _BuiltAtFirstUse(build))
+
+
+def build_now(settings: object) -> None:
+    """Build a deferred settings singleton now, so no later reader is the first.
+
+    A service wants the deferral: it keeps a refused configuration out of an
+    importer's traceback. A test session wants the opposite - the environment
+    it declares before the first test must be the one the singletons read, not
+    whatever the test that happened to touch one first had arranged around
+    itself. Calling this after those declarations pins them.
+    """
+    if isinstance(settings, _BuiltAtFirstUse):
+        settings._settings()

@@ -58,8 +58,9 @@ _SESSIONS_KEPT = 5
 class TestSessionSettings(ProjectSettings):
     """The harness's own configuration, read from the process environment only.
 
-    Never from a dotenv: these values describe one pytest process tree and are
-    handed from a controller to its children, so a file on disk has no say.
+    Never a setting from a file: these values describe one pytest process tree
+    and are handed from a controller to its children, so a file on disk has no
+    say.
     """
 
     __test__ = False

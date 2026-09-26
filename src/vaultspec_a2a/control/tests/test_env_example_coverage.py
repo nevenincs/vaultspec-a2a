@@ -172,6 +172,9 @@ _DOCUMENTED_BUT_NOT_READ = {
     "POSTGRES_PASSWORD": "docker compose",
     # Named in the port table as the place a Postgres port is embedded.
     "DATABASE_URL": "port table prose",
+    # Names the settings file itself, so it is read before any field exists to
+    # hold it rather than being one of them.
+    "VAULTSPEC_A2A_ENV_FILE": "the settings loader",
 }
 
 _NAME = re.compile(r"\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b")
@@ -201,8 +204,10 @@ def test_the_integration_example_names_only_settings_the_service_reads() -> None
     integration = _ENV_EXAMPLE.with_name(".env.integration.example")
     named = set(_NAME.findall(integration.read_text(encoding="utf-8")))
 
+    admitted = _all_declared_env_names() | set(_DOCUMENTED_BUT_NOT_READ)
+
     assert named, "the integration example names no settings at all"
-    assert named <= _all_declared_env_names(), sorted(named - _all_declared_env_names())
+    assert named <= admitted, sorted(named - admitted)
 
 
 def test_compose_provider_identity_defaults_are_documented() -> None:

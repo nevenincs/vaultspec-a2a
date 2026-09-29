@@ -110,7 +110,8 @@ def test_release_please_runs_only_for_main_and_uses_the_pr_gate() -> None:
         "cancel-in-progress": "false",
     }
     assert release["name"] == "Build: Release proposal (Linux)"
-    assert release["timeout-minutes"] == "30"
+    assert release["timeout-minutes"] == "150"
+    assert release["env"]["CI_EXEC_BUDGET_MINUTES"] == "30"
     assert action["uses"] == RELEASE_PLEASE_ACTION
     assert action["with"] == {
         "config-file": "release-please-config.json",

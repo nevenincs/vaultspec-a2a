@@ -32,7 +32,9 @@ jobs:
     name: "Check: Basic CI (Linux)"
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 60
+    env:
+      CI_EXEC_BUDGET_MINUTES: 60
+    timeout-minutes: 180
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,7 +70,9 @@ jobs:
     needs: [basic]
     if: always()
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 5
+    env:
+      CI_RESOURCE_CLASS: verdict
+    timeout-minutes: 125
     steps:
       - name: Judge the required checks
         env:

@@ -30,7 +30,9 @@ jobs:
     # registration and fleet topology are infrastructure concerns outside this
     # codebase's test contract.
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 10
+    env:
+      CI_EXEC_BUDGET_MINUTES: 10
+    timeout-minutes: 130
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,7 +66,9 @@ jobs:
   test:
     name: "Check: Full CI (Linux)"
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 90
+    env:
+      CI_EXEC_BUDGET_MINUTES: 90
+    timeout-minutes: 210
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -159,7 +163,9 @@ jobs:
           - target: x86_64-pc-windows-msvc
             runner: [self-hosted, Windows, X64]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    env:
+      CI_EXEC_BUDGET_MINUTES: 45
+    timeout-minutes: 165
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -190,7 +196,9 @@ jobs:
     name: "Test: Provider prerequisites (Linux)"
     needs: test
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 20
+    env:
+      CI_EXEC_BUDGET_MINUTES: 20
+    timeout-minutes: 140
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

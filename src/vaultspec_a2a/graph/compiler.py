@@ -275,10 +275,12 @@ STEP_BACKSTOP_GRACE_SECONDS = 30.0
 # Roles not in this map are exempt from phase prerequisite gating.
 #
 # Plain ``.value`` strings, not the members: this map's values are what the
-# supervisor writes into the checkpointed ``pipeline_phase`` channel, and the
-# checkpoint serializer refuses a type it does not know under strict msgpack -
-# a parked run holding an enum member would not hydrate. ``PipelinePhase`` is a
-# ``StrEnum``, so every comparison against a member still holds.
+# supervisor writes into the checkpointed ``pipeline_phase`` channel, and under
+# strict msgpack the checkpoint serializer will not rebuild a type it does not
+# know - it logs the block and hands back the member's raw value, so a parked
+# run would resume holding a plain string where it wrote a member.
+# ``PipelinePhase`` is a ``StrEnum``, so every comparison against a member
+# still holds.
 _ROLE_TO_PHASE: dict[str, str] = {
     "researcher": PipelinePhase.RESEARCH.value,
     "analyst": PipelinePhase.ADR.value,

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:8707095f0389fbed3eee71f5abb5e887f1b618f0c36f7fad570133ecd9c78b1b'
+body_hash: 'sha256:8ff0d5efc3e279f507aadd5428b373ad63f23a5685d14984cdbf62b1ef9efb44'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -428,6 +428,9 @@ related:
 - `S43` `M` `src/vaultspec_a2a/api/tests/test_served_vocabulary_containment.py`
 - `S43` `verify:` `pytest control thread worker api graph and the package structural tests with Postgres required` -> `pass`
 - `S43` `by:` `orchestrator`
+- `S44` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S44` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
+- `S44` `by:` `orchestrator`
 
 ## Notes
 

@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:2996b5bee4f8b26bef7121a45ff055c00fb9ecf27035e7e87ec366129d29e67a'
+body_hash: 'sha256:190f2cbae39e4dfeeabd33de238e7e2d14687dc870723116a59337f7c6c68b55'
 ---
 
 # `langgraph-conformance` plan
@@ -44,16 +44,16 @@ Decision coverage. Each Step restores behaviour an accepted decision already req
 
 The compiled graphs route, gate and synthesise the way their decisions describe, every review and routing loop is bounded, and checkpointed state carries only plain values.
 
-- [ ] `P01.S01` - Feed every research branch's findings into the synthesis model's input; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/_compiler_research.py`.
-- [ ] `P01.S02` - Write plain strings instead of StrEnum members into checkpointed state and interrupt payloads; `src/vaultspec_a2a/graph/`.
-- [ ] `P01.S03` - Drop the deprecated MessageGraph from the local stubs, route set_node_defaults through the typed builder, and name the compiled graph; `typings/langgraph/graph/, src/vaultspec_a2a/graph/compiler.py`.
-- [ ] `P01.S04` - Budget the submit-refusal loop per phase and end a spent budget in a typed outcome; `src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/graph/_compiler_research.py`.
-- [ ] `P01.S05` - Clear validation errors when a phase advances and bound FINISH-block reroutes to workers that can satisfy the gate; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/thread/state.py`.
-- [ ] `P01.S06` - Route a blocked FINISH through the HARD gate and plan approval, send a rejected plan without a planner back to the supervisor, and bind plan and document verdicts to their request; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/graph/compiler.py`.
-- [ ] `P01.S07` - Refresh the vault index before the supervisor evaluates its gate, and in the research topology; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/graph/_compiler_research.py`.
-- [ ] `P01.S08` - Show the routing refusal on every supervisor re-ask and refuse ambiguous route replies; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
-- [ ] `P01.S09` - Reset the loop count on each turn; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/thread/state.py`.
-- [ ] `P01.S10` - Size the superstep backstop to the retry budget, give the submit nodes a transport retry policy, and pin the node config-injection contract with a test; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/nodes/_config_contract.py`.
+- [x] `P01.S01` - Feed every research branch's findings into the synthesis model's input; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/_compiler_research.py`.
+- [x] `P01.S02` - Write plain strings instead of StrEnum members into checkpointed state and interrupt payloads; `src/vaultspec_a2a/graph/`.
+- [x] `P01.S03` - Drop the deprecated MessageGraph from the local stubs, route set_node_defaults through the typed builder, and name the compiled graph; `typings/langgraph/graph/, src/vaultspec_a2a/graph/compiler.py`.
+- [x] `P01.S04` - Budget the submit-refusal loop per phase and end a spent budget in a typed outcome; `src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/graph/_compiler_research.py`.
+- [x] `P01.S05` - Clear validation errors when a phase advances and bound FINISH-block reroutes to workers that can satisfy the gate; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/thread/state.py`.
+- [x] `P01.S06` - Route a blocked FINISH through the HARD gate and plan approval, send a rejected plan without a planner back to the supervisor, and bind plan and document verdicts to their request; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/graph/compiler.py`.
+- [x] `P01.S07` - Refresh the vault index before the supervisor evaluates its gate, and in the research topology; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/graph/_compiler_research.py`.
+- [x] `P01.S08` - Show the routing refusal on every supervisor re-ask and refuse ambiguous route replies; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
+- [x] `P01.S09` - Reset the loop count on each turn; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/thread/state.py`.
+- [x] `P01.S10` - Size the superstep backstop to the retry budget, give the submit nodes a transport retry policy, and pin the node config-injection contract with a test; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/nodes/_config_contract.py`.
 
 ### Phase `P02` - Interrupts and resume
 

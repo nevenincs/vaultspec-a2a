@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:b2da06bcb2e0ace1bde21dc2c1a9a5a927fe6e60ac92995488350cfab8d3810d'
+body_hash: 'sha256:2101a8adddc259a21582310a6a86cfae9cdfc3daab4c50e5f371017ee1a77cd3'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -254,6 +254,22 @@ Recorded from P03.S18. Tool lifecycle now reaches the emitters from a callback h
 ### aggregator-test-doubles-still-outnumber-real-graphs | low | seven hand-written graph stubs re-declare the streaming protocol
 
 Open. `src/vaultspec_a2a/streaming/tests/test_aggregator.py` implements the streaming protocol by hand seven times (plus two in `team/` and `worker/`) to force error branches; a shared real error-injecting graph fixture would carry them once and make a protocol change one edit rather than ten.
+
+### star-topology-never-clears-validation-errors | medium | a star run's validation errors now end the run with a typed error rather than clearing
+
+Open from P01.S05. The only production clear of `validation_errors` is the research topology's submit node (`src/vaultspec_a2a/graph/nodes/phase_gate.py`); in star and pipeline the channel is seeded at first ingest (`src/vaultspec_a2a/worker/graph_lifecycle.py`) and nothing writes `[]` again, so once non-empty it blocks FINISH until the new budget raises `SupervisorRoutingError`. Bounded now, but still terminal. Recommendation: decide who clears it in the non-document topologies - the exec worker's own return, or the gate on observing the artifact.
+
+### finish-block-budget-outruns-a-small-recursion-limit | low | the blocked-FINISH budget needs about twelve supersteps to fire
+
+Open from P01.S05. Each blocked FINISH costs three supersteps, so the default `supervisor_finish_block_limit` of 3 needs about twelve before its typed error; a star preset with `recursion_limit` at or below 12 gets `GraphRecursionError` instead. No shipped star preset is that low. Recommendation: validate the ratio at compile time or lower the default.
+
+### strict-msgpack-degrades-rather-than-refusing | low | the enum finding overstated what strict mode does
+
+Correction to `enum-members-in-checkpointed-state`. On langgraph-checkpoint 4.2 the strict path logs a blocked deserialization and yields the plain string (`langgraph/checkpoint/serde/jsonplus.py:598-608`), so the run resumes with a silently changed type rather than failing to hydrate. The fix in P01.S02 stands.
+
+### blocked-finish-reason-is-dropped-when-the-reroute-needs-approval | low | one interleaving hides why FINISH was refused for a pass
+
+Open from P01.S06. `_carrying_finish_block` (`src/vaultspec_a2a/graph/nodes/supervisor.py`) clears `routing_error` when the rerouted decision is a plan-approval request, because the approval branch is selected on `routing_error` being unset; the supervisor sees the refusal a pass later. Recommendation: discriminate that branch on the decision rather than on `routing_error`.
 
 ## Recommendations
 

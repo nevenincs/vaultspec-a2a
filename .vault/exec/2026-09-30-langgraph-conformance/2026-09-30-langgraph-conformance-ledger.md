@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:2e0ccfd1a989c400fc08cf8071adcb62c21b13fd3b9de68d035c4a51cd9c16a0'
+body_hash: 'sha256:1ef2fefcd77639cfac97030e2e51e9365b533360ce2e33537e85eea3e6a0fb3a'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -162,6 +162,85 @@ related:
 - `S19` `A` `src/vaultspec_a2a/streaming/tests/test_stream_identity.py`
 - `S19` `verify:` `streaming worker team graph api stream clarification and refusal suites (973) + ruff + ty=pass; orchestrator re-ran the merged tree on the 0.3.2 lock (979)` -> `pass`
 - `S19` `by:` `worker-a3417956`
+- `S01` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S01` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S01` `M` `src/vaultspec_a2a/graph/tests/test_research_adr.py`
+- `S01` `verify:` `test_research_adr (13) + reviewer research probe: synthesis input now carries every branch claim` -> `pass`
+- `S01` `by:` `worker-afec6969`
+- `S02` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S02` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S02` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S02` `M` `src/vaultspec_a2a/graph/tests/conftest.py`
+- `S02` `A` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
+- `S02` `verify:` `test_checkpointed_value_types (2) + real SQLite park, reopen and resume under LANGGRAPH_STRICT_MSGPACK=true on research and star presets` -> `pass`
+- `S02` `by:` `worker-afec6969`
+- `S03` `M` `src/vaultspec_a2a/api/tests/test_cancel_settled_run_status.py`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_recovery_authority.py`
+- `S03` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S03` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S03` `M` `typings/langgraph/graph/__init__.pyi`
+- `S03` `M` `typings/langgraph/graph/message.pyi`
+- `S03` `verify:` `test_compiler (71) + ty over src and typings` -> `pass`
+- `S03` `by:` `worker-afec6969`
+- `S04` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S04` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S04` `M` `src/vaultspec_a2a/graph/tests/nodes/test_phase_gate.py`
+- `S04` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S04` `M` `src/vaultspec_a2a/thread/__init__.py`
+- `S04` `M` `src/vaultspec_a2a/thread/errors.py`
+- `S04` `M` `src/vaultspec_a2a/thread/tests/test_errors.py`
+- `S04` `verify:` `test_review_budget (9) + refuse probe: 16 attempts and GraphRecursionError became 5 and DocumentConformanceError` -> `pass`
+- `S04` `by:` `worker-afec6969`
+- `S05` `M` `src/vaultspec_a2a/domain_config.py`
+- `S05` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S05` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S05` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S05` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S05` `M` `src/vaultspec_a2a/thread/state.py`
+- `S05` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
+- `S05` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S05` `verify:` `graph and thread suites (632) + research probe: later phases no longer see a settled gate's notes` -> `pass`
+- `S05` `by:` `worker-afec6969`
+- `S07` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S07` `M` `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+- `S07` `M` `src/vaultspec_a2a/graph/tests/conftest.py`
+- `S07` `A` `src/vaultspec_a2a/graph/tests/test_vault_index_refresh.py`
+- `S07` `verify:` `graph and context suites (571) + stale probe: exec no longer refused after the planner writes` -> `pass`
+- `S07` `by:` `worker-afec6969`
+- `S08` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S08` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S08` `verify:` `graph suites (407)` -> `pass`
+- `S08` `by:` `worker-afec6969`
+- `S09` `M` `src/vaultspec_a2a/thread/state.py`
+- `S09` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S09` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S09` `verify:` `worker thread graph suites (810)` -> `pass`
+- `S09` `by:` `worker-afec6969`
+- `S10` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S10` `M` `src/vaultspec_a2a/graph/_compiler_retry.py`
+- `S10` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S10` `A` `src/vaultspec_a2a/graph/tests/nodes/test_config_contract.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S10` `verify:` `graph worker suites (579) + topo probe: 60 s budget now backs a 213.5 s step timeout` -> `pass`
+- `S10` `by:` `worker-afec6969`
+- `S06` `M` `.env.example`
+- `S06` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S06` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber.py`
+- `S06` `M` `src/vaultspec_a2a/control/verdict_subscriber.py`
+- `S06` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S06` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S06` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S06` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/nodes/test_phase_gate.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/test_research_adr.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S06` `verify:` `control graph thread worker suites (1372) + gateway plan-approval tests after the merge's payload update` -> `pass`
+- `S06` `by:` `worker-afec6969`
 
 ## Notes
 
@@ -171,3 +250,10 @@ related:
 - `S17` Sync durability is requested only when the graph has a real checkpointer: LangGraph 1.2.12 crashes a sync-durability run without one.
 - `S18` Tool lifecycle and model-turn close come from a callback handler in config callbacks; `message_id` now matches the stored message id the snapshot reports.
 - `S19` Four of five clauses were subsumed by S18 and proven against the pre-S18 code; the residual was a model-announced tool call registered twice.
+- `S01` The join is a declared node property `(joins_research_findings),` so no other worker receives another stage's evidence.
+- `S03` Two direct `_compile_graph` callers in api and control tests needed the new required name.
+- `S04` Ends in a typed DocumentConformanceError instead of parking: a conformance refusal precedes any proposal, and a gate parked on no proposal could never be answered by a verdict.
+- `S05` Adds `supervisor_finish_blocks` and `VAULTSPEC_A2A_SUPERVISOR_FINISH_BLOCK_LIMIT` (default 3), counted apart from re-asks.
+- `S07` Research topology deliberately not refreshed: its documents are unapplied engine proposals and no gate there reads `vault_index.`
+- `S10` The config-contract tests pin existing behaviour; proven non-tautological by neutering the stamp.
+- `S06` Restores the one-time plan approval that ADR-020 still specifies; plan and document gate payloads disclose a `request_id` and refuse a verdict naming another request. The orchestrator updated four gateway plan-approval payload tests at merge.

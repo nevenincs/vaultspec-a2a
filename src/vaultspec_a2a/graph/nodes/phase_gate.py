@@ -302,10 +302,11 @@ def create_phase_gate_node(
             "request_id": proposal_id,
         }
         if not proposal_id:
-            # Every answer a client sends names the request it decides, and a
-            # gate with no committed proposal has none, so no answer could
-            # ever be admitted. Parking would wait on a question nobody can be
-            # asked; the writer resubmits instead.
+            # With no committed proposal the gate has no request id to put in
+            # its payload, and a verdict counts here only when it names this
+            # gate's request, so a park could only ever end in a rejection.
+            # The gate takes that rejection now and the writer resubmits,
+            # rather than pausing the run for an answer that cannot count.
             verdict, notes = (
                 VERDICT_REJECTED,
                 f"Document phase {phase!r} reached its gate with no committed "

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:7aeab25f3f0f1ae6eb3aaf5e5489ed958dcfa524f78b558d1f3661474cba9ce6'
+body_hash: 'sha256:1beb705541dfdc0e7d09852b249b80104d673eaeecc66540daff21647a6f916d'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -449,6 +449,20 @@ related:
 - `S45` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
 - `S45` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/worker src/vaultspec_a2a/api src/vaultspec_a2a/graph with Postgres required` -> `pass`
 - `S45` `by:` `orchestrator`
+- `S28` `M` `.vault/adr/2026-02-26-event-aggregation-server-side-replay-adr.md`
+- `S28` `M` `.vault/adr/2026-02-26-orchestration-topology-pipeline-adr.md`
+- `S28` `M` `.vault/adr/2026-02-27-team-composition-topology-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-blackboard-content-mounting-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-contextual-anchoring-graph-lifecycle-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-persistent-task-queue-schema-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-phase-artifact-gates-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-plan-approval-interrupt-adr.md`
+- `S28` `M` `.vault/adr/2026-03-04-worker-process-architecture-adr.md`
+- `S28` `M` `.vault/adr/2026-03-10-postgres-dual-backend-adr.md`
+- `S28` `M` `.vault/adr/2026-07-14-adr-authoring-orchestration-adr.md`
+- `S28` `M` `.vault/research/2026-09-24-architecture-review-research.md`
+- `S28` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S28` `by:` `vaultspec-adr-researcher`
 
 ## Notes
 
@@ -492,3 +506,4 @@ related:
 - `S13` Correction from the plan-close review: the no-proposal fail-closed branch was unreachable through the resume preflight.
 - `S18` Correction from the plan-close review: the aggregator's projection seams had no production caller.
 - `S34` Correction from the re-review: an unavailable checkpoint read was logged as a receipt not yet due.
+- `S28` User approved the drafted amendments as recommended on 2026-09-30. team-composition-topology and orchestration-topology-pipeline accepted; event-aggregation amended but left proposed pending the user's accept-or-deprecate choice.

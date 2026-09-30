@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#postgres-dual-backend'
 date: 2026-03-10
-modified: '2026-07-15'
-body_hash: 'sha256:e6527e9104bfe0b9a0a93cae363d5427c07139087b64ce781df1341235a75438'
+modified: '2026-09-30'
+body_hash: 'sha256:28e0e98120ed65c7ff8117644a8b801ef72846ce96e1bf40ecd15ced3d96703f'
 related:
 - '[[2026-03-31-database-migration-framework-adr]]'
 - '[[2026-03-04-worker-process-architecture-adr]]'
@@ -207,3 +207,20 @@ clear abstraction point.
 Rejected for the checkpointer. `AsyncPostgresSaver` officially targets psycopg3.
 The SQLAlchemy engine uses `asyncpg` for app-owned queries — the two backends
 coexist at different abstraction levels.
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+The Postgres checkpoint backend runs over a bounded connection pool, not a single connection opened from a connection string. A dropped connection is replaced, rather than leaving checkpointing dead until a restart. The pool's ceiling bounds how many server connections the process holds. It is sized from the worker's concurrent-run bound plus headroom for the reads that are not a run's own, and from the gateway's page of parallel checkpoint probes (`src/vaultspec_a2a/database/checkpoints.py`).
+
+A pool alone does not make one saver concurrent. `AsyncPostgresSaver` holds one lock around every statement it issues, so a single saver uses one pooled connection at a time however large the pool is. Concurrency therefore comes from a saver per caller over the same pool: one per run at graph compile time, and one per reader in a parallel listing (`src/vaultspec_a2a/database/checkpoints.py`, `src/vaultspec_a2a/worker/graph_lifecycle.py`, `src/vaultspec_a2a/control/thread_listing.py`). A sibling borrows the pool and never closes it; closing belongs to whoever opened the checkpointer, and a saver taken off the Windows bridge refuses a close outright. Backends that cannot benefit, SQLite and a Postgres saver on a bare connection, return themselves.
+
+Checkpoint schema setup is serialized across processes by a session-scoped PostgreSQL advisory lock derived from a stable name, with the loser polling rather than blocking. The saver's setup is not atomic against a concurrent creator, and its final `CREATE INDEX CONCURRENTLY` waits out every open transaction, so a blocking waiter would be a transaction the winner's index build waits for. Shipped start ordering hid this; a second worker or a saver migration would not.
+
+Both stores deserialize through an explicit strict serializer (`strict_checkpoint_serde` in `src/vaultspec_a2a/database/checkpoints.py`), passed to every saver rather than switched on by a process-wide environment variable. Under strict mode a type the serializer does not know is logged and handed back as its raw value, not rebuilt. Postgres writes scalar channel values, including `str` and `int` subclasses, inline in the checkpoint row where the serializer never sees their type, while SQLite serializes the whole checkpoint. The two backends therefore round-trip such subclasses differently, which is why checkpointed state carries plain values only.
+
+Two entries in section 4.2 are settled:
+
+- The `with_allowlist()` bypass is fixed. The bridge returns a clone carrying the narrowed serializer, as the base contract requires, so no holder of the bridge acquires another caller's allowlist.
+- Two further bridge constraints now bind alongside those in section 3.3. `start()` and `setup()` run inside the release block, so a refused setup leaves neither the selector thread nor its connections behind. Methods the inner saver does not implement are not proxied, so the bridge never answers yes on its behalf to a caller choosing how to do the work.
+
+The bridge answers its own synchronous surface by running the inner saver's async methods on its loop, because the inner saver's synchronous writes wait on the loop that must run them. Grounding: `2026-09-30-langgraph-conformance-audit`.

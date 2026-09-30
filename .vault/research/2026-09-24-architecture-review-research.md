@@ -3,9 +3,9 @@ tags:
   - '#research'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-09-24'
+modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:765971a820ac5e3a35ae80b2888673e4ba2fa2948ff253fb588280c405f024b8'
+body_hash: 'sha256:436c8a63441c44f7d3bbfeb5913df81db254848a85418c160b27da30a47299f1'
 related:
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
   - "[[2026-07-15-agent-harness-provisioning-adr]]"
@@ -20,7 +20,7 @@ What do current agent-orchestration frameworks and protocols treat as baseline f
 
 ### LangGraph 1.x execution semantics
 
-Durable execution resumes a thread by re-invoking with `None` input on the same `thread_id`; LangGraph re-runs only the tasks of the interrupted super-step and keeps pending writes from branches that completed, so replaying the original input is not a resume. Nodes re-execute from the top on resume, so any side effect before `interrupt()` must be idempotent, and the documented pattern splits an idempotent commit node from a pure interrupt node. Durability is selectable per invocation (`exit`, `async`, `sync`); `async` is the default. Graph guards belong in edges or `Command(goto=...)` routing, and `Command`-returning nodes declare `destinations` so topology introspection is correct. Run-scoped dependencies belong in Runtime context (`context_schema`, `Runtime[Context]`) rather than checkpointed state or closures. `recursion_limit` with `RemainingSteps` lets a graph end gracefully before the hard limit. As of 1.2 nodes accept `timeout=` (including idle timeouts refreshed by heartbeat), `error_handler=`, `retry_policy=` with jitter, and `cache_policy=`, and `DeltaChannel` (beta) stores channel deltas instead of full values per checkpoint. Checkpoint serde supports a strict msgpack allowlist and `EncryptedSerializer`. `astream_events` v2 does not honour the `langsmith:nostream` tag; `stream_mode="messages"` does.
+Durable execution resumes a thread by re-invoking with `None` input on the same `thread_id`; LangGraph re-runs only the tasks of the interrupted super-step and keeps pending writes from branches that completed, so replaying the original input is not a resume. Nodes re-execute from the top on resume, so any side effect before `interrupt()` must be idempotent, and the documented pattern splits an idempotent commit node from a pure interrupt node. Durability is selectable per invocation (`exit`, `async`, `sync`); `async` is the default. Graph guards belong in edges or `Command(goto=...)` routing, and `Command`-returning nodes declare `destinations` so topology introspection is correct. Run-scoped dependencies belong in Runtime context (`context_schema`, `Runtime[Context]`) rather than checkpointed state or closures. `recursion_limit` with `RemainingSteps` lets a graph end gracefully before the hard limit. As of 1.2 nodes accept `timeout=` (including idle timeouts refreshed by heartbeat), `error_handler=`, `retry_policy=` with jitter, and `cache_policy=`, and `DeltaChannel` (beta) stores channel deltas instead of full values per checkpoint. Checkpoint serde supports a strict msgpack allowlist and `EncryptedSerializer`. `astream_events` v2 does not honour the `nostream` tag; `stream_mode="messages"` does.
 
 The per-agent loop baseline in `langchain@1.x` is `create_agent` plus middleware: `HumanInTheLoopMiddleware` pauses after the model emits tool calls and before they execute, offering approve, edit, or reject per call; `SummarizationMiddleware` triggers on a fraction of the model profile's window and persists a real summary; `ModelCallLimitMiddleware` and `ToolCallLimitMiddleware` bound loops. Deep Agents triggers summarization at 85% and offloads original messages to a filesystem.
 

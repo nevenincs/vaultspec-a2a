@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:7477fd3a531d75f494f0c1795b2802f0b450b5bebd0eec66784ef1a6b55cac81'
+body_hash: 'sha256:21144789c11820ea0a494847d6615beb07e44b59e905084848e7dd900b33f2fc'
 ---
 
 # `langgraph-conformance` plan
@@ -100,7 +100,7 @@ No deprecated LangGraph-family API is called from the repository, and the locked
 
 The decisions that describe the graph match the graph, through amendments presented for approval.
 
-- [ ] `P06.S28` - Draft amendments for the design-record drift the review found and present them for approval; `.vault/adr/`.
+- [x] `P06.S28` - Draft amendments for the design-record drift the review found and present them for approval; `.vault/adr/`.
 
 ### Phase `P07` - Follow-on findings
 

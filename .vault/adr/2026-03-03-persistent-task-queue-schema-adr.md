@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#persistent-task-queue-schema'
 date: 2026-03-03
-modified: '2026-07-15'
-body_hash: 'sha256:16c52a4948d04f60e0981ff014d198f9c941aa7d31736c90be2bdc25426ff788'
+modified: '2026-09-30'
+body_hash: 'sha256:135785b6838fcf77055ed25baaf781d0036c2b2328be68b80d42f2f23af19057'
 related:
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
 - '[[2026-03-03-blackboard-content-mounting-adr]]'
@@ -430,3 +430,7 @@ ordering this record defines are preserved; only the backing store changed
 (file parse to repository query, format-stable). See
 `2026-07-14-a2a-edge-conformance-adr` (R5) and
 `2026-07-14-a2a-edge-conformance-reference`.
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+The worker-return example in this record returns `"mounted_context": None`. That state field was retired: mounted document text is passed straight into the turn's message list and never checkpointed, as the langgraph-conformance amendment to `2026-03-03-blackboard-content-mounting-adr` records. A worker returns its messages and the other channels it owns, with no mounted-context key. The queue schema this record decides is unaffected.

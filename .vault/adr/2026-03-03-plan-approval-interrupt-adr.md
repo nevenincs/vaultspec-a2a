@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#plan-approval-interrupt'
 date: 2026-03-03
-modified: '2026-07-15'
-body_hash: 'sha256:cb15c04dbe5e9b56e70fcda449c853666a067adbe89c1e4eb3c6818f7c8029c2'
+modified: '2026-09-30'
+body_hash: 'sha256:b28c33a845d391ec8c7aec43459dd623249f5c4ee561b05dae348f0f55cc9165'
 related:
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
 - '[[2026-03-03-contextual-anchoring-graph-lifecycle-adr]]'
@@ -468,3 +468,20 @@ are retained as orchestration primitives; the human decision is the engine's
 ledgered approval (self-approval banned engine-side, origin-keyed). See
 `2026-07-14-a2a-edge-conformance-adr` (R12) and
 `2026-07-14-a2a-edge-conformance-reference`.
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+The one-time per-session semantics of sections 2.1 and 2.9 are in force, on a different carrier. There is no `plan_approved` boolean. Execution approval is held as `approval_status`, with the request it answers in `approval_request_id`, both plain strings (`src/vaultspec_a2a/thread/state.py`). A granted approval is carried across every later routing decision. A pending mark or a rejection is spent by the decision that produced it (`src/vaultspec_a2a/graph/nodes/supervisor.py`). A checkpoint written before these keys existed cannot reintroduce the old one: the checkpointer hydrates channels from the current schema and drops the rest.
+
+A verdict is bound to what it approves.
+
+- **Request id:** the gate derives one request id from replay-stable material (the run, the exec worker and the sorted plan paths) and discloses it in the interrupt payload.
+- **Resume shape:** `{"verdict", "notes", "request_id"}`, the same verdict vocabulary the document phase gate resumes on, parsed by the shared helpers in `src/vaultspec_a2a/graph/nodes/phase_gate.py`. The `{"approved": bool}` shape of sections 2.3, 2.4 and 5 is retired and is not accepted as a compatibility input.
+- **Unbound answers:** an answer naming another request, or none, is not a decision on this plan, so the gate asks again under the same payload rather than treating it as a rejection. This makes the node's `interrupt()` count depend on how many unbound answers arrive. That is safe, because every call re-parks on the same request with the same payload, so an answer can never land on a question nobody was shown.
+- **Superseded plans:** naming the plan in the id is what makes a verdict for a superseded plan recognisable after a revision.
+
+A rejection routes to the worker that owns the plan phase, and returns to the supervisor only when the team has no such worker. Sending a rejected plan to the first worker in the roster put it in front of the coder, the very worker the rejection existed to keep out of execution.
+
+The node returns a plain state dict, and the compiled topology routes out of it through a conditional edge on `next`, not through `Command(goto=...)` (`src/vaultspec_a2a/graph/_compiler_topologies.py`). The constraints that matter are unchanged: no static edge leaves the approval node, and the supervisor never calls `interrupt()`. The factory takes no autonomous flag; the supervisor's decision keeps the node unreachable when no human is present.
+
+Module paths in sections 2.8, 5 and 6 are historical, because the `core` package was decomposed. The gate lives in `src/vaultspec_a2a/graph/nodes/supervisor.py`, its state in `src/vaultspec_a2a/thread/state.py`, and interrupt emission in `src/vaultspec_a2a/streaming/transformer.py`. Grounding: `2026-09-30-langgraph-conformance-audit`.

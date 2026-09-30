@@ -3,13 +3,13 @@ tags:
 - '#adr'
 - '#orchestration-topology-pipeline'
 date: 2026-02-26
-modified: '2026-07-15'
-body_hash: 'sha256:2473085b107776f0aea321d4784f0520348f58809e69b681930ca11f1bafc755'
+modified: '2026-09-30'
+body_hash: 'sha256:8fc36b175847a05c8a6c75abe260eddd15421f797d14a37a8d3bb71e56752266'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
 
-# `orchestration-topology-pipeline` adr: `adr-008` | (**status:** `proposed`)
+# `orchestration-topology-pipeline` adr: `adr-008` | (**status:** `accepted`)
 
 ## Migration Note
 
@@ -116,3 +116,14 @@ orchestrating independent processes too brittle for v1.
 
 - LangGraph Gap Audit Research
 - **LangGraph:** `knowledge/repositories/langgraph/`
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+Later accepted decisions have overtaken four descriptions in this record. The decision itself is unchanged and remains the foundation of the system: orchestrate as a compiled LangGraph state machine rather than as independently spawned agent processes, with provider CLIs confined inside the chat-model layer.
+
+- **Worker process:** graph execution does not run in the gateway process. It runs in a separate worker process, which is why the thread-blocking pitfall in section 5 no longer describes the risk it names; `2026-03-04-worker-process-architecture-adr` owns that topology.
+- **Checkpoint backend:** checkpointing is not SQLite-only; `2026-03-10-postgres-dual-backend-adr` owns the backend choice.
+- **Human in the loop:** the mechanism is not `interrupt_before`. The graph always compiles with an empty interrupt list, and every pause is an `interrupt()` call inside a node, which is what makes a pause replay-safe (`src/vaultspec_a2a/graph/compiler.py`).
+- **Second interface:** it is not an in-repo WebSocket UI. The dashboard is a separate repository fronting this service across a loopback edge.
+
+The structured-callback rationale stands and has grown load-bearing. Tool lifecycle reaches the event layer only through LangChain callbacks, because it is not a graph superstep and appears in no stream mode (`src/vaultspec_a2a/streaming/_run_callbacks.py`). Grounding: `2026-09-30-langgraph-conformance-audit`.

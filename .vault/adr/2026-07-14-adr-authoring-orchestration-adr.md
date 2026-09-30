@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#adr-authoring-orchestration'
 date: '2026-07-14'
-modified: '2026-07-16'
-body_hash: 'sha256:c764598335ddc31e01aedbf114e5fec4618d7f31404a7596c0c79470323fcc0e'
+modified: '2026-09-30'
+body_hash: 'sha256:f4368fcd67dbb942d07b351a75b399bc08656f4413d16838d8fc965363e6a5d4'
 related:
   - "[[2026-07-14-document-authoring-orchestration-audit]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
@@ -248,3 +248,20 @@ correctly fail-closed dead code until this amendment's work lands.
   bar unchanged and RE-ARMED: S10 does not close until a fresh live-lane
   ADR passes `vault check all` with ZERO errors AND the lead's manual
   read confirms grounded `related` and canonical status.
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+A refresh at the mount pass alone is not enough. A mount node runs after a routing decision, on the way into a worker, and the run's entry edge has no mount node in front of it at all. The decision that had to observe a document therefore could not, and a plan the planner had just written was refused as missing. The supervisor now re-derives the index before it evaluates its gates, and returns it so the merge reducer keeps what the decision was made against; one scan function serves both callers (`src/vaultspec_a2a/graph/nodes/supervisor.py`, `src/vaultspec_a2a/graph/nodes/vault_reader.py`). The refresh stays add-only: it discovers documents, and removals are not reflected.
+
+The document-authoring topology is deliberately excluded from that refresh. Its artifacts are engine proposals that stay unapplied while the run is in flight, so a filesystem scan there could only surface documents the run did not produce. No gate in that topology reads the index; its gates test proposal existence and approval instead. This is the same scope split recorded on `2026-03-03-phase-artifact-gates-adr`.
+
+The fan-out's join point is a structural requirement, not a prompt convention. The synthesis stage is compiled as the join, and every branch's findings are rendered into its model input (`src/vaultspec_a2a/graph/_compiler_research.py`, `src/vaultspec_a2a/graph/nodes/worker.py`). A branch's findings accumulating in state with no reader is a defect, not a partial rollout. A persona sentence claiming the findings have been joined does not constitute the join.
+
+A fan-out branch is dispatched with `Send`, and LangGraph replays it on every resume with the payload it was dispatched with. The run's later channel values never reach a branch that parks, and that includes the permission answers the run records. A supervised branch therefore asks a human for tool permission through its own resume values. An answer settles only the request it names, and only with an option that request offered. A pull fan-out would give branches live state but departs from the `Send`-based diverge stage this record commits to; that choice remains open.
+
+Each document gate binds its verdict to the proposal it parked on:
+
+- A verdict naming another proposal, or none, makes the gate ask again rather than spend a revision.
+- A gate reached with no committed proposal has no request to put in its payload, so it sends the writer back to resubmit instead of parking (`src/vaultspec_a2a/graph/nodes/phase_gate.py`).
+
+Grounding: `2026-09-30-langgraph-conformance-audit`.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:2a2cae9ac1c8653095397e7237efa5b5f8d54d2385eb95455c32349cfaf391b1'
+body_hash: 'sha256:d0a816454fed8a8d2736537166f7532f2c1a01831194c4a70540260be38831df'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -438,6 +438,41 @@ Fixed as a P02.S13 correction (commit `e2b5e2d`). The preflight admits an answer
 ### baseexception-resolution-is-narrower-than-its-claim | low | the not-reproducing verdict holds for SystemExit and KeyboardInterrupt only
 
 Correction to `ingest-still-classifies-baseexception-as-a-provider-failure`. Asyncio's task step re-raises `SystemExit` and `KeyboardInterrupt` out of the loop, so the verdict stands for those two, from sync and async nodes alike. Any other non-`Exception` `BaseException` subclass raised by a node does reach the catch-all in `src/vaultspec_a2a/streaming/ingest.py`, is classified as a provider failure and is swallowed; the reviewer probed it with a bare subclass. No such subclass exists in this package, LangGraph, langchain-core or anyio, so nothing exercises it today. Recommendation: if the catch-all is revisited, re-raise non-`Exception` exceptions after classification rather than returning FAILED.
+
+### design-record-drift-amendments-applied | info | the ten drifted decision records are amended and two proposed records accepted
+
+Closes `langgraph-design-record-drift` through P06.S28. The user approved the drafted amendments as recommended on 2026-09-30 ("approve the ADR amendments as recommended"). Each record gained an "Amendment - langgraph-conformance (2026-09-30)" section:
+
+- `2026-02-26-event-aggregation-server-side-replay-adr`
+- `2026-03-04-worker-process-architecture-adr`
+- `2026-02-27-team-composition-topology-adr`
+- `2026-03-03-blackboard-content-mounting-adr`
+- `2026-03-03-contextual-anchoring-graph-lifecycle-adr`
+- `2026-03-03-phase-artifact-gates-adr`
+- `2026-03-03-plan-approval-interrupt-adr`
+- `2026-03-10-postgres-dual-backend-adr`
+- `2026-07-14-adr-authoring-orchestration-adr`
+- `2026-02-26-orchestration-topology-pipeline-adr`
+
+The drafts' later findings are folded in, among them strict serde and the borrowed-close refusal, the exec worker retiring validation errors, the compile-time finish budget and the frozen `Send` payload. Two further edits:
+
+- `2026-03-03-persistent-task-queue-schema-adr` gained a note retiring its `mounted_context` example.
+- `2026-09-24-architecture-review-research` now names the tag `nostream`.
+
+The drafts recommended accepting two records, and both are now accepted:
+
+- `2026-02-27-team-composition-topology-adr`
+- `2026-02-26-orchestration-topology-pipeline-adr`
+
+`2026-02-26-event-aggregation-server-side-replay-adr` is amended but stays `proposed`, because the drafts made no recommendation between accepting it and deprecating it in favour of `2026-07-14-a2a-edge-conformance-adr`; that choice is the user's.
+
+The `workers[0]` withdrawal is recorded as an amendment, not a supersession, as recommended.
+
+Two decisions stay open in `2026-07-14-adr-authoring-orchestration-adr`:
+- a pull fan-out in place of `Send`;
+- the submitter's dependency strategy for P07.S38.
+
+Citations name files and symbols rather than line numbers, because the drafted lines had moved by the time the amendments were applied. TypeSafe crossref was not configured, so placement rests on the drafter's local discovery across the full ADR listing.
 
 ## Recommendations
 

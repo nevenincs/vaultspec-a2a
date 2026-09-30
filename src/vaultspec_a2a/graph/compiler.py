@@ -41,6 +41,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import TimeoutPolicy
 
 from ..authoring.contract import is_document_authoring_role
+from ..domain_config import domain_config
 from ..providers.factory import (
     ProviderRuntimeUnavailableError,
     validate_current_execution_lane,
@@ -83,6 +84,7 @@ __all__ = [
     "_route_from_supervisor",
     "_wire_diverge_stage",
     "compile_team_graph",
+    "required_recursion_limit_for_finish_blocks",
     "resolve_model_for_worker",
 ]
 
@@ -585,6 +587,11 @@ def _compile_worker_node(
         cost_port=options["cost_port"],
         authoring_binding_provider=options["authoring_binding_provider"],
         role=agent_cfg.role,
+        # The same role-to-phase reading the supervisor gates on, so the worker
+        # the completion gate reroutes a blocked FINISH to is the worker whose
+        # return retires the validation errors that blocked it. Reading it here
+        # keeps the mapping in the one place that owns it.
+        phase=_ROLE_TO_PHASE.get(agent_cfg.role),
         harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
         # Every worker these topologies compile sits behind a mount node that
         # refreshes the vault index; the worker expands the documents itself.
@@ -836,7 +843,89 @@ def _composed_worker_prompt(agent_config: Any, model: BaseChatModel) -> str:
     )
 
 
-def _validate_compiled_topology(team_config: Any) -> None:
+#: Supersteps one blocked FINISH costs a star run: the supervisor turn that the
+#: completion gate refuses, the mount node ahead of the worker it reroutes to,
+#: and that worker's own turn. Measured against a compiled star graph rather
+#: than reasoned about, and pinned by a test that drives one, because it is the
+#: conversion factor between two limits a preset and an operator set
+#: independently of each other.
+_SUPERSTEPS_PER_FINISH_BLOCK = 3
+
+
+#: The phases the completion gate reroutes a blocked FINISH to. A team with no
+#: worker of either never spends the finish-block budget at all: the gate
+#: refuses the FINISH outright rather than rerouting it, and the re-ask budget
+#: is what bounds that.
+_FINISH_BLOCK_REROUTE_PHASES: frozenset[str] = frozenset(
+    {PipelinePhase.EXEC.value, PipelinePhase.AUDIT.value}
+)
+
+
+def required_recursion_limit_for_finish_blocks() -> int:
+    """The smallest recursion limit that lets the finish-block budget report.
+
+    Every reroute the budget permits, plus the one further supervisor turn on
+    which the budget is spent and the typed error raised. A run cut one
+    superstep shorter than this ends in ``GraphRecursionError`` with the gate's
+    reason never reported.
+    """
+    return (
+        _SUPERSTEPS_PER_FINISH_BLOCK * domain_config.supervisor_finish_block_limit
+    ) + 1
+
+
+def _can_spend_finish_block_budget(
+    team_config: Any, agent_configs: dict[str, Any]
+) -> bool:
+    """Whether this team has a worker a blocked FINISH could be rerouted to."""
+    return any(
+        _ROLE_TO_PHASE.get(cfg.role) in _FINISH_BLOCK_REROUTE_PHASES
+        for cfg in (
+            agent_configs.get(worker.agent_id) for worker in team_config.workers
+        )
+        if cfg is not None
+    )
+
+
+def _validate_finish_block_budget(
+    team_config: Any, agent_configs: dict[str, Any]
+) -> None:
+    """Refuse a star preset whose recursion limit outlaws its own budget.
+
+    The two limits are set independently - the budget by the operator's domain
+    configuration, the ceiling by the preset - and a preset that stops the run
+    first converts a diagnosable refusal into an anonymous
+    ``GraphRecursionError``: the supervisor never reaches the block that would
+    have named the gate it could not satisfy. Refusing at compile time is the
+    only place the pair is visible before a run depends on it.
+
+    Only a team that can actually spend the budget is held to it. Refusing one
+    that cannot would reject a working preset over a limit no run of it ever
+    reaches.
+    """
+    if not _can_spend_finish_block_budget(team_config, agent_configs):
+        return
+    required = required_recursion_limit_for_finish_blocks()
+    declared = int(team_config.graph.recursion_limit)
+    if declared >= required:
+        return
+    raise ConfigError(
+        f"Team {getattr(team_config, 'id', '?')!r} declares recursion_limit "
+        f"{declared}, which is below the {required} supersteps the supervisor "
+        f"finish-block budget of "
+        f"{domain_config.supervisor_finish_block_limit} needs to report a "
+        f"blocked FINISH: each blocked FINISH costs "
+        f"{_SUPERSTEPS_PER_FINISH_BLOCK} supersteps, and one more carries the "
+        f"supervisor turn that spends the budget. A run cut shorter ends in "
+        f"GraphRecursionError with the gate's reason unreported. Raise "
+        f"recursion_limit to at least {required}, or lower the finish-block "
+        f"budget."
+    )
+
+
+def _validate_compiled_topology(
+    team_config: Any, agent_configs: dict[str, Any]
+) -> None:
     from ..team.team_config import TopologyType
 
     topology = team_config.topology
@@ -854,6 +943,10 @@ def _validate_compiled_topology(team_config: Any) -> None:
             f"clarification stage; the questions would never be asked. Topologies "
             f"that ask: {sorted(CLARIFICATION_TOPOLOGIES)}."
         )
+    if topology.type == TopologyType.STAR:
+        # Only the star compiles a supervisor, so only the star can spend this
+        # budget; every other topology's recursion limit is its own business.
+        _validate_finish_block_budget(team_config, agent_configs)
 
 
 def _route_from_supervisor(state: TeamState) -> str:
@@ -1002,7 +1095,7 @@ def compile_team_graph(
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
 
-    _validate_compiled_topology(team_config)
+    _validate_compiled_topology(team_config, agent_configs)
 
     # interrupt_before disabled: approval flows via interrupt() inside the node only.
     interrupt_nodes: list[str] = []

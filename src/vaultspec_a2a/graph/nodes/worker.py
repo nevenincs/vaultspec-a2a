@@ -37,6 +37,7 @@ from ...thread.models import TokenUsageEntry
 from ...thread.snapshots import stamp_message_created_at
 from ...thread.state import read_untrusted_state_value
 from ..acp_options import option_id_of, valid_option_ids
+from ..enums import PipelinePhase
 from ..run_context import RunContext, run_thread_id
 from ..tools.task_queue import create_mark_task_complete_tool
 from ._config_contract import accepting_runnable_config
@@ -712,6 +713,24 @@ async def _record_turn_usage(
         )
 
 
+def _clears_validation_errors(state: TeamState, phase: str | None) -> bool:
+    """Whether this worker's return retires the run's validation errors.
+
+    The completion gate blocks FINISH while the channel is non-empty and sends
+    the run to the worker of the EXEC phase to resolve it, so that worker owns
+    those errors and its finished turn is what retires them. Outside the
+    document topology nothing else ever wrote the empty list, so a run that
+    acquired one error could only ever end in a routing failure however many
+    times the owner ran. The parallel is the document gate, which drops a
+    phase's revision notes once the phase it demanded them for advances.
+
+    A worker of any other phase leaves them alone: the anchoring context shows
+    them to whoever runs, and clearing them from a turn that was never asked
+    to fix them would unblock FINISH with the work still outstanding.
+    """
+    return phase == PipelinePhase.EXEC.value and bool(state.get("validation_errors"))
+
+
 def _finalize_worker_response(
     *,
     response: BaseMessage,
@@ -719,6 +738,7 @@ def _finalize_worker_response(
     state_updates: dict[str, Any],
     approval_status: object = None,
     usage: TokenUsageEntry | None = None,
+    clear_validation_errors: bool = False,
 ) -> dict[str, Any]:
     """Attach worker attribution and merge the queue tool's Command update.
 
@@ -751,6 +771,9 @@ def _finalize_worker_response(
         update["approval_request_id"] = None
     if usage is not None:
         update["token_usage"] = {worker_name: usage.to_dict()}
+    if clear_validation_errors:
+        # The empty list is this channel's own clear signal.
+        update["validation_errors"] = []
     return update
 
 
@@ -1038,6 +1061,7 @@ class _WorkerNodeOptions(TypedDict, total=False):
     task_queue_port: TaskQueuePort | None
     authoring_binding_provider: AuthoringBindingProvider | None
     role: str | None
+    phase: str | None
     harness_mcp_servers: list[str] | None
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
@@ -1052,6 +1076,7 @@ class _WorkerNodeSettings(TypedDict):
     task_queue_port: TaskQueuePort | None
     authoring_binding_provider: AuthoringBindingProvider | None
     role: str | None
+    phase: str | None
     harness_mcp_servers: list[str] | None
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
@@ -1072,6 +1097,7 @@ def _bind_worker_node_settings(
         "task_queue_port": None,
         "authoring_binding_provider": None,
         "role": None,
+        "phase": None,
         "harness_mcp_servers": None,
         "feedback_reader": None,
         "cost_port": None,
@@ -1122,6 +1148,11 @@ def create_worker_node(
                            sees the propose/read tools and no vault-write path. The
                            binding is built per invoke (never closed over) so the
                            shared compiled graph carries no run-scoped tokens.
+        phase:             Optional pipeline phase this worker's role belongs to,
+                           as the compiler maps it. The worker of the EXEC phase
+                           owns the run's validation errors, so its finished turn
+                           retires them; a worker of any other phase, or one whose
+                           role maps to no phase, leaves them for their owner.
         harness_mcp_servers: Declared team-harness MCP server names composed into
                            the ACP session (ADD-only, unioned with any authoring
                            servers) so the spawned CLI's session/new advertises
@@ -1283,6 +1314,7 @@ def create_worker_node(
             state_updates=state_updates,
             approval_status=state.get("approval_status"),
             usage=usage,
+            clear_validation_errors=_clears_validation_errors(state, settings["phase"]),
         )
 
     return accepting_runnable_config(worker_node)

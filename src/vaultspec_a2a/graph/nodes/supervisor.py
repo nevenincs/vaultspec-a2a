@@ -531,13 +531,7 @@ def _carrying_finish_block(
     reasons = [r for r in (finish_block.routing_error, decision.routing_error) if r]
     return replace(
         decision,
-        # The approval branch is chosen on routing_error being unset, so an
-        # approval that is also a blocked FINISH must still park for its human.
-        routing_error=(
-            None
-            if decision.plan_approval_request is not None
-            else " ".join(reasons) or None
-        ),
+        routing_error=" ".join(reasons) or None,
         blocks_finish=True,
     )
 
@@ -875,22 +869,14 @@ def create_supervisor_node(
         finish_blocks = (
             _spend_finish_block(state, decision) if decision.blocks_finish else 0
         )
-        if decision.routing_error:
-            return {
-                **index_update,
-                "next": next_route,
-                "active_agent": _active_agent_for_route(next_route),
-                "pipeline_phase": decision.inferred_phase,
-                "current_plan": [_plan_entry_for_route(next_route)],
-                **_carried_approval(state),
-                "routing_error": decision.routing_error,
-                # Cleared so the route edge follows this decision to its
-                # worker rather than reading a live re-ask and returning here.
-                "supervisor_reasks": 0,
-                "supervisor_finish_blocks": finish_blocks,
-            }
-
         if decision.plan_approval_request is not None:
+            # Tested BEFORE the routing note, and on the decision rather than
+            # on whether it carries one: a blocked FINISH rerouted to an exec
+            # worker needs both, and selecting the branch on an unset
+            # routing_error meant the reroute had to drop the gate's refusal
+            # to reach its human at all. The refusal now travels with the
+            # approval instead of arriving a pass later.
+            #
             # The supervisor never calls interrupt() itself —
             # a resumed node re-runs from its start, so the routing LLM call
             # would replay non-deterministically and could drop the human's
@@ -910,7 +896,22 @@ def create_supervisor_node(
                 "current_plan": [_plan_entry_for_route(next_route)],
                 "approval_status": ApprovalStatus.PENDING.value,
                 "approval_request_id": None,
-                "routing_error": None,
+                "routing_error": decision.routing_error,
+                "supervisor_reasks": 0,
+                "supervisor_finish_blocks": finish_blocks,
+            }
+
+        if decision.routing_error:
+            return {
+                **index_update,
+                "next": next_route,
+                "active_agent": _active_agent_for_route(next_route),
+                "pipeline_phase": decision.inferred_phase,
+                "current_plan": [_plan_entry_for_route(next_route)],
+                **_carried_approval(state),
+                "routing_error": decision.routing_error,
+                # Cleared so the route edge follows this decision to its
+                # worker rather than reading a live re-ask and returning here.
                 "supervisor_reasks": 0,
                 "supervisor_finish_blocks": finish_blocks,
             }

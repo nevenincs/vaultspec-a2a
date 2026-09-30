@@ -93,6 +93,7 @@ class RecoveryCondition(StrEnum):
     TERMINAL = "terminal"
     INPUT_REQUIRED = "input_required"
     CONFLICT = "conflict"
+    RUN_BUSY = "run_busy"
 
 
 class ReplayStatus(StrEnum):

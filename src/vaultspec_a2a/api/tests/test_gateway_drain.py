@@ -28,6 +28,7 @@ from ...control.drain import DrainGate
 from ...database import get_control_action_by_dispatch_id, get_thread
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
+from ...thread.dispatch_policy import FailureType
 from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..routes.gateway import admission_gate
@@ -389,19 +390,22 @@ async def test_ambiguous_start_dispatch_failure_keeps_admission(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_followup_dispatch_failure_keeps_the_live_run_admitted(
+async def test_a_refused_followup_keeps_the_live_run_admitted(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """A follow-up whose acknowledgement is lost must not evict the live run.
+    """A follow-up refused on a busy run must not evict that run.
 
-    The run starts and dispatches normally against the in-process worker, then
-    the worker client is swapped for one pointed at a closed loopback port, so
-    the follow-up message takes a real transport refusal. That refusal is
-    ambiguous - the worker may have taken the follow-up before the reply was
-    lost - and the run itself is unquestionably still executing, so the failure
-    settles nothing: the run stays non-terminal and keeps its admission, and its
-    own terminal event remains the only thing that releases it. Releasing here
-    would let a drain declare quiescence over a run that is still working.
+    The run starts and dispatches normally against the in-process worker, and
+    the follow-up then meets the busy refusal because that run's turn is still
+    executing. The refusal settles nothing: the run stays non-terminal and keeps
+    its admission, and its own terminal event remains the only thing that
+    releases it. Releasing here would let a drain declare quiescence over a run
+    that is still working.
+
+    The worker client is swapped for one pointed at a closed loopback port for
+    the duration of the follow-up, so a dispatch would be a visible transport
+    failure rather than a silent success - the refusal has to happen before any
+    dispatch for this to come back as a conflict at all.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     relay = _RelayContext(checkpointer, worker, session_factory)
@@ -428,7 +432,8 @@ async def test_followup_dispatch_failure_keeps_the_live_run_admitted(
                 f"/v1/runs/{run_id}/messages",
                 json={"content": "keep going"},
             )
-            assert followup.status_code == 502, followup.text
+            assert followup.status_code == 409, followup.text
+            assert followup.json()["detail"]["code"] == FailureType.RUN_BUSY.value
 
         async with session_factory() as db:
             thread = await get_thread(db, run_id)
@@ -441,8 +446,8 @@ async def test_followup_dispatch_failure_keeps_the_live_run_admitted(
         assert not busy.quiescent, busy
         assert busy.active_runs == 1, busy
 
-        # The worker's terminal event is still the release, and the accounting
-        # the failed follow-up left behind is intact enough to take it.
+        # The worker's terminal event is still the release, and the refused
+        # follow-up left the accounting intact enough to take it.
         app.state.worker_client = worker.client
         await _relay_terminal(client, run_id, relay)
         assert not gate.is_active(run_id)

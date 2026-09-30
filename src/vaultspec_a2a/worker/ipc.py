@@ -11,6 +11,7 @@ sent as a single HTTP POST to ``/internal/events/batch``.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -22,7 +23,9 @@ from fastapi.encoders import jsonable_encoder
 
 from ..control.config import settings
 from ..graph.enums import ServerEventType
+from ..streaming.fanout import PROTECTED_WIRE_TYPES
 from ..telemetry import inject_trace_context
+from ..thread.snapshots import wire_event_type
 
 __all__ = ["WorkerBridge"]
 
@@ -33,11 +36,72 @@ logger = logging.getLogger(__name__)
 # already elapsed, while still preventing an unbounded transport teardown.
 _CLIENT_CLOSE_ALLOWANCE_SECONDS = 0.1
 
+# The JSON envelope every batch body is wrapped in, measured once so a batch's
+# size can be accumulated event by event instead of re-serialized per candidate.
+_BATCH_ENVELOPE_BYTES = len(b'{"events":[]}')
+
+_BATCH_CONTENT_TYPE = "application/json"
+
 
 @dataclass(slots=True)
 class _BatchState:
     events: list[dict[str, Any]] = field(default_factory=list)
     flush_task: asyncio.Task[None] | None = None
+
+
+def _entry_event_type(entry: dict[str, Any]) -> str:
+    """Return the wire event type of one buffered entry, or an empty string."""
+    payload = entry.get("payload")
+    return wire_event_type(payload) if isinstance(payload, dict) else ""
+
+
+def _is_protected_entry(entry: dict[str, Any]) -> bool:
+    """Report whether an entry states an outcome that nothing later restates."""
+    return _entry_event_type(entry) in PROTECTED_WIRE_TYPES
+
+
+def _encoded_batch(batch: list[dict[str, Any]]) -> bytes:
+    """Serialize one batch into exactly the bytes that will be posted.
+
+    The body is built here rather than handed to the HTTP client as an object,
+    so the size the splitter measured and the ``Content-Length`` the gateway
+    checks are the same number. Measuring one serialization and sending another
+    is how a batch sized to fit still arrives over the limit.
+    """
+    return json.dumps({"events": batch}, separators=(",", ":")).encode("utf-8")
+
+
+def _split_into_deliverable_batches(
+    events: list[dict[str, Any]], *, limit: int
+) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Split *events* into batches under *limit* bytes, separating the impossible.
+
+    Returns the deliverable batches in order, then the individual events that
+    exceed the limit on their own. The whole buffer used to be posted as one
+    body, so a backlog built during a gateway outage was refused for being too
+    large and re-queued unchanged - a refusal the worker then repeated forever.
+    An event too large alone is the one case retrying cannot fix, so it is
+    separated rather than made to block everything behind it.
+    """
+    batches: list[list[dict[str, Any]]] = []
+    oversized: list[dict[str, Any]] = []
+    current: list[dict[str, Any]] = []
+    size = _BATCH_ENVELOPE_BYTES
+    for event in events:
+        # One comma per event after the first.
+        encoded = len(_encoded_batch([event])) - _BATCH_ENVELOPE_BYTES + 1
+        if encoded + _BATCH_ENVELOPE_BYTES > limit:
+            oversized.append(event)
+            continue
+        if current and size + encoded > limit:
+            batches.append(current)
+            current = []
+            size = _BATCH_ENVELOPE_BYTES
+        current.append(event)
+        size += encoded
+    if current:
+        batches.append(current)
+    return batches, oversized
 
 
 class WorkerBridge:
@@ -80,6 +144,15 @@ class WorkerBridge:
 
         # Event batching state
         self._batch = _BatchState()
+        # One flush at a time. The deferred cadence flush and the immediate flush
+        # a terminal event forces used to be able to run together, each taking a
+        # slice of the same buffer: the gateway then received two overlapping
+        # posts whose ordering nothing established, and a failure in one re-queued
+        # events the other had already sent.
+        self._flush_lock = asyncio.Lock()
+        # Set once shutdown begins, so a failed final flush cannot schedule a
+        # redrive onto a client that is about to close under it.
+        self._closing = False
 
         # Consecutive heartbeat failure tracking for escalating logs.
         self._consecutive_hb_failures: int = 0
@@ -110,6 +183,7 @@ class WorkerBridge:
         retains a small independent allowance when delivery has consumed the
         shared deadline.
         """
+        self._closing = True
         pending = self._batch.flush_task
         pending_joined = True
         if pending is not None and not pending.done():
@@ -148,6 +222,13 @@ class WorkerBridge:
             )
             delivered = False
         return delivered
+
+    @staticmethod
+    def _redrive_delay_seconds() -> float:
+        """Return the wait before retrying a batch that exhausted its attempts."""
+        return settings.ipc_retry_backoff_base_seconds * (
+            2**settings.ipc_max_flush_retries
+        )
 
     @staticmethod
     def _remaining(deadline: float | None) -> float | None:
@@ -196,18 +277,7 @@ class WorkerBridge:
         """
         # Cap buffer to prevent unbounded memory growth.
         if len(self._batch.events) >= settings.ipc_max_event_buffer:
-            logger.warning(
-                "Event buffer full (%d events), dropping oldest event",
-                settings.ipc_max_event_buffer,
-                extra={
-                    "worker_id": self._worker_id,
-                    "thread_id": thread_id,
-                    "action": "buffer_drop_oldest",
-                    "event_buffer_size": len(self._batch.events),
-                    "event_buffer_limit": settings.ipc_max_event_buffer,
-                },
-            )
-            self._batch.events.pop(0)
+            self._evict_one_buffered_event(thread_id)
 
         self._batch.events.append(
             {
@@ -216,13 +286,54 @@ class WorkerBridge:
                 "ts": time.monotonic(),
             }
         )
-        # Schedule a flush if one isn't already pending.
-        if self._batch.flush_task is None or self._batch.flush_task.done():
-            self._batch.flush_task = asyncio.create_task(self._deferred_flush())
+        self._schedule_flush(settings.ipc_flush_interval_seconds)
 
-    async def _deferred_flush(self) -> None:
+    def _evict_one_buffered_event(self, thread_id: str) -> None:
+        """Free one buffer slot, taking the oldest event that is not an outcome.
+
+        Drop-oldest used to take the head whatever it was, so a run's terminal
+        could be evicted by the very flood of progress that preceded it - and a
+        lost terminal leaves the gateway watching a run that never ends. The bound
+        still holds absolutely: when every buffered event is an outcome the oldest
+        one yields, because an unbounded buffer is the failure this cap exists to
+        prevent.
+        """
+        events = self._batch.events
+        index = next(
+            (
+                position
+                for position, entry in enumerate(events)
+                if not _is_protected_entry(entry)
+            ),
+            0,
+        )
+        dropped = events.pop(index)
+        logger.warning(
+            "Event buffer full (%d events), dropping oldest droppable event",
+            settings.ipc_max_event_buffer,
+            extra={
+                "worker_id": self._worker_id,
+                "thread_id": thread_id,
+                "action": "buffer_drop_oldest",
+                "dropped_event_type": _entry_event_type(dropped),
+                "dropped_outcome_event": _is_protected_entry(dropped),
+                "event_buffer_size": len(events),
+                "event_buffer_limit": settings.ipc_max_event_buffer,
+            },
+        )
+
+    def _schedule_flush(self, delay: float) -> None:
+        """Ensure exactly one pending flush, due in at most *delay* seconds."""
+        if self._closing:
+            return
+        if self._batch.flush_task is None or self._batch.flush_task.done():
+            self._batch.flush_task = asyncio.create_task(self._deferred_flush(delay))
+
+    async def _deferred_flush(self, delay: float | None = None) -> None:
         """Wait for the flush interval then send accumulated events."""
-        await asyncio.sleep(settings.ipc_flush_interval_seconds)
+        await asyncio.sleep(
+            settings.ipc_flush_interval_seconds if delay is None else delay
+        )
         await self.flush_events()
 
     async def _post_event_batch(
@@ -232,11 +343,13 @@ class WorkerBridge:
         attempt: int,
         request_timeout: httpx.Timeout | float | None,
     ) -> bool:
+        headers = self._trace_headers() or {}
+        headers["content-type"] = _BATCH_CONTENT_TYPE
         try:
             resp = await self._client.post(
                 "/internal/events/batch",
-                json={"events": batch},
-                headers=self._trace_headers(),
+                content=_encoded_batch(batch),
+                headers=headers,
                 timeout=request_timeout,
             )
             if resp.status_code == 200:
@@ -303,25 +416,55 @@ class WorkerBridge:
         return True
 
     async def flush_events(self, *, deadline: float | None = None) -> bool:
-        """Immediately send all buffered events as a single batch POST.
+        """Send every buffered event, in batches the gateway will accept.
 
-        Retries up to ``_MAX_FLUSH_RETRIES`` times with exponential
-        backoff on failure.  Events are re-queued on final failure so they
-        are not silently lost (subject to the buffer cap).
+        Serialized: one flush runs at a time, so the cadence flush and the
+        immediate flush a terminal forces queue behind each other instead of
+        splitting one buffer between two overlapping posts.
 
-        Failures are logged at WARNING level but never raised -- the worker
-        must not crash because the gateway is temporarily unavailable.
+        Each batch is retried up to ``ipc_max_flush_retries`` times with
+        exponential backoff. Anything still undelivered is re-queued so it is not
+        silently lost (subject to the buffer cap) and a redrive is scheduled, so a
+        backlog drains on its own rather than waiting for a later event that a
+        finished run will never produce.
+
+        Failures are logged but never raised -- the worker must not crash because
+        the gateway is temporarily unavailable.
         """
+        async with self._flush_lock:
+            return await self._flush_locked(deadline=deadline)
+
+    async def _flush_locked(self, *, deadline: float | None) -> bool:
         if not self._batch.events:
             return True
 
-        batch = self._batch.events[:]
+        pending = self._batch.events[:]
         self._batch.events.clear()
+        batches, oversized = _split_into_deliverable_batches(
+            pending, limit=settings.internal_max_event_batch_bytes
+        )
+        self._report_undeliverable_events(oversized)
 
+        delivered = True
+        for index, batch in enumerate(batches):
+            if await self._deliver_batch(batch, deadline=deadline):
+                continue
+            # Everything after a batch that could not land stays buffered behind
+            # it, so the gateway never receives a later event before an earlier one.
+            undelivered = [event for rest in batches[index:] for event in rest]
+            self._requeue_failed_batch(undelivered)
+            delivered = False
+            break
+        return delivered and not oversized
+
+    async def _deliver_batch(
+        self, batch: list[dict[str, Any]], *, deadline: float | None
+    ) -> bool:
+        """Post one size-bounded batch, retrying with backoff inside the deadline."""
         for attempt in range(settings.ipc_max_flush_retries):
             remaining = self._remaining(deadline)
             if remaining is not None and remaining <= 0:
-                break
+                return False
             if await self._send_batch_once(batch, attempt=attempt, remaining=remaining):
                 return True
 
@@ -331,10 +474,30 @@ class WorkerBridge:
                     batch, attempt=attempt, deadline=deadline
                 )
             ):
-                break
-
-        self._requeue_failed_batch(batch)
+                return False
         return False
+
+    def _report_undeliverable_events(self, oversized: list[dict[str, Any]]) -> None:
+        """Record events no batch can carry, rather than retrying them forever.
+
+        An event larger than the whole batch limit cannot be delivered by any
+        number of attempts, and keeping it buffered blocks every event behind it.
+        Dropping it is a loss, so it is reported as one - with the event type and
+        the run, which is what a reader needs to know what is missing.
+        """
+        for event in oversized:
+            logger.error(
+                "Event exceeds the gateway's batch limit and cannot be relayed",
+                extra={
+                    "worker_id": self._worker_id,
+                    "thread_id": event.get("thread_id"),
+                    "action": "flush_events_undeliverable",
+                    "dropped_event_type": _entry_event_type(event),
+                    "dropped_outcome_event": _is_protected_entry(event),
+                    "event_bytes": len(_encoded_batch([event])),
+                    "batch_limit_bytes": settings.internal_max_event_batch_bytes,
+                },
+            )
 
     def _requeue_failed_batch(self, batch: list[dict[str, Any]]) -> None:
         """Report exhausted delivery and preserve the buffered events that fit."""
@@ -358,6 +521,11 @@ class WorkerBridge:
         space = settings.ipc_max_event_buffer - len(self._batch.events)
         if space > 0:
             self._batch.events[:0] = batch[:space]
+            # A re-queued backlog used to sit until the next event arrived, which
+            # for a run that has just ended is never. The redrive is delayed by a
+            # full retry ladder rather than the flush cadence, so an unreachable
+            # gateway is retried steadily instead of in a tight loop.
+            self._schedule_flush(self._redrive_delay_seconds())
         dropped = len(batch) - max(space, 0)
         if dropped > 0:
             logger.error(

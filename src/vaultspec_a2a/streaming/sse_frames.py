@@ -291,11 +291,11 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 #
 # Keys are ``ServerEventType`` members wherever a member exists, so a value
 # respelled at the enum carries this catalog with it rather than silently
-# stranding an entry that can then never match. The three bare literals below -
-# ``thread_terminal``, ``stream_rejected``, ``progress_dropped`` - are transport
-# frame kinds the stream itself mints, which no graph event produces and the enum
-# therefore does not declare. Their spelling here is the mixture reading
-# correctly, not a conversion left half finished.
+# stranding an entry that can then never match. The four bare literals below -
+# ``stream_snapshot``, ``thread_terminal``, ``stream_rejected``,
+# ``progress_dropped`` - are transport frame kinds the stream itself mints, which
+# no graph event produces and the enum therefore does not declare. Their spelling
+# here is the mixture reading correctly, not a conversion left half finished.
 PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     ServerEventType.MESSAGE_CHUNK: {
         "content": _Text(MAX_PROGRESS_CONTENT_CHARS),
@@ -337,6 +337,13 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "message": _Text(512),
         "recoverable": _Flag(),
     },
+    # The first frame of every stream: the run's durable status as it stood the
+    # moment after this viewer was attached, which is what lets a consumer tell
+    # the live frames that follow from whatever it may have missed before it
+    # arrived. It carries the status and nothing else, deliberately - it is a
+    # relay frame like the rest, so it says where to go for authority rather
+    # than trying to be it.
+    "stream_snapshot": {"status": _ENUM},
     "thread_terminal": {
         "status": _ENUM,
         "replay": _Flag(),
@@ -344,7 +351,11 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     },
     ServerEventType.HEARTBEAT: {"server_uptime_seconds": _Number()},
     "stream_rejected": {"reason": _Text(64)},
-    "progress_dropped": {"reason": _Text(64), "dropped_type": _Text(64)},
+    "progress_dropped": {
+        "reason": _Text(64),
+        "dropped_type": _Text(64),
+        "dropped_count": _Integer(),
+    },
     ServerEventType.PERMISSION_REQUEST: {
         "request_id": _Text(128),
         "tool_call": _Text(128),
@@ -486,6 +497,26 @@ def _stamp_semantic_phase(payload: Mapping[str, object]) -> Mapping[str, object]
     return {**payload, "semantic_phase": phase}
 
 
+def _frame_id(payload: Mapping[str, object]) -> str | None:
+    """Return the SSE ``id`` for a frame, which is its per-run sequence.
+
+    The run already numbers its own events, and that number was being carried
+    inside the JSON body where the SSE layer itself could not see it. Promoting
+    it to the ``id`` field is what makes a consumer able to say which events it
+    has and order what it receives, using the transport's own mechanism rather
+    than a convention it has to know about.
+
+    Frames the stream itself mints - the snapshot, heartbeats, the drop sentinel,
+    a replayed terminal - carry no run sequence and so carry no id. That is the
+    honest answer: giving them one would number them into a sequence they are
+    not part of.
+    """
+    sequence = payload.get("sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+        return None
+    return str(sequence)
+
+
 def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
     """Serialize one payload as a wire SSE frame.
 
@@ -502,6 +533,9 @@ def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
     lines: list[str] = []
     if event:
         lines.append(f"event: {event}")
+    frame_id = _frame_id(payload)
+    if frame_id is not None:
+        lines.append(f"id: {frame_id}")
     data = json.dumps(payload, separators=(",", ":"))
     lines.extend(f"data: {line}" for line in data.splitlines() or [data])
     return ("\n".join(lines) + "\n\n").encode("utf-8")

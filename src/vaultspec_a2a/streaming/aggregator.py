@@ -155,6 +155,9 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
     def remove_subscriber(self, client_id: str) -> None:
         self._subscribers_mgr.remove_subscriber(client_id)
 
+    def take_dropped_count(self, client_id: str) -> int:
+        return self._subscribers_mgr.take_dropped_count(client_id)
+
     def subscribe(self, client_id: str, thread_ids: list[str]) -> None:
         self._subscribers_mgr.subscribe(client_id, thread_ids)
 

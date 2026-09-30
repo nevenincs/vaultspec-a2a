@@ -403,6 +403,20 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return self.database_backend
 
     @property
+    def internal_max_event_batch_bytes(self) -> int:
+        """Return the largest worker event batch the gateway will accept.
+
+        One home for the figure, read by the gateway that enforces it and by the
+        worker that has to size its batches under it. The worker used to post its
+        whole buffer and the gateway used to refuse anything over this, with the
+        number written on each side: a post-outage backlog then met a refusal the
+        worker could do nothing about and re-sent it unchanged, forever.
+        """
+        return self.internal_max_http_body_bytes * (
+            self.internal_event_batch_body_multiplier
+        )
+
+    @property
     def resolved_checkpoint_backend(self) -> Literal["sqlite", "postgres"]:
         """Validate the configured checkpoint backend against the configured DSN."""
         url = self.checkpoint_database_url or self.database_url

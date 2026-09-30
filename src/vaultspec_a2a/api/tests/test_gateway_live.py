@@ -37,13 +37,19 @@ from ...control.health import (
     SERVICE_HEALTH_DEADLINE_SECONDS,
 )
 from ...control.tests._catalog_authority import current_execution_metadata
-from ...database import create_control_action, create_thread, list_threads
+from ...database import (
+    create_control_action,
+    create_thread,
+    get_thread,
+    list_threads,
+)
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...testing.tests._support.catalog_selection import in_process_selection
 from ...tests._write_authority import make_test_write_authority
-from ...thread.enums import ThreadStatus
+from ...thread.dispatch_policy import FailureType
+from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..routes.gateway import admission_gate
 from .conftest import make_app
@@ -335,15 +341,17 @@ async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_follow_up_turn_reaches_the_run_that_run_start_cannot_address(
+async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """The versioned surface can now say something further to a live run.
+    """Neither verb can add a turn to a run whose turn is still executing.
 
-    This is the capability run-start structurally cannot provide, and the test
-    proves that rather than asserting it: re-posting to run-start with the same
-    run id returns the ORIGINAL run and dispatches nothing new, because a repeat
-    identifier there is a replay. The follow-up verb dispatches for real.
+    Two refusals, told apart by their shape. Re-posting to run-start with the
+    same run id is a REPLAY: it answers 201 with the ORIGINAL run and dispatches
+    nothing, silently ignoring the new body. The follow-up verb refuses out
+    loud, with a typed conflict naming the run's occupancy - and reserves
+    nothing while doing it, which is the point: admitting the turn used to make
+    it the run's writer and strand the executing turn.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -379,20 +387,24 @@ async def test_a_follow_up_turn_reaches_the_run_that_run_start_cannot_address(
         assert replay.json()["run_id"] == run_id
         assert worker.dispatches == [], "a replay must not dispatch a new turn"
 
-        # The follow-up verb is how a second turn actually reaches the run.
+        # The follow-up verb refuses while the first turn is still in flight,
+        # and the refusal reaches no further than the gateway.
         follow = await client.post(
             f"/v1/runs/{run_id}/messages",
             json={"content": "second turn"},
         )
-        assert follow.status_code == 202
-        body = follow.json()
-        assert body["api_version"] == "v1"
-        assert body["run_id"] == run_id
-        assert body["accepted"] is True
-        # Accepted is not applied: the turn is handed on, not completed here.
-        assert body["applied"] is False
-        assert len(worker.dispatches) == 1
-        assert worker.dispatches[-1]["content"] == "second turn"
+        assert follow.status_code == 409, follow.text
+        detail = follow.json()["detail"]
+        assert detail["code"] == FailureType.RUN_BUSY.value
+        assert detail["message"]
+        assert worker.dispatches == [], "a refused follow-up must not dispatch"
+
+        async with session_factory() as db:
+            after = await get_thread(db, run_id)
+        assert after is not None
+        assert after.last_requested_action != (
+            ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value
+        ), "a refused follow-up must not become the run's requested action"
 
         # An unknown run is a not-found rather than a silent accept.
         missing = await client.post(

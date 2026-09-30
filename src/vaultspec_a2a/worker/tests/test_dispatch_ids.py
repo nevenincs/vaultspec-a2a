@@ -22,6 +22,7 @@ from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
+from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType
 from ...thread.executable_graph import freeze_graph_definition
 from ..app import create_worker_app
@@ -309,11 +310,13 @@ def test_concurrent_distinct_same_thread_dispatch_retains_capacity_refusal(
             if admission_lock.locked():
                 portal.call(admission_lock.release)
 
-        assert sorted(response.status_code for response in resolved) == [200, 429]
-        refusal = next(response for response in resolved if response.status_code == 429)
-        assert refusal.json() == {
-            "detail": "Worker at capacity — too many concurrent threads"
-        }
+        # Two turns for ONE thread is a conflict about that run, not overload:
+        # the worker has room, it just already has this run. A 429 here told the
+        # gateway the opposite and counted against the shared failure breaker.
+        assert sorted(response.status_code for response in resolved) == [200, 409]
+        refusal = next(response for response in resolved if response.status_code == 409)
+        assert refusal.json() == {"detail": {"condition": FailureType.RUN_BUSY.value}}
+        assert refusal.headers.get("Retry-After") is None
         assert len(app.state.dispatch_ids) == 1
 
 
@@ -329,7 +332,9 @@ def test_dispatch_reserves_capacity_before_scheduling_or_checkpoint_read(
             bridge = WorkerBridge("http://127.0.0.1:1", "capacity-test")
             executor = Executor(saver, bridge)
             for index in range(domain_config.max_concurrent_threads):
-                assert await executor.reserve_dispatch_capacity(f"held-{index}")
+                assert (await executor.reserve_dispatch_capacity(f"held-{index}"))[
+                    0
+                ] is not None
             app.state.executor = executor
             app.state.bridge = bridge
             async with anyio.create_task_group() as tasks:
@@ -358,7 +363,9 @@ def test_dispatch_reserves_capacity_before_scheduling_or_checkpoint_read(
     with TestClient(app) as client:
         response = client.post("/dispatch", json=dispatch.model_dump(mode="json"))
 
+        # A full worker IS backpressure, and it says how soon to look again.
         assert response.status_code == 429
+        assert response.headers["Retry-After"] == "5"
         assert len(app.state.dispatch_ids) == 0
         assert app.state.executor.active_ingest_count == (
             domain_config.max_concurrent_threads

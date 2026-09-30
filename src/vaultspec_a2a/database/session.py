@@ -10,7 +10,7 @@ import sqlite3
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import Request
 from sqlalchemy import event, text
@@ -41,6 +41,7 @@ __all__ = [
     "get_session_factory",
     "init_db",
     "inspect_sqlite_database",
+    "resolve_session_factory",
     "seat_sqlite_posture",
     "verify_wal_mode",
 ]
@@ -440,14 +441,26 @@ async def get_db(
     to ensure ``session.close()`` is called even if the generator is abandoned
     mid-stream (e.g. client disconnect before the generator resumes).
     """
-    factory = (
-        getattr(request.app.state, "db_session_factory", None) or get_session_factory()
-    )
-    async with factory() as session:
+    async with resolve_session_factory(request.app.state)() as session:
         try:
             yield session
         finally:
             await session.close()
+
+
+def resolve_session_factory(app_state: object) -> async_sessionmaker[AsyncSession]:
+    """Return the session factory an application is actually bound to.
+
+    An application may carry its own factory on state - a test fixture's
+    file-backed engine, for instance - and must never be silently served from the
+    process-global one instead. This is the single answer to which factory is
+    in force, so a caller that needs to open a session outside the request-scoped
+    dependency cannot reach for a different engine than the request would have.
+    """
+    factory = getattr(app_state, "db_session_factory", None)
+    if isinstance(factory, async_sessionmaker):
+        return cast("async_sessionmaker[AsyncSession]", factory)
+    return get_session_factory()
 
 
 async def verify_wal_mode(engine: AsyncEngine) -> str:

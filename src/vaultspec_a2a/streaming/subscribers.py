@@ -35,6 +35,12 @@ class SubscriberManager:
         self._broadcast_hooks: list[Callable[[SequencedEvent], Awaitable[None]]] = []
         # Node metadata cache: thread_id -> node_name -> safe descriptor fields.
         self._node_metadata: dict[str, dict[str, dict[str, str]]] = {}
+        # Events this client lost to backpressure and has not been told about.
+        # Held here rather than pushed into the queue because the queue being
+        # full is the very condition being reported: a notice enqueued then
+        # would evict another event to make room for the news that an event was
+        # evicted. The consumer collects it on its way past instead.
+        self._dropped: dict[str, int] = defaultdict(int)
         # Lock for subscriber mutation
         self._lock = asyncio.Lock()
         self._telemetry = telemetry
@@ -92,6 +98,7 @@ class SubscriberManager:
         )
         self._subscribers[client_id] = queue
         self._subscriptions[client_id] = set()
+        self._dropped.pop(client_id, None)
         return queue
 
     def get_subscriber_queue(
@@ -104,6 +111,16 @@ class SubscriberManager:
         """Unregister a subscriber."""
         self._subscribers.pop(client_id, None)
         self._subscriptions.pop(client_id, None)
+        self._dropped.pop(client_id, None)
+
+    def take_dropped_count(self, client_id: str) -> int:
+        """Return and clear the events *client_id* lost to backpressure.
+
+        Read by the client's own delivery loop on its way past, so a burst of
+        drops becomes one resynchronization notice rather than one per event,
+        and a client that is keeping up pays nothing.
+        """
+        return self._dropped.pop(client_id, 0)
 
     def subscribe(self, client_id: str, thread_ids: list[str]) -> None:
         """Subscribe a client to one or more thread event streams.
@@ -201,7 +218,9 @@ class SubscriberManager:
             client_subs = self._subscriptions.get(client_id, set())
             if thread_id not in client_subs:
                 continue
-            deliver_bounded(queue, payload, client_id=client_id)
+            outcome = deliver_bounded(queue, payload, client_id=client_id)
+            if outcome.dropped:
+                self._dropped[client_id] += outcome.dropped
 
     # ------------------------------------------------------------------
     # Graph registration
@@ -255,10 +274,12 @@ class SubscriberManager:
             delivered = 0
             for client_id, queue in list(self._subscribers.items()):
                 client_subs = self._subscriptions.get(client_id, set())
-                subscribed = thread_id is None or thread_id in client_subs
-                if subscribed and deliver_bounded(
-                    queue, sequenced, client_id=client_id
-                ):
+                if not (thread_id is None or thread_id in client_subs):
+                    continue
+                outcome = deliver_bounded(queue, sequenced, client_id=client_id)
+                if outcome.dropped:
+                    self._dropped[client_id] += outcome.dropped
+                if outcome.delivered:
                     delivered += 1
             self._telemetry.increment_counter(
                 "aggregator.events_emitted", 1, **{"event.type": str(event_type)}
@@ -277,3 +298,4 @@ class SubscriberManager:
         """Clear all subscriber state."""
         self._subscribers.clear()
         self._subscriptions.clear()
+        self._dropped.clear()

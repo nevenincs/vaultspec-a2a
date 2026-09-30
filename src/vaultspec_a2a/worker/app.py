@@ -43,6 +43,7 @@ from ..lifecycle.registration import deregister_serve, register_serve
 from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
 from ..providers.warmup import warm_model_imports
 from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..thread.dispatch_policy import FailureType
 from ..utils import (
     BearerVerdict,
     configure_logging,
@@ -51,6 +52,7 @@ from ..utils import (
     verify_internal_bearer,
 )
 from ..utils.asyncio_compat import configure_asyncio_runtime
+from ._dispatch_contract import CAPACITY_THREAD_ACTIVE
 from .dispatch_ids import DispatchIdAdmission
 from .executor import Executor
 from .ipc import WorkerBridge
@@ -293,6 +295,15 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             )
 
 
+_CAPACITY_RETRY_AFTER_SECONDS = 5
+"""How soon a caller refused for capacity should look again.
+
+A hint, not a schedule: a caller with its own backoff takes the later of the
+two, so this can only bring a first retry forward, never delay one. It is short
+because slots are freed by runs ending, which the caller cannot observe.
+"""
+
+
 def _require_dispatch_receipt(req: DispatchRequest) -> None:
     if req.action == "cancel":
         return
@@ -300,7 +311,8 @@ def _require_dispatch_receipt(req: DispatchRequest) -> None:
         req.require_graph_action_receipt()
     except ValueError as exc:
         raise HTTPException(
-            status_code=409, detail={"condition": "incompatible_state"}
+            status_code=409,
+            detail={"condition": FailureType.INCOMPATIBLE_STATE.value},
         ) from exc
 
 
@@ -325,15 +337,33 @@ async def _reserve_dispatch_or_replay(
 ) -> tuple[DispatchCapacityReservation | None, bool]:
     if not owns_capacity:
         return None, False
-    reservation = await executor.reserve_dispatch_capacity(req.thread_id)
+    reservation, reason = await executor.reserve_dispatch_capacity(req.thread_id)
     if reservation is not None:
         return reservation, False
     # A duplicate can be admitted while this request waits for capacity.
     if req.dispatch_id in dispatch_ids:
         return None, True
-    raise HTTPException(
+    raise _capacity_refusal(reason)
+
+
+def _capacity_refusal(reason: str) -> HTTPException:
+    """Answer a refused reservation in the terms the refusal actually had.
+
+    The two refusals used to share a 429, which told the gateway that a worker
+    already busy with THIS run was the same event as a worker with no room for
+    ANY run. Only the second is backpressure; the first is a conflict about one
+    run that retrying cannot clear, and counting it as overload opened the shared
+    failure breaker against every other run's control traffic.
+    """
+    if reason == CAPACITY_THREAD_ACTIVE:
+        return HTTPException(
+            status_code=409,
+            detail={"condition": FailureType.RUN_BUSY.value},
+        )
+    return HTTPException(
         status_code=429,
         detail="Worker at capacity — too many concurrent threads",
+        headers={"Retry-After": str(_CAPACITY_RETRY_AFTER_SECONDS)},
     )
 
 

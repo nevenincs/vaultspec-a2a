@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from ..graph.events import ErrorOccurred
@@ -32,7 +33,7 @@ from ..graph.events import ErrorOccurred
 if TYPE_CHECKING:
     from .types import SequencedEvent
 
-__all__ = ["deliver_bounded"]
+__all__ = ["DeliveryOutcome", "deliver_bounded"]
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +101,33 @@ def _evict_one(queue: asyncio.Queue[Any]) -> bool:
     return True
 
 
+@dataclass(frozen=True, slots=True)
+class DeliveryOutcome:
+    """What one bounded delivery did, including what it cost.
+
+    ``delivered`` alone was not enough to answer the consumer's question. A drop
+    under backpressure was reported to the operator's log and to nobody else, so
+    a viewer's history simply lost entries with no indication it had: the stream
+    read as a complete account of the run when it was not. ``dropped`` is that
+    indication, and it is counted rather than flagged so a caller can coalesce a
+    burst into one resynchronization notice instead of one per lost event.
+    """
+
+    delivered: bool
+    dropped: int = 0
+
+    def __bool__(self) -> bool:
+        """Read as the delivery verdict, which is what every caller branches on."""
+        return self.delivered
+
+
 def deliver_bounded(
     queue: asyncio.Queue[Any],
     payload: object,
     *,
     client_id: str,
     log_extra: dict[str, object] | None = None,
-) -> bool:
+) -> DeliveryOutcome:
     """Put *payload* on *queue*, evicting the oldest droppable event when full.
 
     Args:
@@ -119,11 +140,13 @@ def deliver_bounded(
             they share.
 
     Returns:
-        ``True`` when the payload was enqueued, ``False`` when it was dropped
-        because the queue remained full even after an eviction.
+        A :class:`DeliveryOutcome` saying whether the payload was enqueued and
+        how many events this delivery cost the client.
     """
     extra = log_extra or {}
+    dropped = 0
     if queue.full() and _evict_one(queue):
+        dropped += 1
         logger.warning(
             "Dropped an event for slow client %s (relay backpressure, maxsize=%d)",
             client_id,
@@ -138,5 +161,5 @@ def deliver_bounded(
             client_id,
             extra={**extra, "action": "relay_drop_event"} if extra else None,
         )
-        return False
-    return True
+        return DeliveryOutcome(delivered=False, dropped=dropped + 1)
+    return DeliveryOutcome(delivered=True, dropped=dropped)

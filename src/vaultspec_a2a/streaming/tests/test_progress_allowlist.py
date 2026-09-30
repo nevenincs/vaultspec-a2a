@@ -330,14 +330,21 @@ def test_each_catalogued_lifecycle_field_survives(
 
 # The frame kinds the SSE transport synthesises itself instead of projecting from
 # a domain event, so they carry no ``ServerEventType`` discriminator and cannot be
-# derived from that enum. Each has a real producer: ``thread_terminal`` and
-# ``stream_rejected`` are yielded by ``api.thread_stream._stream_thread_events``
-# (both driven live by ``api/tests/test_thread_stream.py`` and
-# ``api/tests/test_stream_slot_release.py``), and ``progress_dropped`` is the
-# over-cap sentinel, emitted for real by the test below rather than taken on
-# trust. A name belongs in this set only when a producer can be pointed at.
+# derived from that enum. Each has a real producer: ``stream_snapshot``,
+# ``thread_terminal`` and ``stream_rejected`` are yielded by
+# ``api.thread_stream._stream_thread_events`` (all driven live by
+# ``api/tests/test_thread_stream.py``, ``api/tests/test_stream_slot_release.py``
+# and ``api/tests/test_stream_attachment_order.py``), and ``progress_dropped`` is
+# emitted both as the over-cap sentinel - proven by the test below rather than
+# taken on trust - and as the backpressure resynchronization notice. A name
+# belongs in this set only when a producer can be pointed at.
 _TRANSPORT_FRAME_KINDS = frozenset(
-    {"thread_terminal", "stream_rejected", "progress_dropped"}
+    {
+        "stream_snapshot",
+        "thread_terminal",
+        "stream_rejected",
+        "progress_dropped",
+    }
 )
 
 

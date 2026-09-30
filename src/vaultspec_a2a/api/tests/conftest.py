@@ -40,16 +40,19 @@ from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner
+from ...database import create_thread
 from ...providers.factory import ProviderCatalogRegistration, ProviderFactory
 from ...providers.in_process_catalog import served_in_process_lanes
 from ...streaming.aggregator import EventAggregator
 from ...testing.tests._support.catalog_selection import in_process_selection
+from ...tests._write_authority import make_test_write_authority
 from ..app import create_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
     from ...providers.provider_catalog_service import ProviderCatalogService
+    from ...thread.enums import ThreadStatus
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = (
@@ -120,6 +123,25 @@ async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as sess:
         yield sess
+
+
+async def seed_run_with_status(
+    session_factory: SessionFactory, thread_id: str, status: ThreadStatus
+) -> None:
+    """Persist one run in *status* for tests that read durable stream state.
+
+    The stream body reads the run's status from the database rather than being
+    handed one, so a test that wants a stream to see a given status has to put
+    that status where the stream looks.
+    """
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=status,
+        )
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------

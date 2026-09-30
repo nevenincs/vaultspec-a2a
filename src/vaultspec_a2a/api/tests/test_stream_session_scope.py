@@ -90,6 +90,17 @@ async def test_attached_viewers_hold_no_pooled_connection(
                 assert response.status_code == 200
             await _wait_for_subscribers(agg, _ATTACHED_VIEWERS)
 
+            # Read each viewer's leading snapshot frame. That frame is emitted
+            # after the body's own durable read, so receiving it is proof the
+            # read happened AND finished - which is what makes the count below a
+            # measurement of what a settled attached stream holds rather than a
+            # race against a read still in flight. The iterators are held for the
+            # rest of the test: abandoning one closes that response body, which
+            # the server sees as the viewer disconnecting.
+            bodies = [response.aiter_bytes() for response in responses]
+            for body in bodies:
+                assert b"stream_snapshot" in await anext(body)
+
             assert pool.checkedout() == 0, (
                 "an attached viewer is still holding a pooled connection"
             )

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:476869af9450778c5e0f22a126f902b82a015515afb5cea05dc2e4e692c91645'
+body_hash: 'sha256:7aeab25f3f0f1ae6eb3aaf5e5489ed958dcfa524f78b558d1f3661474cba9ce6'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -445,6 +445,10 @@ related:
 - `S37` `verify:` `pytest src/vaultspec_a2a/providers/tests/test_mcp_contract.py` -> `pass`
 - `S37` `by:` `orchestrator`
 - `S34` `verify:` `pytest src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py` -> `pass`
+- `S45` `M` `src/vaultspec_a2a/control/_event_application.py`
+- `S45` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S45` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/worker src/vaultspec_a2a/api src/vaultspec_a2a/graph with Postgres required` -> `pass`
+- `S45` `by:` `orchestrator`
 
 ## Notes
 

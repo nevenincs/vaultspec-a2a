@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:70053b895cc7bc9c7fb9f7e13af913f45b0ce4d465a9ecce3ae98bee0beb22df'
+body_hash: 'sha256:7477fd3a531d75f494f0c1795b2802f0b450b5bebd0eec66784ef1a6b55cac81'
 ---
 
 # `langgraph-conformance` plan
@@ -118,6 +118,7 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S42` - Route a warned exec route through plan approval rather than returning the SOFT gate decision first; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
 - [x] `P07.S43` - Declare the execution-state degradation reasons, retire the producerless unknown reason, and widen the vocabulary guards to constructor literals and every member; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `P07.S44` - Correct the compiler comment that says strict msgpack refuses an unknown type; `src/vaultspec_a2a/graph/compiler.py`.
+- [x] `P07.S45` - Settle an answer a failed turn consumed without moving the finished run back to running; `src/vaultspec_a2a/control/_event_application.py`.
 
 ## Parallelization
 

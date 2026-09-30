@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:6e3b4333a89fac39c8cd3c19d2c4df719da221403b0953fa55d8360ce12ecded'
+body_hash: 'sha256:ee08105df799fe39c29f1b398dc9ac7348e05a2bbd0b7911a2d6df8903ed0933'
 ---
 
 # `langgraph-conformance` plan
@@ -106,15 +106,16 @@ The decisions that describe the graph match the graph, through amendments presen
 
 Fix the findings the executors and reviews surfaced while this plan ran, which the user put in scope for this session on 2026-09-30 (the lower fixes and the persistent agents' findings are in scope). Policy sources stay the user's: the hosted-search guidance and the retired example trigger are presented, not changed.
 
-- [ ] `P07.S33` - Give supervised research branches the human permission rung; `src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P07.S33` - Give supervised research branches the human permission rung; `src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/nodes/worker.py`.
 - [ ] `P07.S34` - Count a re-parking resume's receipt as incorporated from the checkpoint's pending writes; `src/vaultspec_a2a/thread/checkpoint_evidence.py`.
 - [ ] `P07.S35` - Disclose only the unanswered fan-out interrupts on run-status and in the resume preflight; `src/vaultspec_a2a/worker/state_projection.py`.
-- [ ] `P07.S36` - Clear star and pipeline validation errors when their owner returns, bound the finish-block budget by the recursion limit, and keep the blocked-FINISH reason through a plan-approval reroute; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/compiler.py`.
+- [x] `P07.S36` - Clear star and pipeline validation errors when their owner returns, bound the finish-block budget by the recursion limit, and keep the blocked-FINISH reason through a plan-approval reroute; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/compiler.py`.
 - [ ] `P07.S37` - Close the rag daemon egress and client-daemon skew gaps and drop torch from the rag extra; `src/vaultspec_a2a/providers/_harness_mcp_registry.py, src/vaultspec_a2a/providers/_mcp_contract.py, pyproject.toml`.
 - [ ] `P07.S38` - Strip body links with core's reader instead of mirrored regexes; `src/vaultspec_a2a/authoring/submitter.py`.
 - [ ] `P07.S39` - Retire the unreachable checkpoint-history degradations, tie the retention schema pin to the saver version, and refuse closing a borrowed saver; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/database/checkpoints.py`.
 - [ ] `P07.S40` - Attribute custom stream writes to their node and replace the aggregator's hand-written graph stubs with one error-injecting graph; `src/vaultspec_a2a/streaming/`.
 - [ ] `P07.S41` - Make the provider tests name the adapter prerequisite they lack; `src/vaultspec_a2a/providers/tests/`.
+- [ ] `P07.S42` - Route a warned exec route through plan approval rather than returning the SOFT gate decision first; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
 
 ## Parallelization
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:62d7a6231493401e8bd937194174fdd63fe0e7a642cd383d4fc711ea0cb73150'
+body_hash: 'sha256:6e1b250e5cf4d8a468262c1f2bc96217d5c8f25f7400fd96f3a4ddbaf2a2f868'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -330,6 +330,18 @@ related:
 - `S27` `A` `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py`
 - `S27` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
 - `S27` `by:` `worker-adefe507`
+- `S33` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S33` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S33` `M` `src/vaultspec_a2a/graph/tests/conftest.py`
+- `S33` `A` `src/vaultspec_a2a/graph/tests/test_research_permission_rung.py`
+- `S33` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S33` `by:` `worker-a0387a8c`
+- `S36` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S36` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S36` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S36` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S36` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S36` `by:` `worker-a0387a8c`
 
 ## Notes
 
@@ -355,3 +367,5 @@ related:
 - `S22` Also fixes the high deadlock the Step's probe found: the bridge's put and `put_writes` waited on the loop that had to run them.
 - `S25` The served schema now says a parent id names the recorded parent, which may be pruned; openapi.json regenerated.
 - `S27` Retired rather than run on both backends: the backfill repaired nothing observable, and the desktop profile's repair belongs to the staged-generation migration entrypoint.
+- `S33` A fan-out branch reads on through its own resume values instead of parking on the first unusable one, because its Send payload never carries later answers; the one-interrupt-per-execution rule still holds for ordinary workers.
+- `S36` The required recursion limit measures `3*limit+1,` not the audit's estimate; the compile check applies only to teams with an exec or audit worker, since others never spend the budget. One budget test moved to the review-artifact gate because exec returns now clear validation errors.

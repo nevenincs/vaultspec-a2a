@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:d88c09924f47f04cab27a6d8e3d7eb164f7aa8a459b6b0ac870d2fe3a3f87f91'
+body_hash: 'sha256:adc7f334d28cde6595571ec3183f3d107f0e9af1d8fedb0ae7487a55ad1ef3a4'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -314,6 +314,26 @@ Owned by P07.S39. `concurrent_checkpointer` and the selector bridge's `concurren
 ### persistence-probes-characterise-the-library | info | the persistence probes bypass the production entry points
 
 Recorded from P04. The executor's pool and setup-race probes build a bare `AsyncPostgresSaver` and call `setup()` directly, bypassing `open_checkpointer`, `concurrent_checkpointer` and `setup_postgres_checkpointer`, so they still show the unguarded library behaviour after the fixes. The production paths are covered by `src/vaultspec_a2a/database/tests/test_checkpoint_setup_race.py` and `test_checkpoint_pool.py`.
+
+### send-fan-out-branches-cannot-read-the-run-channels | medium | a Send branch is replayed with its dispatch payload, so no later state reaches it
+
+Open, surfaced by P07.S33; needs a decision. Every research branch is a push task whose input is the state captured when the dispatch node emitted its `Send` (`src/vaultspec_a2a/graph/nodes/diverge.py`), and LangGraph rebuilds the task from its tasks channel on every resume without refreshing that payload (`langgraph/pregel/_algo.py`, `prepare_push_task_send`). A probe showed the run's `permission_answers` holding both answers while the resumed branch still read an empty map. `messages`, `vault_index`, `validation_errors` and `active_feature` are frozen the same way, so a branch that parks resumes against a stale view of the run. P07.S33 works around it for permissions by reading the task's own resume values. A pull fan-out (`Command(goto=[names])`) gives branches live channels and per-branch interrupt ids and was probed working, but the Send-based diverge stage is committed in `2026-07-14-adr-authoring-orchestration-adr`. Recommendation: decide between the two fan-out primitives in an amendment to that record.
+
+### finish-block-superstep-arithmetic-was-overstated | info | the required recursion limit is three per blocked FINISH plus one
+
+Correction to `finish-block-budget-outruns-a-small-recursion-limit`. Driving a real star graph with the recursion limit swept, the typed routing error first wins at a limit of 10 for the default budget of 3, and budgets of 1, 2, 4 and 5 need 4, 7, 13 and 16: the relation is `3 * limit + 1`, not about twelve. `src/vaultspec_a2a/graph/compiler.py` now carries that arithmetic, pinned by two tests at the boundary in both directions.
+
+### only-one-shipped-preset-is-a-star | low | the star topology's gates and budgets ship almost untested against real presets
+
+Open, surfaced by P07.S36; needs a decision. Of twenty presets under `src/vaultspec_a2a/team/presets/teams/`, only `mock-supervisor-human-in-loop.toml` declares a star topology, so every supervisor gate and budget is exercised only by synthetic teams built inside tests. `vaultspec-solo-coder.toml`, the preset closest to a production star run, is a pipeline with a recursion limit of 10, below the finish-block floor, so making it a star would trip the new compile-time refusal. Recommendation: decide whether a shipped star preset should exist and what its recursion limit is.
+
+### plan-approval-is-skipped-when-a-soft-phase-gate-warns | low | a warned exec route would reach its worker without plan approval
+
+Owned by P07.S42; latent. `_evaluate_supervisor_response` returns the phase-gate decision before `_plan_approval_decision` runs (`src/vaultspec_a2a/graph/nodes/supervisor.py`), so a route that only warns at its phase gate never reaches the approval check. It cannot happen today because the one SOFT prerequisite targets the `adr` phase and only an `exec` route requests approval; adding a SOFT gate on the exec phase would make it live.
+
+### retention-tests-duplicate-helpers | low | the merged retention guard tests copy a helper and a graph builder
+
+Owned by P07.S39. `src/vaultspec_a2a/tests/test_structural_duplication.py` fails on the P04 merge: `_history` exists in both `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py` and `test_checkpoint_retention_guards.py`, and `_delta_graph` and `_plain_graph` in the latter are one shape. The P04 validation ran the database suites but not the package-level structural tests, so the pushed head carries the failure until S39 lands.
 
 ## Recommendations
 

@@ -271,6 +271,30 @@ Correction to `enum-members-in-checkpointed-state`. On langgraph-checkpoint 4.2 
 
 Open from P01.S06. `_carrying_finish_block` (`src/vaultspec_a2a/graph/nodes/supervisor.py`) clears `routing_error` when the rerouted decision is a plan-approval request, because the approval branch is selected on `routing_error` being unset; the supervisor sees the refusal a pass later. Recommendation: discriminate that branch on the decision rather than on `routing_error`.
 
+### repark-receipt-never-durable | medium | a resume that only re-parks never writes its receipt into the checkpoint
+
+Open from P02.S11. A resumed run that suspends again does not advance the checkpoint, so its action receipt stays a pending write and `channel_values["active_graph_action_receipt"]` keeps the previous action's. `read_checkpoint_evidence` reads the receipt only from `channel_values`, so it reports the just-applied resume as a prior action, not incorporated; only the resume that completes the node advances the checkpoint. Recovery keyed on incorporation can therefore redeliver a resume that already applied; the P02.S12 preflight now refuses it rather than double-applying, so the symptom is a stuck recovery loop, not a duplicated answer. Recommendation: `_pending_evidence` in `src/vaultspec_a2a/thread/checkpoint_evidence.py` already reads `pending_writes` for interrupt and error; read the receipt channels there too.
+
+### parallel-interrupt-disclosure-stale | medium | an answered parallel interrupt is still disclosed as pending
+
+Open from P02.S15. After one of two fan-out interrupts is answered, `aget_state().interrupts` and every task's `interrupts` still list both, although the answered branch has run: the superstep holding them has not committed, so nothing clears the first. A reloading client re-renders a question already answered, and the resume preflight admits a redelivery of the answered request because it still reads as pending. Telling answered from pending needs the task's resume writes, which the snapshot does not expose. Recommendation: derive pending interrupts from the checkpoint's pending writes (`_task_projections` and the preflight in `src/vaultspec_a2a/worker/state_projection.py`) rather than from the snapshot.
+
+### research-fan-out-has-no-human-permission-rung | medium | supervised researchers fall to the autonomous rung
+
+Open, surfaced by P02.S15. `src/vaultspec_a2a/graph/_compiler_research.py` builds each researcher's model and composes only harness MCP servers; it never resolves the worker's effective model and never sets `permission_callback`. `src/vaultspec_a2a/providers/_acp_rpc_handlers.py` treats an absent callback as no human rung on any lane, so a supervised research run's branch tool calls are decided without a human. It is also why no parallel human gate arises in production today, though the fan-out is where two would. Recommendation: give each researcher the same permission rung a supervised worker gets, now that P02.S15 addresses one of several pending interrupts.
+
+### interrupt-id-is-namespace-only | low | two interrupts in one task share one id
+
+Open, surfaced by P02.S15. `Interrupt.from_ns` derives the id from the task namespace alone (`langgraph/types.py`), so every interrupt one task raises carries the same id; resume-by-id addresses a task, not a question. Harmless while each node execution raises at most one interrupt (P02.S14) and fan-out branches are separate tasks (P02.S15), and the asking-again gates re-park under the same id by design. Recommendation: never build question identity on the interrupt id; the request id stays the binding.
+
+### provider-suite-fails-without-an-installed-adapter | low | ten provider tests fail in a checkout with no installed adapter
+
+Open, surfaced by P02. `test_claude_permission_posture.py` (5), `test_capsule_acp_resolution.py` (2), `test_factory.py` (1) and `test_launcher_confinement.py` (2) under `src/vaultspec_a2a/providers/tests/` fail identically at the base commit in a fresh worktree with no `node_modules`: they need an installed adapter and node runtime. Not caused by P02. Recommendation: have these tests state the missing prerequisite in their failure, so a bare worktree's result is not misread.
+
+### reparked-gate-reports-no-position | low | a gate asking again dropped out of the projected next nodes
+
+Fixed in the P02.S13 integration correction. LangGraph leaves a task that already holds a resume write out of `StateSnapshot.next` (`langgraph/pregel/main.py`), so once the plan and document gates asked again on an unbound verdict, the execution-state projection reported no position and the research gate's semantic phase fell back from awaiting a decision to running. `_parked_next_nodes` in `src/vaultspec_a2a/worker/state_projection.py` now counts every task parked on an interrupt; `test_a_node_that_asks_again_is_still_the_next_node` fails without it.
+
 ## Recommendations
 
 - Feed research findings to synthesis and bound every review and routing loop before the lower fixes, per the user's ordering.

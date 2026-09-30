@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:190f2cbae39e4dfeeabd33de238e7e2d14687dc870723116a59337f7c6c68b55'
+body_hash: 'sha256:8ce42ef3f1e56afdc69a019afcbc30687c3aa0d9e2bd5d3b1ca17fdbd9550226'
 ---
 
 # `langgraph-conformance` plan
@@ -102,9 +102,25 @@ The decisions that describe the graph match the graph, through amendments presen
 
 - [ ] `P06.S28` - Draft amendments for the design-record drift the review found and present them for approval; `.vault/adr/`.
 
+### Phase `P07` - Follow-on findings
+
+Fix the findings the executors and reviews surfaced while this plan ran, which the user put in scope for this session on 2026-09-30 (the lower fixes and the persistent agents' findings are in scope). Policy sources stay the user's: the hosted-search guidance and the retired example trigger are presented, not changed.
+
+- [ ] `P07.S33` - Give supervised research branches the human permission rung; `src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [ ] `P07.S34` - Count a re-parking resume's receipt as incorporated from the checkpoint's pending writes; `src/vaultspec_a2a/thread/checkpoint_evidence.py`.
+- [ ] `P07.S35` - Disclose only the unanswered fan-out interrupts on run-status and in the resume preflight; `src/vaultspec_a2a/worker/state_projection.py`.
+- [ ] `P07.S36` - Clear star and pipeline validation errors when their owner returns, bound the finish-block budget by the recursion limit, and keep the blocked-FINISH reason through a plan-approval reroute; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/compiler.py`.
+- [ ] `P07.S37` - Close the rag daemon egress and client-daemon skew gaps and drop torch from the rag extra; `src/vaultspec_a2a/providers/_harness_mcp_registry.py, src/vaultspec_a2a/providers/_mcp_contract.py, pyproject.toml`.
+- [ ] `P07.S38` - Strip body links with core's reader instead of mirrored regexes; `src/vaultspec_a2a/authoring/submitter.py`.
+- [ ] `P07.S39` - Retire the unreachable checkpoint-history degradations, tie the retention schema pin to the saver version, and refuse closing a borrowed saver; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/database/checkpoints.py`.
+- [ ] `P07.S40` - Attribute custom stream writes to their node and replace the aggregator's hand-written graph stubs with one error-injecting graph; `src/vaultspec_a2a/streaming/`.
+- [ ] `P07.S41` - Make the provider tests name the adapter prerequisite they lack; `src/vaultspec_a2a/providers/tests/`.
+
 ## Parallelization
 
 P01, P02, P03 and P04 run in parallel, each owned by one executor in its own git worktree. File ownership is disjoint by Phase except `src/vaultspec_a2a/graph/nodes/worker.py` (P01 owns the prompt builder, P02 the permission callback), `src/vaultspec_a2a/thread/state.py` (P01 owns routing fields, P02 the receipt channels) and `src/vaultspec_a2a/worker/executor.py` (P02 owns resume, P03 drain and ingest); those are merged by the orchestrator. Executors commit one Step per commit and do not edit `.vault/`; the orchestrator logs, closes Steps and merges. P04.S26 (strict msgpack) runs after P01.S02 and P04.S22 are merged. P05 and P06 run after the sweep reports and the fix Phases merge.
+
+After P04 merges, four executors run in their own worktrees on disjoint ownership: graph (P07.S33, P07.S36); persistence, thread and worker projection (P04.S26, P07.S34, P07.S35, P07.S39); providers, authoring and streaming (P07.S37, P07.S38, P07.S40, P07.S41); and the checkpoint fixtures (P05.S32), which touches only the `empty_checkpoint` call sites in test files. A read-only drafter prepares P06.S28 for the orchestrator to present. The same commit and `.vault/` rules apply.
 
 ## Verification
 

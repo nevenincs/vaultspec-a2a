@@ -1,10 +1,11 @@
 """``enabled_tools`` is the registry's declaration, not the caller's suggestion.
 
-The Codex ``config.toml`` writes each server's ``tools`` into ``enabled_tools``
-beside ``default_tools_approval_mode = "auto"``, under a run whose
-``approval_policy`` is ``"never"``. That pairing is what makes an unverified list
-dangerous rather than untidy: a tool named there is invoked without a prompt and
-without anything having compared it to what was reviewed. The rag server exposes
+The Codex ``config.toml`` writes each server's ``tools`` into ``enabled_tools``,
+beside ``default_tools_approval_mode = "auto"`` for every server whose project is
+fixed at launch, under a run whose ``approval_policy`` is ``"never"``. That
+pairing is what makes an unverified list dangerous rather than untidy: a tool
+named there is invoked without a prompt and without anything having compared it
+to what was reviewed. The rag server exposes
 ``reindex_vault`` and ``reindex_codebase``, which the registry deliberately omits
 to hold the read-only composition boundary, so the divergence that matters is a
 SUPERSET - and its failure mode is silence. Nothing raises; a write verb simply
@@ -105,7 +106,9 @@ def test_a_conforming_registry_spec_is_written_unchanged() -> None:
 
     server = parsed["mcp_servers"][_RAG]
     assert tuple(server["enabled_tools"]) == declared_harness_tools(_RAG)
-    assert server["default_tools_approval_mode"] == "auto"
+    # This server takes its project per call, so its calls are elicited rather
+    # than auto-approved; the bridge below keeps the auto mode.
+    assert "default_tools_approval_mode" not in server
 
 
 @pytest.mark.parametrize(

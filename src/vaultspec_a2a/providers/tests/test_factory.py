@@ -24,7 +24,10 @@ from .._factory_commands import (
     kimi_temporary_model_configuration_reason,
 )
 from ..acp_chat_model import AcpChatModel
-from ..cli_resolution import resolve_provider_cli_executable
+from ..cli_resolution import (
+    resolve_provider_cli_executable,
+    resolve_trusted_executable,
+)
 from ..codex_chat_model import CodexChatModel
 from ..factory import ProviderFactory
 from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
@@ -237,7 +240,7 @@ def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
         return
     model = ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
     assert isinstance(model, AcpChatModel)
-    assert model.command == ["node", str(_CLAUDE_ACP_JS)]
+    assert model.command == [resolve_trusted_executable("node"), str(_CLAUDE_ACP_JS)]
     assert model.provider == Provider.ZAI.value
     assert model.acp_backend == "node"
     assert model.use_exec is False
@@ -388,7 +391,8 @@ def test_classify_provider_command_zai_returns_acp_meta() -> None:
     meta = classify_provider_command(Provider.ZAI)
     assert meta["command_kind"] == "node_entry"
     assert meta["acp_backend"] == "node"
-    assert meta["command_executable"] == "node"
+    node = str(resolve_trusted_executable("node"))
+    assert meta["command_executable"] == Path(node).name
 
 
 def test_provider_factory_explicit_string_model() -> None:
@@ -479,7 +483,7 @@ def test_factory_restarts_the_frozen_acp_backend_not_the_current_default() -> No
     )
     assert isinstance(model, AcpChatModel)
     assert model.acp_backend == "node"
-    assert model.command == ["node", str(_CLAUDE_ACP_JS)]
+    assert model.command == [resolve_trusted_executable("node"), str(_CLAUDE_ACP_JS)]
 
 
 def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable() -> (

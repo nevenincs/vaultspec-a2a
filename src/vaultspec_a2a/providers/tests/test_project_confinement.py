@@ -21,11 +21,13 @@ from pathlib import Path
 import pytest
 
 from ...control.config import settings
+from .._acp_mcp import statically_approvable_tool_names
 from .._acp_rpc_handlers import (
     on_fs_read_text_file,
     on_fs_write_text_file,
     on_request_permission,
 )
+from .._acp_session import claude_session_options
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._json_contract import JsonObject, JsonValue
 
@@ -578,3 +580,32 @@ async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
     assert response["result"] == {}
     assert protected_target.read_text(encoding="utf-8") == "service-state"
     assert (parked / "target.txt").read_text(encoding="utf-8") == "workspace-write"
+
+
+def test_a_per_call_project_tool_is_never_pre_approved(tmp_path: Path) -> None:
+    """The guard is only reachable if the CLI was not told to skip the call.
+
+    The search tools stay in the run's composed surface - the permission rung
+    approves them for the run's own project - but they are withheld from the
+    static allowlist the CLI decides by, because that decision is taken before
+    the project-naming argument exists.
+    """
+    config = _config(workspace_root=str(tmp_path))
+
+    options = claude_session_options(config)
+
+    assert config.allowed_tools == _DECLARED_READS
+    assert "allowedTools" not in options
+
+
+def test_a_launch_bound_tool_is_still_pre_approved() -> None:
+    """Withholding is per server, not a blanket retreat from pre-approval.
+
+    The records server takes no project argument at all, so approving it ahead
+    of the call says everything there is to say about the call.
+    """
+    approvable = statically_approvable_tool_names(
+        [*_DECLARED_READS, "mcp__vaultspec-core__find", "Read(/ws/**)"]
+    )
+
+    assert approvable == ["mcp__vaultspec-core__find", "Read(/ws/**)"]

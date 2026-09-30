@@ -80,6 +80,7 @@ from ._codex_protocol import (
 )
 from ._json_contract import JsonObject, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
+from ._project_scope import RunProjectScope
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .conditions import ProviderCondition
 from .lane_admission import is_web_lane_proven
@@ -525,6 +526,7 @@ class CodexChatModel(BaseChatModel):
                 permission_rung=CodexPermissionRung(
                     allowed_tools=self._composed_tool_pairs(),
                     permission_callback=self.permission_callback,
+                    project_scope=RunProjectScope(self.workspace_root),
                 ),
             )
             await asyncio.wait_for(
@@ -578,6 +580,18 @@ class CodexChatModel(BaseChatModel):
                 ),
                 "id",
                 context="turn/start result turn",
+            )
+            # The lane's own turn identity, reported once per turn: the
+            # app-server runs ephemeral inside a per-run home that is deleted
+            # afterwards, so these two ids are the only handles tying this run's
+            # turn to anything the provider itself saw.
+            logger.info(
+                "Codex turn started",
+                extra={
+                    **metadata,
+                    "codex_thread_id": thread_id,
+                    "codex_turn_id": turn_id,
+                },
             )
             active_key = (thread_id, turn_id)
             if active_key in self._active_turns:

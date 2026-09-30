@@ -47,11 +47,16 @@ from typing import TYPE_CHECKING
 from ..control.config import settings
 from ..thread.errors import ConfigError
 from ..utils.enums import CodexWebSearchMode
+from ._codex_auth import seed_run_credential, write_back_refreshed_credential
 from ._config_home_roots import (
     sweep_orphan_homes,
     temp_home_root,
 )
-from ._harness_mcp_registry import declared_harness_tools, is_known_harness_server
+from ._harness_mcp_registry import (
+    declared_harness_tools,
+    harness_server_addresses_projects_per_call,
+    is_known_harness_server,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -304,10 +309,20 @@ def render_codex_config_toml(
         key = _table_key(name)
         lines = [f"[mcp_servers.{key}]", f"command = {_toml_str(command)}"]
         lines.append(f"args = {_toml_str_array(args)}")
-        # Read-verb allowlist: exactly the registry's read tools, auto-approved.
-        # "Exactly" is enforced above, not merely intended.
+        # Read-verb allowlist: exactly the registry's read tools. "Exactly" is
+        # enforced above, not merely intended.
         lines.append(f"enabled_tools = {_toml_str_array(tools)}")
-        lines.append('default_tools_approval_mode = "auto"')
+        # Auto-approval is withheld from a server whose project is chosen by the
+        # CALL. Approving such a tool up front decides it with its arguments
+        # unknown, which puts codex's own approval elicitation - the one place
+        # this lane can see a call naming another project - out of reach. Those
+        # servers keep the default, so every call is elicited and decided by the
+        # run's permission rung.
+        per_call_project = is_known_harness_server(
+            name
+        ) and harness_server_addresses_projects_per_call(name)
+        if not per_call_project:
+            lines.append('default_tools_approval_mode = "auto"')
         block = "\n".join(lines)
         if environment:
             env_lines = [f"[mcp_servers.{key}.env]"]
@@ -332,7 +347,10 @@ def build_codex_config_home(
     Copies ``auth.json`` from *base_home* (if present) to preserve Codex's
     file-based auth, then writes a ``config.toml`` with exactly the declared
     ``[mcp_servers.<name>]`` blocks. The caller sets ``CODEX_HOME`` to the
-    returned path and MUST call :func:`cleanup_codex_config_home` after reap.
+    returned path and MUST call :func:`cleanup_codex_config_home` after reap -
+    which is also what returns a credential Codex refreshed during the run to the
+    home it was copied from, so the removal below never takes the operator's live
+    login with it.
 
     Created inside the armed desktop profile's temporary-home root when one is
     declared (else the system temp directory), mirroring the Claude isolated
@@ -365,14 +383,10 @@ def build_codex_config_home(
     try:
         _restrict(home)
         if base_home is not None:
-            auth = base_home / "auth.json"
-            if auth.exists():
-                dest = home / "auth.json"
-                shutil.copy2(auth, dest)
-                # Defensive: pin the credential copy to owner-only regardless of
-                # the source's mode (POSIX-effective; a no-op on Windows, where
-                # the temp tree is already user-scoped).
-                _restrict(dest)
+            # The copy is RECORDED, not just made: Codex rotates its refresh
+            # token mid-run and writes the new one here, so cleanup has to know
+            # where this login came from to return it.
+            seed_run_credential(base_home, home)
         (home / "config.toml").write_text(
             render_codex_config_toml(
                 specs,
@@ -398,11 +412,16 @@ def build_codex_config_home(
 def cleanup_codex_config_home(home: Path | None) -> None:
     """Remove a per-run Codex config home, reporting failures to its cleanup owner.
 
+    A credential Codex refreshed inside the home is written back to its source
+    first, and unconditionally: the rotation is the operator's login, not this
+    run's state, so it is returned whether the home is then removed or retained.
+
     When ``codex_config_home_retain`` is configured, the home is retained for
     inspection and troubleshooting. By default the home is removed.
     """
     if home is None:
         return
+    write_back_refreshed_credential(home)
     if settings.codex_config_home_retain:
         logger.debug("Codex config home retained at %s by configuration", home)
         return

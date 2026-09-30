@@ -28,19 +28,11 @@ from langchain_core.language_models.chat_models import (
     BaseChatModel,
     generate_from_stream,
 )
-from langchain_core.messages import (
-    AIMessage,
-    AIMessageChunk,
-    BaseMessage,
-    ChatMessage,
-    HumanMessage,
-    SystemMessage,
-)
+from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
-from ..graph.enums import Provider
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
@@ -105,6 +97,7 @@ from ._json_contract import (
     lenient_json_object_list,
 )
 from ._mcp_contract import verify_harness_mcp_contract
+from ._prompt_render import render_prompt_blocks
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import (
@@ -113,7 +106,7 @@ from .acp_exceptions import (
     AcpPromptCancelledError,
     AcpPromptError,
 )
-from .cli_resolution import resolve_provider_cli_executable
+from .cli_resolution import pin_claude_executable
 
 __all__ = ["AcpChatModel"]
 
@@ -355,14 +348,11 @@ class AcpChatModel(BaseChatModel):
         # Bypass the adapter's bundled cli.js — drive the same installed claude
         # binary an interactive invocation runs, so the lane's behaviour (and
         # credential resolution) matches the operator's own CLI exactly. Only
-        # for the claude-family adapter; Kimi runs its own CLI.
-        _system_claude = resolve_provider_cli_executable(Provider.CLAUDE)
-        if (
-            _system_claude
-            and self._state.config.acp_family == "claude"
-            and self.command
-        ):
-            env.setdefault("CLAUDE_CODE_EXECUTABLE", _system_claude)
+        # for the claude-family adapter; Kimi runs its own CLI. Resolved through
+        # the one seam the catalog probe also uses, so a lane cannot be qualified
+        # by one binary and then served by another.
+        if self._state.config.acp_family == "claude" and self.command:
+            self._state.session.claude_executable = pin_claude_executable(env)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
         # Suppress interactive prompts that
         # stall non-interactive ACP subprocesses.
@@ -423,6 +413,31 @@ class AcpChatModel(BaseChatModel):
             )
         return env
 
+    def _record_provider_identity(self, ctx: AcpSessionContext) -> None:
+        """Log which adapter and which CLI this session actually ran on.
+
+        Neither is recoverable after the fact: the adapter names itself once, in
+        the handshake, and the CLI it drives is whatever the pin resolved on this
+        host at this moment. A turn whose behaviour needs explaining later - a
+        capability that was present or absent, a permission posture that differed
+        from the operator's own - is explained by these two facts and by nothing
+        else the run keeps.
+        """
+        agent_info = self._state.session.agent_info
+        name = agent_info.get("name")
+        version = agent_info.get("version")
+        logger.info(
+            "ACP provider identity",
+            extra=runtime_log_extra(
+                self._state.config,
+                process=ctx.process,
+                handshake_step="initialize",
+                agent_name=name if isinstance(name, str) else None,
+                agent_version=version if isinstance(version, str) else None,
+                cli_executable=self._state.session.claude_executable,
+            ),
+        )
+
     async def _native_prompt_blocks(
         self,
         ctx: AcpSessionContext,
@@ -466,13 +481,13 @@ class AcpChatModel(BaseChatModel):
         native_command: NativeCommandRequest | None,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Run one ordinary prompt or one negotiated native command."""
-        prompt_blocks: list[JsonObject] = []
-        for msg in messages:
-            if isinstance(
-                msg,
-                (HumanMessage, SystemMessage, ChatMessage, AIMessage, AIMessageChunk),
-            ):
-                prompt_blocks.append({"type": "text", "text": str(msg.content)})
+        # Rendered through the seam the Codex lane shares: a conversation says
+        # who spoke and what a tool answered, and it has to say the same thing on
+        # whichever transport carries it. Rendering here instead dropped every
+        # role label, every speaker name, and every tool result - leaving the
+        # agent's own prior turns, another agent's output, and the system
+        # instructions arriving as one anonymous voice.
+        prompt_blocks: list[JsonObject] = render_prompt_blocks(messages)
 
         # The child inherits the ambient environment (resolve_env_vars passes it
         # through, minus this service's own infra tokens) so the spawned CLI
@@ -543,6 +558,8 @@ class AcpChatModel(BaseChatModel):
 
             init_result = await initialize_session(ctx, self._state.config)
             self._state.session.auth_methods = init_result.auth_methods
+            self._state.session.agent_info = init_result.agent_info
+            self._record_provider_identity(ctx)
             result = await setup_session(
                 ctx,
                 self._state.config,
@@ -551,6 +568,18 @@ class AcpChatModel(BaseChatModel):
             )
             self._state.session.active_session_id = result.session_id
             self._state.session.session_config_options = result.config_options
+            # The provider's own session id, logged once per turn: it is the only
+            # handle that ties this run's turn to the transcript the CLI wrote in
+            # the operator's config home, and nothing else records it.
+            logger.info(
+                "ACP session opened",
+                extra=runtime_log_extra(
+                    self._state.config,
+                    process=ctx.process,
+                    handshake_step="session/new",
+                    session_id=result.session_id,
+                ),
+            )
             self._state.transport.process = ctx.process
             self._state.transport.stdin = ctx.stdin
             self._state.transport.stdin_lock = ctx.stdin_lock
@@ -684,6 +713,7 @@ class AcpChatModel(BaseChatModel):
                 process=ctx.process,
                 handshake_step="session/prompt",
                 timeout_seconds=idle_limit,
+                session_id=self._state.session.active_session_id,
                 stderr_event_count=ctx.stderr_event_count,
             ),
         )
@@ -733,31 +763,56 @@ class AcpChatModel(BaseChatModel):
         if ctx.interrupt_exc:
             raise ctx.interrupt_exc[0]
         self._raise_if_prompt_future_error(ctx, prompt_future)
+        raise self._abnormal_exit_error(ctx)
+
+    def _abnormal_exit_error(
+        self, ctx: AcpSessionContext, cause: BaseException | None = None
+    ) -> AcpError:
+        """Describe a child that left mid-turn, in its own redacted words.
+
+        The lines were written at DEBUG under an INFO default and the failure
+        carried a line COUNT, so the one account of what happened was discarded
+        exactly when it was needed. Reported at WARNING and carried on the error,
+        because the reader of the log and the caller of the turn are different
+        people with the same question.
+        """
+        tail = ctx.rendered_stderr_tail() or "<empty>"
+        detail = f" ({cause})" if cause is not None else ""
         logger.warning(
-            "ACP subprocess exited before end_turn",
+            "ACP subprocess exited before end_turn%s; redacted stderr tail:\n%s",
+            detail,
+            tail,
             extra=runtime_log_extra(
                 self._state.config,
                 process=ctx.process,
                 handshake_step="session/prompt",
+                session_id=self._state.session.active_session_id,
                 stderr_event_count=ctx.stderr_event_count,
                 exit_code=ctx.process.returncode,
             ),
         )
-        raise AcpError(
-            "ACP subprocess exited before end_turn",
+        return AcpError(
+            f"ACP subprocess exited before end_turn{detail}; "
+            f"redacted stderr tail:\n{tail}",
             effects_may_have_occurred=ctx.effects_may_have_occurred,
         )
 
-    @staticmethod
     def _raise_if_prompt_future_error(
-        ctx: AcpSessionContext, prompt_future: AcpResponseFuture
+        self, ctx: AcpSessionContext, prompt_future: AcpResponseFuture
     ) -> None:
-        if prompt_future.done():
-            resp = prompt_future.result()
-            if "error" in resp:
-                _raise_prompt_error(
-                    resp, effects_may_have_occurred=ctx.effects_may_have_occurred
-                )
+        if not prompt_future.done():
+            return
+        # The stdout reader fails every pending request when the child's stream
+        # ends, and that failure says only that a pipe closed. What explains it is
+        # the child's last words, so the transport error becomes the provider
+        # error that carries them rather than reaching the caller bare.
+        if (failure := prompt_future.exception()) is not None:
+            raise self._abnormal_exit_error(ctx, failure) from failure
+        resp = prompt_future.result()
+        if "error" in resp:
+            _raise_prompt_error(
+                resp, effects_may_have_occurred=ctx.effects_may_have_occurred
+            )
 
     async def _cleanup_session(
         self,
@@ -903,6 +958,7 @@ class AcpChatModel(BaseChatModel):
             if text:
                 self._capture_auth_progress(text, ctx)
                 ctx.stderr_event_count += 1
+                ctx.retain_stderr_line(text)
                 # Diagnostics are proof of life too. The turn deadline exists to
                 # catch a silent hang, and the expensive mistake is felling an
                 # agent that is genuinely working, so any sign of life resets it.

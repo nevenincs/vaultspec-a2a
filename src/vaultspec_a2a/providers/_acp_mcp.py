@@ -43,7 +43,9 @@ from ._harness_mcp_registry import (
     _registry_entry,
     _require_root_pin,
     declared_harness_tools,
+    harness_server_addresses_projects_per_call,
     harness_server_egresses,
+    is_known_harness_server,
     registry_launch_divergence,
 )
 from .lane_admission import is_web_lane_proven
@@ -59,12 +61,14 @@ __all__ = [
     "codex_mcp_server_specs",
     "compose_harness_mcp_servers",
     "harness_allowed_tool_names",
+    "harness_server_of_tool",
     "harness_spawn_env",
     "pin_harness_mcp_servers",
     "reject_duplicate_identities",
     "require_declared_surface",
     "resolve_harness_mcp_capabilities",
     "resolve_harness_mcp_servers",
+    "statically_approvable_tool_names",
 ]
 
 
@@ -211,6 +215,46 @@ def harness_allowed_tool_names(
                 seen.add(qualified)
                 tool_names.append(qualified)
     return tool_names
+
+
+def harness_server_of_tool(tool_name: str) -> str | None:
+    """Return the harness server a qualified tool name belongs to, if any.
+
+    The qualified spelling is ``mcp__<server>__<tool>``, so the server is the
+    middle field. ``None`` for anything else - a native built-in, the run's own
+    authoring bridge, a server this registry does not know - because this reader
+    answers about REGISTRY membership, and a name it cannot place is not a name
+    it may make claims about.
+    """
+    if not tool_name.startswith("mcp__"):
+        return None
+    parts = tool_name.split("__", 2)
+    if len(parts) != 3:
+        return None
+    server = parts[1]
+    return server if is_known_harness_server(server) else None
+
+
+def statically_approvable_tool_names(tool_names: Sequence[str]) -> list[str]:
+    """Return the composed names a lane may pre-approve before the call exists.
+
+    A static pre-approval is a decision taken with the arguments unknown, so it
+    is only honest for a tool whose every call means the same thing. A tool that
+    takes the project as an argument does not qualify: the registry declares that
+    per entry, and such a tool keeps its place in the run's composed surface but
+    is decided at the permission rung, where the argument is visible and a call
+    naming another project is refused.
+
+    Order-preserving, and silent about names it cannot place: a native built-in
+    or the run's own authoring bridge is not a registry server and is unaffected.
+    """
+    approvable: list[str] = []
+    for tool_name in tool_names:
+        server = harness_server_of_tool(tool_name)
+        if server is not None and harness_server_addresses_projects_per_call(server):
+            continue
+        approvable.append(tool_name)
+    return approvable
 
 
 def require_declared_surface(

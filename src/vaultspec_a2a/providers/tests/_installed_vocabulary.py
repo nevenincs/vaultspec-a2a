@@ -25,6 +25,8 @@ from ..cli_resolution import resolve_provider_cli_executable
 __all__ = [
     "MissingInstalledVocabularyError",
     "acp_adapter_error_kinds",
+    "acp_adapter_permission_mode_ids",
+    "acp_adapter_source",
     "acp_error_kinds",
     "codex_error_info_variants",
 ]
@@ -98,6 +100,54 @@ def _acp_adapter_bundle_path() -> Path:
         / "dist"
         / "acp-agent.js"
     )
+
+
+def acp_adapter_source() -> str:
+    """Return the installed ACP adapter bundle's source text.
+
+    The adapter decides what a session's options mean - which of them the
+    caller may override and which it reassigns afterwards - so a client that
+    pins a posture through those options is making a claim about THIS bundle.
+    Handing the source to the caller lets that claim be checked against the
+    artefact that will run rather than against a reading of it.
+    """
+    bundle = _acp_adapter_bundle_path()
+    try:
+        return bundle.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MissingInstalledVocabularyError(
+            "the installed @agentclientprotocol/claude-agent-acp bundle is "
+            f"unavailable at {bundle} (run the project's npm install)"
+        ) from exc
+
+
+_ACP_AVAILABLE_MODES = re.compile(
+    r"function buildAvailableModes\([^)]*\)\s*\{(.*?)\n\}", re.DOTALL
+)
+_ACP_MODE_ID = re.compile(r"""id:\s*["']([A-Za-z]+)["']""")
+
+
+def acp_adapter_permission_mode_ids() -> frozenset[str]:
+    """Return the permission-mode ids the installed ACP adapter can advertise.
+
+    A mode id is a wire value the adapter validates against its own list, so a
+    client asking for one is asking for a member of THAT list. Parsed from the
+    builder rather than restated, so a renamed or withdrawn mode surfaces here
+    instead of at the first unattended run.
+    """
+    builder = _ACP_AVAILABLE_MODES.search(acp_adapter_source())
+    if builder is None:
+        raise MissingInstalledVocabularyError(
+            "the installed ACP adapter no longer builds its available modes in "
+            f"{_acp_adapter_bundle_path()}; the permission-mode vocabulary moved"
+        )
+    ids = frozenset(_ACP_MODE_ID.findall(builder.group(1)))
+    if not ids:
+        raise MissingInstalledVocabularyError(
+            "the installed ACP adapter's mode builder lists no mode ids in "
+            f"{_acp_adapter_bundle_path()}"
+        )
+    return ids
 
 
 _ACP_ADAPTER_OWN_KIND = re.compile(r"""errorKindData\(\s*["']([a-z0-9_]+)["']""")

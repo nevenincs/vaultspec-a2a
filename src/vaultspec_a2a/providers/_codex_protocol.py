@@ -3,14 +3,7 @@
 import json
 from typing import Final
 
-from langchain_core.messages import (
-    AIMessage,
-    AIMessageChunk,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
+from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.messages.ai import (
     InputTokenDetails,
     OutputTokenDetails,
@@ -19,6 +12,7 @@ from langchain_core.messages.ai import (
 from langchain_core.outputs import ChatGenerationChunk
 
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
+from ._prompt_render import render_prompt_text
 from .conditions import ProviderCondition, condition_from_codex_turn_error
 
 __all__ = [
@@ -40,26 +34,12 @@ def _messages_to_prompt(messages: list[BaseMessage]) -> str:
     """Flatten LangChain messages into a single Codex turn prompt.
 
     ``turn/start`` takes one ``UserInput`` array, not role-separated messages, so
-    the conversation is rendered to labelled text blocks. System content leads as
-    a preamble; human turns pass through verbatim; assistant/tool turns are kept
-    with a role label so multi-turn context survives.
+    the conversation is rendered to labelled text. The rendering itself is shared
+    with the ACP lane (:mod:`._prompt_render`): what a history says about who
+    spoke is a property of the conversation, not of the transport that carries
+    it, and two renderings is how the lanes came to disagree about it.
     """
-    blocks: list[str] = []
-    for msg in messages:
-        content = msg.content if isinstance(msg.content, str) else str(msg.content)
-        if not content.strip():
-            continue
-        if isinstance(msg, SystemMessage):
-            blocks.append(f"# System\n{content}")
-        elif isinstance(msg, HumanMessage):
-            blocks.append(content)
-        elif isinstance(msg, ToolMessage):
-            blocks.append(f"# Tool result\n{content}")
-        elif isinstance(msg, (AIMessage, AIMessageChunk)):
-            blocks.append(f"# Assistant\n{content}")
-        else:
-            blocks.append(content)
-    return "\n\n".join(blocks)
+    return render_prompt_text(messages)
 
 
 class _CodexProtocolError(RuntimeError):

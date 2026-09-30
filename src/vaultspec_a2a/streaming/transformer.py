@@ -1,57 +1,54 @@
-"""LangGraph event transformation — maps raw astream_events to domain events.
+"""LangGraph stream projection — maps public stream frames to domain events.
 
-Contains the ``process_langgraph_event`` function and the interrupt detection
-logic.  Extracted from the monolithic ``aggregator.py`` during the aggregator
-decomposition.
+A run is consumed through the documented stream modes of ``astream``. Each
+frame arrives as ``(namespace, mode, payload)`` and this module turns it into
+the wire events a client sees:
+
+- ``messages`` carries the model's own token stream, already filtered by the
+  ``nostream`` tag at the stream layer;
+- ``tasks`` carries one start and one result per graph node, which is the node
+  boundary and the node's own state update;
+- ``updates`` carries the interrupts a parked run raised;
+- ``custom`` carries whatever a node wrote through ``get_stream_writer()``.
+
+A tool's own lifecycle is not a graph stream mode - it is a LangChain callback
+- so it is projected by ``RunLifecycleCallbacks`` instead, seated in the run's
+config. That handler is the sibling of this module, not a layer under it.
 
 These functions are *logically* stateless — they receive emitter/buffering
 references to perform side effects but hold no state of their own.
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import PurePath
-from typing import Any, cast
-from uuid import uuid4
-
-from langgraph.constants import TAG_NOSTREAM
+from typing import cast
 
 from ..domain_config import domain_config
-from ..graph.enums import (
-    AgentLifecycleState,
-    ToolCallStatus,
-)
+from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ._interrupt_projection import emit_interrupt_events as emit_interrupt_events
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .sse_frames import enforce_progress_allowlist
-from .types import (
-    NODE_BOUNDARY_EVENTS,
-    PASSTHROUGH_EVENTS,
-    action_detail_projection,
-    classify_tool_kind,
-    map_action_item_status,
-    parse_action_detail,
+from .translation import (
+    ModelStreamProjection,
+    emit_additional_reasoning,
+    text_field,
+    translate_content_blocks,
+    translate_tool_call_chunks,
 )
 
-# Import GraphInterrupt for isinstance check vs string comparison.
-try:
-    from langgraph.errors import GraphInterrupt as _GraphInterrupt_cls
-
-    GraphInterrupt: type[Exception] | None = _GraphInterrupt_cls
-except ImportError:
-    GraphInterrupt = None
-
-try:
-    from langgraph.errors import GraphRecursionError as _GraphRecursionError_cls
-
-    GraphRecursionError: type[Exception] | None = _GraphRecursionError_cls
-except ImportError:
-    GraphRecursionError = None
-
 logger = logging.getLogger(__name__)
+
+#: The ``updates`` key LangGraph writes a parked run's interrupts under.
+INTERRUPT_UPDATE_KEY = "__interrupt__"
+
+#: The stream modes this projection consumes, in the order they are requested.
+#: ``checkpoints`` is included because the run's own lifecycle reads it (the
+#: dispatch receipt fires from the first durable one); it produces no wire
+#: event of its own, so it is handled by the ingest loop rather than here.
+STREAM_MODES = ("messages", "updates", "tasks", "custom", "checkpoints")
 
 
 def project_run_progress(payload: object) -> object:
@@ -72,425 +69,249 @@ def project_run_progress(payload: object) -> object:
     return payload
 
 
-def _data_field(event_data: dict[str, Any]) -> dict[str, Any]:
-    """Return the event's ``data`` mapping, or an empty mapping when absent."""
-    data = event_data.get("data")
-    return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
+@dataclass(frozen=True, slots=True)
+class StreamFrame:
+    """One frame of a run's graph stream, as ``astream`` yields it."""
 
+    namespace: tuple[str, ...]
+    mode: str
+    payload: object
 
-def _text_field(mapping: Mapping[str, object], key: str) -> str:
-    """Read a string field from an untrusted mapping, defaulting to ``""``."""
-    value = mapping.get(key, "")
-    return value if isinstance(value, str) else ""
+    @property
+    def is_root(self) -> bool:
+        """Whether this frame came from the run's own graph, not a subgraph.
 
-
-def _artifact_label_from_tool_input(file_path: str) -> str:
-    """Collapse a raw tool path to a display-safe filename label."""
-    normalized = file_path.replace("\\", "/").rstrip("/")
-    if not normalized:
-        return "artifact"
-    return PurePath(normalized).name or "artifact"
+        A subgraph's inner node is a node of that subgraph, not an agent of
+        this team, so only a root frame names an agent the client knows.
+        """
+        return not self.namespace
 
 
 @dataclass(frozen=True, slots=True)
-class _ToolEmission:
-    thread_id: str
-    agent_id: str
-    tool_call_id: str
-    node: str | None
-    emitters: EventEmitters
+class EventProjectionServices:
+    """The stable emitter, buffer, and telemetry dependencies for one stream."""
 
-
-async def _emit_completed_action(
-    emission: _ToolEmission,
-    item_type: str,
-    detail: dict[str, Any],
-) -> None:
-    """Register and immediately resolve a Codex one-shot completed-action item.
-
-    Codex reports these only on ``item/completed`` (see
-    ``codex_chat_model._completed_action_chunk`` - "a started command has no
-    exit code"), so there is no separate live start phase to observe: this
-    site sees the whole lifecycle at once. It still emits a start-then-update
-    pair, matching ``_translate_tool_start``/``_translate_tool_end`` (the
-    genuine-``BaseTool`` path) so both lanes reach the wire through the same
-    two-event shape a consumer already expects.
-    """
-    status = map_action_item_status(detail.get("status"))
-    content, locations = action_detail_projection(item_type, detail)
-    await emission.emitters.emit_tool_call_start(
-        thread_id=emission.thread_id,
-        agent_id=emission.agent_id,
-        tool_call_id=emission.tool_call_id,
-        title=item_type,
-        kind=classify_tool_kind(item_type),
-    )
-    await emission.emitters.emit_tool_call_update(
-        thread_id=emission.thread_id,
-        agent_id=emission.agent_id,
-        tool_call_id=emission.tool_call_id,
-        status=status,
-        content=content,
-        locations=locations,
-    )
-
-
-async def _translate_tool_call_chunks(
-    chunk: Any,
-    thread_id: str,
-    effective_agent_id: str,
-    emitters: EventEmitters,
-) -> None:
-    """Translate a streamed chunk's ``tool_call_chunks`` into tool-call events.
-
-    Provider-internal tool activity (an ACP CLI's own built-in tools, a
-    Codex ``commandExecution``/``fileChange``/``mcpToolCall`` action) never
-    goes through a real LangChain ``BaseTool``/``ToolNode``, so
-    ``on_tool_start``/``on_tool_end`` never fire for it - the only place this
-    activity reaches ``astream_events`` at all is as ``tool_call_chunks`` on
-    an ``AIMessageChunk`` flowing through ``on_chat_model_stream``. This was
-    previously not read here (only ``chunk.content`` was), so every one of
-    these calls stayed unregistered for the run's entire live stream and
-    could only be reconstructed - incorrectly, permanently PENDING - from
-    checkpoint state after the run ended (F17).
-    """
-    tool_call_chunks = getattr(chunk, "tool_call_chunks", None)
-    if not tool_call_chunks:
-        return
-    known = emitters.get_tool_call_states(thread_id)
-    for tc in tool_call_chunks:
-        tc_id = tc.get("id")
-        if not isinstance(tc_id, str) or not tc_id:
-            continue
-        name = tc.get("name") or "unknown_tool"
-        detail = parse_action_detail(tc.get("args"))
-        if detail is not None and "status" in detail:
-            # Codex's completed-action shape: a single self-contained
-            # terminal report, not a plain registration.
-            await _emit_completed_action(
-                _ToolEmission(thread_id, effective_agent_id, tc_id, None, emitters),
-                name,
-                detail,
-            )
-            continue
-        if tc_id in known:
-            # Already registered (the initial chunk, or an earlier
-            # partial-args delta for the same id) - do not re-register.
-            continue
-        await emitters.emit_tool_call_start(
-            thread_id=thread_id,
-            agent_id=effective_agent_id,
-            tool_call_id=tc_id,
-            title=name,
-            kind=classify_tool_kind(name),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class _ModelStreamProjection:
-    thread_id: str
-    agent_id: str
-    run_id: str
     emitters: EventEmitters
     buffering: BufferingManager
+    telemetry: TelemetryHook | NullTelemetryHook
 
 
-async def _translate_chat_model_stream(
-    event_data: dict[str, Any], projection: _ModelStreamProjection
+def frame_reports_interrupt(frame: StreamFrame) -> bool:
+    """Whether this frame says the run parked on an interrupt.
+
+    Read from the stream as it happens rather than from a state snapshot taken
+    after it: a snapshot read can time out or fail, and a run whose interrupt
+    was only ever visible in a failed read used to settle as though it had
+    completed. LangGraph reports a park twice - once as an ``updates`` entry
+    under its own key, and once on the parked task's result - and either is
+    enough, so both are honoured.
+    """
+    payload = frame.payload
+    if frame.mode == "updates" and isinstance(payload, dict):
+        return INTERRUPT_UPDATE_KEY in cast("dict[str, object]", payload)
+    if frame.mode == "tasks" and isinstance(payload, dict):
+        return bool(cast("dict[str, object]", payload).get("interrupts"))
+    return False
+
+
+def durable_loop_checkpoint_id(frame: StreamFrame) -> str | None:
+    """The id of a committed root checkpoint of the run's own loop, if this is one.
+
+    ``input`` checkpoints record what the run was handed and carry none of the
+    work, so only a ``loop`` one proves a superstep of this dispatch is on
+    disk. A subgraph's checkpoint is not this run's, so only root frames count.
+    """
+    payload = frame.payload
+    if (
+        frame.mode != "checkpoints"
+        or not frame.is_root
+        or not isinstance(payload, dict)
+    ):
+        return None
+    snapshot = cast("dict[str, object]", payload)
+    metadata = snapshot.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    if cast("dict[str, object]", metadata).get("source") != "loop":
+        return None
+    config = snapshot.get("config")
+    if not isinstance(config, dict):
+        return None
+    configurable = cast("dict[str, object]", config).get("configurable")
+    if not isinstance(configurable, dict):
+        return None
+    checkpoint_id = cast("dict[str, object]", configurable).get("checkpoint_id")
+    return checkpoint_id if isinstance(checkpoint_id, str) else None
+
+
+async def process_stream_frame(
+    frame: StreamFrame,
+    thread_id: str,
+    agent_id: str,
+    services: EventProjectionServices,
 ) -> None:
-    chunk: object = _data_field(event_data).get("chunk")
-    if chunk is None:
+    """Transform one public LangGraph stream frame into wire events."""
+    if frame.mode == "messages":
+        await _project_messages(frame, thread_id, agent_id, services)
         return
-    await _translate_tool_call_chunks(
+    if frame.mode == "tasks":
+        await _project_task(frame, thread_id, agent_id, services)
+        return
+    if frame.mode == "custom":
+        await _project_custom(frame, thread_id, agent_id, services.emitters)
+        return
+    if frame.mode in ("updates", "checkpoints"):
+        # `updates` duplicates what the task result already carried, and is
+        # consumed for its interrupt key by the run's own classification;
+        # `checkpoints` drives the dispatch receipt. Neither is wire output.
+        return
+    services.telemetry.increment_counter(
+        "aggregator.events_filtered", 1, **{"event.kind": frame.mode}
+    )
+    logger.debug("Unhandled LangGraph stream mode: %s", frame.mode)
+
+
+# ---------------------------------------------------------------------------
+# messages — the model's own token stream
+# ---------------------------------------------------------------------------
+
+
+async def _project_messages(
+    frame: StreamFrame,
+    thread_id: str,
+    agent_id: str,
+    services: EventProjectionServices,
+) -> None:
+    """Project one ``(chunk, metadata)`` pair of the model token stream.
+
+    The ``nostream`` tag is honoured by the stream layer itself, so the
+    supervisor's routing decision never reaches here to be filtered out by
+    hand, and nothing this projection does can let it through.
+    """
+    pair = frame.payload
+    if not isinstance(pair, tuple) or len(cast("tuple[object, ...]", pair)) != 2:
+        return
+    chunk, raw_metadata = cast("tuple[object, object]", pair)
+    metadata = cast(
+        "dict[str, object]", raw_metadata if isinstance(raw_metadata, dict) else {}
+    )
+    node = metadata.get("langgraph_node")
+    projection = ModelStreamProjection(
+        thread_id=thread_id,
+        agent_id=node if isinstance(node, str) and node else agent_id,
+        message_id=_message_id(chunk, thread_id),
+        emitters=services.emitters,
+        buffering=services.buffering,
+    )
+    await translate_tool_call_chunks(
         chunk, projection.thread_id, projection.agent_id, projection.emitters
     )
     content: object = getattr(chunk, "content", "")
     if isinstance(content, list):
-        await _translate_content_blocks(cast("list[object]", content), projection)
-        return
-    if isinstance(content, str) and content:
+        await translate_content_blocks(cast("list[object]", content), projection)
+    elif isinstance(content, str) and content:
         await projection.buffering.buffer_message_chunk(
             thread_id=projection.thread_id,
             agent_id=projection.agent_id,
             content=content,
-            message_id=projection.run_id,
+            message_id=projection.message_id,
         )
-    await _emit_additional_reasoning(chunk, projection)
+    await emit_additional_reasoning(chunk, projection)
 
 
-async def _translate_content_blocks(
-    content_blocks: list[object], projection: _ModelStreamProjection
-) -> None:
-    for block in content_blocks:
-        if not isinstance(block, dict):
-            continue
-        block_map = cast("dict[str, object]", block)
-        if block_map.get("type") == "reasoning":
-            reasoning_text = _text_field(block_map, "content") or _text_field(
-                block_map, "text"
-            )
-            if reasoning_text:
-                await projection.emitters.emit_thought_chunk(
-                    thread_id=projection.thread_id,
-                    agent_id=projection.agent_id,
-                    content=reasoning_text,
-                    message_id=projection.run_id,
-                )
-        elif block_map.get("type") in ("text", "text_delta"):
-            text = _text_field(block_map, "text") or _text_field(block_map, "content")
-            if text:
-                await projection.buffering.buffer_message_chunk(
-                    thread_id=projection.thread_id,
-                    agent_id=projection.agent_id,
-                    content=text,
-                    message_id=projection.run_id,
-                )
+def _message_id(chunk: object, thread_id: str) -> str:
+    """The identity a client joins one model turn's chunks under.
+
+    The message's own id is used, not the run id that produced it, because the
+    same id is what lands in checkpointed state and what the settled run's REST
+    snapshot reports for the same message. Keying the live stream on anything
+    else gives a reloading client two ids for one message.
+    """
+    message_id = getattr(chunk, "id", None)
+    return message_id if isinstance(message_id, str) and message_id else thread_id
 
 
-async def _emit_additional_reasoning(
-    chunk: object, projection: _ModelStreamProjection
-) -> None:
-    additional_kwargs_raw = getattr(chunk, "additional_kwargs", {}) or {}
-    additional_kwargs = cast(
-        "dict[str, object]",
-        additional_kwargs_raw if isinstance(additional_kwargs_raw, dict) else {},
-    )
-    reasoning = _text_field(additional_kwargs, "reasoning") or _text_field(
-        additional_kwargs, "reasoning_content"
-    )
-    if reasoning:
-        await projection.emitters.emit_thought_chunk(
-            thread_id=projection.thread_id,
-            agent_id=projection.agent_id,
-            content=reasoning,
-            message_id=projection.run_id,
-        )
+# ---------------------------------------------------------------------------
+# tasks — the node boundary and the node's own update
+# ---------------------------------------------------------------------------
 
 
-async def _translate_chat_model_end(
-    event_data: dict[str, Any], projection: _ModelStreamProjection
-) -> None:
-    await projection.buffering.flush_chunk_buffer(projection.thread_id)
-    output: object = _data_field(event_data).get("output")
-    finish_reason: str | None = None
-    if output is not None:
-        resp_meta_raw: object = getattr(output, "response_metadata", None) or {}
-        resp_meta = cast(
-            "dict[str, object]",
-            resp_meta_raw if isinstance(resp_meta_raw, dict) else {},
-        )
-        finish_reason = _text_field(resp_meta, "finish_reason") or _text_field(
-            resp_meta, "stop_reason"
-        )
-    if finish_reason:
-        await projection.emitters.emit_message_chunk(
-            thread_id=projection.thread_id,
-            agent_id=projection.agent_id,
-            content="",
-            message_id=projection.run_id,
-            finish_reason=finish_reason,
-        )
-
-
-async def _translate_tool_start(
-    event_data: dict[str, Any],
-    emission: _ToolEmission,
-) -> None:
-    if emission.node:
-        tool_name = event_data.get("name", "unknown_tool")
-        tool_input: object = _data_field(event_data).get("input")
-        input_args = (
-            cast("dict[str, Any]", tool_input) if isinstance(tool_input, dict) else None
-        )
-        await emission.emitters.emit_tool_call_start(
-            thread_id=emission.thread_id,
-            agent_id=emission.agent_id,
-            tool_call_id=emission.tool_call_id,
-            title=tool_name,
-            kind=classify_tool_kind(tool_name),
-            input_args=input_args,
-        )
-
-
-async def _emit_tool_artifact(
-    event_data: dict[str, Any],
-    emission: _ToolEmission,
-    tool_name: str,
-    output: object,
-) -> None:
-    """Project a completed file tool's path into its artifact update."""
-    file_tool_keywords = {"write", "edit", "create", "save", "move", "rename", "delete"}
-    if not any(keyword in tool_name.lower() for keyword in file_tool_keywords):
-        return
-    output_str = ""
-    output_content_attr = getattr(output, "content", None)
-    if output_content_attr is not None:
-        output_str = str(output_content_attr)
-    elif isinstance(output, str):
-        output_str = output
-    tool_input_end: object = _data_field(event_data).get("input", {})
-    file_path = ""
-    if isinstance(tool_input_end, dict):
-        tool_input_map = cast("dict[str, object]", tool_input_end)
-        file_path = (
-            _text_field(tool_input_map, "file_path")
-            or _text_field(tool_input_map, "path")
-            or _text_field(tool_input_map, "filename")
-        )
-    if not file_path:
-        return
-    filename = _artifact_label_from_tool_input(file_path)
-    await emission.emitters.emit_artifact_update(
-        thread_id=emission.thread_id,
-        artifact_id=f"{emission.tool_call_id}:{filename}",
-        filename=filename,
-        content=output_str[:500] if output_str else f"[{tool_name}] {filename}",
-    )
-
-
-async def _translate_tool_end(
-    event_data: dict[str, Any],
-    emission: _ToolEmission,
-) -> None:
-    if emission.node:
-        tool_name = event_data.get("name", "")
-        output: object = _data_field(event_data).get("output")
-        output_content: list[dict[str, str | None]] | None = None
-        if output is not None:
-            output_str = ""
-            output_content_attr = getattr(output, "content", None)
-            if output_content_attr is not None:
-                output_str = str(output_content_attr)
-            elif isinstance(output, str):
-                output_str = output
-            else:
-                output_str = str(output)
-            if output_str:
-                max_len = domain_config.tool_arg_truncate_len
-                if len(output_str) > max_len:
-                    output_str = output_str[:max_len] + "..."
-                output_content = [{"content_type": "text", "text": output_str}]
-        await emission.emitters.emit_tool_call_update(
-            thread_id=emission.thread_id,
-            agent_id=emission.agent_id,
-            tool_call_id=emission.tool_call_id,
-            status=ToolCallStatus.COMPLETED,
-            content=output_content,
-        )
-        await _emit_tool_artifact(event_data, emission, tool_name, output)
-
-
-async def _translate_tool_error(
-    event_data: dict[str, Any],
-    emission: _ToolEmission,
-) -> None:
-    if emission.node:
-        error_data = event_data.get("data", {})
-        error_msg = str(error_data.get("error", "Tool call failed"))
-        logger.warning(
-            "Tool error in thread %s node %s: %s",
-            emission.thread_id,
-            emission.node,
-            error_msg,
-        )
-        error_content: list[dict[str, str | None]] | None = (
-            [{"content_type": "text", "text": error_msg}] if error_msg else None
-        )
-        await emission.emitters.emit_tool_call_update(
-            thread_id=emission.thread_id,
-            agent_id=emission.agent_id,
-            tool_call_id=emission.tool_call_id,
-            status=ToolCallStatus.FAILED,
-            content=error_content,
-        )
-
-
-async def _translate_custom_event(
-    event_data: dict[str, Any],
+async def _project_task(
+    frame: StreamFrame,
     thread_id: str,
-    effective_agent_id: str,
-    run_id: str,
-    emitters: EventEmitters,
+    agent_id: str,
+    services: EventProjectionServices,
 ) -> None:
-    data = event_data.get("data", {})
-    content = data if isinstance(data, str) else str(data.get("content", ""))
-    if content:
-        max_len = domain_config.tool_arg_truncate_len
-        if len(content) > max_len:
-            content = content[:max_len] + "..."
-        await emitters.emit_thought_chunk(
-            thread_id=thread_id,
-            agent_id=effective_agent_id,
-            content=content,
-            message_id=run_id,
-        )
+    """Project one node's start or result into its status and state events.
 
-
-async def _translate_node_boundary(
-    event_data: dict[str, Any],
-    thread_id: str,
-    effective_agent_id: str,
-    node: str,
-    emitters: EventEmitters,
-) -> None:
-    # The dispatcher only calls this under ``and node``, so node is never None
-    # here - typed accordingly so the agent-status calls type-check.
-    event_kind = event_data.get("event", "")
-    if event_kind == "on_chain_start":
+    Only a root frame is an agent of this team. A subgraph's inner node runs
+    under a non-empty namespace and is that subgraph's business; reporting it
+    here put a node no client had ever been told about on the team roster.
+    """
+    payload = frame.payload
+    if not frame.is_root or not isinstance(payload, dict):
+        return
+    task = cast("dict[str, object]", payload)
+    name = task.get("name")
+    node = name if isinstance(name, str) and name else agent_id
+    del agent_id
+    emitters = services.emitters
+    if "result" not in task and "error" not in task:
         await emitters.emit_agent_status(
             thread_id=thread_id,
-            agent_id=effective_agent_id,
+            agent_id=node,
             node_name=node,
             state=AgentLifecycleState.WORKING,
         )
-    elif event_kind == "on_chain_end":
-        await emitters.emit_agent_status(
-            thread_id=thread_id,
-            agent_id=effective_agent_id,
-            node_name=node,
-            state=AgentLifecycleState.IDLE,
-        )
-        await _emit_chain_output(
-            _data_field(event_data).get("output"), thread_id, emitters
-        )
-    elif event_kind == "on_chain_error":
-        error_data = event_data.get("data", {})
-        error_msg = str(error_data.get("error", "Node execution failed"))
+        return
+    error = task.get("error")
+    if error is not None:
+        error_msg = str(error)
         logger.warning(
-            "Chain error in thread %s node %s: %s",
-            thread_id,
-            node,
-            error_msg,
+            "Node error in thread %s node %s: %s", thread_id, node, error_msg
         )
         await emitters.emit_agent_status(
             thread_id=thread_id,
-            agent_id=effective_agent_id,
+            agent_id=node,
             node_name=node,
             state=AgentLifecycleState.FAILED,
             detail=error_msg[:200],
         )
-
-
-async def _emit_chain_output(
-    output: object, thread_id: str, emitters: EventEmitters
-) -> None:
-    if not isinstance(output, dict):
         return
-    output_map = cast("dict[str, object]", output)
-    await _emit_chain_plan(output_map.get("current_plan"), thread_id, emitters)
-    await _emit_chain_artifacts(output_map.get("artifacts"), thread_id, emitters)
+    await emitters.emit_agent_status(
+        thread_id=thread_id,
+        agent_id=node,
+        node_name=node,
+        state=AgentLifecycleState.IDLE,
+    )
+    await _emit_node_result(task.get("result"), thread_id, emitters)
 
 
-async def _emit_chain_plan(
-    raw_plan: object, thread_id: str, emitters: EventEmitters
+async def _emit_node_result(
+    result: object, thread_id: str, emitters: EventEmitters
 ) -> None:
+    """Project a node's own state update into plan and artifact events.
+
+    The node's update is read, not the whole graph state: a nested runnable
+    inside a node used to be mistaken for the node itself, so a helper chain
+    that happened to return a plan-shaped value published a plan the node
+    never wrote.
+    """
+    if not isinstance(result, dict):
+        return
+    update = cast("dict[str, object]", result)
+    await _emit_plan(update.get("current_plan"), thread_id, emitters)
+    await _emit_artifacts(update.get("artifacts"), thread_id, emitters)
+
+
+async def _emit_plan(raw_plan: object, thread_id: str, emitters: EventEmitters) -> None:
     if not isinstance(raw_plan, list) or not raw_plan:
         return
     entries: list[dict[str, str]] = [
         {
-            "content": _text_field(entry_map, "content"),
-            "status": _text_field(entry_map, "status") or "pending",
-            "priority": _text_field(entry_map, "priority") or "medium",
+            "content": text_field(entry_map, "content"),
+            "status": text_field(entry_map, "status") or "pending",
+            "priority": text_field(entry_map, "priority") or "medium",
         }
         for entry in cast("list[object]", raw_plan)
         if isinstance(entry, dict)
@@ -501,7 +322,7 @@ async def _emit_chain_plan(
         await emitters.emit_plan_update(thread_id, entries)
 
 
-async def _emit_chain_artifacts(
+async def _emit_artifacts(
     raw_artifacts: object, thread_id: str, emitters: EventEmitters
 ) -> None:
     if not isinstance(raw_artifacts, list) or not raw_artifacts:
@@ -521,97 +342,50 @@ async def _emit_chain_artifacts(
             )
 
 
-#: Model events whose output reaches a client as message text.
-_MODEL_OUTPUT_EVENTS = frozenset({"on_chat_model_stream", "on_chat_model_end"})
+# ---------------------------------------------------------------------------
+# custom — whatever a node wrote through get_stream_writer()
+# ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
-class EventProjectionServices:
-    """The stable emitter, buffer, and telemetry dependencies for one stream."""
-
-    emitters: EventEmitters
-    buffering: BufferingManager
-    telemetry: TelemetryHook | NullTelemetryHook
-
-
-async def process_langgraph_event(
-    event_data: dict[str, Any],
+async def _project_custom(
+    frame: StreamFrame,
     thread_id: str,
     agent_id: str,
-    services: EventProjectionServices,
+    emitters: EventEmitters,
 ) -> None:
-    """Transform a LangGraph astream_events callback into wire events.
+    """Relay a node's own stream write as a thought.
 
-    Filters events using ``langgraph_node`` metadata to eliminate
-    ~60% of noisy sub-runnable events (research §1.2).
+    LangGraph strips the writing node from a custom write's namespace, so the
+    write is attributed to the run's agent rather than guessed at. Any payload
+    shape a node cares to write is accepted: the reason this path existed
+    without a producer is that only one shape was ever contemplated.
     """
-    emitters = services.emitters
-    buffering = services.buffering
-    telemetry = services.telemetry
-    event_kind = event_data.get("event", "")
-    run_id = event_data.get("run_id", str(uuid4()))
-    metadata = event_data.get("metadata", {})
-    node = metadata.get("langgraph_node")
-
-    effective_agent_id = node or agent_id
-
-    if event_kind in _MODEL_OUTPUT_EVENTS and TAG_NOSTREAM in (
-        event_data.get("tags") or ()
-    ):
-        # The v2 event API still emits a model run whose caller asked LangGraph
-        # not to stream it (the supervisor's routing decision), so the tag is
-        # honoured here instead.
+    content = _custom_text(frame.payload)
+    if not content:
         return
-
-    if event_kind == "on_chat_model_stream":
-        projection = _ModelStreamProjection(
-            thread_id, effective_agent_id, run_id, emitters, buffering
-        )
-        await _translate_chat_model_stream(event_data, projection)
-        return
-    if event_kind == "on_chat_model_end":
-        projection = _ModelStreamProjection(
-            thread_id, effective_agent_id, run_id, emitters, buffering
-        )
-        await _translate_chat_model_end(event_data, projection)
-        return
-    if event_kind == "on_tool_start":
-        emission = _ToolEmission(thread_id, effective_agent_id, run_id, node, emitters)
-        await _translate_tool_start(event_data, emission)
-        return
-    if event_kind == "on_tool_end":
-        emission = _ToolEmission(thread_id, effective_agent_id, run_id, node, emitters)
-        await _translate_tool_end(event_data, emission)
-        return
-    if event_kind == "on_tool_error":
-        emission = _ToolEmission(thread_id, effective_agent_id, run_id, node, emitters)
-        await _translate_tool_error(event_data, emission)
-        return
-    if event_kind == "on_custom_event":
-        await _translate_custom_event(
-            event_data, thread_id, effective_agent_id, run_id, emitters
-        )
-        return
-    if event_kind in NODE_BOUNDARY_EVENTS and node:
-        await _translate_node_boundary(
-            event_data, thread_id, effective_agent_id, node, emitters
-        )
-
-    _record_filtered_event(event_kind, run_id, telemetry)
+    await emitters.emit_thought_chunk(
+        thread_id=thread_id,
+        agent_id=agent_id,
+        content=content,
+        message_id=thread_id,
+    )
 
 
-def _record_filtered_event(
-    event_kind: str,
-    run_id: str,
-    telemetry: TelemetryHook | NullTelemetryHook,
-) -> None:
-    # Everything else is filtered out (research §1.2).
-    if event_kind not in PASSTHROUGH_EVENTS | NODE_BOUNDARY_EVENTS:
-        telemetry.increment_counter(
-            "aggregator.events_filtered", 1, **{"event.kind": event_kind}
-        )
-        logger.debug(
-            "Filtered LangGraph event: %s (run_id=%s)",
-            event_kind,
-            run_id,
-        )
+def _custom_text(payload: object) -> str:
+    """Render an arbitrary stream write as bounded display text."""
+    if isinstance(payload, str):
+        text = payload
+    elif isinstance(payload, Mapping):
+        mapping = cast("Mapping[str, object]", payload)
+        raw = mapping.get("content", mapping)
+        text = raw if isinstance(raw, str) else str(raw)
+    elif payload is None:
+        return ""
+    elif isinstance(payload, Sequence | bytes):
+        text = str(payload)
+    else:
+        text = str(payload)
+    if not text:
+        return ""
+    max_len = domain_config.tool_arg_truncate_len
+    return text[:max_len] + "..." if len(text) > max_len else text

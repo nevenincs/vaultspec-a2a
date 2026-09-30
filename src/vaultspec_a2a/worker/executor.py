@@ -18,6 +18,12 @@ from ..domain_config import domain_config
 from ..graph.run_context import RunContext
 from ..ipc.serializers import sequenced_to_dict
 from ..providers.team_selection import model_assignment_digest
+
+# A cancelled dispatch settles on the same terms as a drained one, and for the
+# same reason: both stop a run that is not over, leaving a resumable
+# checkpoint and an open action for recovery to deliver again. Settling it as
+# FAILED instead wrote a terminal for a run nothing had failed.
+from ..streaming.ingest import INGEST_DRAINED
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -29,11 +35,12 @@ from ._dispatch_contract import (
     _RESUME_GUARDS,
     _SLOT_OWNING_ACTIONS,
     CAPACITY_ACCEPTED,
+    CAPACITY_DRAINING,
     CAPACITY_FULL,
     CAPACITY_THREAD_ACTIVE,
     DispatchCapacityReservation,
 )
-from ._dispatch_receipts import emit_dispatch_application_receipt
+from ._dispatch_receipts import DispatchReceiptReporter
 from ._dispatch_settlement import SettlementMixin, TerminalArbitration
 from ._executor_state import CheckpointAccess, DispatchCapacityState, RunResources
 from .graph_lifecycle import (
@@ -131,6 +138,18 @@ class Executor(SettlementMixin):
         self._run_controls: dict[str, RunControl] = {}
         self._runs_idle = asyncio.Event()
         self._runs_idle.set()
+        # The reason a drain was requested, kept for the whole remaining life
+        # of this executor. A drain is one-way: the worker asking for it is on
+        # its way out, so every run that starts afterwards starts drained and
+        # no further dispatch is admitted. Without this the drain reached only
+        # the runs that happened to hold a control at the moment it was asked
+        # for, and a dispatch admitted a moment earlier ran to completion
+        # through a shutdown.
+        self._drain_reason: str | None = None
+        # One incorporation report per dispatch, whichever of the run's two
+        # chances to prove it - its first committed checkpoint, or its settle
+        # - gets there first.
+        self._receipts = DispatchReceiptReporter()
 
         # Worker-scoped holder of per-run actor tokens. Registered when a
         # run's active window opens and dropped when it closes, so tokens live
@@ -276,7 +295,7 @@ class Executor(SettlementMixin):
 
     @override
     async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
-        await emit_dispatch_application_receipt(
+        await self._receipts.report(
             req,
             self._checkpointer,
             self._bridge,
@@ -302,6 +321,8 @@ class Executor(SettlementMixin):
     ) -> tuple[DispatchCapacityReservation | None, str]:
         """Return the bounded reason for one atomic capacity decision."""
         async with self._terminal_arbitration(thread_id), self._ingest_lock:
+            if self._drain_reason is not None:
+                return None, CAPACITY_DRAINING
             if thread_id in self._active_ingests:
                 return None, CAPACITY_THREAD_ACTIVE
             if len(self._active_ingests) >= domain_config.max_concurrent_threads:
@@ -383,15 +404,20 @@ class Executor(SettlementMixin):
                 if req.action == ControlActionType.INGEST
                 else _RESUME_GUARDS
             )
-            action = (
-                guards.slot_held_action
-                if refusal_reason == CAPACITY_THREAD_ACTIVE
-                else "dispatch_capacity_refused"
-            )
+            if refusal_reason == CAPACITY_THREAD_ACTIVE:
+                action, wording = guards.slot_held_action, guards.slot_held
+            elif refusal_reason == CAPACITY_DRAINING:
+                action, wording = (
+                    "dispatch_refused_draining",
+                    "Worker is draining -- refused dispatch for thread %s",
+                )
+            else:
+                action, wording = (
+                    "dispatch_capacity_refused",
+                    "Worker capacity refused dispatch for thread %s",
+                )
             logger.warning(
-                guards.slot_held
-                if refusal_reason == CAPACITY_THREAD_ACTIVE
-                else "Worker capacity refused dispatch for thread %s",
+                wording,
                 req.thread_id,
                 extra=self._dispatch_log_extra(
                     req, action=action, runtime_mode=guards.runtime_mode
@@ -624,6 +650,10 @@ class Executor(SettlementMixin):
                     control=self._open_run_control(req.thread_id),
                 )
                 span.set_attribute("outcome", outcome)
+            except asyncio.CancelledError:
+                outcome = INGEST_DRAINED
+                span.set_attribute("outcome", outcome)
+                raise
             except Exception:
                 outcome = ThreadStatus.FAILED
                 execution_failure_reason = _INGEST_GUARDS.execution_failure_detail
@@ -721,6 +751,10 @@ class Executor(SettlementMixin):
                     control=self._open_run_control(req.thread_id),
                 )
                 span.set_attribute("outcome", outcome)
+            except asyncio.CancelledError:
+                outcome = INGEST_DRAINED
+                span.set_attribute("outcome", outcome)
+                raise
             except Exception:
                 outcome = ThreadStatus.FAILED
                 execution_failure_reason = _RESUME_GUARDS.execution_failure_detail
@@ -744,14 +778,25 @@ class Executor(SettlementMixin):
 
     def _open_run_control(self, thread_id: str) -> RunControl:
         control = RunControl()
+        # A run whose control opens after a drain was asked for starts
+        # drained, so it stops before its first node instead of running a
+        # whole turn through a shutdown the worker already began.
+        if self._drain_reason is not None:
+            control.request_drain(self._drain_reason)
         self._run_controls[thread_id] = control
         self._runs_idle.clear()
         return control
 
     def _close_run_control(self, thread_id: str) -> None:
         self._run_controls.pop(thread_id, None)
+        self._receipts.forget(thread_id)
         if not self._run_controls:
             self._runs_idle.set()
+
+    @property
+    def draining(self) -> bool:
+        """Whether a drain has been requested of this executor."""
+        return self._drain_reason is not None
 
     async def drain(self, reason: str) -> None:
         """Stop every run executing here at its next superstep boundary.
@@ -760,7 +805,12 @@ class Executor(SettlementMixin):
         first, so a caller bounds this with its own deadline and cancels what
         remains; a run that did drain left a resumable checkpoint and no
         terminal status, so its open action is delivered again after restart.
+
+        The request sticks: it holds for runs opened after this call as well
+        as the ones already executing, and refuses any further dispatch, so
+        returning here means no run is executing *and* none can start.
         """
+        self._drain_reason = reason
         for control in list(self._run_controls.values()):
             control.request_drain(reason)
         await self._runs_idle.wait()

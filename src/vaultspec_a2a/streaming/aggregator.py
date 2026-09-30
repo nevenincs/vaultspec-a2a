@@ -23,6 +23,7 @@ from ..graph.enums import AgentLifecycleState, ToolCallStatus, ToolKind
 from ..graph.events import DomainEvent, PermissionRequest
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..providers import ProviderCondition
+from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .ingest import IngestManager, IngestRequest
@@ -383,23 +384,38 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
     ) -> None:
         await self._emitters.emit_team_status(thread_id, agents, active_thread_ids)
 
-    # -- LangGraph event processing (delegates to transformer/ingest) ---
+    # -- LangGraph stream processing (delegates to transformer/ingest) ---
 
-    async def process_langgraph_event(
+    async def process_stream_frame(
         self,
-        event_data: dict[str, Any],
+        namespace: tuple[str, ...],
+        mode: str,
+        payload: object,
         thread_id: str,
         agent_id: str,
     ) -> None:
-        from .transformer import EventProjectionServices, process_langgraph_event
+        """Project one ``(namespace, mode, payload)`` graph stream frame."""
+        from .transformer import (
+            EventProjectionServices,
+            StreamFrame,
+            process_stream_frame,
+        )
 
-        await process_langgraph_event(
-            event_data=event_data,
+        await process_stream_frame(
+            StreamFrame(namespace=namespace, mode=mode, payload=payload),
             thread_id=thread_id,
             agent_id=agent_id,
             services=EventProjectionServices(
                 self._emitters, self._buffering, self._telemetry
             ),
+        )
+
+    def run_lifecycle_callbacks(
+        self, thread_id: str, agent_id: str
+    ) -> RunLifecycleCallbacks:
+        """The tool and model-completion handler a run seats in its config."""
+        return RunLifecycleCallbacks(
+            thread_id, agent_id, self._emitters, self._buffering
         )
 
     # -- Ingest (delegates to ingest manager) ---------------------------

@@ -38,6 +38,7 @@ from ..snapshots import (
     is_terminal_event,
     normalize_artifacts,
     normalize_plan_entries,
+    stamp_message_created_at,
 )
 
 # ---------------------------------------------------------------------------
@@ -90,10 +91,21 @@ def test_extract_timestamp_from_string() -> None:
     assert result == datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def test_extract_timestamp_fallback_to_now() -> None:
-    msg = HumanMessage(content="hi")
-    result = extract_message_timestamp(msg)
-    assert isinstance(result, datetime)
+def test_an_unstamped_message_reports_no_time_not_the_read_time() -> None:
+    assert extract_message_timestamp(HumanMessage(content="hi")) is None
+
+
+def test_a_stamped_message_reports_when_it_was_produced() -> None:
+    produced = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
+    msg = stamp_message_created_at(HumanMessage(content="hi"), at=produced)
+    assert extract_message_timestamp(msg) == produced
+
+
+def test_stamping_never_rewrites_a_recorded_time() -> None:
+    produced = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
+    msg = stamp_message_created_at(AIMessage(content="x"), at=produced)
+    stamp_message_created_at(msg, at=datetime(2027, 1, 1, tzinfo=UTC))
+    assert extract_message_timestamp(msg) == produced
 
 
 # ---------------------------------------------------------------------------

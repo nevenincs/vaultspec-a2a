@@ -28,6 +28,7 @@ from ..telemetry import ws_span
 from ..thread.errors import (
     ConfigError,
 )
+from ..thread.snapshots import stamp_message_created_at
 from ._graph_lifecycle_options import (
     GraphLifecycleOptions,
     bind_graph_lifecycle_options,
@@ -928,9 +929,11 @@ class GraphLifecycleManager:
         """
         messages: list[SystemMessage | HumanMessage] = []
         if req.context_preamble:
-            messages.append(SystemMessage(content=req.context_preamble))
+            messages.append(
+                stamp_message_created_at(SystemMessage(content=req.context_preamble))
+            )
         if req.content:
-            messages.append(HumanMessage(content=req.content))
+            messages.append(stamp_message_created_at(HumanMessage(content=req.content)))
 
         graph_input: dict[str, Any] = {
             "messages": messages,

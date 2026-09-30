@@ -975,6 +975,10 @@ class TestGraphInputBuilding:
         assert inp["current_plan"] == []
         assert inp["thread_id"] == "t-init"
         assert inp["token_usage"] == {}
+        # The run's input is stamped when it is accepted as a turn.
+        assert all(
+            "created_at" in message.response_metadata for message in inp["messages"]
+        )
 
     def test_followup_ingest_omits_plan_fields(self) -> None:
         """On follow-up ingest, graph_input omits current_plan/active_agent/artifacts

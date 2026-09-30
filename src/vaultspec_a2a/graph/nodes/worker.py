@@ -23,6 +23,7 @@ from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
+from ...thread.snapshots import stamp_message_created_at
 from ..acp_options import option_id_of, valid_option_ids
 from ..run_context import RunContext, run_thread_id
 from ..tools.task_queue import create_mark_task_complete_tool
@@ -609,6 +610,7 @@ def _finalize_worker_response(
     across the run.
     """
     response.name = worker_name
+    stamp_message_created_at(response)
     update: dict[str, Any] = {
         "messages": [response],
         # Approval outcomes are consumed by the worker turn they routed.

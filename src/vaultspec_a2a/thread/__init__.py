@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from .snapshots import normalize_artifacts as normalize_artifacts
     from .snapshots import normalize_plan_entries as normalize_plan_entries
     from .snapshots import project_checkpoint_tuple as project_checkpoint_tuple
+    from .snapshots import stamp_message_created_at as stamp_message_created_at
     from .state import TeamState as TeamState
 
 _LAZY_IMPORTS = {
@@ -126,6 +127,7 @@ _LAZY_IMPORTS = {
     "normalize_artifacts": ".snapshots",
     "normalize_plan_entries": ".snapshots",
     "project_checkpoint_tuple": ".snapshots",
+    "stamp_message_created_at": ".snapshots",
     "TeamState": ".state",
 }
 
@@ -187,5 +189,6 @@ __all__ = [
     "normalize_plan_entries",
     "pending_clarification",
     "project_checkpoint_tuple",
+    "stamp_message_created_at",
     "validate_clarification_answers",
 ]

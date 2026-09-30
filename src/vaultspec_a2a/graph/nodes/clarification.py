@@ -80,6 +80,7 @@ from ...thread.clarification import (
     render_clarification_answers,
     strip_control_characters,
 )
+from ...thread.snapshots import stamp_message_created_at
 
 if TYPE_CHECKING:
     from ...thread.state import TeamState
@@ -375,15 +376,23 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
             # effectively answered (all-optional questionnaire, empty map).
             rendered = render_clarification_answers(request, declared)
             if rendered is not None:
-                update["messages"] = [HumanMessage(content=rendered)]
+                update["messages"] = [
+                    stamp_message_created_at(HumanMessage(content=rendered))
+                ]
         elif isinstance(resolution, ClarificationDecline):
             # A decline's whole downstream trace is this one fixed marker: the
             # transcript is the only state model turns read, and without it a
             # declined questionnaire is indistinguishable from one never asked.
             # No answer entry is recorded - refusal is not an answer.
-            update["messages"] = [HumanMessage(content=CLARIFICATION_DECLINE_MARKER)]
+            update["messages"] = [
+                stamp_message_created_at(
+                    HumanMessage(content=CLARIFICATION_DECLINE_MARKER)
+                )
+            ]
         else:
-            update["messages"] = [HumanMessage(content=resolution.prompt)]
+            update["messages"] = [
+                stamp_message_created_at(HumanMessage(content=resolution.prompt))
+            ]
         return Command(goto=proceed_target, update=update)
 
     clarification_gate_node.__name__ = "clarification_gate"

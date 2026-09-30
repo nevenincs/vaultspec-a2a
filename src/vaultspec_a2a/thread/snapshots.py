@@ -33,6 +33,7 @@ __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
     "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
+    "MESSAGE_CREATED_AT_KEY",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "TERMINAL_STATUS_MAP",
     "AgentData",
@@ -65,6 +66,7 @@ __all__ = [
     "normalize_plan_entries",
     "normalize_wire_event_type",
     "project_checkpoint_tuple",
+    "stamp_message_created_at",
     "wire_event_type",
 ]
 
@@ -334,7 +336,9 @@ class MessageData:
     message_id: str
     role: str
     content: str
-    timestamp: datetime
+    # None when the message carries no production time: an older run's
+    # history, recorded before messages were stamped.
+    timestamp: datetime | None
     agent_id: str | None = None
 
 
@@ -736,8 +740,30 @@ def classify_message_role(msg: Any) -> str:
     return "system"
 
 
-def extract_message_timestamp(msg: Any) -> datetime:
-    """Extract message timestamp from response metadata; falls back to now()."""
+#: The metadata key a produced message records its production time under.
+MESSAGE_CREATED_AT_KEY = "created_at"
+
+
+def stamp_message_created_at(msg: Any, *, at: datetime | None = None) -> Any:
+    """Record when *msg* was produced, unless it already says.
+
+    Kept in ``response_metadata``, which the message carries through the
+    checkpoint but no provider integration sends back to a model.
+    """
+    metadata: object = getattr(msg, "response_metadata", None)
+    if isinstance(metadata, dict) and MESSAGE_CREATED_AT_KEY not in metadata:
+        cast("dict[str, object]", metadata)[MESSAGE_CREATED_AT_KEY] = (
+            at or datetime.now(UTC)
+        ).isoformat()
+    return msg
+
+
+def extract_message_timestamp(msg: Any) -> datetime | None:
+    """Return when *msg* was produced, or ``None`` when it does not say.
+
+    The time a projection happens to read the message is not when it was
+    produced, so an unstamped message reports no time rather than that one.
+    """
     ts: datetime | None = None
     response_metadata_raw: object = getattr(msg, "response_metadata", None) or {}
     additional_kwargs_raw: object = getattr(msg, "additional_kwargs", None) or {}
@@ -747,7 +773,9 @@ def extract_message_timestamp(msg: Any) -> datetime:
             if isinstance(meta_src_raw, dict)
             else {}
         )
-        raw_ts: object = meta_src.get("created_at") or meta_src.get("timestamp")
+        raw_ts: object = meta_src.get(MESSAGE_CREATED_AT_KEY) or meta_src.get(
+            "timestamp"
+        )
         if isinstance(raw_ts, datetime):
             ts = raw_ts
             break
@@ -756,8 +784,6 @@ def extract_message_timestamp(msg: Any) -> datetime:
                 ts = datetime.fromisoformat(raw_ts)
             if ts is not None:
                 break
-    if ts is None:
-        ts = datetime.now(UTC)
     return ts
 
 

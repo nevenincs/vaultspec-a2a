@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:b519c746a4c0291c7fa6fbf1d69f022c677dc703b03a56b193296c6e9316b10d'
+body_hash: 'sha256:e06281f7a3c38016ec5a37bbb7a025d5bcde194bddbbf144c56e73e81695f52d'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -313,6 +313,18 @@ related:
 - `S29` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
 - `S29` `by:` `worker-a91fafa5`
 - `S24` `by:` `orchestrator`
+- `S30` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S30` `M` `src/vaultspec_a2a/thread/__init__.py`
+- `S30` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S30` `M` `src/vaultspec_a2a/graph/nodes/clarification.py`
+- `S30` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S30` `M` `src/vaultspec_a2a/api/schemas/snapshots.py`
+- `S30` `M` `openapi.json`
+- `S30` `M` `src/vaultspec_a2a/thread/tests/test_snapshots.py`
+- `S30` `A` `src/vaultspec_a2a/graph/tests/nodes/test_worker_message_time.py`
+- `S30` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S30` `verify:` `runner api control thread graph worker acceptance desktop_tests (2049)` -> `pass`
+- `S30` `by:` `orchestrator`
 
 ## Notes
 
@@ -328,4 +340,5 @@ related:
 - `S22` Deviation accepted by the orchestrator: the unattended Claude lane pins mode default, not the planned dontAsk, because the pinned CLI maps dontAsk to deny-without-asking and would take the permission rung and cross-project guard out of the path (0f58aff); recorded in the audit.
 - `S24` The worker-side hand-off (stop offering an always answer the CLI would persist) was applied by the orchestrator in 92f4a75.
 - `S21` Logged and closed by the orchestrator at merge (b56bb9c) from the P04 worker's report; the merge carried the graph-test fallout of S23 and S27.
+- `S30` MessageSnapshot.timestamp became nullable in openapi.json (regenerated): a message recorded before stamping reports no time; a cross-repository contract change recorded in the audit.
 

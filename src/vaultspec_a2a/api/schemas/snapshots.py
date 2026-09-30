@@ -39,7 +39,9 @@ class MessageSnapshot(BaseModel):
     role: str
     content: str
     agent_id: str | None = None
-    timestamp: datetime
+    # Null for a message recorded before messages carried their production
+    # time; never the time the snapshot was read.
+    timestamp: datetime | None
 
 
 class ToolCallSnapshot(BaseModel):

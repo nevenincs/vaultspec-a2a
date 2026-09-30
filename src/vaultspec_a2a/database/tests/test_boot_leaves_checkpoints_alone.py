@@ -27,6 +27,7 @@ from langgraph.graph import END, START, StateGraph
 from ...api.app import _initialize_gateway_database
 from ...testing import settings_override
 from ...thread.state import TeamState
+from .. import close_db
 from ..migrations import backfill_teamstate_sdd_fields, count_pending_sdd_backfill
 
 if TYPE_CHECKING:
@@ -109,14 +110,19 @@ async def test_boot_does_not_rewrite_legacy_checkpoint_rows(tmp_path: Path) -> N
     pending = count_pending_sdd_backfill(checkpoint_db)
     assert pending > 0
 
-    with settings_override(
-        database_backend="sqlite",
-        database_url=f"sqlite+aiosqlite:///{tmp_path / 'app.db'}",
-        checkpoint_backend="sqlite",
-        checkpoint_database_url=f"sqlite+aiosqlite:///{checkpoint_db}",
-    ):
-        engine = await _initialize_gateway_database(FastAPI(), armed=False)
-        await engine.dispose()
+    # Boot seats the process-wide engine; another test's seat would refuse it,
+    # and leaving this one seated would refuse the next test's.
+    await close_db()
+    try:
+        with settings_override(
+            database_backend="sqlite",
+            database_url=f"sqlite+aiosqlite:///{tmp_path / 'app.db'}",
+            checkpoint_backend="sqlite",
+            checkpoint_database_url=f"sqlite+aiosqlite:///{checkpoint_db}",
+        ):
+            await _initialize_gateway_database(FastAPI(), armed=False)
+    finally:
+        await close_db()
 
     assert _checkpoint_blobs(checkpoint_db) == before
     assert count_pending_sdd_backfill(checkpoint_db) == pending

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:618c8255e07b2d2b3547aad940b82e0868254a2fac6c4cc09eff8a11583e1693'
+body_hash: 'sha256:9a034cccd6e2b4dcc7373346b64cb3dfc03a207a7fdca0a0044867339da23166'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -345,6 +345,9 @@ related:
 - `S42` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
 - `S42` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
 - `S42` `by:` `orchestrator`
+- `S27` `M` `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py`
+- `S27` `verify:` `pytest src/vaultspec_a2a/api src/vaultspec_a2a/control src/vaultspec_a2a/database with Postgres required` -> `pass`
+- `S27` `by:` `orchestrator`
 
 ## Notes
 
@@ -373,3 +376,4 @@ related:
 - `S33` A fan-out branch reads on through its own resume values instead of parking on the first unusable one, because its Send payload never carries later answers; the one-interrupt-per-execution rule still holds for ordinary workers.
 - `S36` The required recursion limit measures `3*limit+1,` not the audit's estimate; the compile check applies only to teams with an exec or audit worker, since others never spend the budget. One budget test moved to the review-artifact gate because exec returns now clear validation errors.
 - `S42` Unreachable under the shipped gate table, so no behavioural test can fail before it without widening the supervisor API to inject a table; the order is now correct by construction and the existing graph suite passes.
+- `S27` Correction: the boot proof leaked the process-wide engine seat and failed when API tests ran first in the same process.

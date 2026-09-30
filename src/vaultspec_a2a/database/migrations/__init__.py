@@ -79,6 +79,14 @@ def backfill_teamstate_sdd_fields(db_path: Path | str) -> int:
     Fresh stores with no checkpoint table are left untouched. Existing rows are
     decoded and re-encoded through LangGraph's production serializer; unreadable
     or structurally foreign rows fail loud instead of being labelled compatible.
+
+    Called by the desktop staged-generation migration entrypoint, which owns
+    every schema mutation for the armed profile and must leave no pending row
+    behind: ordinary armed boot refuses to start while one exists. It is NOT a
+    boot step for any other profile. A checkpoint missing these channels
+    resumes and reads exactly as one carrying their defaults - every reader
+    treats them as optional - so running it on every boot rewrote the whole
+    store to change nothing observable.
     """
     path = Path(db_path)
     if not path.is_file():

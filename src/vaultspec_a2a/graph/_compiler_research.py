@@ -29,7 +29,7 @@ from ..thread.errors import ConfigError
 from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations
 )
-from ._compiler_retry import _NODE_RETRY_POLICY
+from ._compiler_retry import _NODE_RETRY_POLICY, _SUBMIT_RETRY_POLICY
 from .compiler import (
     _add_node,
     _agent_node_metadata,
@@ -627,6 +627,7 @@ def _compile_research_adr(
             max_revisions=max_revisions,
         ),
         destinations=(_RA_RESEARCH_GATE, _RA_SYNTHESIS),
+        retry_policy=_SUBMIT_RETRY_POLICY,
     )
     _add_node(
         builder,
@@ -649,6 +650,7 @@ def _compile_research_adr(
             max_revisions=max_revisions,
         ),
         destinations=(_RA_ADR_GATE, _RA_ADR_AUTHOR),
+        retry_policy=_SUBMIT_RETRY_POLICY,
     )
     _add_node(
         builder,
@@ -671,6 +673,7 @@ def _compile_research_adr(
             max_revisions=max_revisions,
         ),
         destinations=(_RA_PLAN_GATE, _RA_PLAN_AUTHOR),
+        retry_policy=_SUBMIT_RETRY_POLICY,
     )
     _add_node(
         builder,

@@ -6,9 +6,19 @@ from langgraph.errors import GraphRecursionError, NodeTimeoutError
 from langgraph.types import RetryPolicy
 
 from ..providers.conditions import ProviderCondition, condition_is_retryable
-from ..thread.errors import ProviderSessionError, WorkerExecutionError
+from ..thread.errors import (
+    DocumentConformanceError,
+    ProviderSessionError,
+    WorkerExecutionError,
+)
 
-__all__ = ["_NODE_RETRY_POLICY", "_worker_retry_on"]
+__all__ = [
+    "_NODE_RETRY_POLICY",
+    "_SUBMIT_RETRY_POLICY",
+    "_worker_retry_on",
+    "node_occupancy_ceiling",
+    "retry_sleep_ceiling",
+]
 
 # Transient exceptions that warrant a retry at the LangGraph node level.
 _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -156,3 +166,64 @@ _NODE_RETRY_POLICY = RetryPolicy(
     jitter=True,
     retry_on=_worker_retry_on,
 )
+
+
+def _transport_retry_on(exc: Exception) -> bool:
+    """Retry a submit only for a transport fault, never for its own refusal.
+
+    The submitter is idempotent by contract - a repeat for the same run and
+    phase returns the same proposal id - so another attempt after a dropped
+    connection costs nothing and saves a run whose human gates have already
+    passed. Its two deterministic outcomes are excluded by name: a conformance
+    refusal is handled inside the node, and a spent conformance budget is a
+    verdict about the document, which no number of attempts changes.
+    """
+    if isinstance(exc, DocumentConformanceError):
+        return False
+    return isinstance(exc, _TRANSIENT_EXCEPTIONS)
+
+
+#: RetryPolicy for the idempotent document-submit nodes. Same schedule as the
+#: worker policy so the superstep backstop bounds both alike, but a narrower
+#: predicate: a submit node has no model turn to interpret, so the only fault
+#: worth another attempt is the transport.
+_SUBMIT_RETRY_POLICY = RetryPolicy(
+    initial_interval=0.5,
+    backoff_factor=2.0,
+    max_interval=1.0,
+    max_attempts=3,
+    jitter=True,
+    retry_on=_transport_retry_on,
+)
+
+
+def retry_sleep_ceiling(policy: RetryPolicy) -> float:
+    """Worst-case seconds a retry schedule spends WAITING between attempts.
+
+    Derived from the policy's own fields rather than restated as a number, so
+    a change to the schedule cannot leave a bound that no longer covers it.
+    LangGraph waits ``min(max_interval, initial_interval * backoff_factor **
+    (attempts - 1))`` before each attempt after the first, plus up to one
+    second of jitter when the policy asks for it.
+    """
+    total = 0.0
+    for attempt in range(1, max(policy.max_attempts, 1)):
+        interval = min(
+            policy.max_interval,
+            policy.initial_interval * policy.backoff_factor ** (attempt - 1),
+        )
+        total += interval + (1.0 if policy.jitter else 0.0)
+    return total
+
+
+def node_occupancy_ceiling(run_timeout: float) -> float:
+    """The longest one node can hold its superstep across every attempt.
+
+    Each attempt gets the whole per-node run budget, and the retry loop sleeps
+    between them, so a bound of one budget plus a grace - which is what the
+    graph-wide step timeout used to be - cut the retries off: a node that
+    spent its budget on a first attempt had about the grace left for two more.
+    """
+    return max(_NODE_RETRY_POLICY.max_attempts, 1) * run_timeout + retry_sleep_ceiling(
+        _NODE_RETRY_POLICY
+    )

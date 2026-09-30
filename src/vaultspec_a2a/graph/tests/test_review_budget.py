@@ -276,6 +276,58 @@ async def test_a_submitter_that_never_accepts_a_body_ends_the_run_typed() -> Non
     assert raised.value.attempts == 3
 
 
+class _FlakyTransportSubmitter:
+    """Drops the first connection, then submits; idempotent as the seam requires."""
+
+    def __init__(self, drops: int) -> None:
+        self.remaining_drops = drops
+        self.calls = 0
+
+    async def __call__(self, state: Any, phase: str) -> str:
+        del state
+        self.calls += 1
+        if self.remaining_drops > 0:
+            self.remaining_drops -= 1
+            raise ConnectionResetError("the engine dropped the submit")
+        return f"prop-{phase}"
+
+
+@pytest.mark.asyncio
+async def test_a_transport_blip_on_submit_does_not_fail_a_gated_run() -> None:
+    """A dropped submit is retried, not a lost run.
+
+    The submit nodes carried no retry policy at all, so one connection reset
+    between this process and the engine failed a run whose human gates had
+    already passed. The submitter is idempotent by contract, so a second
+    attempt returns the same proposal id rather than a duplicate.
+    """
+    submitter = _FlakyTransportSubmitter(drops=1)
+    team = load_team_config("vaultspec-adr-research")
+    topology = team.topology.model_copy(
+        update={
+            "research_threads": [ResearchThreadSpec(thread_id="primary")],
+            "max_review_revisions": 1,
+        }
+    )
+    team = team.model_copy(update={"topology": topology})
+    graph: Any = compile_team_graph(
+        team_config=team,
+        agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
+        checkpointer=InMemorySaver(),
+        provider_factory=_RoleScriptedFactory({}),
+        proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
+    )
+
+    await _updates(graph, _receipt_input("flaky"), "flaky")
+
+    # Two attempts, one proposal, and the run reached its human gate.
+    assert submitter.calls == 2
+    parked = await graph.aget_state({"configurable": {"thread_id": "flaky"}})
+    assert parked.next == ("research_gate",)
+    assert parked.values["gate_pending_proposal_id"] == "prop-research"
+
+
 @pytest.mark.asyncio
 async def test_a_zero_budget_refusal_ends_on_its_first_retry() -> None:
     """A phase with no revision budget still gets one corrective pass.

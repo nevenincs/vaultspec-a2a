@@ -54,7 +54,7 @@ from ..thread.errors import (
     ConfigError,
 )
 from ..thread.state import TeamState
-from ._compiler_retry import _NODE_RETRY_POLICY
+from ._compiler_retry import _NODE_RETRY_POLICY, node_occupancy_ceiling
 from .enums import PipelinePhase, Provider
 from .nodes.action_completion import GRAPH_COMPLETION_NODE, record_graph_completion
 from .nodes.diverge import (
@@ -260,10 +260,13 @@ class CompiledTeamGraph(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
-#: Seconds the graph-wide superstep bound sits above each node's own run budget.
-#: Both are measured from roughly the same instant, so at equal values the
-#: superstep bound would win the race and report an anonymous step timeout
-#: instead of the node's own, which names the node and which limit it hit.
+#: Seconds the graph-wide superstep bound sits above the longest a node can
+#: legitimately occupy its superstep. Both are measured from roughly the same
+#: instant, so at equal values the superstep bound would win the race and
+#: report an anonymous step timeout instead of the node's own, which names the
+#: node and which limit it hit. The bound it sits above is the RETRY budget -
+#: every attempt's run budget plus the waits between them - not one attempt's,
+#: which is what truncated the retries a node was configured for.
 STEP_BACKSTOP_GRACE_SECONDS = 30.0
 
 # Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
@@ -1074,6 +1077,8 @@ def compile_team_graph(
         name=str(team_config.id),
     )
 
-    graph.step_timeout = step_timeout + STEP_BACKSTOP_GRACE_SECONDS
+    graph.step_timeout = (
+        node_occupancy_ceiling(step_timeout) + STEP_BACKSTOP_GRACE_SECONDS
+    )
 
     return graph

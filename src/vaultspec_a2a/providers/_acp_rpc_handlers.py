@@ -358,48 +358,95 @@ def _strip_mcp_prefix(tool_name: str) -> str:
 def _option_id_at(options: list[JsonObject], index: int, *, default: str) -> str:
     """Return the id of the option at ``index``, or ``default`` if it has none.
 
-    Positional, never scanning: these call sites pick an option by CONVENTION
-    (first is the least restrictive, last the most), so silently sliding to a
-    neighbour when the conventional entry is malformed would substitute an
-    option with the opposite meaning. Reading the id through the canonical
-    extractor instead of subscripting is what keeps a malformed entry from
-    raising ``KeyError`` on a path that exists to handle malformed input.
+    Positional, never scanning: the caller picks an option by CONVENTION (first
+    is the least restrictive), so silently sliding to a neighbour when the
+    conventional entry is malformed would substitute an option with the opposite
+    meaning. Reading the id through the canonical extractor instead of
+    subscripting is what keeps a malformed entry from raising ``KeyError`` on a
+    path that exists to handle malformed input.
     """
     if not options:
         return default
     return option_id_of(options[index]) or default
 
 
-def _first_offered_option_id(options: list[JsonObject], *, default: str) -> str:
-    """Return the first option id actually offered, or ``default`` if none is.
+def _is_approval_option(option: JsonObject) -> bool:
+    """Whether one offered option would let the tool call proceed.
 
-    Unlike :func:`_option_id_at` this scans, because its caller has already
-    established that SOME id is on offer and only needs a real one.
+    Asked by the refusal paths so none of them can answer with an approval. Read
+    from the kind where the backend states one and from the id's own spelling
+    where it does not, because a fail-closed path that trusts only the typed
+    field is one malformed option away from granting what it meant to refuse.
     """
-    return next(
-        (option_id for option in options if (option_id := option_id_of(option))),
-        default,
+    option_id = (option_id_of(option) or "").lower()
+    return option.get("kind") in ("allow_once", "allow_always") or (
+        "allow" in option_id or "approve" in option_id
     )
 
 
-def _denial_option_id(options: list[JsonObject]) -> str:
-    """Return the id of the most restrictive offered option.
+def _offered_refusal_option_id(options: list[JsonObject]) -> str | None:
+    """Return an offered refusal of any spelling, or ``None`` if none is offered."""
+    for option in options:
+        option_id = option_id_of(option)
+        if option_id and (
+            option.get("kind") in ("reject_once", "reject_always")
+            or "reject" in option_id.lower()
+            or "deny" in option_id.lower()
+        ):
+            return option_id
+    return None
 
-    Prefer the first option whose id names a denial; fall back to the last
-    option in the list (conventionally the most restrictive), then to the
-    literal ``"deny"``. The literal is the deliberate answer when the last
-    option is malformed: an id the agent does not recognise makes it decline
-    the tool call, whereas scanning back down the list for any usable id could
-    hand this fail-closed path an APPROVAL.
+
+def _refusal_option_id(options: list[JsonObject]) -> str:
+    """Return the id every refusing path answers with.
+
+    An offered refusal first, whatever the backend spells it. Failing that, the
+    last option - conventionally the most restrictive - but ONLY when it is not
+    an approval, and otherwise the literal ``"reject"``. The literal is a
+    deliberate answer rather than a gap: an id the agent does not recognise makes
+    it decline the tool call, which is the direction a refusal must fail in,
+    while any scan that could land on an approval turns one malformed or unusual
+    option list into a grant.
     """
-    return next(
-        (
-            option_id
-            for option in options
-            if (option_id := option_id_of(option)) and "deny" in option_id.lower()
-        ),
-        _option_id_at(options, -1, default="deny"),
-    )
+    offered = _offered_refusal_option_id(options)
+    if offered is not None:
+        return offered
+    if options and not _is_approval_option(options[-1]):
+        return option_id_of(options[-1]) or "reject"
+    return "reject"
+
+
+def _selected_outcome(rpc_id: AcpRpcId, option_id: str) -> JsonObject:
+    """Build the response frame selecting one offered option."""
+    return {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "result": {"outcome": {"optionId": option_id, "outcome": "selected"}},
+    }
+
+
+def _refused_outcome(rpc_id: AcpRpcId, options: list[JsonObject]) -> JsonObject:
+    """Build the response frame that refuses one tool call.
+
+    A refusal is expressed by SELECTING an offered refusal wherever the request
+    offers one, because that is the answer the agent can act on: the pinned
+    adapter turns it into a denial the model is told about while the turn
+    continues. Where the request offers nothing to refuse with, the protocol's
+    own ``cancelled`` outcome is the answer - it carries no option id at all, so
+    it cannot be mistaken for a selection, and the adapter aborts the tool use.
+    Never an approval, and never an empty frame.
+    """
+    offered = _offered_refusal_option_id(options)
+    if offered is not None:
+        return _selected_outcome(rpc_id, offered)
+    last_id = option_id_of(options[-1]) if options else None
+    if last_id and not _is_approval_option(options[-1]):
+        return _selected_outcome(rpc_id, last_id)
+    return {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "result": {"outcome": {"outcome": "cancelled"}},
+    }
 
 
 def _approval_option_id(options: list[JsonObject]) -> str:
@@ -416,19 +463,6 @@ def _approval_option_id(options: list[JsonObject]) -> str:
             if option.get("kind") == kind and option_id:
                 return option_id
     return _option_id_at(options, 0, default="approve")
-
-
-def _rejection_option_id(options: list[JsonObject]) -> str:
-    """Return the id of an offered rejection, scanning for a refusal of any spelling."""
-    for option in options:
-        option_id = option_id_of(option)
-        if option_id and (
-            option.get("kind") in ("reject_once", "reject_always")
-            or "reject" in option_id.lower()
-            or "deny" in option_id.lower()
-        ):
-            return option_id
-    return _option_id_at(options, -1, default="reject")
 
 
 def _is_always_option(option: JsonObject) -> bool:
@@ -507,7 +541,7 @@ def _autonomous_option_id(
     )
     if canonical in allowed:
         return _approval_option_id(options)
-    return _rejection_option_id(options)
+    return _refusal_option_id(options)
 
 
 async def on_request_permission(
@@ -550,12 +584,7 @@ async def on_request_permission(
             name,
             config.bound_project_root(),
         )
-        deny_id = _denial_option_id(options)
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
-        }
+        return _refused_outcome(rpc_id, options)
 
     if config.permission_callback:
         try:
@@ -570,24 +599,14 @@ async def on_request_permission(
                 logger.warning("Chunk queue full — dropping interrupt sentinel")
             # H9 fix: return a proper JSON-RPC denial response instead of
             # an empty dict `{}` which would produce a malformed frame.
-            deny_id = _denial_option_id(options)
-            return {
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
-            }
+            return _refused_outcome(rpc_id, options)
         except Exception:
             logger.exception(
                 "Permission callback raised; denying permission (fail-closed)"
             )
             # TOAD reference pattern: return a denial outcome (not a JSON-RPC
             # error) so the ACP subprocess can cleanly decline the tool call.
-            deny_id = _denial_option_id(options)
-            return {
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
-            }
+            return _refused_outcome(rpc_id, options)
     else:
         # Autonomous: no permission_callback means no human rung, on ANY lane.
         # Under autonomy the worker leaves the callback unset, so every
@@ -606,20 +625,23 @@ async def on_request_permission(
     # nothing instead of admitting ``None`` as a "valid" answer.
     valid_ids = valid_option_ids(options)
     if valid_ids and option_id not in valid_ids:
+        # An answer naming an option that was never offered is not a decision
+        # this handler can carry out, so the call is REFUSED rather than mapped
+        # onto a neighbour. Substituting the first offered option was the same
+        # bug in two directions: the pinned adapter orders its options
+        # allow_always first, so a refusal whose id did not match resolved to the
+        # broadest possible grant - and any substitution answers a question the
+        # decider was not asked.
         logger.warning(
-            "Permission callback returned option_id=%r not in valid options %r; "
-            "falling back to first option",
+            "Permission answer option_id=%r is not among the offered options %r; "
+            "refusing the tool call rather than substituting one",
             option_id,
             sorted(valid_ids),
         )
-        option_id = _first_offered_option_id(options, default=option_id)
+        return _refused_outcome(rpc_id, options)
 
     logger.info("ACP permission decision: tool=%s option=%s", name, option_id)
-    return {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {"outcome": {"optionId": option_id, "outcome": "selected"}},
-    }
+    return _selected_outcome(rpc_id, option_id)
 
 
 async def on_fs_read_text_file(

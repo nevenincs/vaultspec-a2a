@@ -858,6 +858,13 @@ class InfraConfig(ProjectSettings):
             "Maximum HTTP body accepted on internal /dispatch and /events endpoints."
         ),
     )
+    internal_event_batch_body_multiplier: int = Field(
+        default=4,
+        description=(
+            "How much larger a worker event BATCH may be than a single internal "
+            "body, since a batch carries many events in one request."
+        ),
+    )
 
     # Worker IPC bridge
     ipc_flush_interval_seconds: float = Field(

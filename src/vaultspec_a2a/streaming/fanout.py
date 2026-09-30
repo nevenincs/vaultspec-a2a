@@ -33,15 +33,19 @@ from ..graph.events import ErrorOccurred
 if TYPE_CHECKING:
     from .types import SequencedEvent
 
-__all__ = ["DeliveryOutcome", "deliver_bounded"]
+__all__ = ["PROTECTED_WIRE_TYPES", "DeliveryOutcome", "deliver_bounded"]
 
 logger = logging.getLogger(__name__)
 
-_PROTECTED_WIRE_TYPES = frozenset({"error", "thread_terminal"})
+PROTECTED_WIRE_TYPES = frozenset({"error", "thread_terminal"})
 """Relayed frame types that outlive their queue position under backpressure.
 
 Both state an outcome exactly once. Every other frame on this stream is either
 repeated, superseded, or recoverable by re-reading authoritative state.
+
+Shared with the worker's own event buffer, which drops oldest under the same
+pressure for the same reason: one policy for which events a bounded buffer may
+give up, rather than one per buffer.
 """
 
 
@@ -55,7 +59,7 @@ def _is_protected(payload: object) -> bool:
     """
     if isinstance(payload, Mapping):
         return cast("Mapping[str, object]", payload).get("type") in (
-            _PROTECTED_WIRE_TYPES
+            PROTECTED_WIRE_TYPES
         )
     return isinstance(getattr(payload, "event", None), ErrorOccurred)
 

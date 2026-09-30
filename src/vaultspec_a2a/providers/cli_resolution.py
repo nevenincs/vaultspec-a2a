@@ -58,7 +58,12 @@ def resolve_trusted_executable(
     if os.path.dirname(name):
         raise ValueError(f"trusted executable resolution takes a bare name: {name!r}")
     if search_path is None:
-        search_path = os.environ.get("PATH")
+        # The service's OWN search path, read as the machine fact it is rather
+        # than as configuration: a settings field would declare a second, quieter
+        # answer to "where is this host's software installed", and the value that
+        # must not be consulted here - a provider child's environment - is
+        # excluded by reading this process's rather than by naming a setting.
+        search_path = os.environ.get("PATH")  # storage-anchor-ok
     for directory in _trusted_search_directories(search_path):
         if resolved := shutil.which(os.path.join(directory, name)):
             return os.path.abspath(resolved)

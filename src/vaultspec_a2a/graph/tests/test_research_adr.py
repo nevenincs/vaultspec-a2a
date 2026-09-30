@@ -51,19 +51,25 @@ def _review_state(review_text: str) -> dict[str, Any]:
 
 
 def test_doc_review_router_revises_on_exact_sentinel() -> None:
-    router = _doc_review_router(writer_target="writer", gate_target="gate")
+    router = _doc_review_router(
+        writer_target="writer", gate_target="gate", phase="adr", max_revisions=3
+    )
     text = "REVISION REQUIRED\n1. Frontmatter missing a date locator."
     assert router(_review_state(text)) == "writer"
 
 
 def test_doc_review_router_advances_on_pass() -> None:
-    router = _doc_review_router(writer_target="writer", gate_target="gate")
+    router = _doc_review_router(
+        writer_target="writer", gate_target="gate", phase="adr", max_revisions=3
+    )
     assert router(_review_state("PASS")) == "gate"
 
 
 def test_doc_review_router_no_false_positive_on_negated_prose() -> None:
     """Prose containing the word 'revision' must not route back to the writer."""
-    router = _doc_review_router(writer_target="writer", gate_target="gate")
+    router = _doc_review_router(
+        writer_target="writer", gate_target="gate", phase="adr", max_revisions=3
+    )
     text = "PASS\nThe locators are re-fetchable and no revision required is needed."
     assert router(_review_state(text)) == "gate"
 

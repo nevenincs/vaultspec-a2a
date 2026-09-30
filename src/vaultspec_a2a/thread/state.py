@@ -150,6 +150,14 @@ def _merge_clarification_resolution_receipts(
     return {**existing, **new}
 
 
+def _merge_review_revisions(
+    existing: dict[str, int],
+    new: dict[str, int],
+) -> dict[str, int]:
+    """Merge per-phase review revision counts; a phase's latest count wins."""
+    return {**existing, **new}
+
+
 def append_research_findings(
     existing: list[dict[str, Any]],
     new: list[dict[str, Any]],
@@ -280,6 +288,11 @@ class TeamState(TypedDict):
     # routing can branch on it. Mirrors the ``approval_status`` /
     # ``approval_request_id`` pair the plan-approval gate uses; last-write-wins.
     gate_phase: NotRequired[str | None]
+    # Revisions a document phase's reviewer has requested since the phase last
+    # reached its gate, keyed by phase. Once a phase spends its preset's budget
+    # the review router advances to the gate, leaving the human as the backstop;
+    # the submit node resets the phase to 0 each time it reaches the gate.
+    review_revisions: NotRequired[Annotated[dict[str, int], _merge_review_revisions]]
     gate_verdict: NotRequired[str | None]
     # --- mid-run clarification ---
     # clarification_request: the bounded question set the clarification request

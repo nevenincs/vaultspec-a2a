@@ -162,7 +162,9 @@ _TEST_CACHE_KEY = (
 _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 
 
-def _current_ingest_dispatch(thread_id: str) -> DispatchRequest:
+def _current_ingest_dispatch(
+    thread_id: str, *, recursion_limit: int = 10
+) -> DispatchRequest:
     workspace = pathlib.Path(_WORKSPACE)
     definition = freeze_graph_definition(
         load_team_config("mock-success-single", workspace_root=workspace),
@@ -176,7 +178,7 @@ def _current_ingest_dispatch(thread_id: str) -> DispatchRequest:
         workspace_root=_WORKSPACE,
         team_preset="mock-success-single",
         graph_definition=definition,
-        recursion_limit=10,
+        recursion_limit=recursion_limit,
         model_assignment=_mock_assignment(),
     )
     accepted = freeze_accepted_input(request, intent={"content": "build it"})

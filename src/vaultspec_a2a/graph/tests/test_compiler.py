@@ -596,28 +596,26 @@ async def test_compile_pipeline_empty_order_raises(
         )
 
 
-def test_loop_route_signals_finish_only_on_the_literal_and_the_guard() -> None:
+def test_loop_route_follows_the_loop_verdict_under_the_guard() -> None:
     """The real ``_loop_route`` decision, exercised directly (not compile-only).
 
-    Before this replaced a compile-only assertion, the test only checked that a
-    pipeline-loop graph compiled - it never exercised the routing logic its name
-    and docstring promised. Import the production decision and assert every arm:
-    the literal FINISH ends the loop, the max_loops guard forces FINISH, and any
-    other residue (empty, a stale star value, ``None``) routes back to revise.
+    The loop goes round again only when the loop node's own verdict asks for
+    revision, and the max_loops guard forces FINISH once the counter reaches
+    the ceiling whatever the verdict says.
     """
-    # Literal FINISH ends the loop early, while below the guard.
-    assert _loop_route(next_value="FINISH", loop_count=0, max_loops=3) == "FINISH"
-    # Any non-FINISH residue routes back to the loop, not out of it.
-    assert _loop_route(next_value="revise", loop_count=0, max_loops=3) == "revise"
-    assert _loop_route(next_value="", loop_count=1, max_loops=3) == "revise"
-    assert _loop_route(next_value="vaultspec-coder", loop_count=1, max_loops=3) == (
-        "revise"
+    # A verdict that asks for nothing more ends the loop early.
+    assert _loop_route(revision_requested=False, loop_count=0, max_loops=3) == (
+        "FINISH"
     )
-    assert _loop_route(next_value=None, loop_count=0, max_loops=3) == "revise"
-    # The max_loops guard forces FINISH once the counter reaches the ceiling,
-    # regardless of the residue in next_value.
-    assert _loop_route(next_value="revise", loop_count=3, max_loops=3) == "FINISH"
-    assert _loop_route(next_value="", loop_count=4, max_loops=3) == "FINISH"
+    assert _loop_route(revision_requested=False, loop_count=2, max_loops=3) == (
+        "FINISH"
+    )
+    # A revision request sends the loop round again while below the guard.
+    assert _loop_route(revision_requested=True, loop_count=0, max_loops=3) == ("revise")
+    assert _loop_route(revision_requested=True, loop_count=2, max_loops=3) == ("revise")
+    # The guard wins over any verdict once the ceiling is reached.
+    assert _loop_route(revision_requested=True, loop_count=3, max_loops=3) == ("FINISH")
+    assert _loop_route(revision_requested=True, loop_count=4, max_loops=3) == ("FINISH")
 
 
 # ---------------------------------------------------------------------------

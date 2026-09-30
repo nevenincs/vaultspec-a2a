@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
@@ -11,11 +12,15 @@ if TYPE_CHECKING:
 
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
+    from langgraph.runtime import Runtime
 
     from ..authoring import FeedbackContextReader
+    from .nodes.worker import WorkerNode
     from .protocols import CostPort, ProviderFactoryProtocol
+    from .run_context import RunContext
 
 from langgraph.graph import START, StateGraph
+from langgraph.types import Command
 
 from ..authoring.contract import RESEARCH_ADR_ROLES
 from ..thread.clarification import MAX_REQUEST_ID_CHARS, ClarificationRequest
@@ -33,6 +38,7 @@ from .compiler import (
     resolve_model_for_worker,
 )
 from .enums import PipelinePhase
+from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
 from .nodes.clarification import (
     ClarificationQuestionProducer,
@@ -47,6 +53,7 @@ from .nodes.phase_gate import (
     DocumentProposalSubmitter,
     create_phase_gate_node,
     create_phase_submit_node,
+    review_requests_revision,
 )
 from .nodes.worker import create_worker_node
 from .web_locators import extract_web_locators
@@ -317,31 +324,51 @@ def _make_research_producer(
     return producer
 
 
-#: Standalone verdict sentinels the vaultspec-doc-reviewer persona emits.
-_DOC_REVIEW_REVISION_SENTINEL = "REVISION REQUIRED"
-
-
-def _doc_review_router(*, writer_target: str, gate_target: str) -> Any:
+def _doc_review_router(
+    *, writer_target: str, gate_target: str, phase: str, max_revisions: int
+) -> Any:
     """Return the inner-quality-loop router for a document phase.
 
-    Reads the doc-reviewer's last message for the persona's standalone verdict
-    sentinel: a whole line equal to ``REVISION REQUIRED`` routes back to the phase
-    writer to revise; anything else (the ``PASS`` verdict) advances to the phase
-    gate. The match is an anchored whole-line check, not a substring, so reviewer
-    prose such as "no revision required" does not false-positive back to the
-    writer. Absent an explicit revision verdict the loop advances, so the human
-    gate remains the backstop rather than an inner loop that never exits.
+    A reviewer verdict asking for revision routes back to the phase writer while
+    the phase still has revisions left in its budget; anything else (the
+    ``PASS`` verdict, or no verdict) advances to the phase gate. Every revision
+    costs a writer turn and a review turn, and a reviewer that never passes
+    would otherwise loop until the recursion limit killed the run, so a spent
+    budget advances to the gate too: the human is the backstop, not the loop.
     """
 
     def router(state: TeamState) -> str:
-        messages = state.get("messages") or []
-        last_content = str(getattr(messages[-1], "content", "")) if messages else ""
-        lines = {line.strip().upper() for line in last_content.splitlines()}
-        if _DOC_REVIEW_REVISION_SENTINEL in lines:
-            return writer_target
-        return gate_target
+        if not review_requests_revision(state.get("messages") or []):
+            return gate_target
+        spent = (state.get("review_revisions") or {}).get(phase, 0)
+        return writer_target if spent <= max_revisions else gate_target
 
     return router
+
+
+def _count_review_revisions(review_node: WorkerNode, phase: str) -> WorkerNode:
+    """Wrap a document reviewer so each revision it requests is counted.
+
+    The router that reads the count is a pure function of state and cannot
+    write it, so the reviewer's own update carries it.
+    """
+
+    @functools.wraps(review_node)
+    async def _review_node_with_count(
+        state: TeamState,
+        config: RunnableConfig | None = None,
+        runtime: Runtime[RunContext] | None = None,
+        _inner: WorkerNode = review_node,
+    ) -> dict[str, Any] | Command[Any]:
+        result = await _inner(state, config=config, runtime=runtime)
+        if isinstance(result, Command) or not review_requests_revision(
+            result.get("messages") or []
+        ):
+            return result
+        spent = (state.get("review_revisions") or {}).get(phase, 0)
+        return {**result, "review_revisions": {phase: spent + 1}}
+
+    return accepting_runnable_config(_review_node_with_count)
 
 
 def _research_harness_servers(team_config: Any) -> list[str]:
@@ -469,17 +496,20 @@ def _compile_research_adr(
     _add_node(
         builder,
         _RA_RESEARCH_REVIEW,
-        create_worker_node(
-            doc_reviewer_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+        _count_review_revisions(
+            create_worker_node(
+                doc_reviewer_model,
+                _composed_role_prompt(
+                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+                ),
+                name=_RA_RESEARCH_REVIEW,
+                autonomous=options.get("autonomous", False),
+                workspace_root=options.get("workspace_root"),
+                role="doc-reviewer",
+                harness_mcp_servers=harness_mcp_servers,
+                cost_port=options.get("cost_port"),
             ),
-            name=_RA_RESEARCH_REVIEW,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="doc-reviewer",
-            harness_mcp_servers=harness_mcp_servers,
-            cost_port=options.get("cost_port"),
+            PipelinePhase.RESEARCH,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -508,17 +538,20 @@ def _compile_research_adr(
     _add_node(
         builder,
         _RA_ADR_REVIEW,
-        create_worker_node(
-            doc_reviewer_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+        _count_review_revisions(
+            create_worker_node(
+                doc_reviewer_model,
+                _composed_role_prompt(
+                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+                ),
+                name=_RA_ADR_REVIEW,
+                autonomous=options.get("autonomous", False),
+                workspace_root=options.get("workspace_root"),
+                role="doc-reviewer",
+                harness_mcp_servers=harness_mcp_servers,
+                cost_port=options.get("cost_port"),
             ),
-            name=_RA_ADR_REVIEW,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="doc-reviewer",
-            harness_mcp_servers=harness_mcp_servers,
-            cost_port=options.get("cost_port"),
+            PipelinePhase.ADR,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -547,17 +580,20 @@ def _compile_research_adr(
     _add_node(
         builder,
         _RA_PLAN_REVIEW,
-        create_worker_node(
-            doc_reviewer_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+        _count_review_revisions(
+            create_worker_node(
+                doc_reviewer_model,
+                _composed_role_prompt(
+                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+                ),
+                name=_RA_PLAN_REVIEW,
+                autonomous=options.get("autonomous", False),
+                workspace_root=options.get("workspace_root"),
+                role="doc-reviewer",
+                harness_mcp_servers=harness_mcp_servers,
+                cost_port=options.get("cost_port"),
             ),
-            name=_RA_PLAN_REVIEW,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="doc-reviewer",
-            harness_mcp_servers=harness_mcp_servers,
-            cost_port=options.get("cost_port"),
+            PipelinePhase.PLAN,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -653,11 +689,15 @@ def _compile_research_adr(
         )
         builder.add_edge(START, _RA_CLARIFY_REQUEST)
 
+    max_revisions = team_config.topology.max_review_revisions
     builder.add_edge(_RA_SYNTHESIS, _RA_RESEARCH_REVIEW)
     builder.add_conditional_edges(
         _RA_RESEARCH_REVIEW,
         _doc_review_router(
-            writer_target=_RA_SYNTHESIS, gate_target=_RA_RESEARCH_SUBMIT
+            writer_target=_RA_SYNTHESIS,
+            gate_target=_RA_RESEARCH_SUBMIT,
+            phase=PipelinePhase.RESEARCH,
+            max_revisions=max_revisions,
         ),
         cast(
             "dict[Hashable, str]",
@@ -667,7 +707,12 @@ def _compile_research_adr(
     builder.add_edge(_RA_ADR_AUTHOR, _RA_ADR_REVIEW)
     builder.add_conditional_edges(
         _RA_ADR_REVIEW,
-        _doc_review_router(writer_target=_RA_ADR_AUTHOR, gate_target=_RA_ADR_SUBMIT),
+        _doc_review_router(
+            writer_target=_RA_ADR_AUTHOR,
+            gate_target=_RA_ADR_SUBMIT,
+            phase=PipelinePhase.ADR,
+            max_revisions=max_revisions,
+        ),
         cast(
             "dict[Hashable, str]",
             {_RA_ADR_AUTHOR: _RA_ADR_AUTHOR, _RA_ADR_SUBMIT: _RA_ADR_SUBMIT},
@@ -676,7 +721,12 @@ def _compile_research_adr(
     builder.add_edge(_RA_PLAN_AUTHOR, _RA_PLAN_REVIEW)
     builder.add_conditional_edges(
         _RA_PLAN_REVIEW,
-        _doc_review_router(writer_target=_RA_PLAN_AUTHOR, gate_target=_RA_PLAN_SUBMIT),
+        _doc_review_router(
+            writer_target=_RA_PLAN_AUTHOR,
+            gate_target=_RA_PLAN_SUBMIT,
+            phase=PipelinePhase.PLAN,
+            max_revisions=max_revisions,
+        ),
         cast(
             "dict[Hashable, str]",
             {_RA_PLAN_AUTHOR: _RA_PLAN_AUTHOR, _RA_PLAN_SUBMIT: _RA_PLAN_SUBMIT},

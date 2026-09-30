@@ -183,7 +183,11 @@ class DomainConfig(ProjectSettings):
 
     graph_recursion_limit: int = Field(
         default=100,
-        description="LangGraph recursion limit passed to every graph invocation.",
+        description=(
+            "Operator ceiling on the LangGraph recursion limit of every graph "
+            "invocation. A run is held to the lower of this and the recursion "
+            "limit its team preset declares."
+        ),
     )
 
     # -- Worker executor -----------------------------------------------------

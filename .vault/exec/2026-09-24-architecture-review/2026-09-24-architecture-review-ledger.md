@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:af7bc82bf3db2b862f28b9ca936a54ddd35ebe861ffef74d2251b84fb38449a0'
+body_hash: 'sha256:584b88a8b198dc27faab97564217858305f7a1dfb0712fccb01e90d4496780e5'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -103,6 +103,23 @@ related:
 - `S09` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
 - `S09` `verify:` `runner graph thread worker context streaming team suites` -> `pass`
 - `S09` `by:` `orchestrator`
+- `S10` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S10` `M` `src/vaultspec_a2a/thread/executable_graph.py`
+- `S10` `M` `src/vaultspec_a2a/domain_config.py`
+- `S10` `M` `src/vaultspec_a2a/team/team_config.py`
+- `S10` `M` `src/vaultspec_a2a/thread/state.py`
+- `S10` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S10` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S10` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S10` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S10` `A` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S10` `A` `src/vaultspec_a2a/worker/tests/test_executor_recursion_limit.py`
+- `S10` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_research_adr.py`
+- `S10` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
+- `S10` `verify:` `runner graph team thread worker suites` -> `pass`
+- `S10` `by:` `orchestrator`
 
 ## Notes
 
@@ -110,4 +127,5 @@ related:
 - `S06` LangGraph 1.2.12 astream_events drops its control keyword for version v2; the RunControl is seated as the parent runtime through the private CONFIG_KEY_RUNTIME, with the drain test as the tripwire.
 - `S08` Closed by the orchestrator; the vaultspec-high-executor by-row above was a logging slip. Pruning runs on the gateway after terminal acceptance, not in the worker, because application receipts pin checkpoint ids the gateway reads in relay order.
 - `S09` An exhausted re-ask budget fails the run with SupervisorRoutingError rather than finishing it; a new turn resets the budget through the graph input.
+- `S10` The recursion limit resolves in the worker from the frozen graph definition (the lower of the gateway ceiling and the preset), not at the gateway call sites; the plan row scope was corrected through the plan verb.
 

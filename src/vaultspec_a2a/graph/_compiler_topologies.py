@@ -46,6 +46,7 @@ from .compiler import (
 )
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
+from .nodes.phase_gate import review_requests_revision
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import create_mount_node
 
@@ -520,7 +521,7 @@ def _compile_pipeline_loop(
 
     def _loop_router(state: TeamState) -> str:
         return _loop_route(
-            next_value=state.get("next"),
+            revision_requested=review_requests_revision(state.get("messages") or []),
             loop_count=state.get("loop_count", 0),
             max_loops=max_loops,
         )

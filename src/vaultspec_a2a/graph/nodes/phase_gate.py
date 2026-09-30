@@ -48,6 +48,8 @@ from ...thread.enums import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ...thread.state import TeamState
     from .worker import RoutingNode
 
@@ -55,12 +57,32 @@ if TYPE_CHECKING:
 # thread.enums holds it precisely because this module and the authoring lifecycle
 # cannot import each other, and a consumer taking it from either would undo that.
 __all__ = [
+    "REVIEW_REVISION_SENTINEL",
     "DocumentProposalSubmitter",
     "ProposalRevisionRequiredError",
     "create_phase_gate_node",
     "create_phase_submit_node",
     "parse_verdict",
+    "review_requests_revision",
 ]
+
+#: The standalone verdict line a reviewer persona emits to send work back.
+REVIEW_REVISION_SENTINEL = "REVISION REQUIRED"
+
+
+def review_requests_revision(messages: Sequence[object]) -> bool:
+    """Whether the latest message is a reviewer verdict asking for revision.
+
+    An anchored whole-line match, not a substring, so reviewer prose such as
+    "no revision required" never reads as a request. Anything else - the
+    ``PASS`` verdict, or no verdict at all - is not a request.
+    """
+    if not messages:
+        return False
+    content = str(getattr(messages[-1], "content", ""))
+    return REVIEW_REVISION_SENTINEL in {
+        line.strip().upper() for line in content.splitlines()
+    }
 
 
 _REVISION_VERDICTS = frozenset({VERDICT_REJECTED, VERDICT_REQUEST_CHANGES})
@@ -184,6 +206,8 @@ def create_phase_submit_node(
                 "gate_pending_proposal_id": proposal_id,
                 "authoring_proposal_ids": [proposal_id],
                 "routing_error": None,
+                # A revision the human asks for at the gate gets a fresh budget.
+                "review_revisions": {phase: 0},
             },
         )
 

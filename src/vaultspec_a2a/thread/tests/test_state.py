@@ -300,6 +300,7 @@ class TestTeamStateStructure:
             # document phase machine
             "research_findings",
             "gate_phase",
+            "review_revisions",
             "gate_verdict",
             "gate_pending_proposal_id",
             # mid-run clarification

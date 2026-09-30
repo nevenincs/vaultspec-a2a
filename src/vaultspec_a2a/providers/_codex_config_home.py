@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING
 from ..control.config import settings
 from ..thread.errors import ConfigError
 from ..utils.enums import CodexWebSearchMode
+from ._codex_auth import seed_run_credential, write_back_refreshed_credential
 from ._config_home_roots import (
     sweep_orphan_homes,
     temp_home_root,
@@ -346,7 +347,10 @@ def build_codex_config_home(
     Copies ``auth.json`` from *base_home* (if present) to preserve Codex's
     file-based auth, then writes a ``config.toml`` with exactly the declared
     ``[mcp_servers.<name>]`` blocks. The caller sets ``CODEX_HOME`` to the
-    returned path and MUST call :func:`cleanup_codex_config_home` after reap.
+    returned path and MUST call :func:`cleanup_codex_config_home` after reap -
+    which is also what returns a credential Codex refreshed during the run to the
+    home it was copied from, so the removal below never takes the operator's live
+    login with it.
 
     Created inside the armed desktop profile's temporary-home root when one is
     declared (else the system temp directory), mirroring the Claude isolated
@@ -379,14 +383,10 @@ def build_codex_config_home(
     try:
         _restrict(home)
         if base_home is not None:
-            auth = base_home / "auth.json"
-            if auth.exists():
-                dest = home / "auth.json"
-                shutil.copy2(auth, dest)
-                # Defensive: pin the credential copy to owner-only regardless of
-                # the source's mode (POSIX-effective; a no-op on Windows, where
-                # the temp tree is already user-scoped).
-                _restrict(dest)
+            # The copy is RECORDED, not just made: Codex rotates its refresh
+            # token mid-run and writes the new one here, so cleanup has to know
+            # where this login came from to return it.
+            seed_run_credential(base_home, home)
         (home / "config.toml").write_text(
             render_codex_config_toml(
                 specs,
@@ -412,11 +412,16 @@ def build_codex_config_home(
 def cleanup_codex_config_home(home: Path | None) -> None:
     """Remove a per-run Codex config home, reporting failures to its cleanup owner.
 
+    A credential Codex refreshed inside the home is written back to its source
+    first, and unconditionally: the rotation is the operator's login, not this
+    run's state, so it is returned whether the home is then removed or retained.
+
     When ``codex_config_home_retain`` is configured, the home is retained for
     inspection and troubleshooting. By default the home is removed.
     """
     if home is None:
         return
+    write_back_refreshed_credential(home)
     if settings.codex_config_home_retain:
         logger.debug("Codex config home retained at %s by configuration", home)
         return

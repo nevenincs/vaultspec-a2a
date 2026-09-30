@@ -48,6 +48,7 @@ _IMPURE_FILES = frozenset(
         "test_capsule_acp_resolution.py",
         "test_catalog_registration_live.py",
         "test_codex_config_home.py",
+        "test_codex_credential_writeback.py",
         "test_codex_stderr_drain.py",
         "test_codex_turn_idle_timeout.py",
         "test_claude_permission_posture.py",

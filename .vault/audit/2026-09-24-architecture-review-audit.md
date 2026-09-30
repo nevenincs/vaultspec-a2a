@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-09-24'
+modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:62e7a395cfa2732acd448777043e33bab0e049f03574d9ab1dfc9afb45670b38'
+body_hash: 'sha256:3cf931747b9f18dd6b6e70b48559a5de5d43d9f9978bf6a78e3cc521ff6193e1'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -362,3 +362,127 @@ Decisions a follow-on ADR must make; this audit does not make them:
 - Provider binary and credential policy: default to the lock-vendored Claude binary or the host one, version ranges attached to lane proofs, recorded binary identity in run evidence, and whether provider-native sessions are resumed or remain per call (`claude-binary-split`, `no-cli-version-identity`, `per-call-provider-sessions`, `oauth-token-setting-unwired`).
 - A unified, durable tool-permission model across lanes: one policy input (including `require_approval_for`), an a2a-owned "always" rule table with scope and expiry, and an attributed decision log (`tool-decision-audit`, `dead-require-approval-for`, `always-allow-persisted-by-cli`).
 - A durable per-run JSONL event log and GenAI span model: schema, retention, content-capture posture, and its relation to checkpoint history (`no-durable-event-log`, `provider-transcripts-unlinked`, `token-accounting-gaps`).
+
+## Execution and plan-close review, 2026-09-30
+
+Findings raised while executing `2026-09-24-architecture-review-plan` and by its plan-close review. The review failed the plan on one critical and two high findings; P01.S08, P03.S14, P03.S17, P03.S19, P03.S20, P04.S23, P04.S25 and P04.S27 were reopened and fixed, and the remainder are recorded here with their owner.
+
+### compose-gateway-binds-loopback | critical | the gateway container bound 127.0.0.1 after P03.S20 moved it to the serve entry
+
+Status: fixed in the P03.S20 reopen. The serve entry binds `settings.host`, whose default is loopback (`src/vaultspec_a2a/control/infra_config.py`, `host`), and only the worker stage set its bind host, so every Compose variant published a dead port and refused the worker's relay while the in-container healthcheck passed. The gateway stage now sets `VAULTSPEC_A2A_HOST=0.0.0.0` (`service/docker/prod.Dockerfile`), and `src/vaultspec_a2a/control/tests/test_deployment_names.py` holds every served stage (with inherited ENV) and every Compose file to a non-loopback bind; the new test fails on the prior Dockerfile. Residual: the Compose healthchecks still probe `localhost` from inside the container, so they would not catch a regression on their own; probing the container's own hostname would.
+
+### grep-pre-approved-host-wide | high | P04.S23 left Grep pre-approved by bare name, readable anywhere on the host
+
+Status: fixed in the P04.S23 reopen; supersedes `grep-unscoped-read`, whose stated mitigation was wrong because a bare allowlist entry never reaches the permission rung. `native_read_floor_rules` (`src/vaultspec_a2a/providers/_native_read_tools.py`) withholds any floor tool whose rule grammar takes no path when the run has a workspace, so the floor composes `Read(<ws>/**)` and `Glob(<ws>/**)` only. The session's working directory is the workspace (`src/vaultspec_a2a/providers/_acp_session.py`, `setup_session`), where the CLI's own posture lets a read-only built-in proceed; an out-of-workspace Grep is raised to the rung, whose prose title does not match any allowlisted name, so an autonomous run refuses it. Residual: that in-workspace Grep proceeds unprompted rests on the pinned CLI's working-directory posture and has no live proof yet; if it does not, Grep degrades to refused rather than to host-wide.
+
+### followup-verb-has-no-reachable-success | high | after P03.S14 the messages verb refuses in every lifecycle state while the contract advertised 202
+
+Status: fixed in the P03.S14 reopen (contract half); absorbs `followup-continuation-seam-unreachable`. The route now states on the edge that no run state admits a follow-up and that its 202 is not currently served (`src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`, `run_message_endpoint`), backed by `test_every_lifecycle_status_resolves_to_a_typed_answer`. The 409 `code` is narrowed from the whole failure vocabulary to `RunMessageRefusalCode` (`src/vaultspec_a2a/api/schemas/gateway.py`), so `openapi.json` names only the five codes the refusal carries. The continuation model itself remains the user's decision; the verb stays published so a caller learns the refusal by code.
+
+### run-busy-refusal-contract | medium | the follow-up verb's refusal changed shape on the dashboard edge
+
+Status: open, cross-repository; updates the execution finding of the same name. `/v1/runs/{run_id}/messages` refuses with `409 {"detail": {"code", "message"}}` where `code` is `RunMessageRefusalCode` (`input_required`, `terminal`, `conflict`, `incompatible_state`, `run_busy`) instead of a string `detail`, and its 202 is documented as not served. The dashboard must be told as a contract event.
+
+### message-timestamp-nullable-contract | low | a replayed message's timestamp may now be null on the dashboard edge
+
+Status: open, cross-repository; from P05.S30. `MessageSnapshot.timestamp` is `datetime | None` in `openapi.json`: messages are stamped with their production time (`src/vaultspec_a2a/thread/snapshots.py`, `stamp_message_created_at`) when a run's input is accepted, a worker turn finishes and a clarification is answered, and a message recorded before that reports no time rather than the snapshot's read time. The dashboard must render a null time; only pre-upgrade history carries one.
+
+### prompt-render-role-headers-are-forgeable | medium | message content could reproduce the renderer's role headings
+
+Status: fixed in the P04.S27 reopen. A content line that reads as a role heading (any depth, any case) is escaped rather than removed, and a speaker name is held to one line (`src/vaultspec_a2a/providers/_prompt_render.py`, `_defused`, `speaker_label`), so a tool result or another agent's output cannot open a system section. `src/vaultspec_a2a/providers/tests/test_prompt_render.py` drives forged headings through both lanes' rendering.
+
+### codex-credential-writeback-blocks-the-event-loop | medium | the Codex write-back held a polled file lock on the worker loop
+
+Status: fixed in the P04.S25 reopen. The config-home cleanup, which carries the write-back, runs through `asyncio.to_thread` (`src/vaultspec_a2a/providers/codex_chat_model.py`), and credential bytes that do not decode as UTF-8 are reported and never published over the operator's login (`src/vaultspec_a2a/providers/_codex_auth.py`, `write_back_refreshed_credential`), covered by `test_bytes_that_are_not_a_login_are_never_written_back`.
+
+### sse-id-without-resumption | medium | P03.S17 put a restartable in-memory sequence in the SSE id field
+
+Status: fixed in the P03.S17 reopen. No frame carries an SSE `id` (`src/vaultspec_a2a/streaming/sse_frames.py`, `_encode`): the sequence restarts with the worker and nothing buffers frames for a `Last-Event-ID`, so an id promised a resumption the stream does not offer and invited deduplication that would drop a restarted worker's events. The sequence stays in the body. A resumable stream needs a durable sequence and a replay buffer, which the `stream-resumption` finding still owns.
+
+### settled-prune-on-the-relay-critical-path | medium | P01.S08's prune ran inside the terminal relay request
+
+Status: fixed in the P01.S08 reopen. The prune is scheduled as a tracked background task (`src/vaultspec_a2a/control/event_handlers.py`, `_schedule_settled_history_prune`), the gateway lifespan waits for pending prunes before the checkpointer closes (`src/vaultspec_a2a/api/app.py`, `settle_pending_checkpoint_prunes`), and a failed or cancelled SQLite prune rolls back on the saver's shared connection (`src/vaultspec_a2a/database/checkpoint_retention.py`, `_prune_sqlite`). `test_a_failed_sqlite_prune_leaves_nothing_for_the_next_write_to_commit` uses a real trigger; the prior code lost every superseded write there.
+
+### requeued-ipc-batch-drops-terminal-events | medium | P03.S19 protected terminals on append but not on re-queue
+
+Status: fixed in the P03.S19 reopen. A failed batch goes back ahead of events that arrived while it was in flight and the cap is restored by the same outcome-preserving eviction a full buffer uses (`src/vaultspec_a2a/worker/ipc.py`, `_requeue_failed_batch`, `_pop_evictable_event`); the drop log counts lost outcomes. `test_a_refused_batch_keeps_its_outcome_when_the_buffer_refilled` holds and refuses a real batch; the prior slice dropped the terminal.
+
+### step-id-carried-forward-in-a-test-docstring | medium | test docstrings cited plan Step ids
+
+Status: fixed. The five Step-id prefixes in `src/vaultspec_a2a/control/tests/test_active_project_identity.py` were replaced by the invariant each test states.
+
+### drained-settle-leaves-the-failure-stash-behind | low | the drain path returned before draining the failure stashes
+
+Status: fixed. `_settle_run` drains both stashes before the `INGEST_DRAINED` return (`src/vaultspec_a2a/worker/_dispatch_settlement.py`).
+
+### seated-runtime-also-shadows-the-saver-store | low | the drain workaround's seated runtime replaced the graph's store
+
+Status: fixed; refines `langgraph-v2-drops-run-control`. The seated runtime carries the graph's own store (`src/vaultspec_a2a/streaming/ingest.py`, `_config_carrying_control`), and `test_shutdown_drain_stops_the_run_between_nodes_without_settling_it` now compiles its graph with a store that a node writes through; without the fix the node sees no store.
+
+### langgraph-v2-drops-run-control | medium | astream_events v1/v2 does not forward the control keyword to the Pregel loop
+
+Status: worked around in P01.S06; upstream defect. LangGraph 1.2.12 `astream_events` forwards `control` only for `version="v3"`, so a `RunControl` passed to a v2 stream never reaches the loop. The worker seats `Runtime(control=..., store=...)` under LangGraph's private `CONFIG_KEY_RUNTIME` key (`src/vaultspec_a2a/streaming/ingest.py`, `_config_carrying_control`); a rename of that key fails at import, and `src/vaultspec_a2a/worker/tests/test_executor_drain.py` detects a drain that stops working. Recommendation: report upstream and drop the workaround once v2 forwards `control`, or move ingest to the v3 event API.
+
+### drain-redelivery-reported-complete | high | a run drained at shutdown was reported completed when its action was delivered again
+
+Status: fixed in P02.S12. A drained run leaves a checkpoint with no pending writes, which the ingest preflight read as "ran to END"; the preflight now reads the action receipts the checkpoint carries and continues a part-way run with `None` input (`src/vaultspec_a2a/worker/state_projection.py`, `pre_flight_checkpoint`), driven by `src/vaultspec_a2a/worker/tests/test_executor_redelivery.py`.
+
+### capsule-claude-binary-still-overridden-by-path | medium | under the desktop capsule a PATH claude is still the one a served turn runs
+
+Status: open; partially fixes `claude-binary-split`, which stays open. `pin_claude_executable` (`src/vaultspec_a2a/providers/cli_resolution.py`) resolves the CLI from the service PATH with no capsule branch, unlike the capsule's Node and adapter resolution in `src/vaultspec_a2a/providers/_factory_commands.py`. P04.S26 unified discovery and execution, not capsule authority. Recommendation: the provider-binary follow-on ADR named in the recommendations above decides capsule-vendored versus host binary per profile.
+
+### half-open-probe-token-is-not-owner-scoped | low | any dispatch's settlement releases another dispatch's half-open probe
+
+Status: open from P03.S15. The breaker's single probe flag (`src/vaultspec_a2a/control/circuit_breaker.py`, `pre_dispatch`, `release_probe`) is cleared by every settlement path without checking who reserved it, so a dispatch in flight across an open-to-half-open transition can admit a second probe. The window needs a request outliving the 30 s recovery timeout. Recommendation: hand `pre_dispatch` a probe token and release only the owner's.
+
+### run-busy-not-in-the-recovery-lease-release-set | low | a worker 409 now retains the action lease where it used to release it
+
+Status: open from P03.S15. `_settle_delivery_failure` releases the lease only for circuit-open, at-capacity and rejected (`src/vaultspec_a2a/control/direct_control_recovery.py`), and the worker's busy 409 is now `RUN_BUSY`, so recovery holds the lease until expiry. Holding it is arguably right, since the worker is executing that run, but the change is unstated and untested. Recommendation: state and test the intent, or add `RUN_BUSY` to the release set.
+
+### deleted-follow-up-dispatch-coverage | low | P03.S14 removed the only tests of the definite-versus-ambiguous lease rule
+
+Status: open from P03.S14. The replaced message-path tests in `src/vaultspec_a2a/control/tests/test_direct_control_leases.py` were the only ones asserting that a definite failure releases the claim and an ambiguous one retains it with its recorded recovery condition, machinery the cancel, permission and recovery verbs still use. Recommendation: re-express the rule against the cancel or permission-respond verb.
+
+### settled-prune-early-receipt-window | low | a turn admitted during the settled-history prune could lose its first application receipt
+
+Status: accepted risk from P01.S08, currently unreachable. The prune runs after the durable terminal write, now in the background; a turn admitted between that write and the prune whose worker had checkpointed past its first superstep could see the checkpoint pinned by its on-start receipt deleted, with the settle-time receipt still applying it. No run state admits a follow-up today, so nothing can be admitted in that window. A tighter bound would prune only ids older than the proven terminal checkpoint.
+
+### permission-repeat-call-same-task | low | the same tool call asked twice in one task shares one permission request id
+
+Status: open from P02.S11. The request id is derived from the task's checkpoint namespace and the exact call (`src/vaultspec_a2a/graph/nodes/worker.py`, `_permission_request_id`), so two identical asks in one task name one request. Before S11 every permission interrupt of a task shared one id, so this narrows an existing collision. A per-task ordinal would separate them only if the provider's ask order is stable across replay.
+
+### input-checkpoint-crash-window | low | a crash between the input checkpoint and the first superstep refuses the redelivered first ingest
+
+Status: open from P02.S12. LangGraph's step -1 input checkpoint holds the input before any channel carries the action receipt, so receipt evidence reads it as incompatible and the preflight refuses the redelivery, failing closed rather than delivering the input twice. Recognising `metadata.source == "input"` in `read_checkpoint_evidence`, which gateway recovery shares, would let it continue.
+
+### at-capacity-marks-failed | medium | a capacity refusal still marks the dispatch failed
+
+Status: open from P03.S15. `FailureType.AT_CAPACITY` carries `should_mark_failed=True` in `src/vaultspec_a2a/thread/dispatch_policy.py` (`_POLICY`), which the control-action-leases recovery amendment's "capacity retains accepted work" rule argues against.
+
+### ipc-client-timeout-shorter-than-terminal-confirmation | medium | the worker's event client gives up before the gateway can confirm a terminal
+
+Status: open from P03.S19; the prune no longer adds to it. The worker's 10 s client timeout (`src/vaultspec_a2a/worker/ipc.py`) is shorter than the gateway's worst-case terminal confirmation, a durable write plus a checkpoint read bounded at 10 s, so a slow store makes the worker re-post a terminal the gateway is accepting.
+
+### terminal-fanout-before-persist | low | a stream learns of a terminal before it is durable, closed only to one heartbeat
+
+Status: open decision from P03.S17. The stream re-reads durable status on each heartbeat and closes on a terminal, bounding the race to one idle beat. Persisting before fan-out in `src/vaultspec_a2a/api/internal.py` would close it at the cost of delaying every relayed frame by a database write; that latency trade-off is the user's.
+
+### parallel-researchers-share-one-model | medium | the research fan-out's parallel branches share one provider model instance
+
+Status: open from P02.S13, code reading only. Every researcher branch calls the one model resolved at compile time (`src/vaultspec_a2a/graph/_compiler_research.py`, `_make_research_producer`) and those branches run in one superstep, while `AcpChatModel` refuses concurrent use; `with_mcp_servers` copies share the original's transport. A per-branch model from the provider factory would separate them and belongs with the provider-lane work.
+
+### graph-cache-per-run | low | each run now compiles its own graph
+
+Status: accepted trade-off of P02.S13. The graph cache is keyed on the run's thread as well as its compilation identity, so a worker compiles once per run; the LRU bound still caps the entries held.
+
+### claude-mode-default-not-dontask | medium | the unattended Claude lane pins default, not the planned dontAsk
+
+Status: accepted deviation from P04.S22, for the user. The pinned CLI maps `dontAsk` to "deny if not pre-approved" without raising `session/request_permission`, which would take the permission rung and the cross-project guard out of the path. `default` still overrides an operator's ambient `acceptEdits` or `bypassPermissions` while every uncovered call reaches the rung (`src/vaultspec_a2a/providers/_claude_tool_policy.py`, `AUTONOMOUS_PERMISSION_MODE`). Moving the posture into the CLI is a decision for the unified permission model.
+
+### acp-turn-idle-error-lacks-stderr | low | the turn-idle deadline error carries only a stderr line count
+
+Status: open from P04.S28. The ACP early-exit error carries the child's stderr tail; the turn-idle deadline error still reports only how many lines it saw.
+
+### acp-simulator-advertises-no-modes | low | an autonomous session warns rather than refuses when a lane advertises no modes
+
+Status: open from P04.S22. The pinned adapter always advertises modes, but the in-repo simulator (`src/vaultspec_a2a/graph/tests/acp_simulator.py`) does not, so tightening the warning to a refusal needs a `modes` block in the simulator first.

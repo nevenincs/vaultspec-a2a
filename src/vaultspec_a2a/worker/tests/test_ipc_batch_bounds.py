@@ -294,6 +294,61 @@ async def test_a_refused_batch_keeps_its_outcome_when_the_buffer_refilled(
     assert [getattr(record, "dropped_outcome_events", None) for record in drops] == [0]
 
 
+class _RefusingOnceGateway:
+    """A real service that refuses its first batch and records the rest."""
+
+    def __init__(self) -> None:
+        self.refused = 0
+        self.events: list[dict[str, Any]] = []
+        self.delivered = asyncio.Event()
+        app = FastAPI()
+        gateway = self
+
+        @app.post("/internal/events/batch")
+        async def _batch(request: Request) -> Response:
+            if gateway.refused == 0:
+                await request.body()
+                gateway.refused += 1
+                return Response(status_code=503)
+            body: dict[str, Any] = await request.json()
+            gateway.events.extend(body["events"])
+            gateway.delivered.set()
+            return Response(content='{"status":"ok"}', media_type="application/json")
+
+        _ = _batch
+        self.app = app
+
+
+@pytest.mark.asyncio
+async def test_a_backlog_the_cadence_flush_failed_is_driven_again() -> None:
+    """A batch re-queued by the cadence flush itself is retried without new events.
+
+    The re-queue runs inside the flush task, which used to count as the pending
+    flush, so no redrive was armed and the backlog waited for an event that a
+    run which has just ended never sends.
+    """
+    gateway = _RefusingOnceGateway()
+    with settings_override(
+        ipc_max_flush_retries=1,
+        ipc_flush_interval_seconds=0.01,
+        ipc_retry_backoff_base_seconds=0.01,
+    ):
+        bridge = WorkerBridge(api_url="http://control:8000", worker_id="ipc-redrive")
+        bridge._client = httpx.AsyncClient(
+            transport=ASGITransport(app=gateway.app), base_url="http://control:8000"
+        )
+        try:
+            await bridge.send_event("run-bounds", _terminal())
+            await asyncio.wait_for(gateway.delivered.wait(), timeout=5.0)
+        finally:
+            await bridge.close()
+
+    assert gateway.refused == 1
+    assert [event["payload"].get("event_type") for event in gateway.events] == [
+        "thread_terminal"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_two_flushes_never_overlap_on_the_wire() -> None:
     """The cadence flush and a terminal's immediate flush take turns.

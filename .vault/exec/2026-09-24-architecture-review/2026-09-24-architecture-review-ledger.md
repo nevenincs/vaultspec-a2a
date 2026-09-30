@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:1c91ea2e4b9ee891cd3255883f2d02a07001c6fbe2cf3b709eb7cdde6382edea'
+body_hash: 'sha256:a5bc50d0b232dcb017d3bce6a668215d9f809a5a47fbbc43a4880b86bd9ec667'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -372,6 +372,7 @@ related:
 - `S06` `M` `src/vaultspec_a2a/api/tests/clarification_harness.py`
 - `S06` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 - `S13` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
+- `S19` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 
 ## Notes
 
@@ -400,4 +401,5 @@ related:
 - `S19` Reopened by the plan-close review (requeued-ipc-batch-drops-terminal-events, medium).
 - `S06` In-scope correction from the plan-close review (seated-runtime-also-shadows-the-saver-store, drained-settle-leaves-the-failure-stash-behind, both low).
 - `S13` In-scope correction from the plan-close review (step-id-carried-forward-in-a-test-docstring).
+- `S19` Correction from the fix re-review (requeue-redrive-delay-never-arms): the redrive was never armed when the cadence flush itself failed, stranding the backlog.
 

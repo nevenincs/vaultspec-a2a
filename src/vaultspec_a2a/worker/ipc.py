@@ -332,10 +332,17 @@ class WorkerBridge:
         return events.pop(index)
 
     def _schedule_flush(self, delay: float) -> None:
-        """Ensure exactly one pending flush, due in at most *delay* seconds."""
+        """Ensure exactly one pending flush, due in at most *delay* seconds.
+
+        The flush task asking for a flush is finishing, not pending: a batch it
+        failed to deliver is re-queued from inside it, and treating it as the
+        pending flush would leave that backlog waiting for an event a finished
+        run never sends.
+        """
         if self._closing:
             return
-        if self._batch.flush_task is None or self._batch.flush_task.done():
+        pending = self._batch.flush_task
+        if pending is None or pending.done() or pending is asyncio.current_task():
             self._batch.flush_task = asyncio.create_task(self._deferred_flush(delay))
 
     async def _deferred_flush(self, delay: float | None = None) -> None:

@@ -493,9 +493,11 @@ def _validated_initialize_result(
             "loadSession support",
             code=AcpErrorCode.INVALID_PARAMS,
         )
+    agent_info = result.get("agentInfo")
     return InitializeResult(
         agent_capabilities=capabilities,
         auth_methods=_validated_auth_methods(result),
+        agent_info=agent_info if isinstance(agent_info, dict) else {},
     )
 
 

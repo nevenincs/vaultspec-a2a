@@ -46,6 +46,7 @@ _IMPURE_FILES = frozenset(
         "test_acp_turn_deadline.py",
         "test_acp_vault_deny.py",
         "test_capsule_acp_resolution.py",
+        "test_claude_binary_identity.py",
         "test_catalog_registration_live.py",
         "test_codex_config_home.py",
         "test_codex_credential_writeback.py",

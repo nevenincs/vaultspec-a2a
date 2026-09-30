@@ -342,6 +342,10 @@ class InitializeResult:
 
     agent_capabilities: JsonObject
     auth_methods: list[JsonObject]
+    # Who answered the handshake, as the agent named itself. Optional in the
+    # protocol and therefore possibly empty; carried rather than dropped because
+    # it is the only statement of adapter identity a run ever receives.
+    agent_info: JsonObject = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -40,7 +40,6 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
-from ..graph.enums import Provider
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
@@ -113,7 +112,7 @@ from .acp_exceptions import (
     AcpPromptCancelledError,
     AcpPromptError,
 )
-from .cli_resolution import resolve_provider_cli_executable
+from .cli_resolution import pin_claude_executable
 
 __all__ = ["AcpChatModel"]
 
@@ -355,14 +354,11 @@ class AcpChatModel(BaseChatModel):
         # Bypass the adapter's bundled cli.js — drive the same installed claude
         # binary an interactive invocation runs, so the lane's behaviour (and
         # credential resolution) matches the operator's own CLI exactly. Only
-        # for the claude-family adapter; Kimi runs its own CLI.
-        _system_claude = resolve_provider_cli_executable(Provider.CLAUDE)
-        if (
-            _system_claude
-            and self._state.config.acp_family == "claude"
-            and self.command
-        ):
-            env.setdefault("CLAUDE_CODE_EXECUTABLE", _system_claude)
+        # for the claude-family adapter; Kimi runs its own CLI. Resolved through
+        # the one seam the catalog probe also uses, so a lane cannot be qualified
+        # by one binary and then served by another.
+        if self._state.config.acp_family == "claude" and self.command:
+            self._state.session.claude_executable = pin_claude_executable(env)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
         # Suppress interactive prompts that
         # stall non-interactive ACP subprocesses.
@@ -422,6 +418,31 @@ class AcpChatModel(BaseChatModel):
                 )
             )
         return env
+
+    def _record_provider_identity(self, ctx: AcpSessionContext) -> None:
+        """Log which adapter and which CLI this session actually ran on.
+
+        Neither is recoverable after the fact: the adapter names itself once, in
+        the handshake, and the CLI it drives is whatever the pin resolved on this
+        host at this moment. A turn whose behaviour needs explaining later - a
+        capability that was present or absent, a permission posture that differed
+        from the operator's own - is explained by these two facts and by nothing
+        else the run keeps.
+        """
+        agent_info = self._state.session.agent_info
+        name = agent_info.get("name")
+        version = agent_info.get("version")
+        logger.info(
+            "ACP provider identity",
+            extra=runtime_log_extra(
+                self._state.config,
+                process=ctx.process,
+                handshake_step="initialize",
+                agent_name=name if isinstance(name, str) else None,
+                agent_version=version if isinstance(version, str) else None,
+                cli_executable=self._state.session.claude_executable,
+            ),
+        )
 
     async def _native_prompt_blocks(
         self,
@@ -543,6 +564,8 @@ class AcpChatModel(BaseChatModel):
 
             init_result = await initialize_session(ctx, self._state.config)
             self._state.session.auth_methods = init_result.auth_methods
+            self._state.session.agent_info = init_result.agent_info
+            self._record_provider_identity(ctx)
             result = await setup_session(
                 ctx,
                 self._state.config,

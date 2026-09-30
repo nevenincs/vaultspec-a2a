@@ -8,7 +8,17 @@ import sys
 
 from ..graph.enums import Provider
 
-__all__ = ["resolve_provider_cli_executable", "resolve_trusted_executable"]
+__all__ = [
+    "CLAUDE_EXECUTABLE_ENV",
+    "pin_claude_executable",
+    "resolve_provider_cli_executable",
+    "resolve_trusted_executable",
+]
+
+# The Claude ACP adapter's own setting for which CLI it drives. Named here
+# because this module is where the answer is resolved, and both the lanes that
+# need one - a served turn and a catalog probe - take it from here.
+CLAUDE_EXECUTABLE_ENV = "CLAUDE_CODE_EXECUTABLE"
 
 _SYSTEM_CLI_NAMES: dict[Provider, str] = {
     Provider.CLAUDE: "claude",
@@ -96,3 +106,26 @@ def resolve_provider_cli_executable(
         if executable := resolve_trusted_executable(candidate, search_path=search_path):
             return executable
     return None
+
+
+def pin_claude_executable(env: dict[str, str]) -> str | None:
+    """Pin the Claude CLI one child will drive, and return the path it will run.
+
+    The adapter ships a vendored CLI and falls back to it when nothing names
+    another, so a child left unpinned runs a DIFFERENT binary from one that is
+    pinned - which is how a served turn and the catalog probe that qualified it
+    came to run two different Claude versions on the same host, the probe reading
+    the vendored one and the turn the installed one.
+
+    One resolver, so both take the same answer. The precedence is unchanged: a
+    value already in the child environment (the operator's own) wins, then this
+    service's own installed CLI, and a host with neither leaves the adapter to its
+    vendored binary - reported by returning ``None`` rather than by silence.
+    """
+    if pinned := env.get(CLAUDE_EXECUTABLE_ENV):
+        return pinned
+    executable = resolve_provider_cli_executable(Provider.CLAUDE)
+    if executable is None:
+        return None
+    env[CLAUDE_EXECUTABLE_ENV] = executable
+    return executable

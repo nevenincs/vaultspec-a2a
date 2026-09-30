@@ -101,7 +101,8 @@ MODE_CONFIG_OPTION_ID = "mode"
 # installed agent SDK's own rule vocabulary (`filePatternTools`), which is what
 # decides whether a scoped rule is a scope or an unmatchable string. `Grep` is
 # deliberately absent from it upstream, so no path pattern can be written for
-# that tool at all and it is composed under its bare name.
+# that tool at all; a run with a workspace therefore does not pre-approve it
+# (see ``native_read_floor_rules``).
 CLAUDE_PATH_RULE_TOOLS: frozenset[str] = frozenset(
     {"Read", "Write", "Edit", "Glob", "NotebookRead", "NotebookEdit", "Cd"}
 )

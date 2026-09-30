@@ -18,10 +18,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 if TYPE_CHECKING:
     import builtins
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator, AsyncIterator, Collection
     from concurrent.futures import Future as ConcurrentFuture
-
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from ..control.config import settings
 from ..domain_config import domain_config
@@ -240,12 +238,27 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         return await asyncio.wrap_future(self._submit(method_name, *args, **kwargs))
 
     def _run_sync(self, method_name: str, *args: object, **kwargs: object) -> object:
+        """Run the inner saver's ASYNC *method_name* and block until it answers.
+
+        Never the inner saver's own synchronous method: those marshal onto the
+        loop they were given at construction, which is the selector loop this
+        submits to, so they either refuse the call outright or wait on the loop
+        that would have to run them.
+        """
         return self._submit(method_name, *args, **kwargs).result()
+
+    def _inner(self) -> Any:
+        if self._saver is None:
+            raise RuntimeError("AsyncPostgresSaver is not initialized")
+        return self._saver
 
     @property
     @override
     def config_specs(self) -> Any:
-        return self._run_sync("config_specs")
+        # Answered here rather than on the selector thread: it is a constant
+        # the saver reports about itself, and the Pregel loop reads it while
+        # building a run's config, on the caller's loop.
+        return self._inner().config_specs
 
     async def setup(self) -> None:
         await self._run_async("_setup")
@@ -281,20 +294,14 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         return await self._run_async("aput_writes", *args, **kwargs)
 
     @override
-    async def acopy_thread(self, *args: Any, **kwargs: Any) -> Any:
-        return await self._run_async("acopy_thread", *args, **kwargs)
-
-    @override
-    async def adelete_for_runs(self, *args: Any, **kwargs: Any) -> Any:
-        return await self._run_async("adelete_for_runs", *args, **kwargs)
-
-    @override
     async def adelete_thread(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("adelete_thread", *args, **kwargs)
 
-    @override
-    async def aprune(self, *args: Any, **kwargs: Any) -> Any:
-        return await self._run_async("aprune", *args, **kwargs)
+    # ``aprune``, ``adelete_for_runs``, ``acopy_thread`` and their synchronous
+    # counterparts are deliberately NOT proxied. The saver behind this bridge
+    # implements none of them, so a proxy would only carry the base class's
+    # refusal across a thread - and, worse, would answer yes to a caller asking
+    # whether this saver implements them before choosing how to do the work.
 
     async def concurrent_sibling(self) -> _SelectorThreadPostgresCheckpointer:
         """Return a bridge to a second saver on the same pool and selector loop.
@@ -336,54 +343,62 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
 
     @override
     def get(self, config: Any) -> Any:
-        return self._run_sync("get", config)
+        tuple_ = self.get_tuple(config)
+        return None if tuple_ is None else tuple_.checkpoint
 
     @override
     def get_tuple(self, config: Any) -> Any:
-        return self._run_sync("get_tuple", config)
+        return self._run_sync("aget_tuple", config)
 
     @override
     def get_next_version(self, current: Any, channel: Any) -> Any:
-        return self._run_sync("get_next_version", current, channel)
+        # Answered here, NOT across the selector thread. It is pure arithmetic
+        # on *current*, and the Pregel loop calls it once per channel per
+        # superstep from the caller's event loop: bridging it cost that loop a
+        # cross-thread round trip each time, and stalled it outright whenever
+        # the selector loop was busy with a statement.
+        return self._inner().get_next_version(current, channel)
 
     @override
     def list(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_sync("list", *args, **kwargs)
+        return iter(
+            cast(
+                "builtins.list[Any]",
+                self._run_sync("_collect_alist", *args, **kwargs),
+            )
+        )
 
     @override
     def put(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_sync("put", *args, **kwargs)
+        return self._run_sync("aput", *args, **kwargs)
 
     @override
     def put_writes(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_sync("put_writes", *args, **kwargs)
-
-    @override
-    def copy_thread(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_sync("copy_thread", *args, **kwargs)
-
-    @override
-    def delete_for_runs(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_sync("delete_for_runs", *args, **kwargs)
+        return self._run_sync("aput_writes", *args, **kwargs)
 
     @override
     def delete_thread(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_sync("delete_thread", *args, **kwargs)
-
-    @override
-    def prune(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_sync("prune", *args, **kwargs)
+        return self._run_sync("adelete_thread", *args, **kwargs)
 
     @override
     def with_allowlist(
-        self, *args: object, **kwargs: object
+        self, extra_allowlist: Collection[tuple[str, ...]]
     ) -> _SelectorThreadPostgresCheckpointer:
-        new_saver = self._run_sync("with_allowlist", *args, **kwargs)
-        if new_saver is not None:
-            self._saver = cast("AsyncPostgresSaver", new_saver)
-        if self._saver is not None:
-            self.serde = self._saver.serde
-        return self
+        """Return a clone carrying the derived allowlist, as the base does.
+
+        The base contract is a shallow clone with a narrowed serializer; this
+        used to swap its own inner saver and hand back itself, so every holder
+        of the bridge - including runs already compiled against it - silently
+        acquired one caller's allowlist.
+        """
+        inner = self._inner()
+        narrowed = inner.with_allowlist(extra_allowlist)
+        if narrowed is inner:
+            return self
+        clone = copy.copy(self)
+        clone._saver = narrowed
+        clone.serde = narrowed.serde
+        return clone
 
 
 def _scalar(row: Any) -> Any:
@@ -509,6 +524,26 @@ async def prune_settled_thread(checkpointer: Checkpointer, thread_id: str) -> bo
 
 
 @asynccontextmanager
+async def _open_selector_thread_checkpointer(
+    conn_string: str,
+) -> AsyncGenerator[Checkpointer]:
+    """Open the selector-thread bridge and release it however the block ends.
+
+    ``start`` and ``setup`` are inside the block on purpose: both can fail with
+    the selector thread already running and the pool already open, and outside
+    it a refused setup left that thread and every connection behind for the
+    life of the process.
+    """
+    checkpointer = _SelectorThreadPostgresCheckpointer(conn_string)
+    try:
+        await checkpointer.start()
+        await checkpointer.setup()
+        yield checkpointer
+    finally:
+        await checkpointer.close()
+
+
+@asynccontextmanager
 async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
     """Open the configured LangGraph checkpointer backend."""
     if settings.resolved_checkpoint_backend == "sqlite":
@@ -557,15 +592,10 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
         raise RuntimeError(msg) from exc
 
     if sys.platform == "win32":
-        checkpointer = _SelectorThreadPostgresCheckpointer(
+        async with _open_selector_thread_checkpointer(
             settings.checkpoint_connection_string
-        )
-        await checkpointer.start()
-        await checkpointer.setup()
-        try:
+        ) as checkpointer:
             yield checkpointer
-        finally:
-            await checkpointer.close()
         return
 
     pool = _postgres_checkpoint_pool(settings.checkpoint_connection_string)

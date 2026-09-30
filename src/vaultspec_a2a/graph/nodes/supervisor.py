@@ -685,9 +685,10 @@ def create_plan_approval_node(
     "exec_worker", "request_id"}``; resume ``{"verdict": "approved" |
     "rejected" | "request_changes", "notes": str | None, "request_id": str}`` —
     the same verdict vocabulary the document phase gate resumes on (D6), parsed
-    via the shared :func:`...phase_gate.parse_verdict`. Any other verdict,
-    including the retired ``{"approved": bool}`` shape, and any verdict naming
-    another request, fails closed to revision rather than silently approving.
+    via the shared :func:`...phase_gate.parse_verdict`. An unrecognised
+    verdict fails closed to revision rather than silently approving. An answer
+    naming another request, or none - the retired ``{"approved": bool}`` shape
+    among them - is not a decision on this plan, so the gate asks again.
 
     Where no worker of the plan phase exists to revise, a rejection returns to
     the supervisor. The fallback it replaces named ``workers[0]``, which sent a
@@ -701,18 +702,25 @@ def create_plan_approval_node(
         vault_index: dict[str, list[str]] = state.get("vault_index") or {}
         plan_paths = vault_index.get("plan", [])
         request_id = _plan_approval_request_id(state, exec_worker, plan_paths)
-        resume_value = interrupt(
-            {
-                "type": "plan_approval_request",
-                "feature": state.get("active_feature"),
-                "plan_paths": plan_paths,
-                "exec_worker": exec_worker,
-                "request_id": request_id,
-            }
-        )
+        payload = {
+            "type": "plan_approval_request",
+            "feature": state.get("active_feature"),
+            "plan_paths": plan_paths,
+            "exec_worker": exec_worker,
+            "request_id": request_id,
+        }
+        resume_value = interrupt(payload)
+        # An answer bound to another request, or to none, is not a decision on
+        # this plan: the gate asks again instead of treating it as a rejection
+        # that would send the plan back for revision nobody asked for.
+        while not verdict_answers_request(resume_value, request_id):
+            _logger.warning(
+                "Plan approval verdict did not name request %r; asking again",
+                request_id,
+            )
+            resume_value = interrupt(payload)
         verdict, _notes = parse_verdict(resume_value)
-        answered = verdict_answers_request(resume_value, request_id)
-        if verdict == VERDICT_APPROVED and answered:
+        if verdict == VERDICT_APPROVED:
             _logger.info(
                 "plan approved by user — routing to exec_worker=%r", exec_worker
             )
@@ -724,14 +732,7 @@ def create_plan_approval_node(
                 "approval_request_id": request_id,
                 "routing_error": None,
             }
-        reason = (
-            "Plan rejected by user — revise before proceeding to execution."
-            if answered
-            else (
-                "Plan approval verdict named another request; the decision on "
-                "this plan is still outstanding."
-            )
-        )
+        reason = "Plan rejected by user — revise before proceeding to execution."
         revision_worker = _worker_owning_phase(
             PipelinePhase.PLAN.value, workers, worker_phase_map
         )

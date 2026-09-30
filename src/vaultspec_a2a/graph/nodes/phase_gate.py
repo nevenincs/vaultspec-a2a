@@ -37,6 +37,7 @@ to ``validation_errors`` so the writer has a concrete revise signal.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langgraph.types import Command, interrupt
@@ -57,6 +58,8 @@ if TYPE_CHECKING:
 # The verdict vocabulary is imported to ROUTE ON, not to offer a second way in:
 # thread.enums holds it precisely because this module and the authoring lifecycle
 # cannot import each other, and a consumer taking it from either would undo that.
+_logger = logging.getLogger(__name__)
+
 __all__ = [
     "REVIEW_REVISION_SENTINEL",
     "DocumentProposalSubmitter",
@@ -288,23 +291,33 @@ def create_phase_gate_node(
     async def phase_gate_node(state: TeamState) -> Command[Any]:
         """Pause for the committed proposal's verdict, then route."""
         proposal_id = state.get("gate_pending_proposal_id")
-        resume_value = interrupt(
-            {
-                "type": "document_approval_request",
-                "phase": phase,
-                "proposal_id": proposal_id,
-                "feature": state.get("active_feature"),
-                # The proposal this gate parked on IS its request identity: it
-                # is committed to the checkpoint before the park and it is what
-                # the out-of-run verdict subscriber correlates a decision by.
-                "request_id": proposal_id,
-            }
-        )
+        payload = {
+            "type": "document_approval_request",
+            "phase": phase,
+            "proposal_id": proposal_id,
+            "feature": state.get("active_feature"),
+            # The proposal this gate parked on IS its request identity: it is
+            # committed to the checkpoint before the park and it is what the
+            # out-of-run verdict subscriber correlates a decision by.
+            "request_id": proposal_id,
+        }
+        resume_value = interrupt(payload)
+        # An answer bound to another request, or to none, is not this gate's
+        # decision, so the gate asks again rather than spending a revision on
+        # it. The decision stays the human's, and the phase's revision budget
+        # is spent only by a verdict a human gave on this document.
+        while proposal_id and not verdict_answers_request(resume_value, proposal_id):
+            _logger.warning(
+                "Verdict for document phase %r did not name proposal %r; asking again",
+                phase,
+                proposal_id,
+            )
+            resume_value = interrupt(payload)
         verdict, notes = parse_verdict(resume_value)
         if not verdict_answers_request(resume_value, proposal_id):
-            # Not this gate's answer, so it is not an approval - whatever it
-            # says. Failing closed to revision keeps the human decision the
-            # only way past this gate.
+            # A gate with no proposal has no request a verdict could name, so
+            # nothing can answer it; failing closed to revision keeps the run
+            # from waiting on a question no human can be asked.
             verdict, notes = (
                 VERDICT_REJECTED,
                 f"Verdict for document phase {phase!r} named another request; "

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:1ef2fefcd77639cfac97030e2e51e9365b533360ce2e33537e85eea3e6a0fb3a'
+body_hash: 'sha256:f5b6e24b23f604cda9c17b62fa264aeb098437da47a42a2c4f62f33328849652'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -241,6 +241,14 @@ related:
 - `S06` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
 - `S06` `verify:` `control graph thread worker suites (1372) + gateway plan-approval tests after the merge's payload update` -> `pass`
 - `S06` `by:` `worker-afec6969`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_phase_gate.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `S13` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S13` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `S13` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/worker` -> `pass`
+- `S13` `by:` `orchestrator`
 
 ## Notes
 
@@ -257,3 +265,5 @@ related:
 - `S07` Research topology deliberately not refreshed: its documents are unapplied engine proposals and no gate there reads `vault_index.`
 - `S10` The config-contract tests pin existing behaviour; proven non-tautological by neutering the stamp.
 - `S06` Restores the one-time plan approval that ADR-020 still specifies; plan and document gate payloads disclose a `request_id` and refuse a verdict naming another request. The orchestrator updated four gateway plan-approval payload tests at merge.
+- `S13` Integration correction: both approval gates ask again on an unbound verdict; the projection counts parked tasks as next nodes.
+

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import httpx
 import pytest
@@ -11,7 +11,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Interrupt, PregelTask
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, Interrupt, PregelTask, interrupt
 from pydantic import BaseModel, ConfigDict
 
 from ...providers import ProviderCondition
@@ -21,6 +22,13 @@ from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..ipc import WorkerBridge
 from ..state_projection import StateProjector
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
+
+class _AskState(TypedDict, total=False):
+    answer: str
 
 
 class _StateNormalizationFixture(BaseModel):
@@ -76,6 +84,43 @@ def test_normalize_execution_state_projects_interrupt_contract() -> None:
     assert not task.has_error
     assert not task.has_nested_state
     assert not task.has_result
+
+
+@pytest.mark.asyncio
+async def test_a_node_that_asks_again_is_still_the_next_node() -> None:
+    """A node re-parked by an answer that did not settle it stays the position.
+
+    LangGraph drops such a task from ``next`` because it already holds a
+    resume write; the projection must still report the node the run is parked
+    at, or a gate awaiting a decision reads as merely running.
+    """
+
+    def ask_until_settled(state: _AskState) -> _AskState:
+        answer = interrupt({"type": "approval", "request_id": "request-9"})
+        while answer != "settled":
+            answer = interrupt({"type": "approval", "request_id": "request-9"})
+        return {"answer": answer}
+
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _AskState))
+    builder.add_node("ask_until_settled", ask_until_settled)
+    builder.add_edge(START, "ask_until_settled")
+    builder.add_edge("ask_until_settled", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config: RunnableConfig = {"configurable": {"thread_id": "ask-again"}}
+
+    await graph.ainvoke({}, config=config)
+    await graph.ainvoke(Command(resume="unrelated"), config=config)
+    state = await graph.aget_state(config)
+    assert state.next == ()
+
+    payload = StateProjector.normalize_execution_state(state)
+
+    assert payload.next_nodes == ["ask_until_settled"]
+    assert payload.interrupt_types == ["approval"]
+
+    await graph.ainvoke(Command(resume="settled"), config=config)
+    settled = StateProjector.normalize_execution_state(await graph.aget_state(config))
+    assert settled.next_nodes == []
 
 
 def test_normalize_state_keeps_missing_configurable_metadata_optional() -> None:

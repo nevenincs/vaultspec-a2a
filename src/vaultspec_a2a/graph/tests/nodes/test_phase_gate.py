@@ -284,14 +284,16 @@ async def test_a_verdict_for_another_request_does_not_approve_this_gate() -> Non
     LangGraph hands a resume value to whichever ``interrupt()`` asks for one
     next, so a verdict dispatched for a gate the run has already left - or for
     a run that never parked - would otherwise be consumed here as a human
-    decision nobody made about this document.
+    decision nobody made about this document. The gate asks again, so the
+    phase's revision budget is not spent on it, and the verdict the human does
+    give on this proposal is the one that decides.
     """
     submitter = _CountingSubmitter("prop-current")
     graph = _gate_graph(submitter)
     config: Any = {"configurable": {"thread_id": "gate-mismatch"}}
 
     await graph.ainvoke(_base_state(), config=config)
-    resumed = await graph.ainvoke(
+    parked_again = await graph.ainvoke(
         Command(
             resume={
                 "verdict": "approved",
@@ -302,9 +304,19 @@ async def test_a_verdict_for_another_request_does_not_approve_this_gate() -> Non
         config=config,
     )
 
-    assert resumed["next"] == "revise_end"
-    assert resumed["gate_verdict"] == "rejected"
-    assert "named another request" in resumed["validation_errors"][0]
+    [interrupt] = parked_again["__interrupt__"]
+    assert interrupt.value["request_id"] == "prop-current"
+    assert parked_again.get("gate_verdict") is None
+
+    resumed = await graph.ainvoke(
+        Command(
+            resume={"verdict": "approved", "notes": None, "request_id": "prop-current"}
+        ),
+        config=config,
+    )
+
+    assert resumed["next"] == "approved_end"
+    assert resumed["gate_verdict"] == "approved"
 
 
 @pytest.mark.asyncio
@@ -319,9 +331,10 @@ async def test_a_verdict_naming_no_request_does_not_approve_this_gate() -> None:
     config: Any = {"configurable": {"thread_id": "gate-unbound"}}
 
     await graph.ainvoke(_base_state(), config=config)
-    resumed = await graph.ainvoke(
+    parked_again = await graph.ainvoke(
         Command(resume={"verdict": "approved", "notes": None}), config=config
     )
 
-    assert resumed["next"] == "revise_end"
-    assert resumed["gate_verdict"] == "rejected"
+    [interrupt] = parked_again["__interrupt__"]
+    assert interrupt.value["request_id"] == "prop-unbound"
+    assert parked_again.get("gate_verdict") is None

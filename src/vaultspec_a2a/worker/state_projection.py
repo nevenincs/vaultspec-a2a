@@ -270,6 +270,24 @@ def _task_projections(
     return tasks, interrupt_types
 
 
+def _parked_next_nodes(
+    state_next: Iterable[object],
+    tasks: Iterable[ExecutionTaskProjectionPayload],
+) -> list[str]:
+    """Return the nodes the run resumes at, counting every parked task.
+
+    LangGraph leaves a task out of ``next`` once it holds a resume write, so a
+    node that asks again after an answer that did not settle it is parked on a
+    live interrupt yet absent from ``next``. The run still resumes at that
+    node, and the phase it reports must not fall back to a generic one.
+    """
+    next_nodes = [str(node) for node in state_next]
+    for task in tasks:
+        if task.interrupt_ids and task.name and task.name not in next_nodes:
+            next_nodes.append(task.name)
+    return next_nodes
+
+
 def _state_interrupt_types(interrupts: Iterable[object]) -> list[str]:
     """Project state-level interrupts when tasks carry no type metadata."""
     return [
@@ -602,7 +620,7 @@ class StateProjector:
             checkpoint_id=_checkpoint_id(state.config),
             parent_checkpoint_id=_checkpoint_id(state.parent_config),
             snapshot_created_at=_snapshot_created_at_value(state.created_at),
-            next_nodes=[str(node) for node in state.next],
+            next_nodes=_parked_next_nodes(state.next, tasks),
             interrupt_types=interrupt_types,
             interrupt_count=(
                 len(state_interrupts)

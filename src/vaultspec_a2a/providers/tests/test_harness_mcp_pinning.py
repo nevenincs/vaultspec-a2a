@@ -59,6 +59,7 @@ from .._harness_mcp_registry import (
     _launch_spec,
     _require_root_pin,
     harness_server_addresses_projects_per_call,
+    interpreter_pin_args,
 )
 from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
@@ -79,6 +80,9 @@ if TYPE_CHECKING:
 
 RAG = "vaultspec-rag"
 RAG_PIN_VARIABLE = "VAULTSPEC_RAG_ROOT"
+# The interpreter the rendered launch names, read from the production seam rather
+# than restated: the value is a fact about the host running these tests.
+_PYTHON_PIN = interpreter_pin_args("uvx")[1]
 
 # A live stdio handshake plus one tool call against the runtime-acquired search
 # server. Warm it is seconds; the ceiling covers a cold `uvx` acquisition without
@@ -834,7 +838,13 @@ def test_pin_carries_the_bound_project_through_the_declared_channel(
     # The pin is additive: what to launch is unchanged, only which project it
     # serves is now stated.
     assert spec["command"] == "uvx"
-    assert spec["args"] == ["--from", "vaultspec-rag[mcp]", "vaultspec-search-mcp"]
+    assert spec["args"] == [
+        "--python",
+        _PYTHON_PIN,
+        "--from",
+        "vaultspec-rag[mcp]",
+        "vaultspec-search-mcp",
+    ]
 
 
 def test_pin_returns_fresh_specs_and_mutates_no_input(tmp_path: Path) -> None:
@@ -1007,8 +1017,20 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
         # the exact distribution selected by this checkout so the stdio client
         # and its private data-plane service cannot drift independently.
         spec_args = spec["args"]
-        assert spec_args == ["--from", "vaultspec-rag[mcp]", "vaultspec-search-mcp"]
-        spec["args"] = ["--from", rag_requirement, "vaultspec-search-mcp"]
+        assert spec_args == [
+            "--python",
+            _PYTHON_PIN,
+            "--from",
+            "vaultspec-rag[mcp]",
+            "vaultspec-search-mcp",
+        ]
+        spec["args"] = [
+            "--python",
+            _PYTHON_PIN,
+            "--from",
+            rag_requirement,
+            "vaultspec-search-mcp",
+        ]
         spec_env = spec["env"]
         assert isinstance(spec_env, list)
         for item in spec_env:

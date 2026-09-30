@@ -38,7 +38,12 @@ from .._codex_config_home import (
     sweep_orphan_codex_homes,
 )
 from .._config_home_roots import ORPHAN_HOME_MIN_AGE_SECONDS, temp_home_root
+from .._harness_mcp_registry import interpreter_pin_args
 from ..lane_admission import PROVEN_WEB_LANES, is_web_lane_proven
+
+# The interpreter the rendered launch names, read from the production seam rather
+# than restated: the value is a fact about the host running these tests.
+_PYTHON_PIN = interpreter_pin_args("uvx")[1]
 
 if TYPE_CHECKING:
     import subprocess
@@ -137,6 +142,8 @@ def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
     rag = parsed["mcp_servers"]["vaultspec-rag"]
     assert rag["command"] == "uvx"
     assert rag["args"] == [
+        "--python",
+        _PYTHON_PIN,
         "--from",
         "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",

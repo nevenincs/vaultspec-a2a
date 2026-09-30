@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
@@ -40,6 +41,7 @@ __all__ = [
     "harness_server_addresses_projects_per_call",
     "harness_server_egresses",
     "harness_server_exact_surface",
+    "interpreter_pin_args",
     "is_known_harness_server",
     "registry_launch_divergence",
 ]
@@ -158,6 +160,26 @@ RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
 # loudly and repeatedly until it refreshes - accepted as fail-loud, and the
 # reason a2a's own dependency floor names 0.1.56.
 CORE_MCP_REQUIREMENT = "vaultspec-core"
+
+
+_INTERPRETER_PINNED_COMMANDS: frozenset[str] = frozenset({"uv", "uvx"})
+
+
+def interpreter_pin_args(command: str) -> tuple[str, ...]:
+    """Return the interpreter pin *command* needs, or an empty tuple.
+
+    A package runner that is handed no interpreter takes the HOST's default one,
+    so a host whose default Python is older than the floor a harness server
+    declares cannot resolve that server at all - and the failure arrives as a bare
+    resolution error at launch, on a lane whose grounding then simply is not
+    there. The pin is the running interpreter's own minor version: this service
+    runs on the project's pinned Python, so "the interpreter serving this run" is
+    both present on the host and new enough by construction, without this module
+    having to know which floor each server declares.
+    """
+    if command not in _INTERPRETER_PINNED_COMMANDS:
+        return ()
+    return ("--python", f"{sys.version_info.major}.{sys.version_info.minor}")
 
 
 def _validate_registry_entry(name: str, value: JsonValue) -> None:
@@ -508,10 +530,15 @@ def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:
             malformed command or argument vector.
     """
     _require_root_pin(name, entry)
+    command = _frozen_string(entry, "command")
+    # The interpreter pin is added at this one renderer, so both transports and
+    # the divergence guard that compares them see the same command. It is the one
+    # part of a launch that cannot be a registry literal: it states a fact about
+    # the host serving the run, not about the server being launched.
     spec: JsonObject = {
         "name": name,
-        "command": _frozen_string(entry, "command"),
-        "args": list(_frozen_strings(entry, "args")),
+        "command": command,
+        "args": [*interpreter_pin_args(command), *_frozen_strings(entry, "args")],
     }
     return spec
 

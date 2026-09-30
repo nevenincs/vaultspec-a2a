@@ -31,12 +31,17 @@ from .._acp_mcp import (
     require_declared_surface,
     resolve_harness_mcp_servers,
 )
-from .._harness_mcp_registry import is_known_harness_server
+from .._harness_mcp_registry import interpreter_pin_args, is_known_harness_server
 from .._native_read_tools import compose_native_read_tools
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
     from .._json_contract import JsonObject
+
+
+# The interpreter the rendered launch names, read from the production seam rather
+# than restated: the value is a fact about the host running these tests.
+_PYTHON_PIN = interpreter_pin_args("uvx")[1]
 
 
 def test_resolve_known_server_returns_stdio_spec() -> None:
@@ -45,8 +50,11 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
     spec = specs[0]
     assert spec["name"] == "vaultspec-rag"
     assert spec["command"] == "uvx"
-    # uvx invokes the published package's console script, cwd-independent.
+    # uvx invokes the published package's console script, cwd-independent, under
+    # the interpreter serving this run rather than the host's default one.
     assert spec["args"] == [
+        "--python",
+        _PYTHON_PIN,
         "--from",
         "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",
@@ -287,6 +295,8 @@ def test_declared_surface_admits_the_bridge_beside_the_registry_server() -> None
             "name": "vaultspec-rag",
             "command": "uvx",
             "args": [
+                "--python",
+                _PYTHON_PIN,
                 "--from",
                 "vaultspec-rag[mcp]",
                 "vaultspec-search-mcp",
@@ -386,6 +396,8 @@ def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
     assert spec["name"] == "vaultspec-rag"
     assert spec["command"] == "uvx"
     assert spec["args"] == [
+        "--python",
+        _PYTHON_PIN,
         "--from",
         "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",

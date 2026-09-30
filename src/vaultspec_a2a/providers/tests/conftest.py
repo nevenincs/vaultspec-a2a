@@ -43,6 +43,7 @@ _IMPURE_FILES = frozenset(
         # Real child processes.
         "test_acp_mcp.py",
         "test_acp_stderr_tail.py",
+        "test_harness_interpreter_pin.py",
         "test_acp_model_selection.py",
         "test_acp_turn_deadline.py",
         "test_acp_vault_deny.py",

@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:bc93c65b2ab3b768e46259ed244270c9fb0eab0c5cb210ebf0ae323f19a1729c'
+body_hash: 'sha256:ec8acaf14defb92f294737ca08e6ca0870518f962b278f9206cdb6cf69cc2638'
 ---
 
 # `langgraph-conformance` plan
@@ -84,7 +84,7 @@ Both checkpoint backends behave as the dual-backend decision describes, set them
 - [x] `P04.S23` - Mark the desktop SQLite saver set up after schema validation; `src/vaultspec_a2a/database/checkpoints.py`.
 - [x] `P04.S24` - Guard settled-history pruning on saver support and schema version, and import the checkpoint channel names; `src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/thread/checkpoint_evidence.py, src/vaultspec_a2a/thread/snapshots.py`.
 - [x] `P04.S25` - Derive history depth from the tuple already read and report parent ids truthfully after a prune; `src/vaultspec_a2a/control/snapshot.py, src/vaultspec_a2a/control/thread_state_service.py, src/vaultspec_a2a/thread/snapshots.py`.
-- [ ] `P04.S26` - Enable strict checkpoint deserialization on both savers; `src/vaultspec_a2a/database/checkpoints.py`.
+- [x] `P04.S26` - Enable strict checkpoint deserialization on both savers; `src/vaultspec_a2a/database/checkpoints.py`.
 - [x] `P04.S27` - Retire the SQLite-only checkpoint backfill or run it on both backends; `src/vaultspec_a2a/database/migrations/__init__.py, src/vaultspec_a2a/api/app.py`.
 
 ### Phase `P05` - Version and deprecation sweep
@@ -107,15 +107,17 @@ The decisions that describe the graph match the graph, through amendments presen
 Fix the findings the executors and reviews surfaced while this plan ran, which the user put in scope for this session on 2026-09-30 (the lower fixes and the persistent agents' findings are in scope). Policy sources stay the user's: the hosted-search guidance and the retired example trigger are presented, not changed.
 
 - [x] `P07.S33` - Give supervised research branches the human permission rung; `src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P07.S34` - Count a re-parking resume's receipt as incorporated from the checkpoint's pending writes; `src/vaultspec_a2a/thread/checkpoint_evidence.py`.
-- [ ] `P07.S35` - Disclose only the unanswered fan-out interrupts on run-status and in the resume preflight; `src/vaultspec_a2a/worker/state_projection.py`.
+- [x] `P07.S34` - Count a re-parking resume's receipt as incorporated from the checkpoint's pending writes; `src/vaultspec_a2a/thread/checkpoint_evidence.py`.
+- [x] `P07.S35` - Disclose only the unanswered fan-out interrupts on run-status and in the resume preflight; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/thread/snapshots.py`.
 - [x] `P07.S36` - Clear star and pipeline validation errors when their owner returns, bound the finish-block budget by the recursion limit, and keep the blocked-FINISH reason through a plan-approval reroute; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P07.S37` - Close the rag daemon egress and client-daemon skew gaps and drop torch from the rag extra; `src/vaultspec_a2a/providers/_harness_mcp_registry.py, src/vaultspec_a2a/providers/_mcp_contract.py, pyproject.toml`.
 - [ ] `P07.S38` - Strip body links with core's reader instead of mirrored regexes; `src/vaultspec_a2a/authoring/submitter.py`.
-- [ ] `P07.S39` - Retire the unreachable checkpoint-history degradations, tie the retention schema pin to the saver version, and refuse closing a borrowed saver; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/database/checkpoints.py`.
+- [x] `P07.S39` - Retire the unreachable checkpoint-history degradations, tie the retention schema pin to the saver version, and refuse closing a borrowed saver; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/database/checkpoints.py`.
 - [x] `P07.S40` - Attribute custom stream writes to their node and replace the aggregator's hand-written graph stubs with one error-injecting graph; `src/vaultspec_a2a/streaming/`.
 - [x] `P07.S41` - Make the provider tests name the adapter prerequisite they lack; `src/vaultspec_a2a/providers/tests/`.
 - [x] `P07.S42` - Route a warned exec route through plan approval rather than returning the SOFT gate decision first; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
+- [ ] `P07.S43` - Declare the execution-state degradation reasons, retire the producerless unknown reason, and widen the vocabulary guards to constructor literals and every member; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/worker/state_projection.py`.
+- [ ] `P07.S44` - Correct the compiler comment that says strict msgpack refuses an unknown type; `src/vaultspec_a2a/graph/compiler.py`.
 
 ## Parallelization
 

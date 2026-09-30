@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:70879ab8ad9731325e913dba15a19f5ae0ec075c1049cbc4bc92f1488a574f57'
+body_hash: 'sha256:dffec5e12a09b51dad7993164371b2f043ff2aea32079caa594948d510e9912c'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -358,6 +358,26 @@ Correction to `aggregator-test-doubles-still-outnumber-real-graphs`. Outside `sr
 ### codeql-reads-trusted-as-secret | high | CodeQL flagged launcher paths in the spawn logs as clear-text secrets
 
 Fixed in commit `3ebff38`; false positive. CodeQL's clear-text logging query raised three high alerts on the spawn and termination log calls in `src/vaultspec_a2a/providers/_subprocess.py`. Reproduced locally with CodeQL 2.27.1: every source was a call to `resolve_trusted_executable` or `_trusted_search_directories` in `src/vaultspec_a2a/providers/cli_resolution.py`. The shared sensitive-name heuristic classifies any function whose name contains `trusted` as returning a secret, so the resolved launcher path flowed as a secret into the `command_executable` spawn metadata. The functions were renamed to `resolve_service_executable` and `_absolute_search_directories`, and the query now finds nothing. The logging path is unchanged, so a real secret routed into spawn metadata would still be caught. An allowlist rewrite of `_metadata_extra` also silenced the query, but only by hiding the flow, and was rejected.
+
+### postgres-inlines-a-str-subclass-before-the-serializer-sees-it | low | a StrEnum channel value reaches the served store as a bare string while SQLite keeps its type
+
+Open, surfaced by P04.S26; latent. `AsyncPostgresSaver.aput` writes `None`, `str`, `int`, `float` and `bool` channel values inline in the checkpoint row rather than through the serializer (`langgraph/checkpoint/postgres/aio.py`), so a `StrEnum` member is stored as a plain string on Postgres, while the SQLite saver serializes the whole checkpoint and keeps the constructor. Measured directly: the same value produced a strict-mode block on SQLite and nothing on Postgres. The two backends therefore round-trip `str`, `int`, `float` and `bool` subclasses differently, and strict mode cannot see such a value on the served backend. Latent because P01.S02 removed enum members from checkpointed state; `src/vaultspec_a2a/database/tests/test_checkpoint_strict_serde.py` uses a plain `Enum` and says why. Recommendation: keep checkpointed state free of scalar subclasses, which the strict-mode tests already pin for enums.
+
+### execution-state-degradations-are-outside-the-declared-vocabulary | medium | two reasons a client receives are not members of the enumeration that declares them
+
+Owned by P07.S43. The worker's execution-state projection emits `execution_state_projection_timeout` and `execution_state_projection_unavailable` (`src/vaultspec_a2a/worker/state_projection.py`), neither a `DegradedReason` member (`src/vaultspec_a2a/thread/enums.py`), and both reach the served `degraded_reasons` through `src/vaultspec_a2a/control/projection.py`. The containment guard in `src/vaultspec_a2a/api/tests/test_served_vocabulary_containment.py` sweeps only `degraded_reasons.append(...)` literals, so constructor keywords escape it. Declaring them keeps the wire strings unchanged.
+
+### degraded-reason-unknown-has-no-producer | low | a declared reason nothing emits
+
+Owned by P07.S43. `DegradedReason.UNKNOWN` has no producer and no reference anywhere in the package, and the class docstring's membership rule does not place it. Every other member has a producer.
+
+### strict-msgpack-comment-overstates-the-refusal-in-the-compiler | low | a compiler comment says strict msgpack refuses a type it only degrades
+
+Owned by P07.S44. The comment above `_ROLE_TO_PHASE` in `src/vaultspec_a2a/graph/compiler.py` repeats the claim `strict-msgpack-degrades-rather-than-refusing` corrected: strict mode logs, emits a blocked event and returns the raw constructor argument, so a run hydrates with a silently changed type rather than failing to.
+
+### clarification-live-proof-waited-on-the-wrong-condition | low | the live clarification loop asserted the run's position after waiting only for its answers
+
+Fixed under P07.S35 (commit `ea26f72`). `_wait_for_answered_clarification` in `src/vaultspec_a2a/api/tests/test_clarification_loop_live.py` returned once the answers were committed, a superstep before the position the caller asserted; the S35 preflight's extra checkpoint read shifted the interleaving enough to lose that race about one run in six. The wait now covers the condition asserted.
 
 ## Recommendations
 

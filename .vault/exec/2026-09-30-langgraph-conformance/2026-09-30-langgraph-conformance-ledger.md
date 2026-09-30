@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:98d82de2c9a7dcaf46df6f8e31498eef8a427994e1933ddc1f5678bb1be8e3e5'
+body_hash: 'sha256:b6001fde3340807870c878a64a331471bb552448a61db67ae6299cc73cc7617a'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -396,6 +396,31 @@ related:
 - `S41` `M` `src/vaultspec_a2a/providers/tests/test_launcher_confinement.py`
 - `S41` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
 - `S41` `by:` `worker-a7344905`
+- `S26` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S26` `A` `src/vaultspec_a2a/database/tests/test_checkpoint_strict_serde.py`
+- `S26` `M` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S26` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
+- `S26` `by:` `worker-a287e053`
+- `S34` `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `S34` `A` `src/vaultspec_a2a/thread/tests/test_checkpoint_evidence.py`
+- `S34` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
+- `S34` `by:` `worker-a287e053`
+- `S35` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S35` `M` `src/vaultspec_a2a/thread/tests/test_checkpoint_projection_stages.py`
+- `S35` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S35` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `S35` `M` `src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`
+- `S35` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
+- `S35` `by:` `worker-a287e053`
+- `S39` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S39` `A` `src/vaultspec_a2a/database/tests/_checkpoint_history.py`
+- `S39` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py`
+- `S39` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention_guards.py`
+- `S39` `M` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S39` `M` `src/vaultspec_a2a/thread/enums.py`
+- `S39` `A` `src/vaultspec_a2a/thread/tests/test_degraded_reasons.py`
+- `S39` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
+- `S39` `by:` `worker-a287e053`
 
 ## Notes
 
@@ -429,3 +454,7 @@ related:
 - `S37` Skew is refused through the rag client's own `get_index_status` verdict on the contract handshake. Hosted-ranking egress is not observable from the read-only MCP surface (only the daemon's own health endpoint reports it), so it stays an open operator-configuration finding. The worktree started on main and was rebased; commit messages were rewritten at merge for style and attribution.
 - `S40` Custom writes carry their node through a stamp read from the writer's own config metadata; one documented stream-versus-state stub remains because a real graph cannot disagree with itself. The team and worker stubs the audit counted are a Protocol and one justified latency stub.
 - `S41` Absent the adapter the ten tests fail in fixture setup with one message naming the path and npm install; never skipped.
+- `S26` An explicit strict JsonPlusSerializer on every saver rather than the process-wide env var; the compile-time schema allowlist that only the env var triggers adds nothing checkpointed for this graph.
+- `S34` Receipt channels are read from pending writes as well as channel values.
+- `S35` Scope extended to thread/snapshots.py, where run-status disclosure folds pending writes; answered is keyed on the fixed per-task write slots so a task that failed mid-node still reads as waiting. A follow-up commit makes the live clarification proof wait for the run's position rather than only its answers.
+- `S39` The borrowed-close refusal exists only on the selector bridge; the pooled Postgres sibling has no close. The schema pin cannot fail before its change because the guard is the deliverable; proven by bumping the pin. Also consolidates the retention test helpers the structural gate flagged.

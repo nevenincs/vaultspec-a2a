@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:c98c548a8e7293abebd5de998ee942e42c3cd8d96ec4d02cc57337de8ce6800d'
+body_hash: 'sha256:16b9cf3c22a0512aaca88cc0321383ab66d19b6570a71fd3afbe3909a09a556c'
 ---
 
 # `architecture-review` plan
@@ -81,7 +81,7 @@ Provider launchers, the Claude and Codex permission posture, native tool scope, 
 
 - [x] `P04.S21` - Resolve provider launchers to absolute paths from the service trusted PATH or the capsule, never the agent PATH or working directory; `src/vaultspec_a2a/providers/_factory_commands.py, src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/_subprocess.py`.
 - [x] `P04.S22` - Pin the Claude lane permission posture: no ambient setting sources, persona-derived disallowed tools, dontAsk on autonomous runs verified against the reported mode, and allow-once for always options; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P04.S23` - Scope native read tools to the workspace, stop pre-approving project-addressable rag tools, and scan Codex tool arguments for foreign projects; `src/vaultspec_a2a/providers/_native_read_tools.py, src/vaultspec_a2a/providers/_codex_permission.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P04.S23` - Scope native read tools to the workspace, stop pre-approving project-addressable rag tools, and scan Codex tool arguments for foreign projects; `src/vaultspec_a2a/providers/_native_read_tools.py, src/vaultspec_a2a/providers/_codex_permission.py, src/vaultspec_a2a/graph/nodes/worker.py`.
 - [x] `P04.S24` - Fail closed when a permission callback names an option that was not offered; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 - [ ] `P04.S25` - Write refreshed Codex credentials back to their source home under a lock; `src/vaultspec_a2a/providers/_codex_config_home.py`.
 - [x] `P04.S26` - Use one Claude binary resolver for catalog discovery and execution and record the adapter and CLI identity each run used; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py`.

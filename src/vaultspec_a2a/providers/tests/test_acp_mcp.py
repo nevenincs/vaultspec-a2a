@@ -473,8 +473,24 @@ class TestComposeNativeReadTools:
         )
         assert isinstance(wired, AcpChatModel)
         # Scoped to the run's own workspace wherever the tool's rule grammar
-        # takes a path; Grep has no path pattern in the pinned SDK.
-        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Grep", "Glob(/tmp/ws/**)"]
+        # takes a path. Grep's takes none, so it is not pre-approved at all: a
+        # bare name would approve a search of any path on the host.
+        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Glob(/tmp/ws/**)"]
+
+    def test_no_floor_tool_is_pre_approved_by_bare_name_under_a_workspace(
+        self,
+    ) -> None:
+        wired = compose_native_read_tools(
+            self._fresh_model(), autonomous=True, role="researcher"
+        )
+        assert isinstance(wired, AcpChatModel)
+        assert [rule for rule in wired.allowed_tools if "(" not in rule] == []
+
+    def test_a_run_without_a_workspace_keeps_the_bare_floor(self) -> None:
+        model = AcpChatModel(command=["echo"], env_vars={})
+        wired = compose_native_read_tools(model, autonomous=True, role="researcher")
+        assert isinstance(wired, AcpChatModel)
+        assert wired.allowed_tools == ["Read", "Grep", "Glob"]
 
     def test_non_document_role_is_unchanged(self) -> None:
         model = self._fresh_model()
@@ -501,7 +517,6 @@ class TestComposeNativeReadTools:
             "mcp__x__y",
             "Read",
             "Read(/tmp/ws/**)",
-            "Grep",
             "Glob(/tmp/ws/**)",
         ]
 
@@ -513,7 +528,7 @@ class TestComposeNativeReadTools:
         wired = compose_native_read_tools(model, autonomous=True, role="researcher")
         assert isinstance(wired, AcpChatModel)
         assert wired.mcp_servers == [{"name": "vaultspec-authoring", "type": "http"}]
-        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Grep", "Glob(/tmp/ws/**)"]
+        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Glob(/tmp/ws/**)"]
 
     def test_model_without_acp_surface_is_returned_unchanged(self) -> None:
         """A hosted model exposing no with_mcp_servers is passed through as-is."""

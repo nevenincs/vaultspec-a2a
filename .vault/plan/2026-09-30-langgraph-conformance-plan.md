@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:11d03e954539be63800186653aa225115691470519b266efd9868a9a33ffcf14'
+body_hash: 'sha256:70053b895cc7bc9c7fb9f7e13af913f45b0ce4d465a9ecce3ae98bee0beb22df'
 ---
 
 # `langgraph-conformance` plan
@@ -50,7 +50,7 @@ The compiled graphs route, gate and synthesise the way their decisions describe,
 - [x] `P01.S04` - Budget the submit-refusal loop per phase and end a spent budget in a typed outcome; `src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/graph/_compiler_research.py`.
 - [x] `P01.S05` - Clear validation errors when a phase advances and bound FINISH-block reroutes to workers that can satisfy the gate; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/thread/state.py`.
 - [x] `P01.S06` - Route a blocked FINISH through the HARD gate and plan approval, send a rejected plan without a planner back to the supervisor, and bind plan and document verdicts to their request; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/phase_gate.py, src/vaultspec_a2a/graph/compiler.py`.
-- [x] `P01.S07` - Refresh the vault index before the supervisor evaluates its gate, and in the research topology; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/graph/_compiler_research.py`.
+- [x] `P01.S07` - Refresh the vault index before the supervisor evaluates its gate; the research topology is excluded by design, since its documents are unapplied engine proposals and none of its gates reads the index; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/vault_reader.py`.
 - [x] `P01.S08` - Show the routing refusal on every supervisor re-ask and refuse ambiguous route replies; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
 - [x] `P01.S09` - Reset the loop count on each turn; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/thread/state.py`.
 - [x] `P01.S10` - Size the superstep backstop to the retry budget, give the submit nodes a transport retry policy, and pin the node config-injection contract with a test; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/nodes/_config_contract.py`.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:950c225b67915542367c2edaa4e5b499d8de399ec7a4bf5141ef035a48ba4ae6'
+body_hash: 'sha256:2cb076e74f0ae77bb94d91adaab3ad054a2a9b1d8263bceaa5d3be823c6c83e3'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -386,6 +386,38 @@ Fixed in commit `3599038`. The dependency gate in `just ci` refused GHSA-42vr-xj
 ### plain-value-proofs-used-the-system-temp-directory | low | two graph tests opened their stores outside the pytest temp root
 
 Fixed as a P01.S02 correction (commit `d88d16b`). `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py` used `tempfile.TemporaryDirectory()`, which the storage-anchor gate refuses; it failed `just ci` locally and the PR's Basic CI. The tests now take `tmp_path`. The per-package runs that validated S02 did not include the `dev/` harness where that gate lives.
+
+## Plan-close review, 2026-09-30
+
+An independent review of `518b768..e7b3887` failed the plan with one high and one medium finding and four lows. The high finding reopened P07.S34, which is fixed and closed again (`250408f`). The medium finding was resolved by correcting P01.S07's row rather than widening it. Three lows were fixed as corrections; the fourth does not reproduce and is recorded below.
+
+### repark-receipt-never-reaches-the-gateway | high | a resume that only asks again never sent its application report
+
+Fixed by reopening P07.S34 (commit `250408f`). `src/vaultspec_a2a/worker/_dispatch_receipts.py` decided whether a dispatch had landed from committed channel values alone. A resume that parks the turn again commits no superstep, so the reporter never sent its application report. The gateway records an action's application only on that report, so recovery later redelivered an answer the run had already consumed, and the resume preflight refused it: the stuck loop `repark-receipt-never-durable` describes. The reporter now reads the same checkpoint evidence the gateway verifies against, held writes included. `test_a_resume_that_only_asks_again_reports_its_application` drives the real executor and fails without the fix.
+
+### research-topology-index-refresh-never-built | medium | P01.S07 claimed the research topology refresh it deliberately did not build
+
+Resolved by correcting the Step. The supervisor refresh landed; the research topology was left without one on purpose, as S07's ledger note records: its documents are unapplied engine proposals and none of its gates reads `vault_index`. The Step row said otherwise and now matches what was done. `research-adr-has-no-mount-or-index-refresh` is closed as by design; the scope split is carried by the proposed amendment to `2026-07-14-adr-authoring-orchestration-adr`.
+
+### document-gate-without-a-proposal-id-is-unanswerable | low | a gate with no committed proposal parked on a question nothing could answer
+
+Fixed as a P02.S13 correction (commit `bea40ce`). The resume preflight admits only an answer naming a pending request, and a gate with no proposal id has none, so its fail-closed branch was unreachable. It now routes to revision without parking.
+
+### ingest-still-classifies-baseexception-as-a-provider-failure | low | a process exit inside a run might settle it as failed
+
+Does not reproduce as described. A graph node runs in its own task, and asyncio re-raises `SystemExit` and `KeyboardInterrupt` from a task straight out of the event loop rather than to the coroutine awaiting it, so the catch-all in `src/vaultspec_a2a/streaming/ingest.py` never receives them from a node. A probe that raised `SystemExit` inside a node took the event loop down without reaching ingest. They could reach it only if raised in the ingest task's own frames, which no code path does. Left unchanged; revisit if in-task callbacks ever raise them.
+
+### aggregator-projection-seams-have-no-production-caller | low | two aggregator methods existed only for tests
+
+Fixed as a P03.S18 correction (commit `ce82446`). Ingest now builds the run lifecycle handler and projects frames through its own methods, and the aggregator delegates to them, so the aggregator suite exercises the path a run uses.
+
+### readiness-tool-docstring-claims-a-declared-tool | low | the contract probe described the rag readiness tool as declared
+
+Fixed as a P07.S37 correction (commit `1d086f0`). The docstring now says the probe calls a served tool a run may not call, and why that is in bounds.
+
+### stale-audit-entries-closed | info | several open entries were already fixed by later Steps
+
+Recorded from the plan-close review. `blocked-finish-reason-is-dropped-when-the-reroute-needs-approval` and `star-topology-never-clears-validation-errors` were fixed by P07.S36. `plan-approval-is-skipped-when-a-soft-phase-gate-warns` was fixed by P07.S42. `finish-block-budget-outruns-a-small-recursion-limit` was superseded by the compile-time refusal of S36. `retention-tests-duplicate-helpers` was fixed by P07.S39. `repark-receipt-never-durable` is closed by S34 and its reopen above. Each earlier entry's opening status line stands as it was written; this entry closes them.
 
 ## Recommendations
 

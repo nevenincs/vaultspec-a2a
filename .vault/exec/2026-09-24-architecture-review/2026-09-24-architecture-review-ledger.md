@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:1db878214fd688260d07d601cdfcb9fef5f0b4e26c4ac1716fea29842be9f365'
+body_hash: 'sha256:93e4240030b830c1b93810230d574a282b9676a2ee1fdbfdad4e6dad405c675a'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -365,6 +365,9 @@ related:
 - `S08` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py`
 - `S08` `M` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
 - `S08` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
+- `S19` `M` `src/vaultspec_a2a/worker/tests/test_ipc_batch_bounds.py`
+- `S19` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
+- `S19` `by:` `orchestrator`
 
 ## Notes
 
@@ -390,4 +393,5 @@ related:
 - `S25` Reopened by the plan-close review (codex-credential-writeback-blocks-the-event-loop, medium).
 - `S17` Reopened by the plan-close review (sse-id-without-resumption, medium): the SSE id was removed and the Step action corrected through the plan verb to keep the sequence in the body.
 - `S08` Reopened by the plan-close review (settled-prune-on-the-relay-critical-path, medium): the prune runs behind the relay and a failed SQLite prune rolls back.
+- `S19` Reopened by the plan-close review (requeued-ipc-batch-drops-terminal-events, medium).
 

@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:a9aeb6e51930ef092a5f031b55fb541ce3c2c1d63137ea4f8adc80a1bf878053'
+body_hash: 'sha256:5bc063dd480c6db58793c4df7dc26f4ae61d073f9de35746662f8c574ba85080'
 ---
 
 # `architecture-review` plan
@@ -72,7 +72,7 @@ Busy runs, worker backpressure, event streams, checkpoint storage, the event bri
 - [x] `P03.S16` - Scope the stream database session to the handler so an open stream holds no connection or read transaction; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py`.
 - [x] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, keep the run sequence in the frame body without an SSE id until the stream can resume, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.
 - [x] `P03.S18` - Back the Postgres checkpointer with a sized connection pool; `src/vaultspec_a2a/database/checkpoints.py`.
-- [ ] `P03.S19` - Bound, serialize, and split worker event batches and protect terminal events from eviction; `src/vaultspec_a2a/worker/ipc.py, src/vaultspec_a2a/worker/state_projection.py`.
+- [x] `P03.S19` - Bound, serialize, and split worker event batches and protect terminal events from eviction; `src/vaultspec_a2a/worker/ipc.py, src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `P03.S20` - Start containers through the owned serve entry with a stop grace period longer than the shutdown budget; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.
 
 ### Phase `P04` - provider lane security and fidelity

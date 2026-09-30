@@ -299,15 +299,7 @@ class WorkerBridge:
         prevent.
         """
         events = self._batch.events
-        index = next(
-            (
-                position
-                for position, entry in enumerate(events)
-                if not _is_protected_entry(entry)
-            ),
-            0,
-        )
-        dropped = events.pop(index)
+        dropped = self._pop_evictable_event()
         logger.warning(
             "Event buffer full (%d events), dropping oldest droppable event",
             settings.ipc_max_event_buffer,
@@ -321,6 +313,23 @@ class WorkerBridge:
                 "event_buffer_limit": settings.ipc_max_event_buffer,
             },
         )
+
+    def _pop_evictable_event(self) -> dict[str, Any]:
+        """Remove and return the oldest buffered event that is not an outcome.
+
+        The oldest outcome goes only when every buffered event is one, so the
+        buffer's bound holds whatever it is holding.
+        """
+        events = self._batch.events
+        index = next(
+            (
+                position
+                for position, entry in enumerate(events)
+                if not _is_protected_entry(entry)
+            ),
+            0,
+        )
+        return events.pop(index)
 
     def _schedule_flush(self, delay: float) -> None:
         """Ensure exactly one pending flush, due in at most *delay* seconds."""
@@ -517,25 +526,31 @@ class WorkerBridge:
             },
         )
 
-        # Re-queue events (respecting buffer cap).
-        space = settings.ipc_max_event_buffer - len(self._batch.events)
-        if space > 0:
-            self._batch.events[:0] = batch[:space]
+        # The failed batch goes back ahead of what arrived while it was in
+        # flight, and the cap is then restored by the same eviction a full
+        # buffer uses. Keeping the batch's head instead, as a plain slice does,
+        # gave up its tail first - which is where a run's terminal sits.
+        self._batch.events[:0] = batch
+        overflow = len(self._batch.events) - settings.ipc_max_event_buffer
+        dropped = [self._pop_evictable_event() for _ in range(max(overflow, 0))]
+        if self._batch.events:
             # A re-queued backlog used to sit until the next event arrived, which
             # for a run that has just ended is never. The redrive is delayed by a
             # full retry ladder rather than the flush cadence, so an unreachable
             # gateway is retried steadily instead of in a tight loop.
             self._schedule_flush(self._redrive_delay_seconds())
-        dropped = len(batch) - max(space, 0)
-        if dropped > 0:
+        if dropped:
             logger.error(
                 "Dropped %d events after %d failed flush attempts",
-                dropped,
+                len(dropped),
                 settings.ipc_max_flush_retries,
                 extra={
                     "worker_id": self._worker_id,
                     "action": "flush_events_drop",
-                    "dropped_events": dropped,
+                    "dropped_events": len(dropped),
+                    "dropped_outcome_events": sum(
+                        _is_protected_entry(entry) for entry in dropped
+                    ),
                     "flush_attempt_limit": settings.ipc_max_flush_retries,
                     "event_buffer_size": len(self._batch.events),
                 },

@@ -224,6 +224,76 @@ async def test_a_full_buffer_gives_up_progress_before_an_outcome() -> None:
     assert relayed.count("thread_terminal") == 1, relayed
 
 
+class _RefusingGateway:
+    """A real service that holds each batch until released, then refuses it."""
+
+    def __init__(self) -> None:
+        self.received = asyncio.Event()
+        self.release = asyncio.Event()
+        app = FastAPI()
+        gateway = self
+
+        @app.post("/internal/events/batch")
+        async def _batch(request: Request) -> Response:
+            await request.body()
+            gateway.received.set()
+            await gateway.release.wait()
+            return Response(status_code=503)
+
+        _ = _batch
+        self.app = app
+
+
+@pytest.mark.asyncio
+async def test_a_refused_batch_keeps_its_outcome_when_the_buffer_refilled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Re-queueing a failed batch into a refilled buffer gives up progress first.
+
+    Progress kept arriving while the batch was in flight, so there is no room to
+    put all of it back. The terminal is the batch's last event, and a re-queue
+    that kept the batch's head dropped exactly that one.
+    """
+    gateway = _RefusingGateway()
+    with settings_override(
+        ipc_max_event_buffer=4,
+        ipc_max_flush_retries=1,
+        # No cadence flush may join in: the flush under test is the only one.
+        ipc_flush_interval_seconds=60.0,
+    ):
+        bridge = WorkerBridge(api_url="http://control:8000", worker_id="ipc-requeue")
+        bridge._client = httpx.AsyncClient(
+            transport=ASGITransport(app=gateway.app), base_url="http://control:8000"
+        )
+        try:
+            for index in range(3):
+                await bridge.send_event("run-bounds", _progress(index, size=32))
+            await bridge.send_event("run-bounds", _terminal())
+            flush = asyncio.create_task(bridge.flush_events())
+            await gateway.received.wait()
+            for index in range(3, 7):
+                await bridge.send_event("run-bounds", _progress(index, size=32))
+
+            with caplog.at_level(logging.ERROR, logger="vaultspec_a2a.worker.ipc"):
+                gateway.release.set()
+                assert await flush is False
+
+            buffered = [
+                entry["payload"].get("event_type") for entry in bridge._event_buffer
+            ]
+        finally:
+            await bridge.close()
+
+    assert len(buffered) == 4
+    assert buffered.count("thread_terminal") == 1, buffered
+    drops = [
+        record
+        for record in caplog.records
+        if getattr(record, "action", None) == "flush_events_drop"
+    ]
+    assert [getattr(record, "dropped_outcome_events", None) for record in drops] == [0]
+
+
 @pytest.mark.asyncio
 async def test_two_flushes_never_overlap_on_the_wire() -> None:
     """The cadence flush and a terminal's immediate flush take turns.

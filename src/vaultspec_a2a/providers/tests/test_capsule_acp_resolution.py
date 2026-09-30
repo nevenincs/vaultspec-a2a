@@ -25,7 +25,7 @@ from .._factory_commands import (
     capsule_acp_entry,
     capsule_node_executable,
 )
-from ..cli_resolution import resolve_trusted_executable
+from ..cli_resolution import resolve_service_executable
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -203,7 +203,7 @@ print(json.dumps({{
     assert report["omitted"]["status"] == "error"
     assert str(configured_root) in report["omitted"]["message"]
     assert report["explicit_none"]["command"] == [
-        resolve_trusted_executable("node"),
+        resolve_service_executable("node"),
         str(_CLAUDE_ACP_JS),
     ]
     assert report["explicit_none"]["metadata"]["runtime_authority"] == "project_local"
@@ -218,6 +218,6 @@ def test_explicit_none_keeps_project_backend_behavior(
     """Explicit None selects the existing Compose/project-local classifier."""
     del installed_acp_adapter
     command, meta = _classify_acp_command("node", capsule_assets_root=None)
-    assert command == [resolve_trusted_executable("node"), str(_CLAUDE_ACP_JS)]
+    assert command == [resolve_service_executable("node"), str(_CLAUDE_ACP_JS)]
     assert meta["runtime_authority"] == "project_local"
     assert meta["command_origin"] == "project_node_modules_entry"

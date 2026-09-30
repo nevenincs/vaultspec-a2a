@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .cli_resolution import resolve_trusted_executable
+from .cli_resolution import resolve_service_executable
 
 __all__ = ["resolve_antigravity_command"]
 
@@ -54,7 +54,7 @@ def resolve_antigravity_command(
         candidate = Path(override)
         return candidate if candidate.is_file() else None
 
-    found = resolve_trusted_executable("agy") or resolve_trusted_executable("agy.exe")
+    found = resolve_service_executable("agy") or resolve_service_executable("agy.exe")
     if found is not None:
         return Path(found)
 

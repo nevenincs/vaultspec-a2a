@@ -19,7 +19,7 @@ import pytest
 from ...workspace.environment import resolve_env_vars
 from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
 from .._subprocess import kill_process_tree, spawn_acp_process
-from ..cli_resolution import _trusted_search_directories, resolve_trusted_executable
+from ..cli_resolution import _absolute_search_directories, resolve_service_executable
 
 if TYPE_CHECKING:
     from .._json_contract import JsonObject
@@ -119,7 +119,7 @@ def test_classified_acp_command_names_an_absolute_service_runtime(
     del installed_acp_adapter
     command, metadata = _classify_acp_command("node")
 
-    assert command == [resolve_trusted_executable("node"), str(_CLAUDE_ACP_JS)]
+    assert command == [resolve_service_executable("node"), str(_CLAUDE_ACP_JS)]
     assert Path(command[0]).is_absolute()
     assert Path(command[0]).is_file()
     assert metadata["command_executable"] == Path(command[0]).name
@@ -130,10 +130,10 @@ def test_trusted_search_drops_working_directory_entries() -> None:
     """Relative and empty search entries never take part in resolution."""
     search_path = os.pathsep.join(["", ".", "relative/bin", os.sep + "usr/bin"])
 
-    assert _trusted_search_directories(search_path) == (os.sep + "usr/bin",)
+    assert _absolute_search_directories(search_path) == (os.sep + "usr/bin",)
 
 
 def test_trusted_resolution_refuses_a_name_carrying_a_directory() -> None:
     """Resolution answers for bare names only, so a path cannot smuggle a lookup."""
     with pytest.raises(ValueError, match="bare name"):
-        resolve_trusted_executable(os.path.join("any", "node"))
+        resolve_service_executable(os.path.join("any", "node"))

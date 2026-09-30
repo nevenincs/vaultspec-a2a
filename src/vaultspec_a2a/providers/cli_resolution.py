@@ -12,7 +12,7 @@ __all__ = [
     "CLAUDE_EXECUTABLE_ENV",
     "pin_claude_executable",
     "resolve_provider_cli_executable",
-    "resolve_trusted_executable",
+    "resolve_service_executable",
 ]
 
 # The Claude ACP adapter's own setting for which CLI it drives. Named here
@@ -27,7 +27,7 @@ _SYSTEM_CLI_NAMES: dict[Provider, str] = {
 }
 
 
-def _trusted_search_directories(search_path: str | None) -> tuple[str, ...]:
+def _absolute_search_directories(search_path: str | None) -> tuple[str, ...]:
     """Return the absolute directories of one search path, in order.
 
     A relative entry - including the empty entry POSIX reads as "the working
@@ -42,7 +42,7 @@ def _trusted_search_directories(search_path: str | None) -> tuple[str, ...]:
     )
 
 
-def resolve_trusted_executable(
+def resolve_service_executable(
     name: str, *, search_path: str | None = None
 ) -> str | None:
     """Resolve a launcher name to an absolute path using the SERVICE's own PATH.
@@ -74,7 +74,7 @@ def resolve_trusted_executable(
         # must not be consulted here - a provider child's environment - is
         # excluded by reading this process's rather than by naming a setting.
         search_path = os.environ.get("PATH")  # storage-anchor-ok
-    for directory in _trusted_search_directories(search_path):
+    for directory in _absolute_search_directories(search_path):
         if resolved := shutil.which(os.path.join(directory, name)):
             return os.path.abspath(resolved)
     return None
@@ -94,7 +94,7 @@ def resolve_provider_cli_executable(
     the caller's ``PATHEXT``. Unix hosts accept only the unsuffixed executable,
     so an unrelated ``.cmd`` file cannot make a lane appear runnable there. The
     search runs over this service's own locations (see
-    :func:`resolve_trusted_executable`), never the environment a provider child
+    :func:`resolve_service_executable`), never the environment a provider child
     is handed.
     """
 
@@ -103,7 +103,7 @@ def resolve_provider_cli_executable(
     except KeyError as exc:
         raise ValueError(f"provider {provider.value} has no system CLI") from exc
     for candidate in _cli_candidates(name, windows=sys.platform == "win32"):
-        if executable := resolve_trusted_executable(candidate, search_path=search_path):
+        if executable := resolve_service_executable(candidate, search_path=search_path):
             return executable
     return None
 

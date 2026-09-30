@@ -8,7 +8,7 @@ from pathlib import Path
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
-from .cli_resolution import resolve_provider_cli_executable, resolve_trusted_executable
+from .cli_resolution import resolve_provider_cli_executable, resolve_service_executable
 
 __all__ = [
     "_BIN_PATH",
@@ -318,7 +318,7 @@ def _classify_acp_command(
     # launch and is resolved from the service's own environment here, once, to an
     # absolute path. Resolving it at spawn time instead would resolve it from the
     # child's environment, which leads with the agent workspace.
-    node_executable = resolve_trusted_executable("node")
+    node_executable = resolve_service_executable("node")
     if node_executable is None:
         raise ConfigError(
             "Node.js runtime not found on this service's PATH, so the Claude ACP "

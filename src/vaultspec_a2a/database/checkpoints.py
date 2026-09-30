@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import logging
 import sys
@@ -27,12 +28,19 @@ from .checkpoint_schema import checkpoint_pragmas
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Checkpointer", "open_checkpointer", "prune_settled_thread"]
+__all__ = [
+    "Checkpointer",
+    "concurrent_checkpointer",
+    "open_checkpointer",
+    "prune_settled_thread",
+]
 
 # Headroom over the worker's concurrent-run bound. Every run in flight can be
 # writing a checkpoint at a superstep boundary, so the bound is the floor; the
 # spare pair serves the reads that are not a run's own - status enrichment,
 # recovery reconciliation, retention - without queueing them behind the writers.
+# Reaching either bound takes a saver per concurrent caller: see
+# ``concurrent_checkpointer``.
 _CHECKPOINT_POOL_HEADROOM = 2
 
 # One connection is opened up front and the rest on demand. A checkpoint pool
@@ -42,10 +50,16 @@ _CHECKPOINT_POOL_MIN_SIZE = 1
 
 
 def _postgres_checkpoint_pool_size() -> int:
-    """Return the connection ceiling for the checkpoint pool."""
+    """Return the connection ceiling for the checkpoint pool.
+
+    The same factory builds the pool in both processes, so the ceiling covers
+    whichever of them holds it: the worker's concurrent runs plus their
+    out-of-band reads, or the gateway's page of parallel checkpoint probes.
+    """
     return max(
         _CHECKPOINT_POOL_MIN_SIZE,
         domain_config.max_concurrent_threads + _CHECKPOINT_POOL_HEADROOM,
+        domain_config.thread_list_checkpoint_concurrency,
     )
 
 
@@ -53,10 +67,12 @@ def _postgres_checkpoint_pool(conninfo: str) -> Any:
     """Build the unopened checkpoint connection pool for the Postgres backend.
 
     The saver used to run on ONE connection opened from a connection string,
-    which serialized every run's checkpoint writes behind each other and left
-    checkpointing dead until a restart if that connection dropped. A pool gives
-    each operation its own connection, replaces a broken one, and bounds how many
-    the process can hold.
+    which left checkpointing dead until a restart if that connection dropped. A
+    pool replaces a broken connection and bounds how many the process can hold.
+    It does NOT by itself make one saver concurrent: ``AsyncPostgresSaver`` holds
+    a single lock around every statement it issues, so each saver uses one
+    connection at a time and concurrency comes from taking a saver per caller
+    (``concurrent_checkpointer``) over this shared pool.
 
     The connection keywords are not defaults worth inheriting - they are what the
     saver requires. It issues its own transactions, so a connection must be in
@@ -256,6 +272,28 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
     async def aprune(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("aprune", *args, **kwargs)
 
+    async def concurrent_sibling(self) -> _SelectorThreadPostgresCheckpointer:
+        """Return a bridge to a second saver on the same pool and selector loop.
+
+        The sibling borrows this bridge's thread, loop and pool, so it must not
+        outlive it and must never be closed: ``close`` stops the loop and closes
+        the pool both of them are using.
+        """
+        sibling: Any = await self._run_async("_pooled_sibling_saver")
+        clone = copy.copy(self)
+        clone._saver = sibling
+        clone.serde = sibling.serde
+        return clone
+
+    async def _pooled_sibling_saver(self) -> Any:
+        # Constructed ON the selector loop: AsyncPostgresSaver binds the running
+        # loop at construction and marshals its own sync calls onto it.
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        if self._pool is None:
+            raise RuntimeError("AsyncPostgresSaver is not initialized")
+        return AsyncPostgresSaver(conn=self._pool, serde=self.serde)
+
     async def prune_settled_thread(self, thread_id: str) -> bool:
         """Prune a settled thread on the selector loop that owns the connection."""
         return bool(await self._run_async("_prune_settled_thread", thread_id))
@@ -322,6 +360,46 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         if self._saver is not None:
             self.serde = self._saver.serde
         return self
+
+
+def _pooled_postgres_saver(checkpointer: object) -> Any | None:
+    """Return *checkpointer* when it is a native Postgres saver over a pool.
+
+    A saver built from a connection STRING owns one connection and relies on its
+    own lock to keep statements off each other; only a pooled saver can safely
+    have a sibling. Both imports are lazy: the PostgreSQL driver belongs to the
+    optional server profile.
+    """
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from psycopg_pool import AsyncConnectionPool
+    except ImportError:
+        return None
+    if not isinstance(checkpointer, AsyncPostgresSaver):
+        return None
+    return checkpointer if isinstance(checkpointer.conn, AsyncConnectionPool) else None
+
+
+async def concurrent_checkpointer(checkpointer: Checkpointer) -> Checkpointer:
+    """Return a saver that does not queue behind *checkpointer*'s own lock.
+
+    ``AsyncPostgresSaver`` holds one lock around every statement it issues, so a
+    single saver uses one pooled connection at a time however large the pool is.
+    A caller that needs real concurrency - a run writing its own checkpoints, one
+    of a page of parallel status probes - takes a saver of its own over the SAME
+    pool. The pool stays the bound on how many connections the process holds.
+
+    The result borrows the caller's pool and must not outlive it: closing it
+    belongs to whoever opened the checkpointer, never to a sibling. A backend
+    that cannot benefit returns itself - SQLite has one connection to serialize
+    on, and a Postgres saver on a bare connection has nothing else to run on.
+    """
+    if isinstance(checkpointer, _SelectorThreadPostgresCheckpointer):
+        return await checkpointer.concurrent_sibling()
+    saver = _pooled_postgres_saver(checkpointer)
+    if saver is None:
+        return checkpointer
+    return cast("Checkpointer", type(saver)(conn=saver.conn, serde=saver.serde))
 
 
 async def prune_settled_thread(checkpointer: Checkpointer, thread_id: str) -> bool:

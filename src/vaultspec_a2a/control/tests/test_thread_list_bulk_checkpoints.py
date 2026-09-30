@@ -8,17 +8,34 @@ The three states the sequential path distinguished must survive the change -
 present, absent, and unverified - because a thread whose read timed out is
 uncertain, not a thread with no checkpoint, and only a certain read may drive a
 resumability claim.
+
+Concurrency is claimed in two places and proved in both: in the cap, which no
+store may exceed, and against a real PostgreSQL pool, where the page must be
+read on more than one connection rather than queueing behind one saver's lock.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import time
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
 
 from ...control.thread_listing import (
     _bulk_read_checkpoints,
     _CheckpointProbe,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from ...conftest import ExternalPrerequisiteRule
+
+_POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
 
 
 class _Checkpointer:
@@ -112,3 +129,63 @@ def test_concurrency_is_capped() -> None:
 def test_an_empty_thread_list_reads_nothing() -> None:
     """No threads, no reads, no error."""
     assert _read(_Checkpointer({}), []) == {}
+
+
+@pytest_asyncio.fixture
+async def pooled_postgres_saver(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> AsyncIterator[Any]:
+    """The production pooled Postgres saver against the live server."""
+    external_prerequisite("postgres")
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    from ...database.checkpoints import _postgres_checkpoint_pool
+
+    pool = _postgres_checkpoint_pool(os.environ[_POSTGRES_URL_ENV])
+    await pool.open(wait=True)
+    try:
+        saver = AsyncPostgresSaver(conn=pool)
+        await saver.setup()
+        yield saver
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_prerequisites("postgres")
+async def test_a_page_is_read_on_more_than_one_connection(
+    pooled_postgres_saver: Any,
+) -> None:
+    """The cap is only worth having if the reads can actually run together.
+
+    A saver holds one lock around every statement it issues, so a page sharing
+    one saver used a single connection whatever the cap said. Measured in
+    connections the pool had handed out at the same moment, against the real
+    server, because the pool's size alone says nothing about what is in use.
+    """
+    pool = pooled_postgres_saver.conn
+    thread_ids = [f"list-probe-{uuid4().hex}" for _ in range(8)]
+    peak = 0
+    stop = asyncio.Event()
+
+    async def sample() -> None:
+        nonlocal peak
+        while not stop.is_set():
+            stats = pool.get_stats()
+            peak = max(peak, stats.get("pool_size", 0) - stats.get("pool_available", 0))
+            await asyncio.sleep(0)
+
+    sampler = asyncio.create_task(sample())
+    try:
+        probes = await _bulk_read_checkpoints(
+            pooled_postgres_saver, thread_ids, concurrency=8, deadline=30.0
+        )
+    finally:
+        stop.set()
+        await sampler
+
+    assert peak > 1, pool.get_stats()
+    # Absent, not uncertain: these threads have no checkpoint and the reads all
+    # completed, so a wider read must not have cost the batch its certainty.
+    assert all(not probe.unverified for probe in probes.values())
+    assert set(probes) == set(thread_ids)

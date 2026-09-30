@@ -716,12 +716,20 @@ class GraphLifecycleManager:
                 frozen_assignment=req.model_assignment,
             )
 
+        from ..database.checkpoints import concurrent_checkpointer
+
+        # A graph is compiled per run, so it gets a saver of its own over the
+        # shared pool: one saver serializes every statement it issues behind a
+        # single lock, which would put every concurrent run's checkpoint writes
+        # back in one queue however many connections the pool holds.
+        run_checkpointer = await concurrent_checkpointer(self._ports.checkpointer)
+
         return cast(
             "RegisteredCompiledGraph",
             compile_team_graph(
                 team_config=team_config,
                 agent_configs=agent_configs,
-                checkpointer=self._ports.checkpointer,
+                checkpointer=run_checkpointer,
                 supervisor_agent_config=supervisor_config,
                 workspace_root=ws_root,
                 autonomous=req.autonomous,

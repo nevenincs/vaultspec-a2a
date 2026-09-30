@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast, override
 from langgraph.runtime import RunControl
 from langgraph.types import Command
 
+from ..control.permission_dispatch import answered_permission_request
 from ..domain_config import domain_config
 from ..graph.run_context import RunContext
 from ..ipc.serializers import sequenced_to_dict
@@ -49,10 +50,12 @@ from .graph_lifecycle import (
     GraphLifecycleManager,
     RegisteredCompiledGraph,
 )
-from .state_projection import StateProjector
+from .state_projection import ResumeAdmission, ResumeRefusal, StateProjector
 
 if TYPE_CHECKING:
     from contextvars import ContextVar
+
+    from opentelemetry.trace import Span
 
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
@@ -103,6 +106,37 @@ def _recursion_limit(req: DispatchRequest) -> int:
     if definition is None:
         return req.recursion_limit
     return min(req.recursion_limit, definition.recursion_limit)
+
+
+def _addressed_resume(resume_value: object, admission: ResumeAdmission) -> object:
+    """The resume value, addressed to its interrupt when it has to be.
+
+    LangGraph matches a bare resume value to the run's single pending
+    interrupt, and refuses one outright while several are pending: a bare value
+    says nothing about which of them it answers. Keying the value by the
+    interrupt it belongs to is the documented way to answer one of several,
+    and it is used only then - a run waiting on one question takes the plain
+    value, which is the shape every existing resume already sends.
+    """
+    if admission.interrupt_id is None:
+        return resume_value
+    return {admission.interrupt_id: resume_value}
+
+
+def _answered_permission_update(resume_value: object) -> dict[str, Any]:
+    """The state delta recording a tool-permission answer under its request.
+
+    Carried alongside the resume rather than instead of it: the answer still
+    re-enters through ``Command(resume=...)``, and this is what lets the
+    worker turn that replays afterwards find the answer by the request it
+    answered instead of by the position its interrupts fall in. A resume that
+    is not a tool-permission answer contributes nothing.
+    """
+    answered = answered_permission_request(resume_value)
+    if answered is None:
+        return {}
+    request_id, option_id = answered
+    return {"permission_answers": {request_id: option_id}}
 
 
 def _run_context(req: DispatchRequest, *, action: str) -> RunContext:
@@ -702,11 +736,26 @@ class Executor(SettlementMixin):
                 await self._reject_missing_graph(req, span, _RESUME_GUARDS)
                 return
 
+            config = _invocation_config(req, action="resume")
+
+            admission = await self._state_projector.pre_flight_resume(
+                req.thread_id,
+                graph,
+                config,
+                receipt,
+                resume_value=req.option_id,
+                timeout_seconds=max(
+                    0.0, checkpoint_deadline - asyncio.get_running_loop().time()
+                ),
+            )
+            if isinstance(admission, ResumeRefusal):
+                await self._refuse_resume(req, span, graph, config, admission)
+                return
+
             self._bridge.track_thread(req.thread_id)
             # A resumed turn re-provisions the run's tokens for its window.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
-            config = _invocation_config(req, action="resume")
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
             # Stays None unless the catch-all below fires, so a resume that
@@ -726,7 +775,18 @@ class Executor(SettlementMixin):
                     agent_id,
                     graph,
                     Command(
-                        resume=req.option_id,
+                        resume=_addressed_resume(req.option_id, admission),
+                        # Every key here is bound atomically with the answer,
+                        # which is what lets a run parked before checkpoint
+                        # evidence existed acquire its digests without a
+                        # separate state update that would invalidate the
+                        # interrupt it is parked on. LangGraph holds a
+                        # resume's input writes against that checkpoint and
+                        # accumulates them until a superstep consumes them, so
+                        # a turn needing a second approval, and a resume
+                        # redelivered after its turn died, each write these
+                        # keys twice in one step. Every one of them therefore
+                        # reduces rather than holding a single value.
                         update={
                             "graph_action_receipts": {
                                 req.dispatch_id: receipt.model_dump(mode="json")
@@ -741,6 +801,7 @@ class Executor(SettlementMixin):
                             "model_assignment_digest": model_assignment_digest(
                                 req.model_assignment
                             ),
+                            **_answered_permission_update(req.option_id),
                         },
                     ),
                     config,
@@ -775,6 +836,47 @@ class Executor(SettlementMixin):
                     )
                 finally:
                     self._close_run_control(req.thread_id)
+
+    async def _refuse_resume(
+        self,
+        req: DispatchRequest,
+        span: Span,
+        graph: RegisteredCompiledGraph,
+        config: dict[str, Any],
+        refusal: ResumeRefusal,
+    ) -> None:
+        """Turn an answer away without settling the run it was meant for.
+
+        A refused answer is not a failed run: the run is still executing, or
+        still waiting on the question it really asked, and settling it here
+        would end a run on a client's mistake. The client is told on the coded
+        channel, and the run's current execution state is projected after it so
+        a reader that acts on the frame re-reads authoritative state rather
+        than the frame's own wording.
+        """
+        logger.warning(
+            "Resume for thread %s refused as %s; the run is waiting on %s",
+            req.thread_id,
+            refusal.cause.value,
+            ", ".join(refusal.pending_request_ids) or "no request",
+            extra=self._dispatch_log_extra(
+                req,
+                action="resume_refused_unparked",
+                runtime_mode=_RESUME_GUARDS.runtime_mode,
+                refusal=refusal.cause.value,
+            ),
+        )
+        span.set_attribute("pre_flight", "refused")
+        span.set_attribute("refusal", refusal.cause.value)
+        await self._aggregator.emit_error(
+            req.thread_id,
+            refusal.cause.value,
+            refusal.detail,
+            recoverable=True,
+        )
+        await self._state_projector.emit_execution_state_projection(
+            req.thread_id, graph, config
+        )
 
     def _open_run_control(self, thread_id: str) -> RunControl:
         control = RunControl()

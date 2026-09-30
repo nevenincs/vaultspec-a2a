@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..thread.enums import ApprovalStatus
 from ..thread.snapshots import LOCALLY_RESPONDABLE_PAUSE_CAUSES
@@ -10,7 +10,11 @@ from ..thread.snapshots import LOCALLY_RESPONDABLE_PAUSE_CAUSES
 if TYPE_CHECKING:
     from .dispatch import DispatchOutcome
 
-__all__ = ["permission_dispatch_error", "permission_resume_value"]
+__all__ = [
+    "answered_permission_request",
+    "permission_dispatch_error",
+    "permission_resume_value",
+]
 
 
 def permission_dispatch_error(
@@ -56,3 +60,26 @@ def permission_resume_value(
         "notes": notes,
         "request_id": request_id,
     }
+
+
+def answered_permission_request(resume_value: object) -> tuple[str, str] | None:
+    """Read a tool-permission answer as ``(request id, option id)``.
+
+    The inverse of the tool-permission branch of
+    :func:`permission_resume_value`, and the reason a resumed worker turn can
+    find its earlier answers by the request they answered rather than by the
+    order its interrupts happened to fall in. ``None`` means this resume value
+    is not a tool-permission answer, or carries no request to key it by: a
+    plan or document verdict, or a bare option id from a caller that never
+    named its request. Nothing can be keyed from those, so nothing is.
+    """
+    if not isinstance(resume_value, dict):
+        return None
+    payload = cast("dict[str, object]", resume_value)
+    request_id = payload.get("request_id")
+    option_id = payload.get("option_id")
+    if not isinstance(request_id, str) or not request_id:
+        return None
+    if not isinstance(option_id, str) or not option_id:
+        return None
+    return request_id, option_id

@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .enums import ControlActionType
 
@@ -14,6 +14,7 @@ __all__ = [
     "GraphActionReceipt",
     "GraphCompletionReceipt",
     "control_action_payload_fingerprint",
+    "merge_active_graph_action_receipt",
     "merge_graph_action_receipts",
     "merge_graph_completion_receipts",
 ]
@@ -106,3 +107,34 @@ def merge_graph_action_receipts(
                 )
             merged[dispatch_id] = canonical
     return merged
+
+
+def merge_active_graph_action_receipt(
+    existing: dict[str, object],
+    incoming: dict[str, object],
+) -> dict[str, object]:
+    """Keep the most recently accepted action's receipt, never an older one.
+
+    This channel reduces rather than holding a single value per step because a
+    resume delivers its receipt as a graph input write against the checkpoint
+    the run is parked on, and LangGraph accumulates those writes until a
+    superstep consumes them. A turn that needs two approvals, and a resume
+    redelivered after its turn died, both put two receipts on this channel in
+    one step; refusing the second fails the run and leaves the thread's state
+    unreadable for good.
+
+    Writer generation orders a thread's accepted actions, so the higher
+    generation is the active one however the writes were ordered. An equal
+    generation is the same action delivered twice, and the arriving copy
+    stands. A durable value that no longer parses is treated as absent: it is
+    read back from untrusted storage, while the arriving receipt is the one
+    this worker accepted.
+    """
+    arriving = GraphActionReceipt.model_validate(incoming)
+    try:
+        current = GraphActionReceipt.model_validate(existing)
+    except ValidationError:
+        return arriving.model_dump(mode="json")
+    if current.writer_generation > arriving.writer_generation:
+        return current.model_dump(mode="json")
+    return arriving.model_dump(mode="json")

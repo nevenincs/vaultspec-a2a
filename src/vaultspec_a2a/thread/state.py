@@ -12,6 +12,7 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from .action_receipts import (
+    merge_active_graph_action_receipt,
     merge_graph_action_receipts,
     merge_graph_completion_receipts,
 )
@@ -21,6 +22,8 @@ __all__ = [
     "append_artifacts",
     "append_research_findings",
     "append_validation_errors",
+    "keep_last_resume_binding",
+    "merge_permission_answers",
     "merge_token_usage",
     "merge_unique_strs",
     "merge_vault_index",
@@ -105,6 +108,24 @@ def append_validation_errors(
     return existing + new
 
 
+def keep_last_resume_binding[T](existing: T, new: T) -> T:
+    """Keep the value written last for a channel a resume rebinds.
+
+    These channels carry what a dispatch binds its run to rather than work a
+    node produced, and only the executor writes them. Holding a single value
+    per step would be the stricter contract, but a resume's input writes are
+    held against the checkpoint the run is parked on and accumulate there
+    until a superstep consumes them: a turn needing a second approval, and a
+    resume redelivered after its turn died, both write these keys twice in one
+    step. Refusing the second write fails the run and leaves the thread
+    unreadable, and the two values are the same binding restated, so the last
+    one stands. No node writes these channels, so this reduction cannot hide
+    concurrent writers disagreeing.
+    """
+    del existing
+    return new
+
+
 def merge_unique_strs(
     existing: list[str],
     new: list[str],
@@ -117,6 +138,23 @@ def merge_unique_strs(
             merged.append(item)
             seen.add(item)
     return merged
+
+
+def merge_permission_answers(
+    existing: dict[str, str],
+    new: dict[str, str],
+) -> dict[str, str]:
+    """Merge answered tool-permission requests, keyed by the request answered.
+
+    Keyed rather than positional because a worker turn replays in full on
+    every resume and the provider may reach its tool calls in a different
+    order; an answer found by its request id reaches the call the human was
+    shown whatever the replay does. Answers accumulate because one turn can
+    need several, and each stays valid for the rest of the turn that asked it.
+    A repeat of the same request id overwrites, which is the correct reading
+    of a re-answered request.
+    """
+    return {**existing, **new}
 
 
 def _merge_clarification_answers(
@@ -230,14 +268,18 @@ class TeamState(TypedDict):
     loop_count: NotRequired[int]
 
     # --- existing fields ---
-    agent_descriptors: NotRequired[dict[str, dict[str, str]]]
+    agent_descriptors: NotRequired[
+        Annotated[dict[str, dict[str, str]], keep_last_resume_binding]
+    ]
     messages: Annotated[list[BaseMessage], add_messages]
-    model_assignment_digest: NotRequired[str]
-    graph_definition_digest: NotRequired[str]
+    model_assignment_digest: NotRequired[Annotated[str, keep_last_resume_binding]]
+    graph_definition_digest: NotRequired[Annotated[str, keep_last_resume_binding]]
     graph_action_receipts: NotRequired[
         Annotated[dict[str, dict[str, object]], merge_graph_action_receipts]
     ]
-    active_graph_action_receipt: NotRequired[dict[str, object]]
+    active_graph_action_receipt: NotRequired[
+        Annotated[dict[str, object], merge_active_graph_action_receipt]
+    ]
     graph_completion_receipts: NotRequired[
         Annotated[dict[str, dict[str, object]], merge_graph_completion_receipts]
     ]
@@ -276,6 +318,13 @@ class TeamState(TypedDict):
     # dropped on load and never reaches a node.
     approval_status: NotRequired[str | None]
     approval_request_id: NotRequired[str | None]
+
+    # --- tool permission gate ---
+    # Every tool-permission request a human has answered this run, as
+    # ``request id -> chosen option id``. The worker's permission callback
+    # reads it before asking, so a replayed turn takes its earlier answers
+    # from here instead of from the order its interrupts happened to fall in.
+    permission_answers: NotRequired[Annotated[dict[str, str], merge_permission_answers]]
 
     # --- document phase machine ---
     # research_findings: per-thread findings accumulated by the Send-based

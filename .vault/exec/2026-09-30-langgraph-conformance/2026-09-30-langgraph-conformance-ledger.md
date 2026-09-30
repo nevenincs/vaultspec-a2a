@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:50761708907318a1e100c9eb02934b63da80415e1082bf7827c39517720f8605'
+body_hash: 'sha256:0c7c2e6f948c6e4eeee320b938a6a1ec85a56c857a7f162b076e3c7cd5bcca3d'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -125,6 +125,10 @@ related:
 - `S30` `M` `src/vaultspec_a2a/service_tests/test_core_grounding_live.py`
 - `S30` `verify:` `providers team context dev suites on the 0.3.2 lock (1406) + withheld-tool tests failing on the previous handlers + real vaultspec-core-mcp and rag --read-only launches through verify_harness_mcp_contract` -> `pass`
 - `S30` `by:` `orchestrator`
+- `S31` `M` `pyproject.toml`
+- `S31` `M` `uv.lock`
+- `S31` `verify:` `graph streaming factory prompt-render suites on the relocked environment (661); the full suite on these versions passed in the version review (4830)` -> `pass`
+- `S31` `by:` `orchestrator`
 
 ## Notes
 

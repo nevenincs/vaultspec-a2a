@@ -71,10 +71,23 @@ CLAUDE_DENIED_READ_PATHS: tuple[str, ...] = (
     "~/.codex/**",
 )
 
-# The mode an unattended run must be in: the adapter advertises it as "Don't
-# Ask - don't prompt for permissions, deny if not pre-approved", which is the
-# only advertised mode whose meaning matches a run with no human at the prompt.
-AUTONOMOUS_PERMISSION_MODE = "dontAsk"
+# The mode an unattended run must be PINNED to. It is pinned at all because the
+# adapter otherwise adopts the operator's own `permissions.defaultMode`, so an
+# ambient `acceptEdits` or `bypassPermissions` would approve tools before this
+# project's rung was consulted.
+#
+# The value is the adapter's "Manual" mode - "standard behavior, prompts for
+# dangerous operations" - and not the tempting "Don't Ask", which the CLI
+# describes as "don't prompt for permissions, deny if not pre-approved". That
+# description is exactly the problem: this lane's permission decision IS the
+# prompt. An uncovered call is what reaches `session/request_permission`, where
+# the run's exact-name allowlist answers it and a call naming another project is
+# refused. A mode that denies without asking would take that rung out of the
+# path - the run would be bounded by the CLI's static pre-approval alone, the
+# cross-project guard would never run, and every declared grounding tool that is
+# deliberately NOT pre-approved would die silently. Deny-by-default is served
+# here by refusing at the rung, not by never asking it.
+AUTONOMOUS_PERMISSION_MODE = "default"
 
 # The adapter's configuration-option id for the session permission mode. Setting
 # the mode through the configuration surface rather than `session/set_mode` is

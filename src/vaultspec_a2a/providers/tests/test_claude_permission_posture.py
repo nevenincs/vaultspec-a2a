@@ -223,11 +223,31 @@ def test_installed_adapter_advertises_the_unattended_permission_mode() -> None:
     assert AUTONOMOUS_PERMISSION_MODE in acp_adapter_permission_mode_ids()
 
 
+def test_the_pinned_mode_is_the_one_that_still_asks_this_project() -> None:
+    """The pin keeps the permission rung in the path, by the adapter's own words.
+
+    The alternative reads as the stricter choice and is the opposite: a mode that
+    never asks decides every uncovered call inside the CLI, where this run's
+    exact-name allowlist and its cross-project refusal do not exist.
+    """
+    source = acp_adapter_source()
+
+    assert AUTONOMOUS_PERMISSION_MODE == "default"
+    assert f'id: "{AUTONOMOUS_PERMISSION_MODE}",' in source
+    assert "prompts for dangerous operations" in source
+    assert "Don't prompt for permissions, deny if not pre-approved" in source
+
+
 @pytest.mark.asyncio
-async def test_unattended_session_is_pinned_to_the_deny_by_default_mode(
+async def test_unattended_session_is_pinned_away_from_an_ambient_mode(
     echo_context: AcpSessionContext, tmp_path: Path
 ) -> None:
-    """A run with no human rung ends setup in the mode that denies by default."""
+    """An operator default the session arrives in is replaced before any prompt.
+
+    ``acceptEdits`` is the ambient hazard exactly: the adapter resolves it from
+    the operator's own settings, and it approves file edits before this project's
+    permission rung is consulted.
+    """
     config = _config(agent_id="vaultspec-adr-author", workspace_root=tmp_path)
     task = asyncio.create_task(setup_session(echo_context, config, {}, []))
 
@@ -248,8 +268,8 @@ async def test_unattended_session_is_pinned_to_the_deny_by_default_mode(
     echo_context.response_futures[AcpRequestId.SESSION_SETUP].set_result(
         {
             "result": _session_result(
-                current_mode="default",
-                available_modes=("default", AUTONOMOUS_PERMISSION_MODE),
+                current_mode="acceptEdits",
+                available_modes=("acceptEdits", AUTONOMOUS_PERMISSION_MODE),
             )
         }
     )
@@ -338,7 +358,8 @@ async def test_unattended_session_refuses_a_lane_without_the_mode(
     echo_context.response_futures[AcpRequestId.SESSION_SETUP].set_result(
         {
             "result": _session_result(
-                current_mode="default", available_modes=("default", "acceptEdits")
+                current_mode="acceptEdits",
+                available_modes=("acceptEdits", "dontAsk"),
             )
         }
     )
@@ -371,14 +392,14 @@ async def test_supervised_session_keeps_the_mode_it_negotiated(
     echo_context.response_futures[AcpRequestId.SESSION_SETUP].set_result(
         {
             "result": _session_result(
-                current_mode="default",
-                available_modes=("default", AUTONOMOUS_PERMISSION_MODE),
+                current_mode="acceptEdits",
+                available_modes=("acceptEdits", AUTONOMOUS_PERMISSION_MODE),
             )
         }
     )
 
     result = await task
-    assert result.agent_modes["currentModeId"] == "default"
+    assert result.agent_modes["currentModeId"] == "acceptEdits"
     assert AcpRequestId.SESSION_SET_CONFIG_OPTION not in echo_context.response_futures
 
 

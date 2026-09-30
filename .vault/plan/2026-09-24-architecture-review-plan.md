@@ -19,9 +19,9 @@ related:
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-08-03-current-project-binding-adr]]'
   - '[[2026-07-19-observability-lanes-adr]]'
-modified: '2026-09-24'
+modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:02e9625c653d34642053d6e17de130968387fe9c3b6a56587f041d49668fda13'
+body_hash: 'sha256:4616c1018ad51d9c099a166f48366935cd2340383717c9af724d4524ab21bd91'
 ---
 
 # `architecture-review` plan
@@ -57,7 +57,7 @@ The LangGraph family runs at its latest release and the graph layer uses the 1.2
 
 Graph routing, human-in-the-loop resume, crash recovery, and per-run isolation behave as the accepted gate, interrupt, and worker decisions require.
 
-- [ ] `P02.S09` - Route blocked HARD phase gates and unparseable supervisor output back to the supervisor under a bounded re-ask counter; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/compiler.py`.
+- [x] `P02.S09` - Route blocked HARD phase gates and unparseable supervisor output back to the supervisor under a bounded re-ask counter; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/compiler.py`.
 - [ ] `P02.S10` - Honour each preset recursion limit on served runs and bound document review loops per phase; `src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py`.
 - [ ] `P02.S11` - Bind a tool-permission approval to a fingerprint of the exact tool call and re-park when a replayed turn asks for a different call; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 - [ ] `P02.S12` - Resume an interrupted run from its checkpoint through receipt evidence instead of replaying its input; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/action_receipts.py`.

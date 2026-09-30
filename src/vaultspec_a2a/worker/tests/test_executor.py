@@ -980,6 +980,8 @@ class TestGraphInputBuilding:
         # These keys must still be present.
         assert inp["thread_id"] == "t-followup"
         assert len(inp["messages"]) == 1
+        # Every turn starts with the supervisor's whole re-ask budget.
+        assert inp["supervisor_reasks"] == 0
 
     def test_thread_id_matches_request(self) -> None:
         """thread_id in graph_input must match the request thread_id."""

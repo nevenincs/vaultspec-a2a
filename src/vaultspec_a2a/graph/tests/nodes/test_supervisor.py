@@ -195,18 +195,26 @@ def test_supervisor_routing_finish() -> None:
     assert result.next_route == "FINISH"
 
 
-def test_supervisor_routing_unparseable_defaults_to_finish() -> None:
+def test_supervisor_refuses_an_unparseable_reply_instead_of_finishing() -> None:
     result = _decision("I have no idea what to do next!", workers=["planner", "coder"])
-    assert result.next_route == "FINISH"
+    assert result.refused is True
+    assert result.next_route is None
     assert result.routing_error is not None
 
 
 def test_supervisor_sets_routing_error_on_parse_failure() -> None:
     gibberish = "xyzzy forty-two blorp"
     result = _decision(gibberish, workers=["planner", "coder"])
-    assert result.next_route == "FINISH"
     assert result.routing_error is not None
     assert gibberish in result.routing_error
+    # The refusal tells the model what an admissible answer looks like.
+    assert "planner, coder, FINISH" in result.routing_error
+
+
+def test_supervisor_bounds_the_reply_it_carries_back() -> None:
+    result = _decision("x" * 5000, workers=["planner", "coder"])
+    assert result.routing_error is not None
+    assert len(result.routing_error) < 400
 
 
 def test_supervisor_no_routing_error_on_clean_finish() -> None:
@@ -290,9 +298,24 @@ def test_phase_gate_hard_blocks_exec_without_plan() -> None:
         state=_make_state_for_phase_gate(vault_index={}),
         worker_phase_map={"coder": "exec", "planner": "plan"},
     )
-    assert result.inferred_phase == "exec"
+    assert result.refused is True
+    # The intent is kept, but the run has not moved into the blocked phase.
+    assert result.next_route == "coder"
+    assert result.inferred_phase != "exec"
     assert result.routing_error is not None
     assert "plan" in result.routing_error
+
+
+def test_phase_gate_soft_warns_without_refusing() -> None:
+    result = _decision(
+        "adr-writer",
+        workers=["adr-writer"],
+        state=_make_state_for_phase_gate(vault_index={}),
+        worker_phase_map={"adr-writer": "adr"},
+    )
+    assert result.refused is False
+    assert result.next_route == "adr-writer"
+    assert result.routing_error is not None
 
 
 def test_phase_gate_passes_when_prerequisite_satisfied() -> None:
@@ -479,10 +502,11 @@ async def test_supervisor_parse_failure_clears_stale_approval_state() -> None:
 
     result = await node(state)
 
-    assert result["next"] == "FINISH"
-    assert result["current_plan"] == [
-        {"content": "Complete task", "status": "completed"}
-    ]
+    # Nothing was routed: no route is recorded and the plan summary stands.
+    assert "next" not in result
+    assert "current_plan" not in result
+    assert result["supervisor_reasks"] == 1
+    assert result["active_agent"] == ""
     assert "approval_status" in result
     assert result["approval_status"] is None
     assert "approval_request_id" in result

@@ -282,6 +282,7 @@ class TestTeamStateStructure:
             "active_graph_action_receipt",
             "graph_completion_receipts",
             "routing_error",
+            "supervisor_reasks",
             # SDD blackboard awareness fields
             "active_feature",
             "pipeline_phase",

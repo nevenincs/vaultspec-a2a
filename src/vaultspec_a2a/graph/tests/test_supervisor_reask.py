@@ -1,0 +1,201 @@
+"""A refused supervisor decision returns to the supervisor, within a budget.
+
+A real star team is compiled through ``compile_team_graph`` and run with a
+scripted supervisor model. A route a HARD phase gate blocks must never reach the
+blocked worker: the run goes back to the supervisor with the refusal in its
+prompt, and its next admissible decision is followed. A reply naming no route is
+re-asked the same way, and a supervisor that never produces an admissible route
+fails the run instead of ending it as if the work were done.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, cast
+
+import pytest
+from langchain_core.callbacks import AsyncCallbackHandler
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
+
+from ...domain_config import domain_config
+from ...team.team_config import (
+    TeamConfig,
+    TeamGraphConfig,
+    TopologyConfig,
+    TopologyType,
+    WorkerRef,
+    load_agent_config,
+)
+from ...thread.action_receipts import (
+    GraphActionReceipt,
+    control_action_payload_fingerprint,
+)
+from ...thread.enums import ControlActionType
+from ...thread.errors import SupervisorRoutingError
+from ..compiler import compile_team_graph
+from .conftest import deterministic_model_assignment
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from langchain_core.messages import BaseMessage
+
+_PLAN_AUTHOR = "vaultspec-plan-author"
+_CODER = "vaultspec-coder"
+_ROUTING_PROMPT_MARK = "Respond EXACTLY with one of the following words"
+
+
+class _ScriptedFactory:
+    """Hands the supervisor a scripted reply sequence and each worker a fixed one."""
+
+    def __init__(self, supervisor_replies: list[str]) -> None:
+        self._supervisor_replies = supervisor_replies
+
+    def create(
+        self,
+        provider: Any,
+        *,
+        model: Any | None = None,
+        agent_config: Any | None = None,
+        workspace_root: Any | None = None,
+        **kwargs: Any,
+    ) -> FakeListChatModel:
+        del provider, model, workspace_root, kwargs
+        if agent_config is None:
+            return FakeListChatModel(responses=self._supervisor_replies)
+        return FakeListChatModel(responses=[f"{agent_config.id} did its part"])
+
+
+class _SupervisorPrompts(AsyncCallbackHandler):
+    """Records the prompt of every supervisor routing call."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list[list[BaseMessage]],
+        *,
+        run_id: UUID,
+        **kwargs: Any,
+    ) -> None:
+        del serialized, run_id, kwargs
+        for batch in messages:
+            prompt = "\n".join(str(m.content) for m in batch)
+            if _ROUTING_PROMPT_MARK in prompt:
+                self.prompts.append(prompt)
+
+
+def _star_graph(supervisor_replies: list[str]) -> Any:
+    team = TeamConfig(
+        id="reask-star",
+        display_name="reask-star",
+        topology=TopologyConfig(type=TopologyType.STAR),
+        graph=TeamGraphConfig(step_timeout_seconds=120),
+        workers=[WorkerRef(agent_id=_PLAN_AUTHOR), WorkerRef(agent_id=_CODER)],
+    )
+    return compile_team_graph(
+        team_config=team,
+        agent_configs={a: load_agent_config(a) for a in (_PLAN_AUTHOR, _CODER)},
+        provider_factory=_ScriptedFactory(supervisor_replies),
+        model_assignment=deterministic_model_assignment(team),
+        checkpointer=InMemorySaver(),
+    )
+
+
+def _run_input(thread_id: str, vault_index: dict[str, list[str]]) -> dict[str, Any]:
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=thread_id,
+        action_id="ingest",
+        action_type=ControlActionType.INGEST,
+        payload_fingerprint=control_action_payload_fingerprint({"run": thread_id}),
+        dispatch_id="ingest",
+        run_revision=1,
+        writer_generation=1,
+    ).model_dump(mode="json")
+    return {
+        "messages": [HumanMessage(content="Carry the feature forward.")],
+        "thread_id": thread_id,
+        "active_agent": "",
+        "artifacts": [],
+        "current_plan": [],
+        "token_usage": {},
+        "active_feature": "reask-feature",
+        "vault_index": vault_index,
+        "supervisor_reasks": 0,
+        "active_graph_action_receipt": receipt,
+        "graph_action_receipts": {"ingest": receipt},
+    }
+
+
+async def _visits(
+    graph: Any, thread_id: str, graph_input: dict[str, Any], prompts: _SupervisorPrompts
+) -> list[str]:
+    visited: list[str] = []
+    config = {"configurable": {"thread_id": thread_id}, "callbacks": [prompts]}
+    async for update in graph.astream(graph_input, config, stream_mode="updates"):
+        visited.extend(cast("dict[str, Any]", update))
+    return visited
+
+
+@pytest.mark.asyncio
+async def test_a_hard_gated_route_returns_to_the_supervisor_not_the_worker() -> None:
+    # The coder's exec phase needs a plan that does not exist yet; the plan
+    # author's phase needs the ADR that does.
+    graph = _star_graph([_CODER, _PLAN_AUTHOR, "FINISH"])
+    prompts = _SupervisorPrompts()
+
+    visited = await _visits(
+        graph, "hard-gate", _run_input("hard-gate", {"adr": ["adr.md"]}), prompts
+    )
+
+    assert _CODER not in visited
+    assert f"mount_{_CODER}" not in visited
+    assert visited[:4] == [
+        "supervisor",
+        "supervisor",
+        f"mount_{_PLAN_AUTHOR}",
+        _PLAN_AUTHOR,
+    ]
+    assert visited.count("supervisor") == 3
+    assert len(prompts.prompts) == 3
+    assert "Phase gate: routing to 'exec'" not in prompts.prompts[0]
+    assert "Phase gate: routing to 'exec'" in prompts.prompts[1]
+    settled = await graph.aget_state({"configurable": {"thread_id": "hard-gate"}})
+    assert settled.values["supervisor_reasks"] == 0
+    assert settled.values["routing_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_unparseable_reply_is_re_asked_before_it_is_followed() -> None:
+    graph = _star_graph(["no idea, honestly", "FINISH"])
+    prompts = _SupervisorPrompts()
+
+    visited = await _visits(
+        graph, "unparseable", _run_input("unparseable", {}), prompts
+    )
+
+    assert visited[:2] == ["supervisor", "supervisor"]
+    assert _CODER not in visited and _PLAN_AUTHOR not in visited
+    assert "could not parse route" in prompts.prompts[1]
+    assert "no idea, honestly" in prompts.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_a_supervisor_that_never_routes_admissibly_fails_the_run() -> None:
+    graph = _star_graph(["still thinking about it"])
+    prompts = _SupervisorPrompts()
+
+    with pytest.raises(SupervisorRoutingError) as failure:
+        await _visits(graph, "exhausted", _run_input("exhausted", {}), prompts)
+
+    limit = domain_config.supervisor_reask_limit
+    assert failure.value.attempts == limit + 1
+    assert "could not parse route" in failure.value.reason
+    # The first decision plus every re-ask the budget allows, then no more.
+    assert len(prompts.prompts) == limit + 1
+    parked = await graph.aget_state({"configurable": {"thread_id": "exhausted"}})
+    assert parked.values["supervisor_reasks"] == limit

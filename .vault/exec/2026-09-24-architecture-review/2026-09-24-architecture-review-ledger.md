@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-09-24'
+modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:468cb4a7e8de6ecc5a7846ee0c3c4d0dfb8a9fcc6682400fb1094984a8c2dac1'
+body_hash: 'sha256:af7bc82bf3db2b862f28b9ca936a54ddd35ebe861ffef74d2251b84fb38449a0'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -86,10 +86,28 @@ related:
 - `S08` `verify:` `pytest database/tests/test_checkpoint_retention.py on sqlite and postgres connection, pool, selector-thread` -> `pass`
 - `S08` `verify:` `pytest control/tests/test_settled_history_pruning.py` -> `pass`
 - `S08` `by:` `orchestrator`
+- `S09` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S09` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S09` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S09` `M` `src/vaultspec_a2a/thread/state.py`
+- `S09` `M` `src/vaultspec_a2a/thread/errors.py`
+- `S09` `M` `src/vaultspec_a2a/thread/__init__.py`
+- `S09` `M` `src/vaultspec_a2a/domain_config.py`
+- `S09` `M` `.env.example`
+- `S09` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S09` `A` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S09` `M` `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `S09` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S09` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S09` `M` `src/vaultspec_a2a/thread/tests/test_errors.py`
+- `S09` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
+- `S09` `verify:` `runner graph thread worker context streaming team suites` -> `pass`
+- `S09` `by:` `orchestrator`
 
 ## Notes
 
 - `S01` pyproject.toml had drifted from taplo.toml, so the pre-commit format check refused any edit to it; a separate formatting-only commit (fa6d93c, parse-identical) landed first.
 - `S06` LangGraph 1.2.12 astream_events drops its control keyword for version v2; the RunControl is seated as the parent runtime through the private CONFIG_KEY_RUNTIME, with the drain test as the tripwire.
 - `S08` Closed by the orchestrator; the vaultspec-high-executor by-row above was a logging slip. Pruning runs on the gateway after terminal acceptance, not in the worker, because application receipts pin checkpoint ids the gateway reads in relay order.
+- `S09` An exhausted re-ask budget fails the run with SupervisorRoutingError rather than finishing it; a new turn resets the budget through the graph input.
 

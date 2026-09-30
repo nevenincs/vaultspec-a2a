@@ -321,6 +321,10 @@ class TeamState(TypedDict):
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str | None]
+    # Consecutive supervisor decisions refused this turn (no parseable route, or
+    # a route a HARD phase gate blocked). Non-zero sends the run back to the
+    # supervisor; an accepted decision resets it and every new turn starts at 0.
+    supervisor_reasks: NotRequired[int]
 
     # --- routing / identification ---
     thread_id: str

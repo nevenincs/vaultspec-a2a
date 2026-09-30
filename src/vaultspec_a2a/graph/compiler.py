@@ -817,13 +817,18 @@ def _validate_compiled_topology(team_config: Any) -> None:
 def _route_from_supervisor(state: TeamState) -> str:
     """Route a star-topology supervisor output to its next hop.
 
-    A pending plan approval short-circuits to the ``plan_approval`` node before
-    any worker routing. Otherwise the supervisor's own ``next`` decision is the
-    route key. ``next`` is read directly (not defaulted): by the time this edge
-    runs the supervisor has always set it, so a missing key is a real invariant
-    break that should fail loud rather than silently route nowhere. Lifted to
-    module scope so its contract is testable without compiling a graph.
+    A refused decision - one naming no route, or a route a HARD phase gate
+    blocked - returns to the supervisor, whose ``next`` then records only its
+    intent. A pending plan approval short-circuits to the ``plan_approval`` node
+    before any worker routing. Otherwise the supervisor's own ``next`` decision
+    is the route key. ``next`` is read directly (not defaulted): by the time
+    this edge runs the supervisor has always set it, so a missing key is a real
+    invariant break that should fail loud rather than silently route nowhere.
+    Lifted to module scope so its contract is testable without compiling a
+    graph.
     """
+    if state.get("supervisor_reasks"):
+        return "supervisor"
     if state.get("approval_status") == "pending":
         return "plan_approval"
     next_route = state.get("next")

@@ -194,6 +194,26 @@ class WorkerExecutionError(VaultspecError):
         self.relayed_output = relayed_output
 
 
+class SupervisorRoutingError(VaultspecError):
+    """Raised when the supervisor exhausts its re-asks without an admissible route.
+
+    Failing the run is the honest outcome: ending it as completed would report
+    work that was never routed, and routing anyway would run a worker the phase
+    gates refused.
+    """
+
+    __slots__ = ("attempts", "reason")
+
+    def __init__(self, reason: str, *, attempts: int) -> None:
+        """Record the last refusal and how many decisions were refused."""
+        super().__init__(
+            f"supervisor made {attempts} consecutive inadmissible routing "
+            f"decisions; last: {reason}"
+        )
+        self.reason = reason
+        self.attempts = attempts
+
+
 # ---------------------------------------------------------------------------
 # Protocol bridging
 # ---------------------------------------------------------------------------
@@ -339,6 +359,7 @@ __all__ = [
     "PermissionDeniedError",
     "ProtocolError",
     "ProviderSessionError",
+    "SupervisorRoutingError",
     "TeamConfigNotFoundError",
     "TokenBudgetExceededError",
     "VaultspecError",

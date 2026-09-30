@@ -656,6 +656,15 @@ def test_route_from_supervisor_honors_approval_then_the_next_decision() -> None:
     # With no pending approval, the supervisor's own next decision routes.
     assert _route_from_supervisor(_state(next="planner")) == "planner"
     assert _route_from_supervisor(_state(next="FINISH")) == "FINISH"
+    assert _route_from_supervisor(_state(next="planner", supervisor_reasks=0)) == (
+        "planner"
+    )
+
+    # A refused decision goes back to the supervisor; its next is only intent.
+    assert (
+        _route_from_supervisor(_state(next="planner", supervisor_reasks=1))
+        == "supervisor"
+    )
 
 
 # ---------------------------------------------------------------------------

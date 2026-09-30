@@ -247,7 +247,11 @@ def _compile_star(
     route_map: dict[str, str] = {wid: f"mount_{wid}" for wid in compiled_worker_ids}
     route_map["FINISH"] = GRAPH_COMPLETION_NODE
 
-    supervisor_route_map = {**route_map, "plan_approval": "plan_approval"}
+    supervisor_route_map = {
+        **route_map,
+        "plan_approval": "plan_approval",
+        "supervisor": "supervisor",
+    }
     builder.add_conditional_edges(
         "supervisor",
         _route_from_supervisor,

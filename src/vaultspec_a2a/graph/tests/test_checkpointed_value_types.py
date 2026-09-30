@@ -16,9 +16,7 @@ run still held in memory), and every reachable value is checked.
 
 from __future__ import annotations
 
-import tempfile
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -42,6 +40,7 @@ from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 def enum_members(value: object, path: str = "") -> Iterator[str]:
@@ -135,7 +134,9 @@ def _base_state(thread_id: str, **extra: Any) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_a_parked_document_gate_checkpoints_only_plain_values() -> None:
+async def test_a_parked_document_gate_checkpoints_only_plain_values(
+    tmp_path: Path,
+) -> None:
     """The research topology's phase state survives as strings, not members.
 
     ``gate_phase``, the ``review_revisions`` keys and the gate's interrupt
@@ -163,46 +164,47 @@ async def test_a_parked_document_gate_checkpoints_only_plain_values() -> None:
             model_assignment=deterministic_model_assignment(team),
         )
 
-    with tempfile.TemporaryDirectory() as tmp:
-        database = str(Path(tmp) / "gate.sqlite")
-        async with AsyncSqliteSaver.from_conn_string(database) as saver:
-            await saver.setup()
-            parked = await _graph(saver).ainvoke(
-                _base_state("plain-values-doc", active_feature="conformance"),
-                config,
-            )
+    database = str(tmp_path / "gate.sqlite")
+    async with AsyncSqliteSaver.from_conn_string(database) as saver:
+        await saver.setup()
+        parked = await _graph(saver).ainvoke(
+            _base_state("plain-values-doc", active_feature="conformance"),
+            config,
+        )
 
-        payload = parked["__interrupt__"][0].value
-        assert payload["type"] == "document_approval_request"
-        # The payload is checkpointed with the parked task, so the same rule
-        # applies to it as to any channel.
-        assert type(payload["phase"]) is str, repr(payload["phase"])
+    payload = parked["__interrupt__"][0].value
+    assert payload["type"] == "document_approval_request"
+    # The payload is checkpointed with the parked task, so the same rule
+    # applies to it as to any channel.
+    assert type(payload["phase"]) is str, repr(payload["phase"])
 
-        async with AsyncSqliteSaver.from_conn_string(database) as saver:
-            graph = _graph(saver)
-            hydrated = (await graph.aget_state(config)).values
-            leaked = sorted(enum_members(hydrated))
-            assert not leaked, f"enum members survived into the checkpoint: {leaked}"
-            assert hydrated["gate_phase"] == "research"
-            assert set(hydrated["review_revisions"]) == {"research"}
+    async with AsyncSqliteSaver.from_conn_string(database) as saver:
+        graph = _graph(saver)
+        hydrated = (await graph.aget_state(config)).values
+        leaked = sorted(enum_members(hydrated))
+        assert not leaked, f"enum members survived into the checkpoint: {leaked}"
+        assert hydrated["gate_phase"] == "research"
+        assert set(hydrated["review_revisions"]) == {"research"}
 
-            # Readers still work on the plain values: the approved verdict
-            # advances the machine to the next phase's gate.
-            advanced = await graph.ainvoke(
-                Command[str](
-                    resume={
-                        "verdict": "approved",
-                        "notes": None,
-                        "request_id": payload["request_id"],
-                    }
-                ),
-                config,
-            )
-            assert advanced["__interrupt__"][0].value["phase"] == "adr"
+        # Readers still work on the plain values: the approved verdict
+        # advances the machine to the next phase's gate.
+        advanced = await graph.ainvoke(
+            Command[str](
+                resume={
+                    "verdict": "approved",
+                    "notes": None,
+                    "request_id": payload["request_id"],
+                }
+            ),
+            config,
+        )
+        assert advanced["__interrupt__"][0].value["phase"] == "adr"
 
 
 @pytest.mark.asyncio
-async def test_a_parked_plan_approval_checkpoints_only_plain_values() -> None:
+async def test_a_parked_plan_approval_checkpoints_only_plain_values(
+    tmp_path: Path,
+) -> None:
     """The star topology's approval and phase state survive as strings.
 
     ``approval_status`` is an ``ApprovalStatus`` member at the supervisor's
@@ -224,42 +226,39 @@ async def test_a_parked_plan_approval_checkpoints_only_plain_values() -> None:
             model_assignment=deterministic_model_assignment(team),
         )
 
-    with tempfile.TemporaryDirectory() as tmp:
-        database = str(Path(tmp) / "plan.sqlite")
-        async with AsyncSqliteSaver.from_conn_string(database) as saver:
-            await saver.setup()
-            parked = await _graph(saver).ainvoke(
-                _base_state(
-                    "plain-values-plan",
-                    active_feature="conformance",
-                    vault_index={
-                        "plan": [".vault/plan/2026-09-30-conformance-plan.md"]
-                    },
-                ),
-                config,
-            )
-        plan_payload = parked["__interrupt__"][0].value
-        assert plan_payload["type"] == "plan_approval_request"
+    database = str(tmp_path / "plan.sqlite")
+    async with AsyncSqliteSaver.from_conn_string(database) as saver:
+        await saver.setup()
+        parked = await _graph(saver).ainvoke(
+            _base_state(
+                "plain-values-plan",
+                active_feature="conformance",
+                vault_index={"plan": [".vault/plan/2026-09-30-conformance-plan.md"]},
+            ),
+            config,
+        )
+    plan_payload = parked["__interrupt__"][0].value
+    assert plan_payload["type"] == "plan_approval_request"
 
-        async with AsyncSqliteSaver.from_conn_string(database) as saver:
-            graph = _graph(saver)
-            hydrated = (await graph.aget_state(config)).values
-            leaked = sorted(enum_members(hydrated))
-            assert not leaked, f"enum members survived into the checkpoint: {leaked}"
-            assert hydrated["approval_status"] == "pending"
-            assert hydrated["pipeline_phase"] == "plan"
+    async with AsyncSqliteSaver.from_conn_string(database) as saver:
+        graph = _graph(saver)
+        hydrated = (await graph.aget_state(config)).values
+        leaked = sorted(enum_members(hydrated))
+        assert not leaked, f"enum members survived into the checkpoint: {leaked}"
+        assert hydrated["approval_status"] == "pending"
+        assert hydrated["pipeline_phase"] == "plan"
 
-            # The gate still reads its own persisted value: approving routes on
-            # to the exec worker rather than re-asking.
-            await graph.ainvoke(
-                Command[str](
-                    resume={
-                        "verdict": "approved",
-                        "notes": None,
-                        "request_id": plan_payload["request_id"],
-                    }
-                ),
-                config,
-            )
-            after = (await graph.aget_state(config)).values
-            assert not sorted(enum_members(after))
+        # The gate still reads its own persisted value: approving routes on
+        # to the exec worker rather than re-asking.
+        await graph.ainvoke(
+            Command[str](
+                resume={
+                    "verdict": "approved",
+                    "notes": None,
+                    "request_id": plan_payload["request_id"],
+                }
+            ),
+            config,
+        )
+        after = (await graph.aget_state(config)).values
+        assert not sorted(enum_members(after))

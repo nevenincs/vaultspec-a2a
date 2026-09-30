@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:8ff0d5efc3e279f507aadd5428b373ad63f23a5685d14984cdbf62b1ef9efb44'
+body_hash: 'sha256:c17b16b28999c0978c1b2bbec76ca43cdf101011072fcea1384e425f502fc97f'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -431,6 +431,9 @@ related:
 - `S44` `M` `src/vaultspec_a2a/graph/compiler.py`
 - `S44` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
 - `S44` `by:` `orchestrator`
+- `S02` `M` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
+- `S02` `verify:` `pytest src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py dev/tests/test_storage_anchors.py` -> `pass`
+- `S02` `by:` `orchestrator`
 
 ## Notes
 
@@ -469,3 +472,4 @@ related:
 - `S35` Scope extended to thread/snapshots.py, where run-status disclosure folds pending writes; answered is keyed on the fixed per-task write slots so a task that failed mid-node still reads as waiting. A follow-up commit makes the live clarification proof wait for the run's position rather than only its answers.
 - `S39` The borrowed-close refusal exists only on the selector bridge; the pooled Postgres sibling has no close. The schema pin cannot fail before its change because the guard is the deliverable; proven by bumping the pin. Also consolidates the retention test helpers the structural gate flagged.
 - `S43` The producer guard is widened from the history family to every member; the helper-literal producers moved to members so the guard can see them.
+- `S02` Correction: the proofs used the system temp directory, which the storage-anchor gate refuses; surfaced by just ci.

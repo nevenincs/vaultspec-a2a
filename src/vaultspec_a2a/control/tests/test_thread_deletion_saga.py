@@ -18,11 +18,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...conftest import materialize_schema
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
@@ -80,10 +80,11 @@ def _config(thread_id: str, namespace: str = "") -> RunnableConfig:
 async def _write_checkpoint(
     checkpointer: AsyncSqliteSaver, thread_id: str, checkpoint_id: str
 ) -> None:
-    checkpoint = empty_checkpoint()
+    config = _config(thread_id)
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = checkpoint_id
     await checkpointer.aput(
-        _config(thread_id),
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},

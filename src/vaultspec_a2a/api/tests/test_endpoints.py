@@ -47,6 +47,7 @@ from ...database.models import (
     ThreadModel,
 )
 from ...streaming.aggregator import EventAggregator
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
@@ -620,12 +621,11 @@ class TestListThreads:
 
         async def _seed_checkpoint_mismatch() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-list-checkpoint-drift", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-list-current"
             await checkpointer.aput(
-                _checkpoint_config("thread-list-checkpoint-drift", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -887,12 +887,11 @@ class TestThreadState:
 
         async def _corrupt_permission() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-corrupt-permission-state", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-corrupt-permission-state"
             await checkpointer.aput(
-                _checkpoint_config("thread-corrupt-permission-state", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -944,12 +943,11 @@ class TestThreadState:
 
         async def _seed_stale_execution_state() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-stale-state-endpoint", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-fresh-state-endpoint"
             await checkpointer.aput(
-                _checkpoint_config("thread-stale-state-endpoint", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1006,12 +1004,11 @@ class TestThreadState:
 
         async def _seed_plan_without_tool_call() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-plan-no-tool-call-endpoint", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-plan-no-tool-call-endpoint"
             await checkpointer.aput(
-                _checkpoint_config("thread-plan-no-tool-call-endpoint", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1073,12 +1070,11 @@ class TestThreadState:
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-state-aggregator-only", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-thread-state-aggregator-only"
             await checkpointer.aput(
-                _checkpoint_config("thread-state-aggregator-only", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1224,12 +1220,11 @@ class TestThreadState:
 
         async def _seed_terminal_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-state-terminal-permission-residue", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-thread-state-terminal-permission-residue"
             await checkpointer.aput(
-                _checkpoint_config("thread-state-terminal-permission-residue", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1282,12 +1277,11 @@ class TestThreadState:
 
         async def _seed_answered_permission() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-state-answered-pending-apply", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-thread-state-answered-pending-apply"
             await checkpointer.aput(
-                _checkpoint_config("thread-state-answered-pending-apply", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1340,12 +1334,11 @@ class TestThreadState:
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            seed_config = _checkpoint_config("thread-state-checkpoint-only", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-thread-state-checkpoint-only"
             config = await checkpointer.aput(
-                _checkpoint_config("thread-state-checkpoint-only", ""),
+                seed_config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -2729,12 +2722,11 @@ class TestDeleteThread:
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-delete-input-required", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-delete-input-required"
             await checkpointer.aput(
-                _checkpoint_config("thread-delete-input-required", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -2775,20 +2767,20 @@ class TestDeleteThread:
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-delete-terminal", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-delete-terminal-thread-root"
             await checkpointer.aput(
-                _checkpoint_config("thread-delete-terminal", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
             )
-            child_checkpoint = empty_checkpoint()
+            child_config = _checkpoint_config("thread-delete-terminal", "worker:child")
+            child_checkpoint = await real_checkpoint()
             child_checkpoint["id"] = "cp-delete-terminal-thread-child"
             await checkpointer.aput(
-                _checkpoint_config("thread-delete-terminal", "worker:child"),
+                child_config,
                 child_checkpoint,
                 {"source": "loop", "step": 2, "parents": {}},
                 {},

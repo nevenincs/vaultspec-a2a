@@ -8,9 +8,9 @@ journal row, so a second boot and historical repair key stay harmless.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -30,8 +30,12 @@ from ...database.permission_repository import (
     get_or_create_control_action,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 
 async def _seed_paused_thread(session: AsyncSession, tid: str) -> None:
@@ -58,10 +62,11 @@ async def _seed_paused_thread(session: AsyncSession, tid: str) -> None:
 
 async def _put_checkpoint(checkpointer: AsyncSqliteSaver, tid: str) -> None:
     await checkpointer.setup()
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {"configurable": {"thread_id": tid, "checkpoint_ns": ""}}
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{tid}"
     await checkpointer.aput(
-        {"configurable": {"thread_id": tid, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},

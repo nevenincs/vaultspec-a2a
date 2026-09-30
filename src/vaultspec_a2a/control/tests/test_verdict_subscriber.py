@@ -24,7 +24,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Response
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -33,10 +32,13 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...conftest import materialize_schema
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
+
+    from langchain_core.runnables import RunnableConfig
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
@@ -219,7 +221,10 @@ async def _seed_parked_thread(
         else None
     )
     await checkpointer.setup()
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["channel_values"]["authoring_proposal_ids"] = proposal_ids
     checkpoint["channel_values"]["authoring_changeset_ids"] = changeset_ids
     if seed.gate_pending is not None:
@@ -230,7 +235,7 @@ async def _seed_parked_thread(
         )
         checkpoint["channel_values"]["graph_definition_digest"] = definition.digest()
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},

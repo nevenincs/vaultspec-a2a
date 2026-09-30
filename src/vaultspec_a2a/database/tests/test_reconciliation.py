@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -21,7 +21,11 @@ from ...database import (
     record_permission_response_submission,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 
 @pytest.mark.asyncio
@@ -158,10 +162,13 @@ async def test_deleting_thread_with_pending_permission_is_never_swept(
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-deleting-pending-permission"
         await checkpointer.aput(
-            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -224,15 +231,16 @@ async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-answered-pending-apply-reconcile",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-answered-pending-apply"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-answered-pending-apply-reconcile",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},

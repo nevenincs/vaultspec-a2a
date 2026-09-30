@@ -22,10 +22,10 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from langgraph.checkpoint.base import empty_checkpoint
 
 from ...domain_config import domain_config
 from ...testing.environment import settings_override
+from ...tests._checkpoint_seeding import real_checkpoint
 from ..checkpoints import concurrent_checkpointer, open_checkpointer
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ async def _write_checkpoint(
     saver: Checkpointer, thread_id: str, *, payload_bytes: int = 0
 ) -> None:
     """Put one checkpoint through the saver's own public write path."""
-    checkpoint = empty_checkpoint()
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{uuid4().hex}"
     if payload_bytes:
         checkpoint["channel_values"] = {"payload": "x" * payload_bytes}

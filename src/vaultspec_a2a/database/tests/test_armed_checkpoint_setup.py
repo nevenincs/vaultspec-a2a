@@ -19,10 +19,10 @@ from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...testing import armed_desktop_app_home, settings_override
+from ...tests._checkpoint_seeding import real_checkpoint
 from ..checkpoints import Checkpointer, open_checkpointer
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ def _table_names(db_file: Path) -> set[str]:
 
 
 async def _write_one_checkpoint(saver: Checkpointer, thread_id: str) -> None:
-    checkpoint = empty_checkpoint()
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{uuid4().hex}"
     await saver.aput(
         cast("Any", {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}),

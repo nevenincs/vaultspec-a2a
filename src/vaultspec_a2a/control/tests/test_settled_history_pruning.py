@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import pytest_asyncio
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -25,6 +24,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ...conftest import materialize_schema
 from ...database.models import ThreadModel
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus
 from ..event_handlers import _handle_terminal_event, settle_pending_checkpoint_prunes
 from .test_terminal_sequence_capture import _seed_completed_authority
@@ -61,7 +61,7 @@ async def checkpointer(
 async def _put_bare_checkpoint(
     checkpointer: AsyncSqliteSaver, thread_id: str, checkpoint_id: str
 ) -> None:
-    checkpoint = empty_checkpoint()
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = checkpoint_id
     await checkpointer.aput(
         {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},

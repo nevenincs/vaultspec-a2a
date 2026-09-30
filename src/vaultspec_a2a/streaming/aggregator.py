@@ -66,12 +66,16 @@ class _IngestOptions(TypedDict, total=False):
     graph_input: dict[str, Any] | Command[Any] | None
     config: dict[str, Any]
     on_graph_started: Callable[[], Awaitable[None]] | None
+    context: object | None
+    control: object | None
 
 
 def _validate_ingest_arguments(
     args: tuple[object, ...], options: _IngestOptions
 ) -> None:
-    unknown = set(options).difference({"graph_input", "config", "on_graph_started"})
+    unknown = set(options).difference(
+        {"graph_input", "config", "on_graph_started", "context", "control"}
+    )
     if unknown:
         unexpected = next(iter(unknown))
         raise TypeError(
@@ -441,6 +445,8 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
                 graph_input,
                 config,
                 options.get("on_graph_started"),
+                options.get("context"),
+                options.get("control"),
             )
         )
 

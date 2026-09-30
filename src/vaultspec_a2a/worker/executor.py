@@ -11,9 +11,11 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, cast, override
 
+from langgraph.runtime import RunControl
 from langgraph.types import Command
 
 from ..domain_config import domain_config
+from ..graph.run_context import RunContext
 from ..ipc.serializers import sequenced_to_dict
 from ..providers.team_selection import model_assignment_digest
 from ..streaming.node_metadata import node_metadata_from_graph
@@ -61,6 +63,34 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _invocation_config(req: DispatchRequest, *, action: str) -> dict[str, Any]:
+    """The LangGraph config one ingest or resume runs under.
+
+    The metadata and tags are what let a trace backend group every model and
+    tool call of an invocation under the run and dispatch that caused it; with
+    only the thread id, a resumed run's calls were indistinguishable from the
+    ingest's.
+    """
+    return {
+        "configurable": {"thread_id": req.thread_id},
+        "recursion_limit": req.recursion_limit,
+        "run_name": f"vaultspec-a2a {action}",
+        "metadata": {
+            "thread_id": req.thread_id,
+            "dispatch_id": req.dispatch_id,
+            "action": action,
+        },
+        "tags": ["vaultspec-a2a", f"action:{action}"],
+    }
+
+
+def _run_context(req: DispatchRequest, *, action: str) -> RunContext:
+    """The Runtime context the graph's nodes read their run identity from."""
+    return RunContext(
+        thread_id=req.thread_id, dispatch_id=req.dispatch_id, action=action
+    )
+
+
 class Executor(SettlementMixin):
     """Orchestrate graph runs, projections, events, and dispatch capacity."""
 
@@ -81,6 +111,12 @@ class Executor(SettlementMixin):
         )
         self._bridge = bridge
         self._resources = RunResources()
+        # One drain handle per run executing here, and a signal for when none
+        # are left, so a shutdown can stop every run at a superstep boundary
+        # and know when they have all stopped.
+        self._run_controls: dict[str, RunControl] = {}
+        self._runs_idle = asyncio.Event()
+        self._runs_idle.set()
 
         # Worker-scoped holder of per-run actor tokens. Registered when a
         # run's active window opens and dropped when it closes, so tokens live
@@ -512,10 +548,7 @@ class Executor(SettlementMixin):
                 await self._reject_missing_graph(req, span, _INGEST_GUARDS)
                 return
 
-            config = {
-                "configurable": {"thread_id": req.thread_id},
-                "recursion_limit": req.recursion_limit,
-            }
+            config = _invocation_config(req, action="ingest")
             self._bridge.track_thread(req.thread_id)
             # Hold the run's per-role tokens for this active window only.
             self._token_store.register(req.thread_id, req.actor_tokens)
@@ -550,6 +583,8 @@ class Executor(SettlementMixin):
                     on_graph_started=lambda: self._emit_dispatch_application_receipt(
                         req
                     ),
+                    context=_run_context(req, action="ingest"),
+                    control=self._open_run_control(req.thread_id),
                 )
                 span.set_attribute("outcome", outcome)
             except Exception:
@@ -566,9 +601,12 @@ class Executor(SettlementMixin):
                 )
                 span.record_exception(Exception("Graph execution failed"))
             finally:
-                await self._settle_run(
-                    req, graph, config, outcome, execution_failure_reason
-                )
+                try:
+                    await self._settle_run(
+                        req, graph, config, outcome, execution_failure_reason
+                    )
+                finally:
+                    self._close_run_control(req.thread_id)
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
@@ -601,10 +639,7 @@ class Executor(SettlementMixin):
             # A resumed turn re-provisions the run's tokens for its window.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
-            config = {
-                "configurable": {"thread_id": req.thread_id},
-                "recursion_limit": req.recursion_limit,
-            }
+            config = _invocation_config(req, action="resume")
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
             # Stays None unless the catch-all below fires, so a resume that
@@ -645,6 +680,8 @@ class Executor(SettlementMixin):
                     on_graph_started=lambda: self._emit_dispatch_application_receipt(
                         req
                     ),
+                    context=_run_context(req, action="resume"),
+                    control=self._open_run_control(req.thread_id),
                 )
                 span.set_attribute("outcome", outcome)
             except Exception:
@@ -661,9 +698,35 @@ class Executor(SettlementMixin):
                 )
                 span.record_exception(Exception("Graph resume failed"))
             finally:
-                await self._settle_run(
-                    req, graph, config, outcome, execution_failure_reason
-                )
+                try:
+                    await self._settle_run(
+                        req, graph, config, outcome, execution_failure_reason
+                    )
+                finally:
+                    self._close_run_control(req.thread_id)
+
+    def _open_run_control(self, thread_id: str) -> RunControl:
+        control = RunControl()
+        self._run_controls[thread_id] = control
+        self._runs_idle.clear()
+        return control
+
+    def _close_run_control(self, thread_id: str) -> None:
+        self._run_controls.pop(thread_id, None)
+        if not self._run_controls:
+            self._runs_idle.set()
+
+    async def drain(self, reason: str) -> None:
+        """Stop every run executing here at its next superstep boundary.
+
+        Returns once none is left running. A node already mid-turn finishes
+        first, so a caller bounds this with its own deadline and cancels what
+        remains; a run that did drain left a resumable checkpoint and no
+        terminal status, so its open action is delivered again after restart.
+        """
+        for control in list(self._run_controls.values()):
+            control.request_drain(reason)
+        await self._runs_idle.wait()
 
     async def shutdown(self) -> None:
         """Release held resources (aggregator debounce tasks, etc.)."""

@@ -350,7 +350,7 @@ def _research_harness_servers(team_config: Any) -> list[str]:
 
 
 def _compile_research_adr(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     **options: Unpack[_CompileResearchAdrOptions],
@@ -576,6 +576,7 @@ def _compile_research_adr(
             gate_target=_RA_RESEARCH_GATE,
             revision_target=_RA_SYNTHESIS,
         ),
+        destinations=(_RA_RESEARCH_GATE, _RA_SYNTHESIS),
     )
     _add_node(
         builder,
@@ -585,6 +586,7 @@ def _compile_research_adr(
             approved_target=_RA_ADR_AUTHOR,
             revision_target=_RA_SYNTHESIS,
         ),
+        destinations=(_RA_ADR_AUTHOR, _RA_SYNTHESIS),
     )
     _add_node(
         builder,
@@ -595,6 +597,7 @@ def _compile_research_adr(
             gate_target=_RA_ADR_GATE,
             revision_target=_RA_ADR_AUTHOR,
         ),
+        destinations=(_RA_ADR_GATE, _RA_ADR_AUTHOR),
     )
     _add_node(
         builder,
@@ -604,6 +607,7 @@ def _compile_research_adr(
             approved_target=_RA_PLAN_AUTHOR,
             revision_target=_RA_ADR_AUTHOR,
         ),
+        destinations=(_RA_PLAN_AUTHOR, _RA_ADR_AUTHOR),
     )
     _add_node(
         builder,
@@ -614,6 +618,7 @@ def _compile_research_adr(
             gate_target=_RA_PLAN_GATE,
             revision_target=_RA_PLAN_AUTHOR,
         ),
+        destinations=(_RA_PLAN_GATE, _RA_PLAN_AUTHOR),
     )
     _add_node(
         builder,
@@ -623,6 +628,7 @@ def _compile_research_adr(
             approved_target=GRAPH_COMPLETION_NODE,
             revision_target=_RA_PLAN_AUTHOR,
         ),
+        destinations=(GRAPH_COMPLETION_NODE, _RA_PLAN_AUTHOR),
     )
 
     clarification_producer = _declared_clarification_producer(team_config)
@@ -637,11 +643,13 @@ def _compile_research_adr(
                 gate_target=_RA_CLARIFY_GATE,
                 proceed_target=_RA_DISPATCH,
             ),
+            destinations=(_RA_CLARIFY_GATE, _RA_DISPATCH),
         )
         _add_node(
             builder,
             _RA_CLARIFY_GATE,
             create_clarification_gate_node(proceed_target=_RA_DISPATCH),
+            destinations=(_RA_DISPATCH,),
         )
         builder.add_edge(START, _RA_CLARIFY_REQUEST)
 

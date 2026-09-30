@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     # provider factory, which imports the model stack at construction time.
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
+    from langchain_core.runnables.graph import Graph as DrawableGraph
     from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.types import Command, RetryPolicy
 
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
 
 from langgraph.graph import END, StateGraph
+from langgraph.types import TimeoutPolicy
 
 from ..authoring.contract import is_document_authoring_role
 from ..providers.factory import (
@@ -59,12 +61,15 @@ from .nodes.diverge import (
     create_research_dispatch_node,
     researcher_node_name,
 )
+from .nodes.vault_reader import create_context_mounter
 from .nodes.worker import WorkerNode, create_worker_node
+from .run_context import RunContext
 
 logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "STEP_BACKSTOP_GRACE_SECONDS",
     "_ROLE_TO_PHASE",
     "CompiledTeamGraph",
     "_add_node",
@@ -101,6 +106,9 @@ class _TypedBuilder(Protocol):
         *,
         metadata: dict[str, str] | None = ...,
         retry_policy: RetryPolicy | Sequence[RetryPolicy] | None = ...,
+        error_handler: Callable[..., Any] | None = ...,
+        destinations: tuple[str, ...] | None = ...,
+        timeout: TimeoutPolicy | None = ...,
     ) -> object: ...
 
     def compile(
@@ -112,12 +120,15 @@ class _TypedBuilder(Protocol):
 
 
 def _add_node(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     name: str,
     node: Callable[..., Any],
     *,
     metadata: dict[str, str] | None = None,
     retry_policy: RetryPolicy | Sequence[RetryPolicy] | None = None,
+    error_handler: Callable[..., Any] | None = None,
+    destinations: tuple[str, ...] | None = None,
+    timeout: TimeoutPolicy | None = None,
 ) -> None:
     """Add a node to ``builder`` behind one fully-typed call boundary.
 
@@ -128,14 +139,25 @@ def _add_node(
     module routes through here instead of the library method directly, so
     that irreducible diagnostic is paid once, at this boundary, rather than at
     each of the two dozen call sites that would otherwise repeat it.
+
+    ``destinations`` is required in practice for any node that routes by
+    returning ``Command``: such a node has no static outgoing edge, so without
+    it the compiled graph's own topology reports the node as ending the run and
+    every node it actually jumps to as unreachable.
     """
     cast("_TypedBuilder", builder).add_node(
-        name, node, metadata=metadata, retry_policy=retry_policy
+        name,
+        node,
+        metadata=metadata,
+        retry_policy=retry_policy,
+        error_handler=error_handler,
+        destinations=destinations,
+        timeout=timeout,
     )
 
 
 def _compile_graph(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     *,
     checkpointer: BaseCheckpointSaver[str] | None,
     interrupt_before: list[str] | None,
@@ -176,10 +198,15 @@ class CompiledTeamGraph(Protocol):
     @property
     def interrupt_before_nodes(self) -> Sequence[str]: ...
 
+    # The drawable topology, including the edges a ``Command``-routing node
+    # declares. It is how a compiled graph's reachability is asserted: a routing
+    # node without declared destinations draws as ending the run.
+    def get_graph(self) -> DrawableGraph: ...
+
     # Not a property: this function SETS it on the compiled graph a few lines
-    # below, from the team's configured step budget, and the compiler's tests
-    # read back what was set. A protocol that omits it describes a graph this
-    # module does not actually produce.
+    # below, and the compiler's tests read back what was set. It is the
+    # superstep backstop, a grace above the per-node run budget every node
+    # carries, so the node's own timeout fires first and names the node.
     step_timeout: float | None
 
     async def ainvoke(
@@ -199,6 +226,12 @@ class CompiledTeamGraph(Protocol):
         # keys and reading it is exactly what a parked-run assertion does.
     ) -> Mapping[str, Any]: ...
 
+
+#: Seconds the graph-wide superstep bound sits above each node's own run budget.
+#: Both are measured from roughly the same instant, so at equal values the
+#: superstep bound would win the race and report an anonymous step timeout
+#: instead of the node's own, which names the node and which limit it hit.
+STEP_BACKSTOP_GRACE_SECONDS = 30.0
 
 # Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
@@ -511,6 +544,11 @@ def _compile_worker_node(
         authoring_binding_provider=options["authoring_binding_provider"],
         role=agent_cfg.role,
         harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
+        # Every worker these topologies compile sits behind a mount node that
+        # refreshes the vault index; the worker expands the documents itself.
+        context_mounter=create_context_mounter(
+            workspace_root, options["task_queue_port"]
+        ),
     )
     metadata = _agent_node_metadata(agent_cfg, used_provider, model_name)
     return worker_node, metadata
@@ -525,7 +563,7 @@ class _DivergeStageArgs(TypedDict):
 
 
 def _wire_diverge_stage(
-    builder: StateGraph[Any, None, Any, Any], **kwargs: Unpack[_DivergeStageArgs]
+    builder: StateGraph[Any, Any, Any, Any], **kwargs: Unpack[_DivergeStageArgs]
 ) -> str:
     """Wire a Send-based diverge stage into ``builder``.
 
@@ -578,7 +616,12 @@ def _wire_diverge_stage(
         builder.add_edge(name, synthesis_name)
         researcher_names.append(name)
 
-    _add_node(builder, dispatch_name, create_research_dispatch_node(researcher_names))
+    _add_node(
+        builder,
+        dispatch_name,
+        create_research_dispatch_node(researcher_names),
+        destinations=tuple(researcher_names),
+    )
     return dispatch_name
 
 
@@ -774,13 +817,18 @@ def _validate_compiled_topology(team_config: Any) -> None:
 def _route_from_supervisor(state: TeamState) -> str:
     """Route a star-topology supervisor output to its next hop.
 
-    A pending plan approval short-circuits to the ``plan_approval`` node before
-    any worker routing. Otherwise the supervisor's own ``next`` decision is the
-    route key. ``next`` is read directly (not defaulted): by the time this edge
-    runs the supervisor has always set it, so a missing key is a real invariant
-    break that should fail loud rather than silently route nowhere. Lifted to
-    module scope so its contract is testable without compiling a graph.
+    A refused decision - one naming no route, or a route a HARD phase gate
+    blocked - returns to the supervisor, whose ``next`` then records only its
+    intent. A pending plan approval short-circuits to the ``plan_approval`` node
+    before any worker routing. Otherwise the supervisor's own ``next`` decision
+    is the route key. ``next`` is read directly (not defaulted): by the time
+    this edge runs the supervisor has always set it, so a missing key is a real
+    invariant break that should fail loud rather than silently route nowhere.
+    Lifted to module scope so its contract is testable without compiling a
+    graph.
     """
+    if state.get("supervisor_reasks"):
+        return "supervisor"
     if state.get("approval_status") == "pending":
         return "plan_approval"
     next_route = state.get("next")
@@ -900,7 +948,13 @@ def compile_team_graph(
 
     _validate_frozen_assignment_inventory(model_assignment)
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder: StateGraph[Any, RunContext, Any, Any] = StateGraph(
+        cast("Any", TeamState), context_schema=RunContext
+    )
+    # Every node attempt is capped at the preset's step budget. No idle limit:
+    # a provider CLI running a long tool call relays no LangChain callback while
+    # it works, so an idle clock would fell agents that are making progress.
+    builder.set_node_defaults(timeout=TimeoutPolicy(run_timeout=step_timeout))
     _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
@@ -979,7 +1033,6 @@ def compile_team_graph(
         interrupt_before=interrupt_nodes,
     )
 
-    # Apply per-preset graph settings.
-    graph.step_timeout = step_timeout
+    graph.step_timeout = step_timeout + STEP_BACKSTOP_GRACE_SECONDS
 
     return graph

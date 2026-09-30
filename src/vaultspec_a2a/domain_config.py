@@ -117,6 +117,16 @@ class DomainConfig(ProjectSettings):
 
     # -- Context window sizing -----------------------------------------------
 
+    supervisor_reask_limit: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Supervisor: how many consecutive refused routing decisions one turn "
+            "may re-ask before the run fails. A decision is refused when its "
+            "output names no route or its route is blocked by a HARD phase gate; "
+            "each refusal returns to the supervisor with the reason in context."
+        ),
+    )
     context_limit_tokens: int = Field(
         default=120_000,
         description="Estimated token budget for the context window.",

@@ -241,13 +241,6 @@ class TeamState(TypedDict):
     vault_index: NotRequired[Annotated[dict[str, list[str]], merge_vault_index]]
     validation_errors: NotRequired[Annotated[list[str], append_validation_errors]]
 
-    # --- transient: mounted .vault/ document content ---
-    # Populated by mount_node before worker invocation;
-    # cleared by worker_node after reading.
-    # None when active_feature is unset, vault_index is
-    # empty, or workspace_root is None.
-    mounted_context: NotRequired[str | None]
-
     # --- task queue pointer ---
     # ID of the task currently assigned to the worker. None when no feature is active
     # or no task has been assigned. Updated via
@@ -328,6 +321,10 @@ class TeamState(TypedDict):
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str | None]
+    # Consecutive supervisor decisions refused this turn (no parseable route, or
+    # a route a HARD phase gate blocked). Non-zero sends the run back to the
+    # supervisor; an accepted decision resets it and every new turn starts at 0.
+    supervisor_reasks: NotRequired[int]
 
     # --- routing / identification ---
     thread_id: str

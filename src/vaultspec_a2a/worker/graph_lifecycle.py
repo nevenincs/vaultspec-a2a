@@ -915,6 +915,9 @@ class GraphLifecycleManager:
             "workspace_root": req.workspace_root,
             "model_assignment_digest": model_assignment_digest(req.model_assignment),
             "graph_definition_digest": req.require_graph_definition().digest(),
+            # The re-ask budget is per turn: a turn that failed on it must not
+            # leave the next one already spent.
+            "supervisor_reasks": 0,
         }
         if is_first_ingest:
             graph_input.update(

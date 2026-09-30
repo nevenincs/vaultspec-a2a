@@ -88,9 +88,10 @@ async def test_completion_survives_restart_and_does_not_complete_next_action(
         assert evidence["resume"]["outcome"] == "completed"
 
 
-def test_completion_refuses_missing_active_incorporation():
+@pytest.mark.asyncio
+async def test_completion_refuses_missing_active_incorporation():
     with pytest.raises(ValueError):
-        record_graph_completion(
+        await record_graph_completion(
             cast(
                 "TeamState",
                 {

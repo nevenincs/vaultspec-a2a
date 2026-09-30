@@ -15,6 +15,8 @@ from pathlib import PurePath
 from typing import Any, cast
 from uuid import uuid4
 
+from langgraph.constants import TAG_NOSTREAM
+
 from ..domain_config import domain_config
 from ..graph.enums import (
     AgentLifecycleState,
@@ -519,6 +521,10 @@ async def _emit_chain_artifacts(
             )
 
 
+#: Model events whose output reaches a client as message text.
+_MODEL_OUTPUT_EVENTS = frozenset({"on_chat_model_stream", "on_chat_model_end"})
+
+
 @dataclass(frozen=True, slots=True)
 class EventProjectionServices:
     """The stable emitter, buffer, and telemetry dependencies for one stream."""
@@ -548,6 +554,14 @@ async def process_langgraph_event(
     node = metadata.get("langgraph_node")
 
     effective_agent_id = node or agent_id
+
+    if event_kind in _MODEL_OUTPUT_EVENTS and TAG_NOSTREAM in (
+        event_data.get("tags") or ()
+    ):
+        # The v2 event API still emits a model run whose caller asked LangGraph
+        # not to stream it (the supervisor's routing decision), so the tag is
+        # honoured here instead.
+        return
 
     if event_kind == "on_chat_model_stream":
         projection = _ModelStreamProjection(

@@ -20,6 +20,7 @@ from ...domain_config import domain_config
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
 from ..acp_options import valid_option_ids
+from ..run_context import RunContext, run_thread_id
 from ..tools.task_queue import create_mark_task_complete_tool
 from ._config_contract import accepting_runnable_config
 
@@ -31,12 +32,14 @@ if TYPE_CHECKING:
     from langchain_core.messages import ToolCall
     from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import BaseTool
+    from langgraph.runtime import Runtime
 
     from ...authoring import FeedbackContextReader
     from ...providers._acp_authoring import AuthoringToolBinding
     from ...thread.state import TeamState
     from ...worker.authoring_binding import AuthoringBindingProvider
     from ..protocols import CostPort, TaskQueuePort
+    from .vault_reader import ContextMounter
 
 _logger = logging.getLogger(__name__)
 
@@ -69,7 +72,10 @@ class WorkerNode(Protocol):
     __name__: str
 
     async def __call__(
-        self, state: TeamState, config: RunnableConfig | None = None
+        self,
+        state: TeamState,
+        config: RunnableConfig | None = None,
+        runtime: Runtime[RunContext] | None = None,
     ) -> dict[str, Any] | Command[Any]:
         """Execute the node's work, returning a state update or a route."""
         ...
@@ -122,6 +128,7 @@ def _build_worker_messages(
     workspace_root: Path | None,
     role: str | None = None,
     feedback_grounding: str | None = None,
+    mounted_context: str | None = None,
 ) -> list[BaseMessage]:
     """Build the worker prompt/message list before model invocation.
 
@@ -144,9 +151,8 @@ def _build_worker_messages(
         messages.append(rule_message)
     if anchoring:
         messages.append(SystemMessage(content=anchoring))
-    mounted = state.get("mounted_context")
-    if mounted:
-        messages.append(SystemMessage(content=mounted))
+    if mounted_context:
+        messages.append(SystemMessage(content=mounted_context))
     # Feedback-loop grounding: on a revision run the writer sees the reviewer's
     # authoritative comments, retrieved by id from the engine and
     # rendered upstream. Placed after the mounted corpus so the revision
@@ -601,7 +607,6 @@ def _finalize_worker_response(
     response.name = worker_name
     update: dict[str, Any] = {
         "messages": [response],
-        "mounted_context": None,
         # Approval outcomes are consumed by the worker turn they routed.
         "approval_status": None,
         "approval_request_id": None,
@@ -713,13 +718,12 @@ def _attach_authoring_tools(
 
 
 def _queue_tool_for_state(
-    state: TeamState,
+    thread_id: str | None,
     task_queue_port: TaskQueuePort | None,
     feature_tag: str | None,
 ) -> BaseTool | None:
     if task_queue_port is None or feature_tag is None:
         return None
-    thread_id = state.get("thread_id")
     return (
         create_mark_task_complete_tool(task_queue_port, thread_id)
         if thread_id
@@ -728,25 +732,25 @@ def _queue_tool_for_state(
 
 
 async def _feedback_for_state(
-    state: TeamState, feedback_reader: FeedbackContextReader | None
+    state: TeamState,
+    thread_id: str | None,
+    feedback_reader: FeedbackContextReader | None,
 ) -> str | None:
     if feedback_reader is None:
         return None
     batch_id = state.get("feedback_batch_id")
-    thread_id = state.get("thread_id")
     if batch_id and thread_id:
         return await feedback_reader.read(thread_id, batch_id)
     return None
 
 
 async def _authoring_binding_for_state(
-    state: TeamState,
+    thread_id: str | None,
     name: str,
     provider: AuthoringBindingProvider | None,
 ) -> AuthoringToolBinding | None:
     if provider is None:
         return None
-    thread_id = state.get("thread_id")
     return await provider.binding_for(thread_id, name) if thread_id else None
 
 
@@ -784,6 +788,7 @@ class _WorkerNodeOptions(TypedDict, total=False):
     harness_mcp_servers: list[str] | None
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
+    context_mounter: ContextMounter | None
 
 
 class _WorkerNodeSettings(TypedDict):
@@ -796,6 +801,7 @@ class _WorkerNodeSettings(TypedDict):
     harness_mcp_servers: list[str] | None
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
+    context_mounter: ContextMounter | None
 
 
 def _bind_worker_node_settings(
@@ -814,6 +820,7 @@ def _bind_worker_node_settings(
         "harness_mcp_servers": None,
         "feedback_reader": None,
         "cost_port": None,
+        "context_mounter": None,
     }
     for index, value in enumerate(args):
         name = names[index]
@@ -863,6 +870,8 @@ def create_worker_node(
                            the ACP session (ADD-only, unioned with any authoring
                            servers) so the spawned CLI's session/new advertises
                            them; ignored by non-ACP models.
+        context_mounter:   Optional expander of the phase-scoped vault documents
+                           this worker is grounded in, run at every invocation.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -871,20 +880,27 @@ def create_worker_node(
     settings = _bind_worker_node_settings(args, options)
 
     async def worker_node(
-        state: TeamState, config: RunnableConfig | None = None
+        state: TeamState,
+        config: RunnableConfig | None = None,
+        runtime: Runtime[RunContext] | None = None,
     ) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
+        thread_id = run_thread_id(state, runtime)
         # The task queue is thread-scoped, so build the mark-complete
         # tool per invocation using the thread_id carried in graph state — the
         # compiled graph is shared across threads and cannot close over it. The
         # tool returns a Command (revised contract); its update is propagated
         # through this node's return, not a side-channel drain.
         queue_tool = _queue_tool_for_state(
-            state, settings["task_queue_port"], settings["feature_tag"]
+            thread_id, settings["task_queue_port"], settings["feature_tag"]
         )
         feedback_grounding = await _feedback_for_state(
-            state, settings["feedback_reader"]
+            state, thread_id, settings["feedback_reader"]
         )
+        # Expanded per invocation, never carried in state: a resumed or retried
+        # attempt re-derives it rather than finding it absent or stale.
+        mounter = settings["context_mounter"]
+        mounted_context = await mounter(state) if mounter is not None else None
 
         messages = _build_worker_messages(
             state=state,
@@ -892,6 +908,7 @@ def create_worker_node(
             workspace_root=settings["workspace_root"],
             role=settings["role"],
             feedback_grounding=feedback_grounding,
+            mounted_context=mounted_context,
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
         effective_model = _resolve_effective_worker_model(
@@ -903,7 +920,7 @@ def create_worker_node(
         # compiled graph holds no run-scoped tokens (R7). Absent provider or
         # coverage yields no binding, leaving the session's MCP surface unchanged.
         authoring_binding = await _authoring_binding_for_state(
-            state, name, settings["authoring_binding_provider"]
+            thread_id, name, settings["authoring_binding_provider"]
         )
         effective_model = _attach_authoring_tools(
             effective_model, authoring_binding, autonomous=settings["autonomous"]
@@ -976,7 +993,7 @@ def create_worker_node(
         if usage is not None:
             await _record_turn_usage(
                 cost_port=settings["cost_port"],
-                thread_id=state.get("thread_id"),
+                thread_id=thread_id,
                 worker_name=name,
                 model=effective_model,
                 usage=usage,

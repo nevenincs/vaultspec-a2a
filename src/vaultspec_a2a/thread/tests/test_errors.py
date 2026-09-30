@@ -349,6 +349,7 @@ class TestAllExports:
             "PermissionDeniedError",
             "ProtocolError",
             "ProviderSessionError",
+            "SupervisorRoutingError",
             "TeamConfigNotFoundError",
             "TokenBudgetExceededError",
             "VaultspecError",

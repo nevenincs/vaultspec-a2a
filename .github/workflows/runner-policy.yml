@@ -1,0 +1,20 @@
+name: Self-hosted runner policy
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  runner-policy:
+    name: 'Check: Self-hosted runners'
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    timeout-minutes: 130
+    runs-on: [self-hosted, Linux, X64]
+    env:
+      CI_EXEC_BUDGET_MINUTES: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reject hosted runner placement
+        run: uv run --isolated --no-project --python 3.13 dev/ci_contract.py --runner-placement-only

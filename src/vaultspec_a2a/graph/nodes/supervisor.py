@@ -18,6 +18,7 @@ from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 from ...thread.enums import VERDICT_APPROVED, ApprovalStatus
+from ...thread.errors import SupervisorRoutingError
 from .phase_gate import parse_verdict
 
 if TYPE_CHECKING:
@@ -196,10 +197,19 @@ class _GateResult:
 
 @dataclass(frozen=True, slots=True)
 class _SupervisorDecision:
-    next_route: str
+    """One evaluated routing decision.
+
+    ``refused`` marks a decision the run must not follow - no parseable route,
+    or a route a HARD phase gate blocked - which sends the run back to the
+    supervisor. A refused decision keeps its intended route in ``next_route``
+    when it had one, and ``None`` when the output named none.
+    """
+
+    next_route: str | None
     inferred_phase: str
     routing_error: str | None = None
     plan_approval_request: dict[str, Any] | None = None
+    refused: bool = False
 
 
 # Maps target phase -> (required vault_index key, is_hard_gate)
@@ -233,7 +243,14 @@ def _check_phase_prerequisites(
         f'vault_index["{required_key}"] to be non-empty.'
     )
     if is_hard:
-        return _GateResult(blocked=True, warning=False, message=msg)
+        return _GateResult(
+            blocked=True,
+            warning=False,
+            message=(
+                f"{msg} The route was refused; choose a worker that produces "
+                f"the '{required_key}' artifact first."
+            ),
+        )
     return _GateResult(blocked=False, warning=True, message=msg)
 
 
@@ -257,6 +274,14 @@ def _phase_gate_decision(
         "blocked" if gate_result.blocked else "warning",
         gate_result.message,
     )
+    if gate_result.blocked:
+        # The run does not move: the phase stays the one the vault supports.
+        return _SupervisorDecision(
+            next_route=next_route,
+            inferred_phase=inferred_phase,
+            routing_error=gate_result.message,
+            refused=True,
+        )
     return _SupervisorDecision(
         next_route=next_route,
         inferred_phase=_phase_for_route(
@@ -301,6 +326,30 @@ def _plan_approval_decision(
     )
 
 
+# Bounds how much of an unparseable reply is carried back into the prompt.
+_REFUSED_TEXT_CHARS = 200
+
+
+def _refused_update(state: TeamState, decision: _SupervisorDecision) -> dict[str, Any]:
+    """Send a refused decision back to the supervisor, or fail once over budget."""
+    reasks = int(state.get("supervisor_reasks") or 0) + 1
+    reason = decision.routing_error or "inadmissible routing decision"
+    if reasks > domain_config.supervisor_reask_limit:
+        raise SupervisorRoutingError(reason, attempts=reasks)
+    update: dict[str, Any] = {
+        "active_agent": "",
+        "pipeline_phase": decision.inferred_phase,
+        "approval_status": None,
+        "approval_request_id": None,
+        "routing_error": reason,
+        "supervisor_reasks": reasks,
+    }
+    if decision.next_route is not None:
+        # Recorded as the supervisor's intent; the route edge does not follow it.
+        update["next"] = decision.next_route
+    return update
+
+
 def _evaluate_supervisor_response(
     *,
     state: TeamState,
@@ -317,13 +366,18 @@ def _evaluate_supervisor_response(
     next_route, unparseable = _parse_route(response_text, options)
     if unparseable:
         _logger.warning(
-            "supervisor could not parse route from response %r — defaulting to FINISH",
+            "supervisor could not parse route from response %r — re-asking",
             response_text[:120],
         )
         return _SupervisorDecision(
-            next_route="FINISH",
+            next_route=None,
             inferred_phase=inferred_phase,
-            routing_error=(f"supervisor could not parse route from: {response_text!r}"),
+            routing_error=(
+                f"supervisor could not parse route from: "
+                f"{response_text[:_REFUSED_TEXT_CHARS]!r}; respond with exactly "
+                f"one of: {', '.join(options)}."
+            ),
+            refused=True,
         )
 
     if next_route == "FINISH":
@@ -555,15 +609,19 @@ def create_supervisor_node(
             worker_phase_map=worker_phase_map,
             autonomous=autonomous,
         )
+        if decision.refused:
+            return _refused_update(state, decision)
+        next_route = cast("str", decision.next_route)
         if decision.routing_error:
             return {
-                "next": decision.next_route,
-                "active_agent": _active_agent_for_route(decision.next_route),
+                "next": next_route,
+                "active_agent": _active_agent_for_route(next_route),
                 "pipeline_phase": decision.inferred_phase,
-                "current_plan": [_plan_entry_for_route(decision.next_route)],
+                "current_plan": [_plan_entry_for_route(next_route)],
                 "approval_status": None,
                 "approval_request_id": None,
                 "routing_error": decision.routing_error,
+                "supervisor_reasks": 0,
             }
 
         if decision.plan_approval_request is not None:
@@ -576,25 +634,27 @@ def create_supervisor_node(
             _logger.info(
                 "supervisor plan approval pending: feature=%r exec_worker=%r",
                 state.get("active_feature"),
-                decision.next_route,
+                next_route,
             )
             return {
-                "next": decision.next_route,
-                "active_agent": _active_agent_for_route(decision.next_route),
+                "next": next_route,
+                "active_agent": _active_agent_for_route(next_route),
                 "pipeline_phase": decision.inferred_phase,
-                "current_plan": [_plan_entry_for_route(decision.next_route)],
+                "current_plan": [_plan_entry_for_route(next_route)],
                 "approval_status": ApprovalStatus.PENDING,
                 "approval_request_id": None,
                 "routing_error": None,
+                "supervisor_reasks": 0,
             }
         return {
-            "next": decision.next_route,
-            "active_agent": _active_agent_for_route(decision.next_route),
+            "next": next_route,
+            "active_agent": _active_agent_for_route(next_route),
             "pipeline_phase": decision.inferred_phase,
-            "current_plan": [_plan_entry_for_route(decision.next_route)],
+            "current_plan": [_plan_entry_for_route(next_route)],
             "approval_status": None,
             "approval_request_id": None,
             "routing_error": None,
+            "supervisor_reasks": 0,
         }
 
     supervisor_node.__name__ = "supervisor_node"

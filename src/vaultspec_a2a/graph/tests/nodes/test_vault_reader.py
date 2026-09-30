@@ -1,8 +1,8 @@
-"""Tests for graph.nodes.vault_reader -- create_mount_node."""
+"""Tests for graph.nodes.vault_reader -- the mount node and the context mounter."""
 
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -17,14 +17,35 @@ from ....database import create_thread, seed_task_queue
 from ....database.models import Base
 from ....domain_config import domain_config
 from ....tests._write_authority import make_test_write_authority
-from ....thread.state import TeamState
+from ....thread.state import TeamState, merge_vault_index
 from ....worker.task_queue_port import SqlTaskQueuePort
-from ...nodes.vault_reader import build_initial_vault_index, create_mount_node
+from ...nodes.vault_reader import (
+    build_initial_vault_index,
+    create_context_mounter,
+    create_mount_node,
+)
+from ...protocols import TaskQueuePort
 
-# create_mount_node's factory return is declared as a bare Callable in
-# production; this alias pins the concrete signature for the test call sites
-# below without widening the production API.
-MountNode = Callable[[TeamState], Coroutine[Any, Any, dict[str, Any]]]
+
+async def _mount_pass(
+    workspace_root: Path | None,
+    state: TeamState,
+    task_queue_port: TaskQueuePort | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """Run one mount pass the way the compiled graph does.
+
+    The mount node's index update is folded into state through the production
+    reducer before the worker-side mounter expands the documents it names.
+    """
+    update = await create_mount_node(workspace_root)(state)
+    merged: TeamState = {
+        **state,
+        "vault_index": merge_vault_index(
+            state.get("vault_index") or {}, update.get("vault_index", {})
+        ),
+    }
+    mounter = create_context_mounter(workspace_root, task_queue_port)
+    return update, await mounter(merged)
 
 
 def _make_state(
@@ -54,17 +75,34 @@ def _make_state(
 
 
 @pytest.mark.asyncio
-async def test_mount_node_returns_none_when_workspace_root_is_none() -> None:
-    mount = cast("MountNode", create_mount_node(None))
-    result = await mount(_make_state())
-    assert result == {"mounted_context": None}
+async def test_mount_is_empty_when_workspace_root_is_none() -> None:
+    update, mounted = await _mount_pass(None, _make_state())
+    assert update == {}
+    assert mounted is None
 
 
 @pytest.mark.asyncio
-async def test_mount_node_returns_none_when_no_active_feature() -> None:
-    mount = cast("MountNode", create_mount_node(Path("/tmp/ws")))
-    result = await mount(_make_state(active_feature=None))
-    assert result == {"mounted_context": None}
+async def test_mount_is_empty_when_no_active_feature() -> None:
+    update, mounted = await _mount_pass(
+        Path("/tmp/ws"), _make_state(active_feature=None)
+    )
+    assert update == {}
+    assert mounted is None
+
+
+@pytest.mark.asyncio
+async def test_mount_node_never_writes_document_text_to_state(tmp_path: Path) -> None:
+    """The node's update is the index handle list only; text stays out of state."""
+    adr_dir = tmp_path / ".vault" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "my-feature-adr.md").write_text(
+        "# ADR\n\nSecret text.", encoding="utf-8"
+    )
+
+    update = await create_mount_node(tmp_path)(_make_state())
+
+    assert set(update) == {"vault_index"}
+    assert "Secret text." not in repr(update)
 
 
 @pytest.mark.asyncio
@@ -74,13 +112,12 @@ async def test_mount_node_returns_content_for_adr_files(tmp_path: Path) -> None:
     adr_file = adr_dir / "my-feature-adr.md"
     adr_file.write_text("# ADR\n\nDecision text.", encoding="utf-8")
 
-    mount = cast("MountNode", create_mount_node(tmp_path))
     state = _make_state(
         vault_index={"adr": [".vault/adr/my-feature-adr.md"]},
     )
-    result = await mount(state)
-    assert result["mounted_context"] is not None
-    assert "Decision text." in result["mounted_context"]
+    _update, mounted = await _mount_pass(tmp_path, state)
+    assert mounted is not None
+    assert "Decision text." in mounted
 
 
 @pytest.mark.asyncio
@@ -99,14 +136,13 @@ async def test_mount_refreshes_vault_index_for_documents_written_mid_run(
         "# Research\n\nProduced mid-run.", encoding="utf-8"
     )
 
-    mount = cast("MountNode", create_mount_node(tmp_path))
     state = _make_state(pipeline_phase="research", vault_index={})
-    result = await mount(state)
+    update, mounted = await _mount_pass(tmp_path, state)
 
     expected_rel = str(Path(".vault/research/my-feature-research.md"))
-    assert result["vault_index"] == {"research": [expected_rel]}
-    assert result["mounted_context"] is not None
-    assert "Produced mid-run." in result["mounted_context"]
+    assert update["vault_index"] == {"research": [expected_rel]}
+    assert mounted is not None
+    assert "Produced mid-run." in mounted
 
 
 @pytest.mark.asyncio
@@ -116,19 +152,19 @@ async def test_mount_refresh_preserves_prior_index_entries(tmp_path: Path) -> No
     adr_dir.mkdir(parents=True)
     (adr_dir / "my-feature-adr.md").write_text("# ADR\n\nBinding.", encoding="utf-8")
 
-    mount = cast("MountNode", create_mount_node(tmp_path))
     # A plan path lives only in state (no matching file on disk to re-glob).
     state = _make_state(
         pipeline_phase="adr",
         vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
     )
-    result = await mount(state)
+    update, mounted = await _mount_pass(tmp_path, state)
 
     # The returned update carries only the freshly discovered ADR; the reducer
     # merges it with the surviving plan entry already in state.
     expected_rel = str(Path(".vault/adr/my-feature-adr.md"))
-    assert result["vault_index"] == {"adr": [expected_rel]}
-    assert "Binding." in result["mounted_context"]
+    assert update["vault_index"] == {"adr": [expected_rel]}
+    assert mounted is not None
+    assert "Binding." in mounted
 
 
 # ---------------------------------------------------------------------------
@@ -183,14 +219,12 @@ async def test_mount_injects_db_queue_view_during_exec(
     queue_thread: str,
 ) -> None:
     port = SqlTaskQueuePort(session_factory)
-    mount = cast("MountNode", create_mount_node(tmp_path, port))
     state = _make_state(
         pipeline_phase="exec",
         thread_id=queue_thread,
         current_task_id="Q-1",
     )
-    result = await mount(state)
-    context = result["mounted_context"]
+    _update, context = await _mount_pass(tmp_path, state, port)
     assert context is not None
     assert "## Task Queue -- my-feature" in context
     assert "| Q-1 | in_progress | Do first |" in context
@@ -207,14 +241,13 @@ async def test_mount_skips_queue_outside_queue_phases(
     queue_thread: str,
 ) -> None:
     port = SqlTaskQueuePort(session_factory)
-    mount = cast("MountNode", create_mount_node(tmp_path, port))
     state = _make_state(
         pipeline_phase="research",
         thread_id=queue_thread,
         current_task_id="Q-1",
     )
-    result = await mount(state)
-    assert result == {"mounted_context": None}
+    _update, mounted = await _mount_pass(tmp_path, state, port)
+    assert mounted is None
 
 
 @pytest.mark.asyncio
@@ -230,14 +263,13 @@ async def test_mount_no_queue_block_when_empty(
         thread_id = thread.id
 
     port = SqlTaskQueuePort(session_factory)
-    mount = cast("MountNode", create_mount_node(tmp_path, port))
     state = _make_state(
         pipeline_phase="exec",
         thread_id=thread_id,
         current_task_id=None,
     )
-    result = await mount(state)
-    assert result == {"mounted_context": None}
+    _update, mounted = await _mount_pass(tmp_path, state, port)
+    assert mounted is None
 
 
 def test_the_index_keeps_the_most_recent_records_when_a_stage_exceeds_its_cap(

@@ -74,6 +74,28 @@ if [ "$(node --version 2>/dev/null || true)" != "v$node_version" ]; then
   done
 fi
 
+# `just ci` lints TOML with taplo and falls back to the pinned Docker image when
+# no native binary is on PATH, but these containers run no Docker daemon, so
+# the gate cannot start. Install the same release the image pins (mirrors
+# `tamasfe/taplo:0.9.3` in dev/toolchain.py), checked against a pinned digest
+# of the unpacked binary because the release publishes no checksum file.
+taplo_version="0.9.3"
+taplo_sha256="6e7dd2ffd27e0f098ed59801557967ad0f80d5e563c9c058248f8dcf554814e7"
+if [ "$(taplo --version 2>/dev/null || true)" != "taplo $taplo_version" ] \
+  && [ "$(uname -m)" = "x86_64" ]; then
+  log "installing taplo $taplo_version"
+  scratch="$(mktemp -d)"
+  if curl -fsSL -o "$scratch/taplo.gz" \
+    "https://github.com/tamasfe/taplo/releases/download/$taplo_version/taplo-linux-x86_64.gz" \
+    && gunzip "$scratch/taplo.gz" \
+    && printf '%s  %s\n' "$taplo_sha256" "$scratch/taplo" | sha256sum -c --quiet -; then
+    install -m 755 "$scratch/taplo" "$LOCAL_BIN/taplo"
+  else
+    log "taplo $taplo_version unavailable; just ci falls back to its Docker image"
+  fi
+  rm -rf "$scratch"
+fi
+
 # actionlint-py ships only an sdist whose build downloads the actionlint binary
 # with urllib. Python 3.13 enables VERIFY_X509_STRICT, which rejects the egress
 # proxy's CA, so the in-lock build fails. Building the same sdist once under an

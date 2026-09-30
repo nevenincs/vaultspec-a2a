@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:56eeb3d331b68e0d5b8688b0b4fc5555a645a6de7346cd2e66e255fdf0552632'
+body_hash: 'sha256:98d82de2c9a7dcaf46df6f8e31498eef8a427994e1933ddc1f5678bb1be8e3e5'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -375,6 +375,27 @@ related:
 - `S32` `A` `src/vaultspec_a2a/tests/_checkpoint_seeding.py`
 - `S32` `verify:` `pytest api control database desktop with Postgres required after the merge` -> `pass`
 - `S32` `by:` `worker-a534b80e`
+- `S37` `M` `pyproject.toml`
+- `S37` `M` `src/vaultspec_a2a/providers/_harness_mcp_registry.py`
+- `S37` `M` `src/vaultspec_a2a/providers/_mcp_contract.py`
+- `S37` `M` `src/vaultspec_a2a/providers/tests/test_mcp_contract.py`
+- `S37` `M` `uv.lock`
+- `S37` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S37` `by:` `worker-a7344905`
+- `S40` `M` `src/vaultspec_a2a/streaming/__init__.py`
+- `S40` `A` `src/vaultspec_a2a/streaming/custom_writes.py`
+- `S40` `A` `src/vaultspec_a2a/streaming/tests/_error_injecting_graph.py`
+- `S40` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S40` `M` `src/vaultspec_a2a/streaming/transformer.py`
+- `S40` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S40` `by:` `worker-a7344905`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_launcher_confinement.py`
+- `S41` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S41` `by:` `worker-a7344905`
 
 ## Notes
 
@@ -405,3 +426,6 @@ related:
 - `S42` Unreachable under the shipped gate table, so no behavioural test can fail before it without widening the supervisor API to inject a table; the order is now correct by construction and the existing graph suite passes.
 - `S27` Correction: the boot proof leaked the process-wide engine seat and failed when API tests ran first in the same process.
 - `S32` Seeds from a real graph run on a private InMemorySaver so whole-store scans and exact history counts see no seed rows; hand-set `channel_versions` now come from the target saver's `get_next_version.` The first attempt ran on the wrong base and was replayed.
+- `S37` Skew is refused through the rag client's own `get_index_status` verdict on the contract handshake. Hosted-ranking egress is not observable from the read-only MCP surface (only the daemon's own health endpoint reports it), so it stays an open operator-configuration finding. The worktree started on main and was rebased; commit messages were rewritten at merge for style and attribution.
+- `S40` Custom writes carry their node through a stamp read from the writer's own config metadata; one documented stream-versus-state stub remains because a real graph cannot disagree with itself. The team and worker stubs the audit counted are a Protocol and one justified latency stub.
+- `S41` Absent the adapter the ten tests fail in fixture setup with one message naming the path and npm install; never skipped.

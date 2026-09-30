@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:ad9cfdb17ec62482cf3d919df4430cdeaa929e3572156081e86b9b97671615fb'
+body_hash: 'sha256:2dd34493f538b74b55e3f5fdca668316fcfa8b6ead6f4b867017e20ba8b663ef'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -342,6 +342,18 @@ Fixed in a P04.S27 correction. `test_boot_does_not_rewrite_legacy_checkpoint_row
 ### postgres-proofs-need-the-declared-prerequisite | info | the real-Postgres tests are deselected unless the run declares the prerequisite
 
 Recorded from P05.S32. Tests marked `requires_prerequisites("postgres")` run only when pytest is given `--require-prerequisite=postgres` (`src/vaultspec_a2a/conftest.py`); the `VAULTSPEC_A2A_TEST_POSTGRES_URL` variable alone satisfies the probe but not the declaration. The orchestrator's post-merge runs for P04 set the variable without the flag, so the pool and selector-bridge proofs were not exercised there; they pass with it after the S32 merge, and every later gate in this plan declares it.
+
+### body-link-regex-diverges-from-core-reader | low | the submitter and core disagree on an inline code span delimited by two backticks
+
+Open, blocking P07.S38; needs a dependency-strategy decision. `_INLINE_CODE_RE` in `src/vaultspec_a2a/authoring/submitter.py` matches single-backtick runs only, while vaultspec-core 0.3.2 reads code spans by backtick run length (`vaultspec_core/vaultcore/markdown.py`, `INLINE_CODE_RE` and `non_prose_spans`). On a real comparison against the installed core, a double-backtick span containing a literal backtick and a wiki-link is stripped whole by core but left partly exposed by the submitter, whose conformance notes then report a false `wiki-link in body text`. The faithful fixes are a runtime dependency on vaultspec-core (exact parity, but core becomes a production import rather than a tooling pin), a core CLI verb the submitter spawns (none exists today), or porting core's reader (no dependency, but the same drift relocated). Recommendation: decide the dependency strategy in an ADR before S38 changes code.
+
+### rag-hosted-ranking-egress-is-unobservable | info | the rag lane cannot see whether its daemon ranks through the hosted API
+
+Recorded from P07.S37, narrowing `rag-daemon-hosted-ranking-egress`. The installed vaultspec-rag 0.5.3 exposes the daemon's hosted-ranking state only through the daemon's own health endpoint; no served MCP tool or resource carries it, so admission cannot refuse an egressing daemon without reaching past the read-only surface this project allows itself. S37 made version skew fail closed through the client's own readiness verdict and recorded the egress limit at the rag launch spec in `src/vaultspec_a2a/providers/_harness_mcp_registry.py`. The egress finding stays open as operator configuration: a daemon serving this project must run without `VAULTSPEC_RAG_TYPESAFE_API_KEY`.
+
+### aggregator-stub-count-corrected | info | the team and worker graph stubs the audit counted were not protocol re-declarations
+
+Correction to `aggregator-test-doubles-still-outnumber-real-graphs`. Outside `src/vaultspec_a2a/streaming/tests/test_aggregator.py`, `src/vaultspec_a2a/team/tests/test_failure_scenario_preset.py` declares a structural Protocol it never instantiates, and `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py` carries one stub with its own recorded justification (it controls a checkpoint read's latency). P07.S40 replaced the seven aggregator stubs with one real error-injecting graph and kept one documented stream-versus-state stub.
 
 ## Recommendations
 

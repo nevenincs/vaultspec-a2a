@@ -245,17 +245,23 @@ def write_back_refreshed_credential(
     if _digest(payload) == seed.digest:
         return False
     try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        # Codex writes its login as JSON text. Bytes that do not decode are not a
+        # refresh it made, so they are never published over the operator's login.
+        logger.error(
+            "The credential left in the run home is not UTF-8 text, so it was not "
+            "written back to %s",
+            seed.source,
+        )
+        return False
+    try:
         with _credential_lock(seed.source, timeout_seconds=lock_timeout_seconds):
             if _source_overtook_the_run(seed, payload):
                 return False
             # The audited publication: fsynced, retried over a contention
             # window, and never leaving a temporary credential behind.
-            atomic_write_text(
-                seed.source,
-                payload.decode("utf-8"),
-                mode=0o600,
-                newline="",
-            )
+            atomic_write_text(seed.source, text, mode=0o600, newline="")
     except (OSError, TimeoutError) as error:
         logger.error(
             "Codex refreshed its credential during the run and it could not be "

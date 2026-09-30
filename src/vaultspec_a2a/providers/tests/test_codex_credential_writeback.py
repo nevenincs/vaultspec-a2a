@@ -87,6 +87,23 @@ def test_a_refreshed_credential_is_written_back_on_cleanup(tmp_path: Path) -> No
     assert not run_home.exists()
 
 
+def test_bytes_that_are_not_a_login_are_never_written_back(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A run home left holding undecodable bytes does not overwrite the login."""
+    base_home = _base_home(tmp_path)
+    seeded = (base_home / CODEX_AUTH_FILENAME).read_bytes()
+    run_home = _run_home(base_home)
+    (run_home / CODEX_AUTH_FILENAME).write_bytes(b"\xff\xfe not a login")
+
+    with caplog.at_level(logging.ERROR):
+        cleanup_codex_config_home(run_home)
+
+    assert (base_home / CODEX_AUTH_FILENAME).read_bytes() == seeded
+    assert not run_home.exists()
+    assert "not UTF-8 text" in caplog.text
+
+
 def test_an_untouched_credential_is_left_exactly_as_it_was(tmp_path: Path) -> None:
     """A run that never refreshed writes nothing, not even the same bytes back."""
     base_home = _base_home(tmp_path)

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:e5127d355c2074ae66c4241ef88e71522cff87fafddd5b03576fde7c3be8b1b8'
+body_hash: 'sha256:6b44f94385032d0dca9dd1023d779d842ddd149186bd15fc67c1ab31b7329884'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -353,6 +353,10 @@ related:
 - `S27` `M` `src/vaultspec_a2a/providers/tests/test_prompt_render.py`
 - `S27` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 - `S27` `by:` `orchestrator`
+- `S25` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S25` `M` `src/vaultspec_a2a/providers/tests/test_codex_credential_writeback.py`
+- `S25` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
+- `S25` `by:` `orchestrator`
 
 ## Notes
 
@@ -375,4 +379,5 @@ related:
 - `S23` Reopened by the plan-close review (grep-pre-approved-host-wide, high): a floor tool whose rule takes no path is withheld under a workspace; in-workspace Grep rests on the CLI's working-directory posture, not yet proven live.
 - `S14` Reopened for the contract half (followup-verb-has-no-reachable-success, high): the verb and its 202 now say no state admits a follow-up; the refusal code is narrowed; the continuation model stays the user's decision.
 - `S27` Reopened by the plan-close review (prompt-render-role-headers-are-forgeable, medium).
+- `S25` Reopened by the plan-close review (codex-credential-writeback-blocks-the-event-loop, medium).
 

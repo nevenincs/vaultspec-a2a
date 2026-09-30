@@ -623,10 +623,15 @@ class CodexChatModel(BaseChatModel):
                         lambda: kill_process_tree(orphaned_process),
                     )
                 )
+            # Off the loop: the write-back waits on a lock another run's
+            # teardown may hold, and every other run on this loop would wait
+            # with it.
             cleanup_steps.append(
                 (
                     "codex-config-home",
-                    lambda: cleanup_codex_config_home(codex_config_home),
+                    lambda: asyncio.to_thread(
+                        cleanup_codex_config_home, codex_config_home
+                    ),
                 )
             )
             await run_independent_cleanups(*cleanup_steps)

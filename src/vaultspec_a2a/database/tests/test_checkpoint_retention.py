@@ -12,7 +12,6 @@ from __future__ import annotations
 import operator
 import os
 import sqlite3
-from collections import defaultdict
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 from uuid import uuid4
 
@@ -22,6 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from ..checkpoints import _SelectorThreadPostgresCheckpointer, prune_settled_thread
+from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -82,20 +82,6 @@ def _failing_graph(saver: Checkpointer) -> CompiledStateGraph[Any, Any, Any, Any
     return builder.compile(checkpointer=saver)
 
 
-def _config(thread_id: str) -> dict[str, Any]:
-    return {"configurable": {"thread_id": thread_id}}
-
-
-async def _history(saver: Checkpointer, thread_id: str) -> dict[str, list[str]]:
-    by_namespace: dict[str, list[str]] = defaultdict(list)
-    async for item in saver.alist(cast("Any", _config(thread_id))):
-        configurable = item.config["configurable"]
-        by_namespace[configurable["checkpoint_ns"]].append(
-            configurable["checkpoint_id"]
-        )
-    return dict(by_namespace)
-
-
 async def _prove_a_settled_thread_keeps_only_its_latest(saver: Checkpointer) -> None:
     graph = _settling_graph(saver)
     # The control thread takes the same turns and is never pruned: it is both
@@ -106,11 +92,11 @@ async def _prove_a_settled_thread_keeps_only_its_latest(saver: Checkpointer) -> 
         for turn in ("one", "two"):
             for target in (thread_id, control_id):
                 await graph.ainvoke(
-                    cast("Any", {"log": [turn]}), cast("Any", _config(target))
+                    cast("Any", {"log": [turn]}), cast("Any", config_for(target))
                 )
-        before = await _history(saver, thread_id)
-        control_before = await _history(saver, control_id)
-        settled = (await graph.aget_state(cast("Any", _config(thread_id)))).values
+        before = await stored_history(saver, thread_id)
+        control_before = await stored_history(saver, control_id)
+        settled = (await graph.aget_state(cast("Any", config_for(thread_id)))).values
         # The root namespace plus one subgraph namespace per turn, each with a
         # history - otherwise there is nothing for retention to prove.
         assert len(before) == 3
@@ -118,19 +104,19 @@ async def _prove_a_settled_thread_keeps_only_its_latest(saver: Checkpointer) -> 
 
         assert await prune_settled_thread(saver, thread_id) is True
 
-        assert await _history(saver, thread_id) == {
+        assert await stored_history(saver, thread_id) == {
             namespace: [max(ids)] for namespace, ids in before.items()
         }
-        pruned = await graph.aget_state(cast("Any", _config(thread_id)))
+        pruned = await graph.aget_state(cast("Any", config_for(thread_id)))
         assert pruned.values == settled
-        assert await _history(saver, control_id) == control_before
+        assert await stored_history(saver, control_id) == control_before
 
         for target in (thread_id, control_id):
             await graph.ainvoke(
-                cast("Any", {"log": ["three"]}), cast("Any", _config(target))
+                cast("Any", {"log": ["three"]}), cast("Any", config_for(target))
             )
-        resumed = await graph.aget_state(cast("Any", _config(thread_id)))
-        control = await graph.aget_state(cast("Any", _config(control_id)))
+        resumed = await graph.aget_state(cast("Any", config_for(thread_id)))
+        control = await graph.aget_state(cast("Any", config_for(control_id)))
         assert resumed.values == control.values
         assert len(resumed.values["log"]) > len(settled["log"])
     finally:
@@ -144,24 +130,24 @@ async def _prove_a_failed_thread_keeps_its_error_writes(saver: Checkpointer) -> 
     try:
         with pytest.raises(RuntimeError, match="the step failed"):
             await graph.ainvoke(
-                cast("Any", {"log": ["go"]}), cast("Any", _config(thread_id))
+                cast("Any", {"log": ["go"]}), cast("Any", config_for(thread_id))
             )
-        latest = await saver.aget_tuple(cast("Any", _config(thread_id)))
+        latest = await saver.aget_tuple(cast("Any", config_for(thread_id)))
         assert latest is not None
         assert latest.pending_writes
         channels = {write[1] for write in latest.pending_writes}
         # The failure and the sibling's finished work are both pending on the
         # latest checkpoint: recovery reads the one, a retry reuses the other.
         assert {"__error__", "log"} <= channels
-        assert len((await _history(saver, thread_id))[""]) > 1
+        assert len((await stored_history(saver, thread_id))[""]) > 1
 
         assert await prune_settled_thread(saver, thread_id) is True
 
-        kept = await saver.aget_tuple(cast("Any", _config(thread_id)))
+        kept = await saver.aget_tuple(cast("Any", config_for(thread_id)))
         assert kept is not None
         assert kept.checkpoint["id"] == latest.checkpoint["id"]
         assert sorted(kept.pending_writes or []) == sorted(latest.pending_writes)
-        assert await _history(saver, thread_id) == {"": [latest.checkpoint["id"]]}
+        assert await stored_history(saver, thread_id) == {"": [latest.checkpoint["id"]]}
     finally:
         await saver.adelete_thread(thread_id)
 
@@ -208,9 +194,11 @@ async def test_a_failed_sqlite_prune_leaves_nothing_for_the_next_write_to_commit
     """
     graph = _settling_graph(sqlite_saver)
     thread_id, other_id = f"refused-{uuid4()}", f"other-{uuid4()}"
-    await graph.ainvoke(cast("Any", {"log": ["one"]}), cast("Any", _config(thread_id)))
+    await graph.ainvoke(
+        cast("Any", {"log": ["one"]}), cast("Any", config_for(thread_id))
+    )
     writes = await _write_count(sqlite_saver, thread_id)
-    history = await _history(sqlite_saver, thread_id)
+    history = await stored_history(sqlite_saver, thread_id)
     await sqlite_saver.conn.execute(
         "CREATE TRIGGER refuse_prune BEFORE DELETE ON checkpoints "
         "BEGIN SELECT RAISE(ABORT, 'prune refused'); END"
@@ -221,10 +209,12 @@ async def test_a_failed_sqlite_prune_leaves_nothing_for_the_next_write_to_commit
         await prune_settled_thread(sqlite_saver, thread_id)
 
     await sqlite_saver.conn.execute("DROP TRIGGER refuse_prune")
-    await graph.ainvoke(cast("Any", {"log": ["one"]}), cast("Any", _config(other_id)))
+    await graph.ainvoke(
+        cast("Any", {"log": ["one"]}), cast("Any", config_for(other_id))
+    )
 
     assert await _write_count(sqlite_saver, thread_id) == writes
-    assert await _history(sqlite_saver, thread_id) == history
+    assert await stored_history(sqlite_saver, thread_id) == history
 
 
 @pytest.mark.asyncio
@@ -233,11 +223,13 @@ async def test_an_unrecognised_saver_is_left_untouched() -> None:
 
     saver = InMemorySaver()
     graph = _settling_graph(saver)
-    await graph.ainvoke(cast("Any", {"log": ["one"]}), cast("Any", _config("memory")))
-    before = await _history(saver, "memory")
+    await graph.ainvoke(
+        cast("Any", {"log": ["one"]}), cast("Any", config_for("memory"))
+    )
+    before = await stored_history(saver, "memory")
 
     assert await prune_settled_thread(saver, "memory") is False
-    assert await _history(saver, "memory") == before
+    assert await stored_history(saver, "memory") == before
 
 
 @pytest_asyncio.fixture(params=["connection", "pool", "selector-thread"])
@@ -318,16 +310,16 @@ async def test_postgres_drops_the_blobs_only_superseded_checkpoints_named(
     try:
         for turn in ("one", "two", "three"):
             await graph.ainvoke(
-                cast("Any", {"log": [turn]}), cast("Any", _config(thread_id))
+                cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
             )
-        settled = (await graph.aget_state(cast("Any", _config(thread_id)))).values
+        settled = (await graph.aget_state(cast("Any", config_for(thread_id)))).values
         blobs_before = await _blob_count(thread_id)
 
         assert await prune_settled_thread(postgres_saver, thread_id) is True
 
         assert 0 < await _blob_count(thread_id) < blobs_before
         assert (
-            await graph.aget_state(cast("Any", _config(thread_id)))
+            await graph.aget_state(cast("Any", config_for(thread_id)))
         ).values == settled
     finally:
         await postgres_saver.adelete_thread(thread_id)

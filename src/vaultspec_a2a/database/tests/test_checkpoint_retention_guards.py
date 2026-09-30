@@ -15,7 +15,6 @@ from __future__ import annotations
 import operator
 import os
 import sqlite3
-from collections import defaultdict
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 from uuid import uuid4
 
@@ -27,6 +26,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from ..checkpoint_retention import prune_settled_checkpoints
+from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -40,34 +40,8 @@ if TYPE_CHECKING:
 _POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
 
 
-def _config(thread_id: str) -> dict[str, Any]:
-    return {"configurable": {"thread_id": thread_id}}
-
-
-async def _history(saver: Checkpointer, thread_id: str) -> dict[str, list[str]]:
-    by_namespace: dict[str, list[str]] = defaultdict(list)
-    async for item in saver.alist(cast("Any", _config(thread_id))):
-        configurable = item.config["configurable"]
-        by_namespace[configurable["checkpoint_ns"]].append(
-            configurable["checkpoint_id"]
-        )
-    return dict(by_namespace)
-
-
 class _Log(TypedDict):
     log: Annotated[list[str], operator.add]
-
-
-def _plain_graph(saver: Checkpointer) -> CompiledStateGraph[Any, Any, Any, Any]:
-    async def step(state: _Log) -> dict[str, list[str]]:
-        del state
-        return {"log": ["step"]}
-
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
-    builder.add_node("step", step)
-    builder.add_edge(START, "step")
-    builder.add_edge("step", END)
-    return builder.compile(checkpointer=saver)
 
 
 def _accumulate(state: Any, writes: Sequence[Any]) -> list[str]:
@@ -80,12 +54,22 @@ class _DeltaLog(TypedDict):
     log: Annotated[list[str], DeltaChannel(_accumulate, list, snapshot_frequency=1000)]
 
 
-def _delta_graph(saver: Checkpointer) -> CompiledStateGraph[Any, Any, Any, Any]:
-    async def step(state: _DeltaLog) -> dict[str, list[str]]:
+def _one_step_graph(
+    saver: Checkpointer, state_schema: type[Any]
+) -> CompiledStateGraph[Any, Any, Any, Any]:
+    """One node appending a turn to *state_schema*'s log, compiled over *saver*.
+
+    The two schemas differ only in the channel behind that log - one plain,
+    one a delta channel whose value is rebuilt from the history a prune
+    removes. Building both from one graph is what keeps the channel the only
+    difference between the cases below.
+    """
+
+    async def step(state: Any) -> dict[str, list[str]]:
         del state
         return {"log": ["step"]}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _DeltaLog))
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", state_schema))
     builder.add_node("step", step)
     builder.add_edge(START, "step")
     builder.add_edge("step", END)
@@ -110,21 +94,23 @@ async def test_a_delta_channel_thread_is_left_alone(
     nothing raises: the channel simply reconstructs as empty. The guard is the
     only thing standing between a settled delta thread and silent data loss.
     """
-    graph = _delta_graph(sqlite_saver)
+    graph = _one_step_graph(sqlite_saver, _DeltaLog)
     thread_id = f"delta-{uuid4()}"
     for turn in ("one", "two", "three"):
         await graph.ainvoke(
-            cast("Any", {"log": [turn]}), cast("Any", _config(thread_id))
+            cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
         )
-    before = await _history(sqlite_saver, thread_id)
-    settled = (await graph.aget_state(cast("Any", _config(thread_id)))).values
+    before = await stored_history(sqlite_saver, thread_id)
+    settled = (await graph.aget_state(cast("Any", config_for(thread_id)))).values
     assert settled["log"], "the delta channel must hold a value to lose"
     assert all(len(ids) > 1 for ids in before.values())
 
     assert await prune_settled_checkpoints(sqlite_saver, thread_id) is False
 
-    assert await _history(sqlite_saver, thread_id) == before
-    assert (await graph.aget_state(cast("Any", _config(thread_id)))).values == settled
+    assert await stored_history(sqlite_saver, thread_id) == before
+    assert (
+        await graph.aget_state(cast("Any", config_for(thread_id)))
+    ).values == settled
 
 
 @pytest.mark.asyncio
@@ -132,18 +118,18 @@ async def test_a_plain_thread_on_the_same_store_is_still_pruned(
     sqlite_saver: AsyncSqliteSaver,
 ) -> None:
     """The delta guard is per thread, not a blanket refusal for the store."""
-    graph = _plain_graph(sqlite_saver)
+    graph = _one_step_graph(sqlite_saver, _Log)
     thread_id = f"plain-{uuid4()}"
     for turn in ("one", "two"):
         await graph.ainvoke(
-            cast("Any", {"log": [turn]}), cast("Any", _config(thread_id))
+            cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
         )
-    before = await _history(sqlite_saver, thread_id)
+    before = await stored_history(sqlite_saver, thread_id)
     assert all(len(ids) > 1 for ids in before.values())
 
     assert await prune_settled_checkpoints(sqlite_saver, thread_id) is True
 
-    assert await _history(sqlite_saver, thread_id) == {
+    assert await stored_history(sqlite_saver, thread_id) == {
         namespace: [max(ids)] for namespace, ids in before.items()
     }
 
@@ -158,19 +144,19 @@ async def test_a_sqlite_store_with_another_table_layout_is_refused(
     layout they were not written for, and the class of the saver holding it
     says nothing about that.
     """
-    graph = _plain_graph(sqlite_saver)
+    graph = _one_step_graph(sqlite_saver, _Log)
     thread_id = f"layout-{uuid4()}"
     for turn in ("one", "two"):
         await graph.ainvoke(
-            cast("Any", {"log": [turn]}), cast("Any", _config(thread_id))
+            cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
         )
-    before = await _history(sqlite_saver, thread_id)
+    before = await stored_history(sqlite_saver, thread_id)
     await sqlite_saver.conn.execute("ALTER TABLE writes ADD COLUMN retained INTEGER")
     await sqlite_saver.conn.commit()
 
     assert await prune_settled_checkpoints(sqlite_saver, thread_id) is False
 
-    assert await _history(sqlite_saver, thread_id) == before
+    assert await stored_history(sqlite_saver, thread_id) == before
 
 
 @pytest.mark.asyncio
@@ -193,20 +179,44 @@ async def test_a_saver_that_prunes_itself_is_asked_to(
 
     saver = _PruningSaver(sqlite_saver.conn)
     saver.is_setup = True
-    graph = _plain_graph(saver)
+    graph = _one_step_graph(saver, _Log)
     thread_id = f"self-pruning-{uuid4()}"
     for turn in ("one", "two"):
         await graph.ainvoke(
-            cast("Any", {"log": [turn]}), cast("Any", _config(thread_id))
+            cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
         )
-    before = await _history(saver, thread_id)
+    before = await stored_history(saver, thread_id)
 
     assert await prune_settled_checkpoints(saver, thread_id) is True
 
     # The saver was asked, and the direct statements did not also run.
     assert calls == [([thread_id], "keep_latest")]
-    assert await _history(saver, thread_id) == before
+    assert await stored_history(saver, thread_id) == before
     assert type(saver).aprune is not BaseCheckpointSaver.aprune
+
+
+def test_the_pinned_schema_version_is_the_one_the_installed_saver_reaches() -> None:
+    """A saver that migrates further must stop this suite, not stop pruning.
+
+    The pin refuses a store the saver has taken past it, which fails safe and
+    fails silently: settled history simply stops being pruned, with a log line
+    nobody is watching for. Moving the pin is only correct once someone has
+    re-read the DELETE statements against the new tables, so the migration
+    count moving is made to fail here, where it cannot be missed.
+
+    Read off the saver's own migration list, whose position IS its version, so
+    this needs no server and runs wherever the package is installed.
+    """
+    from langgraph.checkpoint.postgres.base import BasePostgresSaver
+
+    from ..checkpoint_retention import _POSTGRES_SCHEMA_VERSION
+
+    assert len(BasePostgresSaver.MIGRATIONS) - 1 == _POSTGRES_SCHEMA_VERSION, (
+        "the installed PostgreSQL saver no longer ends at the schema version "
+        "the retention statements were written for. Re-read "
+        "_POSTGRES_PRUNE_WRITES, _POSTGRES_PRUNE_CHECKPOINTS and "
+        "_POSTGRES_PRUNE_BLOBS against the new tables, then move the pin."
+    )
 
 
 @pytest_asyncio.fixture
@@ -231,6 +241,30 @@ async def postgres_saver(
 
 @pytest.mark.asyncio
 @pytest.mark.requires_prerequisites("postgres")
+async def test_a_freshly_set_up_store_records_the_pinned_schema_version(
+    postgres_saver: Any,
+) -> None:
+    """The pin must match what setup actually writes, not only the source list.
+
+    The offline check above reads the saver's migration list; this reads the
+    ledger a real setup left behind. They can disagree - a migration the saver
+    declares but does not apply, or a store set up by an older release - and
+    the ledger is what retention consults.
+    """
+    from ..checkpoint_retention import _POSTGRES_SCHEMA_VERSION
+
+    async with postgres_saver.conn.connection() as connection:
+        cursor = await connection.execute(
+            "SELECT MAX(v) AS v FROM checkpoint_migrations"
+        )
+        row = await cursor.fetchone()
+
+    assert row is not None
+    assert int(row["v"]) == _POSTGRES_SCHEMA_VERSION
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_prerequisites("postgres")
 async def test_a_postgres_store_at_another_schema_version_is_refused(
     postgres_saver: Any,
 ) -> None:
@@ -239,14 +273,14 @@ async def test_a_postgres_store_at_another_schema_version_is_refused(
     A store the saver has migrated past the version these statements were
     written against must be left alone, and the ledger is where that shows.
     """
-    graph = _plain_graph(postgres_saver)
+    graph = _one_step_graph(postgres_saver, _Log)
     thread_id = f"pg-version-{uuid4()}"
     try:
         for turn in ("one", "two"):
             await graph.ainvoke(
-                cast("Any", {"log": [turn]}), cast("Any", _config(thread_id))
+                cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
             )
-        before = await _history(postgres_saver, thread_id)
+        before = await stored_history(postgres_saver, thread_id)
         assert all(len(ids) > 1 for ids in before.values())
 
         async with postgres_saver.conn.connection() as connection:
@@ -260,7 +294,7 @@ async def test_a_postgres_store_at_another_schema_version_is_refused(
             )
         try:
             assert await prune_settled_checkpoints(postgres_saver, thread_id) is False
-            assert await _history(postgres_saver, thread_id) == before
+            assert await stored_history(postgres_saver, thread_id) == before
         finally:
             async with postgres_saver.conn.connection() as connection:
                 await connection.execute(
@@ -269,7 +303,7 @@ async def test_a_postgres_store_at_another_schema_version_is_refused(
 
         # Back at the version the statements were written for, it prunes again.
         assert await prune_settled_checkpoints(postgres_saver, thread_id) is True
-        assert await _history(postgres_saver, thread_id) == {
+        assert await stored_history(postgres_saver, thread_id) == {
             namespace: [max(ids)] for namespace, ids in before.items()
         }
     finally:
@@ -285,10 +319,12 @@ async def test_a_sqlite_prune_still_rolls_back_a_failure(
     The saver shares one connection, so deletes a failed prune leaves open are
     committed by its next write.
     """
-    graph = _plain_graph(sqlite_saver)
+    graph = _one_step_graph(sqlite_saver, _Log)
     thread_id = f"refused-{uuid4()}"
-    await graph.ainvoke(cast("Any", {"log": ["one"]}), cast("Any", _config(thread_id)))
-    before = await _history(sqlite_saver, thread_id)
+    await graph.ainvoke(
+        cast("Any", {"log": ["one"]}), cast("Any", config_for(thread_id))
+    )
+    before = await stored_history(sqlite_saver, thread_id)
     await sqlite_saver.conn.execute(
         "CREATE TRIGGER refuse_prune BEFORE DELETE ON checkpoints "
         "BEGIN SELECT RAISE(ABORT, 'prune refused'); END"
@@ -299,6 +335,6 @@ async def test_a_sqlite_prune_still_rolls_back_a_failure(
         await prune_settled_checkpoints(sqlite_saver, thread_id)
 
     await sqlite_saver.conn.execute("DROP TRIGGER refuse_prune")
-    await graph.ainvoke(cast("Any", {"log": ["two"]}), cast("Any", _config("other")))
+    await graph.ainvoke(cast("Any", {"log": ["two"]}), cast("Any", config_for("other")))
 
-    assert await _history(sqlite_saver, thread_id) == before
+    assert await stored_history(sqlite_saver, thread_id) == before

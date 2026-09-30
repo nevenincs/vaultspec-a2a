@@ -69,6 +69,14 @@ _CHECKPOINT_SETUP_LOCK_KEY = int.from_bytes(
 _CHECKPOINT_SETUP_LOCK_TIMEOUT_SECONDS = 120.0
 _CHECKPOINT_SETUP_LOCK_POLL_SECONDS = 0.05
 
+# What a saver says when it is asked to close resources it only borrows.
+_BORROWED_SAVER_CLOSE_REFUSAL = (
+    "This checkpointer borrows the selector thread, event loop and connection "
+    "pool of the one it was taken from, so closing it would close the "
+    "checkpoint store for every holder. Close the checkpointer that opened "
+    "them instead."
+)
+
 
 def strict_checkpoint_serde() -> SerializerProtocol:
     """Return the serializer that reads back only the safe set of types.
@@ -167,6 +175,9 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         self._loop: asyncio.AbstractEventLoop | None = None
         self._pool: Any = None
         self._saver: Any = None
+        # Set on the clones below, which run on this bridge's thread, loop and
+        # pool without owning any of them.
+        self._borrowed = False
 
     async def start(self) -> None:
         """Start the selector-loop thread and enter AsyncPostgresSaver."""
@@ -206,7 +217,15 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         self.serde = self._saver.serde
 
     async def close(self) -> None:
-        """Exit the saver context and stop the selector loop thread."""
+        """Exit the saver context and stop the selector loop thread.
+
+        A borrowed saver refuses instead. Its thread, loop and pool belong to
+        the checkpointer it was cloned from, and closing it would take the
+        store away from every other holder - runs mid-superstep included -
+        while the owner went on believing its store was open.
+        """
+        if self._borrowed:
+            raise RuntimeError(_BORROWED_SAVER_CLOSE_REFUSAL)
         if self._loop is None:
             return
         try:
@@ -336,12 +355,13 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         """Return a bridge to a second saver on the same pool and selector loop.
 
         The sibling borrows this bridge's thread, loop and pool, so it must not
-        outlive it and must never be closed: ``close`` stops the loop and closes
-        the pool both of them are using.
+        outlive it and cannot be closed: closing stops the loop and closes the
+        pool both of them are using, so it refuses.
         """
         sibling: Any = await self._run_async("_pooled_sibling_saver")
         clone = copy.copy(self)
         clone._saver = sibling
+        clone._borrowed = True
         clone.serde = sibling.serde
         return clone
 
@@ -418,7 +438,8 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         The base contract is a shallow clone with a narrowed serializer; this
         used to swap its own inner saver and hand back itself, so every holder
         of the bridge - including runs already compiled against it - silently
-        acquired one caller's allowlist.
+        acquired one caller's allowlist. The clone borrows this bridge's
+        thread, loop and pool, so it refuses to be closed.
         """
         inner = self._inner()
         narrowed = inner.with_allowlist(extra_allowlist)
@@ -426,6 +447,7 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
             return self
         clone = copy.copy(self)
         clone._saver = narrowed
+        clone._borrowed = True
         clone.serde = narrowed.serde
         return clone
 
@@ -521,7 +543,9 @@ async def concurrent_checkpointer(checkpointer: Checkpointer) -> Checkpointer:
     pool. The pool stays the bound on how many connections the process holds.
 
     The result borrows the caller's pool and must not outlive it: closing it
-    belongs to whoever opened the checkpointer, never to a sibling. A backend
+    belongs to whoever opened the checkpointer, never to a sibling. Where the
+    sibling has a ``close`` to call - the selector bridge - it refuses one; the
+    pooled saver has none, and its pool is the caller's to close. A backend
     that cannot benefit returns itself - SQLite has one connection to serialize
     on, and a Postgres saver on a bare connection has nothing else to run on.
     """

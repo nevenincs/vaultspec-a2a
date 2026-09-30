@@ -12,6 +12,11 @@
 
 services:
   gateway:
+    # Docker's default stop grace is 10s, which is SHORTER than the service's own
+    # shutdown budget (VAULTSPEC_A2A_SHUTDOWN_TOTAL_TIMEOUT_SECONDS, 15s by
+    # default): the container was SIGKILLed mid-drain, before the lifespan could
+    # close the database and flush telemetry. This must stay above that budget.
+    stop_grace_period: ${A2A_STOP_GRACE_PERIOD:-30s}
     build:
       context: ..
       dockerfile: service/docker/prod.Dockerfile
@@ -55,6 +60,11 @@ services:
       start_period: 15s
 
   worker:
+    # Docker's default stop grace is 10s, which is SHORTER than the service's own
+    # shutdown budget (VAULTSPEC_A2A_SHUTDOWN_TOTAL_TIMEOUT_SECONDS, 15s by
+    # default): the container was SIGKILLed mid-drain, before the lifespan could
+    # close the database and flush telemetry. This must stay above that budget.
+    stop_grace_period: ${A2A_STOP_GRACE_PERIOD:-30s}
     build:
       context: ..
       dockerfile: service/docker/prod.Dockerfile

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PreflightDecision",
+    "ResumeAdmission",
     "ResumeRefusal",
     "ResumeRefusalCause",
     "StateProjector",
@@ -54,6 +55,7 @@ class ResumeRefusalCause(StrEnum):
     NOT_PARKED = "resume_not_parked"
     REQUEST_NOT_PENDING = "resume_request_not_pending"
     STATE_UNREADABLE = "resume_state_unreadable"
+    AMBIGUOUS_TARGET = "resume_target_ambiguous"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +76,22 @@ class ResumeRefusal:
     pending_request_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class ResumeAdmission:
+    """How one admitted resume must be handed to the graph.
+
+    Attributes:
+        interrupt_id: The interrupt this answer belongs to, when the run is
+            waiting on more than one. LangGraph refuses a bare value while
+            several are pending, because a bare value says nothing about which
+            of them it answers, so the answer is addressed to its interrupt
+            instead. ``None`` when exactly one is pending and the plain value
+            is unambiguous.
+    """
+
+    interrupt_id: str | None = None
+
+
 def answered_request_id(resume_value: object) -> str | None:
     """The request a resume value names, or ``None`` when it names none.
 
@@ -89,17 +107,29 @@ def answered_request_id(resume_value: object) -> str | None:
     return named if isinstance(named, str) and named else None
 
 
-def _pending_request_ids(interrupts: Iterable[object]) -> tuple[str, ...]:
-    """The request ids of the interrupts a run is parked on."""
-    found: list[str] = []
+def _pending_requests(interrupts: Iterable[object]) -> dict[str, str]:
+    """The request each pending interrupt asks, keyed by the request id.
+
+    The value is the interrupt's own identifier, which is how an answer is
+    addressed while more than one interrupt is pending. An interrupt whose
+    payload names no request, or which carries no identifier, contributes
+    nothing: neither can be matched to an answer.
+    """
+    found: dict[str, str] = {}
     for interrupt in interrupts:
         payload = coerce_object_mapping(getattr(interrupt, "value", interrupt))
         if payload is None:
             continue
         request_id = payload.get("request_id")
-        if isinstance(request_id, str) and request_id:
-            found.append(request_id)
-    return tuple(found)
+        interrupt_id = getattr(interrupt, "id", None)
+        if (
+            isinstance(request_id, str)
+            and request_id
+            and isinstance(interrupt_id, str)
+            and interrupt_id
+        ):
+            found[request_id] = interrupt_id
+    return found
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,8 +473,8 @@ class StateProjector:
         *,
         resume_value: object,
         timeout_seconds: float,
-    ) -> ResumeRefusal | None:
-        """Why this resume must not reach the graph, or ``None`` when it may.
+    ) -> ResumeRefusal | ResumeAdmission:
+        """How this resume must reach the graph, or why it must not.
 
         A resume is an answer to one question the run stopped to ask. Handed to
         a run that is not stopped, LangGraph gives the value to whatever the
@@ -452,7 +482,7 @@ class StateProjector:
         question settles it - a probe approved a plan that never parked. An
         answer is therefore admitted only against the question it answers.
 
-        Two things are checked, in order of what the run's state can prove:
+        Three things are decided, in order of what the run's state can prove:
 
         * The run is parked. The live snapshot is authoritative; when it cannot
           be read, durable checkpoint evidence deciding ``INTERRUPTED`` stands
@@ -461,6 +491,10 @@ class StateProjector:
           of the pending interrupts asks that request. An answer naming a
           request the run is not waiting on is refused rather than spent on a
           different question.
+        * Which interrupt the answer is addressed to, when the run is waiting
+          on more than one. A bare value is refused there rather than handed
+          over: LangGraph refuses it too, but as a fault inside the run rather
+          than as an answer the client can correct.
 
         A refusal leaves the run exactly as it was. It is not a failure of the
         run: the question is still open and a correct answer still resolves it.
@@ -496,7 +530,7 @@ class StateProjector:
                     "not applied"
                 ),
             )
-        pending = _pending_request_ids(interrupts)
+        pending = _pending_requests(interrupts)
         named = answered_request_id(resume_value)
         if named is not None and named not in pending:
             return ResumeRefusal(
@@ -505,28 +539,40 @@ class StateProjector:
                     "The answer names a request the run is not waiting on, so "
                     "it was not applied"
                 ),
-                pending_request_ids=pending,
+                pending_request_ids=tuple(pending),
             )
-        return None
+        if len(interrupts) == 1:
+            return ResumeAdmission()
+        if named is None:
+            return ResumeRefusal(
+                cause=ResumeRefusalCause.AMBIGUOUS_TARGET,
+                detail=(
+                    "The run is waiting on more than one question and the "
+                    "answer names none of them, so it was not applied"
+                ),
+                pending_request_ids=tuple(pending),
+            )
+        return ResumeAdmission(interrupt_id=pending[named])
 
     async def _durable_resume_refusal(
         self,
         receipt: GraphActionReceipt,
         *,
         timeout_seconds: float,
-    ) -> ResumeRefusal | None:
+    ) -> ResumeRefusal | ResumeAdmission:
         """Admit a resume on durable evidence when the live read failed.
 
         The checkpoint records that the run stopped at an interrupt but not
         which request it asked, so this admits the answer on the weaker
-        parked-at-all proof. Refusing every resume whose live state momentarily
-        could not be read would strand runs that are genuinely waiting.
+        parked-at-all proof, addressed to no interrupt in particular.
+        Refusing every resume whose live state momentarily could not be read
+        would strand runs that are genuinely waiting.
         """
         evidence = await read_checkpoint_evidence(
             self._checkpointer, receipt, timeout_seconds=timeout_seconds
         )
         if evidence.kind is CheckpointEvidenceKind.INTERRUPTED:
-            return None
+            return ResumeAdmission()
         return ResumeRefusal(
             cause=(
                 ResumeRefusalCause.STATE_UNREADABLE

@@ -43,7 +43,7 @@ from .graph_lifecycle import (
     GraphLifecycleManager,
     RegisteredCompiledGraph,
 )
-from .state_projection import ResumeRefusal, StateProjector
+from .state_projection import ResumeAdmission, ResumeRefusal, StateProjector
 
 if TYPE_CHECKING:
     from contextvars import ContextVar
@@ -99,6 +99,21 @@ def _recursion_limit(req: DispatchRequest) -> int:
     if definition is None:
         return req.recursion_limit
     return min(req.recursion_limit, definition.recursion_limit)
+
+
+def _addressed_resume(resume_value: object, admission: ResumeAdmission) -> object:
+    """The resume value, addressed to its interrupt when it has to be.
+
+    LangGraph matches a bare resume value to the run's single pending
+    interrupt, and refuses one outright while several are pending: a bare value
+    says nothing about which of them it answers. Keying the value by the
+    interrupt it belongs to is the documented way to answer one of several,
+    and it is used only then - a run waiting on one question takes the plain
+    value, which is the shape every existing resume already sends.
+    """
+    if admission.interrupt_id is None:
+        return resume_value
+    return {admission.interrupt_id: resume_value}
 
 
 def _answered_permission_update(resume_value: object) -> dict[str, Any]:
@@ -693,7 +708,7 @@ class Executor(SettlementMixin):
 
             config = _invocation_config(req, action="resume")
 
-            refusal = await self._state_projector.pre_flight_resume(
+            admission = await self._state_projector.pre_flight_resume(
                 req.thread_id,
                 graph,
                 config,
@@ -703,8 +718,8 @@ class Executor(SettlementMixin):
                     0.0, checkpoint_deadline - asyncio.get_running_loop().time()
                 ),
             )
-            if refusal is not None:
-                await self._refuse_resume(req, span, graph, config, refusal)
+            if isinstance(admission, ResumeRefusal):
+                await self._refuse_resume(req, span, graph, config, admission)
                 return
 
             self._bridge.track_thread(req.thread_id)
@@ -730,7 +745,7 @@ class Executor(SettlementMixin):
                     agent_id,
                     graph,
                     Command(
-                        resume=req.option_id,
+                        resume=_addressed_resume(req.option_id, admission),
                         # Every key here is bound atomically with the answer,
                         # which is what lets a run parked before checkpoint
                         # evidence existed acquire its digests without a

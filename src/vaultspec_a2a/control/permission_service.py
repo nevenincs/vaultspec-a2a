@@ -457,17 +457,30 @@ def _active_permission_request_id(
     pending_permissions: Sequence[PermissionRequestModel],
     request_id: str,
 ) -> str | None:
+    """The request a response is measured against, which may be its own.
+
+    A run can wait on more than one question at a time - a fan-out stage parks
+    each of its branches on its own - and each of those is answerable. So a
+    response to a request that is itself still outstanding is answering the
+    live question, whatever else is outstanding beside it. Only a response to
+    a request that is no longer outstanding is measured against the newest one,
+    which is what reports it superseded.
+    """
     if permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
         active_plan_permissions = [
             pending.request_id
             for pending in pending_permissions
             if pending.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
         ]
+        if request_id in active_plan_permissions:
+            return request_id
         return (
             active_plan_permissions[-1]
             if active_plan_permissions
             else thread_record.approval_request_id or request_id
         )
+    if any(pending.request_id == request_id for pending in pending_permissions):
+        return request_id
     if pending_permissions:
         return pending_permissions[-1].request_id
     return None

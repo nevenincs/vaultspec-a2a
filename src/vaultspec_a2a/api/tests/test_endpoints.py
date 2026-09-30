@@ -39,6 +39,7 @@ from ...database import (
     get_thread,
     record_permission_request,
     record_permission_response_submission,
+    supersede_permission_requests,
 )
 from ...database.models import (
     PermissionRequestModel,
@@ -2439,10 +2440,15 @@ class TestPermissionRespond:
         )
         assert len(worker.dispatches) == 1
 
-    def test_rejects_stale_permission_request_when_newer_interrupt_exists(
+    def test_rejects_a_permission_request_the_run_has_moved_past(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Only the active pending interrupt for a thread may be resumed."""
+        """A request the run has left behind is refused; a live one is not.
+
+        Two requests both still outstanding are two live questions - a fan-out
+        stage parks each of its branches on its own - so being the older of two
+        is not what makes a request stale. Having been superseded is.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_permissions() -> None:
@@ -2476,6 +2482,11 @@ class TestPermissionRespond:
                         }
                     ],
                     tool_call="bash",
+                )
+                await supersede_permission_requests(
+                    session,
+                    thread_id=thread_id,
+                    except_request_id=new_request_id,
                 )
                 await session.commit()
 
@@ -2513,6 +2524,73 @@ class TestPermissionRespond:
             "option_id": "allow_once",
             "request_id": new_request_id,
         }
+
+    def test_two_outstanding_requests_are_both_answerable(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        """A run waiting on two questions can be answered on either of them.
+
+        A fan-out stage parks each of its branches on its own request, so both
+        are live and each dispatches its own resume. Only the run's checkpoint
+        knows which interrupts it still holds, so the worker - not this route -
+        is what turns an answer away that no pending interrupt asked for.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_permissions() -> None:
+            async with session_factory() as session:
+                for request_id in (left_request_id, right_request_id):
+                    await record_permission_request(
+                        session,
+                        request_id=request_id,
+                        thread_id=thread_id,
+                        pause_reason_type="bash",
+                        description="Allow this branch?",
+                        allowed_options=[
+                            {
+                                "option_id": "allow_once",
+                                "name": "Allow once",
+                                "kind": "allow_once",
+                            }
+                        ],
+                        tool_call="bash",
+                    )
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "parallel permission test",
+                    "run_id": "endpoints-run-19b",
+                    **catalog_run_fields(client),
+                },
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["run_id"]
+            left_request_id = f"{thread_id}:req-left"
+            right_request_id = f"{thread_id}:req-right"
+            asyncio.run(_seed_permissions())
+
+            worker.dispatches.clear()
+            left = client.post(
+                f"/v1/runs/{thread_id}/permissions/{left_request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+            right = client.post(
+                f"/v1/runs/{thread_id}/permissions/{right_request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        assert left.status_code == 200
+        assert right.status_code == 200
+        assert [
+            dispatch["option_id"]["request_id"] for dispatch in worker.dispatches
+        ] == [
+            left_request_id,
+            right_request_id,
+        ]
 
     def test_plan_approval_uses_live_pending_request_over_stale_thread_pointer(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

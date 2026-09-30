@@ -35,6 +35,7 @@ from ...database import (
     get_control_action_by_idempotency_key,
     get_permission_request,
     record_permission_request,
+    supersede_permission_requests,
 )
 from ...database.models import ControlActionModel
 from ...tests._write_authority import make_test_write_authority
@@ -174,7 +175,14 @@ async def test_unknown_option_is_journalled_and_committed(
 async def test_superseded_request_is_journalled_and_committed(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """The active-interrupt guard journals through the same single path."""
+    """The active-interrupt guard journals through the same single path.
+
+    The stale request is one the run has already moved past, which is what
+    makes it stale. Two requests both still outstanding are two live questions
+    - a fan-out stage parks each of its branches on its own - and each of those
+    is answerable, so this guard measures a response only against requests that
+    are still outstanding.
+    """
     thread_id = await _seed_thread(session_factory)
     stale_request_id = f"{thread_id}:perm-stale"
     active_request_id = f"{thread_id}:perm-active"
@@ -189,6 +197,11 @@ async def test_superseded_request_is_journalled_and_committed(
                 description="Run a tool",
                 allowed_options=_OPTIONS,
             )
+        await supersede_permission_requests(
+            session,
+            thread_id=thread_id,
+            except_request_id=active_request_id,
+        )
         await session.commit()
 
     async with session_factory() as session:

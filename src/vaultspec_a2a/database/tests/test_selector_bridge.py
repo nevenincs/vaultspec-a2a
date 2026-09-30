@@ -187,15 +187,9 @@ async def test_narrowing_the_allowlist_clones_the_bridge(
     in place and returning itself gave one caller's allowlist to all of them,
     including runs already compiled against it.
     """
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
-    # An allowlist that can actually be narrowed: the default serializer admits
-    # every type, so the base contract correctly returns the saver unchanged
-    # and there would be nothing to clone.
-    restricted = JsonPlusSerializer(allowed_msgpack_modules=None)
-    bridge._inner().serde = restricted
-    bridge.serde = restricted
-
+    # There is an allowlist here to narrow because the bridge opens with one:
+    # a serializer admitting every type has nothing to add to, and the base
+    # contract would correctly return the saver unchanged.
     original_inner = bridge._inner()
     original_serde = bridge.serde
 

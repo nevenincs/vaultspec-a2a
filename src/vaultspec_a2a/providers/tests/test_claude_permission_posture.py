@@ -9,12 +9,10 @@ prove the posture actually leaves the process.
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-import pytest_asyncio
 
 from ...team.team_config import load_agent_config
 from ...utils.enums import AcpRequestId
@@ -37,8 +35,6 @@ from ._installed_vocabulary import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
     from .._json_contract import JsonObject
 
 _SESSION_ID = "session-under-test"
@@ -46,46 +42,6 @@ _TIMEOUT = 10.0
 
 # Echoes each stdin line back on stdout, so the frame a production seam wrote is
 # readable from the same context. A real pipe round-trip through a real process.
-_ECHO_CHILD = (
-    "import sys\n"
-    "for line in sys.stdin.buffer:\n"
-    "    sys.stdout.buffer.write(line)\n"
-    "    sys.stdout.buffer.flush()\n"
-)
-
-
-@pytest_asyncio.fixture
-async def echo_context() -> AsyncIterator[AcpSessionContext]:
-    """Yield a production context bound to a real echoing child process."""
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        _ECHO_CHILD,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    assert process.stdin is not None
-    assert process.stdout is not None
-    context = AcpSessionContext(
-        process=process,
-        stdin=process.stdin,
-        stdout=process.stdout,
-        response_futures={},
-        chunk_queue=asyncio.Queue(),
-        prompt_done=asyncio.Event(),
-        prompt_id_ref=[],
-        interrupt_exc=[],
-    )
-    try:
-        yield context
-    finally:
-        process.stdin.close()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
 
 
 def _config(

@@ -22,16 +22,15 @@ import contextlib
 import hashlib
 import json
 import logging
-import os
 import shutil
-import sys
-import tempfile
-import time
 import tomllib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from ..utils.atomic_write import atomic_write_text
+from ..utils.file_lock import held_exclusive_lock
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -59,7 +58,6 @@ _SEED_FILENAME = ".vaultspec-codex-auth-seed.json"
 _LOCK_FILENAME = ".vaultspec-codex-auth.lock"
 
 _LOCK_TIMEOUT_SECONDS = 10.0
-_LOCK_POLL_SECONDS = 0.05
 
 # Codex's own config key for where it keeps credentials. Reported when there is
 # no credential file to seed from, because "no file" then means "kept elsewhere"
@@ -205,96 +203,21 @@ def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None
     return seed
 
 
-def _lock_fd(path: Path) -> int:
-    return os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-
-
-def _try_lock(fd: int) -> bool:
-    """Take a non-blocking exclusive lock on byte zero; ``True`` when granted."""
-    if sys.platform == "win32":
-        import msvcrt
-
-        os.lseek(fd, 0, os.SEEK_SET)
-        try:
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-        except OSError:
-            return False
-        return True
-    import fcntl
-
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return False
-    return True
-
-
-def _unlock(fd: int) -> None:
-    """Release the byte-zero lock. POSIX ``flock`` also releases on close."""
-    if sys.platform == "win32":
-        import msvcrt
-
-        os.lseek(fd, 0, os.SEEK_SET)
-        with contextlib.suppress(OSError):
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        return
-    import fcntl
-
-    with contextlib.suppress(OSError):
-        fcntl.flock(fd, fcntl.LOCK_UN)
-
-
 @contextlib.contextmanager
 def _credential_lock(
     source: Path, *, timeout_seconds: float = _LOCK_TIMEOUT_SECONDS
 ) -> Iterator[None]:
-    """Hold the write-back lock for one source login, or report that it timed out.
+    """Hold the write-back lock for one source login.
 
-    Polled rather than blocking on the OS call: the Windows and POSIX primitives
-    disagree about what a blocking acquisition does to a process that dies
-    holding it, and a bounded wait that gives up loudly is preferable to a
-    cleanup path that can hang a run's teardown. ``timeout_seconds`` is a
-    parameter rather than only a constant so the loud failure is reachable
-    without holding a real lock for the production bound.
+    The lock file is named next to the credential it guards, because that file -
+    not this service's own state - is what two concurrent runs contend for. The
+    waiting policy is this caller's: a bounded wait, because the cleanup path it
+    runs on must not be able to hang a run's teardown.
     """
-    lock_path = source.parent / _LOCK_FILENAME
-    fd = _lock_fd(lock_path)
-    deadline = time.monotonic() + timeout_seconds
-    try:
-        while not _try_lock(fd):
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"another run held the Codex credential lock at {lock_path} for "
-                    f"{timeout_seconds:.1f}s"
-                )
-            time.sleep(_LOCK_POLL_SECONDS)
+    with held_exclusive_lock(
+        source.parent / _LOCK_FILENAME, timeout_seconds=timeout_seconds
+    ):
         yield
-    finally:
-        _unlock(fd)
-        os.close(fd)
-
-
-def _atomic_replace(destination: Path, payload: bytes) -> None:
-    """Replace *destination*'s contents in one step, owner-only throughout.
-
-    Written to a sibling temporary file and renamed, so a reader never observes a
-    half-written credential and a failed write leaves the previous one intact.
-    """
-    handle, temporary = tempfile.mkstemp(
-        prefix=f".{destination.name}.", dir=destination.parent
-    )
-    temporary_path = Path(temporary)
-    try:
-        with os.fdopen(handle, "wb") as sink:
-            sink.write(payload)
-            sink.flush()
-            os.fsync(sink.fileno())
-        _restrict_file(temporary_path)
-        os.replace(temporary_path, destination)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            temporary_path.unlink()
-        raise
 
 
 def write_back_refreshed_credential(
@@ -325,7 +248,14 @@ def write_back_refreshed_credential(
         with _credential_lock(seed.source, timeout_seconds=lock_timeout_seconds):
             if _source_overtook_the_run(seed, payload):
                 return False
-            _atomic_replace(seed.source, payload)
+            # The audited publication: fsynced, retried over a contention
+            # window, and never leaving a temporary credential behind.
+            atomic_write_text(
+                seed.source,
+                payload.decode("utf-8"),
+                mode=0o600,
+                newline="",
+            )
     except (OSError, TimeoutError) as error:
         logger.error(
             "Codex refreshed its credential during the run and it could not be "

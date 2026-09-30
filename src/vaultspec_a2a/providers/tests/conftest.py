@@ -14,6 +14,16 @@ from .._acp_types import AcpSessionContext
 
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
+# Echoes each stdin line straight back on stdout, so a frame written to the
+# child's stdin is readable from the same context's stdout.
+_ECHO_CHILD = (
+    "import sys\n"
+    "for line in sys.stdin.buffer:\n"
+    "    sys.stdout.buffer.write(line)\n"
+    "    sys.stdout.buffer.flush()\n"
+)
+
+
 # Files that spawn a real ACP subprocess / network I/O declare their own
 # ``service`` marker and must NOT receive the pure ``unit``/``middleware`` marks.
 _LIVE_FILES = frozenset(
@@ -152,3 +162,44 @@ async def acp_session_context(
     function-scoped and loop-local.
     """
     yield _fresh_acp_session_context(_acp_child_streams)
+
+
+@pytest_asyncio.fixture
+async def echo_context() -> AsyncIterator[AcpSessionContext]:
+    """Yield a production context bound to a real echoing child process.
+
+    The child writes every line it reads on stdin straight back on stdout, so a
+    frame a production seam wrote is readable from the same context - a real pipe
+    round-trip through a real process, and the seam under test is the production
+    one. Shared here because both the session-configuration tests and the
+    permission-posture tests drive session setup this way.
+    """
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _ECHO_CHILD,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    context = AcpSessionContext(
+        process=process,
+        stdin=process.stdin,
+        stdout=process.stdout,
+        response_futures={},
+        chunk_queue=asyncio.Queue(),
+        prompt_done=asyncio.Event(),
+        prompt_id_ref=[],
+        interrupt_exc=[],
+    )
+    try:
+        yield context
+    finally:
+        process.stdin.close()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            process.kill()
+            await process.wait()

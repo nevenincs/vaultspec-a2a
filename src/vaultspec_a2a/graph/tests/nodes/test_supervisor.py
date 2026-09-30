@@ -17,7 +17,7 @@ from ...nodes.supervisor import (
     _build_supervisor_messages,
     _evaluate_supervisor_response,
     _phase_for_route,
-    _select_revision_worker,
+    _worker_owning_phase,
     create_plan_approval_node,
     create_supervisor_node,
 )
@@ -381,7 +381,8 @@ def test_plan_approval_interrupt_fires_for_non_approved_status() -> None:
 
 
 def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
-    worker = _select_revision_worker(
+    worker = _worker_owning_phase(
+        "plan",
         ["vaultspec-doc-reviewer", "vaultspec-plan-author", "vaultspec-coder"],
         {
             "vaultspec-doc-reviewer": "audit",
@@ -392,8 +393,16 @@ def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
     assert worker == "vaultspec-plan-author"
 
 
-def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> None:
-    worker = _select_revision_worker(
+def test_a_team_with_no_plan_phase_worker_names_none_for_revision() -> None:
+    """Nobody is the honest answer when no worker owns the plan phase.
+
+    The fallback this replaces named ``workers[0]``, so a rejected plan on a
+    team with no planner was handed to whichever worker happened to be listed
+    first - on the shipped human-in-loop preset, the coder the rejection was
+    meant to keep out of execution.
+    """
+    worker = _worker_owning_phase(
+        "plan",
         ["vaultspec-researcher", "vaultspec-doc-reviewer", "vaultspec-coder"],
         {
             "vaultspec-researcher": "research",
@@ -401,7 +410,7 @@ def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> N
             "vaultspec-coder": "exec",
         },
     )
-    assert worker == "vaultspec-researcher"
+    assert worker is None
 
 
 def test_supervisor_prefers_worker_phase_over_vault_inference() -> None:
@@ -541,17 +550,20 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
 
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
+    request_id = first["__interrupt__"][0].value["request_id"]
 
     resumed = await graph.ainvoke(
-        Command(resume={"verdict": "approved"}), config=config
+        Command(resume={"verdict": "approved", "request_id": request_id}),
+        config=config,
     )
     assert resumed["next"] == "vaultspec-coder"
     assert resumed["current_plan"] == [
         {"content": "Route to vaultspec-coder", "status": "in_progress"}
     ]
     assert resumed["approval_status"] == "approved"
-    assert "approval_request_id" in resumed
-    assert resumed["approval_request_id"] is None
+    # The granted approval keeps its linkage: it is durable thread state, not
+    # a per-turn flag, so the request it was granted under stays readable.
+    assert resumed["approval_request_id"] == request_id
     assert "routing_error" in resumed
     assert resumed["routing_error"] is None
 
@@ -582,14 +594,17 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
 
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
+    request_id = first["__interrupt__"][0].value["request_id"]
 
     resumed = await graph.ainvoke(
-        Command(resume={"verdict": "rejected"}), config=config
+        Command(resume={"verdict": "rejected", "request_id": request_id}),
+        config=config,
     )
     assert resumed["next"] == "vaultspec-plan-author"
     assert resumed["approval_status"] == "rejected"
-    assert "approval_request_id" in resumed
-    assert resumed["approval_request_id"] is None
+    # The rejection names the request it answered; the next worker turn is
+    # what clears the consumed outcome.
+    assert resumed["approval_request_id"] == request_id
 
 
 @pytest.mark.asyncio
@@ -645,7 +660,13 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
     assert "__interrupt__" in first
 
     resumed = await graph.ainvoke(
-        Command(resume={"verdict": "rejected"}), config=config
+        Command(
+            resume={
+                "verdict": "rejected",
+                "request_id": first["__interrupt__"][0].value["request_id"],
+            }
+        ),
+        config=config,
     )
     assert resumed["next"] == "vaultspec-plan-author"
     assert resumed["active_agent"] == "vaultspec-plan-author"

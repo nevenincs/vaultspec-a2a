@@ -215,10 +215,15 @@ class TeamState(TypedDict):
 
     # --- pipeline_loop iteration guard ---
     # Plain last-write-wins int, incremented by the _loop_node_with_counter wrapper
-    # on each pass.  The _loop_router conditional edge enforces the max_loops cap:
-    # when loop_count >= max_loops it returns "FINISH" regardless of state["next"].
-    # Workers signal early loop exit by returning next="FINISH"; otherwise the loop
-    # continues ("revise" is the default).
+    # on each pass. The _loop_router conditional edge enforces the max_loops cap:
+    # at loop_count >= max_loops it returns "FINISH" whatever the loop node said.
+    # Below the cap the loop goes round again ONLY when the loop node's own
+    # verdict asks for a revision; anything else finishes. It does not read
+    # next="FINISH" for the early exit, which is what an earlier reading of this
+    # field described and no worker ever wrote, so every loop ran to its ceiling.
+    # The per-turn graph input resets it to 0: the ceiling is a budget for one
+    # turn, and a follow-up turn that inherited the count got fewer passes than
+    # its preset grants.
     # NotRequired because non-pipeline_loop teams never set this key.
     # M6: type is int (>= 0); negative values are prevented at write time by the
     # _loop_node_with_counter wrapper which only increments, never decrements.
@@ -338,6 +343,13 @@ class TeamState(TypedDict):
     # a route a HARD phase gate blocked). Non-zero sends the run back to the
     # supervisor; an accepted decision resets it and every new turn starts at 0.
     supervisor_reasks: NotRequired[int]
+    # Consecutive FINISH decisions this turn that a completion gate blocked and
+    # rerouted to a worker. Counted apart from supervisor_reasks because the two
+    # have different outcomes: a re-ask returns to the supervisor, while a
+    # blocked FINISH runs the worker that can satisfy the gate. A gate the
+    # worker never clears would otherwise reroute until the recursion limit.
+    # An accepted decision resets it and every new turn starts at 0.
+    supervisor_finish_blocks: NotRequired[int]
 
     # --- routing / identification ---
     thread_id: str

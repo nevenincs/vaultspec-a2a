@@ -17,6 +17,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 from ...domain_config import domain_config
 from ...team.team_config import (
@@ -105,7 +106,11 @@ def _star_graph(supervisor_replies: list[str]) -> Any:
     )
 
 
-def _run_input(thread_id: str, vault_index: dict[str, list[str]]) -> dict[str, Any]:
+def _run_input(
+    thread_id: str,
+    vault_index: dict[str, list[str]],
+    validation_errors: list[str] | None = None,
+) -> dict[str, Any]:
     receipt = GraphActionReceipt(
         schema_version="graph-action-v1",
         thread_id=thread_id,
@@ -125,7 +130,9 @@ def _run_input(thread_id: str, vault_index: dict[str, list[str]]) -> dict[str, A
         "token_usage": {},
         "active_feature": "reask-feature",
         "vault_index": vault_index,
+        "validation_errors": validation_errors or [],
         "supervisor_reasks": 0,
+        "supervisor_finish_blocks": 0,
         "active_graph_action_receipt": receipt,
         "graph_action_receipts": {"ingest": receipt},
     }
@@ -185,6 +192,62 @@ async def test_an_unparseable_reply_is_re_asked_before_it_is_followed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_reply_naming_two_routes_is_refused_not_resolved() -> None:
+    """A sentence naming two workers is not a routing decision.
+
+    The rule this replaces took the longest matching option, so "Do not send
+    to the plan author; the coder is next" routed to the plan author - the
+    one the sentence was ruling out. The supervisor is asked again instead,
+    and told what was ambiguous.
+    """
+    graph = _star_graph([f"Do not send to {_PLAN_AUTHOR}; {_CODER} is next", "FINISH"])
+    prompts = _SupervisorPrompts()
+
+    visited = await _visits(graph, "ambiguous", _run_input("ambiguous", {}), prompts)
+
+    assert visited[:2] == ["supervisor", "supervisor"]
+    assert _PLAN_AUTHOR not in visited
+    assert _CODER not in visited
+    assert "named more than one route" in prompts.prompts[1]
+    assert _PLAN_AUTHOR in prompts.prompts[1]
+    assert _CODER in prompts.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_a_reply_naming_one_route_inside_a_sentence_is_followed() -> None:
+    """Refusing ambiguity must not refuse a plain one-route sentence."""
+    graph = _star_graph([f"The {_PLAN_AUTHOR} should go next.", "FINISH"])
+    prompts = _SupervisorPrompts()
+
+    visited = await _visits(
+        graph, "one-route", _run_input("one-route", {"adr": ["adr.md"]}), prompts
+    )
+
+    assert visited[:3] == ["supervisor", f"mount_{_PLAN_AUTHOR}", _PLAN_AUTHOR]
+
+
+@pytest.mark.asyncio
+async def test_a_re_ask_shows_the_refusal_when_no_feature_is_bound() -> None:
+    """The reason reaches the model whether or not a feature is active.
+
+    It used to travel only inside the anchoring block, which is empty without
+    an active feature - so an unbound thread was re-asked with the prompt it
+    had just failed, verbatim, until the budget ran out.
+    """
+    graph = _star_graph(["no idea, honestly", "FINISH"])
+    prompts = _SupervisorPrompts()
+    graph_input = _run_input("unbound-reask", {})
+    graph_input["active_feature"] = None
+
+    await _visits(graph, "unbound-reask", graph_input, prompts)
+
+    assert len(prompts.prompts) >= 2
+    assert prompts.prompts[0] != prompts.prompts[1]
+    assert "could not parse route" in prompts.prompts[1]
+    assert "no idea, honestly" in prompts.prompts[1]
+
+
+@pytest.mark.asyncio
 async def test_a_supervisor_that_never_routes_admissibly_fails_the_run() -> None:
     graph = _star_graph(["still thinking about it"])
     prompts = _SupervisorPrompts()
@@ -199,3 +262,172 @@ async def test_a_supervisor_that_never_routes_admissibly_fails_the_run() -> None
     assert len(prompts.prompts) == limit + 1
     parked = await graph.aget_state({"configurable": {"thread_id": "exhausted"}})
     assert parked.values["supervisor_reasks"] == limit
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_finish_stops_rerouting_once_its_budget_is_spent() -> None:
+    """A completion gate the reroute never clears fails the run, and says so.
+
+    Nothing in a star run clears ``validation_errors``, so the gate refuses
+    FINISH again on every pass. The reroute used to reset the re-ask budget,
+    leaving the loop bounded by nothing but the recursion limit: the run ended
+    anonymously after a worker turn per pass.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+    limit = domain_config.supervisor_finish_block_limit
+    # The plan is already approved, so the reroute's own gates pass and this
+    # isolates the blocked-FINISH budget from the approval interrupt.
+    graph_input = _run_input(
+        "finish-blocked",
+        {"adr": ["adr.md"], "plan": ["plan.md"]},
+        ["frontmatter is malformed"],
+    )
+    graph_input["approval_status"] = "approved"
+
+    with pytest.raises(SupervisorRoutingError) as failure:
+        await _visits(graph, "finish-blocked", graph_input, prompts)
+
+    assert failure.value.attempts == limit + 1
+    assert "validation error(s)" in failure.value.reason
+    # One supervisor pass per reroute the budget allowed, plus the one that
+    # spent it - and a worker turn for each reroute, not for the last pass.
+    assert len(prompts.prompts) == limit + 1
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_finish_still_meets_the_plan_approval_gate() -> None:
+    """A reroute is a route: it parks for approval like any other exec hand-off.
+
+    The blocked-FINISH branch returned before the approval gate was evaluated,
+    so a completion gate could send the run into an exec worker with an
+    unapproved plan and no interrupt was ever raised.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+
+    visited = await _visits(
+        graph,
+        "blocked-needs-approval",
+        _run_input(
+            "blocked-needs-approval",
+            {"adr": ["adr.md"], "plan": ["plan.md"]},
+            ["frontmatter is malformed"],
+        ),
+        prompts,
+    )
+
+    assert "__interrupt__" in visited
+    parked = await graph.aget_state(
+        {"configurable": {"thread_id": "blocked-needs-approval"}}
+    )
+    assert parked.next == ("plan_approval",)
+    # The exec worker the gate rerouted to has not run: the human decides first.
+    assert _CODER not in visited
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_finish_still_meets_the_hard_phase_gate() -> None:
+    """A reroute the HARD gate refuses never reaches its worker.
+
+    The exec reroute needs a plan artifact. Without one the gate must refuse
+    it exactly as it refuses the supervisor's own exec route; returning early
+    ran the coder with no plan at all.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+
+    with pytest.raises(SupervisorRoutingError) as failure:
+        await _visits(
+            graph,
+            "blocked-hard-gated",
+            _run_input(
+                "blocked-hard-gated", {"adr": ["adr.md"]}, ["frontmatter is malformed"]
+            ),
+            prompts,
+        )
+
+    assert "Phase gate: routing to 'exec'" in failure.value.reason
+    parked = await graph.aget_state(
+        {"configurable": {"thread_id": "blocked-hard-gated"}}
+    )
+    worker_messages = [
+        m for m in parked.values["messages"] if getattr(m, "name", None) is not None
+    ]
+    assert worker_messages == []
+
+
+@pytest.mark.asyncio
+async def test_a_plan_is_approved_once_for_the_thread_not_once_per_turn() -> None:
+    """One approval releases execution for the thread, not for one turn.
+
+    The grant was cleared after every worker turn and by every supervisor
+    decision, so the same human was asked about the same plan before every
+    later exec hand-off.
+    """
+    graph = _star_graph([_CODER, _CODER, "FINISH"])
+    prompts = _SupervisorPrompts()
+    thread: Any = {"configurable": {"thread_id": "approve-once"}}
+
+    parked = await _visits(
+        graph,
+        "approve-once",
+        _run_input("approve-once", {"adr": ["adr.md"], "plan": ["plan.md"]}),
+        prompts,
+    )
+    assert "__interrupt__" in parked
+    state = await graph.aget_state(thread)
+    payload = state.tasks[0].interrupts[0].value
+    assert payload["type"] == "plan_approval_request"
+
+    visited: list[str] = []
+    async for update in graph.astream(
+        Command(resume={"verdict": "approved", "request_id": payload["request_id"]}),
+        thread,
+        stream_mode="updates",
+    ):
+        visited.extend(cast("dict[str, Any]", update))
+
+    # The whole rest of the run: two coder turns and a clean finish, with no
+    # second approval interrupt anywhere in it.
+    assert visited.count(_CODER) == 2
+    assert "__interrupt__" not in visited
+    settled = await graph.aget_state(thread)
+    assert settled.values["approval_status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_a_finish_gate_no_worker_can_satisfy_is_refused_not_rerouted() -> None:
+    """A gate with no worker to satisfy it refuses rather than picking one.
+
+    This team has a plan author and a coder and no reviewer, so nothing on it
+    can produce the audit artifact the completion gate demands. The reroute
+    used to fall back to ``workers[0]`` - here the plan author - whose next
+    hand-off is blocked by the same gate for the same reason. Refusing puts
+    the reason in front of the supervisor and ends the run within the re-ask
+    budget instead.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+
+    with pytest.raises(SupervisorRoutingError) as failure:
+        await _visits(
+            graph,
+            "no-auditor",
+            _run_input(
+                "no-auditor",
+                {"adr": ["adr.md"], "plan": ["plan.md"], "exec": ["exec/s01.md"]},
+            ),
+            prompts,
+        )
+
+    assert "audit" in failure.value.reason
+    assert "No worker of the 'audit' phase" in failure.value.reason
+    # Refused, so the run never reached a worker at all.
+    assert failure.value.attempts == domain_config.supervisor_reask_limit + 1
+    parked = await graph.aget_state({"configurable": {"thread_id": "no-auditor"}})
+    assert parked.values["supervisor_reasks"] == domain_config.supervisor_reask_limit
+    worker_messages = [
+        m for m in parked.values["messages"] if getattr(m, "name", None) is not None
+    ]
+    assert worker_messages == []

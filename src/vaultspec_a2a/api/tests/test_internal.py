@@ -651,6 +651,7 @@ class TestInternalEvents:
         assert worker.dispatches[0]["option_id"] == {
             "verdict": "approved",
             "notes": None,
+            "request_id": request_id,
         }
 
     @pytest.mark.asyncio(loop_scope="function")

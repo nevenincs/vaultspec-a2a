@@ -41,6 +41,7 @@ __all__ = [
     "build_initial_vault_index",
     "create_context_mounter",
     "create_mount_node",
+    "refresh_vault_index",
 ]
 
 
@@ -205,6 +206,27 @@ async def _mount_document_blocks(
     return blocks, tokens_used
 
 
+async def refresh_vault_index(
+    state: TeamState, workspace_root: Path | None
+) -> dict[str, list[str]]:
+    """Re-derive the active feature's vault index from disk.
+
+    The one refresh both the mount node and the supervisor's gates use.
+    Returns an empty mapping when there is nothing to scan - no workspace or
+    no active feature - which the callers read as "leave the index alone".
+    Add-only by construction: it discovers documents and the merge reducer
+    unions them, so a removal is not reflected.
+
+    Off the loop: the scan globs the vault tree from disk.
+    """
+    active_feature = state.get("active_feature")
+    if workspace_root is None or not active_feature:
+        return {}
+    return await asyncio.to_thread(
+        build_initial_vault_index, workspace_root, active_feature
+    )
+
+
 def create_mount_node(workspace_root: Path | None) -> MountNode:
     """Factory: the graph node that refreshes the vault index before a worker.
 
@@ -217,14 +239,7 @@ def create_mount_node(workspace_root: Path | None) -> MountNode:
 
     async def mount_node(state: TeamState) -> dict[str, Any]:
         """Refresh the active feature's vault index into state."""
-        if workspace_root is None:
-            return {}
-        active_feature = state.get("active_feature")
-        if not active_feature:
-            return {}
-        refreshed_index = await asyncio.to_thread(
-            build_initial_vault_index, workspace_root, active_feature
-        )
+        refreshed_index = await refresh_vault_index(state, workspace_root)
         return {"vault_index": refreshed_index} if refreshed_index else {}
 
     return mount_node

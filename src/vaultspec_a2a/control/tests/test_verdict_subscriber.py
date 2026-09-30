@@ -958,9 +958,19 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
             assert action.request_id == "proposal:research"
             accepted_input = json.loads(action.payload_json or "null")
             assert accepted_input["schema_version"] == "accepted-action-input-v2"
+            # The verdict names the gate it answers, so a resume delivered to a
+            # run that has since re-parked is recognisable there.
             assert accepted_input["intent"] in (
-                {"verdict": "approved", "notes": "ship"},
-                {"verdict": "rejected", "notes": "revise"},
+                {
+                    "verdict": "approved",
+                    "notes": "ship",
+                    "request_id": "proposal:research",
+                },
+                {
+                    "verdict": "rejected",
+                    "notes": "revise",
+                    "request_id": "proposal:research",
+                },
             )
 
 

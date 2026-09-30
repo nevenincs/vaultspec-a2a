@@ -15,11 +15,10 @@ from langchain_core.language_models.fake_chat_models import (
 )
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import RetryPolicy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
-
-    from langgraph.types import RetryPolicy
 
     from ..protocols import ProviderFactoryProtocol
 
@@ -38,10 +37,20 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from ...thread.errors import ConfigError, WorkerExecutionError
+from ...thread.errors import (
+    ConfigError,
+    DocumentConformanceError,
+    WorkerExecutionError,
+)
 from ...thread.state import TeamState
 from .._compiler_research import _make_research_producer
-from .._compiler_retry import _NODE_RETRY_POLICY, _worker_retry_on
+from .._compiler_retry import (
+    _NODE_RETRY_POLICY,
+    _SUBMIT_RETRY_POLICY,
+    _worker_retry_on,
+    node_occupancy_ceiling,
+    retry_sleep_ceiling,
+)
 from ..compiler import (
     STEP_BACKSTOP_GRACE_SECONDS,
     _build_supervisor_prompt,
@@ -737,7 +746,13 @@ async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) 
             model_assignment=deterministic_model_assignment(team),
         )
     assert _node_run_timeouts(graph) == {42.0}
-    assert graph.step_timeout == 42.0 + STEP_BACKSTOP_GRACE_SECONDS
+    # The backstop covers the RETRY budget, not one attempt of it: every
+    # attempt gets the whole per-node budget and the loop waits between them.
+    assert graph.step_timeout == (
+        node_occupancy_ceiling(42.0) + STEP_BACKSTOP_GRACE_SECONDS
+    )
+    assert graph.step_timeout is not None
+    assert graph.step_timeout > 42.0 * _NODE_RETRY_POLICY.max_attempts
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -759,7 +774,104 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
             model_assignment=deterministic_model_assignment(team),
         )
     assert _node_run_timeouts(graph) == {120.0}
-    assert graph.step_timeout == 120.0 + STEP_BACKSTOP_GRACE_SECONDS
+    assert graph.step_timeout == (
+        node_occupancy_ceiling(120.0) + STEP_BACKSTOP_GRACE_SECONDS
+    )
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_compiled_graph_is_named_for_the_team_it_came_from(
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """Every compiled graph says which team produced it.
+
+    The name is what a trace, a stream event and a subgraph label report, and
+    a worker process holds one compiled graph per team at a time. Unnamed they
+    are all ``LangGraph``, so nothing downstream can tell two runs apart by it.
+    """
+    team = load_team_config("vaultspec-solo-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+        await cp.setup()
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=cp,
+            provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
+        )
+    assert graph.name == "vaultspec-solo-coder"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_the_superstep_backstop_covers_every_attempt_a_node_may_make(
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """The graph bound cannot cut a node's own retries short.
+
+    Every attempt gets the whole per-node run budget and the loop waits
+    between attempts, so the backstop has to cover the budget times the
+    attempts plus those waits. It used to be one budget plus a fixed grace: a
+    node that spent its budget on the first attempt had the grace - about
+    thirty seconds - for the two more it was configured for, so the graph
+    bound fired first and reported an anonymous step timeout.
+    """
+    team = load_team_config("vaultspec-solo-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    budget = 90.0
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+        await cp.setup()
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=cp,
+            step_timeout=budget,
+            provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
+        )
+
+    attempts = _NODE_RETRY_POLICY.max_attempts
+    assert _node_run_timeouts(graph) == {budget}
+    assert graph.step_timeout is not None
+    # Room for the last attempt to spend its whole budget and still be the
+    # limit that fires.
+    assert graph.step_timeout >= attempts * budget + retry_sleep_ceiling(
+        _NODE_RETRY_POLICY
+    )
+    assert graph.step_timeout > attempts * budget
+
+
+def test_the_retry_sleep_ceiling_is_derived_from_the_policy_it_bounds() -> None:
+    """The waits are computed from the schedule, not restated beside it.
+
+    LangGraph sleeps ``min(max_interval, initial_interval * backoff_factor **
+    (attempts - 1))`` plus up to a second of jitter before each attempt after
+    the first, so the shipped policy's two waits are 0.5 and 1.0 second with
+    up to two seconds of jitter between them.
+    """
+    assert retry_sleep_ceiling(_NODE_RETRY_POLICY) == pytest.approx(3.5)
+    # A policy that never retries waits for nothing.
+    assert retry_sleep_ceiling(
+        RetryPolicy(max_attempts=1, jitter=False, retry_on=_worker_retry_on)
+    ) == pytest.approx(0.0)
+
+
+def test_a_submit_node_retries_the_transport_and_not_its_own_verdict() -> None:
+    """The submit policy admits a dropped connection and nothing deterministic.
+
+    The submitter is idempotent, so another attempt after a transport blip
+    saves a run whose human gates have already passed. A spent conformance
+    budget is a verdict about the document: no number of attempts changes it.
+    """
+    retry_on = _SUBMIT_RETRY_POLICY.retry_on
+    assert callable(retry_on)
+    assert retry_on(ConnectionResetError("engine went away")) is True
+    assert retry_on(TimeoutError("engine did not answer")) is True
+    assert (
+        retry_on(DocumentConformanceError("adr", ["wiki-link in body"], attempts=3))
+        is False
+    )
+    assert retry_on(RuntimeError("boom")) is False
 
 
 def _node_run_timeouts(graph: Any) -> set[float | None]:

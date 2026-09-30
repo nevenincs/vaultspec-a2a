@@ -259,11 +259,12 @@ def _compile_star(
         cast("dict[Hashable, str]", supervisor_route_map),
     )
 
-    # Approved -> exec worker's mount; rejected -> revision worker's mount.
+    # Approved -> exec worker's mount; rejected -> revision worker's mount, or
+    # back to the supervisor when no worker of the plan phase can revise it.
     builder.add_conditional_edges(
         "plan_approval",
         _route_from_plan_approval,
-        cast("dict[Hashable, str]", route_map),
+        cast("dict[Hashable, str]", {**route_map, "supervisor": "supervisor"}),
     )
 
 

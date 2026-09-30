@@ -2575,6 +2575,7 @@ class TestPermissionRespond:
         assert worker.dispatches[0]["option_id"] == {
             "verdict": "approved",
             "notes": None,
+            "request_id": live_request_id,
         }
 
     def test_respond_notes_field_survives_into_verdict_resume_payload(
@@ -2635,6 +2636,7 @@ class TestPermissionRespond:
         assert worker.dispatches[0]["option_id"] == {
             "verdict": "approved",
             "notes": "Looks solid, ship it.",
+            "request_id": request_id,
         }
 
 
@@ -2869,7 +2871,11 @@ class TestDeleteThread:
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
-        assert dispatch["option_id"] == {"verdict": "approved", "notes": None}
+        assert dispatch["option_id"] == {
+            "verdict": "approved",
+            "notes": None,
+            "request_id": request_id,
+        }
 
     def test_rejects_stale_second_response_after_submission(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

@@ -54,7 +54,7 @@ from ..thread.errors import (
     ConfigError,
 )
 from ..thread.state import TeamState
-from ._compiler_retry import _NODE_RETRY_POLICY
+from ._compiler_retry import _NODE_RETRY_POLICY, node_occupancy_ceiling
 from .enums import PipelinePhase, Provider
 from .nodes.action_completion import GRAPH_COMPLETION_NODE, record_graph_completion
 from .nodes.diverge import (
@@ -111,11 +111,18 @@ class _TypedBuilder(Protocol):
         timeout: TimeoutPolicy | None = ...,
     ) -> object: ...
 
+    def set_node_defaults(
+        self,
+        *,
+        timeout: TimeoutPolicy | None = ...,
+    ) -> object: ...
+
     def compile(
         self,
         checkpointer: BaseCheckpointSaver[str] | bool | None = ...,
         *,
         interrupt_before: list[str] | None = ...,
+        name: str | None = ...,
     ) -> object: ...
 
 
@@ -156,22 +163,43 @@ def _add_node(
     )
 
 
+def _set_node_defaults(
+    builder: StateGraph[Any, Any, Any, Any],
+    *,
+    timeout: TimeoutPolicy,
+) -> None:
+    """Apply graph-wide node defaults behind the same typed call boundary.
+
+    Mirrors ``_add_node``: langgraph declares ``cache_policy`` here as a bare
+    ``CachePolicy[Unknown]`` too, so the member read is partially unknown
+    whatever this module passes. Going through the protocol is what makes the
+    one argument this project actually sets a checked argument.
+    """
+    cast("_TypedBuilder", builder).set_node_defaults(timeout=timeout)
+
+
 def _compile_graph(
     builder: StateGraph[Any, Any, Any, Any],
     *,
     checkpointer: BaseCheckpointSaver[str] | None,
     interrupt_before: list[str] | None,
+    name: str,
 ) -> CompiledTeamGraph:
     """Compile ``builder`` behind one fully-typed call boundary.
 
     Mirrors ``_add_node``: langgraph's ``compile`` overloads carry the same
     unresolved ``BaseCheckpointSaver[Unknown]``-shaped defaults in their own
     source, so this is the single place that diagnostic is paid.
+
+    ``name`` is the team the graph was compiled from. Unnamed, every compiled
+    graph reports itself as ``LangGraph``, so a trace, a stream event or a
+    subgraph label could not say which team produced it - and a worker process
+    holds several compiled graphs at once.
     """
     return cast(
         "CompiledTeamGraph",
         cast("_TypedBuilder", builder).compile(
-            checkpointer, interrupt_before=interrupt_before
+            checkpointer, interrupt_before=interrupt_before, name=name
         ),
     )
 
@@ -197,6 +225,11 @@ class CompiledTeamGraph(Protocol):
 
     @property
     def interrupt_before_nodes(self) -> Sequence[str]: ...
+
+    # The team the graph was compiled from, set at compile time. Every runnable
+    # carries a name and an unnamed compiled graph takes langgraph's default,
+    # so a trace holding several of them could not tell them apart.
+    name: str
 
     # The drawable topology, including the edges a ``Command``-routing node
     # declares. It is how a compiled graph's reachability is asserted: a routing
@@ -227,22 +260,31 @@ class CompiledTeamGraph(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
-#: Seconds the graph-wide superstep bound sits above each node's own run budget.
-#: Both are measured from roughly the same instant, so at equal values the
-#: superstep bound would win the race and report an anonymous step timeout
-#: instead of the node's own, which names the node and which limit it hit.
+#: Seconds the graph-wide superstep bound sits above the longest a node can
+#: legitimately occupy its superstep. Both are measured from roughly the same
+#: instant, so at equal values the superstep bound would win the race and
+#: report an anonymous step timeout instead of the node's own, which names the
+#: node and which limit it hit. The bound it sits above is the RETRY budget -
+#: every attempt's run budget plus the waits between them - not one attempt's,
+#: which is what truncated the retries a node was configured for.
 STEP_BACKSTOP_GRACE_SECONDS = 30.0
 
 # Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
+#
+# Plain ``.value`` strings, not the members: this map's values are what the
+# supervisor writes into the checkpointed ``pipeline_phase`` channel, and the
+# checkpoint serializer refuses a type it does not know under strict msgpack -
+# a parked run holding an enum member would not hydrate. ``PipelinePhase`` is a
+# ``StrEnum``, so every comparison against a member still holds.
 _ROLE_TO_PHASE: dict[str, str] = {
-    "researcher": PipelinePhase.RESEARCH,
-    "analyst": PipelinePhase.ADR,
-    "adr-author": PipelinePhase.ADR,
-    "planner": PipelinePhase.PLAN,
-    "plan-author": PipelinePhase.PLAN,
-    "coder": PipelinePhase.EXEC,
-    "reviewer": PipelinePhase.AUDIT,
+    "researcher": PipelinePhase.RESEARCH.value,
+    "analyst": PipelinePhase.ADR.value,
+    "adr-author": PipelinePhase.ADR.value,
+    "planner": PipelinePhase.PLAN.value,
+    "plan-author": PipelinePhase.PLAN.value,
+    "coder": PipelinePhase.EXEC.value,
+    "reviewer": PipelinePhase.AUDIT.value,
 }
 
 
@@ -955,7 +997,7 @@ def compile_team_graph(
     # Every node attempt is capped at the preset's step budget. No idle limit:
     # a provider CLI running a long tool call relays no LangChain callback while
     # it works, so an idle clock would fell agents that are making progress.
-    builder.set_node_defaults(timeout=TimeoutPolicy(run_timeout=step_timeout))
+    _set_node_defaults(builder, timeout=TimeoutPolicy(run_timeout=step_timeout))
     _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
@@ -1032,8 +1074,11 @@ def compile_team_graph(
         builder,
         checkpointer=options.get("checkpointer"),
         interrupt_before=interrupt_nodes,
+        name=str(team_config.id),
     )
 
-    graph.step_timeout = step_timeout + STEP_BACKSTOP_GRACE_SECONDS
+    graph.step_timeout = (
+        node_occupancy_ceiling(step_timeout) + STEP_BACKSTOP_GRACE_SECONDS
+    )
 
     return graph

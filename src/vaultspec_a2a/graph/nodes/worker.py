@@ -21,9 +21,11 @@ from ...context.anchoring import build_anchoring_context
 from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
+from ...thread.enums import ApprovalStatus
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
 from ...thread.snapshots import stamp_message_created_at
+from ...thread.state import read_untrusted_state_value
 from ..acp_options import option_id_of, valid_option_ids
 from ..run_context import RunContext, run_thread_id
 from ..tools.task_queue import create_mark_task_complete_tool
@@ -49,7 +51,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-__all__ = ["create_worker_node"]
+__all__ = ["create_worker_node", "render_research_findings"]
 
 # A lane name and a model id are bounded configuration values, not free text, and
 # they reach a client-visible failure reason. Anything longer than this is not an
@@ -126,6 +128,71 @@ def _worker_rule_message(
     return SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{rules}")
 
 
+def _finding_source_lines(locators: object) -> list[str]:
+    """Render one finding's locators as citation lines, skipping malformed ones."""
+    if not isinstance(locators, list):
+        return []
+    lines: list[str] = []
+    for locator in cast("list[object]", locators):
+        if not isinstance(locator, dict):
+            continue
+        entry = cast("dict[str, Any]", locator)
+        url = entry.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        title = entry.get("title")
+        retrieved_at = entry.get("retrieved_at")
+        rendered = (
+            f"  - {title} — {url}" if isinstance(title, str) and title else f"  - {url}"
+        )
+        if isinstance(retrieved_at, str) and retrieved_at:
+            rendered = f"{rendered} (retrieved {retrieved_at})"
+        lines.append(rendered)
+    return lines
+
+
+def render_research_findings(state: TeamState) -> str | None:
+    """Render the fan-out's accumulated findings as the join point's input.
+
+    Every researcher branch appends a ``{claim, locators, source_thread}``
+    finding through the append-only ``research_findings`` reducer, and the
+    branch's claim is the only place its work exists: nothing else in state
+    carries it. Without this the join point that is supposed to feed synthesis
+    fed it nothing, so the synthesist wrote from the turn history alone while
+    the checkpoint held every branch's claim.
+
+    Read defensively through the untrusted-state boundary: a finding hydrated
+    from a checkpoint bypassed the branch-side validation that admitted it, and
+    an unreadable one must be skipped rather than fail the turn that would
+    otherwise synthesise the readable ones.
+    """
+    findings: object = read_untrusted_state_value(state, "research_findings") or []
+    if not isinstance(findings, list):
+        return None
+    blocks: list[str] = []
+    for finding in cast("list[object]", findings):
+        if not isinstance(finding, dict):
+            continue
+        entry = cast("dict[str, Any]", finding)
+        claim = entry.get("claim")
+        if not isinstance(claim, str) or not claim.strip():
+            continue
+        source = entry.get("source_thread")
+        heading = (
+            f"### Thread `{source}`"
+            if isinstance(source, str) and source
+            else "### Unattributed thread"
+        )
+        block = [heading, "", claim.strip()]
+        source_lines = _finding_source_lines(entry.get("locators"))
+        if source_lines:
+            block.extend(["", "Sources:", *source_lines])
+        blocks.append("\n".join(block))
+    if not blocks:
+        return None
+    return "## Research findings from the fan-out\n\n" + "\n\n".join(blocks)
+
+
 def _build_worker_messages(
     *,
     state: TeamState,
@@ -134,6 +201,7 @@ def _build_worker_messages(
     role: str | None = None,
     feedback_grounding: str | None = None,
     mounted_context: str | None = None,
+    research_findings: str | None = None,
 ) -> list[BaseMessage]:
     """Build the worker prompt/message list before model invocation.
 
@@ -158,6 +226,8 @@ def _build_worker_messages(
         messages.append(SystemMessage(content=anchoring))
     if mounted_context:
         messages.append(SystemMessage(content=mounted_context))
+    if research_findings:
+        messages.append(SystemMessage(content=research_findings))
     # Feedback-loop grounding: on a revision run the writer sees the reviewer's
     # authoritative comments, retrieved by id from the engine and
     # rendered upstream. Placed after the mounted corpus so the revision
@@ -613,6 +683,7 @@ def _finalize_worker_response(
     response: BaseMessage,
     worker_name: str,
     state_updates: dict[str, Any],
+    approval_status: object = None,
     usage: TokenUsageEntry | None = None,
 ) -> dict[str, Any]:
     """Attach worker attribution and merge the queue tool's Command update.
@@ -624,16 +695,26 @@ def _finalize_worker_response(
     When the lane reported usage, this node also emits the per-agent delta on
     the ``token_usage`` channel, whose existing additive reducer accumulates it
     across the run.
+
+    A GRANTED approval survives the turn it released. It is durable
+    per-thread state - the human approved this thread's plan for execution,
+    not one turn of it - so clearing it here asked the same human the same
+    question before every later exec turn. A rejection or a pending mark IS
+    consumed by the turn it routed and is cleared.
     """
     response.name = worker_name
     stamp_message_created_at(response)
+    approval_granted = approval_status == ApprovalStatus.APPROVED.value
     update: dict[str, Any] = {
         "messages": [response],
-        # Approval outcomes are consumed by the worker turn they routed.
-        "approval_status": None,
-        "approval_request_id": None,
+        "approval_status": (
+            ApprovalStatus.APPROVED.value if approval_granted else None
+        ),
         **state_updates,
     }
+    if not approval_granted:
+        # The linkage outlives the turn only for as long as the approval does.
+        update["approval_request_id"] = None
     if usage is not None:
         update["token_usage"] = {worker_name: usage.to_dict()}
     return update
@@ -875,6 +956,7 @@ class _WorkerNodeOptions(TypedDict, total=False):
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
     context_mounter: ContextMounter | None
+    joins_research_findings: bool
 
 
 class _WorkerNodeSettings(TypedDict):
@@ -888,6 +970,7 @@ class _WorkerNodeSettings(TypedDict):
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
     context_mounter: ContextMounter | None
+    joins_research_findings: bool
 
 
 def _bind_worker_node_settings(
@@ -907,6 +990,7 @@ def _bind_worker_node_settings(
         "feedback_reader": None,
         "cost_port": None,
         "context_mounter": None,
+        "joins_research_findings": False,
     }
     for index, value in enumerate(args):
         name = names[index]
@@ -958,6 +1042,11 @@ def create_worker_node(
                            them; ignored by non-ACP models.
         context_mounter:   Optional expander of the phase-scoped vault documents
                            this worker is grounded in, run at every invocation.
+        joins_research_findings: When True this worker is the join point of a
+                           research fan-out and its prompt carries every branch's
+                           accumulated finding. Off by default: a worker that is
+                           not a join point must not be handed another stage's
+                           evidence.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -987,6 +1076,11 @@ def create_worker_node(
         # attempt re-derives it rather than finding it absent or stale.
         mounter = settings["context_mounter"]
         mounted_context = await mounter(state) if mounter is not None else None
+        research_findings = (
+            render_research_findings(state)
+            if settings["joins_research_findings"]
+            else None
+        )
 
         # Off the loop: the workspace rules are globbed and read from disk, on
         # the loop that also carries every other run and the worker's heartbeat.
@@ -999,6 +1093,7 @@ def create_worker_node(
                 role=settings["role"],
                 feedback_grounding=feedback_grounding,
                 mounted_context=mounted_context,
+                research_findings=research_findings,
             )
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
@@ -1093,6 +1188,7 @@ def create_worker_node(
             response=response,
             worker_name=name,
             state_updates=state_updates,
+            approval_status=state.get("approval_status"),
             usage=usage,
         )
 

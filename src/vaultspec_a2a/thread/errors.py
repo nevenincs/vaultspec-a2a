@@ -214,6 +214,32 @@ class SupervisorRoutingError(VaultspecError):
         self.attempts = attempts
 
 
+class DocumentConformanceError(VaultspecError):
+    """Raised when a phase spends its budget without a submittable document.
+
+    The submitter refuses a body that would fail vault conformance at
+    materialization, and the refusal routes back to the phase's writer for a
+    targeted second chance. Failing the run once that budget is spent is the
+    honest outcome: no proposal was ever created, so there is nothing for a
+    human gate to decide and no id an out-of-run verdict could correlate to -
+    parking would be a pause nothing can end. The unresolved checks travel on
+    the error so the failure names what the writer never fixed.
+    """
+
+    __slots__ = ("attempts", "phase", "revision_notes")
+
+    def __init__(self, phase: str, revision_notes: list[str], *, attempts: int) -> None:
+        """Record the phase, what it still fails, and how many tries it had."""
+        joined = "; ".join(revision_notes) or "no check was reported"
+        super().__init__(
+            f"document phase {phase!r} still fails vault conformance after "
+            f"{attempts} revision attempt(s): {joined}"
+        )
+        self.phase = phase
+        self.revision_notes = list(revision_notes)
+        self.attempts = attempts
+
+
 # ---------------------------------------------------------------------------
 # Protocol bridging
 # ---------------------------------------------------------------------------
@@ -353,6 +379,7 @@ __all__ = [
     "ConfigError",
     "ContextOverflowError",
     "DatabaseError",
+    "DocumentConformanceError",
     "EventAggregatorError",
     "HarnessToolContractError",
     "NicknameConflictError",

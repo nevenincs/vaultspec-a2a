@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .errors import ConfigError as ConfigError
     from .errors import ContextOverflowError as ContextOverflowError
     from .errors import DatabaseError as DatabaseError
+    from .errors import DocumentConformanceError as DocumentConformanceError
     from .errors import EventAggregatorError as EventAggregatorError
     from .errors import NicknameConflictError as NicknameConflictError
     from .errors import PermissionDeniedError as PermissionDeniedError
@@ -101,6 +102,7 @@ _LAZY_IMPORTS = {
     "ConfigError": ".errors",
     "ContextOverflowError": ".errors",
     "DatabaseError": ".errors",
+    "DocumentConformanceError": ".errors",
     "EventAggregatorError": ".errors",
     "NicknameConflictError": ".errors",
     "PermissionDeniedError": ".errors",
@@ -161,6 +163,7 @@ __all__ = [
     "ControlActionResultStatus",
     "ControlActionType",
     "DatabaseError",
+    "DocumentConformanceError",
     "EventAggregatorError",
     "ExecutionStateProjection",
     "InvalidTransitionError",

@@ -68,7 +68,7 @@ jobs:
     needs: [basic]
     if: always()
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 5
+    timeout-minutes: 66
     steps:
       - name: Judge the required checks
         env:

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import inspect
 import logging
 import sys
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
@@ -33,6 +35,7 @@ __all__ = [
     "concurrent_checkpointer",
     "open_checkpointer",
     "prune_settled_thread",
+    "setup_postgres_checkpointer",
 ]
 
 # Headroom over the worker's concurrent-run bound. Every run in flight can be
@@ -47,6 +50,22 @@ _CHECKPOINT_POOL_HEADROOM = 2
 # sized for peak concurrency would otherwise hold that many idle server
 # connections in a desktop profile that runs one thread at a time.
 _CHECKPOINT_POOL_MIN_SIZE = 1
+
+# The advisory-lock key every process of this package uses to serialize
+# checkpoint schema setup. Derived from a stable name rather than chosen by
+# hand, so the two processes agree on it and an unrelated application sharing
+# the database is vanishingly unlikely to pick the same number.
+_CHECKPOINT_SETUP_LOCK_KEY = int.from_bytes(
+    hashlib.blake2b(b"vaultspec-a2a:checkpoint-setup", digest_size=8).digest(),
+    "big",
+    signed=True,
+)
+
+# Setup is four small DDL statements and three index builds on tables that are
+# empty the one time this contends, so a process still waiting after this long
+# is not waiting for a peer that is making progress.
+_CHECKPOINT_SETUP_LOCK_TIMEOUT_SECONDS = 120.0
+_CHECKPOINT_SETUP_LOCK_POLL_SECONDS = 0.05
 
 
 def _postgres_checkpoint_pool_size() -> int:
@@ -229,7 +248,12 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         return self._run_sync("config_specs")
 
     async def setup(self) -> None:
-        await self._run_async("setup")
+        await self._run_async("_setup")
+
+    async def _setup(self) -> None:
+        if self._saver is None or self._pool is None:
+            raise RuntimeError("AsyncPostgresSaver is not initialized")
+        await setup_postgres_checkpointer(self._saver, self._pool)
 
     @override
     async def aget(self, config: Any) -> Any:
@@ -362,6 +386,76 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         return self
 
 
+def _scalar(row: Any) -> Any:
+    """Return the single column of *row*, whatever row factory produced it."""
+    if isinstance(row, dict):
+        return next(iter(cast("dict[str, Any]", row).values()))
+    return row[0]
+
+
+async def _take_setup_lock(connection: Any) -> None:
+    """Hold the checkpoint setup lock on *connection*, waiting between tries."""
+    deadline = time.monotonic() + _CHECKPOINT_SETUP_LOCK_TIMEOUT_SECONDS
+    while True:
+        cursor = await connection.execute(
+            "SELECT pg_try_advisory_lock(%s)", (_CHECKPOINT_SETUP_LOCK_KEY,)
+        )
+        if _scalar(await cursor.fetchone()):
+            return
+        if time.monotonic() >= deadline:
+            msg = (
+                "Another process has held the checkpoint schema setup lock for "
+                f"{_CHECKPOINT_SETUP_LOCK_TIMEOUT_SECONDS:.0f}s; refusing to set "
+                "up the schema alongside it."
+            )
+            raise TimeoutError(msg)
+        await asyncio.sleep(_CHECKPOINT_SETUP_LOCK_POLL_SECONDS)
+
+
+async def setup_postgres_checkpointer(saver: Any, pool: Any) -> None:
+    """Create the saver's schema under a lock no other process can cross.
+
+    ``AsyncPostgresSaver.setup`` issues its ``CREATE TABLE IF NOT EXISTS``
+    statements and migration inserts unguarded, and ``IF NOT EXISTS`` is not
+    atomic against a concurrent creator: two processes starting against a fresh
+    database collide inside PostgreSQL's own catalog, and the loser fails on
+    ``pg_type_typname_nsp_index`` rather than on anything the statements test
+    for. Shipped start ordering hides it; a second worker or a saver migration
+    would not.
+
+    The saver's last migrations are ``CREATE INDEX CONCURRENTLY``, which waits
+    out every transaction already running on the database, and that dictates
+    the shape of the lock twice over. It is session-scoped rather than
+    transaction-scoped, so the holder sits idle rather than keeping a
+    transaction the index build would wait for; and the loser POLLS for it
+    instead of blocking in ``pg_advisory_lock``, because a connection parked
+    inside that statement is itself a transaction the winner's index build
+    would wait for - the two would wait for each other. Between polls the
+    waiter holds nothing. A process that dies instead of unlocking drops its
+    session, and the lock with it.
+    """
+    async with pool.connection() as connection:
+        await _take_setup_lock(connection)
+        try:
+            await saver.setup()
+        finally:
+            try:
+                await connection.execute(
+                    "SELECT pg_advisory_unlock(%s)", (_CHECKPOINT_SETUP_LOCK_KEY,)
+                )
+            except Exception:
+                # Returning it to the pool still locked would stall the next
+                # process to start for as long as this one lives. Ending the
+                # session is the release of last resort, and it must not
+                # replace a failure from setup itself.
+                logger.warning(
+                    "Could not release the checkpoint setup lock; discarding "
+                    "the connection so the session ends.",
+                    exc_info=True,
+                )
+                await connection.close()
+
+
 def _pooled_postgres_saver(checkpointer: object) -> Any | None:
     """Return *checkpointer* when it is a native Postgres saver over a pool.
 
@@ -478,7 +572,7 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
     await pool.open(wait=True)
     try:
         checkpointer = AsyncPostgresSaver(conn=pool)
-        await checkpointer.setup()
+        await setup_postgres_checkpointer(checkpointer, pool)
         yield checkpointer
     finally:
         # The pool owns real server connections, so shutdown closes it rather

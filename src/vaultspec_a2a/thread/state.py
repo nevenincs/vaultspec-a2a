@@ -59,10 +59,10 @@ def merge_token_usage(
     merged = {k: dict(v) for k, v in existing.items()}
     for agent_id, counters in new.items():
         if agent_id in merged:
-            for key in ("input", "output", "total"):
-                merged[agent_id][key] = merged[agent_id].get(key, 0) + counters.get(
-                    key, 0
-                )
+            # Every counter the delta carries - the cache and reasoning
+            # breakdown too - accumulates; one it does not carry is untouched.
+            for key, value in counters.items():
+                merged[agent_id][key] = merged[agent_id].get(key, 0) + value
         else:
             merged[agent_id] = dict(counters)
     return merged

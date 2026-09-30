@@ -639,6 +639,11 @@ class TestCodexUsageCapture:
         output_token_details = usage.get("output_token_details")
         assert output_token_details is not None
         assert output_token_details.get("reasoning") == 48
+        # ...and the turn's accounting keeps them rather than only in and out.
+        entry = _turn_token_usage(message)
+        assert entry is not None
+        assert (entry.cache_read_tokens, entry.cache_write_tokens) == (420, 15)
+        assert entry.reasoning_tokens == 48
 
 
 class TestUsageReachesAPersistedRow:
@@ -657,7 +662,16 @@ class TestUsageReachesAPersistedRow:
         await session.commit()
 
         message = await _run_codex_turn(
-            [_usage_frame(input_tokens=880, output_tokens=120), _completed_frame()]
+            [
+                _usage_frame(
+                    input_tokens=880,
+                    output_tokens=120,
+                    cached=700,
+                    cache_write=30,
+                    reasoning=64,
+                ),
+                _completed_frame(),
+            ]
         )
         usage = _turn_token_usage(message)
         assert usage is not None
@@ -670,11 +684,22 @@ class TestUsageReachesAPersistedRow:
             model="gpt-5.4",
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
         )
 
         totals = await sum_cost_by_thread(session, "t-e2e")
         assert totals["input_tokens"] == 880
         assert totals["output_tokens"] == 120
+        # The breakdown that explains a surprising bill reaches the row too.
+        row = (
+            await session.execute(
+                select(CostTrackingModel).where(CostTrackingModel.thread_id == "t-e2e")
+            )
+        ).scalar_one()
+        assert (row.cache_read_tokens, row.cache_write_tokens) == (700, 30)
+        assert row.reasoning_tokens == 64
         # No priced lane exists, so cost stays exactly unset rather than guessed.
         assert totals["estimated_cost"] == Decimal(0)
 
@@ -703,6 +728,9 @@ class TestUsageReachesAPersistedRow:
                 model="gpt-5.4",
                 input_tokens=100,
                 output_tokens=25,
+                cache_read_tokens=None,
+                cache_write_tokens=None,
+                reasoning_tokens=None,
             )
         totals = await sum_cost_by_agent(session, "coder-1")
         assert totals["input_tokens"] == 300
@@ -906,6 +934,9 @@ class TestDegradedLaneIsStoredAsUnknown:
             model=None,
             input_tokens=210,
             output_tokens=35,
+            cache_read_tokens=None,
+            cache_write_tokens=None,
+            reasoning_tokens=None,
         )
 
         row = (
@@ -919,6 +950,9 @@ class TestDegradedLaneIsStoredAsUnknown:
         assert row.model is None
         assert row.input_tokens == 210
         assert row.output_tokens == 35
+        # An unreported breakdown is unknown, not a measured zero.
+        assert row.cache_read_tokens is None
+        assert row.reasoning_tokens is None
 
         totals = await sum_cost_by_thread(session, "t-degraded")
         assert totals["input_tokens"] == 210

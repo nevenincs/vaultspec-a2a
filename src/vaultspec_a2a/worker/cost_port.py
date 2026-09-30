@@ -64,6 +64,9 @@ class SqlCostPort:
                     model=model,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    cache_read_tokens=kwargs["cache_read_tokens"],
+                    cache_write_tokens=kwargs["cache_write_tokens"],
+                    reasoning_tokens=kwargs["reasoning_tokens"],
                 ),
             )
             await session.commit()

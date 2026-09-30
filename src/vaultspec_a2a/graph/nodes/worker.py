@@ -540,12 +540,25 @@ def _turn_token_usage(response: BaseMessage) -> TokenUsageEntry | None:
         return None
     input_tokens = int(usage.get("input_tokens", 0))
     output_tokens = int(usage.get("output_tokens", 0))
+    input_details = usage.get("input_token_details") or {}
+    output_details = usage.get("output_token_details") or {}
     return TokenUsageEntry(
         agent_id="",
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total=int(usage.get("total_tokens", input_tokens + output_tokens)),
+        cache_read_tokens=_reported_count(input_details, "cache_read"),
+        cache_write_tokens=_reported_count(input_details, "cache_creation"),
+        reasoning_tokens=_reported_count(output_details, "reasoning"),
     )
+
+
+def _reported_count(details: object, key: str) -> int | None:
+    """A breakdown count the lane reported, or ``None`` when it said nothing."""
+    if not isinstance(details, dict):
+        return None
+    value = cast("dict[str, object]", details).get(key)
+    return int(value) if isinstance(value, int) else None
 
 
 async def _record_turn_usage(
@@ -583,6 +596,9 @@ async def _record_turn_usage(
             model=model_id,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
         )
     except Exception:
         _logger.warning(

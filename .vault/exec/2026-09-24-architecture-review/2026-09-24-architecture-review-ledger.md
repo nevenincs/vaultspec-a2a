@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:eb7324fab6d36af8c571af8657f030bceb27fe2cd44f0f4aa3616d9f87c75845'
+body_hash: 'sha256:67a7a3f1351307a2172436f7a9f97cc052aecc6ef6a86cd9dfca769481c4994e'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -331,6 +331,19 @@ related:
 - `S31` `A` `src/vaultspec_a2a/worker/tests/test_executor_log_context.py`
 - `S31` `verify:` `runner full unit gate (4815)` -> `pass`
 - `S31` `by:` `orchestrator`
+- `S32` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S32` `M` `src/vaultspec_a2a/thread/models.py`
+- `S32` `M` `src/vaultspec_a2a/thread/state.py`
+- `S32` `M` `src/vaultspec_a2a/graph/protocols.py`
+- `S32` `M` `src/vaultspec_a2a/worker/cost_port.py`
+- `S32` `M` `src/vaultspec_a2a/database/models.py`
+- `S32` `A` `src/vaultspec_a2a/database/migrations/versions/0022_cost_tracking_token_breakdown.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_cost_tracking.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_thread_write_authority_migration.py`
+- `S32` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
+- `S32` `M` `src/vaultspec_a2a/thread/tests/test_models.py`
+- `S32` `verify:` `runner full unit gate (4817)` -> `pass`
+- `S32` `by:` `orchestrator`
 
 ## Notes
 
@@ -348,4 +361,5 @@ related:
 - `S21` Logged and closed by the orchestrator at merge (b56bb9c) from the P04 worker's report; the merge carried the graph-test fallout of S23 and S27.
 - `S30` MessageSnapshot.timestamp became nullable in openapi.json (regenerated): a message recorded before stamping reports no time; a cross-repository contract change recorded in the audit.
 - `S31` The correlation scope covers the worker's dispatches; runtime_log_extra in providers/_acp_auth.py and TRACEPARENT for CLI children (the rest of correlation-stops-at-provider) were not changed: provider logs now inherit thread and dispatch through the context variable, and child-process trace propagation remains open in the audit.
+- `S32` The breakdown is nullable end to end: a lane that does not report it records NULL, not zero, and pre-existing rows stay NULL; ACP lanes still report no usage at all, which remains open in the audit's token-accounting-gaps.
 

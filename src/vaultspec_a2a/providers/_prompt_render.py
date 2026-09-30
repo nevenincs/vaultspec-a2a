@@ -79,13 +79,17 @@ def _rendered_content(message: BaseMessage) -> str:
     the fact that it was there is part of the history while its payload is not
     something to inline into a prompt.
     """
-    text = message.text.strip()
+    text = message.text
     described = [
         f"[{block.get('type', 'content')}]"
         for block in message.content_blocks
         if block.get("type") != "text"
     ]
-    return "\n".join([part for part in (text, *described) if part])
+    # Text is passed through as written, never re-wrapped or trimmed: a persona
+    # and a tool's output are content this layer carries rather than edits. Only
+    # the decision about whether a message SAYS anything looks past whitespace.
+    parts = [*([text] if text.strip() else []), *described]
+    return "\n".join(parts)
 
 
 def rendered_prompt_sections(messages: Sequence[BaseMessage]) -> list[str]:

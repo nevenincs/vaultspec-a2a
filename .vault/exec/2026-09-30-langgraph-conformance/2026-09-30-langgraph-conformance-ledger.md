@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:f5b6e24b23f604cda9c17b62fa264aeb098437da47a42a2c4f62f33328849652'
+body_hash: 'sha256:a9aced04a5e81f43845233a4313cc94696fa0a9cbb865eac72ead36810abfca1'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -249,6 +249,46 @@ related:
 - `S13` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
 - `S13` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/worker` -> `pass`
 - `S13` `by:` `orchestrator`
+- `S11` `M` `src/vaultspec_a2a/thread/action_receipts.py`
+- `S11` `M` `src/vaultspec_a2a/thread/state.py`
+- `S11` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S11` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S11` `A` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S11` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S11` `by:` `worker-a35ac993`
+- `S12` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S12` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S12` `A` `src/vaultspec_a2a/worker/tests/test_executor_resume_preflight.py`
+- `S12` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S12` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S12` `by:` `worker-a35ac993`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/clarification.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_clarification.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S13` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S13` `by:` `worker-a35ac993`
+- `S14` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S14` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S14` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker.py`
+- `S14` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S14` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S14` `M` `src/vaultspec_a2a/providers/tests/test_deterministic_scripts.py`
+- `S14` `M` `src/vaultspec_a2a/thread/state.py`
+- `S14` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
+- `S14` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S14` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_preflight.py`
+- `S14` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S14` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S14` `by:` `worker-a35ac993`
+- `S15` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S15` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S15` `M` `src/vaultspec_a2a/control/tests/test_permission_rejection_journal.py`
+- `S15` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S15` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S15` `A` `src/vaultspec_a2a/worker/tests/test_executor_parallel_interrupts.py`
+- `S15` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S15` `by:` `worker-a35ac993`
 
 ## Notes
 
@@ -266,4 +306,6 @@ related:
 - `S10` The config-contract tests pin existing behaviour; proven non-tautological by neutering the stamp.
 - `S06` Restores the one-time plan approval that ADR-020 still specifies; plan and document gate payloads disclose a `request_id` and refuse a verdict naming another request. The orchestrator updated four gateway plan-approval payload tests at merge.
 - `S13` Integration correction: both approval gates ask again on an unbound verdict; the projection counts parked tasks as next nodes.
-
+- `S11` The channels a resume rebinds now reduce; dropping the digests from the resume was rejected because a run parked before checkpoint evidence acquires them from it.
+- `S12` A refused resume leaves the run untouched and projects its execution state. At merge the orchestrator moved the preflight test's resume to a restarted executor, since a draining executor now refuses dispatch.
+- `S14` The bare-option resolver lost its last caller and was removed with the tests that only exercised it.

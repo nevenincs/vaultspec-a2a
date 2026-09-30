@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:8ce42ef3f1e56afdc69a019afcbc30687c3aa0d9e2bd5d3b1ca17fdbd9550226'
+body_hash: 'sha256:6c995bff0edd82c31f70cac1478448b4859b2534d9e6744f595378dc82f65c98'
 ---
 
 # `langgraph-conformance` plan
@@ -59,11 +59,11 @@ The compiled graphs route, gate and synthesise the way their decisions describe,
 
 Every pause resumes exactly once with the answer it asked for, however many approvals a turn needs and however often a resume is delivered.
 
-- [ ] `P02.S11` - Stop resume updates accumulating on the parked checkpoint so a second approval or a redelivered resume applies; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/state.py`.
-- [ ] `P02.S12` - Refuse a resume unless the checkpoint is parked on the interrupt it answers; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/worker/state_projection.py`.
-- [ ] `P02.S13` - Re-park instead of raising when a gate receives a stale or invalid answer; `src/vaultspec_a2a/graph/nodes/clarification.py, src/vaultspec_a2a/thread/clarification.py, src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P02.S14` - Key permission answers by request id with one interrupt per node execution, and refuse answers that name no request; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/thread/state.py`.
-- [ ] `P02.S15` - Resume by interrupt id when several interrupts are pending and let the permission service hold one request per interrupt; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/control/permission_service.py`.
+- [x] `P02.S11` - Stop resume updates accumulating on the parked checkpoint so a second approval or a redelivered resume applies; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/state.py`.
+- [x] `P02.S12` - Refuse a resume unless the checkpoint is parked on the interrupt it answers; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/worker/state_projection.py`.
+- [x] `P02.S13` - Re-park instead of raising when a gate receives a stale or invalid answer; `src/vaultspec_a2a/graph/nodes/clarification.py, src/vaultspec_a2a/thread/clarification.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P02.S14` - Key permission answers by request id with one interrupt per node execution, and refuse answers that name no request; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/thread/state.py`.
+- [x] `P02.S15` - Resume by interrupt id when several interrupts are pending and let the permission service hold one request per interrupt; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/control/permission_service.py`.
 
 ### Phase `P03` - Execution and streaming
 

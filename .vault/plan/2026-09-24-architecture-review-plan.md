@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:1b8ec14465b80fd4cdb0c450cdc90c485daa981018a8d0dff9c0227af4425d48'
+body_hash: 'sha256:fb0c949d2c73b75cb8fccda0c0f29b6d54851305f2b7babc480d6c28106d14d2'
 ---
 
 # `architecture-review` plan
@@ -94,7 +94,7 @@ Provider launchers, the Claude and Codex permission posture, native tool scope, 
 Transcripts carry real event times, logs are loss-free and correlated, and token accounting keeps what providers report.
 
 - [x] `P05.S30` - Stamp message creation times when messages are produced and project an unknown time instead of the read time; `src/vaultspec_a2a/thread/snapshots.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/nodes/clarification.py, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/api/schemas/snapshots.py, openapi.json`.
-- [ ] `P05.S31` - Make the JSON log formatter loss-free, UTC, schema-versioned, and redacting, with a context-variable correlation scope; `src/vaultspec_a2a/utils/logging.py, src/vaultspec_a2a/worker/executor.py`.
+- [x] `P05.S31` - Make the JSON log formatter loss-free, UTC, schema-versioned, and redacting, with a context-variable correlation scope; `src/vaultspec_a2a/utils/logging.py, src/vaultspec_a2a/worker/executor.py`.
 - [ ] `P05.S32` - Keep cache-read, cache-write, and reasoning token counts through turn usage into cost tracking; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/migrations/versions/`.
 
 ## Parallelization

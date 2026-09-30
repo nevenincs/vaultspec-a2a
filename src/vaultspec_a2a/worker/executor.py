@@ -22,6 +22,7 @@ from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
+from ..utils.logging import log_context
 from ._authoring_close import close_authoring_session_best_effort
 from ._dispatch_contract import (
     _INGEST_GUARDS,
@@ -407,43 +408,50 @@ class Executor(SettlementMixin):
         """Route an endpoint-admitted dispatch and always release its reservation."""
         reservation_context = self._dispatch_reservation.set(reservation)
         try:
-            async with ws_span(
-                f"executor.{req.action}",
+            # Every record of the run - provider, streaming and graph logs as
+            # well as the executor's own - carries the run it belongs to.
+            with log_context(
                 thread_id=req.thread_id,
-                agent_id=req.agent_id or "supervisor",
-            ) as span:
-                # Matched as `object`: the wildcard branch below is a real
-                # defense against a caller-constructed request carrying an
-                # action outside the declared Literal, not dead code.
-                match cast("object", req.action):
-                    case "ingest":
-                        await self._handle_ingest(req)
-                    case "resume":
-                        await self._handle_resume(req)
-                    case "cancel":
-                        span.add_event("thread_cancelled")
-                        # `dispatch_id` is a required str field, but this guard
-                        # defends against a caller-constructed request that
-                        # bypassed the model's own validation.
-                        if cast("object", req.dispatch_id) is None:
-                            raise ValueError(
-                                "cancel dispatch requires a stable identity"
+                dispatch_id=req.dispatch_id,
+                action=str(req.action),
+            ):
+                async with ws_span(
+                    f"executor.{req.action}",
+                    thread_id=req.thread_id,
+                    agent_id=req.agent_id or "supervisor",
+                ) as span:
+                    # Matched as `object`: the wildcard branch below is a real
+                    # defense against a caller-constructed request carrying an
+                    # action outside the declared Literal, not dead code.
+                    match cast("object", req.action):
+                        case "ingest":
+                            await self._handle_ingest(req)
+                        case "resume":
+                            await self._handle_resume(req)
+                        case "cancel":
+                            span.add_event("thread_cancelled")
+                            # `dispatch_id` is a required str field, but this guard
+                            # defends against a caller-constructed request that
+                            # bypassed the model's own validation.
+                            if cast("object", req.dispatch_id) is None:
+                                raise ValueError(
+                                    "cancel dispatch requires a stable identity"
+                                )
+                            async with self._terminal_arbitration(req.thread_id):
+                                await self._handle_cancel(req)
+                        case _:
+                            logger.warning(
+                                "Unknown dispatch action: %s",
+                                req.action,
+                                extra=self._dispatch_log_extra(
+                                    req,
+                                    action="unknown_dispatch_action",
+                                ),
                             )
-                        async with self._terminal_arbitration(req.thread_id):
-                            await self._handle_cancel(req)
-                    case _:
-                        logger.warning(
-                            "Unknown dispatch action: %s",
-                            req.action,
-                            extra=self._dispatch_log_extra(
-                                req,
-                                action="unknown_dispatch_action",
-                            ),
-                        )
-                        span.set_attribute("error", True)
-                        span.set_attribute(
-                            "error.message", f"Unknown action: {req.action}"
-                        )
+                            span.set_attribute("error", True)
+                            span.set_attribute(
+                                "error.message", f"Unknown action: {req.action}"
+                            )
         except Exception as exc:
             logger.exception(
                 "Unhandled exception in handle_dispatch (action=%s, thread=%s); "

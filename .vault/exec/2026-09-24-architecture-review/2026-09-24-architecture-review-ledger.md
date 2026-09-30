@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:e06281f7a3c38016ec5a37bbb7a025d5bcde194bddbbf144c56e73e81695f52d'
+body_hash: 'sha256:eb7324fab6d36af8c571af8657f030bceb27fe2cd44f0f4aa3616d9f87c75845'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -325,6 +325,12 @@ related:
 - `S30` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
 - `S30` `verify:` `runner api control thread graph worker acceptance desktop_tests (2049)` -> `pass`
 - `S30` `by:` `orchestrator`
+- `S31` `M` `src/vaultspec_a2a/utils/logging.py`
+- `S31` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S31` `A` `src/vaultspec_a2a/utils/tests/test_logging_contract.py`
+- `S31` `A` `src/vaultspec_a2a/worker/tests/test_executor_log_context.py`
+- `S31` `verify:` `runner full unit gate (4815)` -> `pass`
+- `S31` `by:` `orchestrator`
 
 ## Notes
 
@@ -341,4 +347,5 @@ related:
 - `S24` The worker-side hand-off (stop offering an always answer the CLI would persist) was applied by the orchestrator in 92f4a75.
 - `S21` Logged and closed by the orchestrator at merge (b56bb9c) from the P04 worker's report; the merge carried the graph-test fallout of S23 and S27.
 - `S30` MessageSnapshot.timestamp became nullable in openapi.json (regenerated): a message recorded before stamping reports no time; a cross-repository contract change recorded in the audit.
+- `S31` The correlation scope covers the worker's dispatches; runtime_log_extra in providers/_acp_auth.py and TRACEPARENT for CLI children (the rest of correlation-stops-at-provider) were not changed: provider logs now inherit thread and dispatch through the context variable, and child-process trace propagation remains open in the audit.
 

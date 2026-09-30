@@ -192,6 +192,62 @@ async def test_an_unparseable_reply_is_re_asked_before_it_is_followed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_reply_naming_two_routes_is_refused_not_resolved() -> None:
+    """A sentence naming two workers is not a routing decision.
+
+    The rule this replaces took the longest matching option, so "Do not send
+    to the plan author; the coder is next" routed to the plan author - the
+    one the sentence was ruling out. The supervisor is asked again instead,
+    and told what was ambiguous.
+    """
+    graph = _star_graph([f"Do not send to {_PLAN_AUTHOR}; {_CODER} is next", "FINISH"])
+    prompts = _SupervisorPrompts()
+
+    visited = await _visits(graph, "ambiguous", _run_input("ambiguous", {}), prompts)
+
+    assert visited[:2] == ["supervisor", "supervisor"]
+    assert _PLAN_AUTHOR not in visited
+    assert _CODER not in visited
+    assert "named more than one route" in prompts.prompts[1]
+    assert _PLAN_AUTHOR in prompts.prompts[1]
+    assert _CODER in prompts.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_a_reply_naming_one_route_inside_a_sentence_is_followed() -> None:
+    """Refusing ambiguity must not refuse a plain one-route sentence."""
+    graph = _star_graph([f"The {_PLAN_AUTHOR} should go next.", "FINISH"])
+    prompts = _SupervisorPrompts()
+
+    visited = await _visits(
+        graph, "one-route", _run_input("one-route", {"adr": ["adr.md"]}), prompts
+    )
+
+    assert visited[:3] == ["supervisor", f"mount_{_PLAN_AUTHOR}", _PLAN_AUTHOR]
+
+
+@pytest.mark.asyncio
+async def test_a_re_ask_shows_the_refusal_when_no_feature_is_bound() -> None:
+    """The reason reaches the model whether or not a feature is active.
+
+    It used to travel only inside the anchoring block, which is empty without
+    an active feature - so an unbound thread was re-asked with the prompt it
+    had just failed, verbatim, until the budget ran out.
+    """
+    graph = _star_graph(["no idea, honestly", "FINISH"])
+    prompts = _SupervisorPrompts()
+    graph_input = _run_input("unbound-reask", {})
+    graph_input["active_feature"] = None
+
+    await _visits(graph, "unbound-reask", graph_input, prompts)
+
+    assert len(prompts.prompts) >= 2
+    assert prompts.prompts[0] != prompts.prompts[1]
+    assert "could not parse route" in prompts.prompts[1]
+    assert "no idea, honestly" in prompts.prompts[1]
+
+
+@pytest.mark.asyncio
 async def test_a_supervisor_that_never_routes_admissibly_fails_the_run() -> None:
     graph = _star_graph(["still thinking about it"])
     prompts = _SupervisorPrompts()

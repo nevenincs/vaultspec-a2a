@@ -179,17 +179,58 @@ def _phase_for_route(
     return fallback_phase
 
 
-def _parse_route(text: str, options: list[str]) -> tuple[str, bool]:
+# Bounds how much of an unparseable reply is carried back into the prompt.
+_REFUSED_TEXT_CHARS = 200
+
+
+def _named_options(text: str, options: list[str]) -> list[str]:
+    """Every route the reply names, minus the ones only named inside another.
+
+    A worker id can contain another ("coder" inside "mock-coder"), so a reply
+    naming the longer one matches both. Dropping a match that is a substring
+    of another match is what separates that from a reply that really does name
+    two different routes.
+    """
+    lowered = text.lower()
+    matched = [option for option in options if option.lower() in lowered]
+    return [
+        option
+        for option in matched
+        if not any(
+            other is not option and option.lower() in other.lower() for other in matched
+        )
+    ]
+
+
+def _parse_route(text: str, options: list[str]) -> tuple[str | None, str | None]:
     """Parse the model response text into a route choice.
 
-    Returns (route, unparseable) where unparseable is True if no option matched.
+    Returns ``(route, refusal)``: a route and ``None`` when the reply names
+    exactly one, or ``None`` and the reason when it names none or several.
+
+    A reply naming several routes is REFUSED, not resolved. The rule it
+    replaces took the longest match, which read "The reviewer approved;
+    FINISH" as a route to the reviewer and "Do not send to planner; coder
+    next" as a route to the planner - in both cases the route the sentence
+    was ruling out. A supervisor that cannot say which worker it means is
+    asked again.
     """
     if text in options:
-        return text, False
-    for option in sorted(options, key=len, reverse=True):
-        if option.lower() in text.lower():
-            return option, False
-    return "FINISH", True
+        return text, None
+    named = _named_options(text, options)
+    if len(named) == 1:
+        return named[0], None
+    if not named:
+        return None, (
+            f"supervisor could not parse route from: "
+            f"{text[:_REFUSED_TEXT_CHARS]!r}; respond with exactly "
+            f"one of: {', '.join(options)}."
+        )
+    return None, (
+        f"supervisor named more than one route ({', '.join(sorted(named))}) in: "
+        f"{text[:_REFUSED_TEXT_CHARS]!r}; respond with exactly one of: "
+        f"{', '.join(options)} and nothing else."
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,10 +473,6 @@ def _plan_approval_decision(
     )
 
 
-# Bounds how much of an unparseable reply is carried back into the prompt.
-_REFUSED_TEXT_CHARS = 200
-
-
 def _refused_update(state: TeamState, decision: _SupervisorDecision) -> dict[str, Any]:
     """Send a refused decision back to the supervisor, or fail once over budget.
 
@@ -518,22 +555,20 @@ def _evaluate_supervisor_response(
     inferred_phase = infer_phase_from_vault_index(vault_index)
     options = [*workers, "FINISH"]
 
-    next_route, unparseable = _parse_route(response_text, options)
-    if unparseable:
+    parsed, refusal = _parse_route(response_text, options)
+    if refusal is not None:
         _logger.warning(
-            "supervisor could not parse route from response %r — re-asking",
+            "supervisor refused its own route from response %r — re-asking: %s",
             response_text[:120],
+            refusal,
         )
         return _SupervisorDecision(
             next_route=None,
             inferred_phase=inferred_phase,
-            routing_error=(
-                f"supervisor could not parse route from: "
-                f"{response_text[:_REFUSED_TEXT_CHARS]!r}; respond with exactly "
-                f"one of: {', '.join(options)}."
-            ),
+            routing_error=refusal,
             refused=True,
         )
+    next_route = cast("str", parsed)
 
     finish_block: _SupervisorDecision | None = None
     if next_route == "FINISH":
@@ -610,6 +645,14 @@ def _build_supervisor_messages(
             )
     if anchoring:
         messages.append(SystemMessage(content=anchoring))
+    routing_error = state.get("routing_error")
+    if routing_error and not anchoring:
+        # Anchoring is the only path a refusal reason normally takes into the
+        # prompt, and it returns nothing at all when no feature is bound - so a
+        # thread with no active feature was re-asked with a prompt identical to
+        # the one it had just failed, until the budget ran out. The re-ask has
+        # to say what was wrong with the last answer.
+        messages.append(SystemMessage(content=f"## Routing Note\n\n{routing_error}"))
     messages.extend(working_state.get("messages", []))
     return messages
 

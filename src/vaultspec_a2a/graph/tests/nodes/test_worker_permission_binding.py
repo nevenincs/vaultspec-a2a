@@ -143,11 +143,23 @@ async def test_a_remembered_approval_is_never_offered_or_accepted() -> None:
     parked = _parked(await graph.ainvoke({"granted": []}, _CONFIG))
     assert [o["optionId"] for o in parked["options"]] == ["allow_once", "reject_once"]
 
-    with pytest.raises(RuntimeError, match="unknown option_id 'allow_always'"):
+    # The withheld choice is refused, and refusing it parks the run again on
+    # the same call rather than ending the turn.
+    reparked = _parked(
         await graph.ainvoke(
             Command(
                 resume={"option_id": "allow_always", "request_id": parked["request_id"]}
             ),
             _CONFIG,
         )
+    )
     assert granted == []
+    assert reparked["request_id"] == parked["request_id"]
+
+    # A refused answer must not cost the turn its ability to be approved.
+    final = await graph.ainvoke(
+        Command(resume={"option_id": "allow_once", "request_id": parked["request_id"]}),
+        _CONFIG,
+    )
+    assert "__interrupt__" not in final
+    assert granted == ["allow_once"]

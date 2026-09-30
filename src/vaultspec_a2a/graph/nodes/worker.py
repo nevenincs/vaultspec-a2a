@@ -744,6 +744,13 @@ async def _interrupt_permission_callback(
     passed over, and the run parks again on the call actually being made, so
     an approval never lands on a call nobody saw.
 
+    An answer naming the right request but no option this call offers is
+    turned away the same way, rather than raising. ``interrupt()`` records its
+    resume value against the running task before the callback can judge it, so
+    raising would leave that value in place and make every later answer replay
+    the refused one - one malformed answer would end the turn's ability to be
+    approved at all.
+
     Args:
         tool_name:  Human-readable name of the tool requesting permission.
         tool_input: Input parameters the tool was called with.
@@ -762,21 +769,23 @@ async def _interrupt_permission_callback(
         "tool_input": tool_input,
         "options": offered,
     }
-    resume_value = interrupt(payload)
-    while not _answers_request(resume_value, request_id):
-        _logger.warning(
-            "Permission answer names a different request than the %r call now "
-            "being made; asking again",
-            tool_name,
-        )
+    while True:
         resume_value = interrupt(payload)
-    try:
-        return _resolve_resume_option_id(resume_value, offered)
-    except RuntimeError as exc:
-        raise RuntimeError(
-            "LangGraph interrupt returned an invalid resume payload for "
-            f"{tool_name!r}: {exc}"
-        ) from exc
+        if not _answers_request(resume_value, request_id):
+            _logger.warning(
+                "Permission answer names a different request than the %r call "
+                "now being made; asking again",
+                tool_name,
+            )
+            continue
+        try:
+            return _resolve_resume_option_id(resume_value, offered)
+        except RuntimeError as exc:
+            _logger.warning(
+                "Permission answer for the %r call was refused (%s); asking again",
+                tool_name,
+                exc,
+            )
 
 
 def _attach_authoring_tools(

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.serde.types import INTERRUPT
 
 from ..graph.enums import AgentLifecycleState, PermissionType, Provider
 from .enums import (
@@ -685,7 +686,7 @@ def fold_pending_writes(
             and channel not in projection.pending_write_channels
         ):
             projection.pending_write_channels.append(channel)
-        if channel != "__interrupt__":
+        if channel != INTERRUPT:
             continue
         raw_interrupts: list[object] = (
             list(cast("list[object] | tuple[object, ...]", value))

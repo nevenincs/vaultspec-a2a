@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
+from langgraph.checkpoint.serde.types import ERROR, INTERRUPT
 from pydantic import ValidationError
 
 from .action_receipts import GraphActionReceipt, GraphCompletionReceipt
@@ -114,11 +115,11 @@ def _pending_evidence(
     ):
         return _incompatible(checkpoint_id)
     channels = {write[1] for write in writes or ()}
-    if "__error__" in channels:
+    if ERROR in channels:
         return CheckpointEvidence(
             CheckpointEvidenceKind.FAILED, checkpoint_id, incorporated
         )
-    if "__interrupt__" in channels:
+    if INTERRUPT in channels:
         return CheckpointEvidence(
             CheckpointEvidenceKind.INTERRUPTED, checkpoint_id, incorporated
         )

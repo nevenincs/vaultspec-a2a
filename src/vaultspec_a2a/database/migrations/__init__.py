@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Final, cast
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.constants import START
 
 __all__ = [
     "CheckpointStateMigrationError",
@@ -67,7 +68,7 @@ def _needs_sdd_backfill(checkpoint: dict[str, object]) -> bool:
     # LangGraph persists one input-staging checkpoint whose sole channel is
     # ``__start__`` before TeamState exists. It is not a legacy TeamState row and
     # cannot carry top-level SDD channels; later execution checkpoints do.
-    if set(channel_values) == {"__start__"}:
+    if set(channel_values) == {START}:
         return False
     return any(key not in channel_values for key in _SDD_DEFAULTS)
 

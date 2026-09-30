@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 from ..control.config import settings
 from ..domain_config import domain_config
-from .checkpoint_retention import prune_settled_checkpoints
+from .checkpoint_retention import prune_settled_checkpoints, scalar
 from .checkpoint_schema import checkpoint_pragmas
 
 logger = logging.getLogger(__name__)
@@ -401,13 +401,6 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         return clone
 
 
-def _scalar(row: Any) -> Any:
-    """Return the single column of *row*, whatever row factory produced it."""
-    if isinstance(row, dict):
-        return next(iter(cast("dict[str, Any]", row).values()))
-    return row[0]
-
-
 async def _take_setup_lock(connection: Any) -> None:
     """Hold the checkpoint setup lock on *connection*, waiting between tries."""
     deadline = time.monotonic() + _CHECKPOINT_SETUP_LOCK_TIMEOUT_SECONDS
@@ -415,7 +408,7 @@ async def _take_setup_lock(connection: Any) -> None:
         cursor = await connection.execute(
             "SELECT pg_try_advisory_lock(%s)", (_CHECKPOINT_SETUP_LOCK_KEY,)
         )
-        if _scalar(await cursor.fetchone()):
+        if scalar(await cursor.fetchone()):
             return
         if time.monotonic() >= deadline:
             msg = (

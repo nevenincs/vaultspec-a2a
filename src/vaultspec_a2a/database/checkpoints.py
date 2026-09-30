@@ -21,12 +21,66 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from ..control.config import settings
+from ..domain_config import domain_config
 from .checkpoint_retention import prune_settled_checkpoints
 from .checkpoint_schema import checkpoint_pragmas
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["Checkpointer", "open_checkpointer", "prune_settled_thread"]
+
+# Headroom over the worker's concurrent-run bound. Every run in flight can be
+# writing a checkpoint at a superstep boundary, so the bound is the floor; the
+# spare pair serves the reads that are not a run's own - status enrichment,
+# recovery reconciliation, retention - without queueing them behind the writers.
+_CHECKPOINT_POOL_HEADROOM = 2
+
+# One connection is opened up front and the rest on demand. A checkpoint pool
+# sized for peak concurrency would otherwise hold that many idle server
+# connections in a desktop profile that runs one thread at a time.
+_CHECKPOINT_POOL_MIN_SIZE = 1
+
+
+def _postgres_checkpoint_pool_size() -> int:
+    """Return the connection ceiling for the checkpoint pool."""
+    return max(
+        _CHECKPOINT_POOL_MIN_SIZE,
+        domain_config.max_concurrent_threads + _CHECKPOINT_POOL_HEADROOM,
+    )
+
+
+def _postgres_checkpoint_pool(conninfo: str) -> Any:
+    """Build the unopened checkpoint connection pool for the Postgres backend.
+
+    The saver used to run on ONE connection opened from a connection string,
+    which serialized every run's checkpoint writes behind each other and left
+    checkpointing dead until a restart if that connection dropped. A pool gives
+    each operation its own connection, replaces a broken one, and bounds how many
+    the process can hold.
+
+    The connection keywords are not defaults worth inheriting - they are what the
+    saver requires. It issues its own transactions, so a connection must be in
+    autocommit; it builds statements whose text varies, so server-side prepared
+    statements are disabled rather than accumulating one plan per variant; and it
+    reads rows by column name. ``check`` is what makes a pooled connection
+    trustworthy after an idle period: a connection the server has since dropped is
+    discarded and replaced at checkout instead of failing the caller's write.
+    """
+    from psycopg.rows import dict_row
+    from psycopg_pool import AsyncConnectionPool
+
+    return AsyncConnectionPool(
+        conninfo=conninfo,
+        min_size=_CHECKPOINT_POOL_MIN_SIZE,
+        max_size=_postgres_checkpoint_pool_size(),
+        kwargs={
+            "autocommit": True,
+            "prepare_threshold": 0,
+            "row_factory": dict_row,
+        },
+        check=AsyncConnectionPool.check_connection,
+        open=False,
+    )
 
 
 # Type alias: every LangGraph checkpointer (SQLite, Postgres, in-memory) is a
@@ -51,7 +105,7 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         self._loop_ready = threading.Event()
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._ctx: Any = None
+        self._pool: Any = None
         self._saver: Any = None
 
     async def start(self) -> None:
@@ -78,10 +132,15 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
             loop.close()
 
     async def _open(self) -> None:
+        # The pool is created AND opened on the selector loop, not in ``start``:
+        # its background maintenance tasks bind to the running loop, so a pool
+        # opened on the caller's loop would put psycopg's async layer back on the
+        # very event loop this class exists to keep it off.
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-        self._ctx = AsyncPostgresSaver.from_conn_string(self._conn_string)
-        self._saver = await self._ctx.__aenter__()
+        self._pool = _postgres_checkpoint_pool(self._conn_string)
+        await self._pool.open(wait=True)
+        self._saver = AsyncPostgresSaver(conn=self._pool)
         self.serde = self._saver.serde
 
     async def close(self) -> None:
@@ -104,9 +163,9 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
             self._loop = None
 
     async def _close(self) -> None:
-        if self._ctx is not None:
-            await self._ctx.__aexit__(None, None, None)
-        self._ctx = None
+        if self._pool is not None:
+            await self._pool.close()
+        self._pool = None
         self._saver = None
 
     def _submit(
@@ -337,8 +396,14 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
             await checkpointer.close()
         return
 
-    async with AsyncPostgresSaver.from_conn_string(
-        settings.checkpoint_connection_string
-    ) as checkpointer:
+    pool = _postgres_checkpoint_pool(settings.checkpoint_connection_string)
+    await pool.open(wait=True)
+    try:
+        checkpointer = AsyncPostgresSaver(conn=pool)
         await checkpointer.setup()
         yield checkpointer
+    finally:
+        # The pool owns real server connections, so shutdown closes it rather
+        # than leaving them to the process exit: an abandoned pool also leaves its
+        # maintenance tasks attached to a loop that is about to go away.
+        await pool.close()

@@ -498,20 +498,23 @@ class Executor(SettlementMixin):
                 asyncio.get_running_loop().time()
                 + self._checkpoint_read_timeout_seconds
             )
-            # Pre-flight: detect threads that already reached a terminal or
-            # interrupted state before a crash.  Also grounds is_first_ingest
-            # in checkpoint truth rather than the stale in-memory cache.
-            (
-                pre_flight_outcome,
-                is_first_ingest,
-            ) = await self._state_projector.pre_flight_checkpoint(
+            # Pre-flight: an ingest is delivered again after a worker restart,
+            # so the checkpoint may already hold this action - finished, parked,
+            # or part-way. It also grounds is_first_ingest in checkpoint truth
+            # rather than the stale in-memory cache.
+            preflight = await self._state_projector.pre_flight_checkpoint(
                 req.thread_id,
-                thread_known=self._graph_lifecycle.has_thread(req.thread_id),
+                receipt,
                 timeout_seconds=max(
                     0.0,
                     checkpoint_deadline - asyncio.get_running_loop().time(),
                 ),
             )
+            pre_flight_outcome = preflight.outcome
+            if preflight.refusal is not None:
+                span.set_attribute("pre_flight", "refused")
+                await self._reject_with_condition(req, preflight.refusal)
+                return
             if pre_flight_outcome == ThreadStatus.COMPLETED:
                 await self._settle_completed_preflight(req, span)
                 return
@@ -547,7 +550,10 @@ class Executor(SettlementMixin):
                 span.set_attribute("pre_flight", "interrupted")
                 return
 
-            span.set_attribute("is_first_ingest", is_first_ingest)
+            span.set_attribute("is_first_ingest", preflight.is_first_ingest)
+            span.set_attribute(
+                "resume_from_checkpoint", preflight.resume_from_checkpoint
+            )
 
             try:
                 graph = await self._graph_lifecycle.get_or_compile_graph(
@@ -566,14 +572,18 @@ class Executor(SettlementMixin):
             # Hold the run's per-role tokens for this active window only.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
-            graph_input = GraphLifecycleManager.build_graph_input(
-                req, is_first_ingest=is_first_ingest
-            )
-            graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
-            graph_input["graph_action_receipts"] = {
-                req.dispatch_id: receipt.model_dump(mode="json")
-            }
-            graph_input["active_graph_action_receipt"] = receipt.model_dump(mode="json")
+            graph_input: dict[str, Any] | None = None
+            if not preflight.resume_from_checkpoint:
+                graph_input = GraphLifecycleManager.build_graph_input(
+                    req, is_first_ingest=preflight.is_first_ingest
+                )
+                graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
+                graph_input["graph_action_receipts"] = {
+                    req.dispatch_id: receipt.model_dump(mode="json")
+                }
+                graph_input["active_graph_action_receipt"] = receipt.model_dump(
+                    mode="json"
+                )
 
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 

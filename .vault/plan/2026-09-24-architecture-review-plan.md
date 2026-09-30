@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:de7670fd9b954540d272d4223806fe28395629c8533a841c4c0b4eb78c183836'
+body_hash: 'sha256:ea133120603545a46bd2955a63c3076e572e9f90b78b694640fb1674e25034e6'
 ---
 
 # `architecture-review` plan
@@ -60,7 +60,7 @@ Graph routing, human-in-the-loop resume, crash recovery, and per-run isolation b
 - [x] `P02.S09` - Route blocked HARD phase gates and unparseable supervisor output back to the supervisor under a bounded re-ask counter; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P02.S10` - Honour each preset recursion limit on served runs and bound document review loops per phase, with a working pipeline_loop early exit; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/executable_graph.py, src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/_compiler_topologies.py, src/vaultspec_a2a/graph/nodes/phase_gate.py`.
 - [x] `P02.S11` - Bind a tool-permission approval to a fingerprint of the exact tool call and re-park when a replayed turn asks for a different call; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/control/permission_dispatch.py, src/vaultspec_a2a/control/permission_service.py`.
-- [ ] `P02.S12` - Resume an interrupted run from its checkpoint through receipt evidence instead of replaying its input; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/action_receipts.py`.
+- [x] `P02.S12` - Resume an interrupted run from its checkpoint through receipt evidence instead of replaying its input; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/worker/executor.py`.
 - [ ] `P02.S13` - Give each invocation its own model instances and move rule loading and engine discovery off the worker event loop; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/graph/nodes/, src/vaultspec_a2a/worker/_authoring_close.py`.
 
 ### Phase `P03` - run, session, and edge robustness

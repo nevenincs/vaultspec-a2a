@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, cast
 
@@ -20,6 +21,10 @@ from ..ipc.schemas import (
 )
 from ..providers import ProviderCondition
 from ..thread.cancellation_evidence import CancellationEvidence
+from ..thread.checkpoint_evidence import (
+    CheckpointEvidenceKind,
+    read_checkpoint_evidence,
+)
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..utils.coercion import coerce_object_mapping
@@ -29,11 +34,34 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..streaming.types import StreamableGraph
+    from ..thread.action_receipts import GraphActionReceipt
     from .ipc import WorkerBridge
 
-__all__ = ["StateProjector"]
+__all__ = ["PreflightDecision", "StateProjector"]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PreflightDecision:
+    """What the latest checkpoint says an arriving ingest dispatch should do.
+
+    Attributes:
+        outcome: ``"completed"``, ``"failed"`` or ``"interrupted"`` when this
+            action already reached that state and must not run again; ``None``
+            when it should run.
+        is_first_ingest: No checkpoint exists for the thread at all.
+        resume_from_checkpoint: This action's input is already in the
+            checkpoint and the run stopped part-way, so it continues from there
+            with no input rather than receiving its input a second time.
+        refusal: Why the dispatch must not run, when the checkpoint cannot say
+            what running it would do.
+    """
+
+    outcome: str | None = None
+    is_first_ingest: bool = False
+    resume_from_checkpoint: bool = False
+    refusal: str | None = None
 
 
 class _LogExtraFn(Protocol):
@@ -273,92 +301,78 @@ class StateProjector:
     async def pre_flight_checkpoint(
         self,
         thread_id: str,
+        receipt: GraphActionReceipt,
         *,
-        thread_known: bool,
         timeout_seconds: float = 5.0,
-    ) -> tuple[str | None, bool]:
-        """Inspect the latest checkpoint before running an ingest.
+    ) -> PreflightDecision:
+        """Decide from the latest checkpoint what an arriving ingest should do.
 
-        Resolves the reconciliation window gap: after a worker restart the
-        gateway moves non-terminal threads to ``RECONCILING`` and re-dispatches
-        them.  If the thread actually completed or errored *before* the crash
-        (checkpoint was written but the DB update was lost), LangGraph would
-        silently start another generation.  Inspecting the checkpoint first
-        lets us detect and short-circuit these cases.
+        An ingest is delivered again after a worker restart - a crash, or a
+        shutdown that drained the run at a superstep boundary - so the
+        checkpoint may already hold this very action. The decision is read
+        from the action receipts the checkpoint carries rather than from its
+        pending writes alone: an empty set of pending writes means only that
+        no superstep was mid-flight, which is as true of a drained run half
+        way through as of a finished one, and of an earlier turn's end.
 
-        Also corrects ``is_first_ingest``: after a restart the in-memory cache
-        is empty so every dispatch looks like a first ingest, which would pass
-        initial-state fields (``active_agent``, ``artifacts``, ``current_plan``)
-        and overwrite accumulated checkpoint values.  Using checkpoint truth
-        prevents that overwrite.
-
-        Parameters
-        ----------
-        thread_id:
-            The thread to inspect.
-        thread_known:
-            ``True`` when the thread is already tracked in the graph cache.
-            Used as fallback when checkpoint inspection fails.
-
-        Returns
-        -------
-        ``(outcome, is_first_ingest)`` where *outcome* is one of:
-
-        * ``None``           -- proceed normally with ingest
-        * ``"completed"``    -- graph ran to END before crash; emit and skip
-        * ``"failed"``       -- unhandled error before crash; emit and skip
-        * ``"interrupted"``  -- graph paused at ``interrupt()``; skip and
-                                await a resume dispatch
-
-        *is_first_ingest* is ``True`` only when no prior checkpoint row
-        exists (``aget_tuple`` returns ``None``).
+        * No checkpoint: a new thread; run with the full first-turn input.
+        * An earlier action's checkpoint: a new turn; run with this input.
+        * This action's checkpoint, part-way: continue from it with no input,
+          so the message is not delivered twice and finished nodes do not
+          re-run.
+        * This action completed, failed or parked: report that, do not re-run.
+        * Unreadable or foreign to this action: refuse, because running it
+          blind could deliver its input a second time.
         """
-        # Sentinel channel constants from langgraph.checkpoint.serde.types.
-        interrupt_ch = "__interrupt__"
-        error_ch = "__error__"
-
-        try:
-            checkpoint_tuple = await asyncio.wait_for(
-                self._checkpointer.aget_tuple(
-                    {"configurable": {"thread_id": thread_id}}
-                ),
-                timeout=timeout_seconds,
-            )
-        except Exception:
-            logger.warning(
-                "Could not inspect checkpoint for thread %s before ingest"
-                " — falling back to in-memory heuristic",
+        evidence = await read_checkpoint_evidence(
+            self._checkpointer, receipt, timeout_seconds=timeout_seconds
+        )
+        kind = evidence.kind
+        if kind is CheckpointEvidenceKind.ABSENT:
+            return PreflightDecision(is_first_ingest=True)
+        if kind is CheckpointEvidenceKind.PRIOR_ACTION:
+            return PreflightDecision()
+        if kind is CheckpointEvidenceKind.COMPLETED:
+            return PreflightDecision(outcome=ThreadStatus.COMPLETED)
+        if kind is CheckpointEvidenceKind.FAILED:
+            return PreflightDecision(outcome=ThreadStatus.FAILED)
+        if kind is CheckpointEvidenceKind.INTERRUPTED:
+            return PreflightDecision(outcome="interrupted")
+        if kind is CheckpointEvidenceKind.PENDING:
+            logger.info(
+                "Thread %s checkpoint holds this action part-way; continuing "
+                "from it instead of delivering the input again",
                 thread_id,
-                exc_info=True,
                 extra=self._log_extra_fn(
                     thread_id=thread_id,
-                    action="checkpoint_preflight_fallback",
-                    fallback_strategy="in_memory_heuristic",
+                    action="checkpoint_preflight_resume",
+                    checkpoint_id=evidence.checkpoint_id,
                 ),
             )
-            is_first_ingest = not thread_known
-            return None, is_first_ingest
-
-        if checkpoint_tuple is None:
-            # No prior checkpoint -- genuinely new thread.
-            return None, True
-
-        pending_writes = checkpoint_tuple.pending_writes or []
-        if not pending_writes:
-            # Empty pending_writes: graph ran to END cleanly before crash.
-            return ThreadStatus.COMPLETED, False
-
-        channels = {w[1] for w in pending_writes}
-        if error_ch in channels:
-            # Unhandled task error flushed to checkpoint before crash.
-            return ThreadStatus.FAILED, False
-        if interrupt_ch in channels:
-            # Graph paused at interrupt() -- needs a resume, not a new ingest.
-            return "interrupted", False
-
-        # Normal pending task writes: thread was mid-execution.
-        # LangGraph will restart from the last persisted checkpoint.
-        return None, False
+            return PreflightDecision(resume_from_checkpoint=True)
+        logger.warning(
+            "Thread %s checkpoint evidence is %s; refusing the ingest",
+            thread_id,
+            kind.value,
+            extra=self._log_extra_fn(
+                thread_id=thread_id,
+                action="checkpoint_preflight_refused",
+                evidence=kind.value,
+            ),
+        )
+        if kind is CheckpointEvidenceKind.UNAVAILABLE:
+            return PreflightDecision(
+                refusal=(
+                    "The run's checkpoint could not be read, so the dispatch was "
+                    "not run: running it blind could deliver its input twice"
+                )
+            )
+        return PreflightDecision(
+            refusal=(
+                "The run's checkpoint belongs to a different action than this "
+                "dispatch, so the dispatch was not run"
+            )
+        )
 
     # ------------------------------------------------------------------
     # State normalization

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:65e9effb2c83d77a10e9ea314a8b0b3e74d04e21095a3030c1a4361f6a46f3fe'
+body_hash: 'sha256:d2a5996b35ed006486822513430d998f897bb64c00db9556820e797b5c6f5959'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -127,6 +127,11 @@ related:
 - `S11` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
 - `S11` `verify:` `runner api worker acceptance providers control graph streaming suites` -> `pass`
 - `S11` `by:` `orchestrator`
+- `S12` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S12` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S12` `A` `src/vaultspec_a2a/worker/tests/test_executor_redelivery.py`
+- `S12` `verify:` `runner worker api control acceptance streaming suites` -> `pass`
+- `S12` `by:` `orchestrator`
 
 ## Notes
 
@@ -136,4 +141,5 @@ related:
 - `S09` An exhausted re-ask budget fails the run with SupervisorRoutingError rather than finishing it; a new turn resets the budget through the graph input.
 - `S10` The recursion limit resolves in the worker from the frozen graph definition (the lower of the gateway ceiling and the preset), not at the gateway call sites; the plan row scope was corrected through the plan verb.
 - `S11` The binding needed no provider change: the worker names each permission request by task namespace and exact call, and the gateway echoes the answered request id in the tool-permission resume; the plan row scope was corrected through the plan verb.
+- `S12` The receipt reducer's acceptance of a repeated dispatch_id (thread/action_receipts.py) was left as is: redelivery now continues from the checkpoint and never re-sends the receipt, so the reducer no longer sees the repeat; the plan row scope was corrected through the plan verb. The fix also closes the S06 drain/redelivery interaction, recorded in the audit.
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:584b88a8b198dc27faab97564217858305f7a1dfb0712fccb01e90d4496780e5'
+body_hash: 'sha256:65e9effb2c83d77a10e9ea314a8b0b3e74d04e21095a3030c1a4361f6a46f3fe'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -120,6 +120,13 @@ related:
 - `S10` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
 - `S10` `verify:` `runner graph team thread worker suites` -> `pass`
 - `S10` `by:` `orchestrator`
+- `S11` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S11` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S11` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S11` `A` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S11` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S11` `verify:` `runner api worker acceptance providers control graph streaming suites` -> `pass`
+- `S11` `by:` `orchestrator`
 
 ## Notes
 
@@ -128,4 +135,5 @@ related:
 - `S08` Closed by the orchestrator; the vaultspec-high-executor by-row above was a logging slip. Pruning runs on the gateway after terminal acceptance, not in the worker, because application receipts pin checkpoint ids the gateway reads in relay order.
 - `S09` An exhausted re-ask budget fails the run with SupervisorRoutingError rather than finishing it; a new turn resets the budget through the graph input.
 - `S10` The recursion limit resolves in the worker from the frozen graph definition (the lower of the gateway ceiling and the preset), not at the gateway call sites; the plan row scope was corrected through the plan verb.
+- `S11` The binding needed no provider change: the worker names each permission request by task namespace and exact call, and the gateway echoes the answered request id in the tool-permission resume; the plan row scope was corrected through the plan verb.
 

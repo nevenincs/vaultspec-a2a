@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, overri
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langgraph.config import get_config
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
@@ -655,6 +657,36 @@ def _resolve_resume_option_id(
     )
 
 
+def _permission_request_id(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """Name one permission request by its task and by the exact call it asks about.
+
+    A resumed task replays under the same checkpoint namespace, so the same call
+    asked again after a resume names the same request, while a different call -
+    another tool, or the same tool with other arguments - names a different one.
+    """
+    namespace = get_config().get("configurable", {}).get("checkpoint_ns", "")
+    canonical = json.dumps(
+        [namespace, tool_name, tool_input],
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return f"perm-{hashlib.sha256(canonical.encode()).hexdigest()[:32]}"
+
+
+def _answers_request(resume_value: object, request_id: str) -> bool:
+    """Whether a resume value is the answer to *request_id*.
+
+    A resume that names no request - a bare option id, or one dispatched
+    before answers carried their request - cannot be checked and is taken as
+    it always was.
+    """
+    if not isinstance(resume_value, dict):
+        return True
+    answered = cast("dict[str, object]", resume_value).get("request_id")
+    return answered is None or answered == request_id
+
+
 async def _interrupt_permission_callback(
     tool_name: str,
     tool_input: dict[str, Any],
@@ -667,6 +699,12 @@ async def _interrupt_permission_callback(
     client.  On resume (via ``Command(resume=...)``): returns the human's
     chosen ``option_id`` without raising.
 
+    A resumed node replays its whole turn, and the provider may ask about a
+    different call than the one the human approved. An answer is therefore
+    bound to the request it was given for: one that names another request is
+    passed over, and the run parks again on the call actually being made, so
+    an approval never lands on a call nobody saw.
+
     Args:
         tool_name:  Human-readable name of the tool requesting permission.
         tool_input: Input parameters the tool was called with.
@@ -676,14 +714,22 @@ async def _interrupt_permission_callback(
     Returns:
         The chosen ``optionId`` string to send back to the ACP agent.
     """
-    resume_value = interrupt(
-        {
-            "type": "permission_request",
-            "tool_name": tool_name,
-            "tool_input": tool_input,
-            "options": options,
-        }
-    )
+    request_id = _permission_request_id(tool_name, tool_input)
+    payload = {
+        "type": "permission_request",
+        "request_id": request_id,
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+        "options": options,
+    }
+    resume_value = interrupt(payload)
+    while not _answers_request(resume_value, request_id):
+        _logger.warning(
+            "Permission answer names a different request than the %r call now "
+            "being made; asking again",
+            tool_name,
+        )
+        resume_value = interrupt(payload)
     try:
         return _resolve_resume_option_id(resume_value, options)
     except RuntimeError as exc:

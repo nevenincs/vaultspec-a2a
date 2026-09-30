@@ -32,10 +32,16 @@ def permission_resume_value(
     pause_reason_type: str,
     option_id: str,
     notes: str | None,
+    *,
+    request_id: str,
 ) -> str | dict[str, object]:
-    """Build the one worker resume value used by live and recovery dispatch."""
+    """Build the one worker resume value used by live and recovery dispatch.
+
+    A tool-permission answer names the request it answers, so the worker can
+    refuse to apply it to a different call its replayed turn asks about.
+    """
     if pause_reason_type not in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
-        return option_id
+        return {"option_id": option_id, "request_id": request_id}
     verdict: str = (
         ApprovalStatus.APPROVED.value
         if option_id == "approve"

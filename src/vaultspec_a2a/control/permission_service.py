@@ -752,6 +752,7 @@ async def _record_permission_transition(
         context.permission.pause_reason_type,
         context.option_id,
         context.notes,
+        request_id=context.request_id,
     )
 
     dispatch = DispatchRequest(

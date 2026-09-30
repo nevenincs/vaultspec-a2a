@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:1f7aad63a36437b8787be10006f5fea80b89edc692d284709710c108c02de659'
+body_hash: 'sha256:de7670fd9b954540d272d4223806fe28395629c8533a841c4c0b4eb78c183836'
 ---
 
 # `architecture-review` plan
@@ -59,7 +59,7 @@ Graph routing, human-in-the-loop resume, crash recovery, and per-run isolation b
 
 - [x] `P02.S09` - Route blocked HARD phase gates and unparseable supervisor output back to the supervisor under a bounded re-ask counter; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P02.S10` - Honour each preset recursion limit on served runs and bound document review loops per phase, with a working pipeline_loop early exit; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/executable_graph.py, src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/_compiler_topologies.py, src/vaultspec_a2a/graph/nodes/phase_gate.py`.
-- [ ] `P02.S11` - Bind a tool-permission approval to a fingerprint of the exact tool call and re-park when a replayed turn asks for a different call; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [x] `P02.S11` - Bind a tool-permission approval to a fingerprint of the exact tool call and re-park when a replayed turn asks for a different call; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/control/permission_dispatch.py, src/vaultspec_a2a/control/permission_service.py`.
 - [ ] `P02.S12` - Resume an interrupted run from its checkpoint through receipt evidence instead of replaying its input; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/action_receipts.py`.
 - [ ] `P02.S13` - Give each invocation its own model instances and move rule loading and engine discovery off the worker event loop; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/graph/nodes/, src/vaultspec_a2a/worker/_authoring_close.py`.
 

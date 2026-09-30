@@ -2155,7 +2155,10 @@ class TestPermissionRespond:
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
-        assert dispatch["option_id"] == "allow_once"
+        assert dispatch["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": request_id,
+        }
         _assert_resume_dispatch_log(
             caplog,
             thread_id=thread_id,
@@ -2619,7 +2622,10 @@ class TestPermissionRespond:
         assert stale.json()["detail"] == "Permission request is no longer pending"
         assert active.status_code == 200
         assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == "allow_once"
+        assert worker.dispatches[0]["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": new_request_id,
+        }
 
     def test_plan_approval_uses_live_pending_request_over_stale_thread_pointer(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -3047,7 +3053,10 @@ class TestDeleteThread:
             == "Permission request already has a different response"
         )
         assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == "allow_once"
+        assert worker.dispatches[0]["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": request_id,
+        }
 
     def _seed_bash_permission(
         self,
@@ -3161,7 +3170,10 @@ class TestDeleteThread:
 
         assert second.status_code == 200
         assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == "allow_once"
+        assert worker.dispatches[0]["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": request_id,
+        }
 
     def test_ambiguous_resume_dispatch_keeps_the_answer_and_replays(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

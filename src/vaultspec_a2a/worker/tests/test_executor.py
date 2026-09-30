@@ -22,7 +22,9 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import interrupt
 from opentelemetry.sdk.resources import Resource
@@ -34,12 +36,13 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...domain_config import domain_config
+from ...graph.compiler import compile_team_graph
 from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import model_assignment_digest
-from ...team.team_config import load_team_config
+from ...team.team_config import load_agent_config, load_team_config
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -1003,8 +1006,13 @@ class TestGraphInputBuilding:
         # These keys must still be present.
         assert inp["thread_id"] == "t-followup"
         assert len(inp["messages"]) == 1
-        # Every turn starts with the supervisor's whole re-ask budget.
+        # Every turn starts with the supervisor's whole re-ask budget, the
+        # whole blocked-FINISH budget, and the whole loop ceiling: each is a
+        # budget for ONE turn, and a follow-up that inherited a spent one got
+        # fewer passes than its preset grants, or none at all.
         assert inp["supervisor_reasks"] == 0
+        assert inp["supervisor_finish_blocks"] == 0
+        assert inp["loop_count"] == 0
 
     def test_thread_id_matches_request(self) -> None:
         """thread_id in graph_input must match the request thread_id."""
@@ -2411,3 +2419,113 @@ class TestTheFailureStashCannotOutliveItsRun:
             finally:
                 await bridge.close()
                 await executor.shutdown()
+
+
+class _LoopReviewFactory:
+    """The loop node never passes; every other worker just reports back."""
+
+    def create(
+        self,
+        provider: Any,
+        *,
+        model: Any | None = None,
+        agent_config: Any | None = None,
+        workspace_root: Any | None = None,
+        **kwargs: Any,
+    ) -> FakeListChatModel:
+        del provider, model, workspace_root, kwargs
+        agent_id = getattr(agent_config, "id", "")
+        if agent_id == "mock-reviewer":
+            return FakeListChatModel(
+                responses=["REVISION REQUIRED\n1. Still not right."]
+            )
+        return FakeListChatModel(responses=[f"{agent_id} did its part"])
+
+
+def _loop_assignment(team: Any) -> dict[str, dict[str, Any]]:
+    lane: dict[str, Any] = {
+        "schema_version": 1,
+        "provider": "deterministic",
+        "execution_mode": "in-process-deterministic",
+        "catalog_revision": "test-revision",
+        "entry_id": "test-entry",
+        "model_name": "deterministic",
+        "controls": [],
+        "fallbacks": [],
+        "provenance": {"selection_source": "team_selection"},
+    }
+    return {
+        "__supervisor__": dict(lane),
+        **{ref.agent_id: dict(lane) for ref in team.workers},
+    }
+
+
+def _loop_turn_input(
+    request: DispatchRequest, *, is_first_ingest: bool
+) -> dict[str, Any]:
+    """Build a turn's graph input the way the executor builds one."""
+    graph_input = GraphLifecycleManager.build_graph_input(
+        _graph_input_request(request), is_first_ingest=is_first_ingest
+    )
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=request.thread_id,
+        action_id=request.dispatch_id or "ingest",
+        action_type=ControlActionType.INGEST,
+        payload_fingerprint=control_action_payload_fingerprint(
+            {"run": request.dispatch_id}
+        ),
+        dispatch_id=request.dispatch_id or "ingest",
+        run_revision=1,
+        writer_generation=1,
+    ).model_dump(mode="json")
+    graph_input["graph_action_receipts"] = {request.dispatch_id or "ingest": receipt}
+    graph_input["active_graph_action_receipt"] = receipt
+    return graph_input
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_follow_up_turn_gets_the_whole_loop_ceiling() -> None:
+    """Each turn gets its preset's loop budget, not what the last one left.
+
+    ``loop_count`` is a per-turn ceiling that no node ever reset, so a
+    follow-up on a thread whose first turn had run to the ceiling started
+    already at it: the loop router finished the turn before the loop ran
+    once. Driven through the real per-turn input builder over a real
+    compiled loop graph, two turns on one thread.
+    """
+    team = load_team_config("mock-autonomous")
+    max_loops = team.topology.max_loops
+    graph: Any = compile_team_graph(
+        team_config=team,
+        agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
+        checkpointer=InMemorySaver(),
+        provider_factory=_LoopReviewFactory(),
+        model_assignment=_loop_assignment(team),
+    )
+    config: Any = {"configurable": {"thread_id": "loop-turns"}}
+
+    async def _turn(dispatch: str, *, first: bool) -> list[str]:
+        request = DispatchRequest(
+            action="ingest",
+            workspace_root=_WORKSPACE,
+            thread_id="loop-turns",
+            dispatch_id=dispatch,
+            content="Carry it forward.",
+            team_preset="mock-autonomous",
+            recursion_limit=25,
+        )
+        visited: list[str] = []
+        async for update in graph.astream(
+            _loop_turn_input(request, is_first_ingest=first),
+            config,
+            stream_mode="updates",
+        ):
+            visited.extend(cast("dict[str, Any]", update))
+        return visited
+
+    first_turn = await _turn("loop-turns-d1", first=True)
+    assert first_turn.count("mock-reviewer") == max_loops
+
+    second_turn = await _turn("loop-turns-d2", first=False)
+    assert second_turn.count("mock-reviewer") == max_loops

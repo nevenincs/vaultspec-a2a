@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:ee08105df799fe39c29f1b398dc9ac7348e05a2bbd0b7911a2d6df8903ed0933'
+body_hash: 'sha256:c44b675916a04aa323c22e793f08fb0df054c3082c2dbc7b121312980b6920cf'
 ---
 
 # `langgraph-conformance` plan
@@ -115,7 +115,7 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [ ] `P07.S39` - Retire the unreachable checkpoint-history degradations, tie the retention schema pin to the saver version, and refuse closing a borrowed saver; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/database/checkpoints.py`.
 - [ ] `P07.S40` - Attribute custom stream writes to their node and replace the aggregator's hand-written graph stubs with one error-injecting graph; `src/vaultspec_a2a/streaming/`.
 - [ ] `P07.S41` - Make the provider tests name the adapter prerequisite they lack; `src/vaultspec_a2a/providers/tests/`.
-- [ ] `P07.S42` - Route a warned exec route through plan approval rather than returning the SOFT gate decision first; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
+- [x] `P07.S42` - Route a warned exec route through plan approval rather than returning the SOFT gate decision first; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
 
 ## Parallelization
 

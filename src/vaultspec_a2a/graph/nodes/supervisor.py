@@ -586,7 +586,7 @@ def _evaluate_supervisor_response(
     gate_decision = _phase_gate_decision(
         state, vault_index, next_route, inferred_phase, worker_phase_map
     )
-    if gate_decision is not None:
+    if gate_decision is not None and gate_decision.refused:
         return _carrying_finish_block(gate_decision, finish_block)
     approval_decision = _plan_approval_decision(
         state,
@@ -596,7 +596,16 @@ def _evaluate_supervisor_response(
         autonomous=autonomous,
     )
     if approval_decision is not None:
+        # A gate that only warned still lets the route through, so it must not
+        # also let the route past the human who approves the plan; its warning
+        # travels with the approval instead.
+        if gate_decision is not None:
+            approval_decision = replace(
+                approval_decision, routing_error=gate_decision.routing_error
+            )
         return _carrying_finish_block(approval_decision, finish_block)
+    if gate_decision is not None:
+        return _carrying_finish_block(gate_decision, finish_block)
     if finish_block is not None:
         return finish_block
 

@@ -28,6 +28,7 @@ from ..thread.checkpoint_evidence import (
 )
 from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ..thread.snapshots import tasks_past_their_interrupt
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
@@ -231,12 +232,26 @@ def _interrupt_details(interrupts: Iterable[object]) -> tuple[list[str], list[st
     return interrupt_ids, interrupt_types
 
 
+def _task_interrupts(task: object, answered: Collection[str]) -> tuple[object, ...]:
+    """The interrupts *task* is still stopped on, dropping the ones it answered.
+
+    A snapshot lists every interrupt write the checkpoint holds against a
+    task, including one it has since run past: the superstep that would have
+    cleared it has not committed. ``answered`` is read from those held writes
+    and is the only thing that separates the two.
+    """
+    if str(getattr(task, "id", "")) in answered:
+        return ()
+    return tuple(getattr(task, "interrupts", ()) or ())
+
+
 def _task_projection(
     task: object,
+    answered: Collection[str] = (),
 ) -> tuple[ExecutionTaskProjectionPayload, list[str]]:
     """Project one pending LangGraph task and retain its interrupt types."""
     interrupt_ids, interrupt_types = _interrupt_details(
-        getattr(task, "interrupts", ()) or ()
+        _task_interrupts(task, answered)
     )
     error = getattr(task, "error", None)
     return (
@@ -257,12 +272,13 @@ def _task_projection(
 
 def _task_projections(
     state_tasks: Iterable[object],
+    answered: Collection[str] = (),
 ) -> tuple[list[ExecutionTaskProjectionPayload], list[str]]:
     """Project every pending task while preserving first-seen interrupt order."""
     tasks: list[ExecutionTaskProjectionPayload] = []
     interrupt_types: list[str] = []
     for task in state_tasks:
-        projection, task_interrupt_types = _task_projection(task)
+        projection, task_interrupt_types = _task_projection(task, answered)
         tasks.append(projection)
         for interrupt_type in task_interrupt_types:
             if interrupt_type not in interrupt_types:
@@ -286,6 +302,25 @@ def _parked_next_nodes(
         if task.interrupt_ids and task.name and task.name not in next_nodes:
             next_nodes.append(task.name)
     return next_nodes
+
+
+def _live_interrupts(
+    state: _ExecutionStateSnapshot, answered: Collection[str]
+) -> tuple[object, ...]:
+    """The interrupts the run is still stopped on, across every pending task.
+
+    ``state.interrupts`` is the union of the held interrupt writes, so it
+    keeps listing the question a fanned-out branch already answered. Each
+    interrupt is attributed to its task instead, and the tasks the held writes
+    show finished are dropped. A snapshot with no tasks to attribute to is
+    read as it stands.
+    """
+    tasks = tuple(state.tasks or ())
+    if not tasks:
+        return tuple(state.interrupts or ())
+    return tuple(
+        interrupt for task in tasks for interrupt in _task_interrupts(task, answered)
+    )
 
 
 def _state_interrupt_types(interrupts: Iterable[object]) -> list[str]:
@@ -539,7 +574,10 @@ class StateProjector:
             return await self._durable_resume_refusal(
                 receipt, timeout_seconds=timeout_seconds
             )
-        interrupts = tuple(snapshot.interrupts or ())
+        answered = tasks_past_their_interrupt(
+            await self._held_writes(snapshot.config, timeout_seconds=timeout_seconds)
+        )
+        interrupts = _live_interrupts(snapshot, answered)
         if not interrupts:
             return ResumeRefusal(
                 cause=ResumeRefusalCause.NOT_PARKED,
@@ -571,6 +609,35 @@ class StateProjector:
                 pending_request_ids=tuple(pending),
             )
         return ResumeAdmission(interrupt_id=pending[named])
+
+    async def _held_writes(
+        self, config: Mapping[str, object], *, timeout_seconds: float
+    ) -> tuple[object, ...]:
+        """The writes the store holds against the checkpoint *config* names.
+
+        Read from the store because a snapshot does not carry a task's resume
+        writes, and those are what distinguish a question still being asked
+        from one already answered. A read that fails returns nothing, which
+        leaves every held interrupt reading as pending: the snapshot's own
+        reading, and the one that keeps disclosing a question rather than
+        stranding an answer on a momentary store failure.
+        """
+        try:
+            stored = await asyncio.wait_for(
+                self._checkpointer.aget_tuple(cast("Any", config)),
+                timeout=timeout_seconds,
+            )
+        except Exception:
+            logger.warning(
+                "Checkpoint writes could not be read; every interrupt the "
+                "snapshot lists will be reported as still pending",
+                exc_info=True,
+                extra=self._log_extra_fn(action="held_writes_unavailable"),
+            )
+            return ()
+        if stored is None:
+            return ()
+        return tuple(cast("Any", stored.pending_writes) or ())
 
     async def _durable_resume_refusal(
         self,
@@ -610,11 +677,26 @@ class StateProjector:
     @staticmethod
     def normalize_execution_state(
         state: _ExecutionStateSnapshot,
+        held_writes: Iterable[object] = (),
     ) -> ExecutionStateProjectionPayload:
-        """Normalize LangGraph runtime state into a durable worker payload."""
+        """Normalize LangGraph runtime state into a durable worker payload.
+
+        *held_writes* are the writes the checkpoint holds against this
+        snapshot. They are the only thing that tells a question still being
+        asked from one a fanned-out branch has already answered, because the
+        snapshot lists both. Omitted, every interrupt the snapshot carries is
+        read as pending, which is the snapshot's own reading of itself.
+        """
+        answered = tasks_past_their_interrupt(held_writes)
         state_interrupts = state.interrupts or ()
-        tasks, interrupt_types = _task_projections(state.tasks or ())
-        if state_interrupts and not interrupt_types:
+        tasks, interrupt_types = _task_projections(state.tasks or (), answered)
+        interrupt_count = sum(len(task.interrupt_ids) for task in tasks)
+        if state_interrupts and not tasks:
+            # No task to attribute an interrupt to, so there is nothing the
+            # held writes can narrow and the state-level list is the reading.
+            interrupt_types = _state_interrupt_types(state_interrupts)
+            interrupt_count = len(state_interrupts)
+        elif interrupt_count and not interrupt_types:
             interrupt_types = _state_interrupt_types(state_interrupts)
         return ExecutionStateProjectionPayload(
             checkpoint_id=_checkpoint_id(state.config),
@@ -622,11 +704,7 @@ class StateProjector:
             snapshot_created_at=_snapshot_created_at_value(state.created_at),
             next_nodes=_parked_next_nodes(state.next, tasks),
             interrupt_types=interrupt_types,
-            interrupt_count=(
-                len(state_interrupts)
-                if state_interrupts
-                else sum(len(task.interrupt_ids) for task in tasks)
-            ),
+            interrupt_count=interrupt_count,
             task_count=len(tasks),
             tasks=tasks,
         )
@@ -649,7 +727,13 @@ class StateProjector:
             )
             if not _is_execution_state_snapshot(state):
                 raise TypeError("Graph returned an incomplete execution-state snapshot")
-            payload = self.normalize_execution_state(state)
+            payload = self.normalize_execution_state(
+                state,
+                await self._held_writes(
+                    state.config,
+                    timeout_seconds=domain_config.aget_state_timeout_seconds,
+                ),
+            )
         except TimeoutError:
             payload = ExecutionStateProjectionPayload(
                 degraded_reasons=["execution_state_projection_timeout"]

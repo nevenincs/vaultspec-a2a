@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:c2987acf69d84a2cb6ae6352f9697494efc0fb46f73799b3aee79a46bf9ed1e6'
+body_hash: 'sha256:df6b69c6a96b1460e7745edef560730b6fc72620ae0edd0f8092c55051cb7297'
 ---
 
 # `architecture-review` plan
@@ -70,7 +70,7 @@ Busy runs, worker backpressure, event streams, checkpoint storage, the event bri
 - [x] `P03.S14` - Refuse a follow-up on a busy run with a typed conflict that installs no writer; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/worker/app.py`.
 - [x] `P03.S15` - Split worker refusals by reason and feed the circuit breaker only transport failures and server errors, with a single half-open probe; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/worker/app.py`.
 - [x] `P03.S16` - Scope the stream database session to the handler so an open stream holds no connection or read transaction; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py`.
-- [ ] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, keep the run sequence in the frame body without an SSE id until the stream can resume, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.
+- [x] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, keep the run sequence in the frame body without an SSE id until the stream can resume, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.
 - [x] `P03.S18` - Back the Postgres checkpointer with a sized connection pool; `src/vaultspec_a2a/database/checkpoints.py`.
 - [ ] `P03.S19` - Bound, serialize, and split worker event batches and protect terminal events from eviction; `src/vaultspec_a2a/worker/ipc.py, src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `P03.S20` - Start containers through the owned serve entry with a stop grace period longer than the shutdown budget; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.

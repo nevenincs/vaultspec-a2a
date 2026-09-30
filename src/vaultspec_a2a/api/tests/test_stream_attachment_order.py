@@ -130,16 +130,15 @@ async def test_a_viewer_is_subscribed_before_it_is_told_the_run_state(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_relayed_frame_carries_its_run_sequence_as_the_sse_id(
+async def test_no_frame_claims_an_sse_id_the_stream_cannot_resume_from(
     session_factory: SessionFactory,
 ) -> None:
-    """The run numbers its own events; the transport now carries that number.
+    """The run's sequence orders frames in the body and is never the SSE id.
 
-    The sequence was inside the JSON body, where the SSE layer could not see it,
-    so a consumer had no transport-level handle on which events it held. Frames
-    the stream mints itself carry no run sequence and so carry no id, which is
-    the honest answer rather than numbering them into a sequence they are not
-    part of.
+    The sequence restarts with the worker and nothing buffers frames for a
+    ``Last-Event-ID`` to resume from, so an id would promise a resumption this
+    stream does not offer, and a consumer deduplicating by it would drop a
+    restarted worker's events as ones it already held.
     """
     aggregator = EventAggregator()
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
@@ -156,7 +155,7 @@ async def test_a_relayed_frame_carries_its_run_sequence_as_the_sse_id(
         aggregator.relay_payload(_RUN, _progress(_RUN, sequence=7, content="tick"))
         progress_raw = await anext(stream)
 
-        assert _frame_id(progress_raw) == "7"
+        assert _frame_id(progress_raw) is None
         assert _frame(progress_raw)["sequence"] == 7
     finally:
         await _close(stream)

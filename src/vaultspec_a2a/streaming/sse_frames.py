@@ -497,26 +497,6 @@ def _stamp_semantic_phase(payload: Mapping[str, object]) -> Mapping[str, object]
     return {**payload, "semantic_phase": phase}
 
 
-def _frame_id(payload: Mapping[str, object]) -> str | None:
-    """Return the SSE ``id`` for a frame, which is its per-run sequence.
-
-    The run already numbers its own events, and that number was being carried
-    inside the JSON body where the SSE layer itself could not see it. Promoting
-    it to the ``id`` field is what makes a consumer able to say which events it
-    has and order what it receives, using the transport's own mechanism rather
-    than a convention it has to know about.
-
-    Frames the stream itself mints - the snapshot, heartbeats, the drop sentinel,
-    a replayed terminal - carry no run sequence and so carry no id. That is the
-    honest answer: giving them one would number them into a sequence they are
-    not part of.
-    """
-    sequence = payload.get("sequence")
-    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
-        return None
-    return str(sequence)
-
-
 def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
     """Serialize one payload as a wire SSE frame.
 
@@ -529,13 +509,18 @@ def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
     character costs bytes (which :data:`MAX_SSE_FRAME_BYTES` is sized for) and
     buys the guarantee that the serialized payload holds no character
     ``splitlines`` can break on.
+
+    No frame carries an SSE ``id``. The only number a frame could offer is the
+    run's event sequence, which the worker keeps in memory and restarts from zero
+    when it does, and the gateway keeps no buffer a ``Last-Event-ID`` could
+    resume from. An id would therefore promise a resumption that does not exist,
+    and a consumer that deduplicated by it would discard a restarted worker's
+    events as ones it already held. The sequence stays in the body, where it
+    orders a run's frames without claiming to identify them across restarts.
     """
     lines: list[str] = []
     if event:
         lines.append(f"event: {event}")
-    frame_id = _frame_id(payload)
-    if frame_id is not None:
-        lines.append(f"id: {frame_id}")
     data = json.dumps(payload, separators=(",", ":"))
     lines.extend(f"data: {line}" for line in data.splitlines() or [data])
     return ("\n".join(lines) + "\n\n").encode("utf-8")

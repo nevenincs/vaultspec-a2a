@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:6b44f94385032d0dca9dd1023d779d842ddd149186bd15fc67c1ab31b7329884'
+body_hash: 'sha256:13ca07cd331add089f5e7291aaa57d99afc6c919ddf4a7f9c9312798dc29ffbd'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -357,6 +357,9 @@ related:
 - `S25` `M` `src/vaultspec_a2a/providers/tests/test_codex_credential_writeback.py`
 - `S25` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 - `S25` `by:` `orchestrator`
+- `S17` `M` `src/vaultspec_a2a/api/tests/test_stream_attachment_order.py`
+- `S17` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
+- `S17` `by:` `orchestrator`
 
 ## Notes
 
@@ -380,4 +383,5 @@ related:
 - `S14` Reopened for the contract half (followup-verb-has-no-reachable-success, high): the verb and its 202 now say no state admits a follow-up; the refusal code is narrowed; the continuation model stays the user's decision.
 - `S27` Reopened by the plan-close review (prompt-render-role-headers-are-forgeable, medium).
 - `S25` Reopened by the plan-close review (codex-credential-writeback-blocks-the-event-loop, medium).
+- `S17` Reopened by the plan-close review (sse-id-without-resumption, medium): the SSE id was removed and the Step action corrected through the plan verb to keep the sequence in the body.
 

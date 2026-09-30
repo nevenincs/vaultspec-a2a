@@ -301,28 +301,32 @@ def create_phase_gate_node(
             # out-of-run verdict subscriber correlates a decision by.
             "request_id": proposal_id,
         }
-        resume_value = interrupt(payload)
-        # An answer bound to another request, or to none, is not this gate's
-        # decision, so the gate asks again rather than spending a revision on
-        # it. The decision stays the human's, and the phase's revision budget
-        # is spent only by a verdict a human gave on this document.
-        while proposal_id and not verdict_answers_request(resume_value, proposal_id):
-            _logger.warning(
-                "Verdict for document phase %r did not name proposal %r; asking again",
-                phase,
-                proposal_id,
-            )
-            resume_value = interrupt(payload)
-        verdict, notes = parse_verdict(resume_value)
-        if not verdict_answers_request(resume_value, proposal_id):
-            # A gate with no proposal has no request a verdict could name, so
-            # nothing can answer it; failing closed to revision keeps the run
-            # from waiting on a question no human can be asked.
+        if not proposal_id:
+            # Every answer a client sends names the request it decides, and a
+            # gate with no committed proposal has none, so no answer could
+            # ever be admitted. Parking would wait on a question nobody can be
+            # asked; the writer resubmits instead.
             verdict, notes = (
                 VERDICT_REJECTED,
-                f"Verdict for document phase {phase!r} named another request; "
-                f"the decision on proposal {proposal_id!r} is still outstanding.",
+                f"Document phase {phase!r} reached its gate with no committed "
+                "proposal; resubmit it before a decision can be asked for.",
             )
+        else:
+            resume_value = interrupt(payload)
+            # An answer bound to another request, or to none, is not this
+            # gate's decision, so the gate asks again rather than spending a
+            # revision on it. The decision stays the human's, and the phase's
+            # revision budget is spent only by a verdict a human gave on this
+            # document.
+            while not verdict_answers_request(resume_value, proposal_id):
+                _logger.warning(
+                    "Verdict for document phase %r did not name proposal %r; "
+                    "asking again",
+                    phase,
+                    proposal_id,
+                )
+                resume_value = interrupt(payload)
+            verdict, notes = parse_verdict(resume_value)
 
         if verdict == VERDICT_APPROVED:
             return Command(

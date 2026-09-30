@@ -338,3 +338,40 @@ async def test_a_verdict_naming_no_request_does_not_approve_this_gate() -> None:
     [interrupt] = parked_again["__interrupt__"]
     assert interrupt.value["request_id"] == "prop-unbound"
     assert parked_again.get("gate_verdict") is None
+
+
+@pytest.mark.asyncio
+async def test_a_gate_with_no_committed_proposal_revises_instead_of_parking() -> None:
+    """A gate that has no proposal to name asks no one; it sends the writer back.
+
+    Every answer a client can send names the request it decides, and a gate
+    with no committed proposal has no request, so the resume preflight turns
+    every answer away. Parking there would leave the run waiting on a question
+    nothing can answer.
+    """
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+
+    async def approved_end(state: TeamState) -> dict[str, Any]:
+        return {}
+
+    async def revise_end(state: TeamState) -> dict[str, Any]:
+        return {}
+
+    gate = create_phase_gate_node(
+        "research", approved_target="approved_end", revision_target="revise_end"
+    )
+    add_test_node(builder, "gate", gate)
+    add_test_node(builder, "approved_end", approved_end)
+    add_test_node(builder, "revise_end", revise_end)
+    builder.add_edge(START, "gate")
+    builder.add_edge("approved_end", END)
+    builder.add_edge("revise_end", END)
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "gate-no-proposal"}}
+
+    result = await graph.ainvoke(_base_state(), config=config)
+
+    assert "__interrupt__" not in result
+    assert result["next"] == "revise_end"
+    assert result["gate_verdict"] == "rejected"
+    assert any("no committed proposal" in note for note in result["validation_errors"])

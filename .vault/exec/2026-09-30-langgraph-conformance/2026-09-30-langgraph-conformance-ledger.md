@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:189887c21dcbade6f5c16c38c355b71906f18dfe3daaaeb432bd2f5ed862b53a'
+body_hash: 'sha256:af950e0fc0e1f13440ba10b8a8cfff91a917808cdb96d2b804c9d58e3153f113'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -438,6 +438,8 @@ related:
 - `S34` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
 - `S34` `verify:` `pytest src/vaultspec_a2a/worker src/vaultspec_a2a/streaming src/vaultspec_a2a/graph src/vaultspec_a2a/control with Postgres required` -> `pass`
 - `S34` `by:` `orchestrator`
+- `S13` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
+- `S13` `by:` `orchestrator`
 
 ## Notes
 
@@ -478,3 +480,4 @@ related:
 - `S43` The producer guard is widened from the history family to every member; the helper-literal producers moved to members so the guard can see them.
 - `S02` Correction: the proofs used the system temp directory, which the storage-anchor gate refuses; surfaced by just ci.
 - `S34` Reopened by the plan-close review: the pending-write fold was unreachable because the worker never emitted a receipt for a resume that only asks again.
+- `S13` Correction from the plan-close review: the no-proposal fail-closed branch was unreachable through the resume preflight.

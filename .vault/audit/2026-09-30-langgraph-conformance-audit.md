@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:2101a8adddc259a21582310a6a86cfae9cdfc3daab4c50e5f371017ee1a77cd3'
+body_hash: 'sha256:d88c09924f47f04cab27a6d8e3d7eb164f7aa8a459b6b0ac870d2fe3a3f87f91'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -294,6 +294,26 @@ Open, surfaced by P02. `test_claude_permission_posture.py` (5), `test_capsule_ac
 ### reparked-gate-reports-no-position | low | a gate asking again dropped out of the projected next nodes
 
 Fixed in the P02.S13 integration correction. LangGraph leaves a task that already holds a resume write out of `StateSnapshot.next` (`langgraph/pregel/main.py`), so once the plan and document gates asked again on an unbound verdict, the execution-state projection reported no position and the research gate's semantic phase fell back from awaiting a decision to running. `_parked_next_nodes` in `src/vaultspec_a2a/worker/state_projection.py` now counts every task parked on an interrupt; `test_a_node_that_asks_again_is_still_the_next_node` fails without it.
+
+### selector-bridge-sync-writes-deadlock | high | the Windows bridge's synchronous writes deadlocked its own selector loop
+
+Fixed in P04.S22. `AsyncPostgresSaver.put` and `put_writes` marshal onto `self.loop` with `run_coroutine_threadsafe(...).result()` and carry no same-loop guard (`langgraph/checkpoint/postgres/aio.py`), and the bridge submitted those methods to that very loop, so each waited on the loop that had to run it; `get_tuple` and `delete_thread` carry the guard and refused instead (`InvalidStateError: Synchronous calls to AsyncPostgresSaver are only allowed from a different thread`, probed live). The bridge's synchronous surface now calls the inner async methods on its own loop; `src/vaultspec_a2a/database/tests/test_selector_bridge.py` hangs against the pre-S22 bridge.
+
+### unreachable-checkpoint-history-degradations | low | two degraded reasons have no producer after the history read was removed
+
+Owned by P07.S39. `DegradedReason.CHECKPOINT_HISTORY_TIMEOUT` and `CHECKPOINT_HISTORY_UNAVAILABLE` (`src/vaultspec_a2a/thread/enums.py`) were emitted only by the second history read that P04.S25 removed from `src/vaultspec_a2a/control/thread_state_service.py`; `CHECKPOINT_HISTORY_UNKNOWN` keeps a producer. Neither retired string appears in `openapi.json`, so retiring them is internal.
+
+### pinned-postgres-retention-schema-version | low | retention stops pruning silently when the saver migrates further
+
+Owned by P07.S39. `_POSTGRES_SCHEMA_VERSION` in `src/vaultspec_a2a/database/checkpoint_retention.py` refuses a store the saver has migrated past it with a warning and `False`, so settled history stops being pruned with no failure. The fail-safe direction is intended, but a saver upgrade must force a re-read of the DELETE statements rather than a bare constant bump.
+
+### shared-lifetime-savers-must-not-be-closed | low | a sibling saver borrows a pool it does not own
+
+Owned by P07.S39. `concurrent_checkpointer` and the selector bridge's `concurrent_sibling` and `with_allowlist` (`src/vaultspec_a2a/database/checkpoints.py`) return savers sharing the caller's pool, and for the bridge its thread and loop; closing one closes the store for all. Documented in each docstring but unenforced, the same hazard upstream `BaseCheckpointSaver.with_allowlist` carries; nothing closes a compiled graph's checkpointer today.
+
+### persistence-probes-characterise-the-library | info | the persistence probes bypass the production entry points
+
+Recorded from P04. The executor's pool and setup-race probes build a bare `AsyncPostgresSaver` and call `setup()` directly, bypassing `open_checkpointer`, `concurrent_checkpointer` and `setup_postgres_checkpointer`, so they still show the unguarded library behaviour after the fixes. The production paths are covered by `src/vaultspec_a2a/database/tests/test_checkpoint_setup_race.py` and `test_checkpoint_pool.py`.
 
 ## Recommendations
 

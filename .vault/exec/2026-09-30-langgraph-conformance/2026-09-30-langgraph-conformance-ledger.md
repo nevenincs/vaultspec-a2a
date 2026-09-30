@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:a9aced04a5e81f43845233a4313cc94696fa0a9cbb865eac72ead36810abfca1'
+body_hash: 'sha256:62d7a6231493401e8bd937194174fdd63fe0e7a642cd383d4fc711ea0cb73150'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -289,6 +289,47 @@ related:
 - `S15` `A` `src/vaultspec_a2a/worker/tests/test_executor_parallel_interrupts.py`
 - `S15` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
 - `S15` `by:` `worker-a35ac993`
+- `S20` `M` `src/vaultspec_a2a/control/tests/test_thread_list_bulk_checkpoints.py`
+- `S20` `M` `src/vaultspec_a2a/control/thread_listing.py`
+- `S20` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S20` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_pool.py`
+- `S20` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S20` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S20` `by:` `worker-adefe507`
+- `S21` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S21` `A` `src/vaultspec_a2a/database/tests/test_checkpoint_setup_race.py`
+- `S21` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S21` `by:` `worker-adefe507`
+- `S22` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S22` `A` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S22` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S22` `by:` `worker-adefe507`
+- `S23` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S23` `A` `src/vaultspec_a2a/database/tests/test_armed_checkpoint_setup.py`
+- `S23` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S23` `by:` `worker-adefe507`
+- `S24` `M` `src/vaultspec_a2a/database/checkpoint_retention.py`
+- `S24` `M` `src/vaultspec_a2a/database/checkpoint_schema.py`
+- `S24` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S24` `M` `src/vaultspec_a2a/database/migrations/__init__.py`
+- `S24` `A` `src/vaultspec_a2a/database/tests/test_checkpoint_retention_guards.py`
+- `S24` `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `S24` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S24` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S24` `by:` `worker-adefe507`
+- `S25` `M` `openapi.json`
+- `S25` `M` `src/vaultspec_a2a/api/schemas/snapshots.py`
+- `S25` `M` `src/vaultspec_a2a/control/snapshot.py`
+- `S25` `A` `src/vaultspec_a2a/control/tests/test_checkpoint_history_depth.py`
+- `S25` `M` `src/vaultspec_a2a/control/thread_state_service.py`
+- `S25` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S25` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S25` `by:` `worker-adefe507`
+- `S27` `M` `src/vaultspec_a2a/api/app.py`
+- `S27` `M` `src/vaultspec_a2a/database/migrations/__init__.py`
+- `S27` `A` `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py`
+- `S27` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S27` `by:` `worker-adefe507`
 
 ## Notes
 
@@ -309,3 +350,8 @@ related:
 - `S11` The channels a resume rebinds now reduce; dropping the digests from the resume was rejected because a run parked before checkpoint evidence acquires them from it.
 - `S12` A refused resume leaves the run untouched and projects its execution state. At merge the orchestrator moved the preflight test's resume to a restarted executor, since a draining executor now refuses dispatch.
 - `S14` The bare-option resolver lost its last caller and was removed with the tests that only exercised it.
+- `S20` Concurrency is a saver per caller over the shared pool; one AsyncPostgresSaver holds one lock around every statement, so a pool alone never made it concurrent.
+- `S21` Setup is serialized by a session-scoped advisory lock with a polling loser; a blocking waiter would be a transaction the winner's CREATE INDEX CONCURRENTLY waits on.
+- `S22` Also fixes the high deadlock the Step's probe found: the bridge's put and `put_writes` waited on the loop that had to run them.
+- `S25` The served schema now says a parent id names the recorded parent, which may be pruned; openapi.json regenerated.
+- `S27` Retired rather than run on both backends: the backfill repaired nothing observable, and the desktop profile's repair belongs to the staged-generation migration entrypoint.

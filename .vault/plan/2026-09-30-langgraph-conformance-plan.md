@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:6c995bff0edd82c31f70cac1478448b4859b2534d9e6744f595378dc82f65c98'
+body_hash: 'sha256:6e3b4333a89fac39c8cd3c19d2c4df719da221403b0953fa55d8360ce12ecded'
 ---
 
 # `langgraph-conformance` plan
@@ -78,14 +78,14 @@ Ingest runs on LangGraph's public stream API with durable checkpoints, drains an
 
 Both checkpoint backends behave as the dual-backend decision describes, set themselves up safely, and prune only what they understand.
 
-- [ ] `P04.S20` - Give each run its own saver on the shared Postgres pool and prove concurrent use; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/worker/graph_lifecycle.py`.
-- [ ] `P04.S21` - Serialize Postgres saver setup across processes; `src/vaultspec_a2a/database/checkpoints.py`.
-- [ ] `P04.S22` - Make the Windows selector bridge answer synchronous calls locally, clone on with_allowlist, and release its thread and pool on a failed start; `src/vaultspec_a2a/database/checkpoints.py`.
-- [ ] `P04.S23` - Mark the desktop SQLite saver set up after schema validation; `src/vaultspec_a2a/database/checkpoints.py`.
-- [ ] `P04.S24` - Guard settled-history pruning on saver support and schema version, and import the checkpoint channel names; `src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/thread/checkpoint_evidence.py, src/vaultspec_a2a/thread/snapshots.py`.
-- [ ] `P04.S25` - Derive history depth from the tuple already read and report parent ids truthfully after a prune; `src/vaultspec_a2a/control/snapshot.py, src/vaultspec_a2a/control/thread_state_service.py, src/vaultspec_a2a/thread/snapshots.py`.
+- [x] `P04.S20` - Give each run its own saver on the shared Postgres pool and prove concurrent use; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/worker/graph_lifecycle.py`.
+- [x] `P04.S21` - Serialize Postgres saver setup across processes; `src/vaultspec_a2a/database/checkpoints.py`.
+- [x] `P04.S22` - Make the Windows selector bridge answer synchronous calls locally, clone on with_allowlist, and release its thread and pool on a failed start; `src/vaultspec_a2a/database/checkpoints.py`.
+- [x] `P04.S23` - Mark the desktop SQLite saver set up after schema validation; `src/vaultspec_a2a/database/checkpoints.py`.
+- [x] `P04.S24` - Guard settled-history pruning on saver support and schema version, and import the checkpoint channel names; `src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/thread/checkpoint_evidence.py, src/vaultspec_a2a/thread/snapshots.py`.
+- [x] `P04.S25` - Derive history depth from the tuple already read and report parent ids truthfully after a prune; `src/vaultspec_a2a/control/snapshot.py, src/vaultspec_a2a/control/thread_state_service.py, src/vaultspec_a2a/thread/snapshots.py`.
 - [ ] `P04.S26` - Enable strict checkpoint deserialization on both savers; `src/vaultspec_a2a/database/checkpoints.py`.
-- [ ] `P04.S27` - Retire the SQLite-only checkpoint backfill or run it on both backends; `src/vaultspec_a2a/database/migrations/__init__.py, src/vaultspec_a2a/api/app.py`.
+- [x] `P04.S27` - Retire the SQLite-only checkpoint backfill or run it on both backends; `src/vaultspec_a2a/database/migrations/__init__.py, src/vaultspec_a2a/api/app.py`.
 
 ### Phase `P05` - Version and deprecation sweep
 

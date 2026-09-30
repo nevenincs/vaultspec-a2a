@@ -3434,7 +3434,7 @@
           "run_busy"
         ],
         "title": "RunMessageRefusalCode",
-        "description": "The conditions a follow-up turn can be refused for.\n\nA closed subset of the dispatch failure vocabulary, so the published\ncontract names only what this refusal can carry rather than every failure\nthe gateway knows. Each value is spelled as its failure-type counterpart,\nand the module refuses to import if one is not."
+        "description": "The conditions a follow-up turn can be refused for.\n\nA closed subset of the dispatch failure vocabulary, so the published\ncontract names only what this refusal can carry rather than every failure\nthe gateway knows. Each value is spelled as its failure-type counterpart."
       },
       "RunMessageRefusalDetail": {
         "properties": {

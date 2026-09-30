@@ -718,8 +718,7 @@ class RunMessageRefusalCode(StrEnum):
 
     A closed subset of the dispatch failure vocabulary, so the published
     contract names only what this refusal can carry rather than every failure
-    the gateway knows. Each value is spelled as its failure-type counterpart,
-    and the module refuses to import if one is not.
+    the gateway knows. Each value is spelled as its failure-type counterpart.
     """
 
     INPUT_REQUIRED = FailureType.INPUT_REQUIRED.value
@@ -727,16 +726,6 @@ class RunMessageRefusalCode(StrEnum):
     CONFLICT = FailureType.CONFLICT.value
     INCOMPATIBLE_STATE = FailureType.INCOMPATIBLE_STATE.value
     RUN_BUSY = FailureType.RUN_BUSY.value
-
-
-def _require_failure_type_codes() -> None:
-    known = {failure.value for failure in FailureType}
-    stray = [code.value for code in RunMessageRefusalCode if code.value not in known]
-    if stray:
-        raise RuntimeError(f"refusal codes with no failure type: {stray}")
-
-
-_require_failure_type_codes()
 
 
 class RunMessageRefusalDetail(BaseModel):

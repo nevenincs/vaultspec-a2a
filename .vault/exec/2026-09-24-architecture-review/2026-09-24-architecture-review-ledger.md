@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:2a7b4538607b9abd1497c4a48d18d151473293e357e1615cf6396dabfd8ef956'
+body_hash: 'sha256:d00559f47bc857d7f6714a0c63737f466dbfc173e6f70ce2011267eec59b93ad'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -375,6 +375,7 @@ related:
 - `S19` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 - `S27` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 - `S23` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
+- `S14` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 
 ## Notes
 
@@ -406,4 +407,5 @@ related:
 - `S19` Correction from the fix re-review (requeue-redrive-delay-never-arms): the redrive was never armed when the cadence flush itself failed, stranding the backlog.
 - `S27` Correction from the fix re-review (forged-heading-escape-rewrites-mounted-vault-headings).
 - `S23` Correction from the fix re-review (stale-comment-says-grep-composes-bare).
+- `S14` Correction from the fix re-review (refusal-code-import-guard-cannot-fail).
 

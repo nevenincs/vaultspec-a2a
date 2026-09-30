@@ -697,6 +697,17 @@ class Executor(SettlementMixin):
                     graph,
                     Command(
                         resume=req.option_id,
+                        # Every key here is bound atomically with the answer,
+                        # which is what lets a run parked before checkpoint
+                        # evidence existed acquire its digests without a
+                        # separate state update that would invalidate the
+                        # interrupt it is parked on. LangGraph holds a
+                        # resume's input writes against that checkpoint and
+                        # accumulates them until a superstep consumes them, so
+                        # a turn needing a second approval, and a resume
+                        # redelivered after its turn died, each write these
+                        # keys twice in one step. Every one of them therefore
+                        # reduces rather than holding a single value.
                         update={
                             "graph_action_receipts": {
                                 req.dispatch_id: receipt.model_dump(mode="json")

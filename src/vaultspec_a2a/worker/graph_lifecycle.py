@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from langchain_core.runnables import RunnableConfig
-    from langgraph.types import Command
+    from langgraph.types import Command, Interrupt
 
     from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
     from ..database.checkpoints import Checkpointer
@@ -119,6 +119,9 @@ class GraphStateSnapshot(Protocol):
 
     @property
     def next(self) -> tuple[str, ...]: ...
+
+    @property
+    def interrupts(self) -> tuple[Interrupt, ...]: ...
 
 
 class RegisteredCompiledGraph(StreamableGraph, Protocol):

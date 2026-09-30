@@ -459,7 +459,12 @@ def _test_graph_definition_digest(team_preset: str) -> str:
 
 
 class TestOneWorkspaceOneGraphEntry:
-    """S09 - the worker's graph cache holds one entry per workspace."""
+    """S09 - a run's graph cache entry is keyed on its canonical workspace.
+
+    Each run compiles its own graph (a compiled graph holds model instances a
+    provider refuses to share between concurrent turns); within a run, every
+    spelling of its project reaches that one entry.
+    """
 
     @staticmethod
     def _manager() -> GraphLifecycleManager:
@@ -486,22 +491,23 @@ class TestOneWorkspaceOneGraphEntry:
         digest = model_assignment_digest({})
         definition_digest = _definition(workspace).digest()
         assert graph_cache_key(
-            "preset", str(workspace), False, digest, definition_digest
+            "preset", str(workspace), False, digest, definition_digest, thread_id="r"
         ) == graph_cache_key(
-            "preset", _uncanonical_spelling(workspace), False, digest, definition_digest
+            "preset",
+            _uncanonical_spelling(workspace),
+            False,
+            digest,
+            definition_digest,
+            thread_id="r",
         )
 
     def test_a_project_less_key_is_still_a_key(self) -> None:
         """A run with no project still keys, so the mint cannot break cancel."""
         digest = model_assignment_digest({})
         definition_digest = _test_graph_definition_digest("preset")
-        assert graph_cache_key("preset", None, True, digest, definition_digest) == (
-            "preset",
-            None,
-            True,
-            digest,
-            definition_digest,
-        )
+        assert graph_cache_key(
+            "preset", None, True, digest, definition_digest, thread_id="r"
+        ) == ("preset", None, True, digest, definition_digest, "r")
 
     def test_model_assignment_identity_partitions_the_graph_cache(self) -> None:
         first = model_assignment_digest({"coder": {"model_name": "first"}})
@@ -510,52 +516,60 @@ class TestOneWorkspaceOneGraphEntry:
         definition_digest = _test_graph_definition_digest("preset")
 
         assert graph_cache_key(
-            "preset", None, False, first, definition_digest
-        ) == graph_cache_key("preset", None, False, same, definition_digest)
+            "preset", None, False, first, definition_digest, thread_id="r"
+        ) == graph_cache_key(
+            "preset", None, False, same, definition_digest, thread_id="r"
+        )
         assert graph_cache_key(
-            "preset", None, False, first, definition_digest
-        ) != graph_cache_key("preset", None, False, other, definition_digest)
+            "preset", None, False, first, definition_digest, thread_id="r"
+        ) != graph_cache_key(
+            "preset", None, False, other, definition_digest, thread_id="r"
+        )
 
-    def test_two_threads_on_one_workspace_share_one_cached_graph(
+    def test_two_runs_never_share_a_graph_entry(self) -> None:
+        digest = model_assignment_digest({})
+        definition_digest = _test_graph_definition_digest("preset")
+        assert graph_cache_key(
+            "preset", None, False, digest, definition_digest, thread_id="run-1"
+        ) != graph_cache_key(
+            "preset", None, False, digest, definition_digest, thread_id="run-2"
+        )
+
+    def test_two_runs_on_one_workspace_hold_their_own_entries(
         self, workspace: Path
     ) -> None:
-        """The registration seam must not shadow the entry a dispatch would find.
+        """Two runs of one preset never share a graph, but agree on the project.
 
-        Registering under two spellings of one directory used to leave two
-        entries, so the second thread's turn recompiled a graph the worker
-        already held.
+        A compiled graph holds its nodes' model instances, and a provider model
+        refuses concurrent use, so a second run's overlapping turn on a shared
+        graph failed. Each run keeps its own entry; both still record the one
+        canonical spelling of the project, whichever spelling registered them.
         """
         manager = self._manager()
-        graph = self._graph()
 
         definition_digest = _test_graph_definition_digest("preset")
-        manager.register_compiled_graph(
-            "run-1",
-            (
-                "mock-success-single",
-                str(workspace),
-                False,
-                model_assignment_digest(_assignment("current")),
-                definition_digest,
-            ),
-            graph,
-        )
-        manager.register_compiled_graph(
-            "run-2",
-            (
-                "mock-success-single",
-                _uncanonical_spelling(workspace),
-                False,
-                model_assignment_digest(_assignment("current")),
-                definition_digest,
-            ),
-            graph,
-        )
+        for thread_id, spelling in (
+            ("run-1", str(workspace)),
+            ("run-2", _uncanonical_spelling(workspace)),
+        ):
+            manager.register_compiled_graph(
+                thread_id,
+                (
+                    "mock-success-single",
+                    spelling,
+                    False,
+                    model_assignment_digest(_assignment("current")),
+                    definition_digest,
+                ),
+                self._graph(),
+            )
 
-        assert manager.graph_count == 1
-        assert manager.cache_key_for_thread("run-1") == manager.cache_key_for_thread(
-            "run-2"
-        )
+        assert manager.graph_count == 2
+        first = manager.cache_key_for_thread("run-1")
+        second = manager.cache_key_for_thread("run-2")
+        assert first is not None and second is not None
+        assert first[:5] == second[:5]
+        assert first != second
 
     @pytest.mark.asyncio
     async def test_a_dispatch_reuses_the_registered_graph(
@@ -583,7 +597,7 @@ class TestOneWorkspaceOneGraphEntry:
 
         follow_up = DispatchRequest(
             action="ingest",
-            thread_id="run-2",
+            thread_id="run-1",
             team_preset="mock-success-single",
             workspace_root=_uncanonical_spelling(workspace),
             recursion_limit=25,
@@ -594,6 +608,37 @@ class TestOneWorkspaceOneGraphEntry:
 
         assert resolved is graph
         assert manager.graph_count == 1
+
+    @pytest.mark.asyncio
+    async def test_each_run_compiles_its_own_graph_and_reuses_it(
+        self, workspace: Path
+    ) -> None:
+        """Real compilation: a second run never receives the first run's graph."""
+        manager = self._manager()
+
+        selection = _assignment("current")["coder"]
+        team = load_team_config("mock-success-single", workspace_root=workspace)
+        assignment = {ref.agent_id: dict(selection) for ref in team.workers}
+
+        def dispatch(thread_id: str) -> DispatchRequest:
+            return DispatchRequest(
+                action="ingest",
+                thread_id=thread_id,
+                team_preset="mock-success-single",
+                workspace_root=str(workspace),
+                recursion_limit=25,
+                model_assignment=assignment,
+                graph_definition=_definition(workspace),
+            )
+
+        first = await manager.get_or_compile_graph(dispatch("run-1"))
+        second = await manager.get_or_compile_graph(dispatch("run-2"))
+        again = await manager.get_or_compile_graph(dispatch("run-1"))
+
+        assert first is not None and second is not None
+        assert first is not second
+        assert again is first
+        assert manager.graph_count == 2
 
     @pytest.mark.asyncio
     async def test_a_thread_cannot_reuse_a_graph_for_another_assignment(
@@ -764,7 +809,7 @@ class TestOneWorkspaceOneGraphEntry:
         assert manager.compile_count == 1
 
     @pytest.mark.asyncio
-    async def test_different_threads_with_one_exact_key_share_one_compile(
+    async def test_concurrent_runs_of_one_compilation_identity_compile_apart(
         self, workspace: Path
     ) -> None:
         class ControlledManager(GraphLifecycleManager):
@@ -809,11 +854,13 @@ class TestOneWorkspaceOneGraphEntry:
         await manager.started.wait()
         second = asyncio.create_task(manager.get_or_compile_graph(request("run-b")))
         await asyncio.sleep(0)
-        assert manager.compile_count == 1
-        assert manager.compile_flight_count == 1
+        # The second run does not wait on the first run's compile to share it:
+        # a shared graph would hand both runs the same model instances.
+        assert manager.compile_count == 2
+        assert manager.compile_flight_count == 2
         manager.release.set()
-        assert await first is await second
-        assert manager.compile_count == 1
+        assert await first is not await second
+        assert manager.compile_count == 2
         assert manager.compile_flight_count == 0
 
     @pytest.mark.asyncio

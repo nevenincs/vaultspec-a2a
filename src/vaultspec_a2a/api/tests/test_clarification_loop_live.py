@@ -88,7 +88,7 @@ if TYPE_CHECKING:
 
     from ...database.models import ThreadModel
     from ...worker.graph_lifecycle import (
-        GraphCacheKey,
+        GraphCompilationKey,
         GraphStateSnapshot,
         RegisteredCompiledGraph,
     )
@@ -102,7 +102,7 @@ type SessionFactory = async_sessionmaker[AsyncSession]
 
 async def _cache_key_for_thread(
     session_factory: SessionFactory, thread_id: str
-) -> GraphCacheKey:
+) -> GraphCompilationKey:
     """Bind the registered real graph to the run's exact durable authority."""
     async with session_factory() as db:
         metadata_json = await get_thread_metadata(db, thread_id)
@@ -156,7 +156,7 @@ class _ParkedRun:
     """Gateway and checkpoint values for one parked clarification graph."""
 
     thread_id: str
-    cache_key: GraphCacheKey
+    cache_key: GraphCompilationKey
     parked: ParkedClarification
     config: RunnableConfig
 

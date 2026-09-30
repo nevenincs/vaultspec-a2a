@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:1bfd2ded4a229e92ed7c16907960a20bb3701f11ff336a12b5a6eba54bd4fcd4'
+body_hash: 'sha256:fda27925a487ed9dd801eeb8d55943cf30e2783672b6aef91838eaff05ce62aa'
 ---
 
 # `architecture-review` plan
@@ -61,7 +61,7 @@ Graph routing, human-in-the-loop resume, crash recovery, and per-run isolation b
 - [x] `P02.S10` - Honour each preset recursion limit on served runs and bound document review loops per phase, with a working pipeline_loop early exit; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/thread/executable_graph.py, src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/_compiler_topologies.py, src/vaultspec_a2a/graph/nodes/phase_gate.py`.
 - [x] `P02.S11` - Bind a tool-permission approval to a fingerprint of the exact tool call and re-park when a replayed turn asks for a different call; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/control/permission_dispatch.py, src/vaultspec_a2a/control/permission_service.py`.
 - [x] `P02.S12` - Resume an interrupted run from its checkpoint through receipt evidence instead of replaying its input; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/worker/executor.py`.
-- [ ] `P02.S13` - Give each invocation its own model instances and move rule loading and engine discovery off the worker event loop; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/graph/nodes/, src/vaultspec_a2a/worker/_authoring_close.py`.
+- [x] `P02.S13` - Give each invocation its own model instances and move rule loading and engine discovery off the worker event loop; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/worker/_authoring_close.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/authoring/client.py`.
 
 ### Phase `P03` - run, session, and edge robustness
 

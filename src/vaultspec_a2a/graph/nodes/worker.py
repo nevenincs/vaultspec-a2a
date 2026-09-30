@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -948,13 +950,18 @@ def create_worker_node(
         mounter = settings["context_mounter"]
         mounted_context = await mounter(state) if mounter is not None else None
 
-        messages = _build_worker_messages(
-            state=state,
-            system_prompt=system_prompt,
-            workspace_root=settings["workspace_root"],
-            role=settings["role"],
-            feedback_grounding=feedback_grounding,
-            mounted_context=mounted_context,
+        # Off the loop: the workspace rules are globbed and read from disk, on
+        # the loop that also carries every other run and the worker's heartbeat.
+        messages = await asyncio.to_thread(
+            functools.partial(
+                _build_worker_messages,
+                state=state,
+                system_prompt=system_prompt,
+                workspace_root=settings["workspace_root"],
+                role=settings["role"],
+                feedback_grounding=feedback_grounding,
+                mounted_context=mounted_context,
+            )
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
         effective_model = _resolve_effective_worker_model(

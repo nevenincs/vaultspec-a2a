@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import functools
 from datetime import UTC, datetime
 from pathlib import Path
@@ -249,10 +250,13 @@ def _make_research_producer(
         messages: list[Any] = [SystemMessage(content=system_prompt)]
         effective_workspace_root = workspace_root or state.get("workspace_root")
         if effective_workspace_root:
-            rules = RuleManager(
-                Path(effective_workspace_root),
-                bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
-            ).compile("researcher")
+            rules = await asyncio.to_thread(
+                RuleManager(
+                    Path(effective_workspace_root),
+                    bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
+                ).compile,
+                "researcher",
+            )
             if rules:
                 messages.append(
                     SystemMessage(

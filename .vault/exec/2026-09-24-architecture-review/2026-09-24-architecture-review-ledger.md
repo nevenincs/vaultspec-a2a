@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:94636bbf1533da8b05c5662d3017610b4fc611388199052acec0f63c78b78c2c'
+body_hash: 'sha256:8159b0e222a08abea6af2d495c55efe00601927f1bda7497fb0c0b9c16ae3544'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -203,6 +203,18 @@ related:
 - `S20` `M` `src/vaultspec_a2a/control/tests/test_deployment_names.py`
 - `S20` `verify:` `docker compose config renders stop_grace_period 30s in all four variants + check-python check-type check-shell` -> `pass`
 - `S20` `by:` `worker-a62ea442`
+- `S13` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S13` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S13` `M` `src/vaultspec_a2a/worker/_authoring_close.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S13` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S13` `M` `src/vaultspec_a2a/authoring/client.py`
+- `S13` `M` `src/vaultspec_a2a/control/tests/test_active_project_identity.py`
+- `S13` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S13` `M` `src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`
+- `S13` `verify:` `runner full unit gate + api control desktop acceptance graph + worker` -> `pass`
+- `S13` `by:` `orchestrator`
 
 ## Notes
 
@@ -214,4 +226,5 @@ related:
 - `S11` The binding needed no provider change: the worker names each permission request by task namespace and exact call, and the gateway echoes the answered request id in the tool-permission resume; the plan row scope was corrected through the plan verb.
 - `S12` The receipt reducer's acceptance of a repeated dispatch_id (thread/action_receipts.py) was left as is: redelivery now continues from the checkpoint and never re-sends the receipt, so the reducer no longer sees the repeat; the plan row scope was corrected through the plan verb. The fix also closes the S06 drain/redelivery interaction, recorded in the audit.
 - `S14` Logged and closed by the orchestrator at merge (1c5278b) from the P03 worker's report; S14 made the messages verb refuse every state with a typed 409, a cross-repository contract change recorded in the audit.
+- `S13` Per-invocation model copies were rejected: AcpChatModel copies keep the original's transport, so they are not independent. Runs are separated instead by keying the compiled-graph cache on the run's thread, and a settled run's graph is evicted with it; this reverses the earlier one-entry-per-workspace sharing, recorded in the audit. Parallel researcher branches within one run still share one model, recorded as an open finding.
 

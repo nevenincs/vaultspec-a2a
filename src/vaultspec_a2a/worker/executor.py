@@ -36,8 +36,8 @@ from ._dispatch_receipts import emit_dispatch_application_receipt
 from ._dispatch_settlement import SettlementMixin, TerminalArbitration
 from ._executor_state import CheckpointAccess, DispatchCapacityState, RunResources
 from .graph_lifecycle import (
-    GraphCacheKey,
     GraphCompilationError,
+    GraphCompilationKey,
     GraphLifecycleManager,
     RegisteredCompiledGraph,
 )
@@ -241,11 +241,11 @@ class Executor(SettlementMixin):
     def register_compiled_graph(
         self,
         thread_id: str,
-        cache_key: GraphCacheKey,
+        compilation_key: GraphCompilationKey,
         graph: RegisteredCompiledGraph,
     ) -> None:
         """Register a pre-compiled graph through the lifecycle's atomic seam."""
-        self._graph_lifecycle.register_compiled_graph(thread_id, cache_key, graph)
+        self._graph_lifecycle.register_compiled_graph(thread_id, compilation_key, graph)
 
     def _log_extra(self, **fields: Any) -> dict[str, Any]:
         """Build bounded structured log fields for executor-owned events."""

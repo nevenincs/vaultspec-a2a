@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 __all__ = [
     "GraphCacheKey",
     "GraphCompilationError",
+    "GraphCompilationKey",
     "GraphLifecycleManager",
     "RegisteredCompiledGraph",
     "graph_cache_key",
@@ -62,10 +63,13 @@ class GraphCompilationError(RuntimeError):
 
 logger = logging.getLogger(__name__)
 
-# Public type for the graph cache key.  The explicit registration seam lets
-# real-behavior tests install a pre-compiled graph without reaching mutable
+# What a graph is compiled from: preset, project, autonomy, and the frozen
+# assignment and definition. The explicit registration seam takes one, so
+# real-behavior tests can install a pre-compiled graph without reaching mutable
 # cache dictionaries.
-type GraphCacheKey = tuple[str, str | None, bool, str, str]
+type GraphCompilationKey = tuple[str, str | None, bool, str, str]
+# The cache key: the compilation identity plus the run it belongs to.
+type GraphCacheKey = tuple[str, str | None, bool, str, str, str]
 
 
 def graph_cache_key(
@@ -74,8 +78,16 @@ def graph_cache_key(
     autonomous: bool,
     assignment_digest: str,
     graph_definition_digest: str,
+    *,
+    thread_id: str,
 ) -> GraphCacheKey:
     """Form the cache key for a compiled team graph.
+
+    A compiled graph holds its nodes' model instances, and a provider model
+    refuses concurrent use, so two runs of one preset sharing a graph failed
+    whichever turn overlapped the other. The run's thread is the last element:
+    each run compiles its own graph, and a run's successive turns - which
+    never overlap - reuse it.
 
     The single site that builds a key, so the workspace element is always the
     run's canonical project spelling and the final element binds the complete
@@ -94,6 +106,7 @@ def graph_cache_key(
         autonomous,
         assignment_digest,
         graph_definition_digest,
+        thread_id,
     )
 
 
@@ -295,8 +308,15 @@ class GraphLifecycleManager:
         return len(self._state.thread_compile_locks)
 
     def release_thread(self, thread_id: str) -> None:
-        """Release terminal thread identity without evicting a shared graph."""
-        self._state.thread_to_cache_key.pop(thread_id, None)
+        """Release a terminal run's identity and the graph compiled for it.
+
+        Graphs are compiled per run, so no other run can reach a settled run's
+        entry; keeping it would only hold its model instances until the LRU
+        bound pushed it out.
+        """
+        cache_key = self._state.thread_to_cache_key.pop(thread_id, None)
+        if cache_key is not None:
+            self._state.graph_cache.pop(cache_key, None)
         self._state.thread_compilation_digests.pop(thread_id, None)
 
     def clear(self) -> None:
@@ -316,7 +336,7 @@ class GraphLifecycleManager:
     def register_compiled_graph(
         self,
         thread_id: str,
-        cache_key: GraphCacheKey,
+        compilation_key: GraphCompilationKey,
         graph: RegisteredCompiledGraph,
     ) -> None:
         """Atomically install a compiled graph for a known thread.
@@ -328,7 +348,7 @@ class GraphLifecycleManager:
         here so a graph installed through this seam shares the entry a dispatch
         for the same workspace would find, rather than shadowing it.
         """
-        cache_key = graph_cache_key(*cache_key)
+        cache_key = graph_cache_key(*compilation_key, thread_id=thread_id)
         bound = self._state.thread_compilation_digests.get(thread_id)
         if bound is not None and bound != (cache_key[3], cache_key[4]):
             raise GraphCompilationError(
@@ -478,6 +498,7 @@ class GraphLifecycleManager:
             autonomous,
             assignment_digest,
             definition_digest,
+            thread_id=req.thread_id,
         )
 
         graph = await self._get_or_compile_cache_key(req, new_key, team_preset)
@@ -662,7 +683,7 @@ class GraphLifecycleManager:
         feedback_reader = None
         if team_config.topology.type == TopologyType.RESEARCH_ADR:
             proposal_submitter = await self._build_proposal_submitter(ws_root)
-            feedback_reader = self._build_feedback_reader()
+            feedback_reader = await self._build_feedback_reader()
 
         # CLI-coder presets that arm the engine authoring bridge get a per-run
         # binding provider, built here behind the same fail-closed contract as the
@@ -833,7 +854,7 @@ class GraphLifecycleManager:
             catalog_store=self._ports.catalog_store,
         )
 
-    def _build_feedback_reader(self) -> FeedbackContextReader | None:
+    async def _build_feedback_reader(self) -> FeedbackContextReader | None:
         """Construct the feedback-batch reader for a research_adr run, or None.
 
         The read-path companion to the submitter:
@@ -847,7 +868,9 @@ class GraphLifecycleManager:
         """
         from ..authoring import FeedbackContextReader, resolve_engine
 
-        engine = resolve_engine()
+        # Discovery reads files and probes the engine over HTTP; off the loop,
+        # as its sibling resolvers here already are.
+        engine = await asyncio.to_thread(resolve_engine)
         if engine is None:
             return None
         return FeedbackContextReader(

@@ -57,8 +57,8 @@ from .._dispatch_contract import (
 )
 from ..executor import Executor
 from ..graph_lifecycle import (
-    GraphCacheKey,
     GraphCompilationError,
+    GraphCompilationKey,
     GraphLifecycleManager,
     RegisteredCompiledGraph,
 )
@@ -239,7 +239,10 @@ def _current_resume_dispatch(
 
 
 def _inject_graph(
-    executor: Executor, thread_id: str, *, cache_key: GraphCacheKey = _TEST_CACHE_KEY
+    executor: Executor,
+    thread_id: str,
+    *,
+    cache_key: GraphCompilationKey = _TEST_CACHE_KEY,
 ) -> None:
     """Register a real terminal graph through the public executor seam."""
 
@@ -486,7 +489,8 @@ class TestIngestGating:
                 assert not executor._graph_lifecycle.has_thread(
                     f"terminal-{outcome.value}"
                 )
-                assert executor.graph_count == 1
+                # The run's own graph is released with it.
+                assert executor.graph_count == 0
             finally:
                 await bridge.close()
 
@@ -523,7 +527,8 @@ class TestIngestGating:
                     await executor._mark_ingest_done(thread_id, ThreadStatus.COMPLETED)
 
                 assert executor._graph_lifecycle.thread_binding_count == 0
-                assert executor.graph_count == 1
+                # Each settled run's own graph goes with it.
+                assert executor.graph_count == 0
             finally:
                 await bridge.close()
 

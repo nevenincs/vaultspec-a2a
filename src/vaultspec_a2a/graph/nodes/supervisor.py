@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -578,10 +580,14 @@ def create_supervisor_node(
 
     async def supervisor_node(state: TeamState) -> dict[str, Any]:
         """Execute the supervisor's routing task."""
-        messages = _build_supervisor_messages(
-            state=state,
-            full_prompt=full_prompt,
-            workspace_root=workspace_root,
+        # Off the loop: the workspace rules are globbed and read from disk.
+        messages = await asyncio.to_thread(
+            functools.partial(
+                _build_supervisor_messages,
+                state=state,
+                full_prompt=full_prompt,
+                workspace_root=workspace_root,
+            )
         )
         model_type = type(model).__name__
         _logger.debug(

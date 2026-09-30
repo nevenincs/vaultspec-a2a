@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:13ca07cd331add089f5e7291aaa57d99afc6c919ddf4a7f9c9312798dc29ffbd'
+body_hash: 'sha256:1db878214fd688260d07d601cdfcb9fef5f0b4e26c4ac1716fea29842be9f365'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -360,6 +360,11 @@ related:
 - `S17` `M` `src/vaultspec_a2a/api/tests/test_stream_attachment_order.py`
 - `S17` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 - `S17` `by:` `orchestrator`
+- `S08` `M` `src/vaultspec_a2a/api/app.py`
+- `S08` `M` `src/vaultspec_a2a/database/checkpoint_retention.py`
+- `S08` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py`
+- `S08` `M` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
+- `S08` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 
 ## Notes
 
@@ -384,4 +389,5 @@ related:
 - `S27` Reopened by the plan-close review (prompt-render-role-headers-are-forgeable, medium).
 - `S25` Reopened by the plan-close review (codex-credential-writeback-blocks-the-event-loop, medium).
 - `S17` Reopened by the plan-close review (sse-id-without-resumption, medium): the SSE id was removed and the Step action corrected through the plan verb to keep the sequence in the body.
+- `S08` Reopened by the plan-close review (settled-prune-on-the-relay-critical-path, medium): the prune runs behind the relay and a failed SQLite prune rolls back.
 

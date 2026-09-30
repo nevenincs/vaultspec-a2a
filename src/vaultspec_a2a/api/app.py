@@ -41,6 +41,7 @@ from ..control.clarification_service import (
 from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
+from ..control.event_handlers import settle_pending_checkpoint_prunes
 from ..control.health import (
     FullHealthRuntime,
     assemble_health_status,
@@ -531,6 +532,9 @@ async def _shutdown_gateway(
     )
     await finish_before(worker_client.aclose(), deadline, phase="worker HTTP client")
     await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
+    await finish_before(
+        settle_pending_checkpoint_prunes(), deadline, phase="checkpoint prunes"
+    )
     await finish_before(close_db(), deadline, phase="database")
 
     await _shutdown_observability(deadline)

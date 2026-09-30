@@ -14,6 +14,7 @@ is left untouched rather than guessed at.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -102,9 +103,16 @@ async def prune_settled_checkpoints(checkpointer: object, thread_id: str) -> boo
 
 async def _prune_sqlite(saver: AsyncSqliteSaver, thread_id: str) -> None:
     async with saver.lock:
-        await saver.conn.execute(_SQLITE_PRUNE_WRITES, (thread_id,))
-        await saver.conn.execute(_SQLITE_PRUNE_CHECKPOINTS, (thread_id,))
-        await saver.conn.commit()
+        try:
+            await saver.conn.execute(_SQLITE_PRUNE_WRITES, (thread_id,))
+            await saver.conn.execute(_SQLITE_PRUNE_CHECKPOINTS, (thread_id,))
+            await saver.conn.commit()
+        except BaseException:
+            # The saver's connection is shared, so deletes left open by a failed
+            # or cancelled prune would be committed by the saver's next write,
+            # half a prune landing on a thread nobody chose to prune then.
+            await asyncio.shield(saver.conn.rollback())
+            raise
 
 
 def _native_postgres_saver(checkpointer: object) -> Any | None:

@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:df6b69c6a96b1460e7745edef560730b6fc72620ae0edd0f8092c55051cb7297'
+body_hash: 'sha256:a9aeb6e51930ef092a5f031b55fb541ce3c2c1d63137ea4f8adc80a1bf878053'
 ---
 
 # `architecture-review` plan
@@ -51,7 +51,7 @@ The LangGraph family runs at its latest release and the graph layer uses the 1.2
 - [x] `P01.S05` - Carry run identity in a typed LangGraph Runtime context passed on ingest and resume; `src/vaultspec_a2a/graph/, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/executor.py`.
 - [x] `P01.S06` - Drain in-flight runs at a superstep boundary with RunControl on worker shutdown so a restart resumes a checkpoint instead of a torn node; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/worker/app.py`.
 - [x] `P01.S07` - Drop langsmith nostream-tagged model events from the relayed stream; `src/vaultspec_a2a/streaming/transformer.py`.
-- [ ] `P01.S08` - Prune superseded checkpoints of settled runs while keeping each run's latest checkpoint; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/control/event_handlers.py`.
+- [x] `P01.S08` - Prune superseded checkpoints of settled runs while keeping each run's latest checkpoint; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/control/event_handlers.py`.
 
 ### Phase `P02` - graph-layer defects
 

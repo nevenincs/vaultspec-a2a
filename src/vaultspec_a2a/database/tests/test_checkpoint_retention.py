@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import operator
 import os
+import sqlite3
 from collections import defaultdict
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 from uuid import uuid4
@@ -184,6 +185,46 @@ async def test_sqlite_keeps_the_error_writes_of_a_failed_thread(
     sqlite_saver: AsyncSqliteSaver,
 ) -> None:
     await _prove_a_failed_thread_keeps_its_error_writes(sqlite_saver)
+
+
+async def _write_count(saver: AsyncSqliteSaver, thread_id: str) -> int:
+    async with saver.conn.execute(
+        "SELECT COUNT(*) FROM writes WHERE thread_id = ?", (thread_id,)
+    ) as cursor:
+        row = await cursor.fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+@pytest.mark.asyncio
+async def test_a_failed_sqlite_prune_leaves_nothing_for_the_next_write_to_commit(
+    sqlite_saver: AsyncSqliteSaver,
+) -> None:
+    """A prune that fails part-way takes back what it had already deleted.
+
+    The saver shares one connection, so deletes a failed prune left open would
+    be committed by whatever the saver wrote next. A real trigger refuses the
+    second statement after the first has run.
+    """
+    graph = _settling_graph(sqlite_saver)
+    thread_id, other_id = f"refused-{uuid4()}", f"other-{uuid4()}"
+    await graph.ainvoke(cast("Any", {"log": ["one"]}), cast("Any", _config(thread_id)))
+    writes = await _write_count(sqlite_saver, thread_id)
+    history = await _history(sqlite_saver, thread_id)
+    await sqlite_saver.conn.execute(
+        "CREATE TRIGGER refuse_prune BEFORE DELETE ON checkpoints "
+        "BEGIN SELECT RAISE(ABORT, 'prune refused'); END"
+    )
+    await sqlite_saver.conn.commit()
+
+    with pytest.raises(sqlite3.DatabaseError, match="prune refused"):
+        await prune_settled_thread(sqlite_saver, thread_id)
+
+    await sqlite_saver.conn.execute("DROP TRIGGER refuse_prune")
+    await graph.ainvoke(cast("Any", {"log": ["one"]}), cast("Any", _config(other_id)))
+
+    assert await _write_count(sqlite_saver, thread_id) == writes
+    assert await _history(sqlite_saver, thread_id) == history
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:2dd34493f538b74b55e3f5fdca668316fcfa8b6ead6f4b867017e20ba8b663ef'
+body_hash: 'sha256:70879ab8ad9731325e913dba15a19f5ae0ec075c1049cbc4bc92f1488a574f57'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -354,6 +354,10 @@ Recorded from P07.S37, narrowing `rag-daemon-hosted-ranking-egress`. The install
 ### aggregator-stub-count-corrected | info | the team and worker graph stubs the audit counted were not protocol re-declarations
 
 Correction to `aggregator-test-doubles-still-outnumber-real-graphs`. Outside `src/vaultspec_a2a/streaming/tests/test_aggregator.py`, `src/vaultspec_a2a/team/tests/test_failure_scenario_preset.py` declares a structural Protocol it never instantiates, and `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py` carries one stub with its own recorded justification (it controls a checkpoint read's latency). P07.S40 replaced the seven aggregator stubs with one real error-injecting graph and kept one documented stream-versus-state stub.
+
+### codeql-reads-trusted-as-secret | high | CodeQL flagged launcher paths in the spawn logs as clear-text secrets
+
+Fixed in commit `3ebff38`; false positive. CodeQL's clear-text logging query raised three high alerts on the spawn and termination log calls in `src/vaultspec_a2a/providers/_subprocess.py`. Reproduced locally with CodeQL 2.27.1: every source was a call to `resolve_trusted_executable` or `_trusted_search_directories` in `src/vaultspec_a2a/providers/cli_resolution.py`. The shared sensitive-name heuristic classifies any function whose name contains `trusted` as returning a secret, so the resolved launcher path flowed as a secret into the `command_executable` spawn metadata. The functions were renamed to `resolve_service_executable` and `_absolute_search_directories`, and the query now finds nothing. The logging path is unchanged, so a real secret routed into spawn metadata would still be caught. An allowlist rewrite of `_metadata_extra` also silenced the query, but only by hiding the flow, and was rejected.
 
 ## Recommendations
 

@@ -455,7 +455,10 @@ def test_factory_applies_exact_kimi_model_scoped_effort() -> None:
     assert model.env_vars["KIMI_MODEL_THINKING_EFFORT"] == "deep"
 
 
-def test_factory_applies_exact_acp_session_controls() -> None:
+def test_factory_applies_exact_acp_session_controls(
+    installed_acp_adapter: Path,
+) -> None:
+    del installed_acp_adapter
     model = ProviderFactory().create(
         Provider.CLAUDE,
         model="catalog-model",

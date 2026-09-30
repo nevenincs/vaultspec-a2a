@@ -73,8 +73,10 @@ async def _read_initialize_result(stdout: asyncio.StreamReader) -> JsonObject:
 @pytest.mark.asyncio
 async def test_workspace_planted_node_never_launches_the_adapter(
     tmp_path: Path,
+    installed_acp_adapter: Path,
 ) -> None:
     """A workspace ``.venv/bin/node`` does not become the provider's runtime."""
+    del installed_acp_adapter
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     planted = _plant_workspace_node(workspace)
@@ -110,8 +112,11 @@ async def test_workspace_planted_node_never_launches_the_adapter(
         await kill_process_tree(process)
 
 
-def test_classified_acp_command_names_an_absolute_service_runtime() -> None:
+def test_classified_acp_command_names_an_absolute_service_runtime(
+    installed_acp_adapter: Path,
+) -> None:
     """The Claude ACP command carries the service's own Node, by absolute path."""
+    del installed_acp_adapter
     command, metadata = _classify_acp_command("node")
 
     assert command == [resolve_trusted_executable("node"), str(_CLAUDE_ACP_JS)]

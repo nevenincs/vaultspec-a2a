@@ -155,8 +155,10 @@ def test_capsule_rejects_asset_symlink_that_escapes_root(
 
 def test_explicit_none_forces_project_resolution_despite_configured_root(
     tmp_path: Path,
+    installed_acp_adapter: Path,
 ) -> None:
     """Explicit None bypasses configured capsule resolution in a clean process."""
+    del installed_acp_adapter
     configured_root = tmp_path / "configured-capsule"
     configured_root.mkdir()
     repository_root = Path(__file__).resolve().parents[4]
@@ -210,8 +212,11 @@ print(json.dumps({{
     )
 
 
-def test_explicit_none_keeps_project_backend_behavior() -> None:
+def test_explicit_none_keeps_project_backend_behavior(
+    installed_acp_adapter: Path,
+) -> None:
     """Explicit None selects the existing Compose/project-local classifier."""
+    del installed_acp_adapter
     command, meta = _classify_acp_command("node", capsule_assets_root=None)
     assert command == [resolve_trusted_executable("node"), str(_CLAUDE_ACP_JS)]
     assert meta["runtime_authority"] == "project_local"

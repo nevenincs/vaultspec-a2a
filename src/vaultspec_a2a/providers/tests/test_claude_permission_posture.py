@@ -150,8 +150,11 @@ def test_session_options_deny_the_built_ins_a_persona_may_not_use(
     assert set(permitted).isdisjoint(disallowed)
 
 
-def test_installed_adapter_lets_the_client_choose_its_setting_sources() -> None:
+def test_installed_adapter_lets_the_client_choose_its_setting_sources(
+    installed_acp_adapter: Path,
+) -> None:
     """The adapter defaults to ambient sources and the client's value wins."""
+    del installed_acp_adapter
     source = acp_adapter_source()
 
     default = source.index('settingSources: ["user", "project", "local"]')
@@ -166,26 +169,35 @@ def test_installed_adapter_lets_the_client_choose_its_setting_sources() -> None:
     assert spread < reassigned
 
 
-def test_installed_adapter_keeps_the_client_denied_tools() -> None:
+def test_installed_adapter_keeps_the_client_denied_tools(
+    installed_acp_adapter: Path,
+) -> None:
     """The adapter appends its own denials to the client's rather than replacing."""
+    del installed_acp_adapter
     assert (
         "disallowedTools: [...(userProvidedOptions?.disallowedTools || []), "
         "...disallowedTools]" in acp_adapter_source()
     )
 
 
-def test_installed_adapter_advertises_the_unattended_permission_mode() -> None:
+def test_installed_adapter_advertises_the_unattended_permission_mode(
+    installed_acp_adapter: Path,
+) -> None:
     """The mode an unattended run asks for is one the adapter can actually serve."""
+    del installed_acp_adapter
     assert AUTONOMOUS_PERMISSION_MODE in acp_adapter_permission_mode_ids()
 
 
-def test_the_pinned_mode_is_the_one_that_still_asks_this_project() -> None:
+def test_the_pinned_mode_is_the_one_that_still_asks_this_project(
+    installed_acp_adapter: Path,
+) -> None:
     """The pin keeps the permission rung in the path, by the adapter's own words.
 
     The alternative reads as the stricter choice and is the opposite: a mode that
     never asks decides every uncovered call inside the CLI, where this run's
     exact-name allowlist and its cross-project refusal do not exist.
     """
+    del installed_acp_adapter
     source = acp_adapter_source()
 
     assert AUTONOMOUS_PERMISSION_MODE == "default"
@@ -420,12 +432,15 @@ def test_a_read_grant_names_the_workspace_it_is_for(tmp_path: Path) -> None:
     assert workspace_scoped_tool_rule("Read", None) == "Read"
 
 
-def test_installed_sdk_admits_a_path_pattern_for_every_scoped_tool() -> None:
+def test_installed_sdk_admits_a_path_pattern_for_every_scoped_tool(
+    installed_acp_adapter: Path,
+) -> None:
     """The scoped rules are written in a grammar the installed SDK really has.
 
     The SDK classifies which tools take a file pattern; a rule for a tool
     outside that set would read as a scope while matching nothing.
     """
+    del installed_acp_adapter
     source = (
         Path(__file__).resolve().parents[4]
         / "node_modules"

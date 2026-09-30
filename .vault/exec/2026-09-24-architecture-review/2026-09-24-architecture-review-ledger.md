@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:8159b0e222a08abea6af2d495c55efe00601927f1bda7497fb0c0b9c16ae3544'
+body_hash: 'sha256:b519c746a4c0291c7fa6fbf1d69f022c677dc703b03a56b193296c6e9316b10d'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -215,6 +215,104 @@ related:
 - `S13` `M` `src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`
 - `S13` `verify:` `runner full unit gate + api control desktop acceptance graph + worker` -> `pass`
 - `S13` `by:` `orchestrator`
+- `S21` `M` `src/vaultspec_a2a/providers/_factory_commands.py`
+- `S21` `M` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S21` `M` `src/vaultspec_a2a/providers/antigravity_cli.py`
+- `S21` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S21` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S21` `M` `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
+- `S21` `M` `src/vaultspec_a2a/providers/tests/test_cli_resolution.py`
+- `S21` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S21` `A` `src/vaultspec_a2a/providers/tests/test_launcher_confinement.py`
+- `S21` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S21` `by:` `worker-a91fafa5`
+- `S22` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S22` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S22` `A` `src/vaultspec_a2a/providers/_claude_tool_policy.py`
+- `S22` `M` `src/vaultspec_a2a/providers/tests/_installed_vocabulary.py`
+- `S22` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S22` `M` `src/vaultspec_a2a/providers/tests/test_acp_permission_option_ids.py`
+- `S22` `A` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S22` `M` `src/vaultspec_a2a/providers/_claude_tool_policy.py`
+- `S22` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S22` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S22` `by:` `worker-a91fafa5`
+- `S23` `M` `src/vaultspec_a2a/providers/_acp_mcp.py`
+- `S23` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S23` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S23` `M` `src/vaultspec_a2a/providers/_claude_tool_policy.py`
+- `S23` `M` `src/vaultspec_a2a/providers/_codex_config_home.py`
+- `S23` `M` `src/vaultspec_a2a/providers/_codex_permission.py`
+- `S23` `M` `src/vaultspec_a2a/providers/_harness_mcp_registry.py`
+- `S23` `M` `src/vaultspec_a2a/providers/_native_read_tools.py`
+- `S23` `A` `src/vaultspec_a2a/providers/_project_scope.py`
+- `S23` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp_egress_axis.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_codex_enabled_tools_allowlist.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_kimi_acp_conditioning.py`
+- `S23` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S23` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S23` `by:` `worker-a91fafa5`
+- `S24` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S24` `M` `src/vaultspec_a2a/providers/tests/test_acp_permission_option_ids.py`
+- `S24` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S24` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S24` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S24` `by:` `worker-a91fafa5`
+- `S25` `A` `src/vaultspec_a2a/providers/_codex_auth.py`
+- `S25` `M` `src/vaultspec_a2a/providers/_codex_config_home.py`
+- `S25` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S25` `A` `src/vaultspec_a2a/providers/tests/test_codex_credential_writeback.py`
+- `S25` `M` `src/vaultspec_a2a/lifecycle/singleton.py`
+- `S25` `M` `src/vaultspec_a2a/providers/_codex_auth.py`
+- `S25` `M` `src/vaultspec_a2a/providers/tests/test_acp_model_selection.py`
+- `S25` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S25` `A` `src/vaultspec_a2a/utils/file_lock.py`
+- `S25` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S25` `by:` `worker-a91fafa5`
+- `S26` `M` `src/vaultspec_a2a/providers/_acp_auth.py`
+- `S26` `M` `src/vaultspec_a2a/providers/_acp_model_state.py`
+- `S26` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S26` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S26` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S26` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S26` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S26` `A` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S26` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S26` `by:` `worker-a91fafa5`
+- `S27` `M` `src/vaultspec_a2a/providers/_codex_protocol.py`
+- `S27` `A` `src/vaultspec_a2a/providers/_prompt_render.py`
+- `S27` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S27` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S27` `A` `src/vaultspec_a2a/providers/tests/test_prompt_render.py`
+- `S27` `M` `src/vaultspec_a2a/providers/_prompt_render.py`
+- `S27` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S27` `by:` `worker-a91fafa5`
+- `S28` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S28` `M` `src/vaultspec_a2a/providers/_codex_app_server_client.py`
+- `S28` `M` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S28` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S28` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S28` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S28` `A` `src/vaultspec_a2a/providers/tests/test_acp_stderr_tail.py`
+- `S28` `M` `src/vaultspec_a2a/providers/tests/test_codex_stderr_drain.py`
+- `S28` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S28` `by:` `worker-a91fafa5`
+- `S29` `M` `src/vaultspec_a2a/providers/_harness_mcp_registry.py`
+- `S29` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S29` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S29` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S29` `A` `src/vaultspec_a2a/providers/tests/test_harness_interpreter_pin.py`
+- `S29` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S29` `verify:` `providers suite (944) + utils + worker database thread control (1322) + api (535) + check-python check-type check-anchors` -> `pass`
+- `S29` `by:` `worker-a91fafa5`
+- `S24` `by:` `orchestrator`
 
 ## Notes
 
@@ -227,4 +325,7 @@ related:
 - `S12` The receipt reducer's acceptance of a repeated dispatch_id (thread/action_receipts.py) was left as is: redelivery now continues from the checkpoint and never re-sends the receipt, so the reducer no longer sees the repeat; the plan row scope was corrected through the plan verb. The fix also closes the S06 drain/redelivery interaction, recorded in the audit.
 - `S14` Logged and closed by the orchestrator at merge (1c5278b) from the P03 worker's report; S14 made the messages verb refuse every state with a typed 409, a cross-repository contract change recorded in the audit.
 - `S13` Per-invocation model copies were rejected: AcpChatModel copies keep the original's transport, so they are not independent. Runs are separated instead by keying the compiled-graph cache on the run's thread, and a settled run's graph is evicted with it; this reverses the earlier one-entry-per-workspace sharing, recorded in the audit. Parallel researcher branches within one run still share one model, recorded as an open finding.
+- `S22` Deviation accepted by the orchestrator: the unattended Claude lane pins mode default, not the planned dontAsk, because the pinned CLI maps dontAsk to deny-without-asking and would take the permission rung and cross-project guard out of the path (0f58aff); recorded in the audit.
+- `S24` The worker-side hand-off (stop offering an always answer the CLI would persist) was applied by the orchestrator in 92f4a75.
+- `S21` Logged and closed by the orchestrator at merge (b56bb9c) from the P04 worker's report; the merge carried the graph-test fallout of S23 and S27.
 

@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:fda27925a487ed9dd801eeb8d55943cf30e2783672b6aef91838eaff05ce62aa'
+body_hash: 'sha256:6d138224a92d4c5ba2950ee3da6a6f831c7857f2853bd7f41fe52f168de9d328'
 ---
 
 # `architecture-review` plan
@@ -79,15 +79,15 @@ Busy runs, worker backpressure, event streams, checkpoint storage, the event bri
 
 Provider launchers, the Claude and Codex permission posture, native tool scope, credentials, and the ACP wire are confined and faithful on every served lane.
 
-- [ ] `P04.S21` - Resolve provider launchers to absolute paths from the service trusted PATH or the capsule, never the agent PATH or working directory; `src/vaultspec_a2a/providers/_factory_commands.py, src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/_subprocess.py`.
-- [ ] `P04.S22` - Pin the Claude lane permission posture: no ambient setting sources, persona-derived disallowed tools, dontAsk on autonomous runs verified against the reported mode, and allow-once for always options; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P04.S23` - Scope native read tools to the workspace, stop pre-approving project-addressable rag tools, and scan Codex tool arguments for foreign projects; `src/vaultspec_a2a/providers/_native_read_tools.py, src/vaultspec_a2a/providers/_codex_permission.py, src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P04.S24` - Fail closed when a permission callback names an option that was not offered; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
-- [ ] `P04.S25` - Write refreshed Codex credentials back to their source home under a lock; `src/vaultspec_a2a/providers/_codex_config_home.py`.
-- [ ] `P04.S26` - Use one Claude binary resolver for catalog discovery and execution and record the adapter and CLI identity each run used; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py`.
-- [ ] `P04.S27` - Render ACP prompts with roles, speaker names, and tool results through the renderer the Codex lane shares; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_codex_protocol.py`.
-- [ ] `P04.S28` - Retain a redacted ACP stderr tail, attach it to provider errors, and log provider session ids per turn; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
-- [ ] `P04.S29` - Pin the harness MCP launch interpreter to the project Python; `src/vaultspec_a2a/providers/_harness_mcp_registry.py`.
+- [x] `P04.S21` - Resolve provider launchers to absolute paths from the service trusted PATH or the capsule, never the agent PATH or working directory; `src/vaultspec_a2a/providers/_factory_commands.py, src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/_subprocess.py`.
+- [x] `P04.S22` - Pin the Claude lane permission posture: no ambient setting sources, persona-derived disallowed tools, dontAsk on autonomous runs verified against the reported mode, and allow-once for always options; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P04.S23` - Scope native read tools to the workspace, stop pre-approving project-addressable rag tools, and scan Codex tool arguments for foreign projects; `src/vaultspec_a2a/providers/_native_read_tools.py, src/vaultspec_a2a/providers/_codex_permission.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P04.S24` - Fail closed when a permission callback names an option that was not offered; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [x] `P04.S25` - Write refreshed Codex credentials back to their source home under a lock; `src/vaultspec_a2a/providers/_codex_config_home.py`.
+- [x] `P04.S26` - Use one Claude binary resolver for catalog discovery and execution and record the adapter and CLI identity each run used; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py`.
+- [x] `P04.S27` - Render ACP prompts with roles, speaker names, and tool results through the renderer the Codex lane shares; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_codex_protocol.py`.
+- [x] `P04.S28` - Retain a redacted ACP stderr tail, attach it to provider errors, and log provider session ids per turn; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [x] `P04.S29` - Pin the harness MCP launch interpreter to the project Python; `src/vaultspec_a2a/providers/_harness_mcp_registry.py`.
 
 ### Phase `P05` - context and observability
 

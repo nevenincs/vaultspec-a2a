@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:ea133120603545a46bd2955a63c3076e572e9f90b78b694640fb1674e25034e6'
+body_hash: 'sha256:1bfd2ded4a229e92ed7c16907960a20bb3701f11ff336a12b5a6eba54bd4fcd4'
 ---
 
 # `architecture-review` plan
@@ -67,13 +67,13 @@ Graph routing, human-in-the-loop resume, crash recovery, and per-run isolation b
 
 Busy runs, worker backpressure, event streams, checkpoint storage, the event bridge, and container shutdown fail typed and bounded instead of wedging.
 
-- [ ] `P03.S14` - Refuse a follow-up on a busy run with a typed conflict that installs no writer; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/worker/app.py`.
-- [ ] `P03.S15` - Split worker refusals by reason and feed the circuit breaker only transport failures and server errors, with a single half-open probe; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/worker/app.py`.
-- [ ] `P03.S16` - Scope the stream database session to the handler so an open stream holds no connection or read transaction; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py`.
-- [ ] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, sequence frames with SSE ids, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.
-- [ ] `P03.S18` - Back the Postgres checkpointer with a sized connection pool; `src/vaultspec_a2a/database/checkpoints.py`.
-- [ ] `P03.S19` - Bound, serialize, and split worker event batches and protect terminal events from eviction; `src/vaultspec_a2a/worker/ipc.py, src/vaultspec_a2a/worker/state_projection.py`.
-- [ ] `P03.S20` - Start containers through the owned serve entry with a stop grace period longer than the shutdown budget; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.
+- [x] `P03.S14` - Refuse a follow-up on a busy run with a typed conflict that installs no writer; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/worker/app.py`.
+- [x] `P03.S15` - Split worker refusals by reason and feed the circuit breaker only transport failures and server errors, with a single half-open probe; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/worker/app.py`.
+- [x] `P03.S16` - Scope the stream database session to the handler so an open stream holds no connection or read transaction; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py`.
+- [x] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, sequence frames with SSE ids, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.
+- [x] `P03.S18` - Back the Postgres checkpointer with a sized connection pool; `src/vaultspec_a2a/database/checkpoints.py`.
+- [x] `P03.S19` - Bound, serialize, and split worker event batches and protect terminal events from eviction; `src/vaultspec_a2a/worker/ipc.py, src/vaultspec_a2a/worker/state_projection.py`.
+- [x] `P03.S20` - Start containers through the owned serve entry with a stop grace period longer than the shutdown budget; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.
 
 ### Phase `P04` - provider lane security and fidelity
 

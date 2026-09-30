@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:d2a5996b35ed006486822513430d998f897bb64c00db9556820e797b5c6f5959'
+body_hash: 'sha256:94636bbf1533da8b05c5662d3017610b4fc611388199052acec0f63c78b78c2c'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -132,6 +132,77 @@ related:
 - `S12` `A` `src/vaultspec_a2a/worker/tests/test_executor_redelivery.py`
 - `S12` `verify:` `runner worker api control acceptance streaming suites` -> `pass`
 - `S12` `by:` `orchestrator`
+- `S14` `M` `openapi.json`
+- `S14` `M` `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`
+- `S14` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S14` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S14` `M` `src/vaultspec_a2a/api/tests/test_gateway_drain.py`
+- `S14` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S14` `M` `src/vaultspec_a2a/control/message_service.py`
+- `S14` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `S14` `M` `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+- `S14` `M` `src/vaultspec_a2a/thread/dispatch_policy.py`
+- `S14` `M` `src/vaultspec_a2a/thread/enums.py`
+- `S14` `M` `src/vaultspec_a2a/thread/message_policy.py`
+- `S14` `M` `src/vaultspec_a2a/thread/tests/test_message_policy.py`
+- `S14` `verify:` `runner api control thread tests (1313) + check-python + check-type` -> `pass`
+- `S14` `by:` `worker-a62ea442`
+- `S15` `M` `src/vaultspec_a2a/control/circuit_breaker.py`
+- `S15` `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `S15` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S15` `A` `src/vaultspec_a2a/control/tests/test_circuit_breaker_probe.py`
+- `S15` `A` `src/vaultspec_a2a/control/tests/test_dispatch_refusal_classification.py`
+- `S15` `M` `src/vaultspec_a2a/thread/dispatch_policy.py`
+- `S15` `M` `src/vaultspec_a2a/worker/_dispatch_contract.py`
+- `S15` `M` `src/vaultspec_a2a/worker/app.py`
+- `S15` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S15` `M` `src/vaultspec_a2a/worker/tests/test_dispatch_ids.py`
+- `S15` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S15` `verify:` `runner control worker thread (944) + api (533) + gates` -> `pass`
+- `S15` `by:` `worker-a62ea442`
+- `S16` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S16` `A` `src/vaultspec_a2a/api/tests/test_stream_session_scope.py`
+- `S16` `verify:` `runner api tests (534) + gates` -> `pass`
+- `S16` `by:` `worker-a62ea442`
+- `S17` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S17` `M` `src/vaultspec_a2a/api/tests/conftest.py`
+- `S17` `A` `src/vaultspec_a2a/api/tests/test_stream_attachment_order.py`
+- `S17` `M` `src/vaultspec_a2a/api/tests/test_stream_connection_limit.py`
+- `S17` `M` `src/vaultspec_a2a/api/tests/test_stream_quota_entry_points.py`
+- `S17` `M` `src/vaultspec_a2a/api/tests/test_stream_session_scope.py`
+- `S17` `M` `src/vaultspec_a2a/api/tests/test_stream_slot_release.py`
+- `S17` `M` `src/vaultspec_a2a/api/tests/test_thread_stream.py`
+- `S17` `M` `src/vaultspec_a2a/api/thread_stream.py`
+- `S17` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S17` `M` `src/vaultspec_a2a/database/session.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/aggregator.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/fanout.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/sse_frames.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/subscribers.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/tests/test_fanout.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/tests/test_progress_allowlist.py`
+- `S17` `verify:` `runner api streaming (752) + gates` -> `pass`
+- `S17` `by:` `worker-a62ea442`
+- `S18` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S18` `A` `src/vaultspec_a2a/database/tests/test_checkpoint_pool.py`
+- `S18` `verify:` `runner database --require-prerequisite=postgres (410) + control (562) + gates` -> `pass`
+- `S18` `by:` `worker-a62ea442`
+- `S19` `M` `.env.example`
+- `S19` `M` `src/vaultspec_a2a/api/internal.py`
+- `S19` `M` `src/vaultspec_a2a/control/config.py`
+- `S19` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S19` `M` `src/vaultspec_a2a/streaming/fanout.py`
+- `S19` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S19` `A` `src/vaultspec_a2a/worker/tests/test_ipc_batch_bounds.py`
+- `S19` `verify:` `runner worker api streaming control (1472) + gates` -> `pass`
+- `S19` `by:` `worker-a62ea442`
+- `S20` `M` `service/docker-compose.dev.yml`
+- `S20` `M` `service/docker-compose.integration.yml`
+- `S20` `M` `service/docker-compose.prod.yml`
+- `S20` `M` `service/docker/prod.Dockerfile`
+- `S20` `M` `src/vaultspec_a2a/control/tests/test_deployment_names.py`
+- `S20` `verify:` `docker compose config renders stop_grace_period 30s in all four variants + check-python check-type check-shell` -> `pass`
+- `S20` `by:` `worker-a62ea442`
 
 ## Notes
 
@@ -142,4 +213,5 @@ related:
 - `S10` The recursion limit resolves in the worker from the frozen graph definition (the lower of the gateway ceiling and the preset), not at the gateway call sites; the plan row scope was corrected through the plan verb.
 - `S11` The binding needed no provider change: the worker names each permission request by task namespace and exact call, and the gateway echoes the answered request id in the tool-permission resume; the plan row scope was corrected through the plan verb.
 - `S12` The receipt reducer's acceptance of a repeated dispatch_id (thread/action_receipts.py) was left as is: redelivery now continues from the checkpoint and never re-sends the receipt, so the reducer no longer sees the repeat; the plan row scope was corrected through the plan verb. The fix also closes the S06 drain/redelivery interaction, recorded in the audit.
+- `S14` Logged and closed by the orchestrator at merge (1c5278b) from the P03 worker's report; S14 made the messages verb refuse every state with a typed 409, a cross-repository contract change recorded in the audit.
 

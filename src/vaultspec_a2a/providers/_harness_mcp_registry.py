@@ -41,9 +41,11 @@ __all__ = [
     "harness_server_addresses_projects_per_call",
     "harness_server_egresses",
     "harness_server_exact_surface",
+    "harness_tool_is_withheld",
     "interpreter_pin_args",
     "is_known_harness_server",
     "registry_launch_divergence",
+    "withheld_harness_tools",
 ]
 
 
@@ -151,14 +153,15 @@ _TRUST_AXES = ("read_only", "network_egress")
 _ROOT_PIN_AXIS = "root_pin"
 _EXACT_SURFACE_AXIS = "exact_surface"
 _PER_CALL_PROJECT_AXIS = "per_call_project"
+_WITHHELD_TOOLS_FIELD = "withheld_tools"
 RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
-# The restricted launch is served from 0.1.56 onward. NO version constraint,
-# per the registry's standing policy (asserted by its own test): the boundary
-# is the SERVED SURFACE, checked before every launch. An older resolution
-# rejects `--read-only` and is refused at the contract seam rather than
-# surfaced wide. Operationally that means a stale `uvx` cache fails the lane
-# loudly and repeatedly until it refreshes - accepted as fail-loud, and the
-# reason a2a's own dependency floor names 0.1.56.
+# The server executable is ``vaultspec-core-mcp`` from 0.2.4 onward. NO
+# version constraint, per the registry's standing policy (asserted by its own
+# test): the boundary is the SERVED SURFACE, checked before every launch. An
+# older resolution lacks the executable or serves another surface and is
+# refused at the contract seam rather than surfaced wide. Operationally that
+# means a stale `uvx` cache fails the lane loudly and repeatedly until it
+# refreshes - accepted as fail-loud.
 CORE_MCP_REQUIREMENT = "vaultspec-core"
 
 
@@ -227,6 +230,27 @@ def _validate_registry_entry(name: str, value: JsonValue) -> None:
             "project is chosen per call may not be approved ahead of the call "
             "that chooses it - omission is never read as permission"
         )
+    withheld = value.get(_WITHHELD_TOOLS_FIELD)
+    if withheld is not None:
+        declared = value.get("tools")
+        if not isinstance(withheld, list) or not all(
+            isinstance(tool, str) and tool for tool in withheld
+        ):
+            raise ConfigError(
+                f"harness registry entry {name!r} declares "
+                f"{_WITHHELD_TOOLS_FIELD!r} as {withheld!r}; state the served "
+                "tools no run may call as a list of tool names"
+            )
+        overlap = sorted(
+            tool
+            for tool in withheld
+            if isinstance(tool, str) and isinstance(declared, list) and tool in declared
+        )
+        if overlap:
+            raise ConfigError(
+                f"harness registry entry {name!r} both permits and withholds "
+                f"{overlap!r}; a tool is one or the other"
+            )
     if _ENV_FIELD in value:
         raise ConfigError(
             f"harness registry entry {name!r} declares {_ENV_FIELD!r}; the "
@@ -292,21 +316,31 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
         "vaultspec-rag": {
             "name": "vaultspec-rag",
             "command": "uvx",
-            "args": ["--from", RAG_MCP_REQUIREMENT, "vaultspec-search-mcp"],
+            # ``--read-only`` withdraws every tool not annotated read-only, so
+            # the reindex and clean verbs the server otherwise serves never
+            # reach a session at all rather than resting on the permission rung.
+            "args": [
+                "--from",
+                RAG_MCP_REQUIREMENT,
+                "vaultspec-search-mcp",
+                "--read-only",
+            ],
             "tools": ["search_vault", "search_codebase", "get_code_file"],
             "read_only": True,
-            # Indexes and serves the local vault/codebase over stdio; no outbound
-            # request leaves the agent host on its behalf.
+            # Serves the local vault/codebase over stdio. A daemon an operator
+            # starts holding a hosted-ranking key would send search candidates
+            # outward; the launch here never supplies one, and that daemon is
+            # the operator's own configuration rather than a run's.
             "network_egress": False,
             # The stdio server resolves the project a call addresses from the
-            # call's explicit root, then this variable, then its own working
-            # directory. Naming the variable here is what lets a run REPLACE the
-            # working-directory fallback - undeclared inheritance through a
-            # third-party CLI, correct as far as anyone has checked and verified
-            # for nothing - with a stated per-run pin. The pin sets the project a
-            # call addresses when it names none; a call that names another project
-            # is a separate boundary, refused at the permission layer until the
-            # server locks its stdio session to its launch root.
+            # call's explicit root, then this variable, then the core pin
+            # variable, then its own working directory. Naming the variable here
+            # is what lets a run REPLACE the inherited fallbacks - undeclared
+            # inheritance through a third-party CLI - with a stated per-run pin.
+            # The pin sets the project a call addresses when it names none; a
+            # call that names another project is a separate boundary, refused at
+            # the permission layer until the server locks its stdio session to
+            # its launch root.
             "root_pin": "VAULTSPEC_RAG_ROOT",
             # Every tool this server serves takes the project as an ARGUMENT,
             # with the pin above only supplying the default. A call may
@@ -314,11 +348,9 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
             # decision about the CALL - so its tools are never approved before
             # the call exists, on either transport.
             "per_call_project": True,
-            # The served surface legitimately exceeds this declaration: the search
-            # server also mounts index-rebuild and index-clean verbs. That is
-            # tolerable because those mutate a recoverable index under the search
-            # storage root, never the vault, so the declaration is an allowlist
-            # rather than the safety case.
+            # The read-only launch serves more read tools than a run declares
+            # (combined and document search, index status), so the declaration
+            # is an allowlist rather than the safety case.
             "exact_surface": False,
             "runtime_acquisition": True,
             "desktop_available": False,
@@ -333,16 +365,27 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
             # vault behind every deny that guards the filesystem path. The
             # restricted launch registers only non-mutating handlers, so no
             # write-capable tool exists in the process to be handed or approved.
-            "args": ["--from", CORE_MCP_REQUIREMENT, "vaultspec-mcp", "--read-only"],
-            # Exactly what the restricted launch registers. ``check`` is safe to
-            # declare ONLY here: unrestricted it takes a repair argument that a
-            # tool-name allowlist cannot see, while the read-only launch registers
-            # a validation-only signature and rejects a smuggled repair argument
+            "args": [
+                "--from",
+                CORE_MCP_REQUIREMENT,
+                "vaultspec-core-mcp",
+                "--read-only",
+            ],
+            # The read tools a run may call. ``check`` is safe to declare ONLY
+            # here: unrestricted it takes a repair argument that a tool-name
+            # allowlist cannot see, while the read-only launch registers a
+            # validation-only signature and rejects a smuggled repair argument
             # server-side.
             "tools": ["status", "find", "check", "discover"],
+            # Served by the restricted launch, which has no flag to drop them,
+            # and never callable: both send vault text to a hosted API whenever
+            # the host has a key for it. Withholding them on every lane, before
+            # any human is asked, is what keeps the no-egress claim below true
+            # of everything a run can reach.
+            "withheld_tools": ["search", "crossref"],
             "read_only": True,
-            # Local stdio server over the pinned project's own records; no
-            # outbound request leaves the agent host on its behalf.
+            # Local stdio server over the pinned project's own records; nothing
+            # a run can call sends a request off the agent host on its behalf.
             "network_egress": False,
             # Bound ONCE at launch: the entrypoint takes no target argument, so
             # this variable is the whole channel, and the tool surface carries no
@@ -356,9 +399,10 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
             # there is to say.
             "per_call_project": False,
             # The restriction IS the safety case, so serving more than is declared
-            # means the restriction is gone. Asserting equality turns a lost
-            # ``--read-only`` into a refused launch instead of a silently restored
-            # write surface that still passes a subset check.
+            # (permitted or withheld) means the restriction is gone. Asserting
+            # equality turns a lost ``--read-only`` into a refused launch instead
+            # of a silently restored write surface that still passes a subset
+            # check.
             "exact_surface": True,
             "runtime_acquisition": True,
             "desktop_available": False,
@@ -629,6 +673,34 @@ def declared_harness_tools(name: str) -> tuple[str, ...]:
         ConfigError: If *name* is not a known harness server.
     """
     return _frozen_strings(_registry_entry(name), "tools")
+
+
+def withheld_harness_tools(name: str) -> tuple[str, ...]:
+    """Return the tools *name* serves that no run may call.
+
+    Raises:
+        ConfigError: If *name* is not a known harness server.
+    """
+    return _frozen_strings(_registry_entry(name), _WITHHELD_TOOLS_FIELD)
+
+
+def harness_tool_is_withheld(tool_name: str) -> bool:
+    """Return whether a permission request names a withheld harness tool.
+
+    A qualified ``mcp__<server>__<tool>`` name is matched against that server
+    alone. A bare name - the spelling a lane that drops the server prefix
+    carries - is matched against every server's withheld set, because such a
+    lane gives no way to tell which server it came from and a refusal is the
+    direction a doubt must fail in.
+    """
+    if tool_name.startswith("mcp__"):
+        parts = tool_name.split("__", 2)
+        if len(parts) != 3 or not is_known_harness_server(parts[1]):
+            return False
+        return parts[2] in withheld_harness_tools(parts[1])
+    return any(
+        tool_name in withheld_harness_tools(server) for server in _KNOWN_MCP_SERVERS
+    )
 
 
 def harness_server_addresses_projects_per_call(name: str) -> bool:

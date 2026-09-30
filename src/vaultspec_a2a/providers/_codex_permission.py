@@ -31,6 +31,7 @@ from typing import Final
 from langgraph.errors import GraphBubbleUp
 
 from ._acp_types import PermissionCallback
+from ._harness_mcp_registry import harness_tool_is_withheld
 from ._json_contract import JsonObject, lenient_json_object
 from ._project_scope import ProjectScope, foreign_project_argument
 
@@ -216,6 +217,17 @@ class CodexPermissionRung:
         # that could permit it. The refused ARGUMENT is not logged - a
         # caller-chosen path is agent-supplied payload - only the fact and the
         # run's own bound project.
+        # Refused ahead of both rungs for the same reason as the ACP lane: the
+        # tool is served but never callable, and nobody at a prompt can see that
+        # it would send vault text off the host.
+        if harness_tool_is_withheld(f"mcp__{call.server}__{call.tool}"):
+            logger.warning(
+                "Declining a withheld harness tool call: server=%s tool=%s",
+                call.server,
+                call.tool,
+            )
+            return DECLINE_ACTION
+
         if self._project_scope is not None and (
             foreign_project_argument(call.arguments, self._project_scope) is not None
         ):

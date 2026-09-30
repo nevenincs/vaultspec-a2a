@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:6e978ac6c24054eeb9ff242115d36a561bb0f9e6843ab94f086952626c844418'
+body_hash: 'sha256:0c83e65b514edfee47ba9c5643e2fd7046a6c700f9a10f89285d20f83e0c3fef'
 ---
 
 # `langgraph-conformance` plan
@@ -92,7 +92,7 @@ Both checkpoint backends behave as the dual-backend decision describes, set them
 No deprecated LangGraph-family API is called from the repository, and the locked versions are current or knowingly held.
 
 - [x] `P05.S29` - Bump vaultspec-core to 0.3.2 and vaultspec-rag to 0.5.3 with no upper bound, and apply the framework's migrations and builtin upgrade; `pyproject.toml, uv.lock, .vaultspec/, prek.toml`.
-- [ ] `P05.S30` - Launch the vaultspec-core and vaultspec-rag MCP servers as their new releases serve them: renamed core server, declared new core tools and their egress, rag read-only surface and root pinning; `src/vaultspec_a2a/providers/_harness_mcp_registry.py`.
+- [x] `P05.S30` - Launch the vaultspec-core and vaultspec-rag MCP servers as their new releases serve them: renamed core server, declared new core tools and their egress, rag read-only surface and root pinning; `src/vaultspec_a2a/providers/_harness_mcp_registry.py`.
 
 ### Phase `P06` - Design records
 

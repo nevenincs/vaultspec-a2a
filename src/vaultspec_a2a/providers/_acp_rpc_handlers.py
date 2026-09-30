@@ -32,6 +32,7 @@ from ._acp_types import (
     AcpSessionContext,
     require_workspace_root,
 )
+from ._harness_mcp_registry import harness_tool_is_withheld
 from ._json_contract import (
     JsonObject,
     lenient_json_object,
@@ -584,6 +585,14 @@ async def on_request_permission(
             name,
             config.bound_project_root(),
         )
+        return _refused_outcome(rpc_id, options)
+
+    # A withheld harness tool is served by a server the run mounts but is never
+    # callable, so it is refused ahead of the human rung as well: a person at the
+    # prompt cannot see that the call would send vault text off the host, and
+    # the registry's no-egress declaration rests on nobody being asked.
+    if harness_tool_is_withheld(_canonical_tool_identity(name, config)):
+        logger.warning("Refused a withheld harness tool: tool=%s", name)
         return _refused_outcome(rpc_id, options)
 
     if config.permission_callback:

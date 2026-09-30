@@ -50,6 +50,7 @@ from ._harness_mcp_registry import (
     harness_server_exact_surface,
     is_known_harness_server,
     registry_launch_divergence,
+    withheld_harness_tools,
 )
 from ._subprocess import redact_secrets
 
@@ -75,7 +76,9 @@ CONTRACT_PROBE_TIMEOUT_SECONDS = 180.0
 # would defeat the cache entirely, while the served tool surface is a property of
 # the command being launched. A failure is never cached: a transient acquisition
 # failure must be re-probed on the next run rather than poisoning the process.
-_verified: set[tuple[str, tuple[str, ...], tuple[str, ...]]] = set()
+_verified: set[tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...], bool]] = (
+    set()
+)
 _probe_lock = asyncio.Lock()
 
 # Enough of the server's own stderr to explain a refusal (an unresolvable
@@ -189,11 +192,18 @@ def _tool_contract_differences(
     declared: Sequence[str],
     served: frozenset[str],
     exact_surface: bool,
+    withheld: Sequence[str] = (),
 ) -> tuple[list[str], list[str]]:
-    """Return missing and, when requested, undeclared served tool names."""
+    """Return missing and, when requested, undeclared served tool names.
+
+    A withheld tool is part of the surface the registry expects the server to
+    serve, so serving it is not a lost restriction; it is never required,
+    because a release that stops serving it only narrows what no run could call.
+    """
     missing = [tool for tool in declared if tool not in served]
+    expected = {*declared, *withheld}
     undeclared = (
-        [tool for tool in served if tool not in declared] if exact_surface else []
+        sorted(tool for tool in served if tool not in expected) if exact_surface else []
     )
     return missing, undeclared
 
@@ -209,6 +219,7 @@ class _VerifyDeclaredToolContractOptions(
     _VerifyDeclaredToolContractRequired, total=False
 ):
     exact_surface: bool
+    withheld: Sequence[str]
     env: Mapping[str, str] | None
     timeout: float
 
@@ -242,9 +253,10 @@ async def verify_declared_tool_contract(
     args = options["args"]
     declared = options["declared"]
     exact_surface = options.get("exact_surface", False)
+    withheld = options.get("withheld", ())
     env = options.get("env")
     timeout = options.get("timeout", CONTRACT_PROBE_TIMEOUT_SECONDS)
-    key = (command, tuple(args), tuple(declared))
+    key = (command, tuple(args), tuple(declared), tuple(withheld), exact_surface)
     if key in _verified:
         return
     async with _probe_lock:
@@ -290,6 +302,7 @@ async def verify_declared_tool_contract(
                 declared=declared,
                 served=served,
                 exact_surface=exact_surface,
+                withheld=withheld,
             )
             if missing:
                 offered = ", ".join(sorted(served)) if served else "no tools at all"
@@ -376,6 +389,7 @@ async def verify_harness_mcp_contract(
             args=_launch_args(spec, name=name),
             declared=declared_harness_tools(name),
             exact_surface=harness_server_exact_surface(name),
+            withheld=withheld_harness_tools(name),
             env=env,
             timeout=timeout,
         )

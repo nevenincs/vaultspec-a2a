@@ -844,6 +844,7 @@ def test_pin_carries_the_bound_project_through_the_declared_channel(
         "--from",
         "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",
+        "--read-only",
     ]
 
 
@@ -1023,6 +1024,7 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
             "--from",
             "vaultspec-rag[mcp]",
             "vaultspec-search-mcp",
+            "--read-only",
         ]
         spec["args"] = [
             "--python",
@@ -1030,6 +1032,7 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
             "--from",
             rag_requirement,
             "vaultspec-search-mcp",
+            "--read-only",
         ]
         spec_env = spec["env"]
         assert isinstance(spec_env, list)

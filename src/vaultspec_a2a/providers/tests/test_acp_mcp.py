@@ -58,6 +58,7 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
         "--from",
         "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",
+        "--read-only",
     ]
 
 
@@ -300,6 +301,7 @@ def test_declared_surface_admits_the_bridge_beside_the_registry_server() -> None
                 "--from",
                 "vaultspec-rag[mcp]",
                 "vaultspec-search-mcp",
+                "--read-only",
             ],
         },
     ]
@@ -401,6 +403,7 @@ def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
         "--from",
         "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",
+        "--read-only",
     ]
     # The read tools ride along for the Codex enabled_tools allowlist.
     assert spec["tools"] == ["search_vault", "search_codebase", "get_code_file"]

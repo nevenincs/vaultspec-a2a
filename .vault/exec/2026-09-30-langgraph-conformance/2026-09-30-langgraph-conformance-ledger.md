@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:45b23d2771a83185de569e3c0bbef2b338e918258105d569f6b2e2ba85c8705e'
+body_hash: 'sha256:50761708907318a1e100c9eb02934b63da80415e1082bf7827c39517720f8605'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -114,7 +114,19 @@ related:
 - `S29` `M` `uv.lock`
 - `S29` `verify:` `dev tests (105) + providers team context suites on the 0.3.2 lock (1406) + vault check all + both plan checks + real MCP contract launches` -> `pass`
 - `S29` `by:` `orchestrator`
+- `S30` `M` `src/vaultspec_a2a/providers/_harness_mcp_registry.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_mcp_contract.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_codex_permission.py`
+- `S30` `A` `src/vaultspec_a2a/providers/tests/test_withheld_harness_tools.py`
+- `S30` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S30` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S30` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S30` `M` `src/vaultspec_a2a/service_tests/test_core_grounding_live.py`
+- `S30` `verify:` `providers team context dev suites on the 0.3.2 lock (1406) + withheld-tool tests failing on the previous handlers + real vaultspec-core-mcp and rag --read-only launches through verify_harness_mcp_contract` -> `pass`
+- `S30` `by:` `orchestrator`
 
 ## Notes
 
 - `S29` The framework's 28 builtins, provider projections and hook migration were applied by vaultspec-core install --upgrade and migrations run; the repository's annotations hook was moved out of the managed block the migration re-rendered.
+- `S30` Core's search and crossref are withheld, not declared, per the user's choice on 2026-09-30 (serve but never permit): they send vault text to a hosted API when a key resolves and 0.3.2 has no launch flag to drop them.

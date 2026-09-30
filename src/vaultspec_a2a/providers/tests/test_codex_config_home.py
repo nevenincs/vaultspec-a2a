@@ -147,6 +147,7 @@ def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
         "--from",
         "vaultspec-rag[mcp]",
         "vaultspec-search-mcp",
+        "--read-only",
     ]
 
 

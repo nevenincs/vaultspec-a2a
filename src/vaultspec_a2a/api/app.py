@@ -59,7 +59,6 @@ from ..database import (
     seat_sqlite_posture,
 )
 from ..database.checkpoints import Checkpointer, open_checkpointer
-from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.reconciliation import reconcile_threads_on_startup
 from ..domain_config import domain_config
 from ..lifecycle.discovery import (
@@ -318,8 +317,6 @@ async def _initialize_gateway_database(app: FastAPI, *, armed: bool) -> AsyncEng
             settings.resolved_database_backend,
         )
     app.state.sqlite_fallback_diagnostics = build_sqlite_fallback_diagnostics()
-    if not armed and settings.resolved_checkpoint_backend == "sqlite":
-        backfill_teamstate_sdd_fields(settings.checkpoint_path)
     return engine
 
 

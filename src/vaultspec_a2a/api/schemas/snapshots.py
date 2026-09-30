@@ -160,13 +160,29 @@ class ThreadStateSnapshot(BaseModel):
     last_sequence: int
     checkpoint_id: str | None = None
     checkpoint_created_at: datetime | None = None
-    checkpoint_parent_id: str | None = None
+    checkpoint_parent_id: str | None = Field(
+        default=None,
+        description=(
+            "The parent the current checkpoint records. It may name a "
+            "checkpoint that no longer exists: once a run settles, its "
+            "superseded history is pruned and only this reference to it "
+            "remains. Do not read it as a checkpoint that can be fetched."
+        ),
+    )
     checkpoint_source: str | None = None
     checkpoint_step: int | None = None
     checkpoint_updated_channels: list[str] = Field(default_factory=list)
     pending_write_channels: list[str] = Field(default_factory=list)
     pending_write_count: int = 0
-    history_depth: int | None = None
+    history_depth: int | None = Field(
+        default=None,
+        description=(
+            "How deep the current checkpoint's recorded ancestry goes: 2 when "
+            "it names a parent, 1 when it is the first of its thread, null "
+            "when no checkpoint was read. Recorded ancestry, not stored rows - "
+            "a settled run's history is pruned and its depth does not fall."
+        ),
+    )
     next_nodes: list[str] = Field(default_factory=list)
     task_count: int = 0
     pending_interrupt_count: int = 0

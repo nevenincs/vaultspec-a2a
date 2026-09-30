@@ -4900,7 +4900,8 @@
                 "type": "null"
               }
             ],
-            "title": "Checkpoint Parent Id"
+            "title": "Checkpoint Parent Id",
+            "description": "The parent the current checkpoint records. It may name a checkpoint that no longer exists: once a run settles, its superseded history is pruned and only this reference to it remains. Do not read it as a checkpoint that can be fetched."
           },
           "checkpoint_source": {
             "anyOf": [
@@ -4952,7 +4953,8 @@
                 "type": "null"
               }
             ],
-            "title": "History Depth"
+            "title": "History Depth",
+            "description": "How deep the current checkpoint's recorded ancestry goes: 2 when it names a parent, 1 when it is the first of its thread, null when no checkpoint was read. Recorded ancestry, not stored rows - a settled run's history is pruned and its depth does not fall."
           },
           "next_nodes": {
             "items": {

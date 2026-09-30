@@ -1,10 +1,12 @@
-"""The PostgreSQL checkpointer holds a pool, not one connection.
+"""The PostgreSQL checkpointer holds a pool, and really uses more of it than one.
 
 Against a real PostgreSQL server through the production ``open_checkpointer``
-entry point, because both properties under test are properties of what that
-factory builds: a saver on one connection serialized every run's checkpoint
-writes behind each other, and it stayed broken for the life of the process once
-that connection dropped.
+entry point, because every property under test is a property of what that
+factory builds: a saver on one connection stayed broken for the life of the
+process once that connection dropped, and a single saver over a pool still
+serializes every statement behind its own lock, so concurrency takes a saver per
+caller. The concurrency claims are measured in connections actually checked out,
+not inferred from the pool's size.
 
 Each test gets its own database. One of them terminates every backend on it to
 prove the pool recovers, which no shared database could tolerate.
@@ -24,25 +26,39 @@ from langgraph.checkpoint.base import empty_checkpoint
 
 from ...domain_config import domain_config
 from ...testing.environment import settings_override
-from ..checkpoints import open_checkpointer
+from ..checkpoints import concurrent_checkpointer, open_checkpointer
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable
 
     from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
 
 _POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
 
+# Enough writers to exceed the pool, and a payload big enough that a write is
+# still in flight when the next one starts. A checkpoint small enough to finish
+# within one scheduling turn would show one connection in use whether or not the
+# savers can run in parallel, and prove nothing either way.
+_WRITERS = 12
+_PAYLOAD_BYTES = 400_000
+
 
 def _config(thread_id: str) -> dict[str, Any]:
     return {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
 
 
-async def _write_checkpoint(saver: Checkpointer, thread_id: str) -> None:
+async def _write_checkpoint(
+    saver: Checkpointer, thread_id: str, *, payload_bytes: int = 0
+) -> None:
     """Put one checkpoint through the saver's own public write path."""
     checkpoint = empty_checkpoint()
     checkpoint["id"] = f"cp-{uuid4().hex}"
+    if payload_bytes:
+        checkpoint["channel_values"] = {"payload": "x" * payload_bytes}
+        checkpoint["channel_versions"] = {
+            "payload": saver.get_next_version(None, cast("Any", None))
+        }
     await saver.aput(
         cast("Any", _config(thread_id)),
         checkpoint,
@@ -97,21 +113,108 @@ async def postgres_checkpointer(postgres_url: str) -> AsyncIterator[Checkpointer
 
 @pytest.mark.asyncio
 @pytest.mark.requires_prerequisites("postgres")
-async def test_the_saver_is_backed_by_a_pool_sized_from_the_run_bound(
+async def test_the_saver_is_backed_by_a_pool_sized_for_both_its_holders(
     postgres_checkpointer: Checkpointer,
 ) -> None:
-    """Every run in flight can be writing a checkpoint, so all of them fit.
+    """The same factory serves the worker's runs and the gateway's probes.
 
     The ceiling follows the configured concurrency rather than a number written
-    here, and carries headroom for the reads that are not a run's own.
+    here: every run in flight can be writing a checkpoint, with headroom for the
+    reads that are not a run's own, and a page of parallel status probes must
+    fit too.
     """
     from psycopg_pool import AsyncConnectionPool
 
     pool = cast("Any", postgres_checkpointer).conn
 
     assert isinstance(pool, AsyncConnectionPool)
-    assert pool.max_size == domain_config.max_concurrent_threads + 2
-    assert pool.max_size > domain_config.max_concurrent_threads
+    assert pool.max_size >= domain_config.max_concurrent_threads + 2
+    assert pool.max_size >= domain_config.thread_list_checkpoint_concurrency
+
+
+async def _peak_checked_out(pool: Any, work: Awaitable[Any]) -> int:
+    """Run *work*, sampling how many of *pool*'s connections are checked out."""
+    peak = 0
+    stop = asyncio.Event()
+
+    async def sample() -> None:
+        nonlocal peak
+        while not stop.is_set():
+            stats = pool.get_stats()
+            peak = max(peak, stats.get("pool_size", 0) - stats.get("pool_available", 0))
+            await asyncio.sleep(0)
+
+    sampler = asyncio.create_task(sample())
+    try:
+        await work
+    finally:
+        stop.set()
+        await sampler
+    return peak
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_prerequisites("postgres")
+async def test_one_saver_uses_one_connection_however_many_writers_it_has(
+    postgres_checkpointer: Checkpointer,
+) -> None:
+    """The lock, not the pool, is what decides a saver's concurrency.
+
+    This is the property that makes a saver per caller necessary rather than a
+    nicety, and it is measured rather than assumed: sharing one saver between
+    concurrent writers keeps exactly one connection checked out at a time, so a
+    pool sized for every run in flight would sit idle behind it.
+    """
+    pool = cast("Any", postgres_checkpointer).conn
+    threads = [f"pool-shared-{uuid4().hex}" for _ in range(_WRITERS)]
+
+    peak = await _peak_checked_out(
+        pool,
+        asyncio.gather(
+            *(
+                _write_checkpoint(
+                    postgres_checkpointer, thread, payload_bytes=_PAYLOAD_BYTES
+                )
+                for thread in threads
+            )
+        ),
+    )
+
+    assert peak == 1, pool.get_stats()
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_prerequisites("postgres")
+async def test_a_saver_per_caller_really_writes_on_several_connections(
+    postgres_checkpointer: Checkpointer,
+) -> None:
+    """Concurrent runs each get a saver, and the pool is then really used.
+
+    Proven in connections the server actually handed out at the same moment -
+    the claim a shared saver cannot make - and every write must still land.
+    """
+    pool = cast("Any", postgres_checkpointer).conn
+    threads = [f"pool-per-run-{uuid4().hex}" for _ in range(_WRITERS)]
+    savers = [await concurrent_checkpointer(postgres_checkpointer) for _ in threads]
+
+    assert len({id(saver) for saver in savers}) == len(threads)
+
+    peak = await _peak_checked_out(
+        pool,
+        asyncio.gather(
+            *(
+                _write_checkpoint(saver, thread, payload_bytes=_PAYLOAD_BYTES)
+                for saver, thread in zip(savers, threads, strict=True)
+            )
+        ),
+    )
+
+    assert peak > 1, pool.get_stats()
+    for thread in threads:
+        assert (
+            await postgres_checkpointer.aget_tuple(cast("Any", _config(thread)))
+            is not None
+        )
 
 
 @pytest.mark.asyncio
@@ -119,12 +222,12 @@ async def test_the_saver_is_backed_by_a_pool_sized_from_the_run_bound(
 async def test_a_busy_connection_does_not_hold_up_another_run(
     postgres_checkpointer: Checkpointer,
 ) -> None:
-    """One connection made every run's checkpoint write wait for the others.
+    """A connection held open elsewhere must not stop a run checkpointing.
 
     A connection is held in an open transaction for the duration - which is what
-    a run mid-write looks like from the outside - and the other runs' writes have
-    to complete anyway. On a single-connection saver they could not: there was
-    nothing else to write on.
+    an unrelated reader mid-statement looks like from the outside - and the runs'
+    writes have to complete anyway. On a single-connection saver they could not:
+    there was nothing else to write on.
     """
     pool = cast("Any", postgres_checkpointer).conn
     threads = [f"pool-concurrent-{uuid4().hex}" for _ in range(3)]

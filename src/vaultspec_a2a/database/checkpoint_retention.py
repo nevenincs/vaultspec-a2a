@@ -7,22 +7,44 @@ nothing but the latest checkpoint is read once a run is over. Pruning keeps each
 namespace's latest checkpoint, the pending writes that belong to it, and (on
 PostgreSQL) the channel blobs it references, and removes the rest.
 
-The statements are written against each saver's own tables because the saver
-interface offers no pruning of its own. A saver this module does not recognise
-is left untouched rather than guessed at.
+Writing statements against another library's tables is only safe while three
+things hold, and each is checked rather than assumed. The saver must not have
+grown pruning of its own, which would be authoritative where this is a
+stand-in. Its schema must be the one the statements were written for, because
+recognising the saver's CLASS says nothing about the version of the tables
+behind it. And the thread must not use a delta channel: those keep only a
+sentinel in the checkpoint and reconstruct state by walking ancestors, so
+dropping the ancestors silently empties the channel with no error to notice.
+A saver or a store failing any of these is left untouched rather than guessed
+at.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+from .checkpoint_schema import LANGGRAPH_TABLE_COLUMNS
 
 __all__ = ["prune_settled_checkpoints"]
 
 logger = logging.getLogger(__name__)
+
+# The migration version of the PostgreSQL saver whose tables the statements
+# below were written against. Read from ``checkpoint_migrations`` at run time
+# and compared: a store the saver has since migrated further is one these
+# statements no longer describe.
+_POSTGRES_SCHEMA_VERSION = 9
+
+# LangGraph records per-channel delta counters here, and only on threads that
+# use a delta channel. It is dropped again the moment every counter resets, so
+# a snapshot blob in the checkpoint is the other half of the same signal.
+_DELTA_COUNTERS_KEY = "counters_since_delta_snapshot"
 
 # A checkpoint id is time-ordered, and each saver resolves "latest" as the
 # greatest id in a namespace, so the same rule decides what survives here.
@@ -76,6 +98,37 @@ WHERE b.thread_id = %s
 """
 
 
+def scalar(row: Any) -> Any:
+    """Return the single column of *row*, whatever row factory produced it."""
+    if isinstance(row, dict):
+        return next(iter(row.values()))
+    return row[0]
+
+
+def _saver_prunes_itself(checkpointer: object) -> bool:
+    """Whether *checkpointer* implements pruning rather than inheriting a refusal."""
+    own = getattr(type(checkpointer), "aprune", None)
+    return own is not None and own is not BaseCheckpointSaver.aprune
+
+
+async def _thread_uses_a_delta_channel(checkpointer: Any, thread_id: str) -> bool:
+    """Whether *thread_id*'s state depends on ancestors these statements delete.
+
+    A delta channel writes a sentinel and rebuilds its value by walking back to
+    the nearest snapshot, so the surviving latest checkpoint is usually not a
+    snapshot point and pruning its ancestors would leave the channel
+    reconstructing as empty - returning no value rather than raising.
+    """
+    latest = await checkpointer.aget_tuple({"configurable": {"thread_id": thread_id}})
+    if latest is None:
+        return False
+    metadata = latest.metadata or {}
+    if metadata.get(_DELTA_COUNTERS_KEY):
+        return True
+    values = latest.checkpoint.get("channel_values") or {}
+    return any(isinstance(value, _DeltaSnapshot) for value in values.values())
+
+
 async def prune_settled_checkpoints(checkpointer: object, thread_id: str) -> bool:
     """Drop every checkpoint of *thread_id* but each namespace's latest.
 
@@ -83,14 +136,30 @@ async def prune_settled_checkpoints(checkpointer: object, thread_id: str) -> boo
     latest checkpoint, which is kept, but nothing older is ever read again.
 
     Returns:
-        ``True`` when the saver was pruned, ``False`` when this module does not
-        recognise the saver and left it alone.
+        ``True`` when the history was pruned, ``False`` when this module will
+        not write to the store behind *checkpointer* and left it alone.
     """
+    if _saver_prunes_itself(checkpointer):
+        # Its own pruning knows its own schema and its own delta channels; the
+        # statements here are a stand-in for savers that offer none.
+        await cast("Any", checkpointer).aprune([thread_id], strategy="keep_latest")
+        return True
+    if await _thread_uses_a_delta_channel(checkpointer, thread_id):
+        logger.info(
+            "Checkpoint retention skipped for thread %s: it uses a delta "
+            "channel, whose value is rebuilt from the history a prune removes",
+            thread_id,
+        )
+        return False
     if isinstance(checkpointer, AsyncSqliteSaver):
+        if not await _sqlite_layout_is_the_expected_one(checkpointer):
+            return False
         await _prune_sqlite(checkpointer, thread_id)
         return True
     postgres = _native_postgres_saver(checkpointer)
     if postgres is not None:
+        if not await _postgres_schema_is_the_expected_one(postgres):
+            return False
         await _prune_postgres(postgres, thread_id)
         return True
     logger.debug(
@@ -99,6 +168,61 @@ async def prune_settled_checkpoints(checkpointer: object, thread_id: str) -> boo
         type(checkpointer).__name__,
     )
     return False
+
+
+async def _sqlite_layout_is_the_expected_one(saver: AsyncSqliteSaver) -> bool:
+    """Whether the store's tables are the ones the SQLite statements describe.
+
+    SQLite's saver keeps no migration ledger, so the tables are their own
+    version: a column added, removed or reordered is a layout these deletes
+    were not written for.
+    """
+    async with saver.lock:
+        for table, expected in LANGGRAPH_TABLE_COLUMNS.items():
+            async with saver.conn.execute(
+                "SELECT name FROM pragma_table_info(?)", (table,)
+            ) as cursor:
+                found = tuple(str(row[0]) for row in await cursor.fetchall())
+            if found != expected:
+                logger.warning(
+                    "Checkpoint retention skipped: SQLite table %r is %r, not "
+                    "the %r these retention statements were written for",
+                    table,
+                    found,
+                    expected,
+                )
+                return False
+    return True
+
+
+async def _postgres_schema_is_the_expected_one(saver: Any) -> bool:
+    """Whether the store is at the saver schema version the statements assume."""
+    from psycopg_pool import AsyncConnectionPool
+
+    if isinstance(saver.conn, AsyncConnectionPool):
+        async with saver.conn.connection() as connection:
+            version = await _postgres_schema_version(connection)
+    else:
+        async with saver.lock:
+            version = await _postgres_schema_version(saver.conn)
+    if version == _POSTGRES_SCHEMA_VERSION:
+        return True
+    logger.warning(
+        "Checkpoint retention skipped: the checkpoint store is at saver schema "
+        "version %r, not the %r these retention statements were written for",
+        version,
+        _POSTGRES_SCHEMA_VERSION,
+    )
+    return False
+
+
+async def _postgres_schema_version(connection: Any) -> int | None:
+    cursor = await connection.execute("SELECT MAX(v) AS v FROM checkpoint_migrations")
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    version = scalar(row)
+    return None if version is None else int(version)
 
 
 async def _prune_sqlite(saver: AsyncSqliteSaver, thread_id: str) -> None:

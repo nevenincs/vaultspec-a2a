@@ -21,7 +21,9 @@ default: nothing here is allowed to make a tool call fail that succeeded.
 
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -48,6 +50,21 @@ __all__ = ["RunLifecycleCallbacks"]
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class _InFlightCall:
+    """What a tool call's start knew, kept for the callbacks that do not."""
+
+    node: str | None
+    tool_name: str
+    tool_input: object
+
+
+#: What an end or failure reports when no start was seen for that identity -
+#: a tool the run never registered, which is a defect elsewhere, not a reason
+#: to drop the resolution.
+_UNSTARTED_CALL = _InFlightCall(node=None, tool_name="", tool_input=None)
+
+
 class RunLifecycleCallbacks(AsyncCallbackHandler):
     """Project one run's tool lifecycle and model completions onto the wire."""
 
@@ -62,11 +79,14 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
         self._agent_id = agent_id
         self._emitters = emitters
         self._buffering = buffering
-        # The tool name and input each in-flight call started with, so its end
-        # can report what it was and whether it touched a file. Keyed by the
-        # same tool-call id the wire uses, and dropped when the call resolves,
-        # so a long run never accumulates finished calls.
-        self._in_flight: dict[str, tuple[str, object]] = {}
+        # What each in-flight call started as: the node that made it, the tool
+        # it named, and the input it was given. The end and the failure
+        # callbacks carry none of those - only the identity - so a call that
+        # did not remember them reported its own resolution under a different
+        # agent, and with no tool name to recognise a file write by. Keyed by
+        # the same tool-call id the wire uses, and dropped when the call
+        # resolves, so a long run never accumulates finished calls.
+        self._in_flight: dict[str, _InFlightCall] = {}
 
     def _emission(self, tool_call_id: str, node: str | None) -> ToolEmission:
         return ToolEmission(
@@ -88,12 +108,32 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
         inputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        """Register a starting tool call under the id the model gave it."""
+        """Register a starting tool call under the id the model gave it.
+
+        A model that streams its tool calls announces this one before it
+        runs, and that announcement already registered the id. Registering it
+        again would put the same call on the wire twice; the call is advanced
+        instead, from announced to running, carrying the input the tool was
+        actually given.
+        """
         del input_str, parent_run_id, tags
         tool_call_id = _tool_call_id(kwargs, run_id)
         tool_name = _tool_name(serialized)
-        self._in_flight[tool_call_id] = (tool_name, inputs)
-        emission = self._emission(tool_call_id, _node(metadata))
+        node = _node(metadata)
+        self._in_flight[tool_call_id] = _InFlightCall(node, tool_name, inputs)
+        emission = self._emission(tool_call_id, node)
+        announced = tool_call_id in self._emitters.get_tool_call_states(
+            emission.thread_id
+        )
+        if announced:
+            await self._emitters.emit_tool_call_update(
+                thread_id=emission.thread_id,
+                agent_id=emission.agent_id,
+                tool_call_id=tool_call_id,
+                status=ToolCallStatus.IN_PROGRESS,
+                content=truncated_tool_content(_rendered_input(inputs)),
+            )
+            return
         await self._emitters.emit_tool_call_start(
             thread_id=emission.thread_id,
             agent_id=emission.agent_id,
@@ -115,9 +155,12 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
         """Resolve a finished tool call and publish any artifact it wrote."""
         del parent_run_id, tags
         tool_call_id = _tool_call_id(kwargs, run_id, output)
-        tool_name, tool_input = self._in_flight.pop(tool_call_id, ("", None))
+        started = self._in_flight.pop(tool_call_id, _UNSTARTED_CALL)
         await emit_tool_completion(
-            self._emission(tool_call_id, None), tool_name, tool_input, output
+            self._emission(tool_call_id, started.node),
+            started.tool_name,
+            started.tool_input,
+            output,
         )
 
     async def on_tool_error(
@@ -132,7 +175,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
         """Report a failed tool call under the identity it started with."""
         del parent_run_id, tags
         tool_call_id = _tool_call_id(kwargs, run_id)
-        self._in_flight.pop(tool_call_id, None)
+        started = self._in_flight.pop(tool_call_id, _UNSTARTED_CALL)
         error_msg = str(error) or "Tool call failed"
         logger.warning(
             "Tool error in thread %s call %s: %s",
@@ -140,7 +183,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             tool_call_id,
             error_msg,
         )
-        emission = self._emission(tool_call_id, None)
+        emission = self._emission(tool_call_id, started.node)
         await self._emitters.emit_tool_call_update(
             thread_id=emission.thread_id,
             agent_id=emission.agent_id,
@@ -202,6 +245,16 @@ def _tool_call_id(kwargs: dict[str, Any], run_id: UUID, output: object = None) -
     if isinstance(from_output, str) and from_output:
         return from_output
     return str(run_id)
+
+
+def _rendered_input(inputs: dict[str, Any] | None) -> str:
+    """Render a tool's resolved input the way its registration would have."""
+    if not inputs:
+        return ""
+    try:
+        return json.dumps(inputs, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(inputs)
 
 
 def _tool_name(serialized: dict[str, Any] | None) -> str:

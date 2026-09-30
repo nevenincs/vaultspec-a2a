@@ -95,7 +95,7 @@ def _select_revision_worker(
     worker_phase_map: dict[str, str] | None,
 ) -> str:
     """Prefer the plan-phase worker when a rejected exec plan needs revision."""
-    return _select_phase_worker(PipelinePhase.PLAN, workers, worker_phase_map)
+    return _select_phase_worker(PipelinePhase.PLAN.value, workers, worker_phase_map)
 
 
 def _select_phase_worker(
@@ -156,7 +156,9 @@ def _check_finish_blocked(
             "rerouting to exec-phase worker",
             len(errors),
         )
-        next_route = _select_phase_worker(PipelinePhase.EXEC, workers, worker_phase_map)
+        next_route = _select_phase_worker(
+            PipelinePhase.EXEC.value, workers, worker_phase_map
+        )
         return {
             "next": next_route,
             "pipeline_phase": inferred_phase,
@@ -175,7 +177,7 @@ def _check_finish_blocked(
             " — rerouting to audit-phase worker",
         )
         next_route = _select_phase_worker(
-            PipelinePhase.AUDIT, workers, worker_phase_map
+            PipelinePhase.AUDIT.value, workers, worker_phase_map
         )
         return {
             "next": next_route,
@@ -215,11 +217,15 @@ class _SupervisorDecision:
 
 
 # Maps target phase -> (required vault_index key, is_hard_gate)
+#
+# Plain ``.value`` strings: the required key indexes ``vault_index``, whose keys
+# are the strings the vault scan produces, and the target phase reaches the
+# checkpointed ``pipeline_phase`` channel, which must carry no enum member.
 _PHASE_PREREQUISITES: dict[str, tuple[str, bool]] = {
-    PipelinePhase.ADR: (PipelinePhase.RESEARCH, False),  # SOFT -- warn only
-    PipelinePhase.PLAN: (PipelinePhase.ADR, True),  # HARD -- block
-    PipelinePhase.EXEC: (PipelinePhase.PLAN, True),  # HARD -- block
-    PipelinePhase.AUDIT: (PipelinePhase.EXEC, True),  # HARD -- block
+    PipelinePhase.ADR.value: (PipelinePhase.RESEARCH.value, False),  # SOFT -- warn
+    PipelinePhase.PLAN.value: (PipelinePhase.ADR.value, True),  # HARD -- block
+    PipelinePhase.EXEC.value: (PipelinePhase.PLAN.value, True),  # HARD -- block
+    PipelinePhase.AUDIT.value: (PipelinePhase.EXEC.value, True),  # HARD -- block
 }
 
 
@@ -303,9 +309,9 @@ def _plan_approval_decision(
     *,
     autonomous: bool,
 ) -> _SupervisorDecision | None:
-    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED
+    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED.value
     exec_route = bool(worker_phase_map) and (
-        worker_phase_map.get(next_route) == PipelinePhase.EXEC
+        worker_phase_map.get(next_route) == PipelinePhase.EXEC.value
     )
     plan_ready = bool(state.get("active_feature") and vault_index.get("plan"))
     if autonomous or not exec_route or not plan_ready or approval_granted:
@@ -514,7 +520,7 @@ def create_plan_approval_node(
                 "next": exec_worker,
                 "active_agent": _active_agent_for_route(exec_worker),
                 "current_plan": [_plan_entry_for_route(exec_worker)],
-                "approval_status": ApprovalStatus.APPROVED,
+                "approval_status": ApprovalStatus.APPROVED.value,
                 "approval_request_id": None,
                 "routing_error": None,
             }
@@ -531,7 +537,7 @@ def create_plan_approval_node(
                 worker_phase_map=worker_phase_map,
             ),
             "current_plan": [_plan_entry_for_route(revision_worker)],
-            "approval_status": ApprovalStatus.REJECTED,
+            "approval_status": ApprovalStatus.REJECTED.value,
             "approval_request_id": None,
             "routing_error": (
                 "Plan rejected by user — revise before proceeding to execution."
@@ -647,7 +653,7 @@ def create_supervisor_node(
                 "active_agent": _active_agent_for_route(next_route),
                 "pipeline_phase": decision.inferred_phase,
                 "current_plan": [_plan_entry_for_route(next_route)],
-                "approval_status": ApprovalStatus.PENDING,
+                "approval_status": ApprovalStatus.PENDING.value,
                 "approval_request_id": None,
                 "routing_error": None,
                 "supervisor_reasks": 0,

@@ -30,6 +30,7 @@ _IMPURE_CORE_FILES = frozenset(
         "test_compiler.py",
         "test_harness_topology_reach.py",
         # Live AsyncSqliteSaver against a real database file.
+        "test_checkpointed_value_types.py",
         "test_diverge.py",
         "test_persona_web_composition.py",
         "test_research_adr.py",

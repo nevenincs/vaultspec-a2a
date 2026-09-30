@@ -235,14 +235,20 @@ STEP_BACKSTOP_GRACE_SECONDS = 30.0
 
 # Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
+#
+# Plain ``.value`` strings, not the members: this map's values are what the
+# supervisor writes into the checkpointed ``pipeline_phase`` channel, and the
+# checkpoint serializer refuses a type it does not know under strict msgpack -
+# a parked run holding an enum member would not hydrate. ``PipelinePhase`` is a
+# ``StrEnum``, so every comparison against a member still holds.
 _ROLE_TO_PHASE: dict[str, str] = {
-    "researcher": PipelinePhase.RESEARCH,
-    "analyst": PipelinePhase.ADR,
-    "adr-author": PipelinePhase.ADR,
-    "planner": PipelinePhase.PLAN,
-    "plan-author": PipelinePhase.PLAN,
-    "coder": PipelinePhase.EXEC,
-    "reviewer": PipelinePhase.AUDIT,
+    "researcher": PipelinePhase.RESEARCH.value,
+    "analyst": PipelinePhase.ADR.value,
+    "adr-author": PipelinePhase.ADR.value,
+    "planner": PipelinePhase.PLAN.value,
+    "plan-author": PipelinePhase.PLAN.value,
+    "coder": PipelinePhase.EXEC.value,
+    "reviewer": PipelinePhase.AUDIT.value,
 }
 
 

@@ -517,7 +517,7 @@ def _compile_research_adr(
                 harness_mcp_servers=harness_mcp_servers,
                 cost_port=options.get("cost_port"),
             ),
-            PipelinePhase.RESEARCH,
+            PipelinePhase.RESEARCH.value,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -559,7 +559,7 @@ def _compile_research_adr(
                 harness_mcp_servers=harness_mcp_servers,
                 cost_port=options.get("cost_port"),
             ),
-            PipelinePhase.ADR,
+            PipelinePhase.ADR.value,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -601,7 +601,7 @@ def _compile_research_adr(
                 harness_mcp_servers=harness_mcp_servers,
                 cost_port=options.get("cost_port"),
             ),
-            PipelinePhase.PLAN,
+            PipelinePhase.PLAN.value,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -615,7 +615,7 @@ def _compile_research_adr(
         builder,
         _RA_RESEARCH_SUBMIT,
         create_phase_submit_node(
-            PipelinePhase.RESEARCH,
+            PipelinePhase.RESEARCH.value,
             options["proposal_submitter"],
             gate_target=_RA_RESEARCH_GATE,
             revision_target=_RA_SYNTHESIS,
@@ -626,7 +626,7 @@ def _compile_research_adr(
         builder,
         _RA_RESEARCH_GATE,
         create_phase_gate_node(
-            PipelinePhase.RESEARCH,
+            PipelinePhase.RESEARCH.value,
             approved_target=_RA_ADR_AUTHOR,
             revision_target=_RA_SYNTHESIS,
         ),
@@ -636,7 +636,7 @@ def _compile_research_adr(
         builder,
         _RA_ADR_SUBMIT,
         create_phase_submit_node(
-            PipelinePhase.ADR,
+            PipelinePhase.ADR.value,
             options["proposal_submitter"],
             gate_target=_RA_ADR_GATE,
             revision_target=_RA_ADR_AUTHOR,
@@ -647,7 +647,7 @@ def _compile_research_adr(
         builder,
         _RA_ADR_GATE,
         create_phase_gate_node(
-            PipelinePhase.ADR,
+            PipelinePhase.ADR.value,
             approved_target=_RA_PLAN_AUTHOR,
             revision_target=_RA_ADR_AUTHOR,
         ),
@@ -657,7 +657,7 @@ def _compile_research_adr(
         builder,
         _RA_PLAN_SUBMIT,
         create_phase_submit_node(
-            PipelinePhase.PLAN,
+            PipelinePhase.PLAN.value,
             options["proposal_submitter"],
             gate_target=_RA_PLAN_GATE,
             revision_target=_RA_PLAN_AUTHOR,
@@ -668,7 +668,7 @@ def _compile_research_adr(
         builder,
         _RA_PLAN_GATE,
         create_phase_gate_node(
-            PipelinePhase.PLAN,
+            PipelinePhase.PLAN.value,
             approved_target=GRAPH_COMPLETION_NODE,
             revision_target=_RA_PLAN_AUTHOR,
         ),
@@ -704,7 +704,7 @@ def _compile_research_adr(
         _doc_review_router(
             writer_target=_RA_SYNTHESIS,
             gate_target=_RA_RESEARCH_SUBMIT,
-            phase=PipelinePhase.RESEARCH,
+            phase=PipelinePhase.RESEARCH.value,
             max_revisions=max_revisions,
         ),
         cast(
@@ -718,7 +718,7 @@ def _compile_research_adr(
         _doc_review_router(
             writer_target=_RA_ADR_AUTHOR,
             gate_target=_RA_ADR_SUBMIT,
-            phase=PipelinePhase.ADR,
+            phase=PipelinePhase.ADR.value,
             max_revisions=max_revisions,
         ),
         cast(
@@ -732,7 +732,7 @@ def _compile_research_adr(
         _doc_review_router(
             writer_target=_RA_PLAN_AUTHOR,
             gate_target=_RA_PLAN_SUBMIT,
-            phase=PipelinePhase.PLAN,
+            phase=PipelinePhase.PLAN.value,
             max_revisions=max_revisions,
         ),
         cast(

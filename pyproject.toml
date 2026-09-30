@@ -75,7 +75,7 @@ dependencies = [
   # whether it is available - so merely HAVING it installed added roughly thirteen
   # seconds to any import that reached the language-model package, in a process
   # that never used a tokenizer.
-  rag = ["torch>=2.4", "vaultspec-rag[mcp]>=0.3.8"]
+  rag = ["torch>=2.4", "vaultspec-rag[mcp]>=0.5.3"]
 
   [project.scripts]
   vaultspec-a2a = "vaultspec_a2a.cli.main:main"
@@ -150,7 +150,7 @@ tooling = [
   # without these its calls type as Unknown.
   "types-jsonschema>=4.26",
   "ty>=0.0.15",
-  "vaultspec-core>=0.1.56,<0.3",
+  "vaultspec-core>=0.3.2",
   # Dead-code detection. Advisory: it infers reachability it cannot always see,
   # so a finding is a lead to confirm rather than a verdict.
   "vulture>=2.16",
@@ -162,7 +162,7 @@ tooling = [
 # so the spec collects it explicitly). Installed by scripts/build_binary.py's
 # caller (the dashboard release pipeline), not by ordinary development.
 all = [{ include-group = "docs" }, { include-group = "tooling" }]
-freeze = ["pyinstaller>=6.11", "vaultspec-core>=0.1.56,<0.3"]
+freeze = ["pyinstaller>=6.11", "vaultspec-core>=0.3.2"]
 
 [tool.uv]
 default-groups = []

@@ -3412,16 +3412,19 @@ wheels = [
 
 [[package]]
 name = "tree-sitter-language-pack"
-version = "1.6.1"
+version = "1.20.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "tree-sitter" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/f0/22/f2ab4c0c1a315fe87d93794037e3804bf8094191deba600c73a2c54d68ef/tree_sitter_language_pack-1.20.0.tar.gz", hash = "sha256:6f10672b06a48ce783c8000f465f0d271877372582407f93c05e0997800049f8", size = 89170, upload-time = "2026-09-14T22:24:58.904Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/5a/b479def27c195ce3c0b63e9103b96207b0650ae77773719757ca24d56f72/tree_sitter_language_pack-1.6.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:8c1e61c1174ffcbb492ae76c95b68fb58930a0f776f5fe3fae5b67e07d9ae770", size = 2241706, upload-time = "2026-04-17T13:23:43.088Z" },
-    { url = "https://files.pythonhosted.org/packages/7c/79/4a81fbd4ff96598fa7867ebbed3cd0fe8ebdec3a3f39725ffcc6cc9a1ee3/tree_sitter_language_pack-1.6.1-cp310-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:8354813b8666af395a724d2323bd3e6fd1148151b253b63045de13cdf7f3a413", size = 2419374, upload-time = "2026-04-17T13:23:45.196Z" },
-    { url = "https://files.pythonhosted.org/packages/80/6a/482b36d4030492e71d1235902487698e1d53a33d4ae2896103a0c280e9af/tree_sitter_language_pack-1.6.1-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:d414bc34186ccc6f68b97699e06c76338725451a31a98a71a0822d1583aef66f", size = 2555547, upload-time = "2026-04-17T13:23:47.134Z" },
-    { url = "https://files.pythonhosted.org/packages/48/43/bd347295026a0ab822c36eb621be21823bb31cb80267e2d5e87b1f0bcb00/tree_sitter_language_pack-1.6.1-cp310-abi3-win_amd64.whl", hash = "sha256:34d9bd0e6cadf1a2c6fd7e73eb9dd490eca703263ece93c63cfdda7b34520d77", size = 2350857, upload-time = "2026-04-17T13:23:48.704Z" },
+    { url = "https://files.pythonhosted.org/packages/12/07/0976aab467781eb1f33d39433dfea75eb2ffd2e9e549511971725e057eda/tree_sitter_language_pack-1.20.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:b8fdcda83f48ee05b7a55119cf8417a4bd91ac75205d0294aa06dd5d39f59e13", size = 2294541, upload-time = "2026-09-14T22:24:50.28Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/a7/7efe38f71d6487a533c45090e8df684d98f9ce817f86506bdc6a412fcafe/tree_sitter_language_pack-1.20.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:4f0b0155046d9027c2ca86a2e67b0f74040bd7520eaaa640b94becb8df042f72", size = 2183462, upload-time = "2026-09-14T22:24:51.74Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/91/b89308f744e35d414a02efe2d122d051b74e275edb852fdcdd58238f1ab3/tree_sitter_language_pack-1.20.0-cp310-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:355c35042989ec176dc9ded7082d3357b668429ea873ff76f2b9a6a7d753731b", size = 2339010, upload-time = "2026-09-14T22:24:53.16Z" },
+    { url = "https://files.pythonhosted.org/packages/89/72/02da1179165c74930c489565d00388201c9d26533fdd3b61a5eae4cc347e/tree_sitter_language_pack-1.20.0-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:e53fa9e1b281c21f1d885ae6a30828c2af2b0c43f221b7bc3c381fbdec4b1409", size = 2456922, upload-time = "2026-09-14T22:24:54.302Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/46/7c6da7dbf4aaa7a4916d4fc13ca34eaabc4bcd514dec04ad93712ed36d03/tree_sitter_language_pack-1.20.0-cp310-abi3-win_amd64.whl", hash = "sha256:e4481ceb2ebb2e6a67531118c17bc3b36e8402ce9c4d227d89b4b17422a7fa78", size = 2238521, upload-time = "2026-09-14T22:24:55.875Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/b6/06598eb0151d2094a87593b5d17851e27229e772f640c02e7a6aa779cc6f/tree_sitter_language_pack-1.20.0-cp310-abi3-win_arm64.whl", hash = "sha256:37c8e17441041f345a21494687b909c01f9a67d78c0737e3e3d81c2a47840ebe", size = 2140157, upload-time = "2026-09-14T22:24:57.714Z" },
 ]
 
 [[package]]
@@ -3781,7 +3784,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'rag'", specifier = ">=2.4" },
     { name = "typing-extensions", specifier = ">=4.16.0" },
     { name = "uvicorn", specifier = ">=0.41.0" },
-    { name = "vaultspec-rag", extras = ["mcp"], marker = "extra == 'rag'", specifier = ">=0.3.8" },
+    { name = "vaultspec-rag", extras = ["mcp"], marker = "extra == 'rag'", specifier = ">=0.5.3" },
     { name = "websockets", specifier = ">=16.0" },
 ]
 provides-extras = ["server", "rag"]
@@ -3813,7 +3816,7 @@ all = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vaultspec-core", specifier = ">=0.1.56,<0.3" },
+    { name = "vaultspec-core", specifier = ">=0.3.2" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
@@ -3843,7 +3846,7 @@ dev = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vaultspec-core", specifier = ">=0.1.56,<0.3" },
+    { name = "vaultspec-core", specifier = ">=0.3.2" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
@@ -3851,7 +3854,7 @@ dev = [
 docs = [{ name = "sphinx", specifier = ">=8.2" }]
 freeze = [
     { name = "pyinstaller", specifier = ">=6.11" },
-    { name = "vaultspec-core", specifier = ">=0.1.56,<0.3" },
+    { name = "vaultspec-core", specifier = ">=0.3.2" },
 ]
 tooling = [
     { name = "actionlint-py", specifier = "==1.7.12.24" },
@@ -3878,7 +3881,7 @@ tooling = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vaultspec-core", specifier = ">=0.1.56,<0.3" },
+    { name = "vaultspec-core", specifier = ">=0.3.2" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
@@ -3886,9 +3889,10 @@ tooling = [
 
 [[package]]
 name = "vaultspec-core"
-version = "0.2.2"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "anyio" },
     { name = "mcp" },
     { name = "networkx" },
     { name = "phart", version = "1.1.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -3898,19 +3902,16 @@ dependencies = [
     { name = "rich" },
     { name = "ruamel-yaml" },
     { name = "rustworkx" },
-    { name = "sse-starlette" },
-    { name = "starlette" },
     { name = "typer" },
-    { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/52/54/ba4156784d538f5c92ee5116987a080e5a2af835113e815bda32e52d7d4d/vaultspec_core-0.2.2.tar.gz", hash = "sha256:01d6e8010548a80fc1ffe70685083d0bdd3ee6f58d87d0ea1058337038701a0c", size = 6478413, upload-time = "2026-09-18T14:19:49.565Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/8d/8165eeb39f67dd9ed9658a08727a9b1eb455b9522e63da11aad26a42dc5f/vaultspec_core-0.3.2.tar.gz", hash = "sha256:a0660233250f6f24671dd09fdd6971eea40a28c1d6589f293b4acc89ddf361fc", size = 7098799, upload-time = "2026-09-28T09:17:43.821Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/b1/6a0a49a15753f984bc47f9c37ef45ecd22358dacfcdb1f68ba3a1054915c/vaultspec_core-0.2.2-py3-none-any.whl", hash = "sha256:ab03d9a8e2cf2632c2f09aad512e1ed26826b14a406ef6e15db6eda328d855ad", size = 1076838, upload-time = "2026-09-18T14:19:46.631Z" },
+    { url = "https://files.pythonhosted.org/packages/de/80/f38f810b5cd7a6440a2ca8e1d8d2b0fa754080db6911b3979d7bc68510cb/vaultspec_core-0.3.2-py3-none-any.whl", hash = "sha256:61334376f2ea2ed724b47d7f4510be73341aaccb5699c402734930a0c1a002bf", size = 1305569, upload-time = "2026-09-28T09:17:40.8Z" },
 ]
 
 [[package]]
 name = "vaultspec-rag"
-version = "0.4.25"
+version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -3921,7 +3922,6 @@ dependencies = [
     { name = "pathspec" },
     { name = "psutil" },
     { name = "pydantic" },
-    { name = "python-dotenv" },
     { name = "qdrant-client" },
     { name = "rich" },
     { name = "starlette" },
@@ -3934,9 +3934,9 @@ dependencies = [
     { name = "vaultspec-core" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c3/9d/adb2c790574c2e109861042f97ec7ccaa95aa99880723c3b3256bb198e8a/vaultspec_rag-0.4.25.tar.gz", hash = "sha256:b4df9d0de511c890e8e569afbfd4a1f495d60531b8b3121c8a0be77fa0dc353d", size = 6143392, upload-time = "2026-09-07T17:47:51.991Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/14/a5bfcc91185814ffa1daa2d3ae647ddbcef9e9f086c133e6189a7b38e23f/vaultspec_rag-0.5.3.tar.gz", hash = "sha256:c738ab7914f0d216ca41422618f203953941aea4e9980b395d0a69306a461359", size = 6327012, upload-time = "2026-09-30T07:03:06.509Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/02/4240bd135ea479ebea0e83da972b681c8b907d345f5e788499d54c3d68cc/vaultspec_rag-0.4.25-py3-none-any.whl", hash = "sha256:7d55da6ad11e57a168ca5dd95c9ea27fbee600e4e3482d0f5f1ee92fd004682e", size = 1401575, upload-time = "2026-09-07T17:47:48.379Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/12/6d1af925104e48a69ef52defec7d40ea6bd84ba2264427185ebfbb11098c/vaultspec_rag-0.5.3-py3-none-any.whl", hash = "sha256:e295b2fd718f906fac0d60898556938b92e0f32304d05c36247d259e7d8f4360", size = 1613789, upload-time = "2026-09-30T07:03:03.601Z" },
 ]
 
 [package.optional-dependencies]

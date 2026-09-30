@@ -1,5 +1,9 @@
 {
   "commands": {
+    "commit-gate": [
+      "--json",
+      "--target"
+    ],
     "config get": [
       "--json",
       "--target"
@@ -107,40 +111,18 @@
       "--target"
     ],
     "spec hooks add": [
-      "--body",
       "--command",
-      "--dry-run",
       "--event",
       "--force",
-      "--from-file",
       "--json",
-      "--target"
-    ],
-    "spec hooks edit": [
-      "--editor",
       "--target"
     ],
     "spec hooks list": [
       "--json",
       "--target"
     ],
-    "spec hooks remove": [
-      "--force",
-      "--json",
-      "--target",
-      "--yes"
-    ],
-    "spec hooks rename": [
-      "--json",
-      "--target"
-    ],
-    "spec hooks restore": [
-      "--json",
-      "--target"
-    ],
     "spec hooks run": [
       "--json",
-      "--path",
       "--target"
     ],
     "spec hooks show": [
@@ -153,7 +135,6 @@
     ],
     "spec hooks sync": [
       "--dry-run",
-      "--force",
       "--json",
       "--target"
     ],
@@ -322,6 +303,52 @@
       "--json",
       "--target"
     ],
+    "spec triggers add": [
+      "--body",
+      "--command",
+      "--dry-run",
+      "--event",
+      "--force",
+      "--from-file",
+      "--json",
+      "--target"
+    ],
+    "spec triggers edit": [
+      "--editor",
+      "--target"
+    ],
+    "spec triggers list": [
+      "--json",
+      "--target"
+    ],
+    "spec triggers remove": [
+      "--force",
+      "--json",
+      "--target",
+      "--yes"
+    ],
+    "spec triggers rename": [
+      "--json",
+      "--target"
+    ],
+    "spec triggers run": [
+      "--json",
+      "--path",
+      "--target"
+    ],
+    "spec triggers show": [
+      "--json",
+      "--target"
+    ],
+    "spec triggers status": [
+      "--json",
+      "--target"
+    ],
+    "spec triggers trust": [
+      "--json",
+      "--revoke",
+      "--target"
+    ],
     "status": [
       "--json",
       "--limit",
@@ -359,6 +386,16 @@
       "--tier",
       "--title",
       "--topic"
+    ],
+    "vault adr crossref": [
+      "--after",
+      "--all",
+      "--apply",
+      "--feature",
+      "--isolated",
+      "--json",
+      "--max-sources",
+      "--target"
     ],
     "vault adr supersede": [
       "--by",
@@ -902,6 +939,14 @@
       "--target",
       "--verbose"
     ],
+    "vault search": [
+      "--date",
+      "--feature",
+      "--json",
+      "--limit",
+      "--target",
+      "--type"
+    ],
     "vault set-body": [
       "--body-file",
       "--body-stdin",
@@ -933,6 +978,7 @@
   "mcp_tools": [
     "check",
     "create",
+    "crossref",
     "discover",
     "edit",
     "find",
@@ -940,8 +986,9 @@
     "log",
     "plan_edit",
     "plan_progress",
+    "search",
     "status"
   ],
   "schema": 1,
-  "version": "0.2.2"
+  "version": "0.2.6"
 }

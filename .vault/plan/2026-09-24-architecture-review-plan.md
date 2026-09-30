@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:16b9cf3c22a0512aaca88cc0321383ab66d19b6570a71fd3afbe3909a09a556c'
+body_hash: 'sha256:bab6b30e226f190a9d409bb47116d225af8133ac209d4a7caa817de6807310e6'
 ---
 
 # `architecture-review` plan
@@ -67,7 +67,7 @@ Graph routing, human-in-the-loop resume, crash recovery, and per-run isolation b
 
 Busy runs, worker backpressure, event streams, checkpoint storage, the event bridge, and container shutdown fail typed and bounded instead of wedging.
 
-- [ ] `P03.S14` - Refuse a follow-up on a busy run with a typed conflict that installs no writer; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/worker/app.py`.
+- [x] `P03.S14` - Refuse a follow-up on a busy run with a typed conflict that installs no writer; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/worker/app.py`.
 - [x] `P03.S15` - Split worker refusals by reason and feed the circuit breaker only transport failures and server errors, with a single half-open probe; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/worker/app.py`.
 - [x] `P03.S16` - Scope the stream database session to the handler so an open stream holds no connection or read transaction; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py`.
 - [ ] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, keep the run sequence in the frame body without an SSE id until the stream can resume, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.

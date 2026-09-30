@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:49ab0402807e2ef68056cbde3234d7bb85ef993fde99f9c13809a418c5f8481c'
+body_hash: 'sha256:0d60124f5b0014727e580bf1eb417f1a5f38424b393e51f4fd52299f4716b91b'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -348,6 +348,8 @@ related:
 - `S23` `M` `src/vaultspec_a2a/graph/tests/nodes/_native_read_floor.py`
 - `S23` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 - `S23` `by:` `orchestrator`
+- `S14` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
+- `S14` `by:` `orchestrator`
 
 ## Notes
 
@@ -368,4 +370,5 @@ related:
 - `S32` The breakdown is nullable end to end: a lane that does not report it records NULL, not zero, and pre-existing rows stay NULL; ACP lanes still report no usage at all, which remains open in the audit's token-accounting-gaps.
 - `S20` Reopened by the plan-close review (compose-gateway-binds-loopback, critical): the gateway stage now sets its bind host.
 - `S23` Reopened by the plan-close review (grep-pre-approved-host-wide, high): a floor tool whose rule takes no path is withheld under a workspace; in-workspace Grep rests on the CLI's working-directory posture, not yet proven live.
+- `S14` Reopened for the contract half (followup-verb-has-no-reachable-success, high): the verb and its 202 now say no state admits a follow-up; the refusal code is narrowed; the continuation model stays the user's decision.
 

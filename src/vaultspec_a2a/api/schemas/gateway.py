@@ -77,6 +77,7 @@ __all__ = [
     "RunClarificationRespondRequest",
     "RunClarificationRespondResponse",
     "RunCommitResponse",
+    "RunMessageRefusalCode",
     "RunMessageRefusalDetail",
     "RunMessageRefusalResponse",
     "RunPrepareResponse",
@@ -712,6 +713,32 @@ class RunMessageResponse(BaseModel):
     idempotency_key: str | None = None
 
 
+class RunMessageRefusalCode(StrEnum):
+    """The conditions a follow-up turn can be refused for.
+
+    A closed subset of the dispatch failure vocabulary, so the published
+    contract names only what this refusal can carry rather than every failure
+    the gateway knows. Each value is spelled as its failure-type counterpart,
+    and the module refuses to import if one is not.
+    """
+
+    INPUT_REQUIRED = FailureType.INPUT_REQUIRED.value
+    TERMINAL = FailureType.TERMINAL.value
+    CONFLICT = FailureType.CONFLICT.value
+    INCOMPATIBLE_STATE = FailureType.INCOMPATIBLE_STATE.value
+    RUN_BUSY = FailureType.RUN_BUSY.value
+
+
+def _require_failure_type_codes() -> None:
+    known = {failure.value for failure in FailureType}
+    stray = [code.value for code in RunMessageRefusalCode if code.value not in known]
+    if stray:
+        raise RuntimeError(f"refusal codes with no failure type: {stray}")
+
+
+_require_failure_type_codes()
+
+
 class RunMessageRefusalDetail(BaseModel):
     """Why a follow-up turn was refused, in terms a program can match.
 
@@ -723,7 +750,7 @@ class RunMessageRefusalDetail(BaseModel):
     reconcile from this body.
     """
 
-    code: FailureType
+    code: RunMessageRefusalCode
     message: str = Field(max_length=1024)
 
 

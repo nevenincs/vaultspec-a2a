@@ -75,6 +75,7 @@ from ..schemas.gateway import (
     PresetSummary,
     RunClarificationRespondRequest,
     RunClarificationRespondResponse,
+    RunMessageRefusalCode,
     RunMessageRefusalDetail,
     RunMessageRefusalResponse,
     RunMessageRequest,
@@ -182,13 +183,7 @@ __all__ = ["_summarize_preset", "route_signature"]
 # turn now and nothing was reserved, so they share one status and are told apart
 # by the typed code in the body rather than by parsing the message.
 _MESSAGE_REFUSALS: frozenset[FailureType] = frozenset(
-    {
-        FailureType.INPUT_REQUIRED,
-        FailureType.TERMINAL,
-        FailureType.CONFLICT,
-        FailureType.INCOMPATIBLE_STATE,
-        FailureType.RUN_BUSY,
-    }
+    FailureType(code.value) for code in RunMessageRefusalCode
 )
 
 
@@ -198,7 +193,7 @@ def _message_refusal(result: MessageResult) -> HTTPException:
     if failure_type is None:
         raise RuntimeError("refused follow-up carries no failure type")
     detail = RunMessageRefusalDetail(
-        code=failure_type,
+        code=RunMessageRefusalCode(failure_type.value),
         message=result.error_detail or "The run cannot accept a follow-up turn",
     )
     return HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
@@ -224,6 +219,12 @@ async def _raise_for_message_dispatch_failure(
     status_code=202,
     response_model=RunMessageResponse,
     responses={
+        202: {
+            "description": (
+                "Reserved for a follow-up turn the run can take. No run state "
+                "admits one yet, so this response is not currently served."
+            ),
+        },
         409: {
             "model": RunMessageRefusalResponse,
             "description": (
@@ -231,7 +232,7 @@ async def _raise_for_message_dispatch_failure(
                 "and nothing was dispatched; the typed code names which "
                 "condition refused it."
             ),
-        }
+        },
     },
 )
 async def run_message_endpoint(
@@ -240,6 +241,14 @@ async def run_message_endpoint(
     context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
 ) -> RunMessageResponse:
     """Send a follow-up turn into an existing run.
+
+    No run state admits a follow-up today, so every request that names a run is
+    refused with the typed 409: a run with a turn in flight is busy, a parked run
+    answers through its own respond verb, and a settled run is over. Taking a
+    turn needs a continuation model this surface does not have yet, and the 202
+    shape below is what that model will answer with. The verb is published now
+    so a caller learns the refusal from its code rather than from a missing
+    route.
 
     Run-start cannot carry this. A repeat run identifier there is a REPLAY - it
     answers with the original run and never adopts the new body - so without

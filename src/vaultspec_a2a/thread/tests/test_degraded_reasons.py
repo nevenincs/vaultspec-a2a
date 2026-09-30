@@ -9,17 +9,12 @@ source, because the hazard is a reader removed in a module nobody reopened.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ..enums import DegradedReason
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-
-#: The prefix naming the checkpoint-history read. Its reasons went from three
-#: to one when history depth started coming off the checkpoint tuple the
-#: caller already holds, which removed the separate read that could time out
-#: or find the store unreachable.
-_HISTORY_PREFIX = "checkpoint_history_"
 
 
 def _production_sources() -> list[str]:
@@ -31,22 +26,34 @@ def _production_sources() -> list[str]:
     ]
 
 
-def test_every_checkpoint_history_degradation_has_a_producer() -> None:
-    """Each history reason is one some reader can actually report."""
-    declared = {
+#: A reason reaches a client as a member, or as a literal handed to a
+#: snapshot's degradation list. A bare string elsewhere is not a producer:
+#: ``"unknown"`` means something different in every vocabulary that uses it.
+_APPENDED = re.compile(r'degraded_reasons\.append\(\s*"([a-z_]+)"\s*\)')
+_CONSTRUCTED = re.compile(r"degraded_reasons=\[([^\]]*)\]")
+_QUOTED = re.compile(r'"([a-z_]+)"')
+
+
+def _reported_literals(sources: list[str]) -> set[str]:
+    """Every literal some shipped module hands to a degradation list."""
+    literals: set[str] = set()
+    for source in sources:
+        literals.update(_APPENDED.findall(source))
+        for listed in _CONSTRUCTED.findall(source):
+            literals.update(_QUOTED.findall(listed))
+    return literals
+
+
+def test_every_degradation_reason_has_a_producer() -> None:
+    """Each declared reason is one some reader can actually report."""
+    sources = _production_sources()
+    literals = _reported_literals(sources)
+    orphaned = sorted(
         member.value
         for member in DegradedReason
-        if member.value.startswith(_HISTORY_PREFIX)
-    }
-    assert declared, "the history reason family is empty, so this proves nothing"
-
-    sources = _production_sources()
-    orphaned = sorted(
-        reason
-        for reason in declared
-        if not any(f'"{reason}"' in source for source in sources)
+        if member.value not in literals
+        and not any(f"DegradedReason.{member.name}" in source for source in sources)
     )
-
     assert not orphaned, (
         "these degradation reasons are declared but nothing in the package "
         f"reports them, so no client can ever receive one: {orphaned}"

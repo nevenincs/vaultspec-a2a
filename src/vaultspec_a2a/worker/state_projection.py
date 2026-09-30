@@ -26,7 +26,7 @@ from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
     read_checkpoint_evidence,
 )
-from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
+from ..thread.enums import TERMINAL_STATUSES, DegradedReason, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..thread.snapshots import tasks_past_their_interrupt
 from ..utils.coercion import coerce_object_mapping
@@ -736,7 +736,9 @@ class StateProjector:
             )
         except TimeoutError:
             payload = ExecutionStateProjectionPayload(
-                degraded_reasons=["execution_state_projection_timeout"]
+                degraded_reasons=[
+                    DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT.value
+                ]
             )
         except Exception:
             logger.warning(
@@ -749,7 +751,9 @@ class StateProjector:
                 ),
             )
             payload = ExecutionStateProjectionPayload(
-                degraded_reasons=["execution_state_projection_unavailable"]
+                degraded_reasons=[
+                    DegradedReason.EXECUTION_STATE_PROJECTION_UNAVAILABLE.value
+                ]
             )
         await self._bridge.send_event(thread_id, payload.model_dump(mode="json"))
 

@@ -146,6 +146,8 @@ class DegradedReason(StrEnum):
     CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
     EXECUTION_STATE_PROJECTION_MISSING = "execution_state_projection_missing"
     EXECUTION_STATE_PROJECTION_STALE = "execution_state_projection_stale"
+    EXECUTION_STATE_PROJECTION_TIMEOUT = "execution_state_projection_timeout"
+    EXECUTION_STATE_PROJECTION_UNAVAILABLE = "execution_state_projection_unavailable"
     EXECUTION_STATE_PROJECTION_UNREADABLE = "execution_state_projection_unreadable"
     INCOMPATIBLE_EXECUTION_AUTHORITY = "incompatible_execution_authority"
     INVALID_AGENT_DESCRIPTORS = "invalid_agent_descriptors"
@@ -158,7 +160,6 @@ class DegradedReason(StrEnum):
     TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE = (
         "terminal_thread_pending_permission_residue"
     )
-    UNKNOWN = "unknown"
 
 
 class TranscriptAvailability(StrEnum):

@@ -302,13 +302,21 @@ def test_degraded_reason_vocabulary_covers_every_producer_in_the_tree() -> None:
 
     package_root = Path(__file__).resolve().parents[2]
     appended = re.compile(r'degraded_reasons\.append\(\s*"([a-z_]+)"\s*\)')
+    # A payload built with its reasons already in hand never appends: the
+    # literal sits in the list handed to the constructor keyword instead.
+    constructed = re.compile(r"degraded_reasons=\[([^\]]*)\]")
+    quoted = re.compile(r'"([a-z_]+)"')
 
     declared = {member.value for member in DegradedReason}
     found: dict[str, str] = {}
     for source in package_root.rglob("*.py"):
         if "tests" in source.parts:
             continue
-        for literal in appended.findall(source.read_text(encoding="utf-8")):
+        text = source.read_text(encoding="utf-8")
+        literals = appended.findall(text)
+        for listed in constructed.findall(text):
+            literals.extend(quoted.findall(listed))
+        for literal in literals:
             found[literal] = str(source.relative_to(package_root))
 
     undeclared = {

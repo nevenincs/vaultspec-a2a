@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:ec8acaf14defb92f294737ca08e6ca0870518f962b278f9206cdb6cf69cc2638'
+body_hash: 'sha256:38f24a3cd28bce19313b12030bc2167732fcfd5915aab615837b2aae48649605'
 ---
 
 # `langgraph-conformance` plan
@@ -116,7 +116,7 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S40` - Attribute custom stream writes to their node and replace the aggregator's hand-written graph stubs with one error-injecting graph; `src/vaultspec_a2a/streaming/`.
 - [x] `P07.S41` - Make the provider tests name the adapter prerequisite they lack; `src/vaultspec_a2a/providers/tests/`.
 - [x] `P07.S42` - Route a warned exec route through plan approval rather than returning the SOFT gate decision first; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
-- [ ] `P07.S43` - Declare the execution-state degradation reasons, retire the producerless unknown reason, and widen the vocabulary guards to constructor literals and every member; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/worker/state_projection.py`.
+- [x] `P07.S43` - Declare the execution-state degradation reasons, retire the producerless unknown reason, and widen the vocabulary guards to constructor literals and every member; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/worker/state_projection.py`.
 - [ ] `P07.S44` - Correct the compiler comment that says strict msgpack refuses an unknown type; `src/vaultspec_a2a/graph/compiler.py`.
 
 ## Parallelization

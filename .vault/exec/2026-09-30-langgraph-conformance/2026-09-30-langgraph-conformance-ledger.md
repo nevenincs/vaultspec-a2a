@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:b6001fde3340807870c878a64a331471bb552448a61db67ae6299cc73cc7617a'
+body_hash: 'sha256:8707095f0389fbed3eee71f5abb5e887f1b618f0c36f7fad570133ecd9c78b1b'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -421,6 +421,13 @@ related:
 - `S39` `A` `src/vaultspec_a2a/thread/tests/test_degraded_reasons.py`
 - `S39` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
 - `S39` `by:` `worker-a287e053`
+- `S43` `M` `src/vaultspec_a2a/thread/enums.py`
+- `S43` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S43` `M` `src/vaultspec_a2a/control/projection.py`
+- `S43` `M` `src/vaultspec_a2a/thread/tests/test_degraded_reasons.py`
+- `S43` `M` `src/vaultspec_a2a/api/tests/test_served_vocabulary_containment.py`
+- `S43` `verify:` `pytest control thread worker api graph and the package structural tests with Postgres required` -> `pass`
+- `S43` `by:` `orchestrator`
 
 ## Notes
 
@@ -458,3 +465,4 @@ related:
 - `S34` Receipt channels are read from pending writes as well as channel values.
 - `S35` Scope extended to thread/snapshots.py, where run-status disclosure folds pending writes; answered is keyed on the fixed per-task write slots so a task that failed mid-node still reads as waiting. A follow-up commit makes the live clarification proof wait for the run's position rather than only its answers.
 - `S39` The borrowed-close refusal exists only on the selector bridge; the pooled Postgres sibling has no close. The schema pin cannot fail before its change because the guard is the deliverable; proven by bumping the pin. Also consolidates the retention test helpers the structural gate flagged.
+- `S43` The producer guard is widened from the history family to every member; the helper-literal producers moved to members so the guard can see them.

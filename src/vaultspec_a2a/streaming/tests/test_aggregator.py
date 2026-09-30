@@ -6,14 +6,14 @@ import sys
 from collections.abc import AsyncIterator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, TypedDict, Unpack, cast, override
+from typing import Any, ClassVar, TypedDict, Unpack, cast
 from uuid import uuid4
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.types import Command, Interrupt
+from langgraph.types import Command
 
 from ...domain_config import domain_config
 from ...graph.enums import (
@@ -36,7 +36,7 @@ from ...graph.events import (
     ToolCallUpdate,
 )
 from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
-from ...providers import AcpPromptCancelledError, AcpPromptError, ProviderCondition
+from ...providers import AcpPromptError, ProviderCondition
 from ...thread.enums import ThreadStatus
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
@@ -44,6 +44,7 @@ from .. import aggregator as agg_module
 from ..aggregator import EventAggregator
 from ..ingest import _next_event_or_cancel, summarize_ingest_exception
 from ..types import SequencedEvent, StreamableGraph
+from ._error_injecting_graph import ERROR_INJECTION_NODE, build_error_injecting_graph
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1175,6 +1176,54 @@ class TestLangGraphStreamProcessing:
         ]
 
     @pytest.mark.asyncio
+    async def test_a_custom_write_without_a_node_stamp_falls_back_to_the_run_agent(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A write LangGraph's namespace could not name a node for keeps the run's."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_stream_frame(
+            (),
+            "custom",
+            {"content": "an un-stamped thought"},
+            thread_id="thread-1",
+            agent_id="supervisor",
+        )
+
+        event = queue.get_nowait().event
+        assert isinstance(event, ThoughtChunk)
+        assert event.agent_id == "supervisor"
+
+    @pytest.mark.asyncio
+    async def test_a_stamped_custom_write_attributes_to_its_own_node(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A write stamped through emit_custom_node_write names its own node.
+
+        LangGraph drops the writing node from a custom write's namespace, so
+        the run's agent is the only identity ``tools/list``-style metadata
+        could ever carry for this mode; a write that stamps its own node
+        inside the payload is the one way this projection can attribute it
+        correctly.
+        """
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_stream_frame(
+            (),
+            "custom",
+            {"node": "coder", "content": "a stamped thought"},
+            thread_id="thread-1",
+            agent_id="supervisor",
+        )
+
+        event = queue.get_nowait().event
+        assert isinstance(event, ThoughtChunk)
+        assert event.agent_id == "coder"
+        assert event.content == "a stamped thought"
+
+    @pytest.mark.asyncio
     async def test_an_unknown_stream_mode_does_not_emit(
         self, aggregator: EventAggregator
     ) -> None:
@@ -1242,6 +1291,40 @@ def _action_chunk_frame(
             ],
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_a_real_nodes_stamped_custom_write_reaches_the_client_as_its_own_agent(
+    aggregator: EventAggregator,
+) -> None:
+    """End to end: a real node's stamped write is attributed to that node.
+
+    No shipped node calls ``emit_custom_node_write`` yet, so this drives the
+    real graph fixture's node through it rather than only exercising a
+    hand-built frame - the same real ``ingest()`` path a production run takes,
+    proving the config the node receives is what the stamp actually reads.
+    """
+    queue = aggregator.add_subscriber("client-1")
+    aggregator.subscribe("client-1", ["thread-custom-write"])
+    graph = build_error_injecting_graph()
+
+    outcome = await _ingest(
+        aggregator,
+        thread_id="thread-custom-write",
+        agent_id="supervisor",
+        graph=graph,
+        graph_input={"custom_write": "a real node's own thought"},
+        config={"configurable": {"thread_id": "thread-custom-write"}},
+    )
+    assert outcome == "completed"
+
+    events: list[DomainEvent] = []
+    while not queue.empty():
+        events.append(queue.get_nowait().event)
+    thoughts = [event for event in events if isinstance(event, ThoughtChunk)]
+    assert len(thoughts) == 1
+    assert thoughts[0].agent_id == ERROR_INJECTION_NODE
+    assert thoughts[0].content == "a real node's own thought"
 
 
 class TestProviderActionToolCallChunks:
@@ -1682,127 +1765,15 @@ class TestExports:
 # ---------------------------------------------------------------------------
 
 
-class _InterruptValue:
-    """Minimal interrupt value carrier for _emit_interrupt_events testing.
-
-    Policy exception: LangGraph's real interrupt objects are created internally
-    by the graph runtime and are not publicly constructible outside a running
-    graph execution. The aggregator only accesses `interrupt_obj.value` via
-    getattr, so a plain dataclass-style object is sufficient to exercise the
-    full interrupt-detection logic without requiring a live graph.
-    """
-
-    def __init__(self, value: object) -> None:
-        self.value = value
-
-
-assert hasattr(_InterruptValue(None), "value")  # protocol drift guard
-
-
-class _GraphTask:
-    """Minimal LangGraph task stub for _emit_interrupt_events testing.
-
-    Policy exception: LangGraph's PregelTask is an internal dataclass populated
-    by the graph runtime. The aggregator only reads `task.name` and
-    `task.interrupts`, making a plain two-attribute object sufficient to test
-    all interrupt-routing branches without a running graph or checkpointer.
-    """
-
-    def __init__(self, name: str, interrupts: list[_InterruptValue]) -> None:
-        self.name = name
-        self.interrupts = interrupts
-
-
-assert hasattr(_GraphTask("", []), "name") and hasattr(  # protocol drift guard
-    _GraphTask("", []), "interrupts"
-)
-
-
-class _GraphStateSnapshot:
-    """Minimal LangGraph state snapshot for _emit_interrupt_events testing.
-
-    Policy exception: LangGraph's StateSnapshot requires a full checkpointer
-    and channel state. The aggregator only reads `state.tasks`, so a minimal
-    one-attribute holder is sufficient to drive all branches of the interrupt
-    detection logic without I/O or LangGraph infrastructure.
-    """
-
-    def __init__(self, tasks: list[_GraphTask]) -> None:
-        self.tasks = tasks
-
-
-assert hasattr(_GraphStateSnapshot([]), "tasks")  # protocol drift guard
-
-
-class _SilentGraph:
-    """Minimal graph stub: astream_events yields nothing, aget_state returns state.
-
-    Policy exception: A real compiled LangGraph graph requires StateGraph
-    definition, node functions, and checkpointer wiring. The ingest() tests
-    only need to verify event routing and _emit_interrupt_events behaviour;
-    a no-op async generator for astream_events and a direct aget_state return
-    are sufficient to exercise those paths without LLM or I/O dependencies.
-    """
-
-    def __init__(self, state: object) -> None:
-        self._state = state
-
-    async def astream(
-        self,
-        graph_input: object,
-        config: object,
-        *,
-        stream_mode: list[str],
-        subgraphs: bool = False,
-        context: object | None = None,
-        control: object | None = None,
-        durability: str | None = None,
-    ):
-        return
-        yield  # make it an async generator
-
-    async def aget_state(self, config: object) -> object:
-        return self._state
-
-
-assert issubclass(_SilentGraph, StreamableGraph)  # protocol drift guard
-
-
-class _InterruptingGraph:
-    """Graph stub whose stream reports a park the way a real one does.
-
-    Policy exception: see _SilentGraph. A parked LangGraph run does not raise
-    - it yields an ``updates`` frame under the interrupt key and ends - so
-    that is what this yields, with a real ``Interrupt``. The run's outcome is
-    read from that frame, and ``aget_state`` then supplies the payload the
-    permission projection publishes.
-    """
-
-    def __init__(self, state: object) -> None:
-        self._state = state
-
-    async def astream(
-        self,
-        graph_input: object,
-        config: object,
-        *,
-        stream_mode: list[str],
-        subgraphs: bool = False,
-        context: object | None = None,
-        control: object | None = None,
-        durability: str | None = None,
-    ):
-        yield ((), "updates", {"__interrupt__": (Interrupt(value={}),)})
-
-    async def aget_state(self, config: object) -> object:
-        return self._state
-
-
-assert issubclass(_InterruptingGraph, StreamableGraph)  # protocol drift guard
-
-
 class TestEmitInterruptEvents:
-    """Tests for _emit_interrupt_events called via ingest() finally block."""
+    """Tests for _emit_interrupt_events called via ingest() finally block.
+
+    Every scenario below suspends a REAL compiled graph on a real ``interrupt()``
+    call (see ``_error_injecting_graph``), so both the stream's own park report
+    and the state ``ingest()`` reads afterward are LangGraph's own, not a
+    hand-built stand-in for either - the interrupted task's name is the
+    graph's real node, :data:`ERROR_INJECTION_NODE`.
+    """
 
     @pytest.mark.asyncio
     async def test_ingest_emits_permission_on_tool_interrupt(
@@ -1810,10 +1781,6 @@ class TestEmitInterruptEvents:
     ) -> None:
         """When graph suspends with a permission_request interrupt, events are
         emitted.
-
-        Uses _InterruptingGraph, whose stream reports the park the way a
-        real one does, so the run is classified interrupted and the
-        permission projection publishes what it asked for.
         """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-interrupt"])
@@ -1827,10 +1794,7 @@ class TestEmitInterruptEvents:
                 {"optionId": "deny_once", "label": "Deny"},
             ],
         }
-        state = _GraphStateSnapshot(
-            tasks=[_GraphTask("vaultspec-coder", [_InterruptValue(interrupt_payload)])]
-        )
-        graph = _InterruptingGraph(state)
+        graph = build_error_injecting_graph()
 
         config = {"configurable": {"thread_id": "thread-interrupt"}}
         await _ingest(
@@ -1838,7 +1802,7 @@ class TestEmitInterruptEvents:
             thread_id="thread-interrupt",
             agent_id="supervisor",
             graph=graph,
-            graph_input=None,
+            graph_input={"interrupt_payload": interrupt_payload},
             config=config,
         )
 
@@ -1858,7 +1822,7 @@ class TestEmitInterruptEvents:
         )
         perm = perm_events[0]
         assert perm.thread_id == "thread-interrupt"
-        assert perm.agent_id == "vaultspec-coder"
+        assert perm.agent_id == ERROR_INJECTION_NODE
         assert "fs/write_text_file" in perm.description
         assert len(perm.options) == 2
 
@@ -1877,8 +1841,7 @@ class TestEmitInterruptEvents:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-normal"])
 
-        state = _GraphStateSnapshot(tasks=[])
-        graph = _SilentGraph(state)
+        graph = build_error_injecting_graph()
 
         config = {"configurable": {"thread_id": "thread-normal"}}
         await _ingest(
@@ -1886,40 +1849,7 @@ class TestEmitInterruptEvents:
             thread_id="thread-normal",
             agent_id="supervisor",
             graph=graph,
-            graph_input=None,
-            config=config,
-        )
-
-        sequenced_all: list[SequencedEvent] = []
-        while not queue.empty():
-            sequenced_all.append(queue.get_nowait())
-        domain_events = [s.event for s in sequenced_all]
-
-        perm_events = [e for e in domain_events if isinstance(e, PermissionRequest)]
-        assert len(perm_events) == 0
-
-    @pytest.mark.asyncio
-    async def test_ingest_no_permission_on_empty_interrupt_tasks(
-        self, aggregator: EventAggregator
-    ) -> None:
-        """When a task has an empty interrupts list, no PermissionRequestEvent
-        is emitted."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-empty-interrupts"])
-
-        # Task exists but with no interrupts - uses _InterruptingGraph
-        # so _emit_interrupt_events IS called, but no events emitted since
-        # task.interrupts is empty.
-        state = _GraphStateSnapshot(tasks=[_GraphTask("vaultspec-coder", [])])
-        graph = _InterruptingGraph(state)
-
-        config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
-        await _ingest(
-            aggregator,
-            thread_id="thread-empty-interrupts",
-            agent_id="supervisor",
-            graph=graph,
-            graph_input=None,
+            graph_input={},
             config=config,
         )
 
@@ -1940,13 +1870,7 @@ class TestEmitInterruptEvents:
         aggregator.subscribe("client-1", ["thread-other-interrupt"])
 
         interrupt_payload = {"type": "some_other_type", "data": "irrelevant"}
-        state = _GraphStateSnapshot(
-            tasks=[_GraphTask("vaultspec-coder", [_InterruptValue(interrupt_payload)])]
-        )
-        # Uses _InterruptingGraph so the stream reports a park and
-        # _emit_interrupt_events is triggered, but the payload type is not
-        # "permission_request" so no PermissionRequestEvent should be emitted.
-        graph = _InterruptingGraph(state)
+        graph = build_error_injecting_graph()
 
         config = {"configurable": {"thread_id": "thread-other-interrupt"}}
         await _ingest(
@@ -1954,7 +1878,7 @@ class TestEmitInterruptEvents:
             thread_id="thread-other-interrupt",
             agent_id="supervisor",
             graph=graph,
-            graph_input=None,
+            graph_input={"interrupt_payload": interrupt_payload},
             config=config,
         )
 
@@ -1980,11 +1904,7 @@ class TestEmitInterruptEvents:
             "tool_input": {},
             "options": [],  # Empty options — should use defaults
         }
-        state = _GraphStateSnapshot(
-            tasks=[_GraphTask("vaultspec-coder", [_InterruptValue(interrupt_payload)])]
-        )
-        # Uses _InterruptingGraph so the interrupt projection runs.
-        graph = _InterruptingGraph(state)
+        graph = build_error_injecting_graph()
 
         config = {"configurable": {"thread_id": "thread-default-opts"}}
         await _ingest(
@@ -1992,7 +1912,7 @@ class TestEmitInterruptEvents:
             thread_id="thread-default-opts",
             agent_id="supervisor",
             graph=graph,
-            graph_input=None,
+            graph_input={"interrupt_payload": interrupt_payload},
             config=config,
         )
 
@@ -2008,38 +1928,72 @@ class TestEmitInterruptEvents:
         assert "allow_once" in option_ids
         assert "deny_once" in option_ids
 
+    @pytest.mark.asyncio
+    async def test_ingest_no_permission_on_empty_interrupt_tasks(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """When a task has an empty interrupts list, no PermissionRequestEvent
+        is emitted.
+
+        Policy exception: the branch this guards against is a disagreement
+        between what the STREAM reported (a park happened) and what a later
+        STATE READ shows (the parked task's own interrupts) - a timing gap a
+        real graph gives no way to force, since a genuine interrupted task's
+        state read always carries the same interrupt the stream just reported.
+        A graph whose stream reports a park via a real ``__interrupt__``
+        update, paired with a state read stubbed to disagree with it, is what
+        isolates the guard rather than the timing race nothing here can drive.
+        """
+
+        class _DisagreeingGraph:
+            async def astream(
+                self,
+                graph_input: object,
+                config: object,
+                *,
+                stream_mode: list[str],
+                subgraphs: bool = False,
+                context: object | None = None,
+                control: object | None = None,
+                durability: str | None = None,
+            ):
+                from langgraph.types import Interrupt
+
+                yield ((), "updates", {"__interrupt__": (Interrupt(value={}),)})
+
+            async def aget_state(self, config: object) -> object:
+                task = type(
+                    "_Task", (), {"name": "vaultspec-coder", "interrupts": []}
+                )()
+                return type("_State", (), {"tasks": [task]})()
+
+        assert issubclass(_DisagreeingGraph, StreamableGraph)  # protocol drift guard
+
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-empty-interrupts"])
+
+        config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
+        await _ingest(
+            aggregator,
+            thread_id="thread-empty-interrupts",
+            agent_id="supervisor",
+            graph=_DisagreeingGraph(),
+            graph_input=None,
+            config=config,
+        )
+
+        sequenced_all: list[SequencedEvent] = []
+        while not queue.empty():
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
+
+        perm_events = [e for e in domain_events if isinstance(e, PermissionRequest)]
+        assert len(perm_events) == 0
+
 
 # ---------------------------------------------------------------------------
 # GraphRecursionError detection
 # ---------------------------------------------------------------------------
-
-
-class _RecursingGraph:
-    """Graph stub that raises GraphRecursionError from astream_events."""
-
-    async def astream(
-        self,
-        graph_input: object,
-        config: object,
-        *,
-        stream_mode: list[str],
-        subgraphs: bool = False,
-        context: object | None = None,
-        control: object | None = None,
-        durability: str | None = None,
-    ):
-        from langgraph.errors import GraphRecursionError
-
-        raise GraphRecursionError("Recursion limit of 100 reached")
-        yield  # make it an async generator
-
-    async def aget_state(self, config: object) -> object:
-        return type(
-            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
-        )()
-
-
-assert issubclass(_RecursingGraph, StreamableGraph)  # protocol drift guard
 
 
 class TestRecursionLimitDetection:
@@ -2050,18 +2004,26 @@ class TestRecursionLimitDetection:
         self, aggregator: EventAggregator
     ) -> None:
         """GraphRecursionError produces ErrorEvent(code='RECURSION_LIMIT_EXCEEDED',
-        recoverable=False)."""
+        recoverable=False).
+
+        A genuinely self-looping real graph, bounded by a low real
+        ``recursion_limit``, so LangGraph's own Pregel loop raises the error
+        rather than this fixture manufacturing it.
+        """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-recurse"])
 
-        graph = _RecursingGraph()
-        config = {"configurable": {"thread_id": "thread-recurse"}}
+        graph = build_error_injecting_graph()
+        config = {
+            "configurable": {"thread_id": "thread-recurse"},
+            "recursion_limit": 3,
+        }
         await _ingest(
             aggregator,
             thread_id="thread-recurse",
             agent_id="supervisor",
             graph=graph,
-            graph_input={"messages": []},
+            graph_input={"loop": True},
             config=config,
         )
 
@@ -2077,82 +2039,6 @@ class TestRecursionLimitDetection:
         assert err.recoverable is False
 
 
-class _FailingGraph:
-    """Graph stub that raises an arbitrary, uncaught exception from ingest.
-
-    Reproduces the S37 resume failure: a node deep in the graph (e.g. an
-    authoring submission whose actor credential is no longer valid) raises
-    something ingest never classifies as an interrupt, recursion limit, or
-    step timeout — the generic catch-all branch.
-    """
-
-    async def astream(
-        self,
-        graph_input: object,
-        config: object,
-        *,
-        stream_mode: list[str],
-        subgraphs: bool = False,
-        context: object | None = None,
-        control: object | None = None,
-        durability: str | None = None,
-    ):
-        raise RuntimeError(
-            "authoring transport error (401 authoring_actor_token_unknown): "
-            "unknown or revoked authoring principal"
-        )
-        yield  # make it an async generator
-
-    async def aget_state(self, config: object) -> object:
-        return type(
-            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
-        )()
-
-
-assert issubclass(_FailingGraph, StreamableGraph)  # protocol drift guard
-
-
-class _ProviderCancelledGraph(_FailingGraph):
-    @override
-    async def astream(
-        self,
-        graph_input: object,
-        config: object,
-        *,
-        stream_mode: list[str],
-        subgraphs: bool = False,
-        context: object | None = None,
-        control: object | None = None,
-        durability: str | None = None,
-    ):
-        raise AcpPromptCancelledError(
-            "ACP prompt was cancelled by the agent",
-            data={"acp_stop_reason": "cancelled"},
-        )
-        yield
-
-
-@pytest.mark.asyncio
-async def test_provider_cancelled_prompt_settles_as_cancelled(
-    aggregator: EventAggregator,
-) -> None:
-    queue = aggregator.add_subscriber("provider-cancel-client")
-    aggregator.subscribe("provider-cancel-client", ["provider-cancel-thread"])
-    outcome = await _ingest(
-        aggregator,
-        thread_id="provider-cancel-thread",
-        agent_id="supervisor",
-        graph=_ProviderCancelledGraph(),
-        graph_input={"messages": []},
-        config={"configurable": {"thread_id": "provider-cancel-thread"}},
-    )
-    assert outcome == ThreadStatus.CANCELLED
-    events = [queue.get_nowait().event for _ in range(queue.qsize())]
-    cancelled = [event for event in events if isinstance(event, AgentStatus)]
-    assert cancelled[-1].state is AgentLifecycleState.CANCELLED
-    assert cancelled[-1].detail == "Provider cancelled the turn"
-
-
 class TestGenericIngestExceptionDetection:
     """Tests for the catch-all exception branch in ingest() (S37 resume fix)."""
 
@@ -2165,19 +2051,25 @@ class TestGenericIngestExceptionDetection:
         Before this fix, every uncaught exception here was reported to
         run-status/relay clients as the same fixed string regardless of
         cause, so a resumed run that died on an expired authoring credential
-        was indistinguishable from any other unrelated ingest crash.
+        was indistinguishable from any other unrelated ingest crash. Reproduced
+        through a real node raising the real exception, not a stub simulating
+        one.
         """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-generic-fail"])
 
-        graph = _FailingGraph()
+        failure_message = (
+            "authoring transport error (401 authoring_actor_token_unknown): "
+            "unknown or revoked authoring principal"
+        )
+        graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-generic-fail"}}
         await _ingest(
             aggregator,
             thread_id="thread-generic-fail",
             agent_id="supervisor",
             graph=graph,
-            graph_input={"messages": []},
+            graph_input={"raise_message": failure_message},
             config=config,
         )
 
@@ -2195,6 +2087,31 @@ class TestGenericIngestExceptionDetection:
         assert err.recoverable is False
         assert "authoring_actor_token_unknown" in err.message
         assert "RuntimeError" in err.message
+
+
+@pytest.mark.asyncio
+async def test_provider_cancelled_prompt_settles_as_cancelled(
+    aggregator: EventAggregator,
+) -> None:
+    """A real node raising the real cancellation exception settles as CANCELLED."""
+    queue = aggregator.add_subscriber("provider-cancel-client")
+    aggregator.subscribe("provider-cancel-client", ["provider-cancel-thread"])
+    outcome = await _ingest(
+        aggregator,
+        thread_id="provider-cancel-thread",
+        agent_id="supervisor",
+        graph=build_error_injecting_graph(),
+        graph_input={
+            "raise_cancelled": True,
+            "raise_message": "ACP prompt was cancelled by the agent",
+        },
+        config={"configurable": {"thread_id": "provider-cancel-thread"}},
+    )
+    assert outcome == ThreadStatus.CANCELLED
+    events = [queue.get_nowait().event for _ in range(queue.qsize())]
+    cancelled = [event for event in events if isinstance(event, AgentStatus)]
+    assert cancelled[-1].state is AgentLifecycleState.CANCELLED
+    assert cancelled[-1].detail == "Provider cancelled the turn"
 
 
 class TestIngestExceptionCauseChain:
@@ -2586,39 +2503,6 @@ class TestRecoverabilityFollowsTheCondition:
             assert _worker_retry_on(wrapper) is err.recoverable
 
 
-class _StallingGraph:
-    """Graph stub whose astream_events never yields (S37 stall watchdog).
-
-    Reproduces the observed live incident: a run whose graph genuinely
-    wedges mid-turn produced no event, no exception, no checkpoint write, and
-    no log line — the ingest coroutine hung forever. ingest()'s bounded
-    manual iteration must turn "no progress within the stall budget" into a
-    caught, classified failure instead.
-    """
-
-    async def astream(
-        self,
-        graph_input: object,
-        config: object,
-        *,
-        stream_mode: list[str],
-        subgraphs: bool = False,
-        context: object | None = None,
-        control: object | None = None,
-        durability: str | None = None,
-    ) -> AsyncIterator[tuple[Any, Any, Any]]:
-        await asyncio.sleep(3600)  # never reached under the test's tiny timeout
-        yield ((), "tasks", {})  # pragma: no cover -- make it an async generator
-
-    async def aget_state(self, config: object) -> object:
-        return type(
-            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
-        )()
-
-
-assert issubclass(_StallingGraph, StreamableGraph)  # protocol drift guard
-
-
 def _cancellable_stalling_graph(
     entered: asyncio.Event, closed: asyncio.Event
 ) -> StreamableGraph:
@@ -2643,57 +2527,19 @@ def _cancellable_stalling_graph(
     return compile_test_graph(builder, checkpointer=InMemorySaver())
 
 
-class _LongStepBudgetGraph:
-    """Graph stub carrying a compiled ``step_timeout``, quiet within that budget.
-
-    Reproduces the live false-positive: a team preset can declare
-    ``step_timeout_seconds`` far above the global ingest-stall default (e.g.
-    1800s for an ACP-backed authoring node doing a long tool call or extended
-    reasoning between protocol frames -- ``graph/compiler.py`` sets exactly
-    this on the compiled Pregel object from the team TOML). ``astream_events``
-    here goes quiet for longer than the tiny global default this test
-    configures, but still well inside ``step_timeout`` -- the shape of a node
-    using precisely the silence its own run sanctioned, not a wedge.
-    """
-
-    step_timeout = 0.5
-
-    async def astream(
-        self,
-        graph_input: object,
-        config: object,
-        *,
-        stream_mode: list[str],
-        subgraphs: bool = False,
-        context: object | None = None,
-        control: object | None = None,
-        durability: str | None = None,
-    ) -> AsyncIterator[tuple[Any, Any, Any]]:
-        await asyncio.sleep(0.3)
-        yield ((), "tasks", {"id": "t1", "name": "worker", "result": {}, "error": None})
-
-    async def aget_state(self, config: object) -> object:
-        return type(
-            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
-        )()
-
-
-assert issubclass(_LongStepBudgetGraph, StreamableGraph)  # protocol drift guard
-
-
 class TestIngestStallWatchdog:
-    """Tests for the S37 ingest-stall safety net (astream_events wedge)."""
+    """Tests for the S37 ingest-stall safety net (astream wedge)."""
 
     @pytest.mark.asyncio
     async def test_stall_fails_loud_with_a_named_reason_not_a_silent_hang(
         self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A graph that never yields an event fails fast, not forever."""
+        """A graph that goes quiet past the stall budget fails fast, not forever."""
         monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.05)
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-stall"])
 
-        graph = _StallingGraph()
+        graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-stall"}}
         # The test's own outer bound: if the watchdog regressed to not firing
         # at all, this fails the test loudly in 5s rather than hanging the
@@ -2704,7 +2550,7 @@ class TestIngestStallWatchdog:
                 thread_id="thread-stall",
                 agent_id="supervisor",
                 graph=graph,
-                graph_input={"messages": []},
+                graph_input={"stall_seconds": 3600},
                 config=config,
             ),
             timeout=5.0,
@@ -2804,7 +2650,7 @@ class TestIngestStallWatchdog:
         persistence path. A consumed reason must never be popped twice.
         """
         monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.05)
-        graph = _StallingGraph()
+        graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-stall-reason"}}
         outcome = await asyncio.wait_for(
             _ingest(
@@ -2812,7 +2658,7 @@ class TestIngestStallWatchdog:
                 thread_id="thread-stall-reason",
                 agent_id="supervisor",
                 graph=graph,
-                graph_input={"messages": []},
+                graph_input={"stall_seconds": 3600},
                 config=config,
             ),
             timeout=5.0,
@@ -2836,17 +2682,14 @@ class TestIngestStallWatchdog:
         still complete cleanly with no failure reason recorded.
         """
         monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 5.0)
-        state = type(
-            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
-        )()
-        graph = _SilentGraph(state)
+        graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-normal"}}
         outcome = await _ingest(
             aggregator,
             thread_id="thread-normal",
             agent_id="supervisor",
             graph=graph,
-            graph_input={"messages": []},
+            graph_input={},
             config=config,
         )
         assert outcome == "completed"
@@ -2869,11 +2712,15 @@ class TestIngestStallWatchdog:
         while the run was doing exactly the long-running work its own
         configuration sanctioned. Fails on the unfixed code (the global
         default alone bounds the wait, so the 0.3s quiet stretch below trips
-        it well before astream_events yields) and passes once the effective
+        it well before astream yields) and passes once the effective
         bound is widened to the graph's own step_timeout.
         """
         monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.1)
-        graph = _LongStepBudgetGraph()
+        graph = build_error_injecting_graph()
+        # The compiler's own convention (``graph/compiler.py``): a team
+        # preset's declared budget rides this plain attribute on the
+        # compiled Pregel object, read defensively by ``ingest()``.
+        graph.step_timeout = 0.5
         config = {"configurable": {"thread_id": "thread-long-step"}}
         outcome = await asyncio.wait_for(
             _ingest(
@@ -2881,7 +2728,7 @@ class TestIngestStallWatchdog:
                 thread_id="thread-long-step",
                 agent_id="supervisor",
                 graph=graph,
-                graph_input={"messages": []},
+                graph_input={"stall_seconds": 0.3},
                 config=config,
             ),
             timeout=5.0,

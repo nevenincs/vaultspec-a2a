@@ -13,6 +13,7 @@ sequenced output.
 """
 
 from .aggregator import EventAggregator
+from .custom_writes import emit_custom_node_write
 from .node_metadata import (
     NODE_METADATA_FIELDS,
     node_metadata_fields,
@@ -26,6 +27,7 @@ __all__ = [
     "SequencedEvent",
     "StreamableGraph",
     "classify_tool_kind",
+    "emit_custom_node_write",
     "node_metadata_fields",
     "node_metadata_from_graph",
 ]

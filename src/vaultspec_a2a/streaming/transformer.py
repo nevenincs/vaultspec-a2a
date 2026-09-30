@@ -29,6 +29,7 @@ from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ._interrupt_projection import emit_interrupt_events as emit_interrupt_events
 from .buffering import BufferingManager
+from .custom_writes import custom_write_node_name
 from .emitters import EventEmitters
 from .sse_frames import enforce_progress_allowlist
 from .translation import (
@@ -355,17 +356,21 @@ async def _project_custom(
 ) -> None:
     """Relay a node's own stream write as a thought.
 
-    LangGraph strips the writing node from a custom write's namespace, so the
-    write is attributed to the run's agent rather than guessed at. Any payload
-    shape a node cares to write is accepted: the reason this path existed
-    without a producer is that only one shape was ever contemplated.
+    LangGraph strips the writing node from a custom write's namespace, so a
+    plain write is attributed to the run's agent - but one pushed through
+    :func:`~vaultspec_a2a.streaming.custom_writes.emit_custom_node_write`
+    carries its node's identity INSIDE the payload instead, read here rather
+    than guessed at. Any other payload shape a node cares to write is still
+    accepted: the reason this path existed without a producer is that only
+    one shape was ever contemplated.
     """
+    node = custom_write_node_name(frame.payload)
     content = _custom_text(frame.payload)
     if not content:
         return
     await emitters.emit_thought_chunk(
         thread_id=thread_id,
-        agent_id=agent_id,
+        agent_id=node or agent_id,
         content=content,
         message_id=thread_id,
     )

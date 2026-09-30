@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, cast
 
 from ..domain_config import domain_config
@@ -30,16 +31,75 @@ from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_finge
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from ..database.checkpoints import Checkpointer
     from ..streaming.types import StreamableGraph
     from ..thread.action_receipts import GraphActionReceipt
+    from .graph_lifecycle import RegisteredCompiledGraph
     from .ipc import WorkerBridge
 
-__all__ = ["PreflightDecision", "StateProjector"]
+__all__ = [
+    "PreflightDecision",
+    "ResumeRefusal",
+    "ResumeRefusalCause",
+    "StateProjector",
+    "answered_request_id",
+]
 
 logger = logging.getLogger(__name__)
+
+
+class ResumeRefusalCause(StrEnum):
+    """Why a resume must not be handed to the graph."""
+
+    NOT_PARKED = "resume_not_parked"
+    REQUEST_NOT_PENDING = "resume_request_not_pending"
+    STATE_UNREADABLE = "resume_state_unreadable"
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeRefusal:
+    """One refused resume, on the operator's channel and the client's.
+
+    Attributes:
+        cause: The vocabulary term a consumer branches on.
+        detail: What the client is told, without the run identifier it is
+            already looking at.
+        pending_request_ids: The requests the run is actually waiting on, for
+            the operator's log. Empty when the run is waiting on none, or when
+            its state could not be read.
+    """
+
+    cause: ResumeRefusalCause
+    detail: str
+    pending_request_ids: tuple[str, ...] = ()
+
+
+def answered_request_id(resume_value: object) -> str | None:
+    """The request a resume value names, or ``None`` when it names none.
+
+    Every typed answer this system dispatches - a tool permission, a
+    clarification resolution, a plan or document verdict - carries the
+    identifier of the request it answers. A value that carries none cannot be
+    matched against what the run is parked on, and only the weaker
+    parked-at-all check applies to it.
+    """
+    if not isinstance(resume_value, dict):
+        return None
+    named = cast("dict[str, object]", resume_value).get("request_id")
+    return named if isinstance(named, str) and named else None
+
+
+def _pending_request_ids(interrupts: Iterable[object]) -> tuple[str, ...]:
+    """The request ids of the interrupts a run is parked on."""
+    found: list[str] = []
+    for interrupt in interrupts:
+        payload = coerce_object_mapping(getattr(interrupt, "value", interrupt))
+        if payload is None:
+            continue
+        request_id = payload.get("request_id")
+        if isinstance(request_id, str) and request_id:
+            found.append(request_id)
+    return tuple(found)
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,6 +432,111 @@ class StateProjector:
                 "The run's checkpoint belongs to a different action than this "
                 "dispatch, so the dispatch was not run"
             )
+        )
+
+    async def pre_flight_resume(
+        self,
+        thread_id: str,
+        graph: RegisteredCompiledGraph,
+        config: dict[str, Any],
+        receipt: GraphActionReceipt,
+        *,
+        resume_value: object,
+        timeout_seconds: float,
+    ) -> ResumeRefusal | None:
+        """Why this resume must not reach the graph, or ``None`` when it may.
+
+        A resume is an answer to one question the run stopped to ask. Handed to
+        a run that is not stopped, LangGraph gives the value to whatever the
+        next superstep interrupts on first, so an answer nobody gave for that
+        question settles it - a probe approved a plan that never parked. An
+        answer is therefore admitted only against the question it answers.
+
+        Two things are checked, in order of what the run's state can prove:
+
+        * The run is parked. The live snapshot is authoritative; when it cannot
+          be read, durable checkpoint evidence deciding ``INTERRUPTED`` stands
+          in for it, and anything else refuses.
+        * Where the answer names a request and the snapshot could be read, one
+          of the pending interrupts asks that request. An answer naming a
+          request the run is not waiting on is refused rather than spent on a
+          different question.
+
+        A refusal leaves the run exactly as it was. It is not a failure of the
+        run: the question is still open and a correct answer still resolves it.
+        """
+        snapshot: object = None
+        try:
+            snapshot = await asyncio.wait_for(
+                graph.aget_state(config), timeout=timeout_seconds
+            )
+        except Exception:
+            logger.warning(
+                "Thread %s live state could not be read before resuming; "
+                "falling back to durable checkpoint evidence",
+                thread_id,
+                exc_info=True,
+                extra=self._log_extra_fn(
+                    thread_id=thread_id, action="resume_preflight_state_unavailable"
+                ),
+            )
+            return await self._durable_resume_refusal(
+                receipt, timeout_seconds=timeout_seconds
+            )
+        if not _is_execution_state_snapshot(snapshot):
+            return await self._durable_resume_refusal(
+                receipt, timeout_seconds=timeout_seconds
+            )
+        interrupts = tuple(snapshot.interrupts or ())
+        if not interrupts:
+            return ResumeRefusal(
+                cause=ResumeRefusalCause.NOT_PARKED,
+                detail=(
+                    "The run is not waiting on a question, so the answer was "
+                    "not applied"
+                ),
+            )
+        pending = _pending_request_ids(interrupts)
+        named = answered_request_id(resume_value)
+        if named is not None and named not in pending:
+            return ResumeRefusal(
+                cause=ResumeRefusalCause.REQUEST_NOT_PENDING,
+                detail=(
+                    "The answer names a request the run is not waiting on, so "
+                    "it was not applied"
+                ),
+                pending_request_ids=pending,
+            )
+        return None
+
+    async def _durable_resume_refusal(
+        self,
+        receipt: GraphActionReceipt,
+        *,
+        timeout_seconds: float,
+    ) -> ResumeRefusal | None:
+        """Admit a resume on durable evidence when the live read failed.
+
+        The checkpoint records that the run stopped at an interrupt but not
+        which request it asked, so this admits the answer on the weaker
+        parked-at-all proof. Refusing every resume whose live state momentarily
+        could not be read would strand runs that are genuinely waiting.
+        """
+        evidence = await read_checkpoint_evidence(
+            self._checkpointer, receipt, timeout_seconds=timeout_seconds
+        )
+        if evidence.kind is CheckpointEvidenceKind.INTERRUPTED:
+            return None
+        return ResumeRefusal(
+            cause=(
+                ResumeRefusalCause.STATE_UNREADABLE
+                if evidence.kind is CheckpointEvidenceKind.UNAVAILABLE
+                else ResumeRefusalCause.NOT_PARKED
+            ),
+            detail=(
+                "The run's state does not show it waiting on a question, so "
+                "the answer was not applied"
+            ),
         )
 
     # ------------------------------------------------------------------

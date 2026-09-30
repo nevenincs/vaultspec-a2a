@@ -11,6 +11,7 @@ neither may leave the thread's durable state unreadable.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -25,7 +26,6 @@ from ...providers.team_selection import model_assignment_digest
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
-    merge_active_graph_action_receipt,
 )
 from ...thread.enums import ControlActionType
 from ..executor import Executor
@@ -188,68 +188,134 @@ async def test_two_approvals_in_one_worker_turn_both_apply() -> None:
             await executor.shutdown()
 
 
-@pytest.mark.asyncio(loop_scope="function")
-async def test_a_resume_redelivered_after_its_turn_died_leaves_state_readable() -> None:
-    """A redelivered resume neither fails the run nor wedges its state.
+def _install_blocking_permission_graph(
+    executor: Executor,
+    request: DispatchRequest,
+    answered: list[str],
+    *,
+    past_the_gate: asyncio.Event | None = None,
+    stranded: list[asyncio.Task[Any]] | None = None,
+) -> RegisteredCompiledGraph:
+    """Compile a real graph whose turn keeps working after its answer arrives.
 
-    The worker that took the resume parks again on the turn's second request
-    and then dies before the gateway learns the action applied, so the gateway
-    hands the same action to a restarted worker. The redelivery lands on the
-    same parked checkpoint as the first delivery.
+    The window between the answer reaching the node and the superstep
+    committing is where a worker dies in production: the answer is already
+    held against the parked checkpoint, and the run is still parked, so the
+    gateway hands the same action to a restarted worker.
+
+    A node given *past_the_gate* announces that it is inside that window and
+    then never leaves it, so the turn cannot commit behind the test's back.
+    It records the task it is running under in *stranded* so the test can end
+    it rather than leave it pending.
+    """
+
+    async def worker_node(state: Any) -> dict[str, Any]:
+        del state
+        answered.append(
+            await _interrupt_permission_callback("Edit", {"path": "a.py"}, _OPTIONS)
+        )
+        if past_the_gate is not None:
+            running = asyncio.current_task()
+            if running is not None and stranded is not None:
+                stranded.append(running)
+            past_the_gate.set()
+            await asyncio.Event().wait()
+        return {"messages": [AIMessage(content="done")], "next": "FINISH"}
+
+    builder = new_state_graph()
+    builder.add_node("worker", worker_node)
+    builder.add_edge("__start__", "worker")
+    builder.add_edge("worker", "__end__")
+    graph: RegisteredCompiledGraph = builder.compile(
+        checkpointer=executor._checkpointer
+    )
+    executor.register_compiled_graph(
+        request.thread_id,
+        (
+            request.require_graph_definition().team_id,
+            request.workspace_root,
+            request.autonomous,
+            model_assignment_digest(request.model_assignment),
+            request.require_graph_definition().digest(),
+        ),
+        graph,
+    )
+    return graph
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_resume_redelivered_after_its_turn_died_applies() -> None:
+    """A resume delivered twice to one parked checkpoint applies and completes.
+
+    The first worker takes the answer, gets past the gate, and dies before its
+    superstep commits, so nothing durable records that the action applied and
+    the run is still parked on the request it answered. The gateway redelivers
+    the same action to a restarted worker, whose receipt lands on the very
+    checkpoint the first delivery's is already held against.
     """
     thread_id = "resume-redelivered"
-    answered: dict[str, str] = {}
+    answered: list[str] = []
     async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
         await checkpointer.setup()
         ingest = _current_ingest_dispatch(thread_id)
         config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        past_the_gate = asyncio.Event()
+        stranded: list[asyncio.Task[Any]] = []
 
         before_bridge = _make_bridge()
         before = Executor(checkpointer=checkpointer, bridge=before_bridge)
         try:
-            graph = _install_two_permission_graph(before, ingest, answered)
+            graph = _install_blocking_permission_graph(
+                before,
+                ingest,
+                answered,
+                past_the_gate=past_the_gate,
+                stranded=stranded,
+            )
             await before.handle_dispatch(ingest)
             parked = (await graph.aget_state(config)).interrupts
             resume = _resume_dispatch(
                 ingest, ordinal=1, resume_value=_answer_for(parked[0])
             )
-            await before.handle_dispatch(resume)
-            assert answered == {"Edit": "allow_once"}
-            assert [
-                park.value["tool_name"]
-                for park in (await graph.aget_state(config)).interrupts
-            ] == ["Bash"]
+            dispatch = asyncio.create_task(before.handle_dispatch(resume))
+            await asyncio.wait_for(past_the_gate.wait(), timeout=10.0)
+            # The worker goes away with the turn still inside the node, which
+            # is the window a crash lands in.
+            dispatch.cancel()
+            await asyncio.wait([dispatch], timeout=10.0)
+            for task in stranded:
+                task.cancel()
+            await asyncio.wait(stranded, timeout=10.0)
+            assert answered == ["allow_once"]
         finally:
             await before_bridge.close()
             await before.shutdown()
 
+        # Nothing committed, so the run is still waiting on the same request.
+        still_parked = (await graph.aget_state(config)).interrupts
+        assert [park.value["tool_name"] for park in still_parked] == ["Edit"]
+
         after_bridge = _make_bridge()
         after = Executor(checkpointer=checkpointer, bridge=after_bridge)
         try:
-            graph = _install_two_permission_graph(after, ingest, answered)
+            graph = _install_blocking_permission_graph(after, ingest, answered)
             await after.handle_dispatch(resume)
 
-            # The thread's durable state is still readable, which is what the
-            # gateway, recovery and every status read depend on, and the run
-            # is still waiting on the request no human has answered.
-            state = await graph.aget_state(config)
-            assert [park.value["tool_name"] for park in state.interrupts] == ["Bash"]
+            # The redelivery ran the turn to the end rather than failing it,
+            # and the thread's state is still readable - which is what the
+            # gateway, recovery and every status read depend on.
+            final = await graph.aget_state(config)
+            assert final.next == ()
+            assert final.interrupts == ()
+            assert answered == ["allow_once", "allow_once"]
 
-            # The redelivery was applied, not dropped: its receipt is held
-            # against the checkpoint the run is parked on, alongside the one
-            # the first delivery left there. The channel that carries them
-            # reduces, so the pair is a merge rather than a refusal, and the
-            # receipt that survives names one real accepted action.
             durable = await checkpointer.aget_tuple(config)
             assert durable is not None
-            receipt = resume.require_graph_action_receipt().model_dump(mode="json")
-            held = [
-                write[2]
-                for write in durable.pending_writes or ()
-                if write[1] == "active_graph_action_receipt"
-            ]
-            assert held == [receipt, receipt]
-            assert merge_active_graph_action_receipt(held[0], held[1]) == receipt
+            receipt = resume.require_graph_action_receipt()
+            values = durable.checkpoint["channel_values"]
+            assert values["active_graph_action_receipt"] == receipt.model_dump(
+                mode="json"
+            )
         finally:
             await after_bridge.close()
             await after.shutdown()

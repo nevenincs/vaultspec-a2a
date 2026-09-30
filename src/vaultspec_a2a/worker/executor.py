@@ -42,10 +42,12 @@ from .graph_lifecycle import (
     GraphLifecycleManager,
     RegisteredCompiledGraph,
 )
-from .state_projection import StateProjector
+from .state_projection import ResumeRefusal, StateProjector
 
 if TYPE_CHECKING:
     from contextvars import ContextVar
+
+    from opentelemetry.trace import Span
 
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
@@ -672,11 +674,26 @@ class Executor(SettlementMixin):
                 await self._reject_missing_graph(req, span, _RESUME_GUARDS)
                 return
 
+            config = _invocation_config(req, action="resume")
+
+            refusal = await self._state_projector.pre_flight_resume(
+                req.thread_id,
+                graph,
+                config,
+                receipt,
+                resume_value=req.option_id,
+                timeout_seconds=max(
+                    0.0, checkpoint_deadline - asyncio.get_running_loop().time()
+                ),
+            )
+            if refusal is not None:
+                await self._refuse_resume(req, span, graph, config, refusal)
+                return
+
             self._bridge.track_thread(req.thread_id)
             # A resumed turn re-provisions the run's tokens for its window.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
-            config = _invocation_config(req, action="resume")
             agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
             # Stays None unless the catch-all below fires, so a resume that
@@ -752,6 +769,47 @@ class Executor(SettlementMixin):
                     )
                 finally:
                     self._close_run_control(req.thread_id)
+
+    async def _refuse_resume(
+        self,
+        req: DispatchRequest,
+        span: Span,
+        graph: RegisteredCompiledGraph,
+        config: dict[str, Any],
+        refusal: ResumeRefusal,
+    ) -> None:
+        """Turn an answer away without settling the run it was meant for.
+
+        A refused answer is not a failed run: the run is still executing, or
+        still waiting on the question it really asked, and settling it here
+        would end a run on a client's mistake. The client is told on the coded
+        channel, and the run's current execution state is projected after it so
+        a reader that acts on the frame re-reads authoritative state rather
+        than the frame's own wording.
+        """
+        logger.warning(
+            "Resume for thread %s refused as %s; the run is waiting on %s",
+            req.thread_id,
+            refusal.cause.value,
+            ", ".join(refusal.pending_request_ids) or "no request",
+            extra=self._dispatch_log_extra(
+                req,
+                action="resume_refused_unparked",
+                runtime_mode=_RESUME_GUARDS.runtime_mode,
+                refusal=refusal.cause.value,
+            ),
+        )
+        span.set_attribute("pre_flight", "refused")
+        span.set_attribute("refusal", refusal.cause.value)
+        await self._aggregator.emit_error(
+            req.thread_id,
+            refusal.cause.value,
+            refusal.detail,
+            recoverable=True,
+        )
+        await self._state_projector.emit_execution_state_projection(
+            req.thread_id, graph, config
+        )
 
     def _open_run_control(self, thread_id: str) -> RunControl:
         control = RunControl()

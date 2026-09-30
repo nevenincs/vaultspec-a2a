@@ -23,7 +23,9 @@ from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 from ...thread.enums import VERDICT_APPROVED, ApprovalStatus
 from ...thread.errors import SupervisorRoutingError
+from ...thread.state import merge_vault_index
 from .phase_gate import parse_verdict, verdict_answers_request
+from .vault_reader import refresh_vault_index
 
 if TYPE_CHECKING:
     # Annotation-only: langchain_core.language_models is seconds-expensive at
@@ -761,6 +763,23 @@ def create_supervisor_node(
 
     async def supervisor_node(state: TeamState) -> dict[str, Any]:
         """Execute the supervisor's routing task."""
+        # The gates below read vault_index, and the only other refresh happens
+        # in the mount node AFTER a routing decision - so a document the last
+        # worker just wrote was invisible to the decision that had to see it,
+        # and a plan the planner had produced was refused as missing. The
+        # refreshed index is used for this decision and returned so the
+        # merge reducer keeps it.
+        refreshed_index = await refresh_vault_index(state, workspace_root)
+        if refreshed_index:
+            state = cast(
+                "TeamState",
+                {
+                    **state,
+                    "vault_index": merge_vault_index(
+                        state.get("vault_index") or {}, refreshed_index
+                    ),
+                },
+            )
         # Off the loop: the workspace rules are globbed and read from disk.
         messages = await asyncio.to_thread(
             functools.partial(
@@ -796,8 +815,14 @@ def create_supervisor_node(
             worker_phase_map=worker_phase_map,
             autonomous=autonomous,
         )
+        # Every return carries the refresh so the reducer keeps what this
+        # decision was made against; a decision that saw a document the state
+        # does not is a decision nothing downstream can reproduce.
+        index_update: dict[str, Any] = (
+            {"vault_index": refreshed_index} if refreshed_index else {}
+        )
         if decision.refused:
-            return _refused_update(state, decision)
+            return {**_refused_update(state, decision), **index_update}
         next_route = cast("str", decision.next_route)
         # Counted once for the decision, whichever branch below returns it: a
         # blocked FINISH that then needs plan approval is still a blocked
@@ -808,6 +833,7 @@ def create_supervisor_node(
         )
         if decision.routing_error:
             return {
+                **index_update,
                 "next": next_route,
                 "active_agent": _active_agent_for_route(next_route),
                 "pipeline_phase": decision.inferred_phase,
@@ -833,6 +859,7 @@ def create_supervisor_node(
                 next_route,
             )
             return {
+                **index_update,
                 "next": next_route,
                 "active_agent": _active_agent_for_route(next_route),
                 "pipeline_phase": decision.inferred_phase,
@@ -844,6 +871,7 @@ def create_supervisor_node(
                 "supervisor_finish_blocks": finish_blocks,
             }
         return {
+            **index_update,
             "next": next_route,
             "active_agent": _active_agent_for_route(next_route),
             "pipeline_phase": decision.inferred_phase,

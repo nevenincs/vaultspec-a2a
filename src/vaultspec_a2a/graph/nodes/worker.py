@@ -23,7 +23,7 @@ from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
-from ..acp_options import valid_option_ids
+from ..acp_options import option_id_of, valid_option_ids
 from ..run_context import RunContext, run_thread_id
 from ..tools.task_queue import create_mark_task_complete_tool
 from ._config_contract import accepting_runnable_config
@@ -676,6 +676,25 @@ def _permission_request_id(tool_name: str, tool_input: dict[str, Any]) -> str:
     return f"perm-{hashlib.sha256(canonical.encode()).hexdigest()[:32]}"
 
 
+def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The choices a human is offered: never one the CLI would remember.
+
+    The CLI persists an "always" answer as a rule in the operator's own
+    settings, where it widens or narrows later runs - unattended ones included -
+    and nothing here can retract it. The provider rung answers such a choice
+    with the once-only option anyway, so offering it would promise a persistence
+    the system deliberately never performs. A request offering nothing else
+    keeps its options, so the run is never left without an answer to give.
+    """
+    once = [
+        option
+        for option in options
+        if not str(option.get("kind", "")).endswith("_always")
+        and "always" not in (option_id_of(option) or "").lower()
+    ]
+    return once or options
+
+
 def _answers_request(resume_value: object, request_id: str) -> bool:
     """Whether a resume value is the answer to *request_id*.
 
@@ -717,12 +736,13 @@ async def _interrupt_permission_callback(
         The chosen ``optionId`` string to send back to the ACP agent.
     """
     request_id = _permission_request_id(tool_name, tool_input)
+    offered = _offered_options(options)
     payload = {
         "type": "permission_request",
         "request_id": request_id,
         "tool_name": tool_name,
         "tool_input": tool_input,
-        "options": options,
+        "options": offered,
     }
     resume_value = interrupt(payload)
     while not _answers_request(resume_value, request_id):
@@ -733,7 +753,7 @@ async def _interrupt_permission_callback(
         )
         resume_value = interrupt(payload)
     try:
-        return _resolve_resume_option_id(resume_value, options)
+        return _resolve_resume_option_id(resume_value, offered)
     except RuntimeError as exc:
         raise RuntimeError(
             "LangGraph interrupt returned an invalid resume payload for "

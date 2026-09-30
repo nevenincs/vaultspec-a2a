@@ -116,3 +116,38 @@ async def test_an_answer_naming_no_request_is_taken_as_before() -> None:
 
     assert "__interrupt__" not in final
     assert granted == ["Bash:allow_once"]
+
+
+@pytest.mark.asyncio
+async def test_a_remembered_approval_is_never_offered_or_accepted() -> None:
+    options = [
+        {"optionId": "allow_always", "name": "Always allow", "kind": "allow_always"},
+        *_OPTIONS,
+    ]
+    granted: list[str] = []
+
+    async def ask(state: _Turn) -> dict[str, list[str]]:
+        del state
+        option = await _interrupt_permission_callback(
+            "Bash", {"command": "ls"}, options
+        )
+        granted.append(option)
+        return {"granted": [option]}
+
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Turn))
+    builder.add_node("ask", ask)
+    builder.add_edge(START, "ask")
+    builder.add_edge("ask", END)
+    graph: Any = builder.compile(checkpointer=InMemorySaver())
+
+    parked = _parked(await graph.ainvoke({"granted": []}, _CONFIG))
+    assert [o["optionId"] for o in parked["options"]] == ["allow_once", "reject_once"]
+
+    with pytest.raises(RuntimeError, match="unknown option_id 'allow_always'"):
+        await graph.ainvoke(
+            Command(
+                resume={"option_id": "allow_always", "request_id": parked["request_id"]}
+            ),
+            _CONFIG,
+        )
+    assert granted == []

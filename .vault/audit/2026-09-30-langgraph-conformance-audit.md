@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:dffec5e12a09b51dad7993164371b2f043ff2aea32079caa594948d510e9912c'
+body_hash: 'sha256:950c225b67915542367c2edaa4e5b499d8de399ec7a4bf5141ef035a48ba4ae6'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -378,6 +378,14 @@ Owned by P07.S44. The comment above `_ROLE_TO_PHASE` in `src/vaultspec_a2a/graph
 ### clarification-live-proof-waited-on-the-wrong-condition | low | the live clarification loop asserted the run's position after waiting only for its answers
 
 Fixed under P07.S35 (commit `ea26f72`). `_wait_for_answered_clarification` in `src/vaultspec_a2a/api/tests/test_clarification_loop_live.py` returned once the answers were committed, a superstep before the position the caller asserted; the S35 preflight's extra checkpoint read shifted the interleaving enough to lose that race about one run in six. The wait now covers the condition asserted.
+
+### pyjwt-pre-verification-recursion-advisory | medium | the lock held a PyJWT release with an unauthenticated recursion denial of service
+
+Fixed in commit `3599038`. The dependency gate in `just ci` refused GHSA-42vr-xj54-vc7v on PyJWT 2.14.0, reached only through the `mcp[crypto]` extra; nothing in this project parses a JWT itself. The lock moved to 2.15.1 rather than recording an acceptance, and the gate passes.
+
+### plain-value-proofs-used-the-system-temp-directory | low | two graph tests opened their stores outside the pytest temp root
+
+Fixed as a P01.S02 correction (commit `d88d16b`). `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py` used `tempfile.TemporaryDirectory()`, which the storage-anchor gate refuses; it failed `just ci` locally and the PR's Basic CI. The tests now take `tmp_path`. The per-package runs that validated S02 did not include the `dev/` harness where that gate lives.
 
 ## Recommendations
 

@@ -568,6 +568,18 @@ class AcpChatModel(BaseChatModel):
             )
             self._state.session.active_session_id = result.session_id
             self._state.session.session_config_options = result.config_options
+            # The provider's own session id, logged once per turn: it is the only
+            # handle that ties this run's turn to the transcript the CLI wrote in
+            # the operator's config home, and nothing else records it.
+            logger.info(
+                "ACP session opened",
+                extra=runtime_log_extra(
+                    self._state.config,
+                    process=ctx.process,
+                    handshake_step="session/new",
+                    session_id=result.session_id,
+                ),
+            )
             self._state.transport.process = ctx.process
             self._state.transport.stdin = ctx.stdin
             self._state.transport.stdin_lock = ctx.stdin_lock
@@ -701,6 +713,7 @@ class AcpChatModel(BaseChatModel):
                 process=ctx.process,
                 handshake_step="session/prompt",
                 timeout_seconds=idle_limit,
+                session_id=self._state.session.active_session_id,
                 stderr_event_count=ctx.stderr_event_count,
             ),
         )
@@ -750,31 +763,56 @@ class AcpChatModel(BaseChatModel):
         if ctx.interrupt_exc:
             raise ctx.interrupt_exc[0]
         self._raise_if_prompt_future_error(ctx, prompt_future)
+        raise self._abnormal_exit_error(ctx)
+
+    def _abnormal_exit_error(
+        self, ctx: AcpSessionContext, cause: BaseException | None = None
+    ) -> AcpError:
+        """Describe a child that left mid-turn, in its own redacted words.
+
+        The lines were written at DEBUG under an INFO default and the failure
+        carried a line COUNT, so the one account of what happened was discarded
+        exactly when it was needed. Reported at WARNING and carried on the error,
+        because the reader of the log and the caller of the turn are different
+        people with the same question.
+        """
+        tail = ctx.rendered_stderr_tail() or "<empty>"
+        detail = f" ({cause})" if cause is not None else ""
         logger.warning(
-            "ACP subprocess exited before end_turn",
+            "ACP subprocess exited before end_turn%s; redacted stderr tail:\n%s",
+            detail,
+            tail,
             extra=runtime_log_extra(
                 self._state.config,
                 process=ctx.process,
                 handshake_step="session/prompt",
+                session_id=self._state.session.active_session_id,
                 stderr_event_count=ctx.stderr_event_count,
                 exit_code=ctx.process.returncode,
             ),
         )
-        raise AcpError(
-            "ACP subprocess exited before end_turn",
+        return AcpError(
+            f"ACP subprocess exited before end_turn{detail}; "
+            f"redacted stderr tail:\n{tail}",
             effects_may_have_occurred=ctx.effects_may_have_occurred,
         )
 
-    @staticmethod
     def _raise_if_prompt_future_error(
-        ctx: AcpSessionContext, prompt_future: AcpResponseFuture
+        self, ctx: AcpSessionContext, prompt_future: AcpResponseFuture
     ) -> None:
-        if prompt_future.done():
-            resp = prompt_future.result()
-            if "error" in resp:
-                _raise_prompt_error(
-                    resp, effects_may_have_occurred=ctx.effects_may_have_occurred
-                )
+        if not prompt_future.done():
+            return
+        # The stdout reader fails every pending request when the child's stream
+        # ends, and that failure says only that a pipe closed. What explains it is
+        # the child's last words, so the transport error becomes the provider
+        # error that carries them rather than reaching the caller bare.
+        if (failure := prompt_future.exception()) is not None:
+            raise self._abnormal_exit_error(ctx, failure) from failure
+        resp = prompt_future.result()
+        if "error" in resp:
+            _raise_prompt_error(
+                resp, effects_may_have_occurred=ctx.effects_may_have_occurred
+            )
 
     async def _cleanup_session(
         self,
@@ -920,6 +958,7 @@ class AcpChatModel(BaseChatModel):
             if text:
                 self._capture_auth_progress(text, ctx)
                 ctx.stderr_event_count += 1
+                ctx.retain_stderr_line(text)
                 # Diagnostics are proof of life too. The turn deadline exists to
                 # catch a silent hang, and the expensive mistake is felling an
                 # agent that is genuinely working, so any sign of life resets it.

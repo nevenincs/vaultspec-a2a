@@ -22,56 +22,29 @@ from ._codex_permission import (
 )
 from ._codex_protocol import _CodexProtocolError, _response_error_message
 from ._json_contract import JsonObject, lenient_json_object
-from ._subprocess import kill_process_tree, redact_secrets
+from ._subprocess import (
+    STDERR_TAIL_LINES,
+    drain_stderr_into,
+    kill_process_tree,
+)
 
 logger = logging.getLogger("vaultspec_a2a.providers.codex_chat_model")
 
 
-async def drain_stderr_into(
-    stream: asyncio.StreamReader | None, tail: deque[str]
-) -> None:
-    """Read *stream* to end, appending each redacted non-empty line to *tail*.
-
-    Module-level rather than a method so the behaviour can be driven directly
-    against a real stream, without reaching into a half-built client.
-
-    Never raises: a diagnostic channel must not be able to fail a turn. Each line
-    is redacted before retention because provider subprocesses report their
-    configuration when they fail, and configuration is where credentials live.
-    """
-    if stream is None:
-        return
-    try:
-        while True:
-            line = await stream.readline()
-            if not line:
-                break
-            text = line.decode("utf-8", errors="replace").rstrip()
-            if text:
-                tail.append(redact_secrets(text))
-    except (OSError, ValueError, asyncio.CancelledError):
-        return
-
-
 CLEANUP_TIMEOUT_SECONDS = 5.0
 """How long close waits before reporting a cancellation-resistant task."""
-
-STDERR_TAIL_LINES = 200
-"""How many redacted stderr lines to retain for crash diagnosis."""
 
 _NATIVE_CONTROL_TIMEOUT_SECONDS = 10.0
 _MAX_CODEX_RUNTIME_ID_LENGTH = 256
 
 __all__ = [
     "CLEANUP_TIMEOUT_SECONDS",
-    "STDERR_TAIL_LINES",
     "_CAPABILITIES",
     "_CLIENT_INFO",
     "_MAX_CODEX_RUNTIME_ID_LENGTH",
     "_NATIVE_CONTROL_TIMEOUT_SECONDS",
     "_STREAM_CLOSED",
     "_CodexAppServerClient",
-    "drain_stderr_into",
 ]
 
 # Client identity advertised in the ``initialize`` handshake. Mirrors the shape

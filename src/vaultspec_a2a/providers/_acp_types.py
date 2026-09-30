@@ -7,6 +7,7 @@ from auth logic and session lifecycle RPCs.
 import asyncio
 import os
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -16,6 +17,7 @@ from langchain_core.outputs import ChatGenerationChunk
 
 from ..team.team_config import AgentConfig
 from ._json_contract import JsonObject
+from ._subprocess import STDERR_TAIL_LINES, redact_secrets
 
 __all__: list[str] = []
 
@@ -291,6 +293,13 @@ class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
     terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
     closing: bool = False
     stderr_event_count: int = 0
+    # The child's own account of what went wrong, redacted at capture and bounded
+    # to the shared tail length. A count of lines says a failure was noisy; the
+    # lines themselves are what a failed startup or a refused login can be read
+    # from, and this lane previously kept only the count.
+    stderr_tail: deque[str] = field(
+        default_factory=lambda: deque(maxlen=STDERR_TAIL_LINES)
+    )
     auth_prompt_active: bool = False
     auth_url: str | None = None
     # Serialises all ctx.stdin.write() + drain() calls so concurrent background
@@ -313,6 +322,14 @@ class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
     def mark_activity(self) -> None:
         """Record that the subprocess just produced a protocol frame."""
         self.last_activity_monotonic = time.monotonic()
+
+    def retain_stderr_line(self, text: str) -> None:
+        """Keep one redacted line of the child's standard error."""
+        self.stderr_tail.append(redact_secrets(text))
+
+    def rendered_stderr_tail(self) -> str:
+        """Return the retained, redacted tail, or the empty string when silent."""
+        return "\n".join(self.stderr_tail)
 
     def native_commands_for(self, session_id: str) -> AcpNativeCommandCatalog:
         """Return the command authority for one exact protocol session."""

@@ -28,14 +28,25 @@ from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
 
 if TYPE_CHECKING:
+    from collections import deque
     from collections.abc import Mapping
 
 __all__ = [
+    "STDERR_TAIL_LINES",
+    "drain_stderr_into",
     "kill_process_tree",
     "process_containment",
     "redact_secrets",
     "spawn_acp_process",
 ]
+
+STDERR_TAIL_LINES = 200
+"""How many redacted stderr lines any provider lane retains for diagnosis.
+
+One bound for every lane, beside the one redactor, because the thing being bounded
+is the same on all of them: what a failing child said about itself, kept long
+enough to explain the failure and no longer.
+"""
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +100,32 @@ def redact_secrets(text: str) -> str:
         return f"{match.group(1)}{replacement}"
 
     return _SECRET_PATTERN.sub(_mask, text)
+
+
+async def drain_stderr_into(
+    stream: asyncio.StreamReader | None, tail: deque[str]
+) -> None:
+    """Read *stream* to end, appending each redacted non-empty line to *tail*.
+
+    Module-level rather than a method so the behaviour can be driven directly
+    against a real stream, without reaching into a half-built client.
+
+    Never raises: a diagnostic channel must not be able to fail a turn. Each line
+    is redacted before retention because provider subprocesses report their
+    configuration when they fail, and configuration is where credentials live.
+    """
+    if stream is None:
+        return
+    try:
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                tail.append(redact_secrets(text))
+    except (OSError, ValueError, asyncio.CancelledError):
+        return
 
 
 # Attribute the run-owned provider's OS containment is stashed on so the shared

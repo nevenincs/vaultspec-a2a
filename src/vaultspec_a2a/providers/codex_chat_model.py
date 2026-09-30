@@ -581,6 +581,18 @@ class CodexChatModel(BaseChatModel):
                 "id",
                 context="turn/start result turn",
             )
+            # The lane's own turn identity, reported once per turn: the
+            # app-server runs ephemeral inside a per-run home that is deleted
+            # afterwards, so these two ids are the only handles tying this run's
+            # turn to anything the provider itself saw.
+            logger.info(
+                "Codex turn started",
+                extra={
+                    **metadata,
+                    "codex_thread_id": thread_id,
+                    "codex_turn_id": turn_id,
+                },
+            )
             active_key = (thread_id, turn_id)
             if active_key in self._active_turns:
                 raise _CodexProtocolError(

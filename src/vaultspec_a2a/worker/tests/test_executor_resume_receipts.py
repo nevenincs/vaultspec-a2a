@@ -200,6 +200,56 @@ async def test_two_approvals_in_one_worker_turn_both_apply() -> None:
             await executor.shutdown()
 
 
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_resume_that_only_asks_again_reports_its_application() -> None:
+    """An answer that parks the turn on its next question still lands.
+
+    The resume that settles the first approval leaves the run parked on the
+    second, so no superstep commits and the receipt stays a write held
+    against the parked checkpoint. The gateway settles the action only on
+    the application report, so a reporter reading committed channels alone
+    never sends one, and recovery later redelivers an answer the run already
+    consumed.
+    """
+    thread_id = "resume-asks-again-receipt"
+    answered: dict[str, str] = {}
+    relayed: list[dict[str, Any]] = []
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
+        await checkpointer.setup()
+        bridge = _make_bridge(relayed=relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            ingest = _current_ingest_dispatch(thread_id)
+            graph = _install_two_permission_graph(executor, ingest, answered)
+            config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+
+            await executor.handle_dispatch(ingest)
+            first_park = (await graph.aget_state(config)).interrupts
+            first = _resume_dispatch(
+                ingest, ordinal=1, resume_value=_answer_for(first_park[0])
+            )
+            await executor.handle_dispatch(first)
+            second_park = (await graph.aget_state(config)).interrupts
+            assert [park.value["tool_name"] for park in second_park] == ["Bash"]
+            await bridge.flush_events()
+
+            applied = [
+                item["payload"]
+                for item in relayed
+                if item["payload"].get("type") == "dispatch_applied"
+            ]
+            assert [payload["dispatch_id"] for payload in applied] == [
+                ingest.dispatch_id,
+                first.dispatch_id,
+            ]
+            assert applied[1]["graph_action_receipt"] == (
+                first.require_graph_action_receipt().model_dump(mode="json")
+            )
+        finally:
+            await bridge.close()
+            await executor.shutdown()
+
+
 def _install_blocking_permission_graph(
     executor: Executor,
     request: DispatchRequest,

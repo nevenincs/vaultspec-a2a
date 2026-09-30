@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from ..ipc.schemas import DispatchApplicationReceiptPayload
+from ..thread.checkpoint_evidence import read_checkpoint_evidence
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,24 +54,23 @@ class DispatchReceiptReporter:
             return
         try:
             receipt = req.require_graph_action_receipt()
-            checkpoint = await asyncio.wait_for(
-                checkpointer.aget_tuple({"configurable": {"thread_id": req.thread_id}}),
-                timeout=checkpoint_read_timeout_seconds,
+            # The same evidence the gateway reads before it settles the
+            # action. A resume that asks again commits no superstep, so its
+            # receipt is only a write held against the parked checkpoint;
+            # reading committed channels alone would never report it, and
+            # recovery would redeliver an answer the run already consumed.
+            evidence = await read_checkpoint_evidence(
+                checkpointer,
+                receipt,
+                timeout_seconds=checkpoint_read_timeout_seconds,
             )
-            if checkpoint is None or checkpoint.metadata.get("source") != "loop":
+            if not evidence.incorporated or evidence.checkpoint_id is None:
                 logger.debug(
-                    "No committed loop checkpoint yet for thread %s; the "
-                    "dispatch application receipt is not due",
+                    "No committed loop checkpoint carries dispatch %s for "
+                    "thread %s yet; the application receipt is not due",
+                    req.dispatch_id,
                     req.thread_id,
                 )
-                return
-            values = checkpoint.checkpoint.get("channel_values", {})
-            receipts: object = values.get("graph_action_receipts")
-            if not isinstance(receipts, dict):
-                return
-            if cast("dict[str, object]", receipts).get(
-                req.dispatch_id
-            ) != receipt.model_dump(mode="json"):
                 return
             self._reported[req.thread_id] = req.dispatch_id
             await bridge.send_event(
@@ -80,7 +79,7 @@ class DispatchReceiptReporter:
                     dispatch_id=req.dispatch_id,
                     action=req.action,
                     graph_action_receipt=receipt,
-                    checkpoint_id=checkpoint.checkpoint["id"],
+                    checkpoint_id=evidence.checkpoint_id,
                 ).model_dump(mode="json"),
             )
         except Exception:

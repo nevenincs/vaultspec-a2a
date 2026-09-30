@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:c17b16b28999c0978c1b2bbec76ca43cdf101011072fcea1384e425f502fc97f'
+body_hash: 'sha256:189887c21dcbade6f5c16c38c355b71906f18dfe3daaaeb432bd2f5ed862b53a'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -434,6 +434,10 @@ related:
 - `S02` `M` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
 - `S02` `verify:` `pytest src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py dev/tests/test_storage_anchors.py` -> `pass`
 - `S02` `by:` `orchestrator`
+- `S34` `M` `src/vaultspec_a2a/worker/_dispatch_receipts.py`
+- `S34` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S34` `verify:` `pytest src/vaultspec_a2a/worker src/vaultspec_a2a/streaming src/vaultspec_a2a/graph src/vaultspec_a2a/control with Postgres required` -> `pass`
+- `S34` `by:` `orchestrator`
 
 ## Notes
 
@@ -473,3 +477,4 @@ related:
 - `S39` The borrowed-close refusal exists only on the selector bridge; the pooled Postgres sibling has no close. The schema pin cannot fail before its change because the guard is the deliverable; proven by bumping the pin. Also consolidates the retention test helpers the structural gate flagged.
 - `S43` The producer guard is widened from the history family to every member; the helper-literal producers moved to members so the guard can see them.
 - `S02` Correction: the proofs used the system temp directory, which the storage-anchor gate refuses; surfaced by just ci.
+- `S34` Reopened by the plan-close review: the pending-write fold was unreachable because the worker never emitted a receipt for a resume that only asks again.

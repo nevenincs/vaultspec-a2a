@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:80fc7a850bcb398e06f0fee7384fb27353bf46eebecb228a9aea7d0c9e6460ae'
+body_hash: 'sha256:c98c548a8e7293abebd5de998ee942e42c3cd8d96ec4d02cc57337de8ce6800d'
 ---
 
 # `architecture-review` plan
@@ -51,7 +51,7 @@ The LangGraph family runs at its latest release and the graph layer uses the 1.2
 - [x] `P01.S05` - Carry run identity in a typed LangGraph Runtime context passed on ingest and resume; `src/vaultspec_a2a/graph/, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/executor.py`.
 - [x] `P01.S06` - Drain in-flight runs at a superstep boundary with RunControl on worker shutdown so a restart resumes a checkpoint instead of a torn node; `src/vaultspec_a2a/worker/executor.py, src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/worker/app.py`.
 - [x] `P01.S07` - Drop langsmith nostream-tagged model events from the relayed stream; `src/vaultspec_a2a/streaming/transformer.py`.
-- [x] `P01.S08` - Prune superseded checkpoints of settled runs while keeping each run's latest checkpoint; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/control/event_handlers.py`.
+- [ ] `P01.S08` - Prune superseded checkpoints of settled runs while keeping each run's latest checkpoint; `src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/control/event_handlers.py`.
 
 ### Phase `P02` - graph-layer defects
 
@@ -67,12 +67,12 @@ Graph routing, human-in-the-loop resume, crash recovery, and per-run isolation b
 
 Busy runs, worker backpressure, event streams, checkpoint storage, the event bridge, and container shutdown fail typed and bounded instead of wedging.
 
-- [x] `P03.S14` - Refuse a follow-up on a busy run with a typed conflict that installs no writer; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/worker/app.py`.
+- [ ] `P03.S14` - Refuse a follow-up on a busy run with a typed conflict that installs no writer; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/worker/app.py`.
 - [x] `P03.S15` - Split worker refusals by reason and feed the circuit breaker only transport failures and server errors, with a single half-open probe; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/worker/app.py`.
 - [x] `P03.S16` - Scope the stream database session to the handler so an open stream holds no connection or read transaction; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py`.
-- [x] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, sequence frames with SSE ids, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.
+- [ ] `P03.S17` - Subscribe before reading run status, lead each stream with a snapshot frame, keep the run sequence in the frame body without an SSE id until the stream can resume, and signal backpressure drops; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/`.
 - [x] `P03.S18` - Back the Postgres checkpointer with a sized connection pool; `src/vaultspec_a2a/database/checkpoints.py`.
-- [x] `P03.S19` - Bound, serialize, and split worker event batches and protect terminal events from eviction; `src/vaultspec_a2a/worker/ipc.py, src/vaultspec_a2a/worker/state_projection.py`.
+- [ ] `P03.S19` - Bound, serialize, and split worker event batches and protect terminal events from eviction; `src/vaultspec_a2a/worker/ipc.py, src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `P03.S20` - Start containers through the owned serve entry with a stop grace period longer than the shutdown budget; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.
 
 ### Phase `P04` - provider lane security and fidelity
@@ -81,11 +81,11 @@ Provider launchers, the Claude and Codex permission posture, native tool scope, 
 
 - [x] `P04.S21` - Resolve provider launchers to absolute paths from the service trusted PATH or the capsule, never the agent PATH or working directory; `src/vaultspec_a2a/providers/_factory_commands.py, src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/_subprocess.py`.
 - [x] `P04.S22` - Pin the Claude lane permission posture: no ambient setting sources, persona-derived disallowed tools, dontAsk on autonomous runs verified against the reported mode, and allow-once for always options; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/graph/nodes/worker.py`.
-- [x] `P04.S23` - Scope native read tools to the workspace, stop pre-approving project-addressable rag tools, and scan Codex tool arguments for foreign projects; `src/vaultspec_a2a/providers/_native_read_tools.py, src/vaultspec_a2a/providers/_codex_permission.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [ ] `P04.S23` - Scope native read tools to the workspace, stop pre-approving project-addressable rag tools, and scan Codex tool arguments for foreign projects; `src/vaultspec_a2a/providers/_native_read_tools.py, src/vaultspec_a2a/providers/_codex_permission.py, src/vaultspec_a2a/graph/nodes/worker.py`.
 - [x] `P04.S24` - Fail closed when a permission callback names an option that was not offered; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
-- [x] `P04.S25` - Write refreshed Codex credentials back to their source home under a lock; `src/vaultspec_a2a/providers/_codex_config_home.py`.
+- [ ] `P04.S25` - Write refreshed Codex credentials back to their source home under a lock; `src/vaultspec_a2a/providers/_codex_config_home.py`.
 - [x] `P04.S26` - Use one Claude binary resolver for catalog discovery and execution and record the adapter and CLI identity each run used; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py`.
-- [x] `P04.S27` - Render ACP prompts with roles, speaker names, and tool results through the renderer the Codex lane shares; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_codex_protocol.py`.
+- [ ] `P04.S27` - Render ACP prompts with roles, speaker names, and tool results through the renderer the Codex lane shares; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_codex_protocol.py`.
 - [x] `P04.S28` - Retain a redacted ACP stderr tail, attach it to provider errors, and log provider session ids per turn; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [x] `P04.S29` - Pin the harness MCP launch interpreter to the project Python; `src/vaultspec_a2a/providers/_harness_mcp_registry.py`.
 

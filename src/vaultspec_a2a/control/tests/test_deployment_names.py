@@ -136,3 +136,105 @@ def test_no_container_starts_a_served_app_behind_its_own_entry_point() -> None:
             if line.startswith(("CMD", "ENTRYPOINT")) and "uvicorn" in line
         ]
         assert launching == [], f"{dockerfile.name}: {launching}"
+
+
+# The served entry of each container and the setting that holds its bind host.
+# Both settings default to loopback, which is right on a developer's machine and
+# unreachable through a published port or from the next container on the
+# Compose network.
+_SERVED_BIND_FIELDS = {
+    ("/app/.venv/bin/vaultspec-a2a", "serve"): "host",
+    ("/app/.venv/bin/python", "-m", "vaultspec_a2a.worker"): "worker_host",
+}
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+_STAGE = re.compile(r"^FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$", re.IGNORECASE)
+_ENV_PAIR = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(\S+)")
+
+
+def _stages(dockerfile: pathlib.Path) -> dict[str, tuple[str, list[str]]]:
+    """Map each named stage to its base and its instructions, lines joined."""
+    stages: dict[str, tuple[str, list[str]]] = {}
+    current: list[str] | None = None
+    pending = ""
+    for raw in dockerfile.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not pending and (not line or line.startswith("#")):
+            continue
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+            continue
+        line, pending = pending + line, ""
+        stage = _STAGE.match(line)
+        if stage is not None:
+            current = []
+            stages[stage.group(2) or stage.group(1)] = (stage.group(1), current)
+        elif current is not None:
+            current.append(line)
+    return stages
+
+
+def _stage_env(stages: dict[str, tuple[str, list[str]]], name: str) -> dict[str, str]:
+    """The ENV a stage runs with, including what it inherits from a local base."""
+    base, instructions = stages[name]
+    env = _stage_env(stages, base) if base in stages else {}
+    for line in instructions:
+        if line.upper().startswith("ENV "):
+            env.update(_ENV_PAIR.findall(line[4:]))
+    return env
+
+
+def test_every_container_served_app_binds_beyond_loopback() -> None:
+    """A served app bound to loopback inside its container is unreachable.
+
+    Its health probe still passes, because the probe runs inside the same
+    container, so nothing but the published port and the peer container notices.
+    The bind host is a setting whose default is loopback, so every stage that
+    serves an app must set it; the serve entries read settings, not flags.
+    """
+    import json
+
+    served = 0
+    for dockerfile in sorted((_SERVICE / "docker").glob("*.Dockerfile")):
+        stages = _stages(dockerfile)
+        for name, (_, instructions) in stages.items():
+            commands = [line for line in instructions if line.startswith("CMD ")]
+            if not commands:
+                continue
+            argv = tuple(json.loads(commands[-1][4:]))
+            field = _SERVED_BIND_FIELDS.get(argv)
+            if field is None:
+                assert not any("vaultspec" in part for part in argv), (
+                    f"{dockerfile.name}:{name} serves {argv} with no known bind setting"
+                )
+                continue
+            env = _stage_env(stages, name)
+            bound = [env[key] for key in field_env_names(Settings, field) if key in env]
+            assert bound, (
+                f"{dockerfile.name}:{name} leaves {field} at its loopback default"
+            )
+            assert not _LOOPBACK_HOSTS.intersection(bound), (
+                f"{dockerfile.name}:{name} binds {field} to {bound}"
+            )
+            served += 1
+
+    assert served >= len(_SERVED_BIND_FIELDS), "no container-served app was checked"
+
+
+def test_no_compose_file_pins_a_served_app_back_to_loopback() -> None:
+    """Compose environment overrides the image's ENV, so it is held to the same."""
+    names = {
+        key
+        for field in set(_SERVED_BIND_FIELDS.values())
+        for key in field_env_names(Settings, field)
+    }
+    pinned = [
+        f"{path.name}: {line.strip()}"
+        for path in _compose_files()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if any(name in line for name in names)
+        and any(host in line for host in _LOOPBACK_HOSTS)
+    ]
+
+    assert pinned == []

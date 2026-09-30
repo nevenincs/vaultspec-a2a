@@ -5,11 +5,10 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:67a7a3f1351307a2172436f7a9f97cc052aecc6ef6a86cd9dfca769481c4994e'
+body_hash: 'sha256:e01ffee84338704704dfa20e7acedb27f20c6262a7253a85841efd342dd7e823'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
-
 
 # `architecture-review` ledger
 
@@ -344,6 +343,8 @@ related:
 - `S32` `M` `src/vaultspec_a2a/thread/tests/test_models.py`
 - `S32` `verify:` `runner full unit gate (4817)` -> `pass`
 - `S32` `by:` `orchestrator`
+- `S20` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
+- `S20` `by:` `orchestrator`
 
 ## Notes
 
@@ -362,4 +363,5 @@ related:
 - `S30` MessageSnapshot.timestamp became nullable in openapi.json (regenerated): a message recorded before stamping reports no time; a cross-repository contract change recorded in the audit.
 - `S31` The correlation scope covers the worker's dispatches; runtime_log_extra in providers/_acp_auth.py and TRACEPARENT for CLI children (the rest of correlation-stops-at-provider) were not changed: provider logs now inherit thread and dispatch through the context variable, and child-process trace propagation remains open in the audit.
 - `S32` The breakdown is nullable end to end: a lane that does not report it records NULL, not zero, and pre-existing rows stay NULL; ACP lanes still report no usage at all, which remains open in the audit's token-accounting-gaps.
+- `S20` Reopened by the plan-close review (compose-gateway-binds-loopback, critical): the gateway stage now sets its bind host.
 

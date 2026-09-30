@@ -84,10 +84,13 @@ ENTRYPOINT ["/app/.venv/bin/python", "/app/service_entrypoint.py"]
 # ── Stage 2b: Gateway (control surface) ─────────────────────────────────────
 FROM python-base AS gateway
 
-# Worker runs as a separate container — never auto-spawn inside Docker.
+# Worker runs as a separate container — never auto-spawn inside Docker. The
+# gateway's own default binds loopback, which is right on a developer's machine
+# and unreachable through the published port and from the worker container.
 ENV VAULTSPEC_A2A_WORKER_URL=http://worker:18001 \
     VAULTSPEC_A2A_INSTALL_ROOT=/app \
-    VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false
+    VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false \
+    VAULTSPEC_A2A_HOST=0.0.0.0
 
 EXPOSE 18000
 # The product's own serve verb, not `uvicorn --factory`. Invoking uvicorn
@@ -96,7 +99,7 @@ EXPOSE 18000
 # there, so a container started this way ignored both and was SIGKILLed with
 # streams still open, before the lifespan could drain admission, close the
 # database and flush telemetry. Host and port come from the settings this entry
-# reads, which already default to the exposed address.
+# reads: the port defaults to the exposed one, the host is set above.
 CMD ["/app/.venv/bin/vaultspec-a2a", "serve"]
 
 # ── Stage 2c: Worker (agent executor) ───────────────────────────────────────

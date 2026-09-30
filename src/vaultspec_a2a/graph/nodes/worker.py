@@ -274,17 +274,26 @@ def _resolve_effective_worker_model(
     model: BaseChatModel,
     autonomous: bool,
     answers: Mapping[str, str],
+    answers_reach_the_node: bool = True,
 ) -> BaseChatModel:
     """Return the invocation model after supervised permission wiring logic.
 
     *answers* are the permission requests this run has already had answered.
     They are bound onto the callback because the provider calls it from inside
     the model turn, where graph state is out of reach.
+
+    *answers_reach_the_node* is False for a node whose input is fixed when it is
+    dispatched rather than read from the run's channels; see
+    :func:`_permission_callback_for`.
     """
     if autonomous or not hasattr(model, "permission_callback"):
         return model
     return model.model_copy(
-        update={"permission_callback": _permission_callback_for(answers)}
+        update={
+            "permission_callback": _permission_callback_for(
+                answers, answers_reach_the_node=answers_reach_the_node
+            )
+        }
     )
 
 
@@ -836,7 +845,9 @@ def _answered_option(
     return chosen
 
 
-def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
+def _permission_callback_for(
+    answers: Mapping[str, str], *, answers_reach_the_node: bool = True
+) -> PermissionCallback:
     """Bind one worker turn's recorded permission answers to its callback.
 
     The callback is handed to the provider, which calls it from inside the
@@ -845,7 +856,23 @@ def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
     replays in full and may reach its tool calls in a different order, and an
     answer found by the request it was given for reaches the call the human
     was shown whatever that order turns out to be.
+
+    *answers_reach_the_node* is False for a node whose input is fixed when it
+    is dispatched rather than read from the run's channels - a fan-out branch,
+    whose input is the payload its dispatch sent and which LangGraph replays
+    unchanged however far the run's channels have moved since. Such a node
+    sees an empty *answers* on every replay no matter how many answers the run
+    has recorded, so turning an unusable stored value away would strand it:
+    the value stays at its position in the task's resume values and is handed
+    to the same call on every later replay, and no channel exists to settle
+    the request instead. The callback reads on past it rather than turning it
+    away, keyed by the request each stored value names.
     """
+    # Answers this execution read out of the task's resume values, for a node
+    # whose input cannot carry them. Keyed by the request each names, so an
+    # answer met while resolving one call still reaches the call it was
+    # actually given for instead of being spent on the one that found it.
+    learned: dict[str, str] = {}
 
     async def permission_callback(
         tool_name: str,
@@ -854,16 +881,21 @@ def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
     ) -> str:
         """Return this call's approved option, or suspend the run for one.
 
-        ``interrupt()`` is reached at most once per node execution: every
-        request this turn has already had answered is resolved from the bound
-        answers without asking, and the first one that has not suspends the
-        run. A value that is not this request's answer never becomes one -
-        the run parks again on the call actually being made, so an approval
-        can never land on a call nobody saw.
+        A value that is not this request's answer never becomes one - the run
+        parks again on the call actually being made, so an approval can never
+        land on a call nobody saw.
+
+        Where the node's input carries the run's answers, ``interrupt()`` is
+        reached at most once per execution: every request already answered is
+        resolved from the bound answers without asking, and the first one that
+        has not suspends the run. Where it cannot, one extra read happens per
+        unusable stored value, and the suspension once they run out is the
+        same "ask again for this call" outcome - reached after the values the
+        branch was already handed have been accounted for rather than before.
         """
         request_id = _permission_request_id(tool_name, tool_input)
         offered = _offered_options(options)
-        already = _answered_option(answers, request_id, offered)
+        already = _answered_option({**answers, **learned}, request_id, offered)
         if already is not None:
             return already
 
@@ -874,34 +906,42 @@ def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
             "tool_input": tool_input,
             "options": offered,
         }
-        answered = answered_permission_request(interrupt(payload))
-        if answered is None:
-            # Including a bare option id: an answer that names no request
-            # cannot be shown to belong to this call, and applying it is how
-            # an approval given for one call reaches another.
-            _logger.warning(
-                "Permission answer for the %r call names no request; asking again",
-                tool_name,
-            )
-            _park_on(payload)
-        answered_request, option_id = answered
-        if answered_request != request_id:
-            _logger.warning(
-                "Permission answer names request %r, not the %r call now being "
-                "made; asking again",
-                answered_request,
-                tool_name,
-            )
-            _park_on(payload)
-        if option_id not in valid_option_ids(offered):
-            _logger.warning(
-                "Permission answer for the %r call chose option %r, which it "
-                "does not offer; asking again",
-                tool_name,
-                option_id,
-            )
-            _park_on(payload)
-        return option_id
+        while True:
+            answered = answered_permission_request(interrupt(payload))
+            if answered is None:
+                # Including a bare option id: an answer that names no request
+                # cannot be shown to belong to this call, and applying it is
+                # how an approval given for one call reaches another.
+                _logger.warning(
+                    "Permission answer for the %r call names no request; asking again",
+                    tool_name,
+                )
+                if answers_reach_the_node:
+                    _park_on(payload)
+                continue
+            answered_request, option_id = answered
+            if answered_request != request_id:
+                _logger.warning(
+                    "Permission answer names request %r, not the %r call now being "
+                    "made; asking again",
+                    answered_request,
+                    tool_name,
+                )
+                if answers_reach_the_node:
+                    _park_on(payload)
+                learned[answered_request] = option_id
+                continue
+            if option_id not in valid_option_ids(offered):
+                _logger.warning(
+                    "Permission answer for the %r call chose option %r, which it "
+                    "does not offer; asking again",
+                    tool_name,
+                    option_id,
+                )
+                if answers_reach_the_node:
+                    _park_on(payload)
+                continue
+            return option_id
 
     return permission_callback
 

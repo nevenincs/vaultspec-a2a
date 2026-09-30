@@ -188,15 +188,9 @@ async def test_narrowing_the_allowlist_clones_the_bridge(
     in place and returning itself gave one caller's allowlist to all of them,
     including runs already compiled against it.
     """
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
-    # An allowlist that can actually be narrowed: the default serializer admits
-    # every type, so the base contract correctly returns the saver unchanged
-    # and there would be nothing to clone.
-    restricted = JsonPlusSerializer(allowed_msgpack_modules=None)
-    bridge._inner().serde = restricted
-    bridge.serde = restricted
-
+    # There is an allowlist here to narrow because the bridge opens with one:
+    # a serializer admitting every type has nothing to add to, and the base
+    # contract would correctly return the saver unchanged.
     original_inner = bridge._inner()
     original_serde = bridge.serde
 
@@ -244,6 +238,46 @@ async def test_the_bridge_does_not_claim_what_the_saver_behind_it_cannot_do(
 
     with pytest.raises(NotImplementedError):
         await bridge.aprune([f"selector-prune-{uuid4().hex}"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_prerequisites("postgres")
+async def test_a_saver_taken_off_the_bridge_refuses_to_close_it(
+    bridge: _SelectorThreadPostgresCheckpointer,
+) -> None:
+    """A clone owns nothing it would be closing.
+
+    Every saver a run or a probe takes on this platform is cloned off the one
+    bridge - a sibling on the same pool, or a clone narrowed for one compiled
+    graph - and each shares its thread, its loop and its connections. Closing
+    one stopped the loop and closed the pool for all of them, leaving every
+    other holder, runs mid-superstep included, with a store that had gone
+    away while its owner still believed it open.
+    """
+    sibling = await bridge.concurrent_sibling()
+    narrowed = bridge.with_allowlist([("builtins", "set")])
+    assert narrowed is not bridge
+
+    for borrowed in (sibling, narrowed):
+        with pytest.raises(RuntimeError, match="borrows the selector thread"):
+            await borrowed.close()
+
+    # The refusal left the store open for every holder, and the clones are
+    # still working savers on it rather than casualties of their own refusal.
+    thread_id = f"selector-borrowed-{uuid4().hex}"
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = f"cp-{uuid4().hex}"
+    try:
+        await sibling.aput(
+            cast("Any", _config(thread_id)),
+            checkpoint,
+            cast("Any", {"source": "loop", "step": 1, "parents": {}}),
+            checkpoint["channel_versions"],
+        )
+        assert await narrowed.aget_tuple(cast("Any", _config(thread_id))) is not None
+        assert await bridge.aget_tuple(cast("Any", _config(thread_id))) is not None
+    finally:
+        await bridge.adelete_thread(thread_id)
 
 
 @pytest.fixture

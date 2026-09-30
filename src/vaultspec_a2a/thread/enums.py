@@ -133,8 +133,10 @@ class DegradedReason(StrEnum):
     """
 
     AUTHORING_RUN_PRODUCED_NO_PROPOSAL = "authoring_run_produced_no_proposal"
-    CHECKPOINT_HISTORY_TIMEOUT = "checkpoint_history_timeout"
-    CHECKPOINT_HISTORY_UNAVAILABLE = "checkpoint_history_unavailable"
+    # History depth is read off the checkpoint tuple the caller already holds.
+    # The separate history read that could time out or find the store
+    # unreachable is gone, and with it the two reasons naming those failures:
+    # depth is either known or it is not.
     CHECKPOINT_HISTORY_UNKNOWN = "checkpoint_history_unknown"
     CHECKPOINT_MISSING = "checkpoint_missing"
     CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW = (

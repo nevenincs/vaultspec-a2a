@@ -15,11 +15,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 if TYPE_CHECKING:
     import builtins
     from collections.abc import AsyncGenerator, AsyncIterator, Collection
     from concurrent.futures import Future as ConcurrentFuture
+
+    from langgraph.checkpoint.serde.base import SerializerProtocol
 
 from ..control.config import settings
 from ..domain_config import domain_config
@@ -34,6 +37,7 @@ __all__ = [
     "open_checkpointer",
     "prune_settled_thread",
     "setup_postgres_checkpointer",
+    "strict_checkpoint_serde",
 ]
 
 # Headroom over the worker's concurrent-run bound. Every run in flight can be
@@ -64,6 +68,37 @@ _CHECKPOINT_SETUP_LOCK_KEY = int.from_bytes(
 # is not waiting for a peer that is making progress.
 _CHECKPOINT_SETUP_LOCK_TIMEOUT_SECONDS = 120.0
 _CHECKPOINT_SETUP_LOCK_POLL_SECONDS = 0.05
+
+# What a saver says when it is asked to close resources it only borrows.
+_BORROWED_SAVER_CLOSE_REFUSAL = (
+    "This checkpointer borrows the selector thread, event loop and connection "
+    "pool of the one it was taken from, so closing it would close the "
+    "checkpoint store for every holder. Close the checkpointer that opened "
+    "them instead."
+)
+
+
+def strict_checkpoint_serde() -> SerializerProtocol:
+    """Return the serializer that reads back only the safe set of types.
+
+    Deserialization is where a checkpoint store becomes an execution surface.
+    The permissive default imports and calls whatever type a stored value names,
+    so anything able to write the store chooses what this process constructs on
+    load; it only logs that it did so. An empty allowlist - which is how the
+    library states strict mode - leaves its own safe set, and that set already
+    covers every type this graph checkpoints: JSON primitives and LangChain
+    messages.
+
+    Configured on each saver rather than through ``LANGGRAPH_STRICT_MSGPACK``,
+    so the posture belongs to the store this package opens and not to whichever
+    process happens to host it.
+
+    Strict deserialization DEGRADES rather than refuses: a blocked value comes
+    back as the raw argument its type was built from - a plain string where an
+    enum member was written - and is logged. Writing plain values in the first
+    place is what keeps that substitution from reaching a node.
+    """
+    return JsonPlusSerializer(allowed_msgpack_modules=None)
 
 
 def _postgres_checkpoint_pool_size() -> int:
@@ -140,6 +175,9 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         self._loop: asyncio.AbstractEventLoop | None = None
         self._pool: Any = None
         self._saver: Any = None
+        # Set on the clones below, which run on this bridge's thread, loop and
+        # pool without owning any of them.
+        self._borrowed = False
 
     async def start(self) -> None:
         """Start the selector-loop thread and enter AsyncPostgresSaver."""
@@ -173,11 +211,21 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
 
         self._pool = _postgres_checkpoint_pool(self._conn_string)
         await self._pool.open(wait=True)
-        self._saver = AsyncPostgresSaver(conn=self._pool)
+        self._saver = AsyncPostgresSaver(
+            conn=self._pool, serde=strict_checkpoint_serde()
+        )
         self.serde = self._saver.serde
 
     async def close(self) -> None:
-        """Exit the saver context and stop the selector loop thread."""
+        """Exit the saver context and stop the selector loop thread.
+
+        A borrowed saver refuses instead. Its thread, loop and pool belong to
+        the checkpointer it was cloned from, and closing it would take the
+        store away from every other holder - runs mid-superstep included -
+        while the owner went on believing its store was open.
+        """
+        if self._borrowed:
+            raise RuntimeError(_BORROWED_SAVER_CLOSE_REFUSAL)
         if self._loop is None:
             return
         try:
@@ -307,12 +355,13 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         """Return a bridge to a second saver on the same pool and selector loop.
 
         The sibling borrows this bridge's thread, loop and pool, so it must not
-        outlive it and must never be closed: ``close`` stops the loop and closes
-        the pool both of them are using.
+        outlive it and cannot be closed: closing stops the loop and closes the
+        pool both of them are using, so it refuses.
         """
         sibling: Any = await self._run_async("_pooled_sibling_saver")
         clone = copy.copy(self)
         clone._saver = sibling
+        clone._borrowed = True
         clone.serde = sibling.serde
         return clone
 
@@ -389,7 +438,8 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         The base contract is a shallow clone with a narrowed serializer; this
         used to swap its own inner saver and hand back itself, so every holder
         of the bridge - including runs already compiled against it - silently
-        acquired one caller's allowlist.
+        acquired one caller's allowlist. The clone borrows this bridge's
+        thread, loop and pool, so it refuses to be closed.
         """
         inner = self._inner()
         narrowed = inner.with_allowlist(extra_allowlist)
@@ -397,6 +447,7 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
             return self
         clone = copy.copy(self)
         clone._saver = narrowed
+        clone._borrowed = True
         clone.serde = narrowed.serde
         return clone
 
@@ -492,7 +543,9 @@ async def concurrent_checkpointer(checkpointer: Checkpointer) -> Checkpointer:
     pool. The pool stays the bound on how many connections the process holds.
 
     The result borrows the caller's pool and must not outlive it: closing it
-    belongs to whoever opened the checkpointer, never to a sibling. A backend
+    belongs to whoever opened the checkpointer, never to a sibling. Where the
+    sibling has a ``close`` to call - the selector bridge - it refuses one; the
+    pooled saver has none, and its pool is the caller's to close. A backend
     that cannot benefit returns itself - SQLite has one connection to serialize
     on, and a Postgres saver on a bare connection has nothing else to run on.
     """
@@ -549,6 +602,10 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
             # engine extends to its own file.
             settings.prepare_state_dir(Path(connection).parent)
         async with AsyncSqliteSaver.from_conn_string(connection) as checkpointer:
+            # ``from_conn_string`` owns the connection but forwards no
+            # serializer, so the posture is set on the saver it yields; the
+            # saver derives nothing from ``serde`` at construction.
+            checkpointer.serde = strict_checkpoint_serde()
             # Desktop profile boot must not mutate schema: ``setup()`` creates the
             # checkpointer tables, so it is suppressed when the profile is armed.
             # The staged-generation migration entrypoint runs setup instead, and
@@ -601,7 +658,7 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
     pool = _postgres_checkpoint_pool(settings.checkpoint_connection_string)
     await pool.open(wait=True)
     try:
-        checkpointer = AsyncPostgresSaver(conn=pool)
+        checkpointer = AsyncPostgresSaver(conn=pool, serde=strict_checkpoint_serde())
         await setup_postgres_checkpointer(checkpointer, pool)
         yield checkpointer
     finally:

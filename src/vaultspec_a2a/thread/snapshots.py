@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.base import WRITES_IDX_MAP
 from langgraph.checkpoint.serde.types import INTERRUPT
 
 from ..graph.enums import AgentLifecycleState, PermissionType, Provider
@@ -28,7 +29,7 @@ from .enums import (
 from .models import PlanEntry
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
@@ -68,6 +69,7 @@ __all__ = [
     "normalize_wire_event_type",
     "project_checkpoint_tuple",
     "stamp_message_created_at",
+    "tasks_past_their_interrupt",
     "wire_event_type",
 ]
 
@@ -633,6 +635,45 @@ def extract_checkpoint_fields(
     return projection
 
 
+#: The channels a saver holds in a fixed slot per task rather than appending:
+#: what the loop records ABOUT a task - the interrupt it raised, the resume
+#: values it consumed, its error, its schedule. Every other write in a task's
+#: set is output the task itself produced, down to the marker meaning "ended
+#: with nothing to say".
+_TASK_BOOKKEEPING_CHANNELS = frozenset(WRITES_IDX_MAP)
+
+
+def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
+    """Return the tasks whose held interrupt is a leftover, not a live question.
+
+    A task's interrupt write is never cleared when the answer lets that task
+    run on. With work fanned out, the superstep another branch is still parked
+    in has not committed, so the answered branch's interrupt stays in the
+    checkpoint beside the output its node produced afterwards. Every reader of
+    the held interrupts then sees a question that has been answered, and
+    re-asks it - or admits its answer a second time.
+
+    A task that produced output is the one that got past its question. A task
+    holding only bookkeeping has not: it is stopped at an interrupt, or it
+    consumed an answer and asked again, or it failed before finishing, and all
+    three are still waiting. A malformed write says nothing either way and is
+    skipped, leaving its task reading as waiting - the direction that keeps
+    disclosing a question rather than hiding one.
+    """
+    finished: set[str] = set()
+    for write in pending_writes or ():
+        if not isinstance(write, tuple | list) or len(write) != 3:
+            continue
+        task_id, channel = cast("object", write[0]), cast("object", write[1])
+        if (
+            isinstance(task_id, str)
+            and isinstance(channel, str)
+            and channel not in _TASK_BOOKKEEPING_CHANNELS
+        ):
+            finished.add(task_id)
+    return frozenset(finished)
+
+
 def _project_pending_interrupt(
     projection: CheckpointProjection,
     raw_interrupt: object,
@@ -682,15 +723,18 @@ def fold_pending_writes(
     pending_writes: list[tuple[object, object, object]] = (
         checkpoint_tuple.pending_writes or []
     )
+    # Every held write is counted and its channel recorded: those describe the
+    # checkpoint. Only the questions are narrowed, to the tasks still asking.
+    answered = tasks_past_their_interrupt(pending_writes)
     for index, pending_write in enumerate(pending_writes):
-        _task_id, channel, value = pending_write
+        task_id, channel, value = pending_write
         projection.pending_write_count += 1
         if (
             isinstance(channel, str)
             and channel not in projection.pending_write_channels
         ):
             projection.pending_write_channels.append(channel)
-        if channel != INTERRUPT:
+        if channel != INTERRUPT or task_id in answered:
             continue
         raw_interrupts: list[object] = (
             list(cast("list[object] | tuple[object, ...]", value))

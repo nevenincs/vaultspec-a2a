@@ -10,10 +10,26 @@ from typing import TYPE_CHECKING, Any, cast
 from langgraph.checkpoint.serde.types import ERROR, INTERRUPT
 from pydantic import ValidationError
 
-from .action_receipts import GraphActionReceipt, GraphCompletionReceipt
+from .action_receipts import (
+    GraphActionReceipt,
+    GraphCompletionReceipt,
+    merge_active_graph_action_receipt,
+    merge_graph_action_receipts,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from ..database.checkpoints import Checkpointer
+
+# The channels a dispatch's receipt is written to, each with the reducer its
+# state field declares. Folding a pending write with the channel's own reducer
+# is what makes this read the value the next superstep will commit rather than
+# a second opinion about it.
+_RECEIPT_REDUCERS: dict[str, Callable[[Any, Any], object]] = {
+    "active_graph_action_receipt": merge_active_graph_action_receipt,
+    "graph_action_receipts": merge_graph_action_receipts,
+}
 
 
 class CheckpointEvidenceKind(StrEnum):
@@ -103,18 +119,57 @@ def _completion_evidence(
     return CheckpointEvidence(CheckpointEvidenceKind.COMPLETED, checkpoint_id, True)
 
 
+def _pending_writes(checkpoint: Any) -> list[tuple[str, object]] | None:
+    """Return the checkpoint's held writes as channel/value pairs.
+
+    ``None`` when the stored shape is not what the saver's type promises;
+    durable storage is untrusted here as everywhere else in this module.
+    """
+    rows: list[tuple[str, object]] = []
+    for write in checkpoint.pending_writes or ():
+        if (
+            not isinstance(cast("object", write), tuple | list)
+            or len(write) != 3
+            or not isinstance(cast("object", write[1]), str)
+        ):
+            return None
+        rows.append((cast("str", write[1]), cast("object", write[2])))
+    return rows
+
+
+def _fold_pending_receipts(
+    values: dict[str, object], writes: Sequence[tuple[str, object]]
+) -> dict[str, object] | None:
+    """Overlay the receipt writes held against this checkpoint onto its values.
+
+    A resume that suspends again never advances the checkpoint: its receipt
+    stays a write held against the checkpoint it answered, durably, while the
+    committed channels still name the action before it. Reading the committed
+    channels alone therefore reports an applied resume as a prior action, and
+    a recovery keyed on incorporation redelivers an answer that already landed.
+
+    ``None`` when a write or the value it folds onto is not the shape its
+    channel takes, which the caller reads as an incompatible checkpoint.
+    """
+    folded = dict(values)
+    for channel, value in writes:
+        reducer = _RECEIPT_REDUCERS.get(channel)
+        if reducer is None:
+            continue
+        existing = folded.get(channel, {})
+        if not isinstance(existing, dict) or not isinstance(value, dict):
+            return None
+        try:
+            folded[channel] = reducer(existing, value)
+        except (ValidationError, ValueError):
+            return None
+    return folded
+
+
 def _pending_evidence(
-    checkpoint: Any, checkpoint_id: str, incorporated: bool
+    writes: Sequence[tuple[str, object]], checkpoint_id: str, incorporated: bool
 ) -> CheckpointEvidence:
-    writes = checkpoint.pending_writes
-    if writes is not None and any(
-        not isinstance(cast("object", write), tuple | list)
-        or len(write) != 3
-        or not isinstance(cast("object", write[1]), str)
-        for write in writes
-    ):
-        return _incompatible(checkpoint_id)
-    channels = {write[1] for write in writes or ()}
+    channels = {channel for channel, _ in writes}
     if ERROR in channels:
         return CheckpointEvidence(
             CheckpointEvidenceKind.FAILED, checkpoint_id, incorporated
@@ -153,11 +208,20 @@ async def read_checkpoint_evidence(
     if isinstance(parsed, CheckpointEvidence):
         return parsed
     current_checkpoint_id, values = parsed
-    action_evidence = _action_evidence(values, receipt, current_checkpoint_id)
+    writes = _pending_writes(checkpoint)
+    if writes is None:
+        return _incompatible(current_checkpoint_id)
+    folded = _fold_pending_receipts(values, writes)
+    if folded is None:
+        return _incompatible(current_checkpoint_id)
+    action_evidence = _action_evidence(folded, receipt, current_checkpoint_id)
     if action_evidence is not None:
         return action_evidence
+    # Completion is read off the committed channels alone: a completion write
+    # still held against a checkpoint means some other task parked the
+    # superstep that would have committed it, so the run has not completed.
     completion_evidence = _completion_evidence(values, receipt, current_checkpoint_id)
     if completion_evidence is not None:
         return completion_evidence
     incorporated = checkpoint.metadata.get("source") == "loop"
-    return _pending_evidence(checkpoint, current_checkpoint_id, incorporated)
+    return _pending_evidence(writes, current_checkpoint_id, incorporated)

@@ -127,11 +127,16 @@ async def _worker_test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 async def _wait_for_answered_clarification(
     graph: RegisteredCompiledGraph, config: RunnableConfig
 ) -> GraphStateSnapshot:
-    """Wait until the real graph records answers for the parked request."""
+    """Wait until the real graph records answers AND runs on to its end.
+
+    The answers commit a superstep before the run finishes, so waiting on
+    them alone returns a snapshot still positioned at the node that follows,
+    and every assertion about where the run ended up races it.
+    """
     with anyio.fail_after(15.0):
         while True:
             snap = await graph.aget_state(config)
-            if snap.values.get("clarification_answers"):
+            if snap.values.get("clarification_answers") and snap.next == ():
                 return snap
             await anyio.sleep(0.05)
 

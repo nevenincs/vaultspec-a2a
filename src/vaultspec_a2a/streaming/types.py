@@ -41,19 +41,25 @@ class SequencedEvent:
 
 @runtime_checkable
 class StreamableGraph(Protocol):
-    """Structural protocol for a compiled LangGraph graph with astream_events."""
+    """Structural protocol for a compiled LangGraph graph this service streams.
 
-    def astream_events(
+    The public stream API is what production consumes: ``astream`` over an
+    explicit list of stream modes, with subgraph frames included, so every
+    frame is a ``(namespace, mode, payload)`` triple.
+    """
+
+    def astream(
         self,
         graph_input: dict[str, Any] | Command[Any] | None,
         config: dict[str, Any],
         *,
-        version: str,
+        stream_mode: list[str],
+        subgraphs: bool = False,
         context: object | None = None,
         control: object | None = None,
         durability: str | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
-        """Yield raw LangGraph event dicts under Runtime *context* and *control*."""
+    ) -> AsyncIterator[tuple[Any, Any, Any]]:
+        """Yield stream frames under Runtime *context* and *control*."""
         ...
 
     async def aget_state(self, config: dict[str, Any]) -> object:
@@ -351,26 +357,3 @@ def evict_oldest[K](d: dict[K, float], max_entries: int) -> None:
     # Sort by timestamp (value), evict the oldest.
     for key in sorted(d, key=d.__getitem__)[:to_remove]:
         del d[key]
-
-
-# ---------------------------------------------------------------------------
-# LangGraph event filtering — research §1.2
-# ---------------------------------------------------------------------------
-PASSTHROUGH_EVENTS = frozenset(
-    {
-        "on_chat_model_stream",
-        "on_chat_model_end",
-        "on_tool_start",
-        "on_tool_end",
-        "on_tool_error",
-        "on_custom_event",
-    }
-)
-
-NODE_BOUNDARY_EVENTS = frozenset(
-    {
-        "on_chain_start",
-        "on_chain_end",
-        "on_chain_error",
-    }
-)

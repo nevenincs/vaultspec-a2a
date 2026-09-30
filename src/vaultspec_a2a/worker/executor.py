@@ -40,7 +40,7 @@ from ._dispatch_contract import (
     CAPACITY_THREAD_ACTIVE,
     DispatchCapacityReservation,
 )
-from ._dispatch_receipts import emit_dispatch_application_receipt
+from ._dispatch_receipts import DispatchReceiptReporter
 from ._dispatch_settlement import SettlementMixin, TerminalArbitration
 from ._executor_state import CheckpointAccess, DispatchCapacityState, RunResources
 from .graph_lifecycle import (
@@ -146,6 +146,10 @@ class Executor(SettlementMixin):
         # for, and a dispatch admitted a moment earlier ran to completion
         # through a shutdown.
         self._drain_reason: str | None = None
+        # One incorporation report per dispatch, whichever of the run's two
+        # chances to prove it - its first committed checkpoint, or its settle
+        # - gets there first.
+        self._receipts = DispatchReceiptReporter()
 
         # Worker-scoped holder of per-run actor tokens. Registered when a
         # run's active window opens and dropped when it closes, so tokens live
@@ -291,7 +295,7 @@ class Executor(SettlementMixin):
 
     @override
     async def _emit_dispatch_application_receipt(self, req: DispatchRequest) -> None:
-        await emit_dispatch_application_receipt(
+        await self._receipts.report(
             req,
             self._checkpointer,
             self._bridge,
@@ -785,6 +789,7 @@ class Executor(SettlementMixin):
 
     def _close_run_control(self, thread_id: str) -> None:
         self._run_controls.pop(thread_id, None)
+        self._receipts.forget(thread_id)
         if not self._run_controls:
             self._runs_idle.set()
 

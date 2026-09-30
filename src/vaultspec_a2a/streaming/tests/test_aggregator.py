@@ -7,11 +7,13 @@ from collections.abc import AsyncIterator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, TypedDict, Unpack, cast, override
+from uuid import uuid4
 
 import pytest
-from langchain_core.messages import AIMessageChunk
-from langgraph.errors import GraphInterrupt
-from langgraph.types import Command
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
+from langgraph.constants import TAG_NOSTREAM
+from langgraph.types import Command, Interrupt
 
 from ...domain_config import domain_config
 from ...graph.enums import (
@@ -27,6 +29,7 @@ from ...graph.events import (
     ErrorOccurred,
     MessageChunk,
     PermissionRequest,
+    PlanUpdate,
     TeamStatus,
     ThoughtChunk,
     ToolCallStart,
@@ -89,16 +92,18 @@ async def test_cancellation_at_stream_eof_wins_and_closes_generator() -> None:
     cancel = asyncio.Event()
     closed = asyncio.Event()
 
-    async def stream() -> AsyncIterator[dict[str, Any]]:
+    frame = ((), "tasks", {"id": "t1", "name": "coder", "triggers": ()})
+
+    async def stream() -> AsyncIterator[tuple[Any, Any, Any]]:
         try:
-            yield {"event": "on_chain_start"}
+            yield frame
             cancel.set()
         finally:
             closed.set()
 
     events = stream()
     first, cancelled = await _next_event_or_cancel(events, cancel, stall_timeout=1.0)
-    assert first == {"event": "on_chain_start"} and not cancelled
+    assert first == frame and not cancelled
     last, cancelled = await _next_event_or_cancel(events, cancel, stall_timeout=1.0)
     assert last is None and cancelled
     assert closed.is_set()
@@ -692,28 +697,64 @@ class TestSequenceOnEvents:
 
 
 # ---------------------------------------------------------------------------
-# LangGraph event processing with langgraph_node filtering
+# LangGraph public stream frames, and the tool callbacks beside them
 # ---------------------------------------------------------------------------
 
 
-class TestLangGraphEventProcessing:
-    """Tests for the LangGraph astream_events adapter."""
+def _messages_frame(
+    chunk: AIMessageChunk, node: str | None = None
+) -> tuple[tuple[str, ...], str, object]:
+    """One frame of the ``messages`` stream mode, as astream yields it."""
+    metadata: dict[str, object] = {}
+    if node is not None:
+        metadata["langgraph_node"] = node
+    return ((), "messages", (chunk, metadata))
+
+
+def _task_start(
+    name: str, namespace: tuple[str, ...] = ()
+) -> tuple[tuple[str, ...], str, object]:
+    """One node's start, as the ``tasks`` stream mode reports it."""
+    return (
+        namespace,
+        "tasks",
+        {"id": f"task-{name}", "name": name, "input": {}, "triggers": ()},
+    )
+
+
+def _task_result(
+    name: str,
+    result: object = None,
+    error: object = None,
+    namespace: tuple[str, ...] = (),
+) -> tuple[tuple[str, ...], str, object]:
+    """One node's result, as the ``tasks`` stream mode reports it."""
+    return (
+        namespace,
+        "tasks",
+        {
+            "id": f"task-{name}",
+            "name": name,
+            "error": error,
+            "result": result,
+            "interrupts": [],
+        },
+    )
+
+
+class TestLangGraphStreamProcessing:
+    """Tests for the projection of LangGraph's public stream frames."""
 
     @pytest.mark.asyncio
-    async def test_on_chat_model_stream_batched(
+    async def test_a_model_token_frame_is_batched(
         self, aggregator: EventAggregator
     ) -> None:
-        """on_chat_model_stream events are batched and flushed after 50ms."""
+        """Model tokens are batched and flushed after the buffer interval."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_chat_model_stream",
-                "run_id": "run-123",
-                "metadata": {},
-                "data": {"chunk": AIMessageChunk(content="Hello world")},
-            },
+        await aggregator.process_stream_frame(
+            *_messages_frame(AIMessageChunk(content="Hello world", id="msg-123")),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -721,134 +762,183 @@ class TestLangGraphEventProcessing:
         # Event is buffered, not yet emitted
         assert queue.empty()
 
-        # Wait for the 50ms flush timer
+        # Wait for the flush timer
         await asyncio.sleep(domain_config.chunk_flush_interval_seconds + 0.02)
 
         sequenced = queue.get_nowait()
         event = sequenced.event
         assert isinstance(event, MessageChunk)
         assert event.content == "Hello world"
-        assert event.message_id == "run-123"
+        assert event.message_id == "msg-123"
 
     @pytest.mark.asyncio
-    async def test_on_chat_model_stream_4kb_threshold(
+    async def test_a_model_token_frame_flushes_over_the_size_threshold(
         self, aggregator: EventAggregator
     ) -> None:
-        """Token chunks flush immediately when buffer exceeds 4KB."""
+        """Token chunks flush immediately when the buffer exceeds its cap."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        # Build a chunk larger than 4KB
         large_content = "x" * (domain_config.chunk_buffer_max_bytes + 100)
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_chat_model_stream",
-                "run_id": "run-big",
-                "metadata": {},
-                "data": {"chunk": AIMessageChunk(content=large_content)},
-            },
+        await aggregator.process_stream_frame(
+            *_messages_frame(AIMessageChunk(content=large_content, id="msg-big")),
             thread_id="thread-1",
             agent_id="agent-1",
         )
 
-        # Should flush immediately (4KB threshold exceeded)
         sequenced = queue.get_nowait()
         event = sequenced.event
         assert isinstance(event, MessageChunk)
         assert len(event.content) > domain_config.chunk_buffer_max_bytes
 
     @pytest.mark.asyncio
-    async def test_on_tool_start_with_node_metadata(
+    async def test_a_model_frame_is_attributed_to_the_node_that_ran_it(
         self, aggregator: EventAggregator
     ) -> None:
-        """on_tool_start only emits when langgraph_node is set."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_tool_start",
-                "run_id": "run-456",
-                "name": "search_code",
-                "metadata": {"langgraph_node": "coder"},
-            },
+        await aggregator.process_stream_frame(
+            *_messages_frame(AIMessageChunk(content="from the coder"), node="coder"),
             thread_id="thread-1",
             agent_id="agent-1",
         )
+        await asyncio.sleep(domain_config.chunk_flush_interval_seconds + 0.02)
 
-        sequenced = queue.get_nowait()
-        event = sequenced.event
+        event = queue.get_nowait().event
+        assert isinstance(event, MessageChunk)
+        assert event.agent_id == "coder"
+
+    @pytest.mark.asyncio
+    async def test_a_tool_call_is_reported_under_the_id_the_model_gave_it(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A tool's lifecycle arrives on the callback surface, not the stream."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+
+        await callbacks.on_tool_start(
+            {"name": "search_code"},
+            "{'query': 'x'}",
+            run_id=uuid4(),
+            metadata={"langgraph_node": "coder"},
+            inputs={"query": "x"},
+            tool_call_id="call_SEARCH",
+        )
+
+        event = queue.get_nowait().event
         assert isinstance(event, ToolCallStart)
-        assert event.tool_call_id == "run-456"
+        assert event.tool_call_id == "call_SEARCH"
         assert event.title == "search_code"
+        assert event.agent_id == "coder"
 
     @pytest.mark.asyncio
-    async def test_on_tool_start_without_node_filtered(
+    async def test_one_tool_call_keeps_one_identity_from_start_to_end(
         self, aggregator: EventAggregator
     ) -> None:
-        """on_tool_start without langgraph_node is filtered out."""
+        """The end resolves the call the start registered, not a second one.
+
+        Keying the end on the LangChain run id left the model's own call id
+        registered and PENDING for the life of the run, beside a second,
+        completed entry no client could join to it.
+        """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
+        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        run_id = uuid4()
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_tool_start",
-                "run_id": "run-456",
-                "name": "internal_tool",
-                "metadata": {},  # No langgraph_node
-            },
-            thread_id="thread-1",
-            agent_id="agent-1",
+        await callbacks.on_tool_start(
+            {"name": "search_code"},
+            "{'query': 'x'}",
+            run_id=run_id,
+            metadata={"langgraph_node": "coder"},
+            inputs={"query": "x"},
+            tool_call_id="call_SEARCH",
+        )
+        await callbacks.on_tool_end(
+            ToolMessage(
+                content="found it", name="search_code", tool_call_id="call_SEARCH"
+            ),
+            run_id=run_id,
+            tool_call_id="call_SEARCH",
         )
 
-        assert queue.empty()
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait().event)
+        identities = {
+            event.tool_call_id
+            for event in events
+            if isinstance(event, ToolCallStart | ToolCallUpdate)
+        }
+        assert identities == {"call_SEARCH"}
+        updates = [event for event in events if isinstance(event, ToolCallUpdate)]
+        assert updates[-1].status == ToolCallStatus.COMPLETED
+        assert aggregator.get_tool_call_states("thread-1") == {
+            "call_SEARCH": {
+                "title": "search_code",
+                "kind": "search",
+                "status": "completed",
+                "agent_id": "coder",
+            }
+        }
 
     @pytest.mark.asyncio
-    async def test_on_tool_end_with_node_metadata(
+    async def test_a_failed_tool_call_is_reported_failed(
         self, aggregator: EventAggregator
     ) -> None:
-        """on_tool_end with langgraph_node emits a ToolCallUpdateEvent."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
+        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        run_id = uuid4()
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_tool_end",
-                "run_id": "run-456",
-                "metadata": {"langgraph_node": "coder"},
-            },
-            thread_id="thread-1",
-            agent_id="agent-1",
+        await callbacks.on_tool_start(
+            {"name": "write_file"},
+            "{}",
+            run_id=run_id,
+            metadata={"langgraph_node": "coder"},
+            inputs={"file_path": "a.py"},
+            tool_call_id="call_WRITE",
+        )
+        await callbacks.on_tool_error(
+            RuntimeError("disk is full"), run_id=run_id, tool_call_id="call_WRITE"
         )
 
-        sequenced = queue.get_nowait()
-        event = sequenced.event
-        assert isinstance(event, ToolCallUpdate)
-        assert event.tool_call_id == "run-456"
-        assert event.status == ToolCallStatus.COMPLETED
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait().event)
+        updates = [event for event in events if isinstance(event, ToolCallUpdate)]
+        assert len(updates) == 1
+        assert updates[0].tool_call_id == "call_WRITE"
+        assert updates[0].status == ToolCallStatus.FAILED
+        assert updates[0].content is not None
+        assert updates[0].content[0]["text"] == "disk is full"
 
     @pytest.mark.asyncio
-    async def test_on_tool_end_redacts_raw_file_paths_from_artifact_updates(
+    async def test_a_file_tool_reports_its_artifact_without_the_raw_path(
         self, aggregator: EventAggregator
     ) -> None:
         """Artifact updates must not expose hostile absolute file paths."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
+        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        run_id = uuid4()
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_tool_end",
-                "run_id": "run-456",
-                "name": "delete_file",
-                "metadata": {"langgraph_node": "coder"},
-                "data": {
-                    "input": {"path": r"C:\\sensitive\\secret.txt"},
-                    "output": "",
-                },
-            },
-            thread_id="thread-1",
-            agent_id="agent-1",
+        await callbacks.on_tool_start(
+            {"name": "delete_file"},
+            "{}",
+            run_id=run_id,
+            metadata={"langgraph_node": "coder"},
+            inputs={"path": r"C:\\sensitive\\secret.txt"},
+            tool_call_id="call_DELETE",
+        )
+        queue.get_nowait()  # the start
+        await callbacks.on_tool_end(
+            ToolMessage(content="", name="delete_file", tool_call_id="call_DELETE"),
+            run_id=run_id,
+            tool_call_id="call_DELETE",
         )
 
         tool_update = queue.get_nowait().event
@@ -856,94 +946,154 @@ class TestLangGraphEventProcessing:
 
         assert isinstance(tool_update, ToolCallUpdate)
         assert isinstance(artifact_update, ArtifactUpdate)
-        assert artifact_update.artifact_id == "run-456:secret.txt"
+        assert artifact_update.artifact_id == "call_DELETE:secret.txt"
         assert artifact_update.filename == "secret.txt"
         assert "C:\\sensitive\\secret.txt" not in artifact_update.content
         assert artifact_update.content == "[delete_file] secret.txt"
 
     @pytest.mark.asyncio
-    async def test_on_tool_end_without_node_filtered(
+    async def test_a_model_turn_closes_on_its_finish_reason(
         self, aggregator: EventAggregator
     ) -> None:
-        """on_tool_end without langgraph_node is filtered out."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
+        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_tool_end",
-                "run_id": "run-456",
-                "metadata": {},
-            },
-            thread_id="thread-1",
-            agent_id="agent-1",
+        await callbacks.on_llm_end(
+            LLMResult(
+                generations=[
+                    [
+                        ChatGeneration(
+                            message=AIMessage(
+                                content="",
+                                id="msg-final",
+                                response_metadata={"finish_reason": "stop"},
+                            )
+                        )
+                    ]
+                ]
+            ),
+            run_id=uuid4(),
+            tags=["seq:step:1"],
+        )
+
+        event = queue.get_nowait().event
+        assert isinstance(event, MessageChunk)
+        assert event.finish_reason == "stop"
+        assert event.message_id == "msg-final"
+
+    @pytest.mark.asyncio
+    async def test_a_nostream_model_turn_does_not_even_close_visibly(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """The stream layer hides a nostream run's tokens; so does its end.
+
+        The supervisor's routing decision is tagged not to stream, and the
+        stream mode honours that on its own. The completion callback still
+        fires for it, so a final chunk sent from there would put the routing
+        turn back on a client's screen with nothing before it.
+        """
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+
+        await callbacks.on_llm_end(
+            LLMResult(
+                generations=[
+                    [
+                        ChatGeneration(
+                            message=AIMessage(
+                                content="",
+                                id="msg-route",
+                                response_metadata={"finish_reason": "stop"},
+                            )
+                        )
+                    ]
+                ]
+            ),
+            run_id=uuid4(),
+            tags=["seq:step:1", TAG_NOSTREAM],
         )
 
         assert queue.empty()
 
     @pytest.mark.asyncio
-    async def test_on_chain_start_emits_working(
+    async def test_a_node_start_frame_emits_working(
         self, aggregator: EventAggregator
     ) -> None:
-        """on_chain_start with langgraph_node -> agent_status(working)."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_chain_start",
-                "run_id": "run-chain-1",
-                "name": "coder",
-                "metadata": {"langgraph_node": "coder"},
-            },
-            thread_id="thread-1",
-            agent_id="agent-1",
+        await aggregator.process_stream_frame(
+            *_task_start("coder"), thread_id="thread-1", agent_id="agent-1"
         )
 
-        sequenced = queue.get_nowait()
-        event = sequenced.event
+        event = queue.get_nowait().event
         assert isinstance(event, AgentStatus)
         assert event.state == AgentLifecycleState.WORKING
         assert event.node_name == "coder"
 
     @pytest.mark.asyncio
-    async def test_on_chain_end_emits_idle(self, aggregator: EventAggregator) -> None:
-        """on_chain_end with langgraph_node -> agent_status(idle)."""
+    async def test_a_node_result_frame_emits_idle(
+        self, aggregator: EventAggregator
+    ) -> None:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_chain_end",
-                "run_id": "run-chain-1",
-                "name": "coder",
-                "metadata": {"langgraph_node": "coder"},
-            },
+        await aggregator.process_stream_frame(
+            *_task_result("coder", result={}),
             thread_id="thread-1",
             agent_id="agent-1",
         )
 
-        sequenced = queue.get_nowait()
-        event = sequenced.event
+        event = queue.get_nowait().event
         assert isinstance(event, AgentStatus)
         assert event.state == AgentLifecycleState.IDLE
         assert event.node_name == "coder"
 
     @pytest.mark.asyncio
-    async def test_on_chain_start_without_node_filtered(
+    async def test_a_failed_node_result_frame_emits_failed(
         self, aggregator: EventAggregator
     ) -> None:
-        """on_chain_start without langgraph_node is filtered (sub-runnable)."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_chain_start",
-                "run_id": "run-sub",
-                "name": "RunnableSequence",
-                "metadata": {},  # No langgraph_node = sub-runnable
-            },
+        await aggregator.process_stream_frame(
+            *_task_result("coder", error=RuntimeError("node blew up")),
+            thread_id="thread-1",
+            agent_id="agent-1",
+        )
+
+        event = queue.get_nowait().event
+        assert isinstance(event, AgentStatus)
+        assert event.state == AgentLifecycleState.FAILED
+        assert event.detail == "node blew up"
+
+    @pytest.mark.asyncio
+    async def test_a_subgraph_inner_node_is_not_reported_as_an_agent(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """Only the run's own graph names agents a client knows.
+
+        A subgraph's node runs under a non-empty namespace. Reporting it put a
+        node no client had ever been told about onto the team roster, and its
+        state update published plan entries as though the parent had written
+        them.
+        """
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_stream_frame(
+            *_task_start("inner", namespace=("team:abc",)),
+            thread_id="thread-1",
+            agent_id="agent-1",
+        )
+        await aggregator.process_stream_frame(
+            *_task_result(
+                "inner",
+                result={"current_plan": [{"content": "inner plan"}]},
+                namespace=("team:abc",),
+            ),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -951,45 +1101,89 @@ class TestLangGraphEventProcessing:
         assert queue.empty()
 
     @pytest.mark.asyncio
-    async def test_on_custom_event_emits_thought_chunk(
+    async def test_a_node_result_publishes_the_plan_that_node_wrote(
         self, aggregator: EventAggregator
     ) -> None:
-        """on_custom_event maps to ThoughtChunkEvent."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_custom_event",
-                "run_id": "run-thought-1",
-                "metadata": {"langgraph_node": "coder"},
-                "data": {"content": "Let me think about this..."},
-            },
+        await aggregator.process_stream_frame(
+            *_task_result(
+                "planner",
+                result={"current_plan": [{"content": "ship it", "status": "pending"}]},
+            ),
             thread_id="thread-1",
             agent_id="agent-1",
         )
 
-        sequenced = queue.get_nowait()
-        event = sequenced.event
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait().event)
+        plans = [event for event in events if isinstance(event, PlanUpdate)]
+        assert len(plans) == 1
+        assert plans[0].entries == [
+            {"content": "ship it", "status": "pending", "priority": "medium"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_custom_write_reaches_the_client_as_a_thought(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """Whatever a node writes through the stream writer is relayed."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_stream_frame(
+            (),
+            "custom",
+            {"content": "Let me think about this..."},
+            thread_id="thread-1",
+            agent_id="agent-1",
+        )
+
+        event = queue.get_nowait().event
         assert isinstance(event, ThoughtChunk)
         assert event.content == "Let me think about this..."
 
     @pytest.mark.asyncio
-    async def test_unknown_event_does_not_emit(
+    async def test_a_custom_write_of_any_shape_is_relayed_not_dropped(
         self, aggregator: EventAggregator
     ) -> None:
-        """Events outside the known set are silently filtered."""
+        """A node writing a bare string or a list must not break the run.
+
+        The custom path only ever contemplated a mapping with a ``content``
+        key, and would raise on anything else; a node is free to write
+        whatever it likes.
+        """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_retriever_start",
-                "run_id": "run-789",
-                "metadata": {},
-            },
-            thread_id="thread-1",
-            agent_id="agent-1",
+        for payload in ("a bare string", ["a", "list"], 42):
+            await aggregator.process_stream_frame(
+                (), "custom", payload, thread_id="thread-1", agent_id="agent-1"
+            )
+
+        relayed = []
+        while not queue.empty():
+            relayed.append(queue.get_nowait().event)
+        assert [
+            event.content for event in relayed if isinstance(event, ThoughtChunk)
+        ] == [
+            "a bare string",
+            "['a', 'list']",
+            "42",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_stream_mode_does_not_emit(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A mode this projection does not consume is silently filtered."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_stream_frame(
+            (), "debug", {"anything": True}, thread_id="thread-1", agent_id="agent-1"
         )
 
         assert queue.empty()
@@ -1002,13 +1196,8 @@ class TestLangGraphEventProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data={
-                "event": "on_chat_model_stream",
-                "run_id": "run-000",
-                "metadata": {},
-                "data": {"chunk": AIMessageChunk(content="")},
-            },
+        await aggregator.process_stream_frame(
+            *_messages_frame(AIMessageChunk(content="", id="msg-empty")),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -1027,36 +1216,32 @@ class TestLangGraphEventProcessing:
 # ---------------------------------------------------------------------------
 
 
-def _action_chunk_event(
+def _action_chunk_frame(
     run_id: str, tool_call_id: str, item_type: str, detail: dict[str, Any]
-) -> dict[str, Any]:
-    """Build an on_chat_model_stream event shaped like a provider action chunk.
+) -> tuple[tuple[str, ...], str, object]:
+    """Build a model token frame shaped like a provider action chunk.
 
     Mirrors what ``codex_chat_model._completed_action_chunk`` actually
     constructs: a chunk with empty ``content`` and one ``tool_call_chunks``
     entry whose ``args`` is the JSON-encoded action detail (carrying its own
     ``status``), driven through the real production seam
-    (``EventAggregator.process_langgraph_event``) rather than calling the
+    (``EventAggregator.process_stream_frame``) rather than calling the
     transformer's private helpers directly.
     """
-    return {
-        "event": "on_chat_model_stream",
-        "run_id": run_id,
-        "metadata": {},
-        "data": {
-            "chunk": AIMessageChunk(
-                content="",
-                tool_call_chunks=[
-                    {
-                        "id": tool_call_id,
-                        "name": item_type,
-                        "args": json.dumps(detail),
-                        "index": 0,
-                    }
-                ],
-            )
-        },
-    }
+    return _messages_frame(
+        AIMessageChunk(
+            content="",
+            id=run_id,
+            tool_call_chunks=[
+                {
+                    "id": tool_call_id,
+                    "name": item_type,
+                    "args": json.dumps(detail),
+                    "index": 0,
+                }
+            ],
+        )
+    )
 
 
 class TestProviderActionToolCallChunks:
@@ -1075,8 +1260,8 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data=_action_chunk_event(
+        await aggregator.process_stream_frame(
+            *_action_chunk_frame(
                 run_id="run-cmd",
                 tool_call_id="call_1",
                 item_type="commandExecution",
@@ -1125,8 +1310,8 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data=_action_chunk_event(
+        await aggregator.process_stream_frame(
+            *_action_chunk_frame(
                 run_id="run-cmd-rejected",
                 tool_call_id="call_2",
                 item_type="commandExecution",
@@ -1164,8 +1349,8 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data=_action_chunk_event(
+        await aggregator.process_stream_frame(
+            *_action_chunk_frame(
                 run_id="run-cmd-unknown",
                 tool_call_id="call_3",
                 item_type="commandExecution",
@@ -1197,8 +1382,8 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_langgraph_event(
-            event_data=_action_chunk_event(
+        await aggregator.process_stream_frame(
+            *_action_chunk_frame(
                 run_id="run-file",
                 tool_call_id="call_4",
                 item_type="fileChange",
@@ -1233,29 +1418,25 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        raw_input_chunk = {
-            "event": "on_chat_model_stream",
-            "run_id": "run-acp",
-            "metadata": {},
-            "data": {
-                "chunk": AIMessageChunk(
-                    content="",
-                    tool_call_chunks=[
-                        {
-                            "id": "call_acp_1",
-                            "name": "read_file",
-                            "args": json.dumps({"path": "a.py"}),
-                            "index": 0,
-                        }
-                    ],
-                )
-            },
-        }
-        await aggregator.process_langgraph_event(
-            event_data=raw_input_chunk, thread_id="thread-1", agent_id="agent-1"
+        raw_input_frame = _messages_frame(
+            AIMessageChunk(
+                content="",
+                id="run-acp",
+                tool_call_chunks=[
+                    {
+                        "id": "call_acp_1",
+                        "name": "read_file",
+                        "args": json.dumps({"path": "a.py"}),
+                        "index": 0,
+                    }
+                ],
+            )
         )
-        await aggregator.process_langgraph_event(
-            event_data=raw_input_chunk, thread_id="thread-1", agent_id="agent-1"
+        await aggregator.process_stream_frame(
+            *raw_input_frame, thread_id="thread-1", agent_id="agent-1"
+        )
+        await aggregator.process_stream_frame(
+            *raw_input_frame, thread_id="thread-1", agent_id="agent-1"
         )
 
         sequenced_all: list[SequencedEvent] = []
@@ -1283,13 +1464,8 @@ class TestTokenChunkBatching:
         aggregator.subscribe("client-1", ["thread-1"])
 
         for token in ["Hello", " ", "world"]:
-            await aggregator.process_langgraph_event(
-                event_data={
-                    "event": "on_chat_model_stream",
-                    "run_id": "run-batch",
-                    "metadata": {},
-                    "data": {"chunk": AIMessageChunk(content=token)},
-                },
+            await aggregator.process_stream_frame(
+                *_messages_frame(AIMessageChunk(content=token, id="run-batch")),
                 thread_id="thread-1",
                 agent_id="agent-1",
             )
@@ -1571,12 +1747,13 @@ class _SilentGraph:
     def __init__(self, state: object) -> None:
         self._state = state
 
-    async def astream_events(
+    async def astream(
         self,
         graph_input: object,
         config: object,
         *,
-        version: str,
+        stream_mode: list[str],
+        subgraphs: bool = False,
         context: object | None = None,
         control: object | None = None,
         durability: str | None = None,
@@ -1592,32 +1769,30 @@ assert issubclass(_SilentGraph, StreamableGraph)  # protocol drift guard
 
 
 class _InterruptingGraph:
-    """Graph stub that raises a real GraphInterrupt from astream_events.
+    """Graph stub whose stream reports a park the way a real one does.
 
-    Policy exception: see _SilentGraph. This variant simulates the H4 guard
-    path in ingest() — where astream_events raises GraphInterrupt — so that
-    _emit_interrupt_events is triggered. Using a real GraphInterrupt (from
-    langgraph.errors) ensures isinstance checks in the production code pass
-    correctly without needing a full graph execution.
+    Policy exception: see _SilentGraph. A parked LangGraph run does not raise
+    - it yields an ``updates`` frame under the interrupt key and ends - so
+    that is what this yields, with a real ``Interrupt``. The run's outcome is
+    read from that frame, and ``aget_state`` then supplies the payload the
+    permission projection publishes.
     """
 
     def __init__(self, state: object) -> None:
         self._state = state
 
-    async def astream_events(
+    async def astream(
         self,
         graph_input: object,
         config: object,
         *,
-        version: str,
+        stream_mode: list[str],
+        subgraphs: bool = False,
         context: object | None = None,
         control: object | None = None,
         durability: str | None = None,
     ):
-        # Raise a real GraphInterrupt to test the H4 guard in ingest().
-        # GraphInterrupt takes a tuple of interrupt values.
-        raise GraphInterrupt(())
-        yield  # make it an async generator
+        yield ((), "updates", {"__interrupt__": (Interrupt(value={}),)})
 
     async def aget_state(self, config: object) -> object:
         return self._state
@@ -1636,9 +1811,9 @@ class TestEmitInterruptEvents:
         """When graph suspends with a permission_request interrupt, events are
         emitted.
 
-        Uses _InterruptingGraph which raises a real GraphInterrupt from
-        astream_events, triggering the H4 guard so _emit_interrupt_events is
-        called and PermissionRequestEvent is emitted.
+        Uses _InterruptingGraph, whose stream reports the park the way a
+        real one does, so the run is classified interrupted and the
+        permission projection publishes what it asked for.
         """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-interrupt"])
@@ -1732,7 +1907,7 @@ class TestEmitInterruptEvents:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-empty-interrupts"])
 
-        # Task exists but with no interrupts — uses _InterruptingGraph
+        # Task exists but with no interrupts - uses _InterruptingGraph
         # so _emit_interrupt_events IS called, but no events emitted since
         # task.interrupts is empty.
         state = _GraphStateSnapshot(tasks=[_GraphTask("vaultspec-coder", [])])
@@ -1768,7 +1943,7 @@ class TestEmitInterruptEvents:
         state = _GraphStateSnapshot(
             tasks=[_GraphTask("vaultspec-coder", [_InterruptValue(interrupt_payload)])]
         )
-        # Uses _InterruptingGraph so GraphInterrupt is raised and
+        # Uses _InterruptingGraph so the stream reports a park and
         # _emit_interrupt_events is triggered, but the payload type is not
         # "permission_request" so no PermissionRequestEvent should be emitted.
         graph = _InterruptingGraph(state)
@@ -1808,7 +1983,7 @@ class TestEmitInterruptEvents:
         state = _GraphStateSnapshot(
             tasks=[_GraphTask("vaultspec-coder", [_InterruptValue(interrupt_payload)])]
         )
-        # Uses _InterruptingGraph so _emit_interrupt_events is called.
+        # Uses _InterruptingGraph so the interrupt projection runs.
         graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-default-opts"}}
@@ -1842,12 +2017,13 @@ class TestEmitInterruptEvents:
 class _RecursingGraph:
     """Graph stub that raises GraphRecursionError from astream_events."""
 
-    async def astream_events(
+    async def astream(
         self,
         graph_input: object,
         config: object,
         *,
-        version: str,
+        stream_mode: list[str],
+        subgraphs: bool = False,
         context: object | None = None,
         control: object | None = None,
         durability: str | None = None,
@@ -1910,12 +2086,13 @@ class _FailingGraph:
     step timeout — the generic catch-all branch.
     """
 
-    async def astream_events(
+    async def astream(
         self,
         graph_input: object,
         config: object,
         *,
-        version: str,
+        stream_mode: list[str],
+        subgraphs: bool = False,
         context: object | None = None,
         control: object | None = None,
         durability: str | None = None,
@@ -1937,12 +2114,13 @@ assert issubclass(_FailingGraph, StreamableGraph)  # protocol drift guard
 
 class _ProviderCancelledGraph(_FailingGraph):
     @override
-    async def astream_events(
+    async def astream(
         self,
         graph_input: object,
         config: object,
         *,
-        version: str,
+        stream_mode: list[str],
+        subgraphs: bool = False,
         context: object | None = None,
         control: object | None = None,
         durability: str | None = None,
@@ -2418,18 +2596,19 @@ class _StallingGraph:
     caught, classified failure instead.
     """
 
-    async def astream_events(
+    async def astream(
         self,
         graph_input: object,
         config: object,
         *,
-        version: str,
+        stream_mode: list[str],
+        subgraphs: bool = False,
         context: object | None = None,
         control: object | None = None,
         durability: str | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncIterator[tuple[Any, Any, Any]]:
         await asyncio.sleep(3600)  # never reached under the test's tiny timeout
-        yield {}  # pragma: no cover -- make it an async generator
+        yield ((), "tasks", {})  # pragma: no cover -- make it an async generator
 
     async def aget_state(self, config: object) -> object:
         return type(
@@ -2479,23 +2658,19 @@ class _LongStepBudgetGraph:
 
     step_timeout = 0.5
 
-    async def astream_events(
+    async def astream(
         self,
         graph_input: object,
         config: object,
         *,
-        version: str,
+        stream_mode: list[str],
+        subgraphs: bool = False,
         context: object | None = None,
         control: object | None = None,
         durability: str | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncIterator[tuple[Any, Any, Any]]:
         await asyncio.sleep(0.3)
-        yield {
-            "event": "on_chain_end",
-            "run_id": "r1",
-            "name": "worker",
-            "metadata": {},
-        }
+        yield ((), "tasks", {"id": "t1", "name": "worker", "result": {}, "error": None})
 
     async def aget_state(self, config: object) -> object:
         return type(

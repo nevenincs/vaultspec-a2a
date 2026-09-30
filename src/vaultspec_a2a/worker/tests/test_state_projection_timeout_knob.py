@@ -62,12 +62,13 @@ _PROBE = textwrap.dedent(
         See the module docstring's Policy exception note.
         \"\"\"
 
-        async def astream_events(
+        async def astream(
             self,
             graph_input,
             config,
             *,
-            version,
+            stream_mode,
+            subgraphs=False,
             context=None,
             control=None,
             durability=None,

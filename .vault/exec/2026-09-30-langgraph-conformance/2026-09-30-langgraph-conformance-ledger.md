@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:0c7c2e6f948c6e4eeee320b938a6a1ec85a56c857a7f162b076e3c7cd5bcca3d'
+body_hash: 'sha256:2e0ccfd1a989c400fc08cf8071adcb62c21b13fd3b9de68d035c4a51cd9c16a0'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -129,8 +129,45 @@ related:
 - `S31` `M` `uv.lock`
 - `S31` `verify:` `graph streaming factory prompt-render suites on the relocked environment (661); the full suite on these versions passed in the version review (4830)` -> `pass`
 - `S31` `by:` `orchestrator`
+- `S16` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S16` `M` `src/vaultspec_a2a/worker/_dispatch_contract.py`
+- `S16` `M` `src/vaultspec_a2a/worker/app.py`
+- `S16` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S16` `M` `src/vaultspec_a2a/worker/tests/test_executor_drain.py`
+- `S16` `verify:` `streaming worker suites (383) + stream, clarification, graph, refusal suites (401) + ruff + ty` -> `pass`
+- `S16` `by:` `worker-a3417956`
+- `S17` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S17` `A` `src/vaultspec_a2a/streaming/tests/test_ingest_durability.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/types.py`
+- `S17` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
+- `S17` `verify:` `streaming worker team graph and stream-attachment suites (948) + ruff + ty` -> `pass`
+- `S17` `by:` `worker-a3417956`
+- `S18` `A` `src/vaultspec_a2a/streaming/_run_callbacks.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/aggregator.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S18` `A` `src/vaultspec_a2a/streaming/tests/test_public_stream_ingest.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/tests/test_transformer_characterization.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/transformer.py`
+- `S18` `A` `src/vaultspec_a2a/streaming/translation.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/types.py`
+- `S18` `M` `src/vaultspec_a2a/worker/_dispatch_receipts.py`
+- `S18` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S18` `A` `src/vaultspec_a2a/worker/tests/test_dispatch_receipt_timing.py`
+- `S18` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
+- `S18` `verify:` `streaming worker team graph api stream and clarification suites (967) + openapi artifact unchanged + ruff + ty` -> `pass`
+- `S18` `by:` `worker-a3417956`
+- `S19` `M` `src/vaultspec_a2a/streaming/_run_callbacks.py`
+- `S19` `A` `src/vaultspec_a2a/streaming/tests/test_stream_identity.py`
+- `S19` `verify:` `streaming worker team graph api stream clarification and refusal suites (973) + ruff + ty=pass; orchestrator re-ran the merged tree on the 0.3.2 lock (979)` -> `pass`
+- `S19` `by:` `worker-a3417956`
 
 ## Notes
 
 - `S29` The framework's 28 builtins, provider projections and hook migration were applied by vaultspec-core install --upgrade and migrations run; the repository's annotations hook was moved out of the managed block the migration re-rendered.
 - `S30` Core's search and crossref are withheld, not declared, per the user's choice on 2026-09-30 (serve but never permit): they send vault text to a hosted API when a key resolves and 0.3.2 has no launch flag to drop them.
+- `S16` Scope extended to `worker/_dispatch_contract.py` and worker/app.py so a draining worker refuses dispatch with its own token and a 503.
+- `S17` Sync durability is requested only when the graph has a real checkpointer: LangGraph 1.2.12 crashes a sync-durability run without one.
+- `S18` Tool lifecycle and model-turn close come from a callback handler in config callbacks; `message_id` now matches the stored message id the snapshot reports.
+- `S19` Four of five clauses were subsumed by S18 and proven against the pre-S18 code; the residual was a model-announced tool call registered twice.

@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:72f15905d667272c3e8193320dd445e37ee88726173ee925e34e8178660cba36'
+body_hash: 'sha256:2996b5bee4f8b26bef7121a45ff055c00fb9ecf27035e7e87ec366129d29e67a'
 ---
 
 # `langgraph-conformance` plan
@@ -69,10 +69,10 @@ Every pause resumes exactly once with the answer it asked for, however many appr
 
 Ingest runs on LangGraph's public stream API with durable checkpoints, drains and cancels truthfully, and sees interrupts and receipts as they happen.
 
-- [ ] `P03.S16` - Propagate cancellation out of ingest and keep a requested drain for runs opened afterwards; `src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/worker/executor.py`.
-- [ ] `P03.S17` - Run ingest and resume with synchronous checkpoint durability; `src/vaultspec_a2a/streaming/ingest.py`.
-- [ ] `P03.S18` - Move ingest to LangGraph's public stream modes, dropping the private runtime seat, detecting interrupts in-stream, and firing the application receipt from the first durable checkpoint; `src/vaultspec_a2a/streaming/, src/vaultspec_a2a/worker/_dispatch_receipts.py`.
-- [ ] `P03.S19` - Key node boundaries, tool calls, nostream filtering and custom events on the identities LangGraph documents; `src/vaultspec_a2a/streaming/transformer.py`.
+- [x] `P03.S16` - Propagate cancellation out of ingest and keep a requested drain for runs opened afterwards; `src/vaultspec_a2a/streaming/ingest.py, src/vaultspec_a2a/worker/executor.py`.
+- [x] `P03.S17` - Run ingest and resume with synchronous checkpoint durability; `src/vaultspec_a2a/streaming/ingest.py`.
+- [x] `P03.S18` - Move ingest to LangGraph's public stream modes, dropping the private runtime seat, detecting interrupts in-stream, and firing the application receipt from the first durable checkpoint; `src/vaultspec_a2a/streaming/, src/vaultspec_a2a/worker/_dispatch_receipts.py`.
+- [x] `P03.S19` - Key node boundaries, tool calls, nostream filtering and custom events on the identities LangGraph documents; `src/vaultspec_a2a/streaming/transformer.py`.
 
 ### Phase `P04` - Persistence
 

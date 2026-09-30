@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:fd15cc19775db0c442158cae048adbef2fb46139461ff65f01a51d2fcc38fc37'
+body_hash: 'sha256:b2da06bcb2e0ace1bde21dc2c1a9a5a927fe6e60ac92995488350cfab8d3810d'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -238,6 +238,22 @@ Open. The `trigger_split` migration moved `.vaultspec/hooks/example-audit-on-cre
 ### legacy-empty-checkpoint-fixtures | low | test fixtures seed checkpoints with LangGraph's deprecated helper
 
 Owned by P05.S32. 22 test files call `langgraph.checkpoint.base.empty_checkpoint`, which the library lists among "deprecated utilities used by past versions" and which writes checkpoint format 2 while the runtime writes format 4.
+
+### langgraph-sync-durability-crashes-without-a-checkpointer | medium | synchronous durability kills a run whose graph has no checkpointer
+
+Worked around in P03.S17; upstream defect in langgraph 1.2.12. `langgraph/pregel/main.py:2802-2804` says `durability` has no effect without a checkpointer, then `main.py:3461-3462` awaits `loop._put_checkpoint_fut`, which is only set when a checkpointer exists (`langgraph/pregel/_loop.py:1176-1202`), so the run dies with `AttributeError`. Ingest asks for sync durability only when the graph carries a real `BaseCheckpointSaver` (`src/vaultspec_a2a/streaming/ingest.py`, `_run_durability`). Recommendation: report upstream and drop the guard once fixed.
+
+### custom-stream-writes-cannot-name-their-node | low | a node's own stream write is attributed to the run rather than the node
+
+Open. LangGraph drops the writing node's segment from a custom write's namespace (`langgraph/pregel/main.py:3285-3296`), so `stream_mode="custom"` carries no node identity and a `get_stream_writer()` thought is attributed to the run's agent. No shipped node writes to the stream today; a fan-out whose branches both did would attribute both to the supervisor.
+
+### tool-callback-ordering-is-no-longer-stream-serialised | low | tool frames and stream frames are ordered by real time rather than one queue
+
+Recorded from P03.S18. Tool lifecycle now reaches the emitters from a callback handler concurrently with the stream consumer, so the order between a tool frame and a node-status frame follows real occurrence; each family stays internally ordered and the per-thread sequence stays monotonic. A consumer that assumed the old interleaving would not fail loudly.
+
+### aggregator-test-doubles-still-outnumber-real-graphs | low | seven hand-written graph stubs re-declare the streaming protocol
+
+Open. `src/vaultspec_a2a/streaming/tests/test_aggregator.py` implements the streaming protocol by hand seven times (plus two in `team/` and `worker/`) to force error branches; a shared real error-injecting graph fixture would carry them once and make a protocol change one edit rather than ten.
 
 ## Recommendations
 

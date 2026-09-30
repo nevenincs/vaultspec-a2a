@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CAPACITY_ACCEPTED",
+    "CAPACITY_DRAINING",
     "CAPACITY_FULL",
     "CAPACITY_THREAD_ACTIVE",
     "_EXECUTOR_CONDITION",
@@ -142,6 +143,10 @@ _SLOT_OWNING_ACTIONS = frozenset({ControlActionType.INGEST, ControlActionType.RE
 CAPACITY_ACCEPTED = "accepted"
 CAPACITY_THREAD_ACTIVE = "thread_active"
 CAPACITY_FULL = "capacity_full"
+# A worker that began draining takes no further run. It is its own refusal, not
+# a busy thread and not overload: neither retrying this worker nor waiting for
+# room will clear it, because the worker is on its way out.
+CAPACITY_DRAINING = "worker_draining"
 
 
 @dataclass(frozen=True, slots=True)

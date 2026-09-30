@@ -52,7 +52,7 @@ from ..utils import (
     verify_internal_bearer,
 )
 from ..utils.asyncio_compat import configure_asyncio_runtime
-from ._dispatch_contract import CAPACITY_THREAD_ACTIVE
+from ._dispatch_contract import CAPACITY_DRAINING, CAPACITY_THREAD_ACTIVE
 from .dispatch_ids import DispatchIdAdmission
 from .executor import Executor
 from .ipc import WorkerBridge
@@ -349,16 +349,25 @@ async def _reserve_dispatch_or_replay(
 def _capacity_refusal(reason: str) -> HTTPException:
     """Answer a refused reservation in the terms the refusal actually had.
 
-    The two refusals used to share a 429, which told the gateway that a worker
+    The refusals used to share a 429, which told the gateway that a worker
     already busy with THIS run was the same event as a worker with no room for
     ANY run. Only the second is backpressure; the first is a conflict about one
     run that retrying cannot clear, and counting it as overload opened the shared
     failure breaker against every other run's control traffic.
+
+    A worker that began draining is a third thing again: it is leaving, so it
+    will not have room later either, and answering 429 would invite the caller
+    to wait for capacity that is never coming back on this worker.
     """
     if reason == CAPACITY_THREAD_ACTIVE:
         return HTTPException(
             status_code=409,
             detail={"condition": FailureType.RUN_BUSY.value},
+        )
+    if reason == CAPACITY_DRAINING:
+        return HTTPException(
+            status_code=503,
+            detail="Worker is shutting down — it is taking no new run",
         )
     return HTTPException(
         status_code=429,

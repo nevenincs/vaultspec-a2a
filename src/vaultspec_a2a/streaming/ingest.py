@@ -431,6 +431,9 @@ class IngestManager:
         cancel_event = self._get_cancel_event(thread_id)
         _outcome = ThreadStatus.COMPLETED
         stall_timeout = _effective_stall_timeout(graph)
+        # Set only on the path that re-raises, so the closing work below knows
+        # not to await anything more on a run whose caller is unwinding.
+        task_cancelled = False
         with self._telemetry.start_span(
             "aggregator.ingest",
             thread_id=thread_id,
@@ -480,18 +483,38 @@ class IngestManager:
                         agent_id=agent_id,
                         services=services,
                     )
+            except asyncio.CancelledError:
+                # A cancelled run is not a failed run. The worker's own
+                # lifespan cancels whatever is still mid-turn when the drain
+                # budget runs out, and the drain contract says that run's open
+                # action is delivered again; classifying the cancellation as a
+                # provider failure instead persisted a FAILED terminal for a
+                # run nothing had failed, and logged a provider error for it.
+                # Swallowing it is also what let an outer timeout around
+                # ingest return a settled-looking outcome, so it is re-raised
+                # for whoever asked for the cancellation to observe.
+                task_cancelled = True
+                logger.info("Ingest cancelled for thread %s", thread_id)
+                span.set_attribute("cancelled", True)
+                span.set_attribute("cancelled.by", "task")
+                raise
             except BaseException as exc:
                 _outcome = await self._handle_ingest_failure(
                     (thread_id, agent_id), exc, stall_timeout, span
                 )
             finally:
                 self._clear_cancel_event(thread_id)
-                await self._buffering.flush_chunk_buffer(thread_id)
                 self._buffering.prune_tool_debounce(thread_id)
-                interrupt_emitted = await emit_interrupt_events(
-                    thread_id, agent_id, graph, config, self._emitters
-                )
-                _outcome = _finalized_outcome(_outcome, interrupt_emitted, span)
+                # Neither the buffer flush nor the state read can be awaited
+                # on the cancelled path: under a cancel scope every await
+                # raises at once, and a state read taken while the run is
+                # being torn down describes nothing the outcome may rest on.
+                if not task_cancelled:
+                    await self._buffering.flush_chunk_buffer(thread_id)
+                    interrupt_emitted = await emit_interrupt_events(
+                        thread_id, agent_id, graph, config, self._emitters
+                    )
+                    _outcome = _finalized_outcome(_outcome, interrupt_emitted, span)
                 self._telemetry.record_histogram(
                     "aggregator.ingest_duration_seconds",
                     time.monotonic() - start,

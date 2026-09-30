@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:bab6b30e226f190a9d409bb47116d225af8133ac209d4a7caa817de6807310e6'
+body_hash: 'sha256:975ff5fc656ab1365a89901aacf255eaba1e27fdeff007b20b302d1f2c5500a8'
 ---
 
 # `architecture-review` plan
@@ -85,7 +85,7 @@ Provider launchers, the Claude and Codex permission posture, native tool scope, 
 - [x] `P04.S24` - Fail closed when a permission callback names an option that was not offered; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 - [ ] `P04.S25` - Write refreshed Codex credentials back to their source home under a lock; `src/vaultspec_a2a/providers/_codex_config_home.py`.
 - [x] `P04.S26` - Use one Claude binary resolver for catalog discovery and execution and record the adapter and CLI identity each run used; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py`.
-- [ ] `P04.S27` - Render ACP prompts with roles, speaker names, and tool results through the renderer the Codex lane shares; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_codex_protocol.py`.
+- [x] `P04.S27` - Render ACP prompts with roles, speaker names, and tool results through the renderer the Codex lane shares; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_codex_protocol.py`.
 - [x] `P04.S28` - Retain a redacted ACP stderr tail, attach it to provider errors, and log provider session ids per turn; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [x] `P04.S29` - Pin the harness MCP launch interpreter to the project Python; `src/vaultspec_a2a/providers/_harness_mcp_registry.py`.
 

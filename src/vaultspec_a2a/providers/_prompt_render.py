@@ -13,6 +13,9 @@ What the rendering has to keep, because a model cannot recover it:
   history and their names are the only thing distinguishing them;
 - TOOL RESULTS, which are the evidence a later turn reasons from; dropping them
   leaves the model with its own tool call and no answer to it;
+- the BOUNDARIES, so a body cannot open a section of its own. A tool result or
+  another agent's output that contains a line reading as a role heading would
+  otherwise speak as the system to every later turn;
 - non-text content, named rather than dumped. A message's content can be a list
   of typed blocks, and rendering that list with ``str()`` puts a Python repr of
   the internal structure into the prompt - which is neither what the block says
@@ -21,6 +24,7 @@ What the rendering has to keep, because a model cannot recover it:
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from langchain_core.messages import (
@@ -45,6 +49,20 @@ __all__ = [
     "speaker_label",
 ]
 
+# A content line a model would read as one of the role headings below. Matched
+# loosely - any heading depth, any case, anything after the role word - because
+# a model does not read a heading's spelling as strictly as this layer writes it.
+_FORGED_ROLE_HEADING = re.compile(
+    r"^([ \t]{0,3})(#+[ \t]*(?:system|developer|user|human|assistant|ai|tool|"
+    r"function|chat)\b)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _defused(text: str) -> str:
+    """Escape every line of *text* that would read as a section heading."""
+    return _FORGED_ROLE_HEADING.sub(r"\1\\\2", text)
+
 
 def speaker_label(message: BaseMessage) -> str | None:
     """Return the heading for one message, or ``None`` when it needs no label.
@@ -67,7 +85,10 @@ def speaker_label(message: BaseMessage) -> str | None:
         role = "User"
     else:
         role = message.type.capitalize()
-    return f"{role} ({message.name})" if message.name else role
+    # A name is caller-chosen, so it is held to one line: a newline inside it
+    # would end the heading and let the rest of the name start another.
+    name = " ".join(message.name.split()) if message.name else ""
+    return f"{role} ({name})" if name else role
 
 
 def _rendered_content(message: BaseMessage) -> str:
@@ -79,14 +100,16 @@ def _rendered_content(message: BaseMessage) -> str:
     the fact that it was there is part of the history while its payload is not
     something to inline into a prompt.
     """
-    text = message.text
+    text = _defused(message.text)
     described = [
         f"[{block.get('type', 'content')}]"
         for block in message.content_blocks
         if block.get("type") != "text"
     ]
     # Text is passed through as written, never re-wrapped or trimmed: a persona
-    # and a tool's output are content this layer carries rather than edits. Only
+    # and a tool's output are content this layer carries rather than edits. The
+    # one exception is a line that would forge a section boundary, which is
+    # escaped rather than removed so the model still sees what was written. Only
     # the decision about whether a message SAYS anything looks past whitespace.
     parts = [*([text] if text.strip() else []), *described]
     return "\n".join(parts)

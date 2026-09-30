@@ -596,6 +596,10 @@ def extract_checkpoint_fields(
     channel_values = cast(
         "dict[str, Any]", _object_dict(checkpoint.get("channel_values", {}))
     )
+    # The parent the checkpoint records, which is not the same as a parent that
+    # still exists: a settled run's superseded history is pruned and this
+    # reference outlives it. Carried through as recorded, and the served field
+    # says so rather than this projection guessing at what is still stored.
     parent_checkpoint_id_raw = configurable_parent.get("checkpoint_id")
     checkpoint_source_raw = metadata.get("source")
     checkpoint_step_raw = metadata.get("step")

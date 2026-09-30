@@ -560,7 +560,14 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
             # checkpointer tables, so it is suppressed when the profile is armed.
             # The staged-generation migration entrypoint runs setup instead, and
             # ordinary armed boot has already validated the schema is present.
-            if not settings.desktop_profile_armed:
+            if settings.desktop_profile_armed:
+                # Not calling setup() does not prevent it: the saver runs it
+                # itself before its first read or write, so skipping the call
+                # here only deferred the same DDL to the first checkpoint.
+                # ``is_setup`` is how the saver records that it has nothing to
+                # create, and the validation that ran before this said so.
+                checkpointer.is_setup = True
+            else:
                 await checkpointer.setup()
             # WAL lets the gateway's status reads run concurrently with the worker's
             # checkpoint writes on the shared file, instead of blocking on a writer's

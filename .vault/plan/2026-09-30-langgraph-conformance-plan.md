@@ -16,7 +16,7 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 modified: '2026-09-30'
 body_schema: body-v2
-body_hash: 'sha256:c44b675916a04aa323c22e793f08fb0df054c3082c2dbc7b121312980b6920cf'
+body_hash: 'sha256:dd1e6212aeb416754a2a5a0c0977abdf13ac7256c0047aa841e7e9c4347a7b5d'
 ---
 
 # `langgraph-conformance` plan
@@ -94,7 +94,7 @@ No deprecated LangGraph-family API is called from the repository, and the locked
 - [x] `P05.S29` - Bump vaultspec-core to 0.3.2 and vaultspec-rag to 0.5.3 with no upper bound, and apply the framework's migrations and builtin upgrade; `pyproject.toml, uv.lock, .vaultspec/, prek.toml`.
 - [x] `P05.S30` - Launch the vaultspec-core and vaultspec-rag MCP servers as their new releases serve them: renamed core server, declared new core tools and their egress, rag read-only surface and root pinning; `src/vaultspec_a2a/providers/_harness_mcp_registry.py`.
 - [x] `P05.S31` - Relock langchain-core, langchain-openai and langsmith to their latest releases; `uv.lock, pyproject.toml`.
-- [ ] `P05.S32` - Seed test checkpoints through real graph runs instead of the deprecated empty_checkpoint helper; `src/vaultspec_a2a/**/tests/`.
+- [x] `P05.S32` - Seed test checkpoints through real graph runs instead of the deprecated empty_checkpoint helper; `src/vaultspec_a2a/**/tests/`.
 
 ### Phase `P06` - Design records
 

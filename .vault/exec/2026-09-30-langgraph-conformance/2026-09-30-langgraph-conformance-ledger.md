@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:9a034cccd6e2b4dcc7373346b64cb3dfc03a207a7fdca0a0044867339da23166'
+body_hash: 'sha256:56eeb3d331b68e0d5b8688b0b4fc5555a645a6de7346cd2e66e255fdf0552632'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -348,6 +348,33 @@ related:
 - `S27` `M` `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py`
 - `S27` `verify:` `pytest src/vaultspec_a2a/api src/vaultspec_a2a/control src/vaultspec_a2a/database with Postgres required` -> `pass`
 - `S27` `by:` `orchestrator`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_gateway_drain.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_internal.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_run_history_transcript_availability.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_team_status_descriptor.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_thread_deletion_saga.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_authoring_completion_check.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_terminal_sequence_capture.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_thread_deletion_saga.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_armed_checkpoint_setup.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_pool.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_reconciliation.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_reconciliation_epoch_reboot.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_repair_journal_retention.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S32` `M` `src/vaultspec_a2a/desktop/tests/test_migration.py`
+- `S32` `A` `src/vaultspec_a2a/tests/_checkpoint_seeding.py`
+- `S32` `verify:` `pytest api control database desktop with Postgres required after the merge` -> `pass`
+- `S32` `by:` `worker-a534b80e`
 
 ## Notes
 
@@ -377,3 +404,4 @@ related:
 - `S36` The required recursion limit measures `3*limit+1,` not the audit's estimate; the compile check applies only to teams with an exec or audit worker, since others never spend the budget. One budget test moved to the review-artifact gate because exec returns now clear validation errors.
 - `S42` Unreachable under the shipped gate table, so no behavioural test can fail before it without widening the supervisor API to inject a table; the order is now correct by construction and the existing graph suite passes.
 - `S27` Correction: the boot proof leaked the process-wide engine seat and failed when API tests ran first in the same process.
+- `S32` Seeds from a real graph run on a private InMemorySaver so whole-store scans and exact history counts see no seed rows; hand-set `channel_versions` now come from the target saver's `get_next_version.` The first attempt ran on the wrong base and was replayed.

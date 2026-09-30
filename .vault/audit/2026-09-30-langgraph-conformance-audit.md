@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:adc7f334d28cde6595571ec3183f3d107f0e9af1d8fedb0ae7487a55ad1ef3a4'
+body_hash: 'sha256:ad9cfdb17ec62482cf3d919df4430cdeaa929e3572156081e86b9b97671615fb'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -334,6 +334,14 @@ Owned by P07.S42; latent. `_evaluate_supervisor_response` returns the phase-gate
 ### retention-tests-duplicate-helpers | low | the merged retention guard tests copy a helper and a graph builder
 
 Owned by P07.S39. `src/vaultspec_a2a/tests/test_structural_duplication.py` fails on the P04 merge: `_history` exists in both `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py` and `test_checkpoint_retention_guards.py`, and `_delta_graph` and `_plain_graph` in the latter are one shape. The P04 validation ran the database suites but not the package-level structural tests, so the pushed head carries the failure until S39 lands.
+
+### boot-proof-leaked-the-engine-seat | low | the boot proof failed whenever an earlier test had seated the gateway engine
+
+Fixed in a P04.S27 correction. `test_boot_does_not_rewrite_legacy_checkpoint_rows` in `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py` disposed the engine boot seated but left the process-wide seat in `src/vaultspec_a2a/database/session.py` pointing at it, so `get_engine` refused it when the API suites ran first in one process. It now clears the seat before and after, as the redispatch tests do.
+
+### postgres-proofs-need-the-declared-prerequisite | info | the real-Postgres tests are deselected unless the run declares the prerequisite
+
+Recorded from P05.S32. Tests marked `requires_prerequisites("postgres")` run only when pytest is given `--require-prerequisite=postgres` (`src/vaultspec_a2a/conftest.py`); the `VAULTSPEC_A2A_TEST_POSTGRES_URL` variable alone satisfies the probe but not the declaration. The orchestrator's post-merge runs for P04 set the variable without the flag, so the pool and selector-bridge proofs were not exercised there; they pass with it after the S32 merge, and every later gate in this plan declares it.
 
 ## Recommendations
 

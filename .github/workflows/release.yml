@@ -33,12 +33,16 @@
 # cleanly, verifies cleanly, and fails only on a user's machine. All four
 # runners below are self-hosted fleet runners and native, including the
 # Linux/ARM64 leg.
+#
+# DISPATCH IS THE ONLY WAY IN. The release cut starts this lane with the tag it
+# has just proved and created. A tag-push or release-event trigger would start a
+# second copy of it for the same tag, and the two would race to attach the same
+# archive names to the same draft. The cut also owns the order: the draft exists
+# before this lane runs and is published by its last step, so a release that is
+# visible is one that carries everything it claims to.
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:

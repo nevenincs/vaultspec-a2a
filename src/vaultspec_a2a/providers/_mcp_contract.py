@@ -318,8 +318,12 @@ async def verify_declared_tool_contract(
     command is absent, the handshake fails or times out) is the same refusal:
     an unverifiable contract is an unmet one.
 
-    *readiness_tool*, when given, names one already-declared, side-effect-free
-    tool called on this same handshake whose FAILURE text is checked for a
+    *readiness_tool*, when given, names one side-effect-free tool the server
+    serves but a run is not permitted to call (it is outside the declared
+    ``tools``), called here by this probe and never by a run, and only when
+    ``tools/list`` shows it served. It reads the server's own readiness and
+    writes nothing, which is what keeps probing past the declared surface in
+    bounds. It runs on this same handshake, and its FAILURE text is checked for a
     known compatibility-verdict prefix (currently vaultspec-rag's own
     ``service_version_mismatch:`` / ``service_version_unreported:`` - see the
     module docstring) and refused if found. This exists for the one kind of

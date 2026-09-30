@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:c57c6fb275f9c167f7faf10d16e23a53e50a0bf1e0aa06bdf6cb6c12331f3432'
+body_hash: 'sha256:c9eecee38c289142a8622ddc0591d0c19a45a1f623d6fc46dc2e3e094a4b979d'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -442,6 +442,8 @@ related:
 - `S13` `by:` `orchestrator`
 - `S18` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/worker` -> `pass`
 - `S18` `by:` `orchestrator`
+- `S37` `verify:` `pytest src/vaultspec_a2a/providers/tests/test_mcp_contract.py` -> `pass`
+- `S37` `by:` `orchestrator`
 
 ## Notes
 

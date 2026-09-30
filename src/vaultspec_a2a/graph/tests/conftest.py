@@ -35,6 +35,7 @@ _IMPURE_CORE_FILES = frozenset(
         "test_persona_web_composition.py",
         "test_research_adr.py",
         "test_research_adr_clarification.py",
+        "test_research_permission_rung.py",
         "test_research_web_locators.py",
         # Real async engine and session maker.
         "test_task_queue.py",

@@ -17,6 +17,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from ...domain_config import domain_config
@@ -33,8 +34,8 @@ from ...thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
-from ...thread.errors import SupervisorRoutingError
-from ..compiler import compile_team_graph
+from ...thread.errors import ConfigError, SupervisorRoutingError
+from ..compiler import compile_team_graph, required_recursion_limit_for_finish_blocks
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
@@ -44,6 +45,9 @@ if TYPE_CHECKING:
 
 _PLAN_AUTHOR = "vaultspec-plan-author"
 _CODER = "vaultspec-coder"
+# The one shipped agent of the audit phase, so a team carrying it can have a
+# blocked FINISH rerouted rather than refused.
+_REVIEWER = "mock-reviewer"
 _ROUTING_PROMPT_MARK = "Respond EXACTLY with one of the following words"
 
 
@@ -89,17 +93,31 @@ class _SupervisorPrompts(AsyncCallbackHandler):
                 self.prompts.append(prompt)
 
 
-def _star_graph(supervisor_replies: list[str]) -> Any:
-    team = TeamConfig(
+def _star_team(
+    workers: tuple[str, ...], recursion_limit: int | None = None
+) -> TeamConfig:
+    graph = TeamGraphConfig(step_timeout_seconds=120)
+    if recursion_limit is not None:
+        graph = TeamGraphConfig(
+            step_timeout_seconds=120, recursion_limit=recursion_limit
+        )
+    return TeamConfig(
         id="reask-star",
         display_name="reask-star",
         topology=TopologyConfig(type=TopologyType.STAR),
-        graph=TeamGraphConfig(step_timeout_seconds=120),
-        workers=[WorkerRef(agent_id=_PLAN_AUTHOR), WorkerRef(agent_id=_CODER)],
+        graph=graph,
+        workers=[WorkerRef(agent_id=w) for w in workers],
     )
+
+
+def _star_graph(
+    supervisor_replies: list[str],
+    workers: tuple[str, ...] = (_PLAN_AUTHOR, _CODER),
+) -> Any:
+    team = _star_team(workers)
     return compile_team_graph(
         team_config=team,
-        agent_configs={a: load_agent_config(a) for a in (_PLAN_AUTHOR, _CODER)},
+        agent_configs={a: load_agent_config(a) for a in workers},
         provider_factory=_ScriptedFactory(supervisor_replies),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
@@ -268,31 +286,91 @@ async def test_a_supervisor_that_never_routes_admissibly_fails_the_run() -> None
 async def test_a_blocked_finish_stops_rerouting_once_its_budget_is_spent() -> None:
     """A completion gate the reroute never clears fails the run, and says so.
 
-    Nothing in a star run clears ``validation_errors``, so the gate refuses
-    FINISH again on every pass. The reroute used to reset the re-ask budget,
-    leaving the loop bounded by nothing but the recursion limit: the run ended
-    anonymously after a worker turn per pass.
+    The review-artifact gate is the one no worker return can clear: it reads
+    the vault index, and the reviewer this run reroutes to produces no audit
+    document, so the gate refuses FINISH again on every pass. The reroute used
+    to reset the re-ask budget, leaving the loop bounded by nothing but the
+    recursion limit: the run ended anonymously after a worker turn per pass.
     """
-    graph = _star_graph(["FINISH"])
+    graph = _star_graph(["FINISH"], workers=(_PLAN_AUTHOR, _CODER, _REVIEWER))
     prompts = _SupervisorPrompts()
     limit = domain_config.supervisor_finish_block_limit
-    # The plan is already approved, so the reroute's own gates pass and this
-    # isolates the blocked-FINISH budget from the approval interrupt.
     graph_input = _run_input(
         "finish-blocked",
-        {"adr": ["adr.md"], "plan": ["plan.md"]},
-        ["frontmatter is malformed"],
+        {"adr": ["adr.md"], "plan": ["plan.md"], "exec": ["exec/s01.md"]},
     )
-    graph_input["approval_status"] = "approved"
 
     with pytest.raises(SupervisorRoutingError) as failure:
         await _visits(graph, "finish-blocked", graph_input, prompts)
 
     assert failure.value.attempts == limit + 1
-    assert "validation error(s)" in failure.value.reason
+    assert "no review artifact" in failure.value.reason
     # One supervisor pass per reroute the budget allowed, plus the one that
     # spent it - and a worker turn for each reroute, not for the last pass.
     assert len(prompts.prompts) == limit + 1
+
+
+@pytest.mark.asyncio
+async def test_the_exec_worker_returning_clears_the_errors_that_blocked_finish() -> (
+    None
+):
+    """A blocked FINISH the owner resolves lets the run finish, not fail.
+
+    Outside the document topology nothing ever wrote the channel's empty
+    clear signal, so a run that arrived carrying one validation error could
+    only ever end in a routing failure: the gate refused FINISH, the reroute
+    ran the exec worker, and the next pass read the same error again however
+    many times that worker was given the job. The worker of the phase the
+    gate reroutes to is the owner of those errors, and its finished turn is
+    what retires them.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+    # The plan is already approved, so the reroute's own gates pass and this
+    # isolates the blocked-FINISH path from the approval interrupt.
+    graph_input = _run_input(
+        "errors-cleared",
+        {"adr": ["adr.md"], "plan": ["plan.md"]},
+        ["frontmatter is malformed"],
+    )
+    graph_input["approval_status"] = "approved"
+
+    visited = await _visits(graph, "errors-cleared", graph_input, prompts)
+
+    # Blocked once, rerouted to the coder, and finished on the next pass.
+    assert visited.count(_CODER) == 1
+    assert len(prompts.prompts) == 2
+    settled = await graph.aget_state({"configurable": {"thread_id": "errors-cleared"}})
+    assert settled.values["validation_errors"] == []
+    assert settled.next == ()
+
+
+@pytest.mark.asyncio
+async def test_a_worker_of_another_phase_leaves_the_errors_for_their_owner() -> None:
+    """Only the phase the gate reroutes to retires its errors.
+
+    Clearing them from any turn that happened to see them would unblock
+    FINISH with the work still outstanding - the plan author cannot resolve an
+    execution error, and its turn must not report that it did.
+    """
+    graph = _star_graph([_PLAN_AUTHOR, "FINISH"])
+    prompts = _SupervisorPrompts()
+    thread: Any = {"configurable": {"thread_id": "errors-kept"}, "callbacks": [prompts]}
+    graph_input = _run_input(
+        "errors-kept",
+        {"adr": ["adr.md"], "plan": ["plan.md"]},
+        ["frontmatter is malformed"],
+    )
+    graph_input["approval_status"] = "approved"
+
+    # Read the state the plan author's own turn left, before the supervisor's
+    # next FINISH reroutes to the worker that does own these errors.
+    async for update in graph.astream(graph_input, thread, stream_mode="updates"):
+        if _PLAN_AUTHOR in cast("dict[str, Any]", update):
+            break
+
+    after_plan_author = await graph.aget_state(thread)
+    assert after_plan_author.values["validation_errors"] == ["frontmatter is malformed"]
 
 
 @pytest.mark.asyncio
@@ -324,6 +402,37 @@ async def test_a_blocked_finish_still_meets_the_plan_approval_gate() -> None:
     assert parked.next == ("plan_approval",)
     # The exec worker the gate rerouted to has not run: the human decides first.
     assert _CODER not in visited
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_finish_keeps_its_reason_through_the_approval_gate() -> None:
+    """The refusal reaches state on the pass it was decided, not one later.
+
+    The approval branch used to be selected on the routing note being unset,
+    so a blocked FINISH that also needed approval had to drop the gate's
+    reason to park for its human at all - and the run carried no record of
+    why FINISH was refused while the human read the request.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+
+    await _visits(
+        graph,
+        "blocked-reason-kept",
+        _run_input(
+            "blocked-reason-kept",
+            {"adr": ["adr.md"], "plan": ["plan.md"]},
+            ["frontmatter is malformed"],
+        ),
+        prompts,
+    )
+
+    parked = await graph.aget_state(
+        {"configurable": {"thread_id": "blocked-reason-kept"}}
+    )
+    assert parked.next == ("plan_approval",)
+    assert parked.values["approval_status"] == "pending"
+    assert "validation error(s)" in (parked.values["routing_error"] or "")
 
 
 @pytest.mark.asyncio
@@ -431,3 +540,114 @@ async def test_a_finish_gate_no_worker_can_satisfy_is_refused_not_rerouted() -> 
         m for m in parked.values["messages"] if getattr(m, "name", None) is not None
     ]
     assert worker_messages == []
+
+
+@pytest.mark.asyncio
+async def test_the_finish_block_budget_reports_at_the_limit_the_compiler_demands() -> (
+    None
+):
+    """The compiler's superstep arithmetic is the run's, measured on the run.
+
+    The conversion factor between the finish-block budget and a recursion
+    limit is a property of the compiled star graph, not of the number written
+    beside it, so it is pinned by driving one to exactly the limit the
+    compiler demands and watching the typed error arrive within it.
+    """
+    graph = _star_graph(["FINISH"], workers=(_PLAN_AUTHOR, _CODER, _REVIEWER))
+    prompts = _SupervisorPrompts()
+    thread = "budget-at-limit"
+    config = {
+        "configurable": {"thread_id": thread},
+        "callbacks": [prompts],
+        "recursion_limit": required_recursion_limit_for_finish_blocks(),
+    }
+    graph_input = _run_input(
+        thread, {"adr": ["adr.md"], "plan": ["plan.md"], "exec": ["exec/s01.md"]}
+    )
+
+    with pytest.raises(SupervisorRoutingError) as failure:
+        async for _ in graph.astream(graph_input, config, stream_mode="updates"):
+            pass
+
+    assert failure.value.attempts == domain_config.supervisor_finish_block_limit + 1
+
+
+@pytest.mark.asyncio
+async def test_one_superstep_short_the_run_ends_anonymously_instead() -> None:
+    """What the compile-time refusal exists to prevent, shown happening.
+
+    A recursion limit one superstep below the arithmetic stops the run before
+    the supervisor turn that would have named the gate, so the operator gets
+    LangGraph's own limit error and no reason at all.
+    """
+    graph = _star_graph(["FINISH"], workers=(_PLAN_AUTHOR, _CODER, _REVIEWER))
+    prompts = _SupervisorPrompts()
+    thread = "budget-one-short"
+    config = {
+        "configurable": {"thread_id": thread},
+        "callbacks": [prompts],
+        "recursion_limit": required_recursion_limit_for_finish_blocks() - 1,
+    }
+    graph_input = _run_input(
+        thread, {"adr": ["adr.md"], "plan": ["plan.md"], "exec": ["exec/s01.md"]}
+    )
+
+    with pytest.raises(GraphRecursionError):
+        async for _ in graph.astream(graph_input, config, stream_mode="updates"):
+            pass
+
+
+def test_a_star_preset_too_short_for_its_finish_budget_is_refused() -> None:
+    """A preset that would produce that anonymous ending never compiles."""
+    workers = (_PLAN_AUTHOR, _CODER)
+    team = _star_team(
+        workers, recursion_limit=required_recursion_limit_for_finish_blocks() - 1
+    )
+
+    with pytest.raises(ConfigError) as refusal:
+        compile_team_graph(
+            team_config=team,
+            agent_configs={a: load_agent_config(a) for a in workers},
+            provider_factory=_ScriptedFactory(["FINISH"]),
+            model_assignment=deterministic_model_assignment(team),
+            checkpointer=InMemorySaver(),
+        )
+
+    assert "recursion_limit" in str(refusal.value)
+    assert str(required_recursion_limit_for_finish_blocks()) in str(refusal.value)
+
+
+def test_a_star_preset_at_the_required_limit_compiles() -> None:
+    """The refusal is a floor, not a preference for a larger number."""
+    workers = (_PLAN_AUTHOR, _CODER)
+    team = _star_team(
+        workers, recursion_limit=required_recursion_limit_for_finish_blocks()
+    )
+
+    assert compile_team_graph(
+        team_config=team,
+        agent_configs={a: load_agent_config(a) for a in workers},
+        provider_factory=_ScriptedFactory(["FINISH"]),
+        model_assignment=deterministic_model_assignment(team),
+        checkpointer=InMemorySaver(),
+    )
+
+
+def test_a_star_team_that_cannot_spend_the_budget_is_not_held_to_it() -> None:
+    """A team with no worker the gate could reroute to never spends it.
+
+    Both completion gates reroute to the exec or the audit phase, and a team
+    carrying neither has its blocked FINISH refused rather than rerouted -
+    the re-ask budget bounds that, at a supervisor turn apiece. Refusing such
+    a preset over a limit no run of it reaches would reject working config.
+    """
+    workers = (_PLAN_AUTHOR,)
+    team = _star_team(workers, recursion_limit=1)
+
+    assert compile_team_graph(
+        team_config=team,
+        agent_configs={a: load_agent_config(a) for a in workers},
+        provider_factory=_ScriptedFactory(["FINISH"]),
+        model_assignment=deterministic_model_assignment(team),
+        checkpointer=InMemorySaver(),
+    )

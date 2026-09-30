@@ -56,7 +56,11 @@ from .nodes.phase_gate import (
     create_phase_submit_node,
     review_requests_revision,
 )
-from .nodes.worker import create_worker_node
+from .nodes.worker import (
+    _recorded_permission_answers,
+    _resolve_effective_worker_model,
+    create_worker_node,
+)
 from .web_locators import extract_web_locators
 
 __all__ = [
@@ -233,6 +237,14 @@ def _make_research_producer(
     that never routed through ``_build_worker_messages``, so a
     conventions-blind researcher would author findings the synthesist then
     folds into a non-conformant document.
+
+    A supervised branch gets the human permission rung a supervised worker
+    gets. Without it the provider decides the branch's tool calls with no
+    human at all, which is not the autonomous posture a preset opts into but
+    the absence of any posture. The branch is a fan-out task, so its state is
+    the payload its dispatch sent and never carries an answer recorded after
+    that; the callback is told so, and resolves the branch's earlier answers
+    from the task's own resume values, which do reach a replayed branch.
     """
 
     async def producer(
@@ -273,7 +285,12 @@ def _make_research_producer(
             )
         )
         messages.extend(state.get("messages", []))
-        effective_model = model
+        effective_model = _resolve_effective_worker_model(
+            model=model,
+            autonomous=autonomous,
+            answers=_recorded_permission_answers(state),
+            answers_reach_the_node=False,
+        )
         if harness_mcp_servers:
             from ..providers._acp_mcp import (
                 compose_harness_mcp_servers,
@@ -304,7 +321,7 @@ def _make_research_producer(
             # a root - a default here would be that same inheritance, spelled
             # invisibly.
             effective_model = compose_harness_mcp_servers(
-                model,
+                effective_model,
                 harness_mcp_servers,
                 allowed_tools=harness_allowed,
                 project_root=(

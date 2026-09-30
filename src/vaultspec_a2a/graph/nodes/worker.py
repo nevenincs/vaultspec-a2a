@@ -37,6 +37,7 @@ from ...thread.models import TokenUsageEntry
 from ...thread.snapshots import stamp_message_created_at
 from ...thread.state import read_untrusted_state_value
 from ..acp_options import option_id_of, valid_option_ids
+from ..enums import PipelinePhase
 from ..run_context import RunContext, run_thread_id
 from ..tools.task_queue import create_mark_task_complete_tool
 from ._config_contract import accepting_runnable_config
@@ -274,17 +275,26 @@ def _resolve_effective_worker_model(
     model: BaseChatModel,
     autonomous: bool,
     answers: Mapping[str, str],
+    answers_reach_the_node: bool = True,
 ) -> BaseChatModel:
     """Return the invocation model after supervised permission wiring logic.
 
     *answers* are the permission requests this run has already had answered.
     They are bound onto the callback because the provider calls it from inside
     the model turn, where graph state is out of reach.
+
+    *answers_reach_the_node* is False for a node whose input is fixed when it is
+    dispatched rather than read from the run's channels; see
+    :func:`_permission_callback_for`.
     """
     if autonomous or not hasattr(model, "permission_callback"):
         return model
     return model.model_copy(
-        update={"permission_callback": _permission_callback_for(answers)}
+        update={
+            "permission_callback": _permission_callback_for(
+                answers, answers_reach_the_node=answers_reach_the_node
+            )
+        }
     )
 
 
@@ -703,6 +713,24 @@ async def _record_turn_usage(
         )
 
 
+def _clears_validation_errors(state: TeamState, phase: str | None) -> bool:
+    """Whether this worker's return retires the run's validation errors.
+
+    The completion gate blocks FINISH while the channel is non-empty and sends
+    the run to the worker of the EXEC phase to resolve it, so that worker owns
+    those errors and its finished turn is what retires them. Outside the
+    document topology nothing else ever wrote the empty list, so a run that
+    acquired one error could only ever end in a routing failure however many
+    times the owner ran. The parallel is the document gate, which drops a
+    phase's revision notes once the phase it demanded them for advances.
+
+    A worker of any other phase leaves them alone: the anchoring context shows
+    them to whoever runs, and clearing them from a turn that was never asked
+    to fix them would unblock FINISH with the work still outstanding.
+    """
+    return phase == PipelinePhase.EXEC.value and bool(state.get("validation_errors"))
+
+
 def _finalize_worker_response(
     *,
     response: BaseMessage,
@@ -710,6 +738,7 @@ def _finalize_worker_response(
     state_updates: dict[str, Any],
     approval_status: object = None,
     usage: TokenUsageEntry | None = None,
+    clear_validation_errors: bool = False,
 ) -> dict[str, Any]:
     """Attach worker attribution and merge the queue tool's Command update.
 
@@ -742,6 +771,9 @@ def _finalize_worker_response(
         update["approval_request_id"] = None
     if usage is not None:
         update["token_usage"] = {worker_name: usage.to_dict()}
+    if clear_validation_errors:
+        # The empty list is this channel's own clear signal.
+        update["validation_errors"] = []
     return update
 
 
@@ -836,7 +868,9 @@ def _answered_option(
     return chosen
 
 
-def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
+def _permission_callback_for(
+    answers: Mapping[str, str], *, answers_reach_the_node: bool = True
+) -> PermissionCallback:
     """Bind one worker turn's recorded permission answers to its callback.
 
     The callback is handed to the provider, which calls it from inside the
@@ -845,7 +879,23 @@ def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
     replays in full and may reach its tool calls in a different order, and an
     answer found by the request it was given for reaches the call the human
     was shown whatever that order turns out to be.
+
+    *answers_reach_the_node* is False for a node whose input is fixed when it
+    is dispatched rather than read from the run's channels - a fan-out branch,
+    whose input is the payload its dispatch sent and which LangGraph replays
+    unchanged however far the run's channels have moved since. Such a node
+    sees an empty *answers* on every replay no matter how many answers the run
+    has recorded, so turning an unusable stored value away would strand it:
+    the value stays at its position in the task's resume values and is handed
+    to the same call on every later replay, and no channel exists to settle
+    the request instead. The callback reads on past it rather than turning it
+    away, keyed by the request each stored value names.
     """
+    # Answers this execution read out of the task's resume values, for a node
+    # whose input cannot carry them. Keyed by the request each names, so an
+    # answer met while resolving one call still reaches the call it was
+    # actually given for instead of being spent on the one that found it.
+    learned: dict[str, str] = {}
 
     async def permission_callback(
         tool_name: str,
@@ -854,16 +904,21 @@ def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
     ) -> str:
         """Return this call's approved option, or suspend the run for one.
 
-        ``interrupt()`` is reached at most once per node execution: every
-        request this turn has already had answered is resolved from the bound
-        answers without asking, and the first one that has not suspends the
-        run. A value that is not this request's answer never becomes one -
-        the run parks again on the call actually being made, so an approval
-        can never land on a call nobody saw.
+        A value that is not this request's answer never becomes one - the run
+        parks again on the call actually being made, so an approval can never
+        land on a call nobody saw.
+
+        Where the node's input carries the run's answers, ``interrupt()`` is
+        reached at most once per execution: every request already answered is
+        resolved from the bound answers without asking, and the first one that
+        has not suspends the run. Where it cannot, one extra read happens per
+        unusable stored value, and the suspension once they run out is the
+        same "ask again for this call" outcome - reached after the values the
+        branch was already handed have been accounted for rather than before.
         """
         request_id = _permission_request_id(tool_name, tool_input)
         offered = _offered_options(options)
-        already = _answered_option(answers, request_id, offered)
+        already = _answered_option({**answers, **learned}, request_id, offered)
         if already is not None:
             return already
 
@@ -874,34 +929,42 @@ def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
             "tool_input": tool_input,
             "options": offered,
         }
-        answered = answered_permission_request(interrupt(payload))
-        if answered is None:
-            # Including a bare option id: an answer that names no request
-            # cannot be shown to belong to this call, and applying it is how
-            # an approval given for one call reaches another.
-            _logger.warning(
-                "Permission answer for the %r call names no request; asking again",
-                tool_name,
-            )
-            _park_on(payload)
-        answered_request, option_id = answered
-        if answered_request != request_id:
-            _logger.warning(
-                "Permission answer names request %r, not the %r call now being "
-                "made; asking again",
-                answered_request,
-                tool_name,
-            )
-            _park_on(payload)
-        if option_id not in valid_option_ids(offered):
-            _logger.warning(
-                "Permission answer for the %r call chose option %r, which it "
-                "does not offer; asking again",
-                tool_name,
-                option_id,
-            )
-            _park_on(payload)
-        return option_id
+        while True:
+            answered = answered_permission_request(interrupt(payload))
+            if answered is None:
+                # Including a bare option id: an answer that names no request
+                # cannot be shown to belong to this call, and applying it is
+                # how an approval given for one call reaches another.
+                _logger.warning(
+                    "Permission answer for the %r call names no request; asking again",
+                    tool_name,
+                )
+                if answers_reach_the_node:
+                    _park_on(payload)
+                continue
+            answered_request, option_id = answered
+            if answered_request != request_id:
+                _logger.warning(
+                    "Permission answer names request %r, not the %r call now being "
+                    "made; asking again",
+                    answered_request,
+                    tool_name,
+                )
+                if answers_reach_the_node:
+                    _park_on(payload)
+                learned[answered_request] = option_id
+                continue
+            if option_id not in valid_option_ids(offered):
+                _logger.warning(
+                    "Permission answer for the %r call chose option %r, which it "
+                    "does not offer; asking again",
+                    tool_name,
+                    option_id,
+                )
+                if answers_reach_the_node:
+                    _park_on(payload)
+                continue
+            return option_id
 
     return permission_callback
 
@@ -998,6 +1061,7 @@ class _WorkerNodeOptions(TypedDict, total=False):
     task_queue_port: TaskQueuePort | None
     authoring_binding_provider: AuthoringBindingProvider | None
     role: str | None
+    phase: str | None
     harness_mcp_servers: list[str] | None
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
@@ -1012,6 +1076,7 @@ class _WorkerNodeSettings(TypedDict):
     task_queue_port: TaskQueuePort | None
     authoring_binding_provider: AuthoringBindingProvider | None
     role: str | None
+    phase: str | None
     harness_mcp_servers: list[str] | None
     feedback_reader: FeedbackContextReader | None
     cost_port: CostPort | None
@@ -1032,6 +1097,7 @@ def _bind_worker_node_settings(
         "task_queue_port": None,
         "authoring_binding_provider": None,
         "role": None,
+        "phase": None,
         "harness_mcp_servers": None,
         "feedback_reader": None,
         "cost_port": None,
@@ -1082,6 +1148,11 @@ def create_worker_node(
                            sees the propose/read tools and no vault-write path. The
                            binding is built per invoke (never closed over) so the
                            shared compiled graph carries no run-scoped tokens.
+        phase:             Optional pipeline phase this worker's role belongs to,
+                           as the compiler maps it. The worker of the EXEC phase
+                           owns the run's validation errors, so its finished turn
+                           retires them; a worker of any other phase, or one whose
+                           role maps to no phase, leaves them for their owner.
         harness_mcp_servers: Declared team-harness MCP server names composed into
                            the ACP session (ADD-only, unioned with any authoring
                            servers) so the spawned CLI's session/new advertises
@@ -1243,6 +1314,7 @@ def create_worker_node(
             state_updates=state_updates,
             approval_status=state.get("approval_status"),
             usage=usage,
+            clear_validation_errors=_clears_validation_errors(state, settings["phase"]),
         )
 
     return accepting_runnable_config(worker_node)

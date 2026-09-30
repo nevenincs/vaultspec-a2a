@@ -15,6 +15,7 @@ from typing import Any
 from langgraph._internal._constants import CONFIG_KEY_RUNTIME
 from langgraph.errors import GraphDrained, NodeTimeoutError
 from langgraph.runtime import RunControl, Runtime
+from langgraph.store.base import BaseStore
 from langgraph.types import Command
 
 from ..domain_config import domain_config
@@ -165,7 +166,7 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
 
 
 def _config_carrying_control(
-    config: dict[str, Any], control: object | None
+    config: dict[str, Any], control: object | None, *, store: object | None = None
 ) -> dict[str, Any]:
     """Seat *control* as the run's parent runtime so a drain reaches the loop.
 
@@ -176,11 +177,17 @@ def _config_carrying_control(
     passed as a keyword, so a release that forwards it needs no change here.
     The import of the key is private and deliberately so: a rename then fails at
     import rather than silently leaving every drain request unheard.
+
+    A seated runtime also replaces the graph's own ``store`` for the run, so the
+    graph's *store* is seated with it; leaving it out would drop a store the
+    graph was compiled with, silently.
     """
     if not isinstance(control, RunControl):
         return config
     configurable = dict(config.get("configurable") or {})
-    configurable[CONFIG_KEY_RUNTIME] = Runtime(control=control)
+    configurable[CONFIG_KEY_RUNTIME] = Runtime(
+        control=control, store=store if isinstance(store, BaseStore) else None
+    )
     return {**config, "configurable": configurable}
 
 
@@ -437,7 +444,9 @@ class IngestManager:
                 # cancellation never depends on the graph yielding another frame.
                 event_stream = graph.astream_events(
                     graph_input,
-                    _config_carrying_control(config, request.control),
+                    _config_carrying_control(
+                        config, request.control, store=getattr(graph, "store", None)
+                    ),
                     version="v2",
                     context=request.context,
                     control=request.control,

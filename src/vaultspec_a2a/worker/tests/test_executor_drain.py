@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.config import get_store
+from langgraph.store.memory import InMemoryStore
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...providers.team_selection import model_assignment_digest
@@ -32,6 +34,9 @@ async def test_shutdown_drain_stops_the_run_between_nodes_without_settling_it() 
 
     async def first(state: Any) -> dict[str, Any]:
         del state
+        # The drain is seated as the run's runtime, which is also where a node
+        # finds its store; the graph's own store must still be the one it gets.
+        get_store().put(("drain",), "first", {"ran": True})
         first_started.set()
         await release_first.wait()
         return {"messages": [AIMessage(content="first")]}
@@ -53,7 +58,10 @@ async def test_shutdown_drain_stops_the_run_between_nodes_without_settling_it() 
             builder.add_edge("__start__", "first")
             builder.add_edge("first", "second")
             builder.add_edge("second", "__end__")
-            graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+            store = InMemoryStore()
+            graph: RegisteredCompiledGraph = builder.compile(
+                checkpointer=checkpointer, store=store
+            )
             definition = request.require_graph_definition()
             executor.register_compiled_graph(
                 request.thread_id,
@@ -78,6 +86,7 @@ async def test_shutdown_drain_stops_the_run_between_nodes_without_settling_it() 
                 {"configurable": {"thread_id": request.thread_id}}
             )
             assert snapshot.next == ("second",)
+            assert store.get(("drain",), "first") is not None
             terminals = [
                 item["payload"]
                 for item in relayed

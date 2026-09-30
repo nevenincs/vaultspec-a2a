@@ -380,6 +380,7 @@ class IngestManager:
         self._emitters = emitters
         self._buffering = buffering
         self._telemetry = telemetry
+        self._projection = EventProjectionServices(emitters, buffering, telemetry)
 
         # Per-thread cancellation events for ingest loops.
         self._cancel_events: dict[str, asyncio.Event] = {}
@@ -405,6 +406,22 @@ class IngestManager:
     # ------------------------------------------------------------------
     # Thread cancellation
     # ------------------------------------------------------------------
+
+    def run_lifecycle_callbacks(
+        self, thread_id: str, agent_id: str
+    ) -> RunLifecycleCallbacks:
+        """The tool and model-completion handler a run seats in its config."""
+        return RunLifecycleCallbacks(
+            thread_id, agent_id, self._emitters, self._buffering
+        )
+
+    async def project_frame(
+        self, frame: StreamFrame, *, thread_id: str, agent_id: str
+    ) -> None:
+        """Project one graph stream frame onto the run's event channels."""
+        await process_stream_frame(
+            frame, thread_id=thread_id, agent_id=agent_id, services=self._projection
+        )
 
     def cancel_thread(self, thread_id: str) -> None:
         """Persist cancellation so a concurrently starting ingest observes it."""
@@ -532,10 +549,7 @@ class IngestManager:
                 event_stream = graph.astream(
                     graph_input,
                     _config_with_run_callbacks(
-                        config,
-                        RunLifecycleCallbacks(
-                            thread_id, agent_id, self._emitters, self._buffering
-                        ),
+                        config, self.run_lifecycle_callbacks(thread_id, agent_id)
                     ),
                     stream_mode=list(STREAM_MODES),
                     subgraphs=True,
@@ -543,9 +557,6 @@ class IngestManager:
                     control=request.control,
                     durability=_run_durability(graph),
                 ).__aiter__()
-                services = EventProjectionServices(
-                    self._emitters, self._buffering, self._telemetry
-                )
                 while True:
                     raw_event, cancelled, exhausted = await self._next_ingest_event(
                         event_stream, cancel_event, stall_timeout
@@ -572,11 +583,8 @@ class IngestManager:
                         assert on_graph_started is not None
                         await on_graph_started()
                         on_graph_started = None
-                    await process_stream_frame(
-                        frame,
-                        thread_id=thread_id,
-                        agent_id=agent_id,
-                        services=services,
+                    await self.project_frame(
+                        frame, thread_id=thread_id, agent_id=agent_id
                     )
             except asyncio.CancelledError:
                 # A cancelled run is not a failed run. The worker's own

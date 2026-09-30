@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:af950e0fc0e1f13440ba10b8a8cfff91a917808cdb96d2b804c9d58e3153f113'
+body_hash: 'sha256:c57c6fb275f9c167f7faf10d16e23a53e50a0bf1e0aa06bdf6cb6c12331f3432'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -440,6 +440,8 @@ related:
 - `S34` `by:` `orchestrator`
 - `S13` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
 - `S13` `by:` `orchestrator`
+- `S18` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/worker` -> `pass`
+- `S18` `by:` `orchestrator`
 
 ## Notes
 
@@ -481,3 +483,4 @@ related:
 - `S02` Correction: the proofs used the system temp directory, which the storage-anchor gate refuses; surfaced by just ci.
 - `S34` Reopened by the plan-close review: the pending-write fold was unreachable because the worker never emitted a receipt for a resume that only asks again.
 - `S13` Correction from the plan-close review: the no-proposal fail-closed branch was unreachable through the resume preflight.
+- `S18` Correction from the plan-close review: the aggregator's projection seams had no production caller.

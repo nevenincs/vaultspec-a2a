@@ -395,28 +395,19 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         agent_id: str,
     ) -> None:
         """Project one ``(namespace, mode, payload)`` graph stream frame."""
-        from .transformer import (
-            EventProjectionServices,
-            StreamFrame,
-            process_stream_frame,
-        )
+        from .transformer import StreamFrame
 
-        await process_stream_frame(
+        await self._ingest.project_frame(
             StreamFrame(namespace=namespace, mode=mode, payload=payload),
             thread_id=thread_id,
             agent_id=agent_id,
-            services=EventProjectionServices(
-                self._emitters, self._buffering, self._telemetry
-            ),
         )
 
     def run_lifecycle_callbacks(
         self, thread_id: str, agent_id: str
     ) -> RunLifecycleCallbacks:
         """The tool and model-completion handler a run seats in its config."""
-        return RunLifecycleCallbacks(
-            thread_id, agent_id, self._emitters, self._buffering
-        )
+        return self._ingest.run_lifecycle_callbacks(thread_id, agent_id)
 
     # -- Ingest (delegates to ingest manager) ---------------------------
 

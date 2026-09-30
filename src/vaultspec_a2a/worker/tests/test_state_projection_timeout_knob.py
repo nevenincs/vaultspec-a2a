@@ -63,7 +63,14 @@ _PROBE = textwrap.dedent(
         \"\"\"
 
         async def astream_events(
-            self, graph_input, config, *, version, context=None, control=None
+            self,
+            graph_input,
+            config,
+            *,
+            version,
+            context=None,
+            control=None,
+            durability=None,
         ):
             return
             yield  # pragma: no cover -- makes this an async generator

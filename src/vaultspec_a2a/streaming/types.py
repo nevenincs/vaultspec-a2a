@@ -51,6 +51,7 @@ class StreamableGraph(Protocol):
         version: str,
         context: object | None = None,
         control: object | None = None,
+        durability: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Yield raw LangGraph event dicts under Runtime *context* and *control*."""
         ...

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from langgraph._internal._constants import CONFIG_KEY_RUNTIME
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphDrained, NodeTimeoutError
 from langgraph.runtime import RunControl, Runtime
 from langgraph.store.base import BaseStore
@@ -43,6 +44,16 @@ __all__ = ["INGEST_DRAINED", "IngestManager", "summarize_ingest_exception"]
 #: asked it to drain. Not terminal: the checkpoint is resumable and the run's
 #: action stays open for recovery to deliver again.
 INGEST_DRAINED = "drained"
+
+#: Persist each superstep before the next one starts, rather than while it
+#: runs. Recovery here is checkpoint-first: a redelivered action is judged
+#: against the last committed checkpoint, and both the dispatch pre-flight and
+#: the drain contract read that checkpoint as the record of what the run
+#: already did. LangGraph's default, ``"async"``, persists a superstep while
+#: the next one executes and so may lose the most recent one to a crash -
+#: which would have this service re-run work its checkpoint never recorded,
+#: or settle a run on a checkpoint that is one superstep behind the truth.
+_RUN_DURABILITY = "sync"
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +174,27 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
     ):
         return float(node_step_timeout) + _STEP_TIMEOUT_STALL_MARGIN_SECONDS
     return global_default
+
+
+def _run_durability(graph: StreamableGraph) -> str | None:
+    """Ask for synchronous checkpoints only on a run that keeps any.
+
+    LangGraph documents ``durability`` as having no effect without a
+    checkpointer and warns when one is passed anyway, but 1.2's asynchronous
+    stream then waits on a checkpoint future a run without a checkpointer
+    never creates, so the run dies with an ``AttributeError`` instead of
+    executing. A graph compiled without a checkpointer is therefore left on
+    the library default, which is what the documented semantics say it would
+    have got in any case.
+
+    ``checkpointer`` is absent from the streamable-graph protocol - a graph
+    need not carry one - so it is read defensively, and only a real saver
+    counts: the attribute also takes ``False`` (checkpointing off) and ``True``
+    (a subgraph inheriting its parent's), neither of which is a saver this run
+    would be writing through.
+    """
+    checkpointer = getattr(graph, "checkpointer", None)
+    return _RUN_DURABILITY if isinstance(checkpointer, BaseCheckpointSaver) else None
 
 
 def _config_carrying_control(
@@ -453,6 +485,7 @@ class IngestManager:
                     version="v2",
                     context=request.context,
                     control=request.control,
+                    durability=_run_durability(graph),
                 ).__aiter__()
                 services = EventProjectionServices(
                     self._emitters, self._buffering, self._telemetry

@@ -1579,6 +1579,7 @@ class _SilentGraph:
         version: str,
         context: object | None = None,
         control: object | None = None,
+        durability: str | None = None,
     ):
         return
         yield  # make it an async generator
@@ -1611,6 +1612,7 @@ class _InterruptingGraph:
         version: str,
         context: object | None = None,
         control: object | None = None,
+        durability: str | None = None,
     ):
         # Raise a real GraphInterrupt to test the H4 guard in ingest().
         # GraphInterrupt takes a tuple of interrupt values.
@@ -1848,6 +1850,7 @@ class _RecursingGraph:
         version: str,
         context: object | None = None,
         control: object | None = None,
+        durability: str | None = None,
     ):
         from langgraph.errors import GraphRecursionError
 
@@ -1915,6 +1918,7 @@ class _FailingGraph:
         version: str,
         context: object | None = None,
         control: object | None = None,
+        durability: str | None = None,
     ):
         raise RuntimeError(
             "authoring transport error (401 authoring_actor_token_unknown): "
@@ -1941,6 +1945,7 @@ class _ProviderCancelledGraph(_FailingGraph):
         version: str,
         context: object | None = None,
         control: object | None = None,
+        durability: str | None = None,
     ):
         raise AcpPromptCancelledError(
             "ACP prompt was cancelled by the agent",
@@ -2421,6 +2426,7 @@ class _StallingGraph:
         version: str,
         context: object | None = None,
         control: object | None = None,
+        durability: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         await asyncio.sleep(3600)  # never reached under the test's tiny timeout
         yield {}  # pragma: no cover -- make it an async generator
@@ -2481,6 +2487,7 @@ class _LongStepBudgetGraph:
         version: str,
         context: object | None = None,
         control: object | None = None,
+        durability: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         await asyncio.sleep(0.3)
         yield {

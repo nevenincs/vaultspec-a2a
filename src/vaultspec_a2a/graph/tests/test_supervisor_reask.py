@@ -105,7 +105,11 @@ def _star_graph(supervisor_replies: list[str]) -> Any:
     )
 
 
-def _run_input(thread_id: str, vault_index: dict[str, list[str]]) -> dict[str, Any]:
+def _run_input(
+    thread_id: str,
+    vault_index: dict[str, list[str]],
+    validation_errors: list[str] | None = None,
+) -> dict[str, Any]:
     receipt = GraphActionReceipt(
         schema_version="graph-action-v1",
         thread_id=thread_id,
@@ -125,7 +129,9 @@ def _run_input(thread_id: str, vault_index: dict[str, list[str]]) -> dict[str, A
         "token_usage": {},
         "active_feature": "reask-feature",
         "vault_index": vault_index,
+        "validation_errors": validation_errors or [],
         "supervisor_reasks": 0,
+        "supervisor_finish_blocks": 0,
         "active_graph_action_receipt": receipt,
         "graph_action_receipts": {"ingest": receipt},
     }
@@ -199,3 +205,72 @@ async def test_a_supervisor_that_never_routes_admissibly_fails_the_run() -> None
     assert len(prompts.prompts) == limit + 1
     parked = await graph.aget_state({"configurable": {"thread_id": "exhausted"}})
     assert parked.values["supervisor_reasks"] == limit
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_finish_stops_rerouting_once_its_budget_is_spent() -> None:
+    """A completion gate the reroute never clears fails the run, and says so.
+
+    Nothing in a star run clears ``validation_errors``, so the gate refuses
+    FINISH again on every pass. The reroute used to reset the re-ask budget,
+    leaving the loop bounded by nothing but the recursion limit: the run ended
+    anonymously after a worker turn per pass.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+    limit = domain_config.supervisor_finish_block_limit
+
+    with pytest.raises(SupervisorRoutingError) as failure:
+        await _visits(
+            graph,
+            "finish-blocked",
+            _run_input(
+                "finish-blocked",
+                {"adr": ["adr.md"], "plan": ["plan.md"]},
+                ["frontmatter is malformed"],
+            ),
+            prompts,
+        )
+
+    assert failure.value.attempts == limit + 1
+    assert "validation error(s)" in failure.value.reason
+    # One supervisor pass per reroute the budget allowed, plus the one that
+    # spent it - and a worker turn for each reroute, not for the last pass.
+    assert len(prompts.prompts) == limit + 1
+
+
+@pytest.mark.asyncio
+async def test_a_finish_gate_no_worker_can_satisfy_is_refused_not_rerouted() -> None:
+    """A gate with no worker to satisfy it refuses rather than picking one.
+
+    This team has a plan author and a coder and no reviewer, so nothing on it
+    can produce the audit artifact the completion gate demands. The reroute
+    used to fall back to ``workers[0]`` - here the plan author - whose next
+    hand-off is blocked by the same gate for the same reason. Refusing puts
+    the reason in front of the supervisor and ends the run within the re-ask
+    budget instead.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+
+    with pytest.raises(SupervisorRoutingError) as failure:
+        await _visits(
+            graph,
+            "no-auditor",
+            _run_input(
+                "no-auditor",
+                {"adr": ["adr.md"], "plan": ["plan.md"], "exec": ["exec/s01.md"]},
+            ),
+            prompts,
+        )
+
+    assert "audit" in failure.value.reason
+    assert "No worker of the 'audit' phase" in failure.value.reason
+    # Refused, so the run never reached a worker at all.
+    assert failure.value.attempts == domain_config.supervisor_reask_limit + 1
+    parked = await graph.aget_state({"configurable": {"thread_id": "no-auditor"}})
+    assert parked.values["supervisor_reasks"] == domain_config.supervisor_reask_limit
+    worker_messages = [
+        m for m in parked.values["messages"] if getattr(m, "name", None) is not None
+    ]
+    assert worker_messages == []

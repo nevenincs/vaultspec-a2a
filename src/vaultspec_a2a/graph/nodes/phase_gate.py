@@ -286,6 +286,13 @@ def create_phase_gate_node(
                     "gate_phase": phase,
                     "gate_verdict": VERDICT_APPROVED,
                     "routing_error": None,
+                    # The phase advances, so its revision notes stop being
+                    # active errors. Nothing else clears them, and anchoring
+                    # shows every active error to every later worker: an ADR
+                    # author was still being told to "fix sources" about a
+                    # research document the human had since approved. The empty
+                    # list is the channel's own clear signal.
+                    "validation_errors": [],
                 },
             )
 

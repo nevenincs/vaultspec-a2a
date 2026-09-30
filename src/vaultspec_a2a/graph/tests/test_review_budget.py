@@ -150,6 +150,38 @@ async def test_a_human_revision_at_the_gate_earns_a_fresh_review_budget() -> Non
 
 
 @pytest.mark.asyncio
+async def test_an_approved_phase_stops_showing_its_revision_notes() -> None:
+    """Notes from a phase's gate do not follow the run into the next phase.
+
+    The notes are appended to ``validation_errors``, which anchoring renders to
+    every later worker as "active" errors, and only an explicit empty write
+    clears the channel. Nothing made that write, so an ADR author was still
+    being told to fix a research document the human had since approved.
+    """
+    graph = _research_graph(max_review_revisions=1)
+    thread: Any = {"configurable": {"thread_id": "clears"}}
+    await _updates(graph, _receipt_input("clears"), "clears")
+
+    await _updates(
+        graph,
+        Command(resume={"verdict": "request_changes", "notes": "Fix the sources."}),
+        "clears",
+    )
+    revising = await graph.aget_state(thread)
+    # The writer must still see the note it has to address.
+    assert revising.values["validation_errors"] == ["Fix the sources."]
+
+    await _updates(
+        graph, Command(resume={"verdict": "approved", "notes": None}), "clears"
+    )
+    advanced = await graph.aget_state(thread)
+
+    assert advanced.values["validation_errors"] == []
+    # The run really did advance past the research phase.
+    assert advanced.next == ("adr_gate",)
+
+
+@pytest.mark.asyncio
 async def test_a_zero_budget_goes_straight_to_the_gate() -> None:
     graph = _research_graph(max_review_revisions=0)
 

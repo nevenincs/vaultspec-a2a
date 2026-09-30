@@ -98,16 +98,35 @@ def _select_revision_worker(
     return _select_phase_worker(PipelinePhase.PLAN.value, workers, worker_phase_map)
 
 
+def _worker_owning_phase(
+    target_phase: str,
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+) -> str | None:
+    """Return the worker that owns *target_phase*, or ``None`` when none does.
+
+    The honest answer to "who produces this artifact?" is sometimes nobody: a
+    team may carry no worker of that phase at all. Callers that can act on that
+    answer take it from here rather than from a fallback that names a worker
+    whose phase cannot satisfy the gate that asked.
+    """
+    if not worker_phase_map:
+        return None
+    for worker in workers:
+        if worker_phase_map.get(worker) == target_phase:
+            return worker
+    return None
+
+
 def _select_phase_worker(
     target_phase: str,
     workers: list[str],
     worker_phase_map: dict[str, str] | None,
 ) -> str:
     """Return the worker that owns *target_phase*, falling back to the first worker."""
-    if worker_phase_map:
-        for worker in workers:
-            if worker_phase_map.get(worker) == target_phase:
-                return worker
+    owner = _worker_owning_phase(target_phase, workers, worker_phase_map)
+    if owner is not None:
+        return owner
     return workers[0] if workers else "FINISH"
 
 
@@ -138,60 +157,6 @@ def _parse_route(text: str, options: list[str]) -> tuple[str, bool]:
     return "FINISH", True
 
 
-def _check_finish_blocked(
-    state: TeamState,
-    vault_index: dict[str, list[str]],
-    workers: list[str],
-    inferred_phase: str,
-    worker_phase_map: dict[str, str] | None,
-) -> dict[str, Any] | None:
-    """Check if FINISH should be blocked due to validation errors or missing review.
-
-    Returns a routing dict if blocked, None if FINISH is allowed.
-    """
-    errors: list[str] = state.get("validation_errors") or []
-    if errors:
-        _logger.warning(
-            "supervisor blocked FINISH: %d validation error(s) active — "
-            "rerouting to exec-phase worker",
-            len(errors),
-        )
-        next_route = _select_phase_worker(
-            PipelinePhase.EXEC.value, workers, worker_phase_map
-        )
-        return {
-            "next": next_route,
-            "pipeline_phase": inferred_phase,
-            "routing_error": (
-                f"FINISH blocked: {len(errors)}"
-                " validation error(s)"
-                " must be resolved first."
-            ),
-        }
-
-    active_feature = state.get("active_feature")
-    if active_feature and vault_index.get("exec") and not vault_index.get("audit"):
-        _logger.warning(
-            "supervisor blocked FINISH: no review"
-            " artifact in vault_index['audit']"
-            " — rerouting to audit-phase worker",
-        )
-        next_route = _select_phase_worker(
-            PipelinePhase.AUDIT.value, workers, worker_phase_map
-        )
-        return {
-            "next": next_route,
-            "pipeline_phase": inferred_phase,
-            "routing_error": (
-                'FINISH blocked: no review artifact in vault_index["audit"]. '
-                "A reviewer agent must produce an"
-                " audit artifact before completion."
-            ),
-        }
-
-    return None
-
-
 @dataclass(frozen=True, slots=True)
 class _GateResult:
     blocked: bool
@@ -207,6 +172,12 @@ class _SupervisorDecision:
     or a route a HARD phase gate blocked - which sends the run back to the
     supervisor. A refused decision keeps its intended route in ``next_route``
     when it had one, and ``None`` when the output named none.
+
+    ``blocks_finish`` marks the other unaccepted outcome: a completion gate
+    refused FINISH and the run goes to a worker that can satisfy the gate.
+    It is a separate mark because it has a separate destination and so a
+    separate budget - a re-ask costs a supervisor turn, a blocked FINISH costs
+    a worker turn as well.
     """
 
     next_route: str | None
@@ -214,6 +185,98 @@ class _SupervisorDecision:
     routing_error: str | None = None
     plan_approval_request: dict[str, Any] | None = None
     refused: bool = False
+    blocks_finish: bool = False
+
+
+def _blocked_finish_decision(
+    *,
+    reason: str,
+    target_phase: str,
+    workers: list[str],
+    inferred_phase: str,
+    worker_phase_map: dict[str, str] | None,
+) -> _SupervisorDecision:
+    """Send a blocked FINISH to the worker that owns *target_phase*.
+
+    When no worker owns it the decision is REFUSED rather than rerouted. The
+    fallback this replaces named ``workers[0]``, which on the shipped star
+    preset is a coder: routing the gate's demand for an audit artifact to a
+    worker that cannot produce one guarantees the next FINISH is blocked for
+    the same reason, which is the livelock itself rather than a recovery from
+    it. Refusing puts the reason in front of the supervisor instead.
+    """
+    owner = _worker_owning_phase(target_phase, workers, worker_phase_map)
+    if owner is None:
+        _logger.warning(
+            "supervisor blocked FINISH and refused it: %s no %s-phase worker",
+            reason,
+            target_phase,
+        )
+        return _SupervisorDecision(
+            next_route=None,
+            inferred_phase=inferred_phase,
+            routing_error=(
+                f"{reason} No worker of the {target_phase!r} phase is on this "
+                f"team to satisfy it."
+            ),
+            refused=True,
+        )
+    _logger.warning(
+        "supervisor blocked FINISH: %s rerouting to %s-phase worker %r",
+        reason,
+        target_phase,
+        owner,
+    )
+    return _SupervisorDecision(
+        next_route=owner,
+        inferred_phase=_phase_for_route(
+            owner, fallback_phase=inferred_phase, worker_phase_map=worker_phase_map
+        ),
+        routing_error=reason,
+        blocks_finish=True,
+    )
+
+
+def _check_finish_blocked(
+    state: TeamState,
+    vault_index: dict[str, list[str]],
+    workers: list[str],
+    inferred_phase: str,
+    worker_phase_map: dict[str, str] | None,
+) -> _SupervisorDecision | None:
+    """Check if FINISH should be blocked due to validation errors or missing review.
+
+    Returns the blocked decision, or None when FINISH is allowed.
+    """
+    errors: list[str] = state.get("validation_errors") or []
+    if errors:
+        return _blocked_finish_decision(
+            reason=(
+                f"FINISH blocked: {len(errors)}"
+                " validation error(s)"
+                " must be resolved first."
+            ),
+            target_phase=PipelinePhase.EXEC.value,
+            workers=workers,
+            inferred_phase=inferred_phase,
+            worker_phase_map=worker_phase_map,
+        )
+
+    active_feature = state.get("active_feature")
+    if active_feature and vault_index.get("exec") and not vault_index.get("audit"):
+        return _blocked_finish_decision(
+            reason=(
+                'FINISH blocked: no review artifact in vault_index["audit"]. '
+                "A reviewer agent must produce an"
+                " audit artifact before completion."
+            ),
+            target_phase=PipelinePhase.AUDIT.value,
+            workers=workers,
+            inferred_phase=inferred_phase,
+            worker_phase_map=worker_phase_map,
+        )
+
+    return None
 
 
 # Maps target phase -> (required vault_index key, is_hard_gate)
@@ -339,7 +402,14 @@ _REFUSED_TEXT_CHARS = 200
 
 
 def _refused_update(state: TeamState, decision: _SupervisorDecision) -> dict[str, Any]:
-    """Send a refused decision back to the supervisor, or fail once over budget."""
+    """Send a refused decision back to the supervisor, or fail once over budget.
+
+    ``supervisor_finish_blocks`` is deliberately NOT written here, so a turn
+    that alternates refusals with blocked FINISHes still reaches a limit: the
+    blocked-FINISH reroute has to clear the re-ask counter to route to its
+    worker at all, so if this reset the other counter in turn neither budget
+    would ever be spent.
+    """
     reasks = int(state.get("supervisor_reasks") or 0) + 1
     reason = decision.routing_error or "inadmissible routing decision"
     if reasks > domain_config.supervisor_reask_limit:
@@ -356,6 +426,22 @@ def _refused_update(state: TeamState, decision: _SupervisorDecision) -> dict[str
         # Recorded as the supervisor's intent; the route edge does not follow it.
         update["next"] = decision.next_route
     return update
+
+
+def _spend_finish_block(state: TeamState, decision: _SupervisorDecision) -> int:
+    """Count one blocked FINISH, or fail the run once the budget is spent.
+
+    Failing is the honest end: the gate has refused completion this many times
+    running and the worker it rerouted to has not cleared it, so another
+    reroute buys another identical refusal. Reporting the run complete would
+    claim the gate passed, and looping ends in an anonymous recursion limit.
+    """
+    blocks = int(state.get("supervisor_finish_blocks") or 0) + 1
+    if blocks > domain_config.supervisor_finish_block_limit:
+        raise SupervisorRoutingError(
+            decision.routing_error or "FINISH blocked", attempts=blocks
+        )
+    return blocks
 
 
 def _evaluate_supervisor_response(
@@ -397,16 +483,7 @@ def _evaluate_supervisor_response(
             worker_phase_map,
         )
         if blocked is not None:
-            blocked_route = cast("str", blocked["next"])
-            return _SupervisorDecision(
-                next_route=blocked_route,
-                inferred_phase=_phase_for_route(
-                    blocked_route,
-                    fallback_phase=cast("str", blocked["pipeline_phase"]),
-                    worker_phase_map=worker_phase_map,
-                ),
-                routing_error=cast("str", blocked["routing_error"]),
-            )
+            return blocked
 
     gate_decision = _phase_gate_decision(
         state, vault_index, next_route, inferred_phase, worker_phase_map
@@ -633,7 +710,14 @@ def create_supervisor_node(
                 "approval_status": None,
                 "approval_request_id": None,
                 "routing_error": decision.routing_error,
+                # Cleared so the route edge follows this decision to its
+                # worker rather than reading a live re-ask and returning here.
                 "supervisor_reasks": 0,
+                "supervisor_finish_blocks": (
+                    _spend_finish_block(state, decision)
+                    if decision.blocks_finish
+                    else 0
+                ),
             }
 
         if decision.plan_approval_request is not None:
@@ -657,6 +741,7 @@ def create_supervisor_node(
                 "approval_request_id": None,
                 "routing_error": None,
                 "supervisor_reasks": 0,
+                "supervisor_finish_blocks": 0,
             }
         return {
             "next": next_route,
@@ -667,6 +752,7 @@ def create_supervisor_node(
             "approval_request_id": None,
             "routing_error": None,
             "supervisor_reasks": 0,
+            "supervisor_finish_blocks": 0,
         }
 
     supervisor_node.__name__ = "supervisor_node"

@@ -127,6 +127,18 @@ class DomainConfig(ProjectSettings):
             "each refusal returns to the supervisor with the reason in context."
         ),
     )
+    supervisor_finish_block_limit: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Supervisor: how many consecutive FINISH decisions the completion "
+            "gates may block and reroute before the run fails. Separate from "
+            "the re-ask budget because a blocked FINISH runs a worker that can "
+            "satisfy the gate rather than re-asking, so it costs a real worker "
+            "turn; when the worker never clears the gate the reroute would "
+            "otherwise repeat until the recursion limit."
+        ),
+    )
     context_limit_tokens: int = Field(
         default=120_000,
         description="Estimated token budget for the context window.",

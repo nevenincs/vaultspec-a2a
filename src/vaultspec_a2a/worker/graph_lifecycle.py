@@ -942,8 +942,10 @@ class GraphLifecycleManager:
             "model_assignment_digest": model_assignment_digest(req.model_assignment),
             "graph_definition_digest": req.require_graph_definition().digest(),
             # The re-ask budget is per turn: a turn that failed on it must not
-            # leave the next one already spent.
+            # leave the next one already spent. The blocked-FINISH budget is
+            # the same promise for the same reason.
             "supervisor_reasks": 0,
+            "supervisor_finish_blocks": 0,
         }
         if is_first_ingest:
             graph_input.update(

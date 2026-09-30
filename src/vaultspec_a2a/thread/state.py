@@ -338,6 +338,13 @@ class TeamState(TypedDict):
     # a route a HARD phase gate blocked). Non-zero sends the run back to the
     # supervisor; an accepted decision resets it and every new turn starts at 0.
     supervisor_reasks: NotRequired[int]
+    # Consecutive FINISH decisions this turn that a completion gate blocked and
+    # rerouted to a worker. Counted apart from supervisor_reasks because the two
+    # have different outcomes: a re-ask returns to the supervisor, while a
+    # blocked FINISH runs the worker that can satisfy the gate. A gate the
+    # worker never clears would otherwise reroute until the recursion limit.
+    # An accepted decision resets it and every new turn starts at 0.
+    supervisor_finish_blocks: NotRequired[int]
 
     # --- routing / identification ---
     thread_id: str

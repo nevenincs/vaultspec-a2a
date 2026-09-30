@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#core-layer'
 date: '2026-03-24'
-modified: '2026-07-15'
-body_hash: 'sha256:98450c2f30c3ca07a23a93bceb2a099a05921d5a191476963e042374e70bce52'
+modified: '2026-09-30'
+body_hash: 'sha256:88ed4df7710fa1ebdc853963b924bca5395b9a8cecc1403e01dcd3d223ab5946'
 related:
   - '[[2026-03-23-core-layer-boundary-plan]]'
   - '[[2026-03-23-core-layer-boundary-adr]]'

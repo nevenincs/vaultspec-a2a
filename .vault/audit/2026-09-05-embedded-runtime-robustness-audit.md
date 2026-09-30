@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#embedded-runtime-robustness'
 date: '2026-09-05'
-modified: '2026-09-06'
+modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:4f79d343b3e00f6ae583fe10ad2862385cbe5e2677dd77235c1a8fb01c33f3cf'
+body_hash: 'sha256:354c3d0d975f02164dcea0d77ee7c8cb83e23de6fa293cdaa1ee5b92156eb4ce'
 related:
   - "[[2026-09-05-embedded-runtime-robustness-research]]"
   - "[[2026-08-02-control-action-leases-implementation-review-audit]]"

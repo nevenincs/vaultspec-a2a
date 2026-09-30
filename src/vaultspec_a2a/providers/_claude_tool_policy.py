@@ -10,6 +10,7 @@ artefact rather than a preference.
 
 from __future__ import annotations
 
+from pathlib import PurePath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -17,10 +18,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AUTONOMOUS_PERMISSION_MODE",
+    "CLAUDE_DENIED_READ_PATHS",
     "CLAUDE_FILE_WRITE_TOOLS",
+    "CLAUDE_PATH_RULE_TOOLS",
     "CLAUDE_TERMINAL_TOOLS",
     "MODE_CONFIG_OPTION_ID",
     "claude_disallowed_tools",
+    "workspace_scoped_tool_rule",
 ]
 
 # The CLI's own file-mutating built-ins. Read from the installed agent SDK's
@@ -49,6 +53,24 @@ CLAUDE_TERMINAL_TOOLS: tuple[str, ...] = (
     "KillBash",
 )
 
+# Absolute paths no run has business reading, denied as path rules on the read
+# built-in. These are not a substitute for scoping reads to the workspace (see
+# :func:`workspace_scoped_tool_rule`) - a blocklist never is - but they are the
+# places where one mistake hands over the credentials the run itself spends, or
+# the environment of a live process, so they are named rather than left to the
+# scope rule alone. Written in the pinned SDK's rule syntax: the read tool takes
+# a file pattern, and ``~`` is expanded by the CLI against the operator's home.
+CLAUDE_DENIED_READ_PATHS: tuple[str, ...] = (
+    "/proc/**",
+    "~/.ssh/**",
+    "~/.aws/**",
+    "~/.gnupg/**",
+    "~/.config/gcloud/**",
+    "~/.claude/**",
+    "~/.claude.json",
+    "~/.codex/**",
+)
+
 # The mode an unattended run must be in: the adapter advertises it as "Don't
 # Ask - don't prompt for permissions, deny if not pre-approved", which is the
 # only advertised mode whose meaning matches a run with no human at the prompt.
@@ -62,19 +84,51 @@ AUTONOMOUS_PERMISSION_MODE = "dontAsk"
 MODE_CONFIG_OPTION_ID = "mode"
 
 
-def claude_disallowed_tools(agent_config: AgentConfig | None) -> tuple[str, ...]:
-    """Return the CLI built-ins a persona's capabilities forbid.
+# The built-ins whose permission rule accepts a file pattern, read from the
+# installed agent SDK's own rule vocabulary (`filePatternTools`), which is what
+# decides whether a scoped rule is a scope or an unmatchable string. `Grep` is
+# deliberately absent from it upstream, so no path pattern can be written for
+# that tool at all and it is composed under its bare name.
+CLAUDE_PATH_RULE_TOOLS: frozenset[str] = frozenset(
+    {"Read", "Write", "Edit", "Glob", "NotebookRead", "NotebookEdit", "Cd"}
+)
 
-    A persona declares what it may do; before this the declaration only cleared
-    ACP client capabilities, which the CLI ignores for its own built-in tools -
-    so an author role with ``filesystem_write = false`` still held Write and
-    Edit. An absent persona denies nothing extra: the caller's other bounds
-    (the exact-name allowlist and the permission rung) still apply.
+
+def workspace_scoped_tool_rule(tool_name: str, workspace_root: str | None) -> str:
+    """Return the rule that permits *tool_name* inside the run's workspace only.
+
+    A bare tool name in the pre-approved set permits the tool ANYWHERE. For a
+    read built-in that is the whole host: the operator's credentials, another
+    project's source, the environment of a running process. The run already has
+    a project, so the permission it needs is that project - expressed as an
+    absolute pattern, which the CLI resolves without reference to any base
+    directory, unlike a relative one.
+
+    A tool whose rule syntax takes no path, or a run with no workspace to name,
+    keeps the bare name: an unmatchable rule would read as a scope while
+    permitting nothing, which is worse than the honest bare name.
     """
+    if tool_name not in CLAUDE_PATH_RULE_TOOLS or not workspace_root:
+        return tool_name
+    root = PurePath(workspace_root).as_posix().rstrip("/")
+    return f"{tool_name}({root}/**)"
+
+
+def claude_disallowed_tools(agent_config: AgentConfig | None) -> tuple[str, ...]:
+    """Return the deny rules one claude session runs under.
+
+    Two sources. The credential and process trees above are denied on every
+    session, whoever is running: no persona has a reason to read them and one of
+    them holds the token the run itself spends. The rest is the persona's own
+    declaration, which before this only cleared ACP client capabilities - flags
+    the CLI ignores for its own built-in tools, so an author role with
+    ``filesystem_write = false`` still held Write and Edit. An absent persona
+    still gets the unconditional denies.
+    """
+    denied: list[str] = [f"Read({path})" for path in CLAUDE_DENIED_READ_PATHS]
     if agent_config is None:
-        return ()
+        return tuple(denied)
     capabilities = agent_config.capabilities
-    denied: list[str] = []
     if not capabilities.filesystem_write:
         denied.extend(CLAUDE_FILE_WRITE_TOOLS)
     if not capabilities.terminal:

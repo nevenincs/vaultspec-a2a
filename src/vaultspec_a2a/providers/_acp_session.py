@@ -16,7 +16,7 @@ from ._acp_auth import (
     runtime_log_extra,
 )
 from ._acp_authoring import AUTHORING_MCP_SERVER_NAME
-from ._acp_mcp import require_declared_surface
+from ._acp_mcp import require_declared_surface, statically_approvable_tool_names
 from ._acp_request import await_response, issue_request
 from ._acp_types import (
     AcpModelConfig,
@@ -80,7 +80,11 @@ def claude_session_options(config: AcpModelConfig) -> JsonObject:
     run), enforced by the CLI itself rather than by config-home or workspace
     file manipulation, while the child still runs as the operator's own
     identity. ``allowedTools`` rides the same block for headless runs so the
-    composed tool names are auto-permitted without a local prompt.
+    composed tool names are auto-permitted without a local prompt - all of them
+    except the ones whose project is chosen by the CALL. Those stay in the run's
+    composed surface and are decided at the permission rung instead, because a
+    static approval is taken with the arguments unknown and would put the one
+    boundary that can see a foreign project out of reach.
 
     ``settingSources`` is the same statement for the CLI's SETTINGS scopes, and
     for the same reason. The adapter defaults it to user, project, and local, so
@@ -97,8 +101,8 @@ def claude_session_options(config: AcpModelConfig) -> JsonObject:
     to ours rather than replacing them, so what is denied here stays denied.
     """
     options: JsonObject = {"strictMcpConfig": True, "settingSources": []}
-    if config.allowed_tools:
-        options["allowedTools"] = list[JsonValue](config.allowed_tools)
+    if pre_approved := statically_approvable_tool_names(config.allowed_tools):
+        options["allowedTools"] = list[JsonValue](pre_approved)
     if disallowed := claude_disallowed_tools(config.agent_config):
         options["disallowedTools"] = list[JsonValue](disallowed)
     return options

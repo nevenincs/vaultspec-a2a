@@ -143,9 +143,11 @@ def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
     ]
 
 
-def test_render_constrains_to_read_tools_auto_approved() -> None:
-    # P04.S19: enabled_tools names EXACTLY the registry's read tools (no write
-    # verb the server also exposes), auto-approved so reads run headless.
+def test_render_constrains_to_read_tools_and_elicits_a_per_call_project() -> None:
+    # enabled_tools names EXACTLY the registry's read tools (no write verb the
+    # server also exposes). Auto-approval is withheld because this server's tools
+    # take the project as an argument: every call is elicited so the run's
+    # permission rung can read the project it names.
     toml = render_codex_config_toml(
         codex_mcp_server_specs(["vaultspec-rag"]),
         web_search=CodexWebSearchMode.DISABLED,
@@ -157,7 +159,7 @@ def test_render_constrains_to_read_tools_auto_approved() -> None:
         "get_code_file",
     ]
     assert not any("reindex" in t for t in rag["enabled_tools"])
-    assert rag["default_tools_approval_mode"] == "auto"
+    assert "default_tools_approval_mode" not in rag
 
 
 def test_codex_model_defaults_keep_read_only_sandbox_defense_in_depth() -> None:

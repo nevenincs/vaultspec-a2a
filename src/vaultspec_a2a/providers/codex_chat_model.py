@@ -80,6 +80,7 @@ from ._codex_protocol import (
 )
 from ._json_contract import JsonObject, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
+from ._project_scope import RunProjectScope
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .conditions import ProviderCondition
 from .lane_admission import is_web_lane_proven
@@ -525,6 +526,7 @@ class CodexChatModel(BaseChatModel):
                 permission_rung=CodexPermissionRung(
                     allowed_tools=self._composed_tool_pairs(),
                     permission_callback=self.permission_callback,
+                    project_scope=RunProjectScope(self.workspace_root),
                 ),
             )
             await asyncio.wait_for(

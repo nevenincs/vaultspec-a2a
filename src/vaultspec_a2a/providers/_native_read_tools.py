@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ..authoring.contract import is_document_authoring_role
 from ..thread.errors import ConfigError
+from ._claude_tool_policy import workspace_scoped_tool_rule
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -32,6 +33,11 @@ __all__ = [
 # code, discover files. They are added by exact name — never a wildcard — so a
 # document role in autonomous mode can invoke them without a local prompt while
 # every write/exec built-in stays gated (the .vault deny remains write-only).
+# Each name is composed under the workspace scope its rule syntax admits
+# (:func:`workspace_scoped_tool_rule`): "agent-side over the workspace fs" is
+# where these tools are AIMED, not where they are bounded - a bare name permits
+# the whole host, which is the operator's credentials and every other project
+# on it.
 # Named here because there is nothing to ask. Every other tool surface in this
 # system is enumerated by its provider - the engine serves its authoring catalog,
 # the harness registry declares its servers - and is consumed rather than
@@ -281,8 +287,20 @@ def compose_native_read_tools(
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         return model
+    # The permission a role needs is its own workspace, not the host. The
+    # workspace is read off the model rather than passed in because it is
+    # already the run's, carried on the same instance the session is opened
+    # from - a second parameter could name a different directory than the one
+    # the CLI will actually run in.
+    workspace_root = getattr(model, "workspace_root", None)
+    composed_rules = [
+        workspace_scoped_tool_rule(
+            name, workspace_root if isinstance(workspace_root, str) else None
+        )
+        for name in composed_names
+    ]
     existing = list(getattr(model, "allowed_tools", []) or [])
-    combined = existing + [name for name in composed_names if name not in existing]
+    combined = existing + [rule for rule in composed_rules if rule not in existing]
     if combined == existing:
         return model
     return attach(list(getattr(model, "mcp_servers", []) or []), combined)

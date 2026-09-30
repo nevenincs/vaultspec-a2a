@@ -34,11 +34,11 @@ from ._acp_types import (
 )
 from ._json_contract import (
     JsonObject,
-    JsonValue,
     lenient_json_object,
     lenient_json_object_list,
 )
 from ._native_read_tools import NATIVE_READ_TOOL_NAMES
+from ._project_scope import foreign_project_argument
 
 __all__: list[str] = []
 
@@ -510,77 +510,6 @@ def _autonomous_option_id(
     return _rejection_option_id(options)
 
 
-# Tool-call argument keys that name a project to operate on. The search tools a
-# run is handed take their root this way - ``project_root`` on every
-# vaultspec-rag tool - which is how a scope escape arrives as an ARGUMENT that no
-# per-server trust assertion can express. Both the snake_case and camelCase
-# spellings are listed because the argument crosses a JSON boundary where either
-# convention is admissible.
-_PROJECT_ARGUMENT_KEYS: frozenset[str] = frozenset(
-    {"project_root", "projectRoot", "workspace_root", "workspaceRoot"}
-)
-
-# Depth bound for the argument scan. Tool inputs are flat in practice (the search
-# adapter exposes a deliberately flat schema), so this exists only so untrusted,
-# deeply nested input cannot turn a permission decision into a recursion.
-_MAX_ARGUMENT_SCAN_DEPTH = 6
-
-
-def _foreign_project_field(key: str, value: JsonValue, config: AcpModelConfig) -> bool:
-    return (
-        key in _PROJECT_ARGUMENT_KEYS
-        and isinstance(value, str)
-        and bool(value.strip())
-        and not config.binds_project_path(value.strip())
-    )
-
-
-def _scan_foreign_project_mapping(
-    value: JsonObject, config: AcpModelConfig, depth: int
-) -> str | None:
-    for key, item in value.items():
-        if _foreign_project_field(key, item, config):
-            return str(item)
-        if (
-            found := _scan_foreign_project_argument(item, config, depth + 1)
-        ) is not None:
-            return found
-    return None
-
-
-def _scan_foreign_project_argument(
-    value: JsonValue, config: AcpModelConfig, depth: int
-) -> str | None:
-    if depth > _MAX_ARGUMENT_SCAN_DEPTH:
-        return None
-    if isinstance(value, dict):
-        return _scan_foreign_project_mapping(value, config, depth)
-    if isinstance(value, list):
-        for item in value:
-            if (
-                found := _scan_foreign_project_argument(item, config, depth + 1)
-            ) is not None:
-                return found
-    return None
-
-
-def _foreign_project_argument(args: JsonObject, config: AcpModelConfig) -> str | None:
-    """Return the first argument naming a project outside the run's, or ``None``.
-
-    The escape this closes is argument-borne: the run's grounding tools resolve a
-    caller-supplied root against any enrolled workspace on the machine, so a call
-    the registry considers entirely read-only and entirely local still returns
-    another project's content. The trust boundary is therefore the call, and this
-    is where calls already pass.
-
-    A named project that is not the run's is REPORTED, not corrected. Rewriting
-    the argument to the bound project would answer a different question than the
-    agent asked and hide that it asked it.
-    """
-
-    return _scan_foreign_project_argument(args, config, 0)
-
-
 async def on_request_permission(
     rpc_id: AcpRpcId,
     params: JsonObject,
@@ -614,7 +543,7 @@ async def on_request_permission(
     # refusal and the run's own bound project: the R7 discipline this handler
     # already follows keeps agent-supplied payload out of the log, and a
     # caller-chosen path is payload.
-    if _foreign_project_argument(args, config) is not None:
+    if foreign_project_argument(args, config) is not None:
         logger.warning(
             "Refused cross-project tool call: tool=%s named a project outside "
             "the run's bound project (bound=%s)",

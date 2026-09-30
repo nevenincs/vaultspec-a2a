@@ -51,7 +51,11 @@ from ._config_home_roots import (
     sweep_orphan_homes,
     temp_home_root,
 )
-from ._harness_mcp_registry import declared_harness_tools, is_known_harness_server
+from ._harness_mcp_registry import (
+    declared_harness_tools,
+    harness_server_addresses_projects_per_call,
+    is_known_harness_server,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -304,10 +308,20 @@ def render_codex_config_toml(
         key = _table_key(name)
         lines = [f"[mcp_servers.{key}]", f"command = {_toml_str(command)}"]
         lines.append(f"args = {_toml_str_array(args)}")
-        # Read-verb allowlist: exactly the registry's read tools, auto-approved.
-        # "Exactly" is enforced above, not merely intended.
+        # Read-verb allowlist: exactly the registry's read tools. "Exactly" is
+        # enforced above, not merely intended.
         lines.append(f"enabled_tools = {_toml_str_array(tools)}")
-        lines.append('default_tools_approval_mode = "auto"')
+        # Auto-approval is withheld from a server whose project is chosen by the
+        # CALL. Approving such a tool up front decides it with its arguments
+        # unknown, which puts codex's own approval elicitation - the one place
+        # this lane can see a call naming another project - out of reach. Those
+        # servers keep the default, so every call is elicited and decided by the
+        # run's permission rung.
+        per_call_project = is_known_harness_server(
+            name
+        ) and harness_server_addresses_projects_per_call(name)
+        if not per_call_project:
+            lines.append('default_tools_approval_mode = "auto"')
         block = "\n".join(lines)
         if environment:
             env_lines = [f"[mcp_servers.{key}.env]"]

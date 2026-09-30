@@ -37,6 +37,7 @@ from .._codex_protocol import (
     _messages_to_prompt,
 )
 from .._factory_commands import _classify_codex_command, classify_provider_command
+from .._project_scope import RunProjectScope
 from .._subprocess import spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 from ..codex_chat_model import CodexChatModel, _ActiveCodexTurn
@@ -350,7 +351,7 @@ for line in sys.stdin:
                         "server": params.get("server", "vaultspec-authoring"),
                         "tool": params.get("tool", "propose_changeset"),
                         "status": "inProgress",
-                        "arguments": {"text": "hello"},
+                        "arguments": params.get("arguments", {"text": "hello"}),
                     },
                 },
             })
@@ -391,6 +392,7 @@ async def _approval_client(
     *,
     allowed: frozenset[tuple[str, str]] = frozenset(),
     permission_callback: PermissionCallback | None = None,
+    project_scope: RunProjectScope | None = None,
 ) -> _CodexAppServerClient:
     """Spawn the real approval subprocess behind a client carrying a live rung."""
     process = await spawn_acp_process(
@@ -404,6 +406,7 @@ async def _approval_client(
         permission_rung=CodexPermissionRung(
             allowed_tools=allowed,
             permission_callback=permission_callback,
+            project_scope=project_scope,
         ),
     )
 
@@ -1143,3 +1146,62 @@ class TestCompletedActionCapture:
         capture replaces. The last case has no id, which the schema requires.
         """
         assert _completed_action_chunk({"threadId": "t-1", "item": item}) is None
+
+
+@pytest.mark.asyncio
+async def test_a_declared_tool_call_naming_another_project_is_declined(
+    tmp_path: Path,
+) -> None:
+    """The run's own project bounds a call the composed surface would admit.
+
+    The tool is declared, so what is refused here is the ARGUMENT: the search
+    tools take their root per call, and a call naming another enrolled project
+    reads that project's content through a tool this run legitimately holds.
+    """
+    bound = tmp_path / "bound-project"
+    other = tmp_path / "other-project"
+    bound.mkdir()
+    other.mkdir()
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-rag", "search_codebase")}),
+        project_scope=RunProjectScope(str(bound)),
+    )
+    try:
+        await client.request(
+            "drive",
+            {
+                "server": "vaultspec-rag",
+                "tool": "search_codebase",
+                "arguments": {"query": "tokens", "project_root": str(other)},
+            },
+        )
+        answered = await _answered_frame(client)
+        assert answered["result"] == {"action": "decline"}
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_the_same_call_against_its_own_project_is_approved(
+    tmp_path: Path,
+) -> None:
+    """Grounding survives: the run may search the project it is bound to."""
+    bound = tmp_path / "bound-project"
+    bound.mkdir()
+    client = await _approval_client(
+        allowed=frozenset({("vaultspec-rag", "search_codebase")}),
+        project_scope=RunProjectScope(str(bound)),
+    )
+    try:
+        await client.request(
+            "drive",
+            {
+                "server": "vaultspec-rag",
+                "tool": "search_codebase",
+                "arguments": {"query": "tokens", "project_root": str(bound / "src")},
+            },
+        )
+        answered = await _answered_frame(client)
+        assert answered["result"] == {"action": "accept", "content": {}}
+    finally:
+        await client.aclose()

@@ -58,6 +58,7 @@ from .._harness_mcp_registry import (
     _declare_registry,
     _launch_spec,
     _require_root_pin,
+    harness_server_addresses_projects_per_call,
 )
 from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
@@ -613,6 +614,7 @@ def _declared_entry(name: str, root_pin: str | None) -> FrozenJsonObject:
                 "network_egress": False,
                 "root_pin": root_pin,
                 "exact_surface": False,
+                "per_call_project": False,
             }
         }
     )
@@ -658,6 +660,44 @@ def test_registry_construction_refuses_an_omitted_root_pin() -> None:
     assert "probe" in message
 
 
+def test_registry_construction_refuses_an_omitted_per_call_project_axis() -> None:
+    """A server that never said whether a CALL chooses its project is refused.
+
+    The axis decides whether the entry's tools may be approved before the call
+    that chooses a project exists, so an entry that omits it would be approved
+    statically by default - the reachability the permission rung exists to close.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _declare_registry(
+            {
+                "probe": {
+                    "name": "probe",
+                    "command": "uvx",
+                    "args": [],
+                    "read_only": True,
+                    "network_egress": False,
+                    "root_pin": "PROBE_ROOT",
+                    "exact_surface": False,
+                }
+            }
+        )
+    message = str(excinfo.value)
+    assert "per_call_project" in message
+    assert "probe" in message
+
+
+def test_every_shipped_entry_declares_whether_a_call_chooses_its_project() -> None:
+    """The axis is declared where entries are written, not only where read."""
+    for name in _KNOWN_MCP_SERVERS:
+        entry = _shipped_entry(name)
+        assert isinstance(entry.get("per_call_project"), bool), (
+            f"{name} declares no per-call-project axis"
+        )
+        assert harness_server_addresses_projects_per_call(name) is (
+            entry["per_call_project"] is True
+        )
+
+
 @pytest.mark.parametrize("declared", [True, "", 7, []])
 def test_registry_construction_refuses_a_malformed_root_pin(
     declared: JsonValue,
@@ -675,6 +715,7 @@ def test_registry_construction_refuses_a_malformed_root_pin(
                     "network_egress": False,
                     "root_pin": declared,
                     "exact_surface": False,
+                    "per_call_project": False,
                 }
             }
         )
@@ -714,6 +755,7 @@ def test_registry_construction_refuses_an_env_declaration(env: JsonValue) -> Non
                     "network_egress": False,
                     "root_pin": "PROBE_ROOT",
                     "exact_surface": False,
+                    "per_call_project": False,
                 }
             }
         )

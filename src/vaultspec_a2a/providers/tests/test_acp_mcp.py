@@ -32,7 +32,7 @@ from .._acp_mcp import (
     resolve_harness_mcp_servers,
 )
 from .._harness_mcp_registry import is_known_harness_server
-from .._native_read_tools import NATIVE_READ_TOOL_NAMES, compose_native_read_tools
+from .._native_read_tools import compose_native_read_tools
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
@@ -460,7 +460,9 @@ class TestComposeNativeReadTools:
             self._fresh_model(), autonomous=True, role="researcher"
         )
         assert isinstance(wired, AcpChatModel)
-        assert wired.allowed_tools == list(NATIVE_READ_TOOL_NAMES)
+        # Scoped to the run's own workspace wherever the tool's rule grammar
+        # takes a path; Grep has no path pattern in the pinned SDK.
+        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Grep", "Glob(/tmp/ws/**)"]
 
     def test_non_document_role_is_unchanged(self) -> None:
         model = self._fresh_model()
@@ -480,8 +482,16 @@ class TestComposeNativeReadTools:
         )
         wired = compose_native_read_tools(model, autonomous=True, role="synthesist")
         assert isinstance(wired, AcpChatModel)
-        # Pre-existing entries kept in place; only the missing read names appended.
-        assert wired.allowed_tools == ["mcp__x__y", "Read", "Grep", "Glob"]
+        # Pre-existing entries kept in place; only the missing read names
+        # appended. A bare name the caller composed is left as it was: this seam
+        # adds its own grant rather than rewriting another one.
+        assert wired.allowed_tools == [
+            "mcp__x__y",
+            "Read",
+            "Read(/tmp/ws/**)",
+            "Grep",
+            "Glob(/tmp/ws/**)",
+        ]
 
     def test_advertised_mcp_servers_survive_the_allowlist_union(self) -> None:
         """The read grant must not clear a server the authoring attach advertised."""
@@ -491,7 +501,7 @@ class TestComposeNativeReadTools:
         wired = compose_native_read_tools(model, autonomous=True, role="researcher")
         assert isinstance(wired, AcpChatModel)
         assert wired.mcp_servers == [{"name": "vaultspec-authoring", "type": "http"}]
-        assert wired.allowed_tools == list(NATIVE_READ_TOOL_NAMES)
+        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Grep", "Glob(/tmp/ws/**)"]
 
     def test_model_without_acp_surface_is_returned_unchanged(self) -> None:
         """A hosted model exposing no with_mcp_servers is passed through as-is."""

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -21,9 +22,12 @@ from .._acp_session import claude_session_options, setup_session
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._claude_tool_policy import (
     AUTONOMOUS_PERMISSION_MODE,
+    CLAUDE_DENIED_READ_PATHS,
     CLAUDE_FILE_WRITE_TOOLS,
+    CLAUDE_PATH_RULE_TOOLS,
     CLAUDE_TERMINAL_TOOLS,
     MODE_CONFIG_OPTION_ID,
+    workspace_scoped_tool_rule,
 )
 from ..acp_exceptions import AcpSessionError
 from ._acp_frames import read_acp_frame
@@ -34,7 +38,6 @@ from ._installed_vocabulary import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
 
     from .._json_contract import JsonObject
 
@@ -402,3 +405,59 @@ async def test_unattended_session_survives_an_agent_that_advertises_no_modes(
     result = await task
     assert result.session_id == _SESSION_ID
     assert AcpRequestId.SESSION_SET_CONFIG_OPTION not in echo_context.response_futures
+
+
+def test_every_session_denies_the_credential_and_process_trees(
+    tmp_path: Path,
+) -> None:
+    """The paths that hand over a run's own credentials are denied outright.
+
+    Denied whoever is running and whatever the persona may otherwise do: the
+    scope rule below bounds where a read is APPROVED, and these name the places
+    where one mistake about that is unrecoverable.
+    """
+    options = claude_session_options(
+        _config(agent_id="mock-coder-success", workspace_root=tmp_path)
+    )
+
+    disallowed = _tool_names(options["disallowedTools"])
+    assert [f"Read({path})" for path in CLAUDE_DENIED_READ_PATHS] == [
+        rule for rule in disallowed if rule.startswith("Read(")
+    ]
+    assert "Read(~/.ssh/**)" in disallowed
+    assert "Read(/proc/**)" in disallowed
+
+
+def test_a_read_grant_names_the_workspace_it_is_for(tmp_path: Path) -> None:
+    """A read built-in is permitted inside the run's project, not on the host.
+
+    The bare name is a grant over every file the operator can read. The rule
+    carries an absolute pattern because the CLI resolves a relative one against
+    a base directory this side does not choose.
+    """
+    assert workspace_scoped_tool_rule("Read", str(tmp_path)) == f"Read({tmp_path}/**)"
+    # A tool whose rule grammar takes no path keeps its bare name rather than
+    # carrying an unmatchable one, and so does a run with no workspace to name.
+    assert "Grep" not in CLAUDE_PATH_RULE_TOOLS
+    assert workspace_scoped_tool_rule("Grep", str(tmp_path)) == "Grep"
+    assert workspace_scoped_tool_rule("Read", None) == "Read"
+
+
+def test_installed_sdk_admits_a_path_pattern_for_every_scoped_tool() -> None:
+    """The scoped rules are written in a grammar the installed SDK really has.
+
+    The SDK classifies which tools take a file pattern; a rule for a tool
+    outside that set would read as a scope while matching nothing.
+    """
+    source = (
+        Path(__file__).resolve().parents[4]
+        / "node_modules"
+        / "@anthropic-ai"
+        / "claude-agent-sdk"
+        / "sdk.mjs"
+    ).read_text(encoding="utf-8", errors="replace")
+    declaration = source[source.index("filePatternTools:") :][:200]
+
+    for tool in CLAUDE_PATH_RULE_TOOLS:
+        assert f'"{tool}"' in declaration, tool
+    assert '"Grep"' not in declaration

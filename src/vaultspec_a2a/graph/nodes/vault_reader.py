@@ -1,6 +1,14 @@
-"""Blackboard content mounting node.
+"""Blackboard content mounting.
 
-The mount node also owns the canonical ``build_initial_vault_index`` scan so the
+Mounting is split in two, because the two halves have opposite persistence
+needs. The vault index is a handle list the run must keep, so the graph's mount
+node refreshes it into state before each worker. The mounted document text is
+large and derivable, so it is expanded by the worker itself at invocation and
+never enters state - a state channel is checkpointed at every superstep, which
+would persist up to the whole mount budget per worker turn for the life of the
+run, and would still be missing when a resumed worker re-executes.
+
+This module also owns the canonical ``build_initial_vault_index`` scan so the
 same glob logic seeds the index at compile time and refreshes it on every mount
 pass. Callers seeding an index import it from here; the ``graph`` package's lazy
 entry point resolves to this module for the same reason.
@@ -27,7 +35,13 @@ if TYPE_CHECKING:
 
 from ..tools.task_queue import render_queue_view
 
-__all__ = ["build_initial_vault_index", "create_mount_node"]
+__all__ = [
+    "ContextMounter",
+    "MountNode",
+    "build_initial_vault_index",
+    "create_context_mounter",
+    "create_mount_node",
+]
 
 
 class MountNode(Protocol):
@@ -41,6 +55,14 @@ class MountNode(Protocol):
 
     async def __call__(self, state: TeamState) -> dict[str, Any]:
         """Execute the mount pass, returning a state update."""
+        ...
+
+
+class ContextMounter(Protocol):
+    """Expands the vault documents one worker turn is grounded in."""
+
+    async def __call__(self, state: TeamState) -> str | None:
+        """Return the mounted document text for *state*, or ``None``."""
         ...
 
 
@@ -82,27 +104,6 @@ def build_initial_vault_index(
         if matches:
             index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
     return index
-
-
-def _merge_index_views(
-    existing: dict[str, list[str]],
-    refreshed: dict[str, list[str]],
-) -> dict[str, list[str]]:
-    """Add-only merge of a refreshed on-disk scan onto the state's index.
-
-    Mirrors the ``_merge_vault_index`` reducer semantics so the in-pass mount
-    view matches what the reducer will persist: newly produced documents are
-    added, prior entries are preserved, and removals are out of scope.
-    """
-    merged: dict[str, list[str]] = {k: list(v) for k, v in existing.items()}
-    for doc_type, paths in refreshed.items():
-        seen = set(merged.get(doc_type, []))
-        bucket = merged.setdefault(doc_type, [])
-        for p in paths:
-            if p not in seen:
-                bucket.append(p)
-                seen.add(p)
-    return merged
 
 
 def _select_paths(
@@ -204,51 +205,57 @@ async def _mount_document_blocks(
     return blocks, tokens_used
 
 
-def create_mount_node(
+def create_mount_node(workspace_root: Path | None) -> MountNode:
+    """Factory: the graph node that refreshes the vault index before a worker.
+
+    Each pass re-derives the active feature's vault index from disk so gates
+    and the mounter observe documents produced earlier in the same run. The
+    refresh is add-only: it discovers newly written documents and returns them
+    through the ``_merge_vault_index`` reducer; removals are out of scope for
+    the merge reducer and are not reflected here.
+    """
+
+    async def mount_node(state: TeamState) -> dict[str, Any]:
+        """Refresh the active feature's vault index into state."""
+        if workspace_root is None:
+            return {}
+        active_feature = state.get("active_feature")
+        if not active_feature:
+            return {}
+        refreshed_index = await asyncio.to_thread(
+            build_initial_vault_index, workspace_root, active_feature
+        )
+        return {"vault_index": refreshed_index} if refreshed_index else {}
+
+    return mount_node
+
+
+def create_context_mounter(
     workspace_root: Path | None,
     task_queue_port: TaskQueuePort | None = None,
-) -> MountNode:
-    """Factory: returns a mount_node with a closure-scoped content cache.
+) -> ContextMounter:
+    """Factory: expands phase-scoped vault documents for one worker invocation.
 
-    The cache is scoped to this factory call -- one cache per compiled graph,
-    not shared across threads or sessions.  When a ``task_queue_port`` is
-    injected, the database-backed queue view is appended as a
-    mounted block during the plan and exec phases, replacing the former
-    ``.vault/plan`` markdown interception.
+    The content cache is scoped to this factory call -- one cache per compiled
+    worker, not shared across threads or sessions. When a ``task_queue_port``
+    is injected, the database-backed queue view is appended as a mounted block
+    during the plan and exec phases.
     """
     # One entry per path holding (mtime, content): a re-edited file replaces
     # its entry instead of accreting stale mtime-keyed copies, so the cache is
     # bounded by the number of mounted documents.
     cache: dict[str, tuple[float, str]] = {}
 
-    async def mount_node(state: TeamState) -> dict[str, Any]:
-        """Preprocessing node: read .vault/ documents and assemble mounted_context.
-
-        Each pass re-derives the active feature's vault index from disk so gates
-        and mounts observe documents produced earlier in the same run. The
-        refresh is add-only: it discovers newly written documents and returns
-        them through the ``_merge_vault_index`` reducer; removals are out of
-        scope for the merge reducer and are not reflected here.
-        """
-        if workspace_root is None:
-            return {"mounted_context": None}
-
-        active_feature = state.get("active_feature")
-        if not active_feature:
-            return {"mounted_context": None}
-
-        refreshed_index = await asyncio.to_thread(
-            build_initial_vault_index, workspace_root, active_feature
-        )
-        mount_index = _merge_index_views(
-            state.get("vault_index") or {}, refreshed_index
-        )
-        index_update: dict[str, Any] = (
-            {"vault_index": refreshed_index} if refreshed_index else {}
-        )
+    async def mount_context(state: TeamState) -> str | None:
+        """Assemble the mounted text from the index the mount node refreshed."""
+        if workspace_root is None or not state.get("active_feature"):
+            return None
 
         blocks, tokens_used = await _mount_document_blocks(
-            mount_index, state.get("pipeline_phase"), workspace_root, cache
+            state.get("vault_index") or {},
+            state.get("pipeline_phase"),
+            workspace_root,
+            cache,
         )
 
         queue_block = await _render_queue_block(state, task_queue_port)
@@ -257,9 +264,6 @@ def create_mount_node(
             if queue_tokens <= domain_config.mount_token_ceiling - tokens_used:
                 blocks.append(queue_block)
 
-        if not blocks:
-            return {"mounted_context": None, **index_update}
+        return "\n\n".join(blocks) if blocks else None
 
-        return {"mounted_context": "\n\n".join(blocks), **index_update}
-
-    return mount_node
+    return mount_context

@@ -282,13 +282,12 @@ class TestTeamStateStructure:
             "active_graph_action_receipt",
             "graph_completion_receipts",
             "routing_error",
+            "supervisor_reasks",
             # SDD blackboard awareness fields
             "active_feature",
             "pipeline_phase",
             "vault_index",
             "validation_errors",
-            # transient mounted document content
-            "mounted_context",
             # task queue pointer
             "current_task_id",
             # authoring proposal references

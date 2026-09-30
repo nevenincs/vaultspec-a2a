@@ -12,6 +12,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from langgraph._internal._constants import CONFIG_KEY_RUNTIME
+from langgraph.errors import GraphDrained, NodeTimeoutError
+from langgraph.runtime import RunControl, Runtime
 from langgraph.types import Command
 
 from ..domain_config import domain_config
@@ -33,7 +36,12 @@ from .transformer import (
 )
 from .types import StreamableGraph
 
-__all__ = ["IngestManager", "summarize_ingest_exception"]
+__all__ = ["INGEST_DRAINED", "IngestManager", "summarize_ingest_exception"]
+
+#: The outcome of a run that stopped at a superstep boundary because its worker
+#: asked it to drain. Not terminal: the checkpoint is resumable and the run's
+#: action stays open for recovery to deliver again.
+INGEST_DRAINED = "drained"
 
 logger = logging.getLogger(__name__)
 
@@ -140,11 +148,12 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
     the run's own operator would recognise as a fault.
 
     ``graph.step_timeout`` is the compiled Pregel attribute the compiler sets
-    from the team TOML (``graph/compiler.py``); it is absent from the
-    ``StreamableGraph`` protocol (a test double, or a graph compiled without a
-    configured step_timeout, need not carry it), so it is read defensively
-    and the global default is kept whenever it is missing or not the wider
-    bound.
+    from the team TOML (``graph/compiler.py``) as a backstop a grace above the
+    per-node run budget, so this bound always sits outside both. It is absent
+    from the ``StreamableGraph`` protocol (a test double, or a graph compiled
+    without a configured step_timeout, need not carry it), so it is read
+    defensively and the global default is kept whenever it is missing or not
+    the wider bound.
     """
     global_default = domain_config.ingest_event_stall_timeout_seconds
     node_step_timeout = getattr(graph, "step_timeout", None)
@@ -153,6 +162,26 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
     ):
         return float(node_step_timeout) + _STEP_TIMEOUT_STALL_MARGIN_SECONDS
     return global_default
+
+
+def _config_carrying_control(
+    config: dict[str, Any], control: object | None
+) -> dict[str, Any]:
+    """Seat *control* as the run's parent runtime so a drain reaches the loop.
+
+    LangGraph 1.2's ``astream_events`` honours its ``control`` keyword only for
+    the v3 event API and drops it for v2, which is what this ingest consumes.
+    The graph loop takes its control from the parent runtime in the config when
+    no keyword reaches it, so that is where it is placed; ``control`` is still
+    passed as a keyword, so a release that forwards it needs no change here.
+    The import of the key is private and deliberately so: a rename then fails at
+    import rather than silently leaving every drain request unheard.
+    """
+    if not isinstance(control, RunControl):
+        return config
+    configurable = dict(config.get("configurable") or {})
+    configurable[CONFIG_KEY_RUNTIME] = Runtime(control=control)
+    return {**config, "configurable": configurable}
 
 
 def summarize_ingest_exception(exc: BaseException) -> str:
@@ -240,6 +269,10 @@ class IngestRequest:
     graph_input: dict[str, Any] | Command[Any] | None
     config: dict[str, Any]
     on_graph_started: Callable[[], Awaitable[None]] | None = None
+    # The graph's LangGraph Runtime context for this invocation.
+    context: object | None = None
+    # The RunControl its worker can ask to drain the run through.
+    control: object | None = None
 
 
 @dataclass(slots=True)
@@ -404,8 +437,10 @@ class IngestManager:
                 # cancellation never depends on the graph yielding another frame.
                 event_stream = graph.astream_events(
                     graph_input,
-                    config,
+                    _config_carrying_control(config, request.control),
                     version="v2",
+                    context=request.context,
+                    control=request.control,
                 ).__aiter__()
                 services = EventProjectionServices(
                     self._emitters, self._buffering, self._telemetry
@@ -529,6 +564,27 @@ class IngestManager:
                 span,
                 (str(exc), "INGEST_STALL_TIMEOUT", True, "ingest_stall_timeout"),
             )
+        if isinstance(exc, NodeTimeoutError):
+            # Reported under the step-timeout code clients already know; the
+            # message is what gains the node and the limit it hit.
+            logger.warning(
+                "Node %s exceeded its %s timeout after %.0fs for thread %s",
+                exc.node,
+                exc.kind,
+                exc.elapsed,
+                thread_id,
+            )
+            return await self._report_ingest_error(
+                identity,
+                span,
+                (
+                    f"Graph node {exc.node!r} exceeded its {exc.kind} timeout "
+                    f"after {exc.elapsed:.0f}s - the operation may be retried",
+                    "STEP_TIMEOUT",
+                    True,
+                    "node_timeout",
+                ),
+            )
         if isinstance(exc, TimeoutError):
             logger.warning("Graph step_timeout fired for thread %s", thread_id)
             return await self._report_ingest_error(
@@ -565,6 +621,14 @@ class IngestManager:
                 detail="Provider cancelled the turn",
             )
             return ThreadStatus.CANCELLED
+        if isinstance(exc, GraphDrained):
+            logger.info(
+                "Graph drained for thread %s at a superstep boundary (%s)",
+                thread_id,
+                exc.reason,
+            )
+            span.set_attribute("drained", True)
+            return INGEST_DRAINED
         if (GraphInterrupt is not None and isinstance(exc, GraphInterrupt)) or (
             exc.__class__.__name__ == "GraphInterrupt"
         ):

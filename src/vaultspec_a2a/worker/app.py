@@ -140,6 +140,20 @@ async def _probe_gateway(bridge: WorkerBridge) -> None:
         )
 
 
+def _shutdown_deadline(app: FastAPI) -> ShutdownDeadline:
+    """The shutdown's one absolute clock, started here if the server did not."""
+    deadline = getattr(app.state, "shutdown_deadline", None)
+    if not isinstance(deadline, ShutdownDeadline):
+        deadline = ShutdownDeadline.start(settings.shutdown_total_timeout_seconds)
+        app.state.shutdown_deadline = deadline
+    return deadline
+
+
+#: Shutdown budget kept back from the run drain for the teardown phases that
+#: follow it: executor shutdown, bridge close, and telemetry flush.
+_DRAIN_RESERVE_SECONDS = 5.0
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Worker lifespan: initialise checkpointer, bridge, executor, heartbeat.
@@ -243,13 +257,18 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             # Shutdown path
             logger.info("Worker %s shutting down", worker_id)
             deregister_serve(worker_record)
+            # Let running graphs stop at a superstep boundary, leaving a
+            # checkpoint that resumes, before whatever is still mid-turn when
+            # the budget runs out is cancelled with the task group.
+            await finish_before(
+                executor.drain("worker shutdown"),
+                _shutdown_deadline(app),
+                phase="worker run drain",
+                reserve=_DRAIN_RESERVE_SECONDS,
+            )
             tg.cancel_scope.cancel()
 
-        deadline = getattr(app.state, "shutdown_deadline", None)
-        if not isinstance(deadline, ShutdownDeadline):
-            deadline = ShutdownDeadline.start(settings.shutdown_total_timeout_seconds)
-            app.state.shutdown_deadline = deadline
-
+        deadline = _shutdown_deadline(app)
         await finish_before(
             executor.shutdown(), deadline, phase="worker executor", reserve=2.0
         )

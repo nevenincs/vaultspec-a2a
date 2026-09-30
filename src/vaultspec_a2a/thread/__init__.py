@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from .errors import PermissionDeniedError as PermissionDeniedError
     from .errors import ProtocolError as ProtocolError
     from .errors import ProviderSessionError as ProviderSessionError
+    from .errors import SupervisorRoutingError as SupervisorRoutingError
     from .errors import TeamConfigNotFoundError as TeamConfigNotFoundError
     from .errors import TokenBudgetExceededError as TokenBudgetExceededError
     from .errors import VaultspecError as VaultspecError
@@ -104,6 +105,7 @@ _LAZY_IMPORTS = {
     "PermissionDeniedError": ".errors",
     "ProtocolError": ".errors",
     "ProviderSessionError": ".errors",
+    "SupervisorRoutingError": ".errors",
     "TeamConfigNotFoundError": ".errors",
     "TokenBudgetExceededError": ".errors",
     "VaultspecError": ".errors",
@@ -169,6 +171,7 @@ __all__ = [
     "ProtocolError",
     "ProviderSessionError",
     "RepairStatus",
+    "SupervisorRoutingError",
     "TeamConfigNotFoundError",
     "TeamState",
     "ThreadStatus",

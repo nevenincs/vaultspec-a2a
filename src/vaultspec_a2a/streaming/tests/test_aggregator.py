@@ -1572,7 +1572,13 @@ class _SilentGraph:
         self._state = state
 
     async def astream_events(
-        self, graph_input: object, config: object, *, version: str
+        self,
+        graph_input: object,
+        config: object,
+        *,
+        version: str,
+        context: object | None = None,
+        control: object | None = None,
     ):
         return
         yield  # make it an async generator
@@ -1598,7 +1604,13 @@ class _InterruptingGraph:
         self._state = state
 
     async def astream_events(
-        self, graph_input: object, config: object, *, version: str
+        self,
+        graph_input: object,
+        config: object,
+        *,
+        version: str,
+        context: object | None = None,
+        control: object | None = None,
     ):
         # Raise a real GraphInterrupt to test the H4 guard in ingest().
         # GraphInterrupt takes a tuple of interrupt values.
@@ -1829,7 +1841,13 @@ class _RecursingGraph:
     """Graph stub that raises GraphRecursionError from astream_events."""
 
     async def astream_events(
-        self, graph_input: object, config: object, *, version: str
+        self,
+        graph_input: object,
+        config: object,
+        *,
+        version: str,
+        context: object | None = None,
+        control: object | None = None,
     ):
         from langgraph.errors import GraphRecursionError
 
@@ -1890,7 +1908,13 @@ class _FailingGraph:
     """
 
     async def astream_events(
-        self, graph_input: object, config: object, *, version: str
+        self,
+        graph_input: object,
+        config: object,
+        *,
+        version: str,
+        context: object | None = None,
+        control: object | None = None,
     ):
         raise RuntimeError(
             "authoring transport error (401 authoring_actor_token_unknown): "
@@ -1910,7 +1934,13 @@ assert issubclass(_FailingGraph, StreamableGraph)  # protocol drift guard
 class _ProviderCancelledGraph(_FailingGraph):
     @override
     async def astream_events(
-        self, graph_input: object, config: object, *, version: str
+        self,
+        graph_input: object,
+        config: object,
+        *,
+        version: str,
+        context: object | None = None,
+        control: object | None = None,
     ):
         raise AcpPromptCancelledError(
             "ACP prompt was cancelled by the agent",
@@ -2384,7 +2414,13 @@ class _StallingGraph:
     """
 
     async def astream_events(
-        self, graph_input: object, config: object, *, version: str
+        self,
+        graph_input: object,
+        config: object,
+        *,
+        version: str,
+        context: object | None = None,
+        control: object | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         await asyncio.sleep(3600)  # never reached under the test's tiny timeout
         yield {}  # pragma: no cover -- make it an async generator
@@ -2438,7 +2474,13 @@ class _LongStepBudgetGraph:
     step_timeout = 0.5
 
     async def astream_events(
-        self, graph_input: object, config: object, *, version: str
+        self,
+        graph_input: object,
+        config: object,
+        *,
+        version: str,
+        context: object | None = None,
+        control: object | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         await asyncio.sleep(0.3)
         yield {

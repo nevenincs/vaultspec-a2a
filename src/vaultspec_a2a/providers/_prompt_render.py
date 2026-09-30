@@ -49,11 +49,12 @@ __all__ = [
     "speaker_label",
 ]
 
-# A content line a model would read as one of the role headings below. Matched
-# loosely - any heading depth, any case, anything after the role word - because
-# a model does not read a heading's spelling as strictly as this layer writes it.
+# A content line that reads as one of the section headings below: the heading
+# depth this layer writes, any case, a role word it writes or a model would take
+# for one. Deeper headings are left alone, because mounted documents use them for
+# their own structure and are shown to the model as written.
 _FORGED_ROLE_HEADING = re.compile(
-    r"^([ \t]{0,3})(#+[ \t]*(?:system|developer|user|human|assistant|ai|tool|"
+    r"^([ \t]{0,3})(#(?!#)[ \t]*(?:system|developer|user|human|assistant|ai|tool|"
     r"function|chat)\b)",
     re.IGNORECASE | re.MULTILINE,
 )

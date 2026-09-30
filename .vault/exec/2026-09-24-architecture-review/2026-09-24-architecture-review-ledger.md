@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:a5bc50d0b232dcb017d3bce6a668215d9f809a5a47fbbc43a4880b86bd9ec667'
+body_hash: 'sha256:c4033c87f6545bb3c4e2f0a7e113fe9637350c124425d982b2805ad9d38e9c98'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -373,6 +373,7 @@ related:
 - `S06` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 - `S13` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 - `S19` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
+- `S27` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 
 ## Notes
 
@@ -402,4 +403,5 @@ related:
 - `S06` In-scope correction from the plan-close review (seated-runtime-also-shadows-the-saver-store, drained-settle-leaves-the-failure-stash-behind, both low).
 - `S13` In-scope correction from the plan-close review (step-id-carried-forward-in-a-test-docstring).
 - `S19` Correction from the fix re-review (requeue-redrive-delay-never-arms): the redrive was never armed when the cadence flush itself failed, stranding the backlog.
+- `S27` Correction from the fix re-review (forged-heading-escape-rewrites-mounted-vault-headings).
 

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast, override
 from langgraph.runtime import RunControl
 from langgraph.types import Command
 
+from ..control.permission_dispatch import answered_permission_request
 from ..domain_config import domain_config
 from ..graph.run_context import RunContext
 from ..ipc.serializers import sequenced_to_dict
@@ -98,6 +99,22 @@ def _recursion_limit(req: DispatchRequest) -> int:
     if definition is None:
         return req.recursion_limit
     return min(req.recursion_limit, definition.recursion_limit)
+
+
+def _answered_permission_update(resume_value: object) -> dict[str, Any]:
+    """The state delta recording a tool-permission answer under its request.
+
+    Carried alongside the resume rather than instead of it: the answer still
+    re-enters through ``Command(resume=...)``, and this is what lets the
+    worker turn that replays afterwards find the answer by the request it
+    answered instead of by the position its interrupts fall in. A resume that
+    is not a tool-permission answer contributes nothing.
+    """
+    answered = answered_permission_request(resume_value)
+    if answered is None:
+        return {}
+    request_id, option_id = answered
+    return {"permission_answers": {request_id: option_id}}
 
 
 def _run_context(req: DispatchRequest, *, action: str) -> RunContext:
@@ -739,6 +756,7 @@ class Executor(SettlementMixin):
                             "model_assignment_digest": model_assignment_digest(
                                 req.model_assignment
                             ),
+                            **_answered_permission_update(req.option_id),
                         },
                     ),
                     config,

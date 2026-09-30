@@ -21,7 +21,10 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from ...api.tests.clarification_harness import new_state_graph
 from ...control.accepted_input import freeze_accepted_input
 from ...control.permission_dispatch import permission_resume_value
-from ...graph.nodes.worker import _interrupt_permission_callback
+from ...graph.nodes.worker import (
+    _permission_callback_for,
+    _recorded_permission_answers,
+)
 from ...providers.team_selection import model_assignment_digest
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -46,6 +49,16 @@ _OPTIONS: list[dict[str, Any]] = [
 ]
 
 
+def _bound_permission_callback(state: Any) -> Any:
+    """The callback the worker node binds, over this run's recorded answers.
+
+    The test graphs bind it exactly as the production node does, so what they
+    exercise is the real request-id lookup rather than a callback that never
+    sees the answers the executor recorded.
+    """
+    return _permission_callback_for(_recorded_permission_answers(state))
+
+
 def _install_two_permission_graph(
     executor: Executor, request: DispatchRequest, answered: dict[str, str]
 ) -> RegisteredCompiledGraph:
@@ -60,11 +73,10 @@ def _install_two_permission_graph(
     """
 
     async def worker_node(state: Any) -> dict[str, Any]:
-        del state
-        answered["Edit"] = await _interrupt_permission_callback(
+        answered["Edit"] = await _bound_permission_callback(state)(
             "Edit", {"path": "a.py"}, _OPTIONS
         )
-        answered["Bash"] = await _interrupt_permission_callback(
+        answered["Bash"] = await _bound_permission_callback(state)(
             "Bash", {"command": "pytest"}, _OPTIONS
         )
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
@@ -210,9 +222,8 @@ def _install_blocking_permission_graph(
     """
 
     async def worker_node(state: Any) -> dict[str, Any]:
-        del state
         answered.append(
-            await _interrupt_permission_callback("Edit", {"path": "a.py"}, _OPTIONS)
+            await _bound_permission_callback(state)("Edit", {"path": "a.py"}, _OPTIONS)
         )
         if past_the_gate is not None:
             running = asyncio.current_task()

@@ -8,28 +8,41 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NoReturn,
+    Protocol,
+    TypedDict,
+    Unpack,
+    cast,
+    override,
+)
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.config import get_config
-from langgraph.errors import GraphBubbleUp
-from langgraph.types import Command, interrupt
+from langgraph.errors import GraphBubbleUp, GraphInterrupt
+from langgraph.types import Command, Interrupt, interrupt
 
 from ...authoring.contract import is_document_authoring_role
 from ...context.anchoring import build_anchoring_context
 from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from ...context.token_budget import compact_context, should_compact
+from ...control.permission_dispatch import answered_permission_request
 from ...domain_config import domain_config
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
 from ...thread.snapshots import stamp_message_created_at
+from ...thread.state import read_untrusted_state_value
 from ..acp_options import option_id_of, valid_option_ids
 from ..run_context import RunContext, run_thread_id
 from ..tools.task_queue import create_mark_task_complete_tool
 from ._config_contract import accepting_runnable_config
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     # Annotation-only: langchain_core.language_models is seconds-expensive at
     # import (it eagerly probes for transformers); the node receives already
     # constructed models and never instantiates one.
@@ -41,6 +54,7 @@ if TYPE_CHECKING:
 
     from ...authoring import FeedbackContextReader
     from ...providers._acp_authoring import AuthoringToolBinding
+    from ...providers._acp_types import PermissionCallback
     from ...thread.state import TeamState
     from ...worker.authoring_binding import AuthoringBindingProvider
     from ..protocols import CostPort, TaskQueuePort
@@ -190,12 +204,18 @@ def _resolve_effective_worker_model(
     *,
     model: BaseChatModel,
     autonomous: bool,
+    answers: Mapping[str, str],
 ) -> BaseChatModel:
-    """Return the invocation model after supervised permission wiring logic."""
+    """Return the invocation model after supervised permission wiring logic.
+
+    *answers* are the permission requests this run has already had answered.
+    They are bound onto the callback because the provider calls it from inside
+    the model turn, where graph state is out of reach.
+    """
     if autonomous or not hasattr(model, "permission_callback"):
         return model
     return model.model_copy(
-        update={"permission_callback": _interrupt_permission_callback}
+        update={"permission_callback": _permission_callback_for(answers)}
     )
 
 
@@ -393,16 +413,18 @@ async def _collect_mock_permission_result(
     response: BaseMessage,
     model: BaseChatModel,
     autonomous: bool,
+    answers: Mapping[str, str],
 ) -> list[ToolMessage]:
     """Resolve a mock-provider permission tool call inside the node context.
 
     This lane exists only for the mock chat model. A real ACP provider never
     reaches here: its permission callback is wired onto the model itself (see
-    :func:`_resolve_effective_worker_model`), so ``_interrupt_permission_callback``
-    raises the interrupt from *inside* ``model.ainvoke`` and no response is
-    produced at all. VidaiMock instead surfaces ``session_request_permission`` as
-    an ordinary tool call, but the LangGraph interrupt must still be raised from a
-    runnable context the graph owns -- so the gate is performed here.
+    :func:`_resolve_effective_worker_model`), so the callback raises the
+    interrupt from *inside* ``model.ainvoke`` and no response is produced at
+    all. VidaiMock instead surfaces ``session_request_permission`` as an
+    ordinary tool call, but the LangGraph interrupt must still be raised from a
+    runnable context the graph owns -- so the gate is performed here, over the
+    same answers the wired lane is bound to.
 
     Only the first permission call in a response is resolved; the interrupt
     suspends the turn, and the resumed turn re-presents any further calls.
@@ -416,7 +438,7 @@ async def _collect_mock_permission_result(
         if tool_call.get("name") != "session_request_permission":
             continue
         tool_input, options = _parse_mock_permission_call(tool_call)
-        selected_option = await _interrupt_permission_callback(
+        selected_option = await _permission_callback_for(answers)(
             "session_request_permission",
             tool_input,
             options,
@@ -466,6 +488,7 @@ class _WorkerToolCallOptions(TypedDict):
     model: BaseChatModel
     autonomous: bool
     config: RunnableConfig | None
+    permission_answers: Mapping[str, str]
 
 
 async def _resolve_worker_tool_calls(
@@ -491,7 +514,10 @@ async def _resolve_worker_tool_calls(
     autonomous = options["autonomous"]
     config = options["config"]
     permission_results = await _collect_mock_permission_result(
-        response=response, model=model, autonomous=autonomous
+        response=response,
+        model=model,
+        autonomous=autonomous,
+        answers=options["permission_answers"],
     )
     queue_results, state_patch = await _collect_queue_tool_results(
         response=response, queue_tool=queue_tool
@@ -639,44 +665,6 @@ def _finalize_worker_response(
     return update
 
 
-def _require_valid_option_id(candidate: object, options: list[dict[str, Any]]) -> str:
-    """Validate a resumed option id and fail closed on malformed input."""
-    valid_ids = valid_option_ids(options)
-    if not valid_ids:
-        raise RuntimeError("Permission resume received no valid option ids")
-    if not isinstance(candidate, str) or not candidate:
-        raise RuntimeError(
-            "Permission resume payload must include a non-empty option_id string"
-        )
-    if candidate not in valid_ids:
-        raise RuntimeError(
-            f"Permission resume payload specified unknown option_id {candidate!r}"
-        )
-    return candidate
-
-
-def _resolve_resume_option_id(
-    resume_value: object,
-    options: list[dict[str, Any]],
-) -> str:
-    """Resolve the resumed option id from a LangGraph interrupt payload."""
-    if isinstance(resume_value, str):
-        return _require_valid_option_id(resume_value, options)
-    if isinstance(resume_value, dict):
-        payload = cast("dict[str, object]", resume_value)
-        candidate = payload.get("option_id")
-        if candidate is None:
-            candidate = payload.get("optionId")
-        return _require_valid_option_id(
-            candidate,
-            options,
-        )
-    raise RuntimeError(
-        "LangGraph interrupt returned an unsupported resume payload type: "
-        f"{type(resume_value).__name__}"
-    )
-
-
 def _permission_request_id(tool_name: str, tool_input: dict[str, Any]) -> str:
     """Name one permission request by its task and by the exact call it asks about.
 
@@ -713,79 +701,129 @@ def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return once or options
 
 
-def _answers_request(resume_value: object, request_id: str) -> bool:
-    """Whether a resume value is the answer to *request_id*.
+def _recorded_permission_answers(state: TeamState) -> Mapping[str, str]:
+    """The run's answered tool-permission requests, narrowed at the boundary.
 
-    A resume that names no request - a bare option id, or one dispatched
-    before answers carried their request - cannot be checked and is taken as
-    it always was.
+    Read through the untrusted-state boundary because the annotation on the
+    channel describes what its reducer produces, not what a checkpoint
+    assembled elsewhere is guaranteed to hold; an entry that is not a pair of
+    non-empty strings names no request and approves no option, so it is
+    dropped rather than offered to a tool call.
     """
-    if not isinstance(resume_value, dict):
-        return True
-    answered = cast("dict[str, object]", resume_value).get("request_id")
-    return answered is None or answered == request_id
-
-
-async def _interrupt_permission_callback(
-    tool_name: str,
-    tool_input: dict[str, Any],
-    options: list[dict[str, Any]],
-) -> str:
-    """Request human approval for an ACP tool call via LangGraph interrupt.
-
-    On first invocation within a node: raises ``GraphInterrupt``, suspending
-    the graph to the checkpointer and surfacing the permission request to the
-    client.  On resume (via ``Command(resume=...)``): returns the human's
-    chosen ``option_id`` without raising.
-
-    A resumed node replays its whole turn, and the provider may ask about a
-    different call than the one the human approved. An answer is therefore
-    bound to the request it was given for: one that names another request is
-    passed over, and the run parks again on the call actually being made, so
-    an approval never lands on a call nobody saw.
-
-    An answer naming the right request but no option this call offers is
-    turned away the same way, rather than raising. ``interrupt()`` records its
-    resume value against the running task before the callback can judge it, so
-    raising would leave that value in place and make every later answer replay
-    the refused one - one malformed answer would end the turn's ability to be
-    approved at all.
-
-    Args:
-        tool_name:  Human-readable name of the tool requesting permission.
-        tool_input: Input parameters the tool was called with.
-        options:    Available permission options from the ACP agent.  Each
-                    dict contains at least ``optionId`` and a label.
-
-    Returns:
-        The chosen ``optionId`` string to send back to the ACP agent.
-    """
-    request_id = _permission_request_id(tool_name, tool_input)
-    offered = _offered_options(options)
-    payload = {
-        "type": "permission_request",
-        "request_id": request_id,
-        "tool_name": tool_name,
-        "tool_input": tool_input,
-        "options": offered,
+    recorded = read_untrusted_state_value(state, "permission_answers")
+    if not isinstance(recorded, dict):
+        return {}
+    return {
+        key: value
+        for key, value in cast("dict[object, object]", recorded).items()
+        if isinstance(key, str) and key and isinstance(value, str) and value
     }
-    while True:
-        resume_value = interrupt(payload)
-        if not _answers_request(resume_value, request_id):
+
+
+def _park_on(payload: dict[str, Any]) -> NoReturn:
+    """Suspend the run on *payload* without asking a second time.
+
+    ``interrupt()`` matches a task's stored resume values to its calls
+    strictly by position, so calling it again to turn an unusable answer away
+    would make the turn's answers depend on the order a replayed provider turn
+    happens to reach its tool calls in. Raising the suspension the call would
+    have raised parks the run on the request actually being made while leaving
+    the count of ``interrupt()`` calls in this execution at one.
+    """
+    namespace = get_config().get("configurable", {}).get("checkpoint_ns", "")
+    raise GraphInterrupt((Interrupt.from_ns(value=payload, ns=namespace),))
+
+
+def _answered_option(
+    answers: Mapping[str, str], request_id: str, offered: list[dict[str, Any]]
+) -> str | None:
+    """The option already chosen for *request_id*, if it is one this call offers.
+
+    An answer recorded for a request whose call now offers other options is
+    treated as unanswered rather than forced through, so a replayed turn that
+    reaches the same call with a different option set asks again.
+    """
+    chosen = answers.get(request_id)
+    if chosen is None:
+        return None
+    if chosen not in valid_option_ids(offered):
+        _logger.warning(
+            "Recorded permission answer %r is not an option this call offers; "
+            "asking again",
+            chosen,
+        )
+        return None
+    return chosen
+
+
+def _permission_callback_for(answers: Mapping[str, str]) -> PermissionCallback:
+    """Bind one worker turn's recorded permission answers to its callback.
+
+    The callback is handed to the provider, which calls it from inside the
+    model turn with no access to graph state, so the answers this turn already
+    has are bound here instead. They are read by request id: a resumed turn
+    replays in full and may reach its tool calls in a different order, and an
+    answer found by the request it was given for reaches the call the human
+    was shown whatever that order turns out to be.
+    """
+
+    async def permission_callback(
+        tool_name: str,
+        tool_input: dict[str, Any],
+        options: list[dict[str, Any]],
+    ) -> str:
+        """Return this call's approved option, or suspend the run for one.
+
+        ``interrupt()`` is reached at most once per node execution: every
+        request this turn has already had answered is resolved from the bound
+        answers without asking, and the first one that has not suspends the
+        run. A value that is not this request's answer never becomes one -
+        the run parks again on the call actually being made, so an approval
+        can never land on a call nobody saw.
+        """
+        request_id = _permission_request_id(tool_name, tool_input)
+        offered = _offered_options(options)
+        already = _answered_option(answers, request_id, offered)
+        if already is not None:
+            return already
+
+        payload = {
+            "type": "permission_request",
+            "request_id": request_id,
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "options": offered,
+        }
+        answered = answered_permission_request(interrupt(payload))
+        if answered is None:
+            # Including a bare option id: an answer that names no request
+            # cannot be shown to belong to this call, and applying it is how
+            # an approval given for one call reaches another.
             _logger.warning(
-                "Permission answer names a different request than the %r call "
-                "now being made; asking again",
+                "Permission answer for the %r call names no request; asking again",
                 tool_name,
             )
-            continue
-        try:
-            return _resolve_resume_option_id(resume_value, offered)
-        except RuntimeError as exc:
+            _park_on(payload)
+        answered_request, option_id = answered
+        if answered_request != request_id:
             _logger.warning(
-                "Permission answer for the %r call was refused (%s); asking again",
+                "Permission answer names request %r, not the %r call now being "
+                "made; asking again",
+                answered_request,
                 tool_name,
-                exc,
             )
+            _park_on(payload)
+        if option_id not in valid_option_ids(offered):
+            _logger.warning(
+                "Permission answer for the %r call chose option %r, which it "
+                "does not offer; asking again",
+                tool_name,
+                option_id,
+            )
+            _park_on(payload)
+        return option_id
+
+    return permission_callback
 
 
 def _attach_authoring_tools(
@@ -981,6 +1019,11 @@ def create_worker_node(
     ) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
         thread_id = run_thread_id(state, runtime)
+        # Every permission request this run has had answered, read once per
+        # execution and bound onto both permission lanes. A replayed turn
+        # finds its earlier approvals here rather than in the order its
+        # interrupts happened to fall in.
+        permission_answers = _recorded_permission_answers(state)
         # The task queue is thread-scoped, so build the mark-complete
         # tool per invocation using the thread_id carried in graph state — the
         # compiled graph is shared across threads and cannot close over it. The
@@ -1014,6 +1057,7 @@ def create_worker_node(
         effective_model = _resolve_effective_worker_model(
             model=model,
             autonomous=settings["autonomous"],
+            answers=permission_answers,
         )
         # Build this role's authoring binding per invoke from the run's thread_id
         # and this worker's agent_id (``name``) - never closed over, so the shared
@@ -1072,6 +1116,7 @@ def create_worker_node(
                 model=effective_model,
                 autonomous=settings["autonomous"],
                 config=attempt_config,
+                permission_answers=permission_answers,
             )
         except GraphBubbleUp:
             raise

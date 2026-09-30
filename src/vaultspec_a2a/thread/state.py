@@ -23,6 +23,7 @@ __all__ = [
     "append_research_findings",
     "append_validation_errors",
     "keep_last_resume_binding",
+    "merge_permission_answers",
     "merge_token_usage",
     "merge_unique_strs",
     "merge_vault_index",
@@ -137,6 +138,23 @@ def merge_unique_strs(
             merged.append(item)
             seen.add(item)
     return merged
+
+
+def merge_permission_answers(
+    existing: dict[str, str],
+    new: dict[str, str],
+) -> dict[str, str]:
+    """Merge answered tool-permission requests, keyed by the request answered.
+
+    Keyed rather than positional because a worker turn replays in full on
+    every resume and the provider may reach its tool calls in a different
+    order; an answer found by its request id reaches the call the human was
+    shown whatever the replay does. Answers accumulate because one turn can
+    need several, and each stays valid for the rest of the turn that asked it.
+    A repeat of the same request id overwrites, which is the correct reading
+    of a re-answered request.
+    """
+    return {**existing, **new}
 
 
 def _merge_clarification_answers(
@@ -295,6 +313,13 @@ class TeamState(TypedDict):
     # dropped on load and never reaches a node.
     approval_status: NotRequired[str | None]
     approval_request_id: NotRequired[str | None]
+
+    # --- tool permission gate ---
+    # Every tool-permission request a human has answered this run, as
+    # ``request id -> chosen option id``. The worker's permission callback
+    # reads it before asking, so a replayed turn takes its earlier answers
+    # from here instead of from the order its interrupts happened to fall in.
+    permission_answers: NotRequired[Annotated[dict[str, str], merge_permission_answers]]
 
     # --- document phase machine ---
     # research_findings: per-thread findings accumulated by the Send-based

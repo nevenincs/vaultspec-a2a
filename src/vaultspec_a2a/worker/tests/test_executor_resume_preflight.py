@@ -19,7 +19,6 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...api.tests.clarification_harness import new_state_graph
 from ...control.permission_dispatch import permission_resume_value
-from ...graph.nodes.worker import _interrupt_permission_callback
 from ...providers.team_selection import model_assignment_digest
 from ...thread.enums import ThreadStatus
 from ..executor import Executor
@@ -29,7 +28,11 @@ from .test_executor import (
     _frames_of,
     _make_recording_bridge,
 )
-from .test_executor_resume_receipts import _OPTIONS, _resume_dispatch
+from .test_executor_resume_receipts import (
+    _OPTIONS,
+    _bound_permission_callback,
+    _resume_dispatch,
+)
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -71,9 +74,8 @@ def _install_gate_behind_a_step(
         return {"messages": [AIMessage(content="ready")]}
 
     async def gate(state: Any) -> dict[str, Any]:
-        del state
         entered.append("gate")
-        decision = await _interrupt_permission_callback(
+        decision = await _bound_permission_callback(state)(
             "Edit", {"path": "a.py"}, _OPTIONS
         )
         entered.append(f"gate:{decision}")
@@ -156,8 +158,7 @@ def _install_single_permission_graph(
     """Compile a real graph parking once on one production permission request."""
 
     async def worker_node(state: Any) -> dict[str, Any]:
-        del state
-        answered["Edit"] = await _interrupt_permission_callback(
+        answered["Edit"] = await _bound_permission_callback(state)(
             "Edit", {"path": "a.py"}, _OPTIONS
         )
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}

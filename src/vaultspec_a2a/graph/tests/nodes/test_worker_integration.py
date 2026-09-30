@@ -196,7 +196,17 @@ async def test_worker_resume_reinvokes_model_with_tool_result() -> None:
     first_result = await graph.ainvoke(_make_state(), config=config)
     assert "__interrupt__" in first_result
 
-    resumed = await graph.ainvoke(Command(resume="approve"), config=config)
+    # The answer names the request it was given for and is recorded under it,
+    # exactly as a dispatched permission response is: an answer that names no
+    # request belongs to no call and is refused.
+    asked = first_result["__interrupt__"][0].value["request_id"]
+    resumed = await graph.ainvoke(
+        Command(
+            resume={"option_id": "approve", "request_id": asked},
+            update={"permission_answers": {asked: "approve"}},
+        ),
+        config=config,
+    )
     final_message = resumed["messages"][-1]
     assert final_message.content == "approved path"
     assert final_message.name == "coder"

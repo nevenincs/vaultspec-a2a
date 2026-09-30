@@ -129,7 +129,10 @@ def _graph(saver: AsyncSqliteSaver, *, pause: bool = False) -> CompiledTeamGraph
     builder.add_edge("work", GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     return _compile_graph(
-        builder, checkpointer=saver, interrupt_before=["work"] if pause else []
+        builder,
+        checkpointer=saver,
+        interrupt_before=["work"] if pause else [],
+        name="recovery-authority-probe",
     )
 
 

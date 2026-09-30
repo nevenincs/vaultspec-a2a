@@ -111,11 +111,18 @@ class _TypedBuilder(Protocol):
         timeout: TimeoutPolicy | None = ...,
     ) -> object: ...
 
+    def set_node_defaults(
+        self,
+        *,
+        timeout: TimeoutPolicy | None = ...,
+    ) -> object: ...
+
     def compile(
         self,
         checkpointer: BaseCheckpointSaver[str] | bool | None = ...,
         *,
         interrupt_before: list[str] | None = ...,
+        name: str | None = ...,
     ) -> object: ...
 
 
@@ -156,22 +163,43 @@ def _add_node(
     )
 
 
+def _set_node_defaults(
+    builder: StateGraph[Any, Any, Any, Any],
+    *,
+    timeout: TimeoutPolicy,
+) -> None:
+    """Apply graph-wide node defaults behind the same typed call boundary.
+
+    Mirrors ``_add_node``: langgraph declares ``cache_policy`` here as a bare
+    ``CachePolicy[Unknown]`` too, so the member read is partially unknown
+    whatever this module passes. Going through the protocol is what makes the
+    one argument this project actually sets a checked argument.
+    """
+    cast("_TypedBuilder", builder).set_node_defaults(timeout=timeout)
+
+
 def _compile_graph(
     builder: StateGraph[Any, Any, Any, Any],
     *,
     checkpointer: BaseCheckpointSaver[str] | None,
     interrupt_before: list[str] | None,
+    name: str,
 ) -> CompiledTeamGraph:
     """Compile ``builder`` behind one fully-typed call boundary.
 
     Mirrors ``_add_node``: langgraph's ``compile`` overloads carry the same
     unresolved ``BaseCheckpointSaver[Unknown]``-shaped defaults in their own
     source, so this is the single place that diagnostic is paid.
+
+    ``name`` is the team the graph was compiled from. Unnamed, every compiled
+    graph reports itself as ``LangGraph``, so a trace, a stream event or a
+    subgraph label could not say which team produced it - and a worker process
+    holds several compiled graphs at once.
     """
     return cast(
         "CompiledTeamGraph",
         cast("_TypedBuilder", builder).compile(
-            checkpointer, interrupt_before=interrupt_before
+            checkpointer, interrupt_before=interrupt_before, name=name
         ),
     )
 
@@ -197,6 +225,11 @@ class CompiledTeamGraph(Protocol):
 
     @property
     def interrupt_before_nodes(self) -> Sequence[str]: ...
+
+    # The team the graph was compiled from, set at compile time. Every runnable
+    # carries a name and an unnamed compiled graph takes langgraph's default,
+    # so a trace holding several of them could not tell them apart.
+    name: str
 
     # The drawable topology, including the edges a ``Command``-routing node
     # declares. It is how a compiled graph's reachability is asserted: a routing
@@ -961,7 +994,7 @@ def compile_team_graph(
     # Every node attempt is capped at the preset's step budget. No idle limit:
     # a provider CLI running a long tool call relays no LangChain callback while
     # it works, so an idle clock would fell agents that are making progress.
-    builder.set_node_defaults(timeout=TimeoutPolicy(run_timeout=step_timeout))
+    _set_node_defaults(builder, timeout=TimeoutPolicy(run_timeout=step_timeout))
     _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
@@ -1038,6 +1071,7 @@ def compile_team_graph(
         builder,
         checkpointer=options.get("checkpointer"),
         interrupt_before=interrupt_nodes,
+        name=str(team_config.id),
     )
 
     graph.step_timeout = step_timeout + STEP_BACKSTOP_GRACE_SECONDS

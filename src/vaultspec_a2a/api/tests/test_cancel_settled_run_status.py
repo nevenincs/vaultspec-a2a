@@ -102,7 +102,12 @@ async def _complete_checkpoint(
     _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
-    graph = _compile_graph(builder, checkpointer=checkpointer, interrupt_before=None)
+    graph = _compile_graph(
+        builder,
+        checkpointer=checkpointer,
+        interrupt_before=None,
+        name="cancel-settled-probe",
+    )
     await graph.ainvoke(
         {
             "active_graph_action_receipt": receipt.model_dump(mode="json"),

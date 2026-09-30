@@ -762,6 +762,30 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
     assert graph.step_timeout == 120.0 + STEP_BACKSTOP_GRACE_SECONDS
 
 
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_compiled_graph_is_named_for_the_team_it_came_from(
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """Every compiled graph says which team produced it.
+
+    The name is what a trace, a stream event and a subgraph label report, and
+    a worker process holds one compiled graph per team at a time. Unnamed they
+    are all ``LangGraph``, so nothing downstream can tell two runs apart by it.
+    """
+    team = load_team_config("vaultspec-solo-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+        await cp.setup()
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=cp,
+            provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
+        )
+    assert graph.name == "vaultspec-solo-coder"
+
+
 def _node_run_timeouts(graph: Any) -> set[float | None]:
     """The run budgets the compiled graph enforces on its user-defined nodes."""
     return {

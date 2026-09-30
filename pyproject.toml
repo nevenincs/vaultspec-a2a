@@ -69,13 +69,15 @@ dependencies = [
   # importing anything. This project orchestrates agents; it runs no model itself
   # and needs no tensor runtime.
   #
-  # Kept out of the base install because it is not free. `vaultspec-rag` pulls
-  # `sentence-transformers`, which pulls `transformers`, and `langchain_core`
-  # imports `transformers` at module scope inside a try/except purely to record
-  # whether it is available - so merely HAVING it installed added roughly thirteen
-  # seconds to any import that reached the language-model package, in a process
-  # that never used a tokenizer.
-  rag = ["torch>=2.4", "vaultspec-rag[mcp]>=0.5.3"]
+  # No `torch` here, deliberately: the `mcp` extra's own published metadata
+  # requires only the `mcp` package, never `torch`, `sentence-transformers`, or
+  # `transformers` - those are gated behind `vaultspec-rag`'s separate `gpu`
+  # extra, which hosts the daemon this stdio client only ever forwards to over
+  # loopback HTTP. Declaring `torch` here bought this project's own install
+  # nothing but the tensor runtime's download weight and its own thirteen-second
+  # tax on `langchain_core`'s optional-import probe, for a package this client
+  # process never imports.
+  rag = ["vaultspec-rag[mcp]>=0.5.3"]
 
   [project.scripts]
   vaultspec-a2a = "vaultspec_a2a.cli.main:main"
@@ -168,27 +170,11 @@ freeze = ["pyinstaller>=6.11", "vaultspec-core>=0.3.2"]
 default-groups = []
 
   [tool.uv.sources]
-  # uv-only project metadata. `tool.uv.sources` is NOT emitted into the wheel's
-  # Requires-Dist, and PEP 508 has no way to express an index, so this override
-  # reaches uv-managed resolution ONLY. A consumer running `pip install
-  # vaultspec-a2a[rag]` against the built wheel resolves torch from the default
-  # index and gets whatever CUDA build PyPI serves, not cu130. Anything that needs
-  # the pinned CUDA build must therefore resolve through the uv-managed lock
-  # rather than wheel metadata; do not restate this override as a property of the
-  # published package.
-  torch = [
-    { index = "pytorch-cu130", extra = "rag", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-  ]
   # Starlette 1.6.0 was released before AnyIO 4.15 began warning on its
   # long-deprecated BlockingPortal alias. This immutable upstream commit includes
   # the reviewed three-access TestClient correction and keeps the locked binary
   # build off the deprecated alias until Starlette publishes it in a release.
   starlette = { git = "https://github.com/Kludex/starlette.git", rev = "bbee894422c6cc1306327335ae385b901ccfec13" }
-
-  [[tool.uv.index]]
-  explicit = true
-  name = "pytorch-cu130"
-  url = "https://download.pytorch.org/whl/cu130"
 
 [tool.vaultspec-rag.mcp-extra]
 # Points at the optional extra, not the base dependency list. The entry was
@@ -407,7 +393,6 @@ known_first_party = ["vaultspec_a2a"]
   # The server extra's psycopg[pool] is what installs psycopg_pool.
   psycopg = ["psycopg", "psycopg_pool"]
   pytest-asyncio = "pytest_asyncio"
-  torch = "torch"
 
   [tool.deptry.per_rule_ignores]
   # DEP002: packages invoked as CLI tools or loaded via URL scheme (not direct Python imports)
@@ -430,8 +415,7 @@ known_first_party = ["vaultspec_a2a"]
     # The server profile loads PostgreSQL drivers through SQLAlchemy URLs.
     "asyncpg",
     "psycopg",
-    # The RAG profile provisions its runtime and MCP service out of process.
-    "torch",
+    # The RAG profile provisions its MCP service out of process.
     "vaultspec-rag",
     # langsmith is the LangGraph/LangChain tracing backend, activated at runtime
     # via LANGCHAIN_TRACING_V2 / LANGSMITH_* env and consumed by the langgraph

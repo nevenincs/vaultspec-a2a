@@ -327,10 +327,18 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
             ],
             "tools": ["search_vault", "search_codebase", "get_code_file"],
             "read_only": True,
-            # Serves the local vault/codebase over stdio. A daemon an operator
-            # starts holding a hosted-ranking key would send search candidates
-            # outward; the launch here never supplies one, and that daemon is
-            # the operator's own configuration rather than a run's.
+            # Serves the local vault/codebase over stdio; the LAUNCHED PROCESS
+            # never speaks to anything but the loopback background daemon it
+            # defers every real call to. That daemon is started independently
+            # of this launch spec, so a daemon an operator starts holding a
+            # hosted-ranking credential (upstream, VAULTSPEC_RAG_TYPESAFE_API_KEY)
+            # sends search candidates to a hosted API for this axis's
+            # declaration to stay true - a fact no launch argument here, the
+            # contract probe, or the served stdio tools expose, so it cannot be
+            # detected and refused the way a version mismatch below can. A
+            # daemon serving this project's root MUST run without that
+            # credential; this is recorded rather than enforced because nothing
+            # reachable from this process can observe it.
             "network_egress": False,
             # The stdio server resolves the project a call addresses from the
             # call's explicit root, then this variable, then the core pin

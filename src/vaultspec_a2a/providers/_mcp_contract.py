@@ -30,6 +30,18 @@ The probe is a short-lived, separate stdio client, not the run's server: the
 run's copy is spawned by the provider CLI as its own child so it inherits that
 root's OS containment. Keeping the probe out of :mod:`._acp_mcp` preserves that
 module's asserted no-spawn invariant.
+
+The one exception to "served tool surface only": vaultspec-rag's stdio server is
+a thin forwarder over a versioned background daemon it does not control, so its
+``tools/list`` answer is a property of the STDIO CLIENT release alone and never
+changes with the daemon's. A daemon running a different release, or one old
+enough to omit its own version report, fails every real search - but not
+``tools/list`` - so admission would otherwise pass a lane already broken end to
+end. :func:`verify_declared_tool_contract` calls one real, side-effect-free tool
+on the same handshake for that one server and classifies the vaultspec-rag
+client's own compatibility verdict, never inventing a signal the protocol does
+not carry: a daemon that is merely absent is unaffected, since the run's own
+tool-call error already names that plainly.
 """
 
 from __future__ import annotations
@@ -42,6 +54,7 @@ from typing import TYPE_CHECKING, TextIO, TypedDict, Unpack
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.types import TextContent
 
 from ..thread.errors import HarnessToolContractError
 from ._config_home_roots import temp_home_root
@@ -56,6 +69,8 @@ from ._subprocess import redact_secrets
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from mcp.types import CallToolResult
 
     from ._json_contract import JsonValue
 
@@ -88,6 +103,28 @@ _probe_lock = asyncio.Lock()
 # slice would put the result back over the very bound it was applied to satisfy.
 _STDERR_TAIL_CHARS = 2000
 _STDERR_ELISION = "..."
+
+# vaultspec-rag's own stdio server name and the one read-only, side-effect-free
+# tool its client uses to learn whether the background daemon it forwards to is
+# even reachable and release-compatible. Keyed by name rather than a new
+# registry axis: this is how the CONTRACT is verified, not what the server
+# declares, and every other registered server is a fresh process per session
+# with no persistent counterpart to drift out of step with.
+_RAG_SERVER_NAME = "vaultspec-rag"
+_RAG_READINESS_TOOL = "get_index_status"
+_READINESS_TOOLS: Mapping[str, str] = {_RAG_SERVER_NAME: _RAG_READINESS_TOOL}
+
+# The stable prefixes of ``vaultspec_rag.serviceclient._compat``'s own
+# compatibility verdict codes (``VERSION_ERROR_MISMATCH`` /
+# ``VERSION_ERROR_UNREPORTED``), reproduced here because every real tool call
+# already raises text carrying one of them once a reachable daemon runs a
+# different release or omits its version report - a fact ``tools/list`` cannot
+# see, since the stdio client serves the same static names regardless of which
+# daemon, if any, answers behind it. Matching the prefix rather than the full
+# sentence keeps this independent of the remediation wording, which names live
+# version numbers that change every release.
+_RAG_VERSION_MISMATCH_PREFIX = "service_version_mismatch:"
+_RAG_VERSION_UNREPORTED_PREFIX = "service_version_unreported:"
 
 
 def _drop_orphaned_combining_marks(text: str) -> str:
@@ -163,6 +200,13 @@ def _launch_args(spec: Mapping[str, JsonValue], *, name: str) -> list[str]:
     return args
 
 
+def _result_text(result: CallToolResult) -> str:
+    """Return the concatenated text content of one real tool call result."""
+    return "".join(
+        block.text for block in result.content if isinstance(block, TextContent)
+    )
+
+
 async def _served_tool_names(
     *,
     command: str,
@@ -170,8 +214,17 @@ async def _served_tool_names(
     env: Mapping[str, str] | None,
     timeout: float,
     captured_stderr: TextIO,
-) -> frozenset[str]:
-    """Launch the server over stdio and return the tool names it advertises."""
+    readiness_tool: str | None,
+) -> tuple[frozenset[str], str | None]:
+    """Launch the server over stdio; return its tools and a readiness failure.
+
+    *readiness_tool*, when given and actually served, is called on this SAME
+    handshake rather than a second connection - the launch cost this function's
+    caller already pays (``uvx`` resolution included) is paid once whichever way.
+    Only a FAILED call's text is returned: a successful call carries nothing
+    this module classifies, and an absent readiness tool or one the server does
+    not serve leaves the daemon side unobserved rather than refused.
+    """
     params = StdioServerParameters(
         command=command,
         args=list(args),
@@ -184,7 +237,30 @@ async def _served_tool_names(
         ):
             await session.initialize()
             listed = await session.list_tools()
-            return frozenset(tool.name for tool in listed.tools)
+            served = frozenset(tool.name for tool in listed.tools)
+            diagnostic: str | None = None
+            if readiness_tool is not None and readiness_tool in served:
+                result = await session.call_tool(readiness_tool, {})
+                if result.is_error:
+                    diagnostic = _result_text(result)
+            return served, diagnostic
+
+
+def _rag_incompatibility_reason(diagnostic: str) -> str | None:
+    """Classify one real readiness failure as a fail-closed refusal, or not.
+
+    Only the vaultspec-rag client's own compatibility verdict is actionable
+    here: a daemon that is merely unreachable, or a failure unrelated to
+    release compatibility, describes daemon-side operator state this
+    admission check has no business refusing - a daemon started (or upgraded)
+    a moment later would put either right without this launch spec, the
+    registry, or the run itself changing anything.
+    """
+    if _RAG_VERSION_MISMATCH_PREFIX in diagnostic:
+        return "runs a different vaultspec-rag release than this stdio client"
+    if _RAG_VERSION_UNREPORTED_PREFIX in diagnostic:
+        return "does not report a vaultspec-rag release this client can confirm"
+    return None
 
 
 def _tool_contract_differences(
@@ -222,6 +298,7 @@ class _VerifyDeclaredToolContractOptions(
     withheld: Sequence[str]
     env: Mapping[str, str] | None
     timeout: float
+    readiness_tool: str | None
 
 
 async def verify_declared_tool_contract(
@@ -241,12 +318,24 @@ async def verify_declared_tool_contract(
     command is absent, the handshake fails or times out) is the same refusal:
     an unverifiable contract is an unmet one.
 
+    *readiness_tool*, when given, names one already-declared, side-effect-free
+    tool called on this same handshake whose FAILURE text is checked for a
+    known compatibility-verdict prefix (currently vaultspec-rag's own
+    ``service_version_mismatch:`` / ``service_version_unreported:`` - see the
+    module docstring) and refused if found. This exists for the one kind of
+    server whose ``tools/list`` answer is the stdio client's own static
+    declaration and never reflects a versioned background daemon it forwards to
+    - a fact no listing can carry. A daemon that is simply not running, or any
+    other failure, is left admitted: that failure names itself plainly the
+    moment a real call is attempted, and is not this check's to pre-empt.
+
     Verification is memoized per launch identity for the process lifetime, so the
     per-session cost is paid once rather than per run.
 
     Raises:
-        HarnessToolContractError: If a declared tool is not served, or the probe
-            could not be completed.
+        HarnessToolContractError: If a declared tool is not served, the probe
+            could not be completed, or a reachable daemon reports itself
+            incompatible with the launched client.
     """
     name = options["name"]
     command = options["command"]
@@ -256,6 +345,7 @@ async def verify_declared_tool_contract(
     withheld = options.get("withheld", ())
     env = options.get("env")
     timeout = options.get("timeout", CONTRACT_PROBE_TIMEOUT_SECONDS)
+    readiness_tool = options.get("readiness_tool")
     key = (command, tuple(args), tuple(declared), tuple(withheld), exact_surface)
     if key in _verified:
         return
@@ -278,12 +368,13 @@ async def verify_declared_tool_contract(
             errors="replace",
         ) as captured_stderr:
             try:
-                served = await _served_tool_names(
+                served, readiness_diagnostic = await _served_tool_names(
                     command=command,
                     args=args,
                     env=env,
                     timeout=timeout,
                     captured_stderr=captured_stderr,
+                    readiness_tool=readiness_tool,
                 )
             except Exception as exc:
                 # ``asyncio.timeout`` surfaces its deadline as ``TimeoutError``
@@ -337,6 +428,18 @@ async def verify_declared_tool_contract(
                     f"argument, or the registry declaration is stale."
                     f"{_stderr_tail(captured_stderr)}"
                 )
+
+            if readiness_diagnostic is not None:
+                reason = _rag_incompatibility_reason(readiness_diagnostic)
+                if reason is not None:
+                    raise HarnessToolContractError(
+                        f"harness MCP server {name!r} {reason}: "
+                        f"{readiness_diagnostic} Launched as {launch!r}, its "
+                        f"served tools already match the declaration, but every "
+                        f"real search through this client fails the same way the "
+                        f"daemon just reported, so the lane is refused before an "
+                        f"agent is handed grounding tools that cannot work."
+                    )
         _verified.add(key)
 
 
@@ -392,4 +495,5 @@ async def verify_harness_mcp_contract(
             withheld=withheld_harness_tools(name),
             env=env,
             timeout=timeout,
+            readiness_tool=_READINESS_TOOLS.get(name),
         )

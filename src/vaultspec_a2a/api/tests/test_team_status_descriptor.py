@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, cast
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.team_service import build_team_status
@@ -37,6 +36,7 @@ from ...team.team_config import (
     WorkerRef,
     load_agent_config,
 )
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ..event_adapter import domain_to_wire
 from ..schemas.events import TeamStatusEvent
@@ -44,6 +44,8 @@ from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+    from langchain_core.runnables import RunnableConfig
 
     from ...streaming.types import StreamableGraph
 
@@ -149,10 +151,13 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
     )
 
     await checkpointer.setup()
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{thread_id}"
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},

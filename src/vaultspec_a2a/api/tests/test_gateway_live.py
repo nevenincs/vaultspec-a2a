@@ -47,6 +47,7 @@ from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...testing.tests._support.catalog_selection import in_process_selection
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -58,6 +59,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 
     from fastapi import FastAPI
+    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -554,8 +556,6 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The TCP gateway projects one real stored tuple without a second latest read."""
-    from langgraph.checkpoint.base import empty_checkpoint
-
     from ...database.thread_repository import create_thread
     from ...thread.enums import ThreadStatus
 
@@ -573,7 +573,10 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
         )
         await session.commit()
 
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = "checkpoint-coherent"
     checkpoint["channel_values"].update(
         {
@@ -584,7 +587,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
         }
     )
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},
@@ -1174,13 +1177,14 @@ async def test_run_status_carries_reconnect_cursor(
     since a reconnecting client only ever reads run-status after a run has
     already ended.
     """
-    from langgraph.checkpoint.base import empty_checkpoint
-
     from ...control.event_handlers import _handle_terminal_event
     from ...thread.action_receipts import GraphCompletionReceipt
 
     run_id, receipt = await _seed_live_thread(session_factory, title="cursor")
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": run_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{run_id}"
     checkpoint["channel_values"] = {
         "active_graph_action_receipt": receipt.model_dump(mode="json"),
@@ -1194,12 +1198,12 @@ async def test_run_status_carries_reconnect_cursor(
         },
     }
     checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": 1,
-        "graph_action_receipts": 1,
-        "graph_completion_receipts": 1,
+        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
+        "graph_action_receipts": checkpointer.get_next_version(None, None),
+        "graph_completion_receipts": checkpointer.get_next_version(None, None),
     }
     await checkpointer.aput(
-        {"configurable": {"thread_id": run_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         checkpoint["channel_versions"],

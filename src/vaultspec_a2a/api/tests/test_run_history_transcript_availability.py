@@ -19,15 +19,16 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 
 from ...database import update_thread_status
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus, TranscriptAvailability
 from .conftest import async_catalog_run_fields, make_app
 from .test_gateway_drain import _relay_terminal, _RelayContext
 from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -231,10 +232,13 @@ async def test_a_run_with_a_real_checkpoint_reports_its_transcript_available(
         # A real checkpoint for this run, written through the same checkpointer
         # instance the app reads - the production read path, not a stand-in.
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {"thread_id": run_id, "checkpoint_ns": ""}
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-hist-present-01"
         await checkpointer.aput(
-            {"configurable": {"thread_id": run_id, "checkpoint_ns": ""}},
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},

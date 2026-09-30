@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import httpx
@@ -13,7 +13,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
@@ -52,6 +51,7 @@ from ...database.session import configure_sqlite_transactions
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
@@ -59,6 +59,9 @@ from ...thread.enums import ControlActionResultStatus, ControlActionType, Thread
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ...worker.ipc import WorkerBridge
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +144,10 @@ async def _seed_unapplied_leased_action(
         session, thread_id=thread_id, dispatch_id=dispatch_id
     )
     assert receipt is not None
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint_id = uuid4().hex
     checkpoint["id"] = checkpoint_id
     checkpoint["channel_values"] = {
@@ -158,13 +164,15 @@ async def _seed_unapplied_leased_action(
             receipt.dispatch_id: completion.model_dump(mode="json")
         }
     checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": 1,
-        "graph_action_receipts": 1,
+        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
+        "graph_action_receipts": checkpointer.get_next_version(None, None),
     }
     if spec.completed:
-        checkpoint["channel_versions"]["graph_completion_receipts"] = 1
+        checkpoint["channel_versions"]["graph_completion_receipts"] = (
+            checkpointer.get_next_version(None, None)
+        )
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         checkpoint["channel_versions"],

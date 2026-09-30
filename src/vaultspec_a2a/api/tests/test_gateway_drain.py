@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 from httpx import ASGITransport
-from langgraph.checkpoint.base import empty_checkpoint
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -26,6 +25,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ...control.drain import DrainGate
 from ...database import get_control_action_by_dispatch_id, get_thread
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.dispatch_policy import FailureType
@@ -38,6 +38,7 @@ from .test_gateway_live import _live_server
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _PRESET = "mock-success-single"
@@ -115,7 +116,10 @@ async def _relay_terminal(
             )
             assert action is not None and action.graph_receipt_json is not None
             receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {"thread_id": run_id, "checkpoint_ns": ""}
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = f"cp-drain-{run_id}"
         checkpoint["channel_values"] = {
             "active_graph_action_receipt": receipt.model_dump(mode="json"),
@@ -131,12 +135,12 @@ async def _relay_terminal(
             },
         }
         checkpoint["channel_versions"] = {
-            "active_graph_action_receipt": 1,
-            "graph_action_receipts": 1,
-            "graph_completion_receipts": 1,
+            "active_graph_action_receipt": checkpointer.get_next_version(None, None),
+            "graph_action_receipts": checkpointer.get_next_version(None, None),
+            "graph_completion_receipts": checkpointer.get_next_version(None, None),
         }
         await checkpointer.aput(
-            {"configurable": {"thread_id": run_id, "checkpoint_ns": ""}},
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             checkpoint["channel_versions"],

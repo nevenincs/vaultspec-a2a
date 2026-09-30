@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING
 import pytest
 from alembic import command
 from alembic.config import Config
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from ...tests._checkpoint_seeding import real_checkpoint
 from ..checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
     install_checkpoint_schema_identity,
@@ -378,11 +378,11 @@ class TestIncompatibleStoresFailLoud:
     ) -> None:
         """A structurally compatible store with legacy state is rejected."""
         primary, checkpoint = await _make_compatible_stores(runtime_dir)
-        legacy = empty_checkpoint()
-        legacy["channel_values"] = {"messages": []}
         config: RunnableConfig = {
             "configurable": {"thread_id": "legacy-thread", "checkpoint_ns": ""}
         }
+        legacy = await real_checkpoint()
+        legacy["channel_values"] = {"messages": []}
         async with AsyncSqliteSaver.from_conn_string(str(checkpoint)) as checkpointer:
             await checkpointer.aput(config, legacy, {}, {})
 

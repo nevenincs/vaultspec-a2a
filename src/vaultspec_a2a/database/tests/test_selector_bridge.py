@@ -25,8 +25,9 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from langgraph.checkpoint.base import BaseCheckpointSaver, empty_checkpoint
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from ...tests._checkpoint_seeding import real_checkpoint
 from ..checkpoints import (
     _open_selector_thread_checkpointer,
     _SelectorThreadPostgresCheckpointer,
@@ -145,7 +146,7 @@ async def test_the_synchronous_surface_answers_instead_of_refusing_itself(
     lives.
     """
     thread_id = f"selector-sync-{uuid4().hex}"
-    checkpoint = empty_checkpoint()
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{uuid4().hex}"
 
     def synchronous_round_trip() -> tuple[Any, list[Any]]:
@@ -209,7 +210,7 @@ async def test_narrowing_the_allowlist_clones_the_bridge(
 
     # The clone is a working saver, on the same thread and pool.
     thread_id = f"selector-allowlist-{uuid4().hex}"
-    checkpoint = empty_checkpoint()
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{uuid4().hex}"
     try:
         await narrowed.aput(

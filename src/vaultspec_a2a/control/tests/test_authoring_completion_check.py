@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -29,10 +28,13 @@ from ...conftest import materialize_schema
 from ...control.thread_state_service import capture_thread_state
 from ...database import create_thread
 from ...streaming.aggregator import EventAggregator
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from ...thread.snapshots import ThreadStateData
 
 
@@ -76,12 +78,15 @@ async def _seed_completed_thread(
 ) -> None:
     """Seed a thread whose checkpoint carries the given authoring id lists."""
     await checkpointer.setup()
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": seed.thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{seed.thread_id}"
     checkpoint["channel_values"]["authoring_proposal_ids"] = seed.proposal_ids
     checkpoint["channel_values"]["authoring_changeset_ids"] = seed.changeset_ids
     await checkpointer.aput(
-        {"configurable": {"thread_id": seed.thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},

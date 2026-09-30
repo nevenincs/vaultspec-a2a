@@ -1,19 +1,31 @@
 name: Migration Check
 
+#
+# ONLY TRUSTED AUTHORS REACH THE FLEET. This job checks out a pull request's own
+# tree and runs its migrations on a self-hosted runner, so it runs for a pull
+# request only when the author is the owner or a collaborator, or once a user -
+# never a bot - has applied `ci:full`. A fork's pull request runs the fork's own
+# copy of this file, so the fork clause only backs up the repository's approval
+# requirement for outside contributors; for every other author the author clause
+# is the control itself. Nothing here is a required check, so a skip is the
+# intended outcome rather than a verdict to be recovered.
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
 
 permissions:
   contents: read
 
 concurrency:
-  group: migrations-${{ github.workflow }}-${{ github.ref }}
+  group: migrations-${{ github.workflow }}-${{ github.ref }}-${{ github.event.label.name || github.event_name }}
   cancel-in-progress: true
 
 jobs:
   migrate:
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && ((github.event.action != 'labeled' && (github.event.pull_request.author_association == 'OWNER' || github.event.pull_request.author_association == 'COLLABORATOR')) || (github.event.action == 'labeled' && github.event.label.name == 'ci:full' && github.event.sender.type == 'User'))) }}
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:

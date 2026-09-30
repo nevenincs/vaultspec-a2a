@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:2cb076e74f0ae77bb94d91adaab3ad054a2a9b1d8263bceaa5d3be823c6c83e3'
+body_hash: 'sha256:2a2cae9ac1c8653095397e7237efa5b5f8d54d2385eb95455c32349cfaf391b1'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -418,6 +418,26 @@ Fixed as a P07.S37 correction (commit `1d086f0`). The docstring now says the pro
 ### stale-audit-entries-closed | info | several open entries were already fixed by later Steps
 
 Recorded from the plan-close review. `blocked-finish-reason-is-dropped-when-the-reroute-needs-approval` and `star-topology-never-clears-validation-errors` were fixed by P07.S36. `plan-approval-is-skipped-when-a-soft-phase-gate-warns` was fixed by P07.S42. `finish-block-budget-outruns-a-small-recursion-limit` was superseded by the compile-time refusal of S36. `retention-tests-duplicate-helpers` was fixed by P07.S39. `repark-receipt-never-durable` is closed by S34 and its reopen above. Each earlier entry's opening status line stands as it was written; this entry closes them.
+
+## Re-review of the plan-close fixes, 2026-09-30
+
+An independent re-review of `150b0b9..b0f2bd3` passed. It confirmed the S34 reporter fires once per dispatch and never early, and fires on neither an incompatible nor a prior-action checkpoint; the gateway accepts every checkpoint id the reporter now sends. It confirmed the no-proposal gate branch is a backstop the submit ordering never reaches, and that the streaming refactor holds no per-run state. One medium and three lows followed, all resolved.
+
+### unavailable-checkpoint-reads-as-receipt-not-due | medium | a failed checkpoint read was logged as a receipt not yet due
+
+Fixed as a P07.S34 correction (commit `0804ef0`). `read_checkpoint_evidence` turns every read failure into an unavailable verdict, and the reporter logged it at debug as a checkpoint not yet carrying the dispatch, where the committed-values reporter had warned. The reporter now warns with the `dispatch_application_receipt_failed` action for an unavailable read. `test_an_unreadable_checkpoint_is_reported_as_a_failed_receipt` fails without it.
+
+### failed-turn-resume-settles-ahead-of-its-terminal | low | an answer applied by a turn that then failed moved the finished run back to running
+
+Fixed by P07.S45 (commit `400efd9`). Evidence-based reporting reports a resume whose turn failed after consuming the answer, and `commit_proven_application` in `src/vaultspec_a2a/control/_event_application.py` then moved the thread to RUNNING, an illegal transition once the FAILED terminal had landed. The reviewer traced it through source; `test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_failed` executes it and reproduced the `InvalidTransitionError`. The permission still settles; a finished run keeps its status.
+
+### gate-comment-overstates-the-resume-preflight | low | the no-proposal branch credited the preflight with a guarantee the verdict binding provides
+
+Fixed as a P02.S13 correction (commit `e2b5e2d`). The preflight admits an answer naming no request; it is `verdict_answers_request` that refuses every unbound verdict, so a park could only end in the rejection the branch takes directly. The comment now says so. The same correction applies to `document-gate-without-a-proposal-id-is-unanswerable` above.
+
+### baseexception-resolution-is-narrower-than-its-claim | low | the not-reproducing verdict holds for SystemExit and KeyboardInterrupt only
+
+Correction to `ingest-still-classifies-baseexception-as-a-provider-failure`. Asyncio's task step re-raises `SystemExit` and `KeyboardInterrupt` out of the loop, so the verdict stands for those two, from sync and async nodes alike. Any other non-`Exception` `BaseException` subclass raised by a node does reach the catch-all in `src/vaultspec_a2a/streaming/ingest.py`, is classified as a provider failure and is swallowed; the reviewer probed it with a bare subclass. No such subclass exists in this package, LangGraph, langchain-core or anyio, so nothing exercises it today. Recommendation: if the catch-all is revisited, re-raise non-`Exception` exceptions after classification rather than returning FAILED.
 
 ## Recommendations
 

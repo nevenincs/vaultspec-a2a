@@ -51,6 +51,27 @@ SAME_REPOSITORY = "github.event.pull_request.head.repo.full_name == github.repos
 VERDICT_JOB = ("merge-gate.yml", "gate")
 
 
+#: Events anyone can raise by writing on an issue, a pull request or a
+#: discussion, mapped to the payload object whose author association decides
+#: whether a job may start from them.
+WRITTEN_EVENTS = {
+    "issue_comment": "comment",
+    "pull_request_review_comment": "comment",
+    "pull_request_review": "review",
+    "issues": "issue",
+    "discussion": "discussion",
+    "discussion_comment": "comment",
+}
+
+
+def _trusted(subject: str) -> str:
+    """Return the trust clause over the author of *subject* in the payload."""
+    return (
+        f"(github.event.{subject}.author_association == 'OWNER' || "
+        f"github.event.{subject}.author_association == 'COLLABORATOR')"
+    )
+
+
 def _workflow(path: Path) -> dict[str, Any]:
     loaded = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert isinstance(loaded, dict)
@@ -186,3 +207,40 @@ def test_the_gate_always_reaches_a_verdict_and_refuses_an_untrusted_author() -> 
     assert "|| true" in str(release["run"]), (
         "a label another run already removed must not redden the gate"
     )
+
+
+def test_only_a_trusted_author_can_start_a_job_by_writing_something() -> None:
+    """A comment, a review or an issue starts a job only for a trusted author.
+
+    Anyone can comment on a public issue or review a pull request, and a job
+    started from that event runs on the self-hosted fleet with whatever the
+    workflow grants it. The pull-request trust rule above never sees these
+    workflows, so each event such a workflow listens to must name its own
+    author's association - the comment's, the review's or the issue's - as the
+    owner's or a collaborator's.
+
+    Mutation proof: replacing the review author clause in claude.yml with
+    `true` makes this fail naming `pull_request_review`; restoring it makes
+    this pass.
+    """
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        workflow = _workflow(path)
+        events = [event for event in WRITTEN_EVENTS if event in workflow["on"]]
+        if not events:
+            continue
+        for job_id, job in cast("dict[str, Any]", workflow["jobs"]).items():
+            condition = " ".join(str(job.get("if", "")).split())
+            where = f"`{job_id}` in {path.name}"
+            for event in events:
+                assert f"github.event_name == '{event}'" in condition, (
+                    f"{where} does not say which condition applies to {event}, "
+                    f"so it may start for anyone who raises one"
+                )
+                assert _trusted(WRITTEN_EVENTS[event]) in condition, (
+                    f"{where} starts on {event} for an author who is neither "
+                    f"the owner nor a collaborator"
+                )
+            assert "MEMBER" not in condition, (
+                f"{where} admits MEMBER, which this personal account never "
+                f"grants, so it can only widen the rule"
+            )

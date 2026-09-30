@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:f2a96b72fd54c1bf719552e6815dbfdcfc255b09143ed56b3a8f354f54f10d25'
+body_hash: 'sha256:fd15cc19775db0c442158cae048adbef2fb46139461ff65f01a51d2fcc38fc37'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -206,6 +206,38 @@ A mismatched clarification answer raises `ValueError` (`src/vaultspec_a2a/thread
 ### unbound-bare-answer | low | a permission answer naming no request is applied to whatever call is asking
 
 `_answers_request` accepts a value with no request id (`src/vaultspec_a2a/graph/nodes/worker.py:716-726`), a compatibility path `2026-08-02-control-action-leases-adr` forbids.
+
+### vaultspec-framework-behind | high | the lock held vaultspec-core 0.2.2 and vaultspec-rag 0.4.25 while the framework moved five releases on
+
+Fixed in P05.S29 and P05.S30. The `<0.3` cap never protected the core MCP lane: `uvx` resolves the latest release, whose executable was renamed to `vaultspec-core-mcp` in 0.2.4, so the registry's `vaultspec-mcp` launch only worked where `uvx` fell back to the project `.venv`'s 0.2.2 binary on PATH, and 0.3.2's read-only launch also serves `search` and `crossref`, which the exact-surface contract refused. Core now installs at 0.3.2 with its migrations (`trigger_split`, `commit_gate`) and builtin upgrade applied, rag at 0.5.3, both without an upper bound; the two open-world core tools are withheld on every lane (`src/vaultspec_a2a/providers/_harness_mcp_registry.py`, `harness_tool_is_withheld`), per the user's decision to serve but never permit them.
+
+### rag-daemon-hosted-ranking-egress | medium | a rag daemon started with a hosted-ranking key sends search candidates off the host
+
+Open. Since vaultspec-rag 0.4.34 a daemon holding `VAULTSPEC_RAG_TYPESAFE_API_KEY` sends candidates to a hosted API for every root it serves, while the registry declares the rag entry `network_egress: False`. The run's launch never supplies the key; the daemon is operator configuration the contract probe cannot see (`tools/list` passes either way). Recommendation: probe the daemon's reported hosted-ranking state before admitting the lane, or record that operator daemons must run without the key.
+
+### rag-client-daemon-version-skew | low | an unpinned rag client and an older running daemon fail every search while the contract passes
+
+Open. The 0.5.3 client requires the exact daemon release and a `readiness` field older daemons do not send; the registry deliberately leaves the rag requirement unpinned, so the next release reaches `uvx` while a running daemon stays behind, and `src/vaultspec_a2a/providers/_mcp_contract.py` verifies only `tools/list`.
+
+### rag-extra-carries-unused-torch | low | the rag extra installs torch that the MCP client never uses
+
+Open. `pyproject.toml` declares `rag = ["torch>=2.4", "vaultspec-rag[mcp]>=0.5.3"]`; the stdio client runs without torch on both releases, rag 0.5.3's own shipped spec dropped `[gpu]` from the MCP install, and hosting a daemon needs the `gpu` extra plus CUDA or MPS rather than torch alone.
+
+### submitter-link-stripping-drift | low | the authoring submitter mirrors core's body-link stripping with regexes core has replaced
+
+Open. `src/vaultspec_a2a/authoring/submitter.py:94-106` reproduces core's link stripping, which 0.3.2 performs with a CommonMark-aware reader (`vaultspec_core/vaultcore/links.py`); edge-case documents may now be judged differently on each side.
+
+### framework-advertises-hosted-search | low | the upgraded framework guidance tells agents to use hosted search this project withholds
+
+Open. The 0.3.2 builtin rules, skills and personas direct agents to `vault search`, `vault adr crossref` and the MCP `search`/`crossref` tools. They do not reach a2a's own agent prompts (`src/vaultspec_a2a/context/rules.py` excludes `*.builtin.md`), but a developer session following them on this repository would send vault text to the hosted API if a key is configured.
+
+### retired-example-trigger | low | an example trigger with a retired event warns on every sync
+
+Open. The `trigger_split` migration moved `.vaultspec/hooks/example-audit-on-create.yaml` to `.vaultspec/triggers/`; its `vault.document.created` event was retired in 0.2.4 and never fired. It is the user's policy source, so it is left for them to delete.
+
+### legacy-empty-checkpoint-fixtures | low | test fixtures seed checkpoints with LangGraph's deprecated helper
+
+Owned by P05.S32. 22 test files call `langgraph.checkpoint.base.empty_checkpoint`, which the library lists among "deprecated utilities used by past versions" and which writes checkpoint format 2 while the runtime writes format 4.
 
 ## Recommendations
 

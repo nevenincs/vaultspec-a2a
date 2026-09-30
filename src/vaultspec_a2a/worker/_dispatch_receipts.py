@@ -6,7 +6,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..ipc.schemas import DispatchApplicationReceiptPayload
-from ..thread.checkpoint_evidence import read_checkpoint_evidence
+from ..thread.checkpoint_evidence import (
+    CheckpointEvidenceKind,
+    read_checkpoint_evidence,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,6 +67,22 @@ class DispatchReceiptReporter:
                 receipt,
                 timeout_seconds=checkpoint_read_timeout_seconds,
             )
+            if evidence.kind is CheckpointEvidenceKind.UNAVAILABLE:
+                # A read that failed says nothing about the checkpoint, and if
+                # both reads a run makes fail the gateway never settles the
+                # action, so this is a failure to report, not a receipt that
+                # is merely not due yet.
+                logger.warning(
+                    "Could not read the checkpoint to prove dispatch %s for "
+                    "thread %s was applied",
+                    req.dispatch_id,
+                    req.thread_id,
+                    extra=dispatch_log_extra(
+                        req,
+                        action="dispatch_application_receipt_failed",
+                    ),
+                )
+                return
             if not evidence.incorporated or evidence.checkpoint_id is None:
                 logger.debug(
                     "No committed loop checkpoint carries dispatch %s for "

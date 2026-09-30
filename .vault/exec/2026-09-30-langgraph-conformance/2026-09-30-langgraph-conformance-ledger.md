@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:c9eecee38c289142a8622ddc0591d0c19a45a1f623d6fc46dc2e3e094a4b979d'
+body_hash: 'sha256:476869af9450778c5e0f22a126f902b82a015515afb5cea05dc2e4e692c91645'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -444,6 +444,7 @@ related:
 - `S18` `by:` `orchestrator`
 - `S37` `verify:` `pytest src/vaultspec_a2a/providers/tests/test_mcp_contract.py` -> `pass`
 - `S37` `by:` `orchestrator`
+- `S34` `verify:` `pytest src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py` -> `pass`
 
 ## Notes
 
@@ -486,3 +487,4 @@ related:
 - `S34` Reopened by the plan-close review: the pending-write fold was unreachable because the worker never emitted a receipt for a resume that only asks again.
 - `S13` Correction from the plan-close review: the no-proposal fail-closed branch was unreachable through the resume preflight.
 - `S18` Correction from the plan-close review: the aggregator's projection seams had no production caller.
+- `S34` Correction from the re-review: an unavailable checkpoint read was logged as a receipt not yet due.

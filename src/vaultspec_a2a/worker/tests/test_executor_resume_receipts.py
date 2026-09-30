@@ -31,6 +31,7 @@ from ...thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
+from .._dispatch_receipts import DispatchReceiptReporter
 from ..executor import Executor
 from .test_executor import (
     _current_ingest_dispatch,
@@ -248,6 +249,44 @@ async def test_a_resume_that_only_asks_again_reports_its_application() -> None:
         finally:
             await bridge.close()
             await executor.shutdown()
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_an_unreadable_checkpoint_is_reported_as_a_failed_receipt(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A read that fails is a receipt failure, not a receipt that is not due.
+
+    Both reads a run makes can fail, and then the gateway never settles the
+    action; a debug line saying the checkpoint does not carry the dispatch yet
+    would blame the checkpoint's contents for what was an unreachable store.
+    """
+    relayed: list[dict[str, Any]] = []
+    bridge = _make_bridge(relayed=relayed)
+    request = _current_ingest_dispatch("receipt-unreadable")
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as closed:
+        await closed.setup()
+    try:
+        with caplog.at_level("WARNING", logger="vaultspec_a2a.worker.executor"):
+            await DispatchReceiptReporter().report(
+                request,
+                closed,
+                bridge,
+                5.0,
+                lambda req, **fields: {"thread_id": req.thread_id, **fields},
+            )
+        await bridge.flush_events()
+    finally:
+        await bridge.close()
+
+    assert relayed == []
+    failures = [
+        record
+        for record in caplog.records
+        if getattr(record, "action", None) == "dispatch_application_receipt_failed"
+    ]
+    assert len(failures) == 1
+    assert failures[0].levelname == "WARNING"
 
 
 def _install_blocking_permission_graph(

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:3cf931747b9f18dd6b6e70b48559a5de5d43d9f9978bf6a78e3cc521ff6193e1'
+body_hash: 'sha256:8aebd73387b37ec866eefab45d83340aafe64299c3e8986d5058efa3485adcbd'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -486,3 +486,31 @@ Status: open from P04.S28. The ACP early-exit error carries the child's stderr t
 ### acp-simulator-advertises-no-modes | low | an autonomous session warns rather than refuses when a lane advertises no modes
 
 Status: open from P04.S22. The pinned adapter always advertises modes, but the in-repo simulator (`src/vaultspec_a2a/graph/tests/acp_simulator.py`) does not, so tightening the warning to a refusal needs a `modes` block in the simulator first.
+
+### fix-re-review | low | the re-review of the plan-close fixes passes
+
+Status: recorded. An independent re-review of the fixes above verified that each closes the finding it names, including the shutdown ordering of the prune wait inside the checkpointer's scope and the seated runtime's merge with the run's own context, and found no critical or high finding. Its findings follow.
+
+### requeue-redrive-never-armed | medium | a backlog re-queued by the cadence flush itself was never driven again
+
+Status: fixed; raised as low by the re-review and elevated here. A batch the cadence flush failed is re-queued inside that flush's own task, and the scheduler counted the still-running task as the pending flush, so after a second failed flush the backlog waited for an event a finished run never sends. `_schedule_flush` now treats the calling flush task as finishing (`src/vaultspec_a2a/worker/ipc.py`), and `test_a_backlog_the_cadence_flush_failed_is_driven_again` fails on the prior code. Residual: a direct flush that fails while a cadence flush is pending retries at the cadence rather than the redrive delay; nothing is lost.
+
+### forged-heading-escape-rewrites-mounted-vault-headings | medium | the heading escape rewrote legitimate headings in mounted documents
+
+Status: fixed. Only a depth-one heading naming a role is escaped now (`src/vaultspec_a2a/providers/_prompt_render.py`, `_FORGED_ROLE_HEADING`), so an audit entry or a transcript section in a mounted document reaches the model as written; `test_a_mounted_document_keeps_its_own_deeper_headings` fails on the prior pattern. Residual: a setext-style heading (a role word underlined with `=`) is not escaped; fencing each message body would make the boundary structural rather than lexical.
+
+### kimi-rung-approves-bare-grep-host-wide | medium | the autonomous rung still approves a native read floor tool by bare name
+
+Status: open, latent. The rung unions the lane's native floor into its approvals (`src/vaultspec_a2a/providers/_acp_rpc_handlers.py`, `_autonomous_option_id`), and a kimi title reduces to exactly `Grep`, so an autonomous kimi Grep of any host path is approved; `foreign_project_argument` scans only project-root keys, not `path`. Kimi is not a proven turn lane, so no served profile reaches it today. The Claude floor has the same shape and is inert only because the pinned adapter titles its calls in prose. Recommendation: approve a floor tool at the rung only when the call's own path arguments lie inside the bound project, and re-point `src/vaultspec_a2a/providers/tests/test_kimi_permission.py` at the refusal, before any kimi lane is admitted.
+
+### stale-comment-says-grep-composes-bare | low | a comment still described the removed Grep composition
+
+Status: fixed (`src/vaultspec_a2a/providers/_claude_tool_policy.py`, `CLAUDE_PATH_RULE_TOOLS`).
+
+### refusal-code-import-guard-cannot-fail | low | an import-time check compared a set with itself
+
+Status: fixed; the guard was removed (`src/vaultspec_a2a/api/schemas/gateway.py`, `RunMessageRefusalCode`).
+
+### prune-wait-has-two-uncovered-shutdown-edges | low | a spent shutdown budget or a cross-loop task can leave the prune wait ineffective
+
+Status: open. When the shared shutdown budget is spent, `finish_before` closes the prune wait without running it (`src/vaultspec_a2a/lifecycle/shutdown.py`), so an in-flight prune can outlive the checkpointer; and `_prune_tasks` is module state shared by every app instance in a process (`src/vaultspec_a2a/control/event_handlers.py`), as `_settlement_tasks` already is. Recommendation: give the prune phase a reserve and key the pending set to the app whose lifespan waits on it.

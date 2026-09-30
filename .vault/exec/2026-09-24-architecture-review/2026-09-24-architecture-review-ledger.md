@@ -408,4 +408,3 @@ related:
 - `S27` Correction from the fix re-review (forged-heading-escape-rewrites-mounted-vault-headings).
 - `S23` Correction from the fix re-review (stale-comment-says-grep-composes-bare).
 - `S14` Correction from the fix re-review (refusal-code-import-guard-cannot-fail).
-

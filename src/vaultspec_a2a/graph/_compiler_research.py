@@ -490,6 +490,10 @@ def _compile_research_adr(
             role="synthesist",
             harness_mcp_servers=harness_mcp_servers,
             cost_port=options.get("cost_port"),
+            # This node IS the fan-out's join point, so every branch's finding
+            # reaches its prompt. The branches write findings and nothing else,
+            # so without this the stage synthesises research it never saw.
+            joins_research_findings=True,
             # Feedback-loop grounding: the research-doc writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=options.get("feedback_reader"),

@@ -9,11 +9,13 @@ interrupt are all exercised.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 import pytest_asyncio
-from langchain_core.messages import HumanMessage
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
@@ -35,6 +37,7 @@ from ...team.team_config import (
 from ...thread.errors import ConfigError
 from .._compiler_research import _doc_review_router
 from ..compiler import compile_team_graph
+from ..nodes.worker import render_research_findings
 from .conftest import deterministic_model_assignment
 
 
@@ -510,3 +513,186 @@ async def test_plan_gate_request_changes_loops_the_plan_writer(
     assert len(plan_passes) == 2
     # The reviewer's note reached the writer as a concrete revise signal.
     assert "Step S02 has no success check." in reparked["validation_errors"]
+
+
+class _Transcript:
+    """Every turn each agent was invoked with, shared across the run's lanes.
+
+    A plain object rather than a field on the chat model: the model is a
+    pydantic class, so a ``dict`` field would be validated into a per-instance
+    copy and each lane would record into its own.
+    """
+
+    def __init__(self) -> None:
+        self.turns: dict[str, list[list[BaseMessage]]] = {}
+
+    def record(self, agent_id: str, messages: list[BaseMessage]) -> None:
+        self.turns.setdefault(agent_id, []).append(list(messages))
+
+
+class _PromptRecordingChat(BaseChatModel):
+    """A scripted lane that keeps the exact message list each turn was given.
+
+    Needed because the defect this guards is invisible in the run's OUTPUT: the
+    branches' findings reach the checkpoint either way, and only the synthesis
+    turn's INPUT says whether they were ever shown to the model.
+    """
+
+    agent_id: str = ""
+    recorder: Any = None
+
+    @property
+    @override
+    def _llm_type(self) -> str:
+        return "prompt-recording"
+
+    @override
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del stop, run_manager, kwargs
+        cast("_Transcript", self.recorder).record(self.agent_id, messages)
+        return ChatResult(
+            generations=[
+                ChatGeneration(message=AIMessage(content=_reply_for(messages)))
+            ]
+        )
+
+
+_BRANCH_CLAIM = "Branch {thread} found the join point is structural."
+
+
+def _reply_for(messages: list[BaseMessage]) -> str:
+    """Answer as the researcher branch whose spec is in *messages*, else neutrally."""
+    for message in messages:
+        content = str(message.content)
+        if content.startswith("Research thread "):
+            thread = content.split("'")[1] if "'" in content else "unknown"
+            return _BRANCH_CLAIM.format(thread=thread)
+    return "PASS"
+
+
+class _PromptRecordingFactory:
+    """Hands every role a recording lane sharing one transcript."""
+
+    def __init__(self) -> None:
+        self.transcript = _Transcript()
+
+    def create(
+        self,
+        provider: Any,
+        *,
+        model: Any | None = None,
+        agent_config: Any | None = None,
+        workspace_root: Any | None = None,
+        **kwargs: Any,
+    ) -> _PromptRecordingChat:
+        del provider, model, workspace_root, kwargs
+        return _PromptRecordingChat(
+            agent_id=getattr(agent_config, "id", "") or "",
+            recorder=self.transcript,
+        )
+
+
+@pytest.mark.asyncio
+async def test_every_branch_claim_reaches_the_synthesis_model_input(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """The fan-out's join point shows synthesis every branch's finding.
+
+    The branches write ``research_findings`` and nothing else, so a synthesis
+    turn that never receives them is synthesising research it has not read. The
+    accumulated list in the checkpoint proves only that the branches ran; this
+    asserts on the message list the synthesis lane was actually invoked with,
+    which is the only place the defect is observable.
+    """
+    factory = _PromptRecordingFactory()
+    team = _research_adr_team(
+        [
+            ResearchThreadSpec(thread_id="codebase"),
+            ResearchThreadSpec(thread_id="prior-art"),
+        ]
+    )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=factory,
+        step_timeout=42.0,
+        proposal_submitter=_FakeSubmitter(),
+        model_assignment=deterministic_model_assignment(team),
+    )
+
+    run_thread_id = "ra-join-run"
+    state: dict[str, Any] = {
+        "active_agent": "research_dispatch",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research the phase machine.")],
+        "next": "",
+        "thread_id": run_thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+    result = await graph.ainvoke(
+        state, config={"configurable": {"thread_id": run_thread_id}}
+    )
+
+    # Both branches really did contribute a finding to the checkpoint.
+    assert sorted(f["source_thread"] for f in result["research_findings"]) == [
+        "codebase",
+        "prior-art",
+    ]
+
+    synthesis_turns = factory.transcript.turns.get("vaultspec-synthesist") or []
+    assert synthesis_turns, "the synthesis lane was never invoked"
+    first_turn = "\n".join(str(m.content) for m in synthesis_turns[0])
+    for thread in ("codebase", "prior-art"):
+        assert _BRANCH_CLAIM.format(thread=thread) in first_turn, (
+            f"branch {thread!r} claim never reached the synthesis model input"
+        )
+        assert f"`{thread}`" in first_turn, (
+            f"branch {thread!r} was not attributed in the synthesis model input"
+        )
+
+
+def test_a_worker_that_is_not_a_join_point_is_shown_no_findings() -> None:
+    """Findings are the join point's input, never every worker's.
+
+    ``render_research_findings`` is called only for the node the compiler marks
+    as the join, so this pins the render itself: given the same state, a reader
+    gets the branches' claims and their attribution, and the default-off wiring
+    keeps every other role's prompt unchanged.
+    """
+    state = cast(
+        "Any",
+        {
+            "research_findings": [
+                {
+                    "claim": "The engine dedupes by idempotency key.",
+                    "locators": [
+                        {
+                            "kind": "web",
+                            "url": "https://example.invalid/a",
+                            "retrieved_at": "2026-09-30T00:00:00+00:00",
+                            "title": "Engine notes",
+                        }
+                    ],
+                    "source_thread": "prior-art",
+                },
+                {"claim": "   ", "locators": [], "source_thread": "empty"},
+            ]
+        },
+    )
+    rendered = render_research_findings(state)
+    assert rendered is not None
+    assert "The engine dedupes by idempotency key." in rendered
+    assert "`prior-art`" in rendered
+    assert "https://example.invalid/a" in rendered
+    # A blank claim contributes no block rather than an empty heading.
+    assert "`empty`" not in rendered
+    assert render_research_findings(cast("Any", {})) is None

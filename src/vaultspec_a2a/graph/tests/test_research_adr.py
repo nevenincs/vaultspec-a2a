@@ -132,6 +132,23 @@ def _agent_configs(team: Any) -> dict[str, Any]:
     return {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
 
+def _answer(parked: Any, verdict: str, notes: str | None = None) -> Command[str]:
+    """Answer the gate the run is parked at, naming the request it disclosed.
+
+    A verdict is bound to its request, so a resumer reads the id off the
+    payload it is answering rather than assuming the run is still where it
+    left it.
+    """
+    payload = parked["__interrupt__"][0].value
+    return Command[str](
+        resume={
+            "verdict": verdict,
+            "notes": notes,
+            "request_id": payload["request_id"],
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_research_adr_compiles_expected_node_set(
     checkpointer: AsyncSqliteSaver,
@@ -434,11 +451,14 @@ async def test_plan_phase_runs_after_gate_two_and_parks_on_gate_three(
     parked_at_research = await graph.ainvoke(state, config=config)
     assert parked_at_research["__interrupt__"][0].value["phase"] == "research"
 
-    approve = Command[str](resume={"verdict": "approved", "notes": None})
-    parked_at_adr = await graph.ainvoke(approve, config=config)
+    parked_at_adr = await graph.ainvoke(
+        _answer(parked_at_research, "approved"), config=config
+    )
     assert parked_at_adr["__interrupt__"][0].value["phase"] == "adr"
 
-    parked_at_plan = await graph.ainvoke(approve, config=config)
+    parked_at_plan = await graph.ainvoke(
+        _answer(parked_at_adr, "approved"), config=config
+    )
     plan_payload = parked_at_plan["__interrupt__"][0].value
     assert plan_payload["type"] == "document_approval_request"
     assert plan_payload["phase"] == "plan"
@@ -492,16 +512,15 @@ async def test_plan_gate_request_changes_loops_the_plan_writer(
         "token_usage": {},
     }
 
-    approve = Command[str](resume={"verdict": "approved", "notes": None})
-    await graph.ainvoke(state, config=config)
-    await graph.ainvoke(approve, config=config)
-    await graph.ainvoke(approve, config=config)
+    at_research = await graph.ainvoke(state, config=config)
+    at_adr = await graph.ainvoke(_answer(at_research, "approved"), config=config)
+    at_plan = await graph.ainvoke(_answer(at_adr, "approved"), config=config)
     assert submitter.phases == ["research", "adr", "plan"]
 
-    revise = Command[str](
-        resume={"verdict": "request_changes", "notes": "Step S02 has no success check."}
+    reparked = await graph.ainvoke(
+        _answer(at_plan, "request_changes", "Step S02 has no success check."),
+        config=config,
     )
-    reparked = await graph.ainvoke(revise, config=config)
 
     assert reparked["__interrupt__"][0].value["phase"] == "plan"
     # The revision looped the PLAN writer, not the ADR writer: exactly one more

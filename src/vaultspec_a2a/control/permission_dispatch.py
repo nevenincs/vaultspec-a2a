@@ -37,8 +37,12 @@ def permission_resume_value(
 ) -> str | dict[str, object]:
     """Build the one worker resume value used by live and recovery dispatch.
 
-    A tool-permission answer names the request it answers, so the worker can
-    refuse to apply it to a different call its replayed turn asks about.
+    Both shapes name the request they answer, so the gate or the worker can
+    refuse to apply the answer to a different question. A resume value is
+    handed to whichever ``interrupt()`` asks for one next, which is not
+    necessarily the one it was written for: without the id, an approval
+    delivered to a checkpoint that had moved on released whatever the run
+    happened to be asking, with no human behind it.
     """
     if pause_reason_type not in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
         return {"option_id": option_id, "request_id": request_id}
@@ -50,4 +54,5 @@ def permission_resume_value(
     return {
         "verdict": verdict,
         "notes": notes,
+        "request_id": request_id,
     }

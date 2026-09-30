@@ -21,6 +21,7 @@ from ...context.anchoring import build_anchoring_context
 from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
+from ...thread.enums import ApprovalStatus
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
 from ...thread.snapshots import stamp_message_created_at
@@ -682,6 +683,7 @@ def _finalize_worker_response(
     response: BaseMessage,
     worker_name: str,
     state_updates: dict[str, Any],
+    approval_status: object = None,
     usage: TokenUsageEntry | None = None,
 ) -> dict[str, Any]:
     """Attach worker attribution and merge the queue tool's Command update.
@@ -693,16 +695,26 @@ def _finalize_worker_response(
     When the lane reported usage, this node also emits the per-agent delta on
     the ``token_usage`` channel, whose existing additive reducer accumulates it
     across the run.
+
+    A GRANTED approval survives the turn it released. It is durable
+    per-thread state - the human approved this thread's plan for execution,
+    not one turn of it - so clearing it here asked the same human the same
+    question before every later exec turn. A rejection or a pending mark IS
+    consumed by the turn it routed and is cleared.
     """
     response.name = worker_name
     stamp_message_created_at(response)
+    approval_granted = approval_status == ApprovalStatus.APPROVED.value
     update: dict[str, Any] = {
         "messages": [response],
-        # Approval outcomes are consumed by the worker turn they routed.
-        "approval_status": None,
-        "approval_request_id": None,
+        "approval_status": (
+            ApprovalStatus.APPROVED.value if approval_granted else None
+        ),
         **state_updates,
     }
+    if not approval_granted:
+        # The linkage outlives the turn only for as long as the approval does.
+        update["approval_request_id"] = None
     if usage is not None:
         update["token_usage"] = {worker_name: usage.to_dict()}
     return update
@@ -1176,6 +1188,7 @@ def create_worker_node(
             response=response,
             worker_name=name,
             state_updates=state_updates,
+            approval_status=state.get("approval_status"),
             usage=usage,
         )
 

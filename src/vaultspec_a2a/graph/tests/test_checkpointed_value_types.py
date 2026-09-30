@@ -32,6 +32,11 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...thread.action_receipts import (
+    GraphActionReceipt,
+    control_action_payload_fingerprint,
+)
+from ...thread.enums import ControlActionType
 from ..compiler import compile_team_graph
 from .conftest import deterministic_model_assignment
 
@@ -102,6 +107,18 @@ class _RoutingFactory:
 
 
 def _base_state(thread_id: str, **extra: Any) -> dict[str, Any]:
+    # The completion node the star topology ends at applies the dispatch
+    # receipt, so a run that reaches the end needs a real one seeded.
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=thread_id,
+        action_id="ingest",
+        action_type=ControlActionType.INGEST,
+        payload_fingerprint=control_action_payload_fingerprint({"run": thread_id}),
+        dispatch_id="ingest",
+        run_revision=1,
+        writer_generation=1,
+    ).model_dump(mode="json")
     state: dict[str, Any] = {
         "active_agent": "",
         "artifacts": [],
@@ -110,6 +127,8 @@ def _base_state(thread_id: str, **extra: Any) -> dict[str, Any]:
         "next": "",
         "thread_id": thread_id,
         "token_usage": {},
+        "active_graph_action_receipt": receipt,
+        "graph_action_receipts": {"ingest": receipt},
     }
     state.update(extra)
     return state
@@ -170,7 +189,14 @@ async def test_a_parked_document_gate_checkpoints_only_plain_values() -> None:
             # Readers still work on the plain values: the approved verdict
             # advances the machine to the next phase's gate.
             advanced = await graph.ainvoke(
-                Command[str](resume={"verdict": "approved", "notes": None}), config
+                Command[str](
+                    resume={
+                        "verdict": "approved",
+                        "notes": None,
+                        "request_id": payload["request_id"],
+                    }
+                ),
+                config,
             )
             assert advanced["__interrupt__"][0].value["phase"] == "adr"
 
@@ -212,7 +238,8 @@ async def test_a_parked_plan_approval_checkpoints_only_plain_values() -> None:
                 ),
                 config,
             )
-        assert parked["__interrupt__"][0].value["type"] == "plan_approval_request"
+        plan_payload = parked["__interrupt__"][0].value
+        assert plan_payload["type"] == "plan_approval_request"
 
         async with AsyncSqliteSaver.from_conn_string(database) as saver:
             graph = _graph(saver)
@@ -225,7 +252,14 @@ async def test_a_parked_plan_approval_checkpoints_only_plain_values() -> None:
             # The gate still reads its own persisted value: approving routes on
             # to the exec worker rather than re-asking.
             await graph.ainvoke(
-                Command[str](resume={"verdict": "approved", "notes": None}), config
+                Command[str](
+                    resume={
+                        "verdict": "approved",
+                        "notes": None,
+                        "request_id": plan_payload["request_id"],
+                    }
+                ),
+                config,
             )
             after = (await graph.aget_state(config)).values
             assert not sorted(enum_members(after))

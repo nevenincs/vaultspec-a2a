@@ -65,6 +65,7 @@ __all__ = [
     "create_phase_submit_node",
     "parse_verdict",
     "review_requests_revision",
+    "verdict_answers_request",
 ]
 
 #: The standalone verdict line a reviewer persona emits to send work back.
@@ -138,6 +139,25 @@ def parse_verdict(resume_value: object) -> tuple[str | None, str | None]:
     verdict_str = verdict if isinstance(verdict, str) else None
     notes_str = notes if isinstance(notes, str) else None
     return verdict_str, notes_str
+
+
+def verdict_answers_request(resume_value: object, request_id: str | None) -> bool:
+    """Whether a verdict payload names the request the gate is parked on.
+
+    A resume value is handed to whichever ``interrupt()`` asks for one next,
+    which is not necessarily the one it was written for: a verdict delivered to
+    a checkpoint that has moved on, or that never parked, would otherwise be
+    consumed as the answer to a question no human was asked. Binding the
+    verdict to a request is what lets the gate tell those apart.
+
+    A payload naming NO request is refused rather than trusted. An unbound
+    answer is exactly the one the run cannot attribute, and accepting it is
+    how an approval arrives with no human behind it.
+    """
+    if not request_id or not isinstance(resume_value, dict):
+        return False
+    named = cast("dict[str, object]", resume_value).get("request_id")
+    return isinstance(named, str) and named == request_id
 
 
 def create_phase_submit_node(
@@ -274,9 +294,22 @@ def create_phase_gate_node(
                 "phase": phase,
                 "proposal_id": proposal_id,
                 "feature": state.get("active_feature"),
+                # The proposal this gate parked on IS its request identity: it
+                # is committed to the checkpoint before the park and it is what
+                # the out-of-run verdict subscriber correlates a decision by.
+                "request_id": proposal_id,
             }
         )
         verdict, notes = parse_verdict(resume_value)
+        if not verdict_answers_request(resume_value, proposal_id):
+            # Not this gate's answer, so it is not an approval - whatever it
+            # says. Failing closed to revision keeps the human decision the
+            # only way past this gate.
+            verdict, notes = (
+                VERDICT_REJECTED,
+                f"Verdict for document phase {phase!r} named another request; "
+                f"the decision on proposal {proposal_id!r} is still outstanding.",
+            )
 
         if verdict == VERDICT_APPROVED:
             return Command(

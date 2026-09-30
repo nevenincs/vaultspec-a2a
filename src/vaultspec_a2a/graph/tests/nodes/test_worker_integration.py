@@ -210,29 +210,46 @@ async def test_worker_resume_reinvokes_model_with_tool_result() -> None:
 
 
 @pytest.mark.asyncio
-async def test_worker_turn_clears_consumed_approval_residue() -> None:
-    """A worker turn must consume the approval state that authorized it."""
+async def test_worker_turn_consumes_a_rejection_and_keeps_an_approval() -> None:
+    """A rejection is spent by the turn it routed; a grant outlives it.
+
+    The execution approval is per-thread durable state - the human approved
+    this thread's plan, not one turn of it - so a turn that cleared it asked
+    the same human the same question before every later exec turn. A
+    rejection is the opposite: it routed one revision and has no meaning
+    after it.
+    """
     from ....providers.acp_chat_model import AcpChatModel
 
-    model = AcpChatModel(
-        command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "approved once"],
-        env_vars={},
-        workspace_root=str(_PROJECT),
-    )
-    node = create_worker_node(
-        model=model,
-        system_prompt="You are a coder.",
-        name="coder",
-    )
+    def _node() -> Any:
+        model = AcpChatModel(
+            command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "approved once"],
+            env_vars={},
+            workspace_root=str(_PROJECT),
+        )
+        return create_worker_node(
+            model=model,
+            system_prompt="You are a coder.",
+            name="coder",
+        )
 
-    state = _make_state()
-    state["approval_status"] = "approved"
-    state["approval_request_id"] = "approval-1"
-
-    result = await node(state)
+    granted = _make_state()
+    granted["approval_status"] = "approved"
+    granted["approval_request_id"] = "approval-1"
+    result = await _node()(granted)
 
     assert isinstance(result, dict)
     assert result["messages"][0].content == "approved once"
+    assert result["approval_status"] == "approved"
+    # The linkage rides with the approval it belongs to.
+    assert "approval_request_id" not in result
+
+    rejected = _make_state()
+    rejected["approval_status"] = "rejected"
+    rejected["approval_request_id"] = "approval-1"
+    result = await _node()(rejected)
+
+    assert isinstance(result, dict)
     assert result["approval_status"] is None
     assert result["approval_request_id"] is None
 

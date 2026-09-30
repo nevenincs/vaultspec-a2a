@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast
 
@@ -21,7 +23,7 @@ from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 from ...thread.enums import VERDICT_APPROVED, ApprovalStatus
 from ...thread.errors import SupervisorRoutingError
-from .phase_gate import parse_verdict
+from .phase_gate import parse_verdict, verdict_answers_request
 
 if TYPE_CHECKING:
     # Annotation-only: langchain_core.language_models is seconds-expensive at
@@ -90,12 +92,43 @@ def _plan_entry_for_route(route: str) -> dict[str, str]:
     }
 
 
-def _select_revision_worker(
-    workers: list[str],
-    worker_phase_map: dict[str, str] | None,
+def _carried_approval(state: TeamState) -> dict[str, Any]:
+    """Keep a GRANTED execution approval across a routing decision.
+
+    The grant is durable per-thread state: the human approved this thread's
+    plan for execution, not the one routing decision that happened to be in
+    flight. Writing it away on every decision - as every branch here did -
+    made the gate re-ask for the same plan before every exec turn. A pending
+    mark or a rejection is spent by the decision it produced and is cleared.
+    """
+    if state.get("approval_status") == ApprovalStatus.APPROVED.value:
+        return {"approval_status": ApprovalStatus.APPROVED.value}
+    return {"approval_status": None, "approval_request_id": None}
+
+
+#: Prefix on the handle a parked plan approval is addressed by.
+_PLAN_APPROVAL_ID_PREFIX = "plan-approval-"
+
+
+def _plan_approval_request_id(
+    state: TeamState, exec_worker: str, plan_paths: list[str]
 ) -> str:
-    """Prefer the plan-phase worker when a rejected exec plan needs revision."""
-    return _select_phase_worker(PipelinePhase.PLAN.value, workers, worker_phase_map)
+    """Name one plan-approval request by the run and the plan it approves.
+
+    Derived from replay-stable material only: a resumed node re-runs from its
+    start against the same checkpointed state, so the id it recomputes is the
+    id it disclosed. Naming the PLAN as well as the run is what makes a
+    verdict for a superseded plan recognisable after the plan was revised - a
+    run-scoped handle alone would let an old approval release a new plan.
+    """
+    canonical = json.dumps(
+        [state.get("thread_id") or "", exec_worker, sorted(plan_paths)],
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    digest = hashlib.sha256(canonical.encode()).hexdigest()[:32]
+    return f"{_PLAN_APPROVAL_ID_PREFIX}{digest}"
 
 
 def _worker_owning_phase(
@@ -417,8 +450,7 @@ def _refused_update(state: TeamState, decision: _SupervisorDecision) -> dict[str
     update: dict[str, Any] = {
         "active_agent": "",
         "pipeline_phase": decision.inferred_phase,
-        "approval_status": None,
-        "approval_request_id": None,
+        **_carried_approval(state),
         "routing_error": reason,
         "supervisor_reasks": reasks,
     }
@@ -442,6 +474,33 @@ def _spend_finish_block(state: TeamState, decision: _SupervisorDecision) -> int:
             decision.routing_error or "FINISH blocked", attempts=blocks
         )
     return blocks
+
+
+def _carrying_finish_block(
+    decision: _SupervisorDecision,
+    finish_block: _SupervisorDecision | None,
+) -> _SupervisorDecision:
+    """Keep a blocked FINISH counted, whatever the reroute's own gates decided.
+
+    Without this the budget leaks: a reroute the phase gate merely WARNS about
+    returns the gate's decision, which carries no block mark, so the FINISH
+    the completion gate refused costs nothing and the loop is unbounded again.
+    A refused decision is left alone - the re-ask budget already bounds it.
+    """
+    if finish_block is None or decision.refused:
+        return decision
+    reasons = [r for r in (finish_block.routing_error, decision.routing_error) if r]
+    return replace(
+        decision,
+        # The approval branch is chosen on routing_error being unset, so an
+        # approval that is also a blocked FINISH must still park for its human.
+        routing_error=(
+            None
+            if decision.plan_approval_request is not None
+            else " ".join(reasons) or None
+        ),
+        blocks_finish=True,
+    )
 
 
 def _evaluate_supervisor_response(
@@ -474,6 +533,7 @@ def _evaluate_supervisor_response(
             refused=True,
         )
 
+    finish_block: _SupervisorDecision | None = None
     if next_route == "FINISH":
         blocked = _check_finish_blocked(
             state,
@@ -483,13 +543,20 @@ def _evaluate_supervisor_response(
             worker_phase_map,
         )
         if blocked is not None:
-            return blocked
+            if blocked.refused:
+                return blocked
+            # A reroute is a route: it must clear the HARD phase gate and the
+            # plan approval that every other route clears. Returning here sent
+            # the run straight to an exec worker with no plan, and past the
+            # approval interrupt with an unapproved one.
+            finish_block = blocked
+            next_route = cast("str", blocked.next_route)
 
     gate_decision = _phase_gate_decision(
         state, vault_index, next_route, inferred_phase, worker_phase_map
     )
     if gate_decision is not None:
-        return gate_decision
+        return _carrying_finish_block(gate_decision, finish_block)
     approval_decision = _plan_approval_decision(
         state,
         vault_index,
@@ -498,7 +565,9 @@ def _evaluate_supervisor_response(
         autonomous=autonomous,
     )
     if approval_decision is not None:
-        return approval_decision
+        return _carrying_finish_block(approval_decision, finish_block)
+    if finish_block is not None:
+        return finish_block
 
     _logger.debug("supervisor routed to %r (raw=%r)", next_route, response_text[:80])
     return _SupervisorDecision(
@@ -568,28 +637,37 @@ def create_plan_approval_node(
     The interrupt payload and resume shapes are the existing wire contract
     consumed by the control and streaming layers: payload
     ``{"type": "plan_approval_request", "feature", "plan_paths",
-    "exec_worker"}``; resume ``{"verdict": "approved" | "rejected" |
-    "request_changes", "notes": str | None}`` — the same verdict vocabulary the
-    document phase gate resumes on (D6), parsed via the shared
-    :func:`...phase_gate.parse_verdict`. Any other verdict, including the
-    retired ``{"approved": bool}`` shape, fails closed to revision rather than
-    silently approving.
+    "exec_worker", "request_id"}``; resume ``{"verdict": "approved" |
+    "rejected" | "request_changes", "notes": str | None, "request_id": str}`` —
+    the same verdict vocabulary the document phase gate resumes on (D6), parsed
+    via the shared :func:`...phase_gate.parse_verdict`. Any other verdict,
+    including the retired ``{"approved": bool}`` shape, and any verdict naming
+    another request, fails closed to revision rather than silently approving.
+
+    Where no worker of the plan phase exists to revise, a rejection returns to
+    the supervisor. The fallback it replaces named ``workers[0]``, which sent a
+    rejected plan to the coder - the very worker the rejection was meant to
+    keep out of execution.
     """
 
     async def plan_approval_node(state: TeamState) -> dict[str, Any]:
         """Pause for human plan approval, then route or reroute for revision."""
         exec_worker = state.get("next") or ""
         vault_index: dict[str, list[str]] = state.get("vault_index") or {}
+        plan_paths = vault_index.get("plan", [])
+        request_id = _plan_approval_request_id(state, exec_worker, plan_paths)
         resume_value = interrupt(
             {
                 "type": "plan_approval_request",
                 "feature": state.get("active_feature"),
-                "plan_paths": vault_index.get("plan", []),
+                "plan_paths": plan_paths,
                 "exec_worker": exec_worker,
+                "request_id": request_id,
             }
         )
         verdict, _notes = parse_verdict(resume_value)
-        if verdict == VERDICT_APPROVED:
+        answered = verdict_answers_request(resume_value, request_id)
+        if verdict == VERDICT_APPROVED and answered:
             _logger.info(
                 "plan approved by user — routing to exec_worker=%r", exec_worker
             )
@@ -598,10 +676,32 @@ def create_plan_approval_node(
                 "active_agent": _active_agent_for_route(exec_worker),
                 "current_plan": [_plan_entry_for_route(exec_worker)],
                 "approval_status": ApprovalStatus.APPROVED.value,
-                "approval_request_id": None,
+                "approval_request_id": request_id,
                 "routing_error": None,
             }
-        revision_worker = _select_revision_worker(workers, worker_phase_map)
+        reason = (
+            "Plan rejected by user — revise before proceeding to execution."
+            if answered
+            else (
+                "Plan approval verdict named another request; the decision on "
+                "this plan is still outstanding."
+            )
+        )
+        revision_worker = _worker_owning_phase(
+            PipelinePhase.PLAN.value, workers, worker_phase_map
+        )
+        if revision_worker is None:
+            # Nobody on this team revises plans, so the supervisor decides what
+            # happens next rather than the rejection picking a worker for it.
+            _logger.info("plan rejected by user — no plan-phase worker to revise")
+            return {
+                "next": "supervisor",
+                "active_agent": "",
+                "current_plan": [_plan_entry_for_route("supervisor")],
+                "approval_status": ApprovalStatus.REJECTED.value,
+                "approval_request_id": request_id,
+                "routing_error": reason,
+            }
         _logger.info(
             "plan rejected by user — rerouting to %r for revision", revision_worker
         )
@@ -615,10 +715,8 @@ def create_plan_approval_node(
             ),
             "current_plan": [_plan_entry_for_route(revision_worker)],
             "approval_status": ApprovalStatus.REJECTED.value,
-            "approval_request_id": None,
-            "routing_error": (
-                "Plan rejected by user — revise before proceeding to execution."
-            ),
+            "approval_request_id": request_id,
+            "routing_error": reason,
         }
 
     plan_approval_node.__name__ = "plan_approval_node"
@@ -701,23 +799,25 @@ def create_supervisor_node(
         if decision.refused:
             return _refused_update(state, decision)
         next_route = cast("str", decision.next_route)
+        # Counted once for the decision, whichever branch below returns it: a
+        # blocked FINISH that then needs plan approval is still a blocked
+        # FINISH, and spending the budget only on one branch left the other
+        # unbounded.
+        finish_blocks = (
+            _spend_finish_block(state, decision) if decision.blocks_finish else 0
+        )
         if decision.routing_error:
             return {
                 "next": next_route,
                 "active_agent": _active_agent_for_route(next_route),
                 "pipeline_phase": decision.inferred_phase,
                 "current_plan": [_plan_entry_for_route(next_route)],
-                "approval_status": None,
-                "approval_request_id": None,
+                **_carried_approval(state),
                 "routing_error": decision.routing_error,
                 # Cleared so the route edge follows this decision to its
                 # worker rather than reading a live re-ask and returning here.
                 "supervisor_reasks": 0,
-                "supervisor_finish_blocks": (
-                    _spend_finish_block(state, decision)
-                    if decision.blocks_finish
-                    else 0
-                ),
+                "supervisor_finish_blocks": finish_blocks,
             }
 
         if decision.plan_approval_request is not None:
@@ -741,18 +841,17 @@ def create_supervisor_node(
                 "approval_request_id": None,
                 "routing_error": None,
                 "supervisor_reasks": 0,
-                "supervisor_finish_blocks": 0,
+                "supervisor_finish_blocks": finish_blocks,
             }
         return {
             "next": next_route,
             "active_agent": _active_agent_for_route(next_route),
             "pipeline_phase": decision.inferred_phase,
             "current_plan": [_plan_entry_for_route(next_route)],
-            "approval_status": None,
-            "approval_request_id": None,
+            **_carried_approval(state),
             "routing_error": None,
             "supervisor_reasks": 0,
-            "supervisor_finish_blocks": 0,
+            "supervisor_finish_blocks": finish_blocks,
         }
 
     supervisor_node.__name__ = "supervisor_node"

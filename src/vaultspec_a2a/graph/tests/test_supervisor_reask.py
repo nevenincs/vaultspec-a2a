@@ -17,6 +17,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 from ...domain_config import domain_config
 from ...team.team_config import (
@@ -219,24 +220,124 @@ async def test_a_blocked_finish_stops_rerouting_once_its_budget_is_spent() -> No
     graph = _star_graph(["FINISH"])
     prompts = _SupervisorPrompts()
     limit = domain_config.supervisor_finish_block_limit
+    # The plan is already approved, so the reroute's own gates pass and this
+    # isolates the blocked-FINISH budget from the approval interrupt.
+    graph_input = _run_input(
+        "finish-blocked",
+        {"adr": ["adr.md"], "plan": ["plan.md"]},
+        ["frontmatter is malformed"],
+    )
+    graph_input["approval_status"] = "approved"
 
     with pytest.raises(SupervisorRoutingError) as failure:
-        await _visits(
-            graph,
-            "finish-blocked",
-            _run_input(
-                "finish-blocked",
-                {"adr": ["adr.md"], "plan": ["plan.md"]},
-                ["frontmatter is malformed"],
-            ),
-            prompts,
-        )
+        await _visits(graph, "finish-blocked", graph_input, prompts)
 
     assert failure.value.attempts == limit + 1
     assert "validation error(s)" in failure.value.reason
     # One supervisor pass per reroute the budget allowed, plus the one that
     # spent it - and a worker turn for each reroute, not for the last pass.
     assert len(prompts.prompts) == limit + 1
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_finish_still_meets_the_plan_approval_gate() -> None:
+    """A reroute is a route: it parks for approval like any other exec hand-off.
+
+    The blocked-FINISH branch returned before the approval gate was evaluated,
+    so a completion gate could send the run into an exec worker with an
+    unapproved plan and no interrupt was ever raised.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+
+    visited = await _visits(
+        graph,
+        "blocked-needs-approval",
+        _run_input(
+            "blocked-needs-approval",
+            {"adr": ["adr.md"], "plan": ["plan.md"]},
+            ["frontmatter is malformed"],
+        ),
+        prompts,
+    )
+
+    assert "__interrupt__" in visited
+    parked = await graph.aget_state(
+        {"configurable": {"thread_id": "blocked-needs-approval"}}
+    )
+    assert parked.next == ("plan_approval",)
+    # The exec worker the gate rerouted to has not run: the human decides first.
+    assert _CODER not in visited
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_finish_still_meets_the_hard_phase_gate() -> None:
+    """A reroute the HARD gate refuses never reaches its worker.
+
+    The exec reroute needs a plan artifact. Without one the gate must refuse
+    it exactly as it refuses the supervisor's own exec route; returning early
+    ran the coder with no plan at all.
+    """
+    graph = _star_graph(["FINISH"])
+    prompts = _SupervisorPrompts()
+
+    with pytest.raises(SupervisorRoutingError) as failure:
+        await _visits(
+            graph,
+            "blocked-hard-gated",
+            _run_input(
+                "blocked-hard-gated", {"adr": ["adr.md"]}, ["frontmatter is malformed"]
+            ),
+            prompts,
+        )
+
+    assert "Phase gate: routing to 'exec'" in failure.value.reason
+    parked = await graph.aget_state(
+        {"configurable": {"thread_id": "blocked-hard-gated"}}
+    )
+    worker_messages = [
+        m for m in parked.values["messages"] if getattr(m, "name", None) is not None
+    ]
+    assert worker_messages == []
+
+
+@pytest.mark.asyncio
+async def test_a_plan_is_approved_once_for_the_thread_not_once_per_turn() -> None:
+    """One approval releases execution for the thread, not for one turn.
+
+    The grant was cleared after every worker turn and by every supervisor
+    decision, so the same human was asked about the same plan before every
+    later exec hand-off.
+    """
+    graph = _star_graph([_CODER, _CODER, "FINISH"])
+    prompts = _SupervisorPrompts()
+    thread: Any = {"configurable": {"thread_id": "approve-once"}}
+
+    parked = await _visits(
+        graph,
+        "approve-once",
+        _run_input("approve-once", {"adr": ["adr.md"], "plan": ["plan.md"]}),
+        prompts,
+    )
+    assert "__interrupt__" in parked
+    state = await graph.aget_state(thread)
+    payload = state.tasks[0].interrupts[0].value
+    assert payload["type"] == "plan_approval_request"
+
+    visited: list[str] = []
+    async for update in graph.astream(
+        Command(resume={"verdict": "approved", "request_id": payload["request_id"]}),
+        thread,
+        stream_mode="updates",
+    ):
+        visited.extend(cast("dict[str, Any]", update))
+
+    # The whole rest of the run: two coder turns and a clean finish, with no
+    # second approval interrupt anywhere in it.
+    assert visited.count(_CODER) == 2
+    assert "__interrupt__" not in visited
+    settled = await graph.aget_state(thread)
+    assert settled.values["approval_status"] == "approved"
 
 
 @pytest.mark.asyncio

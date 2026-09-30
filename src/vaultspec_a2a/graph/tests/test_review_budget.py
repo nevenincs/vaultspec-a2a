@@ -138,7 +138,13 @@ async def test_a_human_revision_at_the_gate_earns_a_fresh_review_budget() -> Non
 
     visited = await _updates(
         graph,
-        Command(resume={"verdict": "request_changes", "notes": "Tighten it."}),
+        Command(
+            resume={
+                "verdict": "request_changes",
+                "notes": "Tighten it.",
+                "request_id": "prop-research",
+            }
+        ),
         "fresh",
     )
 
@@ -164,7 +170,13 @@ async def test_an_approved_phase_stops_showing_its_revision_notes() -> None:
 
     await _updates(
         graph,
-        Command(resume={"verdict": "request_changes", "notes": "Fix the sources."}),
+        Command(
+            resume={
+                "verdict": "request_changes",
+                "notes": "Fix the sources.",
+                "request_id": "prop-research",
+            }
+        ),
         "clears",
     )
     revising = await graph.aget_state(thread)
@@ -172,7 +184,15 @@ async def test_an_approved_phase_stops_showing_its_revision_notes() -> None:
     assert revising.values["validation_errors"] == ["Fix the sources."]
 
     await _updates(
-        graph, Command(resume={"verdict": "approved", "notes": None}), "clears"
+        graph,
+        Command(
+            resume={
+                "verdict": "approved",
+                "notes": None,
+                "request_id": "prop-research",
+            }
+        ),
+        "clears",
     )
     advanced = await graph.aget_state(thread)
 

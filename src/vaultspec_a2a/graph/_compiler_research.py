@@ -611,6 +611,11 @@ def _compile_research_adr(
     # out-of-run verdict subscriber can correlate a verdict to the parked run via
     # the committed ``authoring_proposal_ids``. The inner review loop
     # routes into the SUBMIT node; the submit node routes on into its gate.
+    #
+    # The submit nodes take the SAME per-phase budget as the review router below:
+    # a conformance refusal sends the writer round again, and a refusal that
+    # spent nothing looped the phase until the recursion limit.
+    max_revisions = team_config.topology.max_review_revisions
     _add_node(
         builder,
         _RA_RESEARCH_SUBMIT,
@@ -619,6 +624,7 @@ def _compile_research_adr(
             options["proposal_submitter"],
             gate_target=_RA_RESEARCH_GATE,
             revision_target=_RA_SYNTHESIS,
+            max_revisions=max_revisions,
         ),
         destinations=(_RA_RESEARCH_GATE, _RA_SYNTHESIS),
     )
@@ -640,6 +646,7 @@ def _compile_research_adr(
             options["proposal_submitter"],
             gate_target=_RA_ADR_GATE,
             revision_target=_RA_ADR_AUTHOR,
+            max_revisions=max_revisions,
         ),
         destinations=(_RA_ADR_GATE, _RA_ADR_AUTHOR),
     )
@@ -661,6 +668,7 @@ def _compile_research_adr(
             options["proposal_submitter"],
             gate_target=_RA_PLAN_GATE,
             revision_target=_RA_PLAN_AUTHOR,
+            max_revisions=max_revisions,
         ),
         destinations=(_RA_PLAN_GATE, _RA_PLAN_AUTHOR),
     )
@@ -697,7 +705,6 @@ def _compile_research_adr(
         )
         builder.add_edge(START, _RA_CLARIFY_REQUEST)
 
-    max_revisions = team_config.topology.max_review_revisions
     builder.add_edge(_RA_SYNTHESIS, _RA_RESEARCH_REVIEW)
     builder.add_conditional_edges(
         _RA_RESEARCH_REVIEW,

@@ -46,6 +46,7 @@ from ...thread.enums import (
     VERDICT_REJECTED,
     VERDICT_REQUEST_CHANGES,
 )
+from ...thread.errors import DocumentConformanceError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -145,6 +146,7 @@ def create_phase_submit_node(
     *,
     gate_target: str,
     revision_target: str,
+    max_revisions: int,
 ) -> RoutingNode:
     """Create the deterministic pre-interrupt propose-and-submit node.
 
@@ -167,6 +169,16 @@ def create_phase_submit_node(
     ``revision_notes`` attribute (a duck-typed contract), so the gate module stays
     decoupled from the authoring package.
 
+    That second chance is BUDGETED, on the same per-phase counter the inner
+    review loop spends: both are revisions of this phase's document by the same
+    writer, and a refusal that cost nothing looped writer -> review -> submit
+    until the recursion limit killed the run. A spent budget raises
+    :class:`...thread.errors.DocumentConformanceError` rather than parking at
+    the human gate, because a refusal happens BEFORE any proposal exists: the
+    gate's payload would name no proposal and the out-of-run verdict subscriber
+    correlates a verdict by exactly that id, so a park here is a pause nothing
+    could end.
+
     Args:
         phase:           The document phase this gate guards (e.g. ``research``,
                          ``adr``); recorded in ``gate_phase`` and carried to the gate.
@@ -176,12 +188,18 @@ def create_phase_submit_node(
         revision_target: The phase's writer, routed to when the submitter refuses a
                          non-conformant body (the SAME target the gate uses on
                          ``request_changes``).
+        max_revisions:   The phase's revision budget, shared with the inner review
+                         loop's router so the two cannot each spend it in full.
 
     Returns:
         An async node that proposes+submits and routes via ``Command.goto`` into
         the gate, committing ``authoring_proposal_ids`` / ``gate_phase`` /
-        ``gate_pending_proposal_id`` - or, on a conformance refusal, routes to the
-        writer with the specific check notes.
+        ``gate_pending_proposal_id`` - or, on a conformance refusal within budget,
+        routes to the writer with the specific check notes.
+
+    Raises:
+        DocumentConformanceError: The submitter refused and the phase has no
+            revision left to spend.
     """
 
     async def phase_submit_node(state: TeamState) -> Command[Any]:
@@ -189,6 +207,11 @@ def create_phase_submit_node(
         try:
             proposal_id = await submitter(state, phase)
         except ProposalRevisionRequiredError as exc:
+            spent = (state.get("review_revisions") or {}).get(phase, 0)
+            if spent > max_revisions:
+                raise DocumentConformanceError(
+                    phase, exc.revision_notes, attempts=spent
+                ) from exc
             return Command(
                 goto=revision_target,
                 update={
@@ -196,6 +219,7 @@ def create_phase_submit_node(
                     "gate_phase": phase,
                     "gate_verdict": VERDICT_REQUEST_CHANGES,
                     "validation_errors": list(exc.revision_notes),
+                    "review_revisions": {phase: spent + 1},
                 },
             )
         return Command(

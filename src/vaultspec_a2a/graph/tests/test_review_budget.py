@@ -28,7 +28,9 @@ from ...thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
+from ...thread.errors import DocumentConformanceError
 from ..compiler import compile_team_graph
+from ..nodes.phase_gate import ProposalRevisionRequiredError
 from .conftest import deterministic_model_assignment
 
 _REVISION = "REVISION REQUIRED\n1. The claims need re-fetchable locators."
@@ -156,6 +158,87 @@ async def test_a_zero_budget_goes_straight_to_the_gate() -> None:
     assert visited.count("synthesis") == 1
     state = await graph.aget_state({"configurable": {"thread_id": "zero"}})
     assert state.next == ("research_gate",)
+
+
+class _RefusingSubmitter:
+    """Refuses every body on conformance, as a writer that never complies would."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def __call__(self, state: Any, phase: str) -> str:
+        del state
+        self.attempts += 1
+        raise ProposalRevisionRequiredError(
+            [f"leftover template placeholder in the {phase} body"]
+        )
+
+
+def _refusing_research_graph(
+    max_review_revisions: int, submitter: _RefusingSubmitter
+) -> Any:
+    team = load_team_config("vaultspec-adr-research")
+    topology = team.topology.model_copy(
+        update={
+            "research_threads": [ResearchThreadSpec(thread_id="primary")],
+            "max_review_revisions": max_review_revisions,
+        }
+    )
+    team = team.model_copy(update={"topology": topology})
+    return compile_team_graph(
+        team_config=team,
+        agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
+        checkpointer=InMemorySaver(),
+        provider_factory=_RoleScriptedFactory({}),
+        proposal_submitter=submitter,
+        model_assignment=deterministic_model_assignment(team),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_submitter_that_never_accepts_a_body_ends_the_run_typed() -> None:
+    """A conformance refusal costs a revision, and a spent budget ends the run.
+
+    The refusal routes the phase's writer round again, exactly as a human
+    ``request_changes`` does, so it spends the same per-phase budget. Costing
+    nothing, it looped writer -> review -> submit until the recursion limit -
+    an anonymous failure after a full budget of wasted model turns.
+
+    The bounded end is a typed error rather than a park at the human gate:
+    the refusal happens BEFORE any proposal exists, so a parked gate would
+    name no proposal and nothing out of run could resume it.
+    """
+    submitter = _RefusingSubmitter()
+    graph = _refusing_research_graph(2, submitter)
+
+    with pytest.raises(DocumentConformanceError) as raised:
+        await _updates(graph, _receipt_input("refusing"), "refusing")
+
+    assert raised.value.phase == "research"
+    assert raised.value.revision_notes == [
+        "leftover template placeholder in the research body"
+    ]
+    # The first submit plus the budget's revisions, then the refusal that ends
+    # it - not the recursion limit's worth.
+    assert submitter.attempts == 4
+    assert raised.value.attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_a_zero_budget_refusal_ends_on_its_first_retry() -> None:
+    """A phase with no revision budget still gets one corrective pass.
+
+    A budget of zero means the inner reviewer gets no revision, and the same
+    reading applies here: the writer is told once what the submitter refused,
+    and a second refusal ends the run.
+    """
+    submitter = _RefusingSubmitter()
+    graph = _refusing_research_graph(0, submitter)
+
+    with pytest.raises(DocumentConformanceError):
+        await _updates(graph, _receipt_input("refusing-zero"), "refusing-zero")
+
+    assert submitter.attempts == 2
 
 
 def _loop_graph(reviewer_reply: str) -> Any:

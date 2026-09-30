@@ -67,7 +67,7 @@ def _base_state() -> TeamState:
     }
 
 
-def _gate_graph(submitter: DocumentProposalSubmitter) -> Any:
+def _gate_graph(submitter: DocumentProposalSubmitter, *, max_revisions: int = 2) -> Any:
     """Build START -> submit -> gate -> {approved_end | revise_end} -> END.
 
     The gate is split: a submit node commits the proposal id before the
@@ -83,7 +83,11 @@ def _gate_graph(submitter: DocumentProposalSubmitter) -> Any:
         return {}
 
     submit = create_phase_submit_node(
-        "research", submitter, gate_target="gate", revision_target="revise_end"
+        "research",
+        submitter,
+        gate_target="gate",
+        revision_target="revise_end",
+        max_revisions=max_revisions,
     )
     gate = create_phase_gate_node(
         "research",

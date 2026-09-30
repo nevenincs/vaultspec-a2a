@@ -343,6 +343,7 @@ class TestAllExports:
             "ConfigError",
             "ContextOverflowError",
             "DatabaseError",
+            "DocumentConformanceError",
             "EventAggregatorError",
             "HarnessToolContractError",
             "NicknameConflictError",

@@ -404,6 +404,8 @@ known_first_party = ["vaultspec_a2a"]
   opentelemetry-exporter-otlp-proto-grpc = "opentelemetry"
   opentelemetry-instrumentation-fastapi = "opentelemetry"
   opentelemetry-sdk = "opentelemetry"
+  # The server extra's psycopg[pool] is what installs psycopg_pool.
+  psycopg = ["psycopg", "psycopg_pool"]
   pytest-asyncio = "pytest_asyncio"
   torch = "torch"
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-09-30'
 body_schema: 'body-v2'
-body_hash: 'sha256:e1ba16e5d51b7abfb8690da15da9b5ee83b81ce0f5ce0d49d541a1b48bbd30f9'
+body_hash: 'sha256:1c91ea2e4b9ee891cd3255883f2d02a07001c6fbe2cf3b709eb7cdde6382edea'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -371,6 +371,7 @@ related:
 - `S06` `M` `src/vaultspec_a2a/worker/tests/test_executor_drain.py`
 - `S06` `M` `src/vaultspec_a2a/api/tests/clarification_harness.py`
 - `S06` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
+- `S13` `verify:` `runner full unit gate (4823; 5 scratch-port tests lost the band to a concurrent just ci and passed alone, 50) + just ci` -> `pass`
 
 ## Notes
 
@@ -398,4 +399,5 @@ related:
 - `S08` Reopened by the plan-close review (settled-prune-on-the-relay-critical-path, medium): the prune runs behind the relay and a failed SQLite prune rolls back.
 - `S19` Reopened by the plan-close review (requeued-ipc-batch-drops-terminal-events, medium).
 - `S06` In-scope correction from the plan-close review (seated-runtime-also-shadows-the-saver-store, drained-settle-leaves-the-failure-stash-behind, both low).
+- `S13` In-scope correction from the plan-close review (step-id-carried-forward-in-a-test-docstring).
 

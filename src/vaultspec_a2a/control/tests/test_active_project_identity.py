@@ -161,7 +161,7 @@ class TestStoredMetadataOnlyYieldsADispatchableProject:
 
 
 class TestAdmissionMintsOnce:
-    """S07 - admission is where the run's project spelling is decided."""
+    """Admission is where the run's project spelling is decided."""
 
     def test_admission_returns_the_canonical_spelling(self, workspace: Path) -> None:
         raw = _uncanonical_spelling(workspace)
@@ -244,7 +244,7 @@ class TestAdmissionMintsOnce:
 
 
 class TestDispatchCarriesTheMintedProject:
-    """S08 - the wire mints, so no construction site can dispatch a raw path."""
+    """The wire mints, so no construction site can dispatch a raw path."""
 
     def test_two_spellings_reach_the_worker_as_one(self, workspace: Path) -> None:
         """The run-start and follow-up shapes must agree.
@@ -324,7 +324,7 @@ class TestDispatchCarriesTheMintedProject:
 
 
 class TestGraphStateNamesTheProject:
-    """S20 - ``TeamState.workspace_root`` must be written, not merely declared.
+    """``TeamState.workspace_root`` must be written, not merely declared.
 
     The state key has always documented itself as threaded in through graph
     input. Nothing wrote it, so both readers - the worker node and the research
@@ -425,7 +425,7 @@ class TestGraphStateNamesTheProject:
 
 
 class TestAuthoringSubmitterIsBoundToTheProject:
-    """S14 support - the run's authoring submitter is built on its own project."""
+    """The run's authoring submitter is built on its own project."""
 
     @pytest.mark.asyncio
     async def test_a_document_run_without_a_project_refuses_to_build_one(self) -> None:
@@ -459,7 +459,7 @@ def _test_graph_definition_digest(team_preset: str) -> str:
 
 
 class TestOneWorkspaceOneGraphEntry:
-    """S09 - a run's graph cache entry is keyed on its canonical workspace.
+    """A run's graph cache entry is keyed on its canonical workspace.
 
     Each run compiles its own graph (a compiled graph holds model instances a
     provider refuses to share between concurrent turns); within a run, every

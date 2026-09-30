@@ -55,6 +55,7 @@ _IMPURE_FILES = frozenset(
         "test_claude_permission_posture.py",
         "test_launcher_confinement.py",
         "test_model_stack_warmup.py",
+        "test_prompt_render.py",
         "test_resource_lifetimes.py",
         # Real async engine and session maker.
         "test_deterministic_scripts.py",

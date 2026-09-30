@@ -28,14 +28,7 @@ from langchain_core.language_models.chat_models import (
     BaseChatModel,
     generate_from_stream,
 )
-from langchain_core.messages import (
-    AIMessage,
-    AIMessageChunk,
-    BaseMessage,
-    ChatMessage,
-    HumanMessage,
-    SystemMessage,
-)
+from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
@@ -104,6 +97,7 @@ from ._json_contract import (
     lenient_json_object_list,
 )
 from ._mcp_contract import verify_harness_mcp_contract
+from ._prompt_render import render_prompt_blocks
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import (
@@ -487,13 +481,13 @@ class AcpChatModel(BaseChatModel):
         native_command: NativeCommandRequest | None,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Run one ordinary prompt or one negotiated native command."""
-        prompt_blocks: list[JsonObject] = []
-        for msg in messages:
-            if isinstance(
-                msg,
-                (HumanMessage, SystemMessage, ChatMessage, AIMessage, AIMessageChunk),
-            ):
-                prompt_blocks.append({"type": "text", "text": str(msg.content)})
+        # Rendered through the seam the Codex lane shares: a conversation says
+        # who spoke and what a tool answered, and it has to say the same thing on
+        # whichever transport carries it. Rendering here instead dropped every
+        # role label, every speaker name, and every tool result - leaving the
+        # agent's own prior turns, another agent's output, and the system
+        # instructions arriving as one anonymous voice.
+        prompt_blocks: list[JsonObject] = render_prompt_blocks(messages)
 
         # The child inherits the ambient environment (resolve_env_vars passes it
         # through, minus this service's own infra tokens) so the spawned CLI

@@ -27,7 +27,7 @@ from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .ingest import IngestManager, IngestRequest
-from .subscribers import SubscriberManager
+from .subscribers import AllocationSink, RunSequenceAllocator, SubscriberManager
 from .transformer import project_run_progress
 from .types import SequencedEvent, StreamableGraph
 
@@ -189,7 +189,7 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         self._ingest.clear_thread_state(thread_id)
         self._emitters.clear_thread_state(thread_id)
 
-    def relay_payload(self, thread_id: str, payload: object) -> None:
+    def relay_payload(self, thread_id: str, payload: object) -> object:
         """Fan out a pre-serialized payload to all subscribers of ``thread_id``.
 
         Worker run events enter the public progress edge here. Each is projected
@@ -197,8 +197,33 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         prompts, document and artifact bodies, edit diffs, and raw provider
         payloads are dropped at the relay seam - a first enforcement the encode
         boundary independently repeats.
+
+        Returns the frame as subscribers received it, which carries the
+        gateway's own sequence where this run is numbered. Call
+        :meth:`prepare_run` for the run first: this path is synchronous and
+        cannot establish a number it has never read.
         """
-        self._subscribers_mgr.enqueue_payload(thread_id, project_run_progress(payload))
+        return self._subscribers_mgr.enqueue_payload(
+            thread_id, project_run_progress(payload)
+        )
+
+    async def prepare_run(self, thread_id: str) -> None:
+        """Establish *thread_id*'s event numbering before relaying its frames."""
+        await self._subscribers_mgr.prepare_run(thread_id)
+
+    def bind_sequence_allocator(
+        self,
+        allocator: RunSequenceAllocator | None,
+        *,
+        sink: AllocationSink | None = None,
+    ) -> None:
+        """Seat the authority that numbers this process's outgoing frames."""
+        self._subscribers_mgr.bind_sequence_allocator(allocator, sink=sink)
+
+    @property
+    def sequence_allocator(self) -> RunSequenceAllocator | None:
+        """The seated numbering authority, or ``None`` where none is bound."""
+        return self._subscribers_mgr.sequence_allocator
 
     def register_graph(self, thread_id: str, graph: StreamableGraph) -> None:
         self._subscribers_mgr.register_graph(thread_id, graph)

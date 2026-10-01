@@ -145,7 +145,15 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         self._buffering = buffering
         self._telemetry = telemetry
 
-        # Per-thread monotonic sequence counters (start at 0, first event = 1)
+        # Per-thread monotonic sequence counters (start at 0, first event = 1).
+        #
+        # WORKER-LOCAL ORDERING ONLY. This counter orders a run's events within
+        # one process lifetime and restarts at zero when that process does, so
+        # it is not, and must not be read as, the run's event identity. The
+        # gateway allocates the authoritative number where frames enter
+        # subscriber queues and stamps it over the body's sequence field on the
+        # way past (streaming/subscribers.py). Nothing downstream should resume,
+        # deduplicate, or persist against the number produced here.
         self._sequences: dict[str, int] = defaultdict(int)
 
         # Track pending permission requests per thread.
@@ -171,7 +179,11 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
     # ------------------------------------------------------------------
 
     def next_sequence(self, thread_id: str) -> int:
-        """Atomically increment and return the next sequence for a thread."""
+        """Increment and return this process's next ordering number for a thread.
+
+        A producer-side ordering aid, not the run's event identity; see the
+        counter's declaration in ``__init__``.
+        """
         self._sequences[thread_id] += 1
         return self._sequences[thread_id]
 

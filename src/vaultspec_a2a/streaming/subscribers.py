@@ -3,12 +3,23 @@
 Manages client WebSocket connections, thread subscriptions, broadcast hooks,
 and the graph node metadata cache.  Extracted from the monolithic
 ``aggregator.py`` during the aggregator decomposition.
+
+This module also owns the one place a run's authoritative event sequence is
+allocated. Every frame a subscriber receives passes through
+:meth:`SubscriberManager.enqueue_payload` or :meth:`SubscriberManager.broadcast`,
+so numbering there - and only there - gives a relayed worker payload and an
+in-process domain event exactly one number each from one counter. A process
+that binds no allocator (the worker's own aggregator, or a gateway serving no
+replay) numbers nothing and behaves exactly as it did before.
 """
 
 import asyncio
 import logging
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Protocol
 
 from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
@@ -18,6 +29,136 @@ from .node_metadata import node_metadata_from_graph
 from .types import SequencedEvent, StreamableGraph
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "AllocationSink",
+    "RunSequenceAllocator",
+    "RunSequenceSeedSource",
+    "SequenceAllocation",
+    "SubscriberManager",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class SequenceAllocation:
+    """One run's authoritative number for one outgoing frame.
+
+    ``allocated_at`` is stamped here rather than where the frame is later
+    written, so the durable row records when the frame was PRODUCED. The write
+    sits behind the fan-out and may land much later; dating a row by its write
+    would misreport the age bound that expires it.
+    """
+
+    thread_id: str
+    sequence: int
+    allocated_at: datetime
+
+
+class RunSequenceSeedSource(Protocol):
+    """The two durable reads a run's numbering is established from."""
+
+    async def high_water_mark(self, thread_id: str) -> int | None:
+        """Return the greatest sequence already retained for this run."""
+        ...
+
+    async def settled_sequence(self, thread_id: str) -> int | None:
+        """Return the cursor captured on this run when it settled."""
+        ...
+
+
+class AllocationSink(Protocol):
+    """Where an allocation is recorded, between numbering and fan-out.
+
+    Synchronous on purpose: this runs IN FRONT of the fan-out, so it may only
+    do in-memory work. The durable write belongs behind the fan-out and is the
+    sink's own business.
+    """
+
+    def record(self, allocation: SequenceAllocation, frame: object) -> None:
+        """Record one numbered frame for later durable writing."""
+        ...
+
+
+class RunSequenceAllocator:
+    """One monotonic, restart-stable number per run, allocated in memory.
+
+    The counter is seeded once per run per gateway lifetime, from the run's
+    durable high-water mark, then advanced in process. Three outcomes, and the
+    difference between them is the whole point:
+
+    * seeded from a retained row - numbering continues where the last gateway
+      left off, which is what lets a consumer resume across a restart;
+    * seeded from the cursor captured at settle, or from zero for a run with
+      neither - the only honest starting points left;
+    * UNSEEDABLE, because the store could not be read - the run is left
+      unnumbered for this process's lifetime. Restarting its numbering instead
+      would hand two different frames the same number, which is exactly the
+      hazard that forced the SSE id to be withdrawn once already.
+
+    An unnumbered run still streams. It just carries no id, so no consumer is
+    handed a cursor it cannot resume from.
+    """
+
+    def __init__(self, seeds: RunSequenceSeedSource) -> None:
+        self._seeds = seeds
+        self._counters: dict[str, int] = {}
+        self._unnumbered: set[str] = set()
+
+    async def seed(self, thread_id: str) -> None:
+        """Establish *thread_id*'s counter if this process has not yet done so.
+
+        Idempotent and cheap after the first call: a run already seeded, or
+        already known unseedable, costs one dictionary lookup and no database
+        round trip.
+        """
+        if thread_id in self._counters or thread_id in self._unnumbered:
+            return
+        try:
+            retained = await self._seeds.high_water_mark(thread_id)
+            start = (
+                retained
+                if retained is not None
+                else (await self._seeds.settled_sequence(thread_id) or 0)
+            )
+        except Exception:
+            self._unnumbered.add(thread_id)
+            logger.warning(
+                "Could not establish the event sequence of run %s; its stream "
+                "will carry no resumable id for the life of this process",
+                thread_id,
+                exc_info=True,
+                extra={"thread_id": thread_id, "action": "run_sequence_unseedable"},
+            )
+            return
+        self._counters[thread_id] = start
+
+    def allocate(self, thread_id: str) -> int | None:
+        """Return *thread_id*'s next number, or ``None`` when it has none.
+
+        ``None`` means the run was never seeded on this gateway, or could not
+        be. Both answers are the same to a caller: emit the frame, write no
+        durable row, and offer no id.
+        """
+        current = self._counters.get(thread_id)
+        if current is None:
+            return None
+        advanced = current + 1
+        self._counters[thread_id] = advanced
+        return advanced
+
+    def is_numbered(self, thread_id: str) -> bool:
+        """Whether this run has an established counter on this gateway."""
+        return thread_id in self._counters
+
+    def forget(self, thread_id: str) -> None:
+        """Drop *thread_id*'s in-memory numbering state.
+
+        Called when a run's aggregator state is purged. A later frame for the
+        same run re-seeds from the durable mark, so forgetting costs a read
+        and never a restart of the numbering.
+        """
+        self._counters.pop(thread_id, None)
+        self._unnumbered.discard(thread_id)
 
 
 class SubscriberManager:
@@ -44,6 +185,72 @@ class SubscriberManager:
         # Lock for subscriber mutation
         self._lock = asyncio.Lock()
         self._telemetry = telemetry
+        # Unbound by default. The worker's aggregator and a gateway serving no
+        # replay never bind one, and then nothing below numbers anything.
+        self._allocator: RunSequenceAllocator | None = None
+        self._allocation_sink: AllocationSink | None = None
+
+    # ------------------------------------------------------------------
+    # Sequence allocation
+    # ------------------------------------------------------------------
+
+    def bind_sequence_allocator(
+        self,
+        allocator: RunSequenceAllocator | None,
+        *,
+        sink: AllocationSink | None = None,
+    ) -> None:
+        """Seat the authority that numbers outgoing frames, and its recorder."""
+        self._allocator = allocator
+        self._allocation_sink = sink
+
+    @property
+    def sequence_allocator(self) -> RunSequenceAllocator | None:
+        """The seated numbering authority, or ``None`` where none is bound."""
+        return self._allocator
+
+    async def prepare_run(self, thread_id: str) -> None:
+        """Establish *thread_id*'s numbering before its frames are enqueued.
+
+        :meth:`enqueue_payload` is synchronous and cannot read a database, so
+        the ingest path that owns the await calls this first. A run reaching
+        the chokepoint unprepared is not numbered, which costs it its id and
+        never costs it a frame.
+        """
+        if self._allocator is not None:
+            await self._allocator.seed(thread_id)
+
+    def _number(self, thread_id: str, frame: object) -> SequenceAllocation | None:
+        """Allocate this frame's number and record it, before any fan-out.
+
+        The recording step is deliberately in front of the fan-out and
+        deliberately in-memory: the ORDER that must hold is allocate, record,
+        fan out, and only then write. Putting the durable write here would
+        delay every subscriber by a database round trip.
+        """
+        if self._allocator is None:
+            return None
+        sequence = self._allocator.allocate(thread_id)
+        if sequence is None:
+            return None
+        allocation = SequenceAllocation(
+            thread_id=thread_id, sequence=sequence, allocated_at=datetime.now(UTC)
+        )
+        if self._allocation_sink is not None:
+            try:
+                self._allocation_sink.record(allocation, frame)
+            except Exception:
+                logger.warning(
+                    "Could not record event %d of run %s for replay",
+                    allocation.sequence,
+                    thread_id,
+                    exc_info=True,
+                    extra={
+                        "thread_id": thread_id,
+                        "action": "run_event_record_failed",
+                    },
+                )
+        return allocation
 
     # ------------------------------------------------------------------
     # Subscriber management
@@ -174,6 +381,8 @@ class SubscriberManager:
         for client_id in list(self._subscriptions):
             self._subscriptions[client_id].discard(thread_id)
         self._node_metadata.pop(thread_id, None)
+        if self._allocator is not None:
+            self._allocator.forget(thread_id)
 
     def remove_node_metadata(self, thread_id: str) -> None:
         """Drop the live graph descriptors for one terminal worker thread."""
@@ -212,8 +421,20 @@ class SubscriberManager:
             all_threads.update(threads)
         return sorted(all_threads)
 
-    def enqueue_payload(self, thread_id: str, payload: object) -> None:
-        """Enqueue a pre-serialized payload for all subscribers of ``thread_id``."""
+    def enqueue_payload(self, thread_id: str, payload: object) -> object:
+        """Enqueue a pre-serialized payload for all subscribers of ``thread_id``.
+
+        Numbers the frame first, where a number is available, and stamps that
+        number over the body's own ``sequence``. The worker's counter orders a
+        run's events within one worker lifetime and restarts with the process;
+        the number stamped here is the run's identity and survives a restart
+        of either process, so the relay overwrites rather than forwards.
+
+        Returns the payload as it was delivered, which is the stamped one.
+        """
+        allocation = self._number(thread_id, payload)
+        if allocation is not None and isinstance(payload, Mapping):
+            payload = {**payload, "sequence": allocation.sequence}
         for client_id, queue in list(self._subscribers.items()):
             client_subs = self._subscriptions.get(client_id, set())
             if thread_id not in client_subs:
@@ -259,6 +480,12 @@ class SubscriberManager:
     async def broadcast(self, sequenced: SequencedEvent) -> None:
         """Fan out a sequenced domain event to all interested subscribers.
 
+        An in-process domain event takes its number from the same counter a
+        relayed worker payload does, so two producers on one run cannot both
+        claim one number. The delivered wrapper is a new one rather than the
+        caller's: the hooks below are the worker's relay, which must keep
+        forwarding its own producer-side ordering untouched.
+
         Uses a drop-oldest strategy: if a subscriber queue is full,
         the oldest buffered event is discarded before inserting the new
         one.  This keeps the aggregator non-blocking while bounding
@@ -266,6 +493,15 @@ class SubscriberManager:
         """
         thread_id = getattr(sequenced.event, "thread_id", None)
         event_type = type(sequenced.event).__name__
+
+        delivered_event = sequenced
+        if thread_id is not None:
+            await self.prepare_run(thread_id)
+            allocation = self._number(thread_id, sequenced)
+            if allocation is not None:
+                delivered_event = SequencedEvent(
+                    event=sequenced.event, sequence=allocation.sequence
+                )
 
         with self._telemetry.start_span(
             "aggregator.broadcast",
@@ -276,7 +512,7 @@ class SubscriberManager:
                 client_subs = self._subscriptions.get(client_id, set())
                 if not (thread_id is None or thread_id in client_subs):
                     continue
-                outcome = deliver_bounded(queue, sequenced, client_id=client_id)
+                outcome = deliver_bounded(queue, delivered_event, client_id=client_id)
                 if outcome.dropped:
                     self._dropped[client_id] += outcome.dropped
                 if outcome.delivered:

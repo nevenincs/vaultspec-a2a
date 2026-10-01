@@ -31,11 +31,26 @@ def test_reconciling_threads_are_not_message_eligible() -> None:
 
 @pytest.mark.parametrize(
     "status",
-    [ThreadStatus.SUBMITTED, ThreadStatus.RUNNING, ThreadStatus.CANCELLING],
+    [ThreadStatus.SUBMITTED, ThreadStatus.RUNNING],
 )
-def test_a_run_that_still_owns_a_turn_refuses_as_busy(status: ThreadStatus) -> None:
-    """Occupancy is its own refusal, distinct from a settled or parked run."""
+def test_a_run_executing_a_turn_admits_a_continuation_behind_it(
+    status: ThreadStatus,
+) -> None:
+    """Occupancy is what makes a run admitting, not what refuses it.
+
+    Admitted here never means dispatched: the turn is reserved behind the one
+    executing and takes the run's write authority only at promotion.
+    """
     result = can_send_followup(status.value)
+
+    assert result.allowed is True
+    assert result.failure_type is None
+    assert result.reason is None
+
+
+def test_a_cancelling_run_still_refuses_as_busy() -> None:
+    """A run that is leaving can never promote what is queued behind it."""
+    result = can_send_followup(ThreadStatus.CANCELLING.value)
 
     assert result.allowed is False
     assert result.failure_type is FailureType.RUN_BUSY
@@ -69,14 +84,22 @@ def test_a_settled_run_refuses_as_terminal(status: ThreadStatus) -> None:
 
 
 def test_every_lifecycle_status_resolves_to_a_typed_answer() -> None:
-    """No status may fall through to an untyped or silently allowed follow-up.
+    """No status may fall through to an untyped or silently admitted follow-up.
 
-    The vocabulary is closed, so a new lifecycle state has to be classified here
-    deliberately rather than inheriting the permissive default the old policy
-    ended on.
+    Exactly two states admit one, and the set is asserted rather than the
+    bare refusals: the policy still ends on a permissive default, so a new
+    lifecycle state that nobody classified arrives here as admitted and is
+    caught by not being one of these two. Every other state owes both a typed
+    code and a sentence.
     """
+    admitting = {ThreadStatus.SUBMITTED, ThreadStatus.RUNNING}
     for status in ThreadStatus:
         result = can_send_followup(status.value)
+        if status in admitting:
+            assert result.allowed is True, status
+            assert result.failure_type is None, status
+            assert result.reason is None, status
+            continue
         assert result.allowed is False, status
         assert result.failure_type is not None, status
         assert result.reason, status

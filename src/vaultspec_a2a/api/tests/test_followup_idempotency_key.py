@@ -98,7 +98,7 @@ async def test_a_supplied_key_is_bounded_and_otherwise_taken_as_given(
     """The key is opaque, so the only thing the gateway says about one is its size.
 
     A key at the published bound is carried into the verb, which then answers
-    with the run's own refusal; one byte longer is a malformed request. The
+    with the run's own answer; one byte longer is a malformed request. The
     bound is at the edge because the value reaches a durable uniqueness
     constraint, and an unbounded header has no business there.
     """
@@ -125,13 +125,13 @@ async def test_a_supplied_key_is_bounded_and_otherwise_taken_as_given(
             headers={"Idempotency-Key": ""},
         )
 
-    # The run refuses its own way, which is the proof the key was accepted and
+    # The run answers its own way, which is the proof the key was accepted and
     # the request went on to the verb rather than being rejected at the edge.
-    assert at_bound.status_code == 409, at_bound.text
-    assert at_bound.json()["detail"]["code"] == "run_busy"
+    assert at_bound.status_code == 202, at_bound.text
+    assert at_bound.json()["action_status"] == "queued"
 
     assert over_bound.status_code == 422, over_bound.text
     assert _names_the_header(over_bound.json())
     assert empty.status_code == 422, empty.text
     assert _names_the_header(empty.json())
-    assert worker.dispatches == [], "a refused follow-up must not dispatch"
+    assert worker.dispatches == [], "a queued follow-up must not dispatch"

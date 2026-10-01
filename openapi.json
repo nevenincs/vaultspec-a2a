@@ -697,7 +697,7 @@
     "/v1/runs/{run_id}/messages": {
       "post": {
         "summary": "Run Message Endpoint",
-        "description": "Send a follow-up turn into an existing run.\n\nNo run state admits a follow-up today, so every request that names a run is\nrefused with the typed 409: a run with a turn in flight is busy, a parked run\nanswers through its own respond verb, and a settled run is over. Taking a\nturn needs a continuation model this surface does not have yet, and the 202\nshape below is what that model will answer with. The verb is published now\nso a caller learns the refusal from its code rather than from a missing\nroute.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nA run whose current turn has not finished refuses with a typed 409 rather\nthan taking the turn. Admitting it would hand the run's write authority to\nthe new turn while the old one is still executing, after which the executing\nturn's own completion is refused as superseded and the run quarantines. The\nrefusal reserves nothing and dispatches nothing, so the caller loses no\nstate by meeting it; a queued continuation is a separate capability.\n\nA parked run is likewise refused: a pause is answered through its own typed\nrespond verb, and a message here would start a new turn and orphan the pause.\n\nThe caller names the turn. ``Idempotency-Key`` is required here and has no\nserver-derived default, because a default can only be derived from what the\nrequest already says - the run, the agent, the text - and two deliberate\nidentical continuations are two turns, not one sent twice. Under a derived\nkey the second was answered as a replay of the first and never ran. A\nrequest that names no key is refused before anything is read.\n\nAccepted is not applied: an accepted turn is handed to the worker and\nexecution continues asynchronously, so a caller reconciles from the stream or\nrun-status rather than from this response.",
+        "description": "Queue a follow-up turn behind the one an existing run is executing.\n\nA run that is still executing a turn (SUBMITTED, RUNNING) takes the\nfollow-up and answers 202 with ``action_status`` ``queued`` and the place\nit was given. The turn is reserved in the run's journal and NOTHING else:\nit binds no graph receipt, installs no writer and is not dispatched, which\nis what keeps the executing turn's own terminal from being refused as\nsuperseded. It becomes a dispatch only once that turn's terminal\ncheckpoint is proven, and the run stays RUNNING across the boundary.\n\nA consumer must therefore not read a quiet turn boundary as completion: a\nrun holding a queued continuation emits no terminal frame at the end of\nits first turn, and one at the end of its last.\n\nOne continuation waits per run, and the service bounds the total. A second\noffer while one waits refuses ``queue_full``; nothing was reserved, and\nthe caller may offer again once the waiting turn has run.\n\nEvery other state still refuses, each for its own reason. A cancelling run\nis leaving, so a turn queued behind it would wait for a promotion that can\nnever come. A parked run answers through its own typed respond verb, and a\nmessage here would start a turn that orphans the pause. A settled run is\nover; continuing it is a new run that names it as its predecessor.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nThe caller names the turn. ``Idempotency-Key`` is required here and has no\nserver-derived default, because a default can only be derived from what the\nrequest already says - the run, the agent, the text - and two deliberate\nidentical continuations are two turns, not one sent twice. Under a derived\nkey the second was answered as a replay of the first and never ran. A\nrequest that names no key is refused before anything is read.\n\nQueued is not applied: the turn has not started, so a caller reconciles\nfrom the stream or run-status rather than from this response.",
         "operationId": "run_message_endpoint_v1_runs__run_id__messages_post",
         "security": [
           {
@@ -743,7 +743,7 @@
         },
         "responses": {
           "202": {
-            "description": "Reserved for a follow-up turn the run can take. No run state admits one yet, so this response is not currently served.",
+            "description": "The follow-up turn is queued behind the one the run is executing. It holds a place in the run's queue and no write authority; it reaches the worker when the current turn's terminal checkpoint is proven. ``queue_position`` says where it sits.",
             "content": {
               "application/json": {
                 "schema": {
@@ -756,7 +756,7 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker and the turn was retained for retry."
+            "description": "Gateway service token is not configured."
           },
           "409": {
             "description": "The run cannot accept a follow-up turn. Nothing was reserved and nothing was dispatched; the typed code names which condition refused it.",
@@ -767,9 +767,6 @@
                 }
               }
             }
-          },
-          "502": {
-            "description": "The turn was accepted and retained but the worker could not be reached or failed inside itself. Reconcile from run-status."
           },
           "422": {
             "description": "Validation Error",
@@ -3482,7 +3479,8 @@
           "terminal",
           "conflict",
           "incompatible_state",
-          "run_busy"
+          "run_busy",
+          "queue_full"
         ],
         "title": "RunMessageRefusalCode",
         "description": "The conditions a run action can be refused for.\n\nA closed subset of the dispatch failure vocabulary, so the published\ncontract names only what this refusal can carry rather than every failure\nthe gateway knows. Each value is spelled as its failure-type counterpart.\n\nShared by every verb that reaches the worker through a run dispatch, not\nonly the follow-up turn: the same worker refusal must mean the same thing\nwhichever verb met it."
@@ -3591,6 +3589,18 @@
           "idempotency_key": {
             "type": "string",
             "title": "Idempotency Key"
+          },
+          "queue_position": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Position"
           }
         },
         "type": "object",
@@ -3600,7 +3610,7 @@
           "idempotency_key"
         ],
         "title": "RunMessageResponse",
-        "description": "Acknowledge a follow-up turn as accepted for dispatch.\n\nAcceptance is not completion: the turn is handed to the worker and the run\ncontinues asynchronously, so a caller reconciles progress from the stream or\nrun-status rather than from this body.\n\n``idempotency_key`` is the caller's own key echoed back, never a derived\none, because this verb has no default to derive: it is required on the\nrequest, so an accepted turn always has a key and it is always the one the\ncaller chose."
+        "description": "Acknowledge a follow-up turn as queued behind the run's current turn.\n\nAcceptance is not execution and it is not even dispatch: the turn is\nreserved in the run's journal with a place in its queue, and it reaches\nthe worker only once the turn now running has proven its terminal\ncheckpoint. A caller reconciles progress from the stream or run-status,\nnever from this body.\n\n``queue_position`` is where this turn sits, counting from one, and it is\nstable across a replay of the same key: a caller that lost this response\nand retried reads the same place rather than a new one. ``None`` only for\na response that reserved nothing.\n\n``idempotency_key`` is the caller's own key echoed back, never a derived\none, because this verb has no default to derive: it is required on the\nrequest, so an accepted turn always has a key and it is always the one the\ncaller chose."
       },
       "RunPendingPermission": {
         "properties": {

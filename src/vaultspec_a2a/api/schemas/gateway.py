@@ -709,11 +709,18 @@ class RunMessageRequest(BaseModel):
 
 
 class RunMessageResponse(BaseModel):
-    """Acknowledge a follow-up turn as accepted for dispatch.
+    """Acknowledge a follow-up turn as queued behind the run's current turn.
 
-    Acceptance is not completion: the turn is handed to the worker and the run
-    continues asynchronously, so a caller reconciles progress from the stream or
-    run-status rather than from this body.
+    Acceptance is not execution and it is not even dispatch: the turn is
+    reserved in the run's journal with a place in its queue, and it reaches
+    the worker only once the turn now running has proven its terminal
+    checkpoint. A caller reconciles progress from the stream or run-status,
+    never from this body.
+
+    ``queue_position`` is where this turn sits, counting from one, and it is
+    stable across a replay of the same key: a caller that lost this response
+    and retried reads the same place rather than a new one. ``None`` only for
+    a response that reserved nothing.
 
     ``idempotency_key`` is the caller's own key echoed back, never a derived
     one, because this verb has no default to derive: it is required on the
@@ -728,6 +735,7 @@ class RunMessageResponse(BaseModel):
     action_status: str
     action_id: str | None = None
     idempotency_key: str
+    queue_position: int | None = Field(default=None, ge=1)
 
 
 class RunMessageRefusalCode(StrEnum):
@@ -747,6 +755,10 @@ class RunMessageRefusalCode(StrEnum):
     CONFLICT = FailureType.CONFLICT.value
     INCOMPATIBLE_STATE = FailureType.INCOMPATIBLE_STATE.value
     RUN_BUSY = FailureType.RUN_BUSY.value
+    # A run that would have taken the turn and has nowhere to put it: its own
+    # continuation queue, or the service-wide one, is already spent. Distinct
+    # from RUN_BUSY, which says the run admits no continuation at all.
+    QUEUE_FULL = FailureType.QUEUE_FULL.value
 
 
 class RunMessageRefusalDetail(BaseModel):

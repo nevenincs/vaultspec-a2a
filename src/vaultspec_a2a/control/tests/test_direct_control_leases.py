@@ -462,26 +462,21 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
     }
 
 
-@pytest.mark.parametrize(
-    "status",
-    [ThreadStatus.SUBMITTED, ThreadStatus.RUNNING, ThreadStatus.CANCELLING],
-)
 @pytest.mark.asyncio
-async def test_a_followup_reserves_nothing_while_the_run_owns_a_turn(
+async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
-    status: ThreadStatus,
 ) -> None:
-    """Occupancy is decided before the lease, so the refusal writes nothing.
+    """A run that is leaving refuses before the lease, so nothing is written.
 
-    A follow-up admitted onto an occupied run took that run's write authority
-    from the turn already executing, and the executing turn's own completion was
-    then refused as superseded evidence, quarantining the run. The refusal has
-    to precede the reservation for that to be fixed rather than moved, so this
-    reads the durable side afterwards: no journal action under the key, no
-    writer transition, and no dispatch id admitted by a REAL worker that is
-    running and would have taken one.
+    The two states that still own an unfinished turn now admit a continuation
+    behind it; a cancelling run does not, because it will never promote one.
+    Its refusal has to precede the reservation, so this reads the durable side
+    afterwards: no journal action under the key, no writer transition, and no
+    dispatch id admitted by a REAL worker that is running and would have taken
+    one.
     """
+    status = ThreadStatus.CANCELLING
     thread_id = f"busy-{status.value}-thread"
     async with session_factory() as db:
         await _create_current_thread(db, thread_id=thread_id, status=status)
@@ -493,7 +488,7 @@ async def test_a_followup_reserves_nothing_while_the_run_owns_a_turn(
         requested_before = before.last_requested_action
 
     async with _worker_runtime(tmp_path / f"busy-{status.value}.db") as (
-        worker_client,
+        _worker_client,
         worker_app,
         _bridge,
         _checkpointer,
@@ -505,13 +500,8 @@ async def test_a_followup_reserves_nothing_while_the_run_owns_a_turn(
                 content="second turn",
                 agent_id="vaultspec-supervisor",
                 idempotency_key="busy-refusal-key",
-                circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner(),
-                worker_client=worker_client,
-                recursion_limit=25,
-                trace_headers=None,
             )
-        assert result.dispatched is False
+        assert result.queued is False
         assert result.failure_type is FailureType.RUN_BUSY
         assert result.action_id == ""
         assert len(worker_app.state.dispatch_ids) == 0

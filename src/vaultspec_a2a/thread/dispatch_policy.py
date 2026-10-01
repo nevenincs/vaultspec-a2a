@@ -40,6 +40,12 @@ class FailureType(StrEnum):
     # this one is about the run's occupancy and nothing was reserved, so a caller
     # reconciles from run-status rather than resending under a new key.
     RUN_BUSY = "run_busy"
+    # A busy run whose continuation queue is already spent, per run or across
+    # the service. Distinct from RUN_BUSY, which is now the answer only for a
+    # run that admits no continuation at all: this one says the run would have
+    # taken the turn and has nowhere to put it, so the caller retries once the
+    # waiting turn has run rather than reconciling anything.
+    QUEUE_FULL = "queue_full"
     # A stored run whose metadata names no active project. Distinct from the
     # dispatch failures above: nothing was attempted and no worker was involved,
     # so it carries the same status as the equivalent refusal at run creation

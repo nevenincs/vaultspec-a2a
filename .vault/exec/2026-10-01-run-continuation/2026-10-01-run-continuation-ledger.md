@@ -10,7 +10,6 @@ related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
 
-
 # `run-continuation` ledger
 
 ## Changes

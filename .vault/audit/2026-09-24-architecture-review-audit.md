@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:5e130aa3c424788dd4027fbb9847ec7112345660c8073c0e50218c8d4e10b967'
+body_hash: 'sha256:27c395d462c0959239b52af526714d150ccf54f53f38fd7411cf65c5dec14e96'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -556,3 +556,51 @@ Recorded from P06.S42. `_settlement_tasks` in `src/vaultspec_a2a/control/event_h
 ### event-client-budget-delays-health-probe | info | the derived client budget also lengthens the worker's startup probe
 
 Recorded from P06.S34. The derived budget governs every request the worker's event client makes, so a hung gateway now delays the worker's startup health probe and a heartbeat by 15 s rather than 10 s; the heartbeat interval is 30 s and shutdown stays bounded by its own deadline.
+
+## Plan-close review of the residual phase, 2026-10-01
+
+An independent review of P06.S33-S47 on the integrated tree at `f237d4a` passed with no critical or high finding, so no Step reopens. It reused the full-suite run (5073 passed, 20 skipped, PostgreSQL declared), re-ran the reviewed suites, and proved each Step's test against its parent commit in a throwaway worktree. Its findings follow.
+
+### floor-confinement-rationale-false-for-grep | medium | a pathless kimi Grep is now refused although the rung's rationale says in-project calls never reach it
+
+Open; may need a decision. `_acp_rpc_handlers.py` justifies refusing a pathless floor call because an in-project call "is already pre-approved against the workspace", but `Grep` is never pre-approved (`CLAUDE_PATH_RULE_TOOLS` withholds it), so every autonomous Grep reaches the rung and, since P06.S36, is approved only when `rawInput` or `locations` names an in-project path. On the kimi lane, whose titles reduce exactly, an unqualified "search the project I am in" Grep is refused wholesale. The direction is safe; the missing evidence is a live kimi turn showing what an unqualified Grep carries. If the adapter fills neither field, ruling that a pathless floor call in a session whose working directory is the bound project is in-project is a permission-model commitment for an amendment to `2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr`, not a code comment.
+
+### governing-adrs-not-linked | medium | two accepted records governing changed scope were not linked by the owning plans
+
+Fixed at review: `2026-03-20-service-lifecycle-architecture-adr` (Compose healthchecks, gateway lifespan) is now linked from this plan and `2026-03-31-universal-rule-propagation-adr` (rule frontmatter) from `2026-09-30-langgraph-conformance-plan`. Neither change broke either record.
+
+### relay-context-replay-field-is-dead | low | the merged relay context carries a recorder nothing reads, and the websocket path never flushes
+
+Open, owned by P06.S48. `_RelayContext.replay` in `src/vaultspec_a2a/api/internal.py` is read nowhere: both HTTP endpoints flush their own local and the websocket relay only seats the writer, so websocket frames reach durability on the writer's 50 ms cadence rather than per batch. No data is lost; the two transports differ in durability latency for no stated reason.
+
+### dispatch-admission-holds-probe-is-write-only | low | an admission's probe flag is never read and goes stale after release
+
+Open, owned by P06.S48. `DispatchAdmission.holds_probe` (`src/vaultspec_a2a/control/circuit_breaker.py`) is read only by tests; ownership is decided by identity, and the flag still reads true after the probe is released.
+
+### circuit-open-result-flag-is-now-dead | low | both dispatch result types carry a flag no caller reads
+
+Open, owned by P06.S48; extends `dispatch-failure-policy-mostly-discarded`. After P06.S47 the routes map refusals from the failure type, so `circuit_open` on the message and permission results has no consumer, and five callers still bind the failure policy as `_policy` and discard it.
+
+### research-branch-producers-keyed-by-object-id | low | per-branch producers are found by the object identity of a spec dict
+
+Open, owned by P06.S48. `_compiler_research.py` keys `branch_producers` on `id(spec)`, correct only while the compiling frame keeps the spec list alive and the wiring passes the same objects; a copy or re-validation on the way in becomes a compile-time `KeyError`. Pairing the model with the branch positionally removes the hazard.
+
+### setext-escape-misses-a-multiline-paragraph-heading | low | the setext guard reads only the line above the underline
+
+Open, owned by P06.S49. A setext heading's text is its whole paragraph, so `system: ...` followed by another line and then `===` still renders a depth-one heading containing the role word; the escape inspects only the last line before the underline. The hash pattern has the same granularity, so this is an inherited bound.
+
+### terminal-confirmation-allowance-is-a-guess | low | the event client's budget approximates the unbounded durable write with a constant
+
+Open. P06.S34 derives the budget from the bounded checkpoint read plus a fixed 5 s allowance, but the durable write that precedes the read in the same request has no timeout, so a slow enough store reopens the re-post the Step closed. The write needs its own bound for the derivation to hold.
+
+### signal-reraise-still-awaits-in-finally | low | a re-raised signal waits for the buffer flush and a bounded state read first
+
+Open, owned by P06.S49. In `src/vaultspec_a2a/streaming/ingest.py` only the cancellation arm skips the `finally` awaits, so a non-`Exception` signal reaches its owner after the chunk flush and an interrupt-finalising read bounded by the state-read timeout. The P07.S46 commit message's claim that asyncio re-raises `SystemExit` and `KeyboardInterrupt` past the catch-all is inaccurate: the catch-all catches them first, which the re-raise now corrects.
+
+### plan-step-paths-drifted | low | two Step rows named files the fix did not touch
+
+Fixed at review: P06.S39 now names `src/vaultspec_a2a/thread/checkpoint_evidence.py` and P06.S44 the three Compose files.
+
+### docker-healthcheck-unproven | info | the hostname probes have not run under Docker
+
+Open until the Docker-backed service tier runs; a Docker daemon is now available in this environment, so the next product verification pass owns it.

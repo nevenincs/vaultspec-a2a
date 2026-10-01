@@ -10,11 +10,9 @@ related:
   - "[[2026-10-01-stream-resumption-plan]]"
 ---
 
-
 # `stream-resumption` ledger
 
 ## Changes
-
 
 - `S01` `M` `src/vaultspec_a2a/database/models.py`
 - `S01` `A` `src/vaultspec_a2a/database/migrations/versions/0023_run_event_log.py`

@@ -16,9 +16,10 @@ related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
   - '[[2026-10-01-langgraph-conformance-core-reader-parity-adr]]'
   - '[[2026-10-01-langgraph-conformance-core-runtime-dependency-adr]]'
+  - '[[2026-03-31-universal-rule-propagation-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:1a5f8a59a1e92a9328604bb2780f89ddb542e215af94336adca39cebef270d87'
+body_hash: 'sha256:74893652959db7687a684a94ee0967755d3b8f3c1957a5e1c0e3db20ffad3928'
 ---
 
 # `langgraph-conformance` plan
@@ -125,6 +126,7 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S47` - Declare vaultspec-core a runtime project dependency; `pyproject.toml, uv.lock`.
 - [x] `P07.S48` - Refuse body links with core's own check and split frontmatter with core's split, deleting the port; `src/vaultspec_a2a/authoring/submitter.py, src/vaultspec_a2a/authoring/_prose.py`.
 - [x] `P07.S49` - Read rule frontmatter with core's parser; `src/vaultspec_a2a/context/rules.py`.
+- [ ] `P07.S50` - Refuse leftover placeholders, annotations and legacy status sections with core's own checks; `src/vaultspec_a2a/authoring/submitter.py`.
 
 ## Parallelization
 

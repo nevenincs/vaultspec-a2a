@@ -10,6 +10,7 @@ artefact rather than a preference.
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePath
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,7 @@ __all__ = [
     "CLAUDE_TERMINAL_TOOLS",
     "MODE_CONFIG_OPTION_ID",
     "claude_disallowed_tools",
+    "claude_rule_path",
     "workspace_scoped_tool_rule",
 ]
 
@@ -58,8 +60,13 @@ CLAUDE_TERMINAL_TOOLS: tuple[str, ...] = (
 # :func:`workspace_scoped_tool_rule`) - a blocklist never is - but they are the
 # places where one mistake hands over the credentials the run itself spends, or
 # the environment of a live process, so they are named rather than left to the
-# scope rule alone. Written in the pinned SDK's rule syntax: the read tool takes
-# a file pattern, and ``~`` is expanded by the CLI against the operator's home.
+# scope rule alone.
+#
+# Written as ordinary filesystem paths and rendered into the CLI's rule grammar
+# by :func:`claude_rule_path`, which is also what anchors the workspace scope
+# rule - one spelling of "this exact path", shared, because a deny rule and a
+# scope rule that disagreed about what an absolute path looks like would be a
+# deny that misses and a scope that matches nothing.
 CLAUDE_DENIED_READ_PATHS: tuple[str, ...] = (
     "/proc/**",
     "~/.ssh/**",
@@ -108,6 +115,41 @@ CLAUDE_PATH_RULE_TOOLS: frozenset[str] = frozenset(
 )
 
 
+# A drive-letter prefix, matched independently of the host this process runs on
+# so a rule written for a Windows workspace renders the same on either. The
+# separator is part of the match because ``C:file`` is drive-RELATIVE, which is
+# not an absolute path and must not be anchored as one.
+_WINDOWS_DRIVE = re.compile(r"^([A-Za-z]):[\\/]")
+
+
+def claude_rule_path(path: str) -> str:
+    """Return one path in the spelling the CLI's permission rules resolve.
+
+    The CLI reads a rule path by its leading anchor, and the anchors are not
+    the filesystem's. A single leading ``/`` anchors at the session's primary
+    working directory, ``//`` is the filesystem root, and ``~/`` is the
+    operator's home; a Windows path is normalised to POSIX first with the drive
+    as the first lower-case segment, so ``C:\\Users\\alice`` is written
+    ``//c/Users/alice``.
+
+    So an absolute path cannot be written the way it is spelled on disk, and
+    writing it that way fails in the direction that is hardest to notice: a
+    deny of ``/proc/**`` denies ``<workspace>/proc/**``, a directory that does
+    not exist, and a scope rule naming the workspace with one slash matches
+    nothing at all. Both read as the protection they are not.
+
+    A path that already carries an anchor of its own - ``~``-relative, or a
+    deliberately working-directory-relative pattern - is returned unchanged:
+    those spellings are already in the grammar and mean what they say.
+    """
+    if match := _WINDOWS_DRIVE.match(path):
+        tail = path[match.end() :].replace("\\", "/")
+        posix = f"/{match.group(1).lower()}/{tail}"
+    else:
+        posix = PurePath(path).as_posix()
+    return f"/{posix}" if posix.startswith("/") else posix
+
+
 def workspace_scoped_tool_rule(tool_name: str, workspace_root: str | None) -> str:
     """Return the rule that permits *tool_name* inside the run's workspace only.
 
@@ -116,7 +158,9 @@ def workspace_scoped_tool_rule(tool_name: str, workspace_root: str | None) -> st
     project's source, the environment of a running process. The run already has
     a project, so the permission it needs is that project - expressed as an
     absolute pattern, which the CLI resolves without reference to any base
-    directory, unlike a relative one.
+    directory, unlike a relative one. Absolute means the CLI's own absolute
+    anchor (:func:`claude_rule_path`), not merely a path that starts at the
+    filesystem root.
 
     A tool whose rule syntax takes no path, or a run with no workspace to name,
     keeps the bare name: an unmatchable rule would read as a scope while
@@ -124,8 +168,10 @@ def workspace_scoped_tool_rule(tool_name: str, workspace_root: str | None) -> st
     """
     if tool_name not in CLAUDE_PATH_RULE_TOOLS or not workspace_root:
         return tool_name
-    root = PurePath(workspace_root).as_posix().rstrip("/")
-    return f"{tool_name}({root}/**)"
+    # A drive root renders with its own trailing separator ("//c/"), so the
+    # pattern is appended to the anchor rather than concatenated after it.
+    anchor = claude_rule_path(workspace_root).rstrip("/") or "/"
+    return f"{tool_name}({anchor}/**)"
 
 
 def claude_disallowed_tools(agent_config: AgentConfig | None) -> tuple[str, ...]:
@@ -139,7 +185,9 @@ def claude_disallowed_tools(agent_config: AgentConfig | None) -> tuple[str, ...]
     ``filesystem_write = false`` still held Write and Edit. An absent persona
     still gets the unconditional denies.
     """
-    denied: list[str] = [f"Read({path})" for path in CLAUDE_DENIED_READ_PATHS]
+    denied: list[str] = [
+        f"Read({claude_rule_path(path)})" for path in CLAUDE_DENIED_READ_PATHS
+    ]
     if agent_config is None:
         return tuple(denied)
     capabilities = agent_config.capabilities

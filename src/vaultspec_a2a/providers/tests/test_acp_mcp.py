@@ -477,8 +477,9 @@ class TestComposeNativeReadTools:
         assert isinstance(wired, AcpChatModel)
         # Scoped to the run's own workspace wherever the tool's rule grammar
         # takes a path. Grep's takes none, so it is not pre-approved at all: a
-        # bare name would approve a search of any path on the host.
-        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Glob(/tmp/ws/**)"]
+        # bare name would approve a search of any path on the host. Two leading
+        # slashes because the CLI resolves one against its working directory.
+        assert wired.allowed_tools == ["Read(//tmp/ws/**)", "Glob(//tmp/ws/**)"]
 
     def test_no_floor_tool_is_pre_approved_by_bare_name_under_a_workspace(
         self,
@@ -519,8 +520,8 @@ class TestComposeNativeReadTools:
         assert wired.allowed_tools == [
             "mcp__x__y",
             "Read",
-            "Read(/tmp/ws/**)",
-            "Glob(/tmp/ws/**)",
+            "Read(//tmp/ws/**)",
+            "Glob(//tmp/ws/**)",
         ]
 
     def test_advertised_mcp_servers_survive_the_allowlist_union(self) -> None:
@@ -531,7 +532,7 @@ class TestComposeNativeReadTools:
         wired = compose_native_read_tools(model, autonomous=True, role="researcher")
         assert isinstance(wired, AcpChatModel)
         assert wired.mcp_servers == [{"name": "vaultspec-authoring", "type": "http"}]
-        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Glob(/tmp/ws/**)"]
+        assert wired.allowed_tools == ["Read(//tmp/ws/**)", "Glob(//tmp/ws/**)"]
 
     def test_model_without_acp_surface_is_returned_unchanged(self) -> None:
         """A hosted model exposing no with_mcp_servers is passed through as-is."""

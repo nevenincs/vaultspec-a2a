@@ -636,7 +636,7 @@ def test_a_launch_bound_tool_is_still_pre_approved() -> None:
     of the call says everything there is to say about the call.
     """
     approvable = statically_approvable_tool_names(
-        [*_DECLARED_READS, "mcp__vaultspec-core__find", "Read(/ws/**)"]
+        [*_DECLARED_READS, "mcp__vaultspec-core__find", "Read(//ws/**)"]
     )
 
-    assert approvable == ["mcp__vaultspec-core__find", "Read(/ws/**)"]
+    assert approvable == ["mcp__vaultspec-core__find", "Read(//ws/**)"]

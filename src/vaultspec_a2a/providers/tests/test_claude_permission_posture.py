@@ -27,6 +27,7 @@ from .._claude_tool_policy import (
     CLAUDE_PATH_RULE_TOOLS,
     CLAUDE_TERMINAL_TOOLS,
     MODE_CONFIG_OPTION_ID,
+    claude_rule_path,
     workspace_scoped_tool_rule,
 )
 from ..acp_chat_model import AcpChatModel
@@ -501,26 +502,84 @@ def test_every_session_denies_the_credential_and_process_trees(
     )
 
     disallowed = _tool_names(options["disallowedTools"])
-    assert [f"Read({path})" for path in CLAUDE_DENIED_READ_PATHS] == [
+    assert [f"Read({claude_rule_path(path)})" for path in CLAUDE_DENIED_READ_PATHS] == [
         rule for rule in disallowed if rule.startswith("Read(")
     ]
     assert "Read(~/.ssh/**)" in disallowed
-    assert "Read(/proc/**)" in disallowed
+    # Two slashes, because one anchors the rule at the session's own working
+    # directory: `Read(/proc/**)` denies `<workspace>/proc/**`, which is a
+    # directory no workspace has, so the process tree stayed readable.
+    assert "Read(//proc/**)" in disallowed
+    assert "Read(/proc/**)" not in disallowed
+
+
+def test_every_denied_absolute_path_is_anchored_at_the_filesystem_root() -> None:
+    """No deny rule may be written with the anchor that means the workspace.
+
+    Stated over the whole list rather than one entry, because the failure is
+    silent: a rule with one slash is accepted, matches a directory that does
+    not exist, and reads exactly like the protection it is not.
+    """
+    for path in CLAUDE_DENIED_READ_PATHS:
+        rendered = claude_rule_path(path)
+        assert rendered.startswith(("//", "~/")), rendered
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        pytest.param("/proc/**", "//proc/**", id="posix-absolute"),
+        pytest.param("~/.ssh/**", "~/.ssh/**", id="home-relative-unchanged"),
+        pytest.param("~/.claude.json", "~/.claude.json", id="home-relative-file"),
+        # The CLI normalises a Windows path to POSIX with the drive as the
+        # first segment, lower-cased, before it matches anything.
+        pytest.param("C:\\Users\\alice", "//c/Users/alice", id="windows-drive"),
+        pytest.param("c:/Users/alice", "//c/Users/alice", id="windows-forward-slash"),
+        # Drive-relative, which is not an absolute path and must not be
+        # anchored as though it were.
+        pytest.param("C:notes.txt", "C:notes.txt", id="drive-relative-unchanged"),
+        pytest.param("src/**", "src/**", id="relative-unchanged"),
+    ],
+)
+def test_a_rule_path_is_written_with_the_anchor_the_cli_resolves(
+    path: str, expected: str
+) -> None:
+    """One renderer decides what "this exact path" looks like in a rule."""
+    assert claude_rule_path(path) == expected
 
 
 def test_a_read_grant_names_the_workspace_it_is_for(tmp_path: Path) -> None:
     """A read built-in is permitted inside the run's project, not on the host.
 
     The bare name is a grant over every file the operator can read. The rule
-    carries an absolute pattern because the CLI resolves a relative one against
-    a base directory this side does not choose.
+    carries the CLI's own absolute anchor, because a single leading slash is
+    resolved against the session's working directory - so the rule that looked
+    like the project's absolute path named a directory beneath it that does not
+    exist, and matched nothing at all.
     """
-    assert workspace_scoped_tool_rule("Read", str(tmp_path)) == f"Read({tmp_path}/**)"
+    rule = workspace_scoped_tool_rule("Read", str(tmp_path))
+
+    assert rule == f"Read(/{tmp_path}/**)"
+    assert rule.startswith("Read(//")
     # A tool whose rule grammar takes no path keeps its bare name rather than
     # carrying an unmatchable one, and so does a run with no workspace to name.
     assert "Grep" not in CLAUDE_PATH_RULE_TOOLS
     assert workspace_scoped_tool_rule("Grep", str(tmp_path)) == "Grep"
     assert workspace_scoped_tool_rule("Read", None) == "Read"
+
+
+def test_a_windows_workspace_scope_names_its_drive_the_way_the_cli_does() -> None:
+    """A rule for a Windows project renders the same whichever host writes it.
+
+    The lane is served from either, and a rule rendered against the serving
+    host's path flavour would be a scope on one and an unmatchable string on
+    the other.
+    """
+    assert (
+        workspace_scoped_tool_rule("Read", "C:\\Users\\alice\\project")
+        == "Read(//c/Users/alice/project/**)"
+    )
+    assert workspace_scoped_tool_rule("Glob", "D:\\work") == "Glob(//d/work/**)"
 
 
 def test_installed_sdk_admits_a_path_pattern_for_every_scoped_tool(

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:ba6128cbce69c5956b88d7a50216dff3e1a3c0da93d0acfddcf109f76615af16'
+body_hash: 'sha256:f87dbe18ab89967dcef513aace95f5c65ca8f16e75904e4bb62a65ac79146362'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -432,6 +432,17 @@ related:
 - `S43` `M` `src/vaultspec_a2a/providers/tests/test_prompt_render.py`
 - `S43` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
 - `S43` `by:` `vaultspec-high-executor`
+- `S46` `M` `src/vaultspec_a2a/providers/_claude_tool_policy.py`
+- `S46` `A` `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp_egress_axis.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S46` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S46` `verify:` `pytest src/vaultspec_a2a/providers` -> `pass`
+- `S46` `verify:` `real Claude CLI 2.1.286 and vendored 2.1.207 against a scripted loopback endpoint` -> `pass`
+- `S46` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -468,3 +479,4 @@ related:
 - `S45` Each fixed or partially fixed status was verified against current code, not taken from a plan row; 27 original findings stay open without a Step in this plan, several owned by other open plans.
 - `S33` Scope correction: the permission verb's dispatch and service modules also changed, because they were the only consumers of the failure flag.
 - `S38` Behaviour-neutral by decision: retention is the rule, so each test was proven load-bearing against the rejected alternative instead of pre-fix code.
+- `S46` The executor's commit was refused twice by the permission system; the user approved committing it on 2026-10-01 and the orchestrator applied, re-verified and committed the change.

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:20e71b33ddf908b9a4b6c90ad5fc55baceada0c21fe47c083325026c03b587ef'
+body_hash: 'sha256:787463e88de055a891562d434e2777f207624cc9b27e34ee421c4bf1351f8c16'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -519,7 +519,7 @@ Status: open. When the shared shutdown budget is spent, `finish_before` closes t
 
 ### claude-rule-paths-anchor-at-the-working-directory | medium | absolute deny and scope rules are written in the CLI's working-directory-relative form
 
-Status: open, owned by P06.S46; raised by the tool-permission-model research and confirmed against the current Claude Code permissions reference, which states that a single leading slash anchors a session rule at the primary working directory and that `//path` is the absolute form. `CLAUDE_DENIED_READ_PATHS` (`src/vaultspec_a2a/providers/_claude_tool_policy.py`) writes `/proc/**`, so the deny covers `<workspace>/proc` rather than the process table, and `workspace_scoped_tool_rule` writes `Read(<absolute workspace>/**)`, which resolves under the working directory and matches nothing. The home-relative denies are unaffected. Exposure is bounded: an out-of-workspace read still reaches the permission rung, which an autonomous run refuses, so this is a lost defence layer rather than an open read. Whether the pinned CLI shares the documented grammar is to be proven at the fix.
+Status: fixed in P06.S46: one renderer, `claude_rule_path` in `src/vaultspec_a2a/providers/_claude_tool_policy.py`, writes the `//` absolute anchor for the deny and scope rules and normalises a Windows drive to `//c/...`; `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py` proves it on the real CLI against a scripted loopback endpoint, where the old single-slash spelling grants and denies nothing. Original finding: raised by the tool-permission-model research and confirmed against the current Claude Code permissions reference, which states that a single leading slash anchors a session rule at the primary working directory and that `//path` is the absolute form. `CLAUDE_DENIED_READ_PATHS` (`src/vaultspec_a2a/providers/_claude_tool_policy.py`) writes `/proc/**`, so the deny covers `<workspace>/proc` rather than the process table, and `workspace_scoped_tool_rule` writes `Read(<absolute workspace>/**)`, which resolves under the working directory and matches nothing. The home-relative denies are unaffected. Exposure is bounded: an out-of-workspace read still reaches the permission rung, which an autonomous run refuses, so this is a lost defence layer rather than an open read. Whether the pinned CLI shares the documented grammar is to be proven at the fix.
 
 ### finding-statuses-reconciled | info | P06.S45 reconciled the original Findings section's statuses against the Steps and ADRs that closed, partially closed, or now govern them
 
@@ -544,3 +544,7 @@ Status: open, owned by P07.S21 of `2026-10-01-tool-permission-model-plan`. Per t
 ### acp-simulator-has-no-config-option-verb | low | the simulator cannot exercise the permission-mode pin round trip
 
 Recorded from P06.S41. The simulator advertises modes but does not implement `session/set_config_option`, so it simulates only a lane already in the unattended mode; the pin round trip stays covered by the echo-context tests in `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`.
+
+### model-stack-warmup-timing-under-parallel-load | low | the loop-responsiveness test failed once under parallel load
+
+Recorded during P06.S46 verification. `test_compiling_a_graph_keeps_the_loop_serving` in `src/vaultspec_a2a/providers/tests/test_model_stack_warmup.py` failed in a three-worker run of the provider suite and passed five of five alone. It measures event-loop latency during graph compilation, so CPU contention from sibling test workers reaches its threshold. Not a root cause yet: the next full gate either reproduces it, which makes it a defect in the bound or in the offload, or does not.

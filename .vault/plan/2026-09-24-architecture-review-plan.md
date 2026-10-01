@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:1aed93d87727ec9f62418a3ccf9a729d0e6951011cc5e2142064c821765c9462'
+body_hash: 'sha256:c9725b509e05c4ca79d53c289a528b0dd7adf19af303f937a38d12830f1174c0'
 ---
 
 # `architecture-review` plan
@@ -116,7 +116,7 @@ Close the decision-free findings the plan-close review and its re-review left op
 - [x] `P06.S43` - Escape setext-style role headings in rendered message content; `src/vaultspec_a2a/providers/_prompt_render.py`.
 - [x] `P06.S44` - Probe the container's own hostname in the Compose healthchecks; `service/docker/`.
 - [x] `P06.S45` - Reconcile finding statuses that later Steps closed; `.vault/audit/2026-09-24-architecture-review-audit.md, .vault/audit/2026-09-30-langgraph-conformance-audit.md`.
-- [ ] `P06.S46` - Write absolute Claude permission rule paths with the CLI's absolute anchor so deny and scope rules match the paths they name; `src/vaultspec_a2a/providers/_claude_tool_policy.py`.
+- [x] `P06.S46` - Write absolute Claude permission rule paths with the CLI's absolute anchor so deny and scope rules match the paths they name; `src/vaultspec_a2a/providers/_claude_tool_policy.py`.
 - [ ] `P06.S47` - Answer a permission response on a busy or saturated run with the same typed status the follow-up verb serves instead of 500 or 502; `src/vaultspec_a2a/control/permission_dispatch.py, src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`.
 
 ## Parallelization

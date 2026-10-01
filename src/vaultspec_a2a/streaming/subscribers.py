@@ -78,6 +78,10 @@ class AllocationSink(Protocol):
         """Record one numbered frame for later durable writing."""
         ...
 
+    async def aclose(self) -> None:
+        """Stop recording and make a last attempt to write what is held."""
+        ...
+
 
 class RunSequenceAllocator:
     """One monotonic, restart-stable number per run, allocated in memory.
@@ -220,37 +224,54 @@ class SubscriberManager:
         if self._allocator is not None:
             await self._allocator.seed(thread_id)
 
-    def _number(self, thread_id: str, frame: object) -> SequenceAllocation | None:
-        """Allocate this frame's number and record it, before any fan-out.
+    async def shutdown_allocation_sink(self) -> None:
+        """Close the seated recorder, so a shutdown does not strand its ring."""
+        sink, self._allocation_sink = self._allocation_sink, None
+        if sink is None:
+            return
+        try:
+            await sink.aclose()
+        except Exception:
+            logger.warning("Replay recorder did not close cleanly", exc_info=True)
 
-        The recording step is deliberately in front of the fan-out and
-        deliberately in-memory: the ORDER that must hold is allocate, record,
-        fan out, and only then write. Putting the durable write here would
-        delay every subscriber by a database round trip.
-        """
+    def _allocate(self, thread_id: str) -> SequenceAllocation | None:
+        """Take this run's next number, or ``None`` where it has none."""
         if self._allocator is None:
             return None
         sequence = self._allocator.allocate(thread_id)
         if sequence is None:
             return None
-        allocation = SequenceAllocation(
+        return SequenceAllocation(
             thread_id=thread_id, sequence=sequence, allocated_at=datetime.now(UTC)
         )
-        if self._allocation_sink is not None:
-            try:
-                self._allocation_sink.record(allocation, frame)
-            except Exception:
-                logger.warning(
-                    "Could not record event %d of run %s for replay",
-                    allocation.sequence,
-                    thread_id,
-                    exc_info=True,
-                    extra={
-                        "thread_id": thread_id,
-                        "action": "run_event_record_failed",
-                    },
-                )
-        return allocation
+
+    def _record(self, allocation: SequenceAllocation, frame: object) -> None:
+        """Hand the recorder the frame EXACTLY as subscribers will receive it.
+
+        Called after the number is stamped and before any fan-out, which is
+        both halves of the ordering this seam exists to keep. Stamping first
+        is what stops the retained row carrying the producer's own number
+        while the live frame carries the gateway's - the two would then
+        disagree about the identity a resume is taken against. Recording
+        first is what keeps the fan-out free of a database round trip; the
+        recorder does in-memory work only, and a recorder that fails costs
+        the run its replay, never its stream.
+        """
+        if self._allocation_sink is None:
+            return
+        try:
+            self._allocation_sink.record(allocation, frame)
+        except Exception:
+            logger.warning(
+                "Could not record event %d of run %s for replay",
+                allocation.sequence,
+                allocation.thread_id,
+                exc_info=True,
+                extra={
+                    "thread_id": allocation.thread_id,
+                    "action": "run_event_record_failed",
+                },
+            )
 
     # ------------------------------------------------------------------
     # Subscriber management
@@ -432,9 +453,11 @@ class SubscriberManager:
 
         Returns the payload as it was delivered, which is the stamped one.
         """
-        allocation = self._number(thread_id, payload)
-        if allocation is not None and isinstance(payload, Mapping):
-            payload = {**payload, "sequence": allocation.sequence}
+        allocation = self._allocate(thread_id)
+        if allocation is not None:
+            if isinstance(payload, Mapping):
+                payload = {**payload, "sequence": allocation.sequence}
+            self._record(allocation, payload)
         for client_id, queue in list(self._subscribers.items()):
             client_subs = self._subscriptions.get(client_id, set())
             if thread_id not in client_subs:
@@ -497,11 +520,12 @@ class SubscriberManager:
         delivered_event = sequenced
         if thread_id is not None:
             await self.prepare_run(thread_id)
-            allocation = self._number(thread_id, sequenced)
+            allocation = self._allocate(thread_id)
             if allocation is not None:
                 delivered_event = SequencedEvent(
                     event=sequenced.event, sequence=allocation.sequence
                 )
+                self._record(allocation, delivered_event)
 
         with self._telemetry.start_span(
             "aggregator.broadcast",

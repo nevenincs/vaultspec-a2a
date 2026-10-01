@@ -846,6 +846,24 @@ class InfraConfig(ProjectSettings):
             "from a dead connection to a reader."
         ),
     )
+    stream_replay_enabled: bool = Field(
+        default=True,
+        description=(
+            "Retain a bounded per-run window of outgoing progress frames so a "
+            "disconnected viewer can resume. Off, no frame carries an SSE id at "
+            "all, which is the honest posture: a client is never handed a "
+            "cursor there is nothing to resume from."
+        ),
+    )
+    stream_replay_window_events: int = Field(
+        default=2000,
+        gt=0,
+        description=(
+            "Rows retained per run in the replay log. The flush trims a run to "
+            "its newest N in the same statement batch, so this bounds storage "
+            "per run and the furthest back a resume can reach."
+        ),
+    )
 
     # Internal IPC frame/body limits
     internal_max_frame_bytes: int = Field(

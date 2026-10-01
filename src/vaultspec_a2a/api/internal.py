@@ -38,6 +38,7 @@ from ..control.event_handlers import (
 from ..graph.enums import ServerEventType
 from ..thread.snapshots import normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer
+from ._replay_writer_seat import seated_replay_writer
 
 __all__ = ["internal_router"]
 
@@ -170,9 +171,15 @@ class _RelayContext:
     drain_gate: Any
     prune_registry: Any
     transport: str = "http"
+    # The seated replay recorder, resolved once per ingest rather than per
+    # event: seating it is also what binds the run-sequence authority, so an
+    # ingest that reaches the aggregator has either both or neither.
+    replay: Any = None
 
     @classmethod
-    def of(cls, app: Any, agg: Any, transport: str = "http") -> _RelayContext:
+    def of(
+        cls, app: Any, agg: Any, transport: str = "http", *, replay: Any = None
+    ) -> _RelayContext:
         """Read one app's relay collaborators off the state it seated them on."""
         return cls(
             agg,
@@ -183,6 +190,7 @@ class _RelayContext:
             getattr(app.state, "drain_gate", None),
             getattr(app.state, "checkpoint_prunes", None),
             transport,
+            replay,
         )
 
 
@@ -219,6 +227,10 @@ async def _relay_single_event(
         return
 
     if context.agg is not None:
+        # Establishes the run's durable numbering before the synchronous
+        # chokepoint needs it; a no-op once seeded, and on a gateway that
+        # numbers nothing.
+        await context.agg.prepare_run(thread_id)
         context.agg.relay_payload(thread_id, payload)
         context.agg.sync_worker_event(thread_id, payload)
     else:
@@ -268,7 +280,14 @@ async def _relay_worker_event(
     await _relay_single_event(
         thread_id,
         payload,
-        _RelayContext.of(websocket.app, agg, "ws"),
+        _RelayContext.of(
+            websocket.app,
+            agg,
+            "ws",
+            replay=seated_replay_writer(
+                websocket.app, _app_session_factory(websocket.app)
+            ),
+        ),
     )
 
 
@@ -389,7 +408,12 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
             detail="No relay target available -- gateway not ready",
         )
 
-    await _relay_single_event(thread_id, payload, _RelayContext.of(request.app, agg))
+    replay = seated_replay_writer(request.app, _app_session_factory(request.app))
+    await _relay_single_event(
+        thread_id, payload, _RelayContext.of(request.app, agg, replay=replay)
+    )
+    if replay is not None:
+        await replay.flush()
     return {"status": "ok"}
 
 
@@ -433,7 +457,8 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
             detail="No relay target available -- gateway not ready",
         )
 
-    context = _RelayContext.of(request.app, agg)
+    replay = seated_replay_writer(request.app, _app_session_factory(request.app))
+    context = _RelayContext.of(request.app, agg, replay=replay)
 
     for idx, evt in enumerate(events):
         thread_id = evt.get("thread_id", "")
@@ -449,6 +474,12 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
         thread_id = evt.get("thread_id", "")
         payload = evt.get("payload", {})
         await _relay_single_event(thread_id, payload, context)
+
+    # Behind the fan-out, once per ingested batch: every frame above already
+    # reached its subscribers, and this is the round trip that makes them
+    # durable. A failure here is logged and leaves the frames in the ring.
+    if replay is not None:
+        await replay.flush()
 
     return {"status": "ok"}
 

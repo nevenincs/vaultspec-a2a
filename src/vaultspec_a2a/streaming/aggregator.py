@@ -491,5 +491,6 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         """Cancel all tasks and clear state."""
         await self._buffering.shutdown()
         await self._ingest.shutdown()
+        await self._subscribers_mgr.shutdown_allocation_sink()
         self._subscribers_mgr.clear()
         self._emitters.clear()

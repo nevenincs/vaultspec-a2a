@@ -19,6 +19,7 @@ from .node_metadata import (
     node_metadata_fields,
     node_metadata_from_graph,
 )
+from .run_event_writer import FrameProjector, RunEventWriter
 from .subscribers import (
     AllocationSink,
     RunSequenceAllocator,
@@ -31,6 +32,8 @@ __all__ = [
     "NODE_METADATA_FIELDS",
     "AllocationSink",
     "EventAggregator",
+    "FrameProjector",
+    "RunEventWriter",
     "RunSequenceAllocator",
     "RunSequenceSeedSource",
     "SequenceAllocation",

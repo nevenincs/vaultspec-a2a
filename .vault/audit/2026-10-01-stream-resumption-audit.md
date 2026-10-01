@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:83f4eb1315e3207e6aa0c409870081a3110eef82937493b308782787d108d95c'
+body_hash: 'sha256:bbe0909cfa97d8b4241a51eabfbcb1f2dd2f3d8a8c6d7d6d6ff8c5a66b0c4760'
 related:
   - "[[2026-10-01-stream-resumption-plan]]"
 ---
@@ -109,6 +109,10 @@ Fixed at review intake: `2026-03-10-postgres-dual-backend-adr` and `2026-08-05-s
 ### unnumbered-run-with-replay-enabled-untested | low | no test withholds the id from an unnumbered run while replay is on
 
 Fixed in P01.S03 (1a90345): a real-server proof withholds the id from an unnumbered run with replay on; it passed before the repair, so this was missing coverage, not a defect. Original finding: only the replay-switched-off direction of the id invariant is covered; an unnumbered run with replay enabled, the state the forget defect creates, is not. Repair: add the proof with the P01.S03 repair.
+
+### replay-tests-raced-the-recorder-cadence | low | five replay tests asserted an explicit flush the background cadence could steal
+
+Fixed 2026-10-01 after a merged-tree run failed `test_the_window_sentinel_is_still_told_about_a_hole_inside_the_window` with `assert 0 == 4`: the recorder's 50 ms cadence flushed the rows first under load, so the explicit flush found nothing. The five writers in `api/tests/test_stream_resume_gap.py` and `test_stream_resume_replay.py` now park the cadence, as `test_replay_write_path.py` already did; ten runs under four CPU burners passed.
 
 ## Recommendations
 

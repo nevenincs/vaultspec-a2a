@@ -35,6 +35,11 @@ if TYPE_CHECKING:
 
     from .conftest import SessionFactory
 
+#: A flush cadence no test outlives. These tests ask the recorder for each
+#: flush and assert what it wrote; a live cadence could flush first under load,
+#: and the asked-for flush would then find nothing and report it.
+_PARKED_CADENCE = 3600.0
+
 _RUN = "gap-run"
 _RETAINED = 2
 
@@ -291,7 +296,9 @@ async def test_a_ring_overflow_leaves_a_hole_the_window_reports(
     cursor.
     """
     store = RunEventStore(session_factory)
-    writer = RunEventWriter(store, window=100, ring_capacity=4)
+    writer = RunEventWriter(
+        store, window=100, ring_capacity=4, flush_interval_seconds=_PARKED_CADENCE
+    )
     for sequence in (1, 2):
         _record(writer, sequence)
     assert await writer.flush() == 2
@@ -331,7 +338,9 @@ async def test_the_window_sentinel_is_still_told_about_a_hole_inside_the_window(
     is what keeps the notice meaningful for a client that never held a cursor.
     """
     store = RunEventStore(session_factory)
-    writer = RunEventWriter(store, window=100, ring_capacity=4)
+    writer = RunEventWriter(
+        store, window=100, ring_capacity=4, flush_interval_seconds=_PARKED_CADENCE
+    )
     for sequence in (1, 2):
         _record(writer, sequence)
     assert await writer.flush() == 2
@@ -366,7 +375,7 @@ async def test_a_retained_row_that_cannot_be_decoded_counts_as_a_hole(
 ) -> None:
     """A damaged row costs its own frame and is reported, never skipped silently."""
     store = RunEventStore(session_factory)
-    writer = RunEventWriter(store, window=100)
+    writer = RunEventWriter(store, window=100, flush_interval_seconds=_PARKED_CADENCE)
     for sequence in range(1, 5):
         _record(writer, sequence)
     assert await writer.flush() == 4

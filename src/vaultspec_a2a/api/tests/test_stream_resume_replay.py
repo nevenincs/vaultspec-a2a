@@ -32,6 +32,11 @@ if TYPE_CHECKING:
 
     from .conftest import SessionFactory
 
+#: A flush cadence no test outlives. These tests ask the recorder for each
+#: flush and assert what it wrote; a live cadence could flush first under load,
+#: and the asked-for flush would then find nothing and report it.
+_PARKED_CADENCE = 3600.0
+
 _RUN = "replay-run"
 
 
@@ -234,7 +239,7 @@ async def test_the_rows_and_the_ring_are_unioned_by_sequence_not_concatenated(
     resuming client the entire window twice.
     """
     store = RunEventStore(session_factory)
-    writer = RunEventWriter(store, window=100)
+    writer = RunEventWriter(store, window=100, flush_interval_seconds=_PARKED_CADENCE)
     _seat_ring(writer, _RUN, range(1, 6))
     assert await writer.flush() == 5
     # Produced after the flush: in the ring, not yet in the table.
@@ -262,7 +267,7 @@ async def test_a_flush_landing_during_the_read_changes_nothing_it_serves(
     must be the same contiguous window with each sequence once.
     """
     store = RunEventStore(session_factory)
-    writer = RunEventWriter(store, window=100)
+    writer = RunEventWriter(store, window=100, flush_interval_seconds=_PARKED_CADENCE)
     _seat_ring(writer, _RUN, range(1, 4))
     assert await writer.flush() == 3
     _seat_ring(writer, _RUN, range(4, 10))

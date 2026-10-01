@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:df4a546e9d596fa05fd4aedc168875e75e4f3bb47e33d199342778011ed3bf13'
+body_hash: 'sha256:d0878862223b9570fb296a6b6ec0a4e2f45d3d1fe77368dc25799e4169b75dde'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -469,6 +469,12 @@ related:
 - `S38` `A` `.vault/adr/2026-10-01-langgraph-conformance-core-reader-parity-adr.md`
 - `S38` `verify:` `pytest src/vaultspec_a2a/authoring` -> `pass`
 - `S38` `verify:` `ruff check+format, ty check src/vaultspec_a2a/authoring` -> `pass`
+- `S46` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S46` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S46` `M` `src/vaultspec_a2a/streaming/tests/_error_injecting_graph.py`
+- `S46` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
+- `S46` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/worker` -> `pass`
+- `S46` `verify:` `ruff check+format, ty check src/vaultspec_a2a/streaming` -> `pass`
 
 ## Notes
 

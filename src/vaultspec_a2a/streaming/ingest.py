@@ -605,6 +605,11 @@ class IngestManager:
                 _outcome = await self._handle_ingest_failure(
                     (thread_id, agent_id), exc, stall_timeout, span
                 )
+                if not isinstance(exc, Exception):
+                    # Outside Exception is a signal to whoever runs the ingest,
+                    # not a failure of the run: viewers are told the run did
+                    # not finish, and the signal still reaches its owner.
+                    raise
             finally:
                 self._clear_cancel_event(thread_id)
                 self._buffering.prune_tool_debounce(thread_id)

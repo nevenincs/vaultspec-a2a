@@ -17,7 +17,7 @@ related:
   - '[[2026-10-01-langgraph-conformance-core-reader-parity-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:41e393d90f70d9135eb598279083ceb5d6b44beb099e7b67445c6f266165170b'
+body_hash: 'sha256:7bfc5114b1aa1d0930c9f6581377869be2bd4328aecd0183af3a609f66b79d15'
 ---
 
 # `langgraph-conformance` plan
@@ -120,7 +120,7 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S43` - Declare the execution-state degradation reasons, retire the producerless unknown reason, and widen the vocabulary guards to constructor literals and every member; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `P07.S44` - Correct the compiler comment that says strict msgpack refuses an unknown type; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P07.S45` - Settle an answer a failed turn consumed without moving the finished run back to running; `src/vaultspec_a2a/control/_event_application.py`.
-- [ ] `P07.S46` - Re-raise a non-Exception BaseException a node raises instead of reporting it as a provider failure; `src/vaultspec_a2a/streaming/ingest.py`.
+- [x] `P07.S46` - Re-raise a non-Exception BaseException a node raises instead of reporting it as a provider failure; `src/vaultspec_a2a/streaming/ingest.py`.
 
 ## Parallelization
 

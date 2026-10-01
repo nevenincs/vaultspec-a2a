@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#langgraph-conformance'
 date: '2026-09-30'
-modified: '2026-09-30'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:d0a816454fed8a8d2736537166f7532f2c1a01831194c4a70540260be38831df'
+body_hash: 'sha256:db079956522b83d5c7ca2a6d95cb57140c1266374d7d2b7c986e013a5ca8dc75'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -438,6 +438,8 @@ Fixed as a P02.S13 correction (commit `e2b5e2d`). The preflight admits an answer
 ### baseexception-resolution-is-narrower-than-its-claim | low | the not-reproducing verdict holds for SystemExit and KeyboardInterrupt only
 
 Correction to `ingest-still-classifies-baseexception-as-a-provider-failure`. Asyncio's task step re-raises `SystemExit` and `KeyboardInterrupt` out of the loop, so the verdict stands for those two, from sync and async nodes alike. Any other non-`Exception` `BaseException` subclass raised by a node does reach the catch-all in `src/vaultspec_a2a/streaming/ingest.py`, is classified as a provider failure and is swallowed; the reviewer probed it with a bare subclass. No such subclass exists in this package, LangGraph, langchain-core or anyio, so nothing exercises it today. Recommendation: if the catch-all is revisited, re-raise non-`Exception` exceptions after classification rather than returning FAILED.
+
+Fixed in P07.S46. The catch-all still reports the run failed to its viewers and then re-raises any exception outside `Exception` (`src/vaultspec_a2a/streaming/ingest.py`); `test_a_signal_raised_by_a_node_is_reported_and_still_propagates` in `src/vaultspec_a2a/streaming/tests/test_aggregator.py` drives a real node raising a bare `BaseException` subclass and fails on the prior code.
 
 ### design-record-drift-amendments-applied | info | the ten drifted decision records are amended and two proposed records accepted
 

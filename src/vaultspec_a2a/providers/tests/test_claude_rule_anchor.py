@@ -27,7 +27,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 
@@ -36,7 +36,7 @@ from .._claude_tool_policy import claude_rule_path, workspace_scoped_tool_rule
 from ..cli_resolution import resolve_provider_cli_executable
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
     from ...conftest import ExternalPrerequisiteRule
@@ -162,6 +162,7 @@ def _handler_for(turn: _Turn) -> type[BaseHTTPRequestHandler]:
     class _Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
+        @override
         def log_message(self, format: str, *args: object) -> None:
             """Keep the endpoint silent; the test reports what matters."""
             del format, args
@@ -191,7 +192,7 @@ def _handler_for(turn: _Turn) -> type[BaseHTTPRequestHandler]:
 
 
 @contextmanager
-def _scripted_endpoint(read_path: Path) -> Iterator[tuple[str, _Turn]]:
+def _scripted_endpoint(read_path: Path) -> Generator[tuple[str, _Turn]]:
     """Serve the scripted turn on a real loopback socket for one CLI run."""
     turn = _Turn(read_path=read_path)
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(turn))

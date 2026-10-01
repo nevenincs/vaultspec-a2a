@@ -29,7 +29,7 @@ from langchain_core.messages import (
 from ...graph.enums import Provider
 from ...service_tests._provider_catalog_live import declared_lane_model_value
 from .._acp_types import NativeCommandOutcome
-from .._codex_app_server_client import STDERR_TAIL_LINES, _CodexAppServerClient
+from .._codex_app_server_client import _CodexAppServerClient
 from .._codex_permission import CodexPermissionRung
 from .._codex_protocol import (
     _CodexProtocolError,
@@ -38,7 +38,7 @@ from .._codex_protocol import (
 )
 from .._factory_commands import _classify_codex_command, classify_provider_command
 from .._project_scope import RunProjectScope
-from .._subprocess import spawn_acp_process
+from .._subprocess import STDERR_TAIL_LINES, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 from ..codex_chat_model import CodexChatModel, _ActiveCodexTurn
 from ..conditions import ProviderCondition

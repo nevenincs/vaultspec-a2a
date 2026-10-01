@@ -520,9 +520,9 @@ async def pooled_postgres_saver(
     external_prerequisite("postgres")
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-    from .database.checkpoints import _postgres_checkpoint_pool
+    from .database.checkpoints import postgres_checkpoint_pool
 
-    pool = _postgres_checkpoint_pool(os.environ[POSTGRES_URL_ENV])
+    pool = postgres_checkpoint_pool(os.environ[POSTGRES_URL_ENV])
     await pool.open(wait=True)
     try:
         saver = AsyncPostgresSaver(conn=pool)

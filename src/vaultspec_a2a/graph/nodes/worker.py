@@ -645,8 +645,8 @@ def _turn_token_usage(response: BaseMessage) -> TokenUsageEntry | None:
         return None
     input_tokens = int(usage.get("input_tokens", 0))
     output_tokens = int(usage.get("output_tokens", 0))
-    input_details = usage.get("input_token_details") or {}
-    output_details = usage.get("output_token_details") or {}
+    input_details: object = usage.get("input_token_details")
+    output_details: object = usage.get("output_token_details")
     return TokenUsageEntry(
         agent_id="",
         input_tokens=input_tokens,

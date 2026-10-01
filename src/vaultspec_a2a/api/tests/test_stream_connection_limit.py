@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from fastapi import HTTPException
 
-from ...api.thread_stream import build_thread_stream_response
+from ...api.thread_stream import ThreadStreamRequest, build_thread_stream_response
 from ...control.config import Settings
 from ...streaming.aggregator import EventAggregator
 
@@ -67,10 +67,12 @@ async def test_a_stream_is_refused_at_capacity_without_touching_the_database() -
 
     with pytest.raises(HTTPException) as raised:
         await build_thread_stream_response(
+            ThreadStreamRequest(
+                thread_id="any-thread",
+                aggregator=aggregator,
+                session_factory=cast("async_sessionmaker[AsyncSession]", None),
+            ),
             db=cast("AsyncSession", None),
-            session_factory=cast("async_sessionmaker[AsyncSession]", None),
-            aggregator=aggregator,
-            thread_id="any-thread",
         )
 
     assert raised.value.status_code == 503

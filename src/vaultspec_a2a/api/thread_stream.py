@@ -3,7 +3,10 @@
 The generator and the response builder behind the versioned
 ``GET /v1/runs/{run_id}/stream`` verb. They live beside the gateway rather than
 inside it because the verb's module is already large and this is a
-self-contained streaming concern with no routing of its own.
+self-contained streaming concern with no routing of its own. What a resume can
+be served from - the cursor, the retained window, the reason a window is short -
+is answered next door in ``_stream_replay``; this module decides what to emit
+and in what order.
 
 Attachment order is the load-bearing part. The viewer is registered and
 subscribed BEFORE the run's durable state is read, so an outcome relayed from
@@ -19,17 +22,20 @@ and the snapshot still leads: the retained frames after the cursor follow it,
 and only then does the stream go live. The subscription is attached before any
 of that, which is what makes the handover seamless and also what makes the
 de-duplication below necessary.
+
+The phases run in one fixed order and :class:`_ThreadStream` holds the little
+state they share: resolve the cursor, attach, snapshot, replay, then either the
+durable terminal or the live loop.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -37,13 +43,18 @@ from fastapi.responses import StreamingResponse
 
 from ..control.config import settings
 from ..database import get_thread
-from ..database.run_event_repository import RunEventStore
 from ..graph.enums import ServerEventType
 from ..providers.conditions import ProviderCondition
 from ..streaming.sse_frames import encode_sse_frame
 from ..streaming.types import SequencedEvent
 from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
 from ..thread.errors import EventAggregatorError
+from ._stream_replay import (
+    replay_is_served,
+    replay_window,
+    resume_position,
+    retained_sequence,
+)
 from .event_adapter import sequenced_to_positive_payload
 from .schemas.events import HeartbeatEvent
 
@@ -52,13 +63,17 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..database.run_event_repository import RunEventRecord
     from ..streaming.aggregator import EventAggregator
     from ..streaming.run_event_writer import RunEventWriter
+    from ._stream_replay import ReplayFrame, ResumePosition
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["build_thread_stream_response", "offered_resume_cursor"]
+__all__ = [
+    "ThreadStreamRequest",
+    "build_thread_stream_response",
+    "offered_resume_cursor",
+]
 
 _UNRECORDED_REASON = "The run failed; no reason was recorded"
 """Stands in for a failed run whose durable row holds a condition and no reason.
@@ -67,41 +82,47 @@ Says what is true of the RECORD rather than inventing an account of the failure,
 so a client is never handed a diagnosis nothing observed.
 """
 
-RESUME_WINDOW_START = "-"
-"""The cursor meaning "from the start of whatever is still retained".
-
-A client with no position of its own - a fresh viewer that wants the recent
-history, or one whose stored id has expired - asks for the window rather than
-guessing a number.
-"""
-
 _FOREIGN_RUN_REASON = "resume_cursor_foreign_run"
 
-#: A resume served from later than it asked for, because the frames between
-#: are no longer retained - trimmed by the window bound, or delivered live and
-#: lost before they were written.
-_REPLAY_WINDOW_EXCEEDED = "replay_window_exceeded"
+_IDLE_BEAT: Final = object()
+"""Stands in for a queued event when the heartbeat interval elapses instead.
 
-#: A resume that could not be read at all: the feature is off, the store
-#: refused, or this run has nothing retained to resume from.
-_REPLAY_UNAVAILABLE = "replay_unavailable"
-
-#: An int64 sequence is at most nineteen digits. A longer run of digits names
-#: no position this log could hold, and parsing it would be work done on behalf
-#: of a caller that cannot be served.
-_MAX_CURSOR_DIGITS = 19
+A private object no producer can put on a queue, so the live loop can tell
+"nothing arrived in time" from any event that did without a second return
+value or an exception crossing a phase boundary.
+"""
 
 
 @dataclass(frozen=True, slots=True)
-class _ResumePosition:
-    """Where in a run's retained window a reconnecting viewer wants to restart."""
+class ThreadStreamRequest:
+    """One viewer's request for a run's progress stream, and what serves it.
 
-    after_sequence: int
-    #: True for the window-start sentinel, which claims no position of its own.
-    #: The difference matters to gap honesty: a window that starts later than a
-    #: NUMBERED cursor asked for lost frames, whereas a window is exactly what
-    #: the sentinel asked for.
-    from_window_start: bool
+    A parameter object rather than a long keyword list: these values travel
+    together from the route into a response body that outlives the request
+    scope, and splitting them across call sites is what made the builder's
+    signature grow past what a reader can hold.
+
+    *session_factory* is what the body reads authority through, in sessions of
+    its own that close as soon as each read is done, because the body outlives
+    the request scope. *resume_cursor* is the id a reconnecting viewer last
+    received, already resolved from the request by :func:`offered_resume_cursor`;
+    it is carried into the body rather than acted on at the edge, because a
+    cursor this run cannot honour is answered with a typed frame on a 200
+    stream, not an HTTP error - the client that sends one is an ``EventSource``
+    that would otherwise see only a failed connection. *replay_writer* is the
+    gateway's seated recorder, read rather than created: it holds the newest
+    frames the replay table does not have yet, so a resume taken between an
+    allocation and its flush still sees them. A caller with none - a host
+    embedding this stream without the relay - serves the table alone.
+    *not_found_detail* lets a caller's 404 speak its own resource vocabulary.
+    """
+
+    thread_id: str
+    aggregator: EventAggregator
+    session_factory: async_sessionmaker[AsyncSession]
+    resume_cursor: str | None = None
+    replay_writer: RunEventWriter | None = None
+    not_found_detail: str = "Thread not found"
 
 
 def offered_resume_cursor(header: str | None, query: str | None) -> str | None:
@@ -117,27 +138,6 @@ def offered_resume_cursor(header: str | None, query: str | None) -> str | None:
         if offered is not None and (cursor := offered.strip()):
             return cursor
     return None
-
-
-def _resume_position(cursor: str, thread_id: str) -> _ResumePosition | None:
-    """Return the position *cursor* names on this run, or ``None`` if it names none.
-
-    ``None`` is the refusal case and covers more than a cursor from another
-    run: a value that is not a position at all cannot be honoured either, and
-    serving such a request as though it had no cursor would hand the caller a
-    live-only stream while it believed it had resumed. Both answers are the
-    same to the caller - this stream will not replay from what you sent.
-    """
-    if cursor == RESUME_WINDOW_START:
-        return _ResumePosition(after_sequence=0, from_window_start=True)
-    run_id, separator, decimal = cursor.rpartition(":")
-    if not separator or run_id != thread_id:
-        return None
-    if not decimal.isascii() or not decimal.isdigit():
-        return None
-    if len(decimal) > _MAX_CURSOR_DIGITS:
-        return None
-    return _ResumePosition(after_sequence=int(decimal), from_window_start=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,31 +180,6 @@ def _queue_progress_payload(item: object) -> dict[str, object] | None:
         return sequenced_to_positive_payload(item)
     if isinstance(item, dict):
         return cast("dict[str, object]", item)
-    return None
-
-
-def _replay_is_served(aggregator: EventAggregator, thread_id: str) -> bool:
-    """Whether this run's outgoing frames can be replayed to a reconnect.
-
-    Two conditions, and both are about this gateway rather than this stream.
-    The feature switch governs the whole mechanism. The run being NUMBERED is
-    what says the switch was on when its frames crossed the fan-out: numbering
-    and retention are bound together at the seat, so a numbered run is a
-    retained one, and an unnumbered run's body still carries the worker's own
-    counter - a number that restarts with its process and must never be offered
-    back as a cursor.
-    """
-    if not settings.stream_replay_enabled:
-        return False
-    allocator = aggregator.sequence_allocator
-    return allocator is not None and allocator.is_numbered(thread_id)
-
-
-def _retained_sequence(payload: dict[str, object]) -> int | None:
-    """Return the durable number a served frame carries, if it carries one."""
-    sequence = payload.get("sequence")
-    if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > 0:
-        return sequence
     return None
 
 
@@ -311,259 +286,7 @@ def _terminal_replay_frames(thread_id: str, state: _DurableRunState) -> Iterator
     yield encode_sse_frame(terminal, event="thread_terminal", thread_id=thread_id)
 
 
-@dataclass(frozen=True, slots=True)
-class _ReplayFrame:
-    """One retained frame, decoded back into the body a subscriber was handed."""
-
-    sequence: int
-    event_type: str
-    body: dict[str, object]
-
-
-def _decoded(record: RunEventRecord) -> _ReplayFrame | None:
-    """Decode one retained row, or ``None`` when its body is not a frame.
-
-    A row this gateway wrote is a JSON object by construction, so ``None``
-    here means the stored bytes are no longer what was written. Dropping the
-    row rather than raising keeps one damaged frame from costing the whole
-    resume; the window it leaves behind is then discontiguous, which the
-    caller reports instead of papering over.
-    """
-    try:
-        body = json.loads(record.payload_json)
-    except ValueError:
-        body = None
-    if not isinstance(body, dict):
-        logger.warning(
-            "Retained progress frame %d of run %s is not a decodable frame body",
-            record.sequence,
-            record.thread_id,
-            extra={
-                "thread_id": record.thread_id,
-                "sequence": record.sequence,
-                "action": "run_event_row_undecodable",
-            },
-        )
-        return None
-    return _ReplayFrame(
-        sequence=record.sequence,
-        event_type=record.event_type,
-        body=cast("dict[str, object]", body),
-    )
-
-
-async def _retained_after(
-    *,
-    session_factory: async_sessionmaker[AsyncSession],
-    writer: RunEventWriter | None,
-    thread_id: str,
-    after_sequence: int,
-) -> list[_ReplayFrame]:
-    """Return the run's retained frames after *after_sequence*, oldest first.
-
-    The two sources are unioned BY SEQUENCE, never concatenated. A flush does
-    not empty the ring - it only moves the mark of what the table already
-    holds - so for any window that has been written the ring and the rows name
-    the same frames, and appending one to the other would hand a resuming
-    client every one of them twice. A flush landing between the two reads
-    widens the overlap rather than changing its nature, so the union is
-    correct under any interleaving and the read needs no lock.
-
-    The durable read is bounded by the retention window, which is the most the
-    table can hold for one run; the ring contributes the newest frames the
-    table does not have yet. The session closes before this returns, so no
-    pooled connection is held for the life of the stream.
-    """
-    store = RunEventStore(session_factory)
-    merged: dict[int, RunEventRecord] = {
-        record.sequence: record
-        for record in await store.read_after(
-            thread_id=thread_id,
-            after_sequence=after_sequence,
-            limit=settings.stream_replay_window_events,
-        )
-    }
-    if writer is not None:
-        for record in writer.pending(thread_id):
-            if record.sequence > after_sequence:
-                merged.setdefault(record.sequence, record)
-    return [
-        frame
-        for sequence in sorted(merged)
-        if (frame := _decoded(merged[sequence])) is not None
-    ]
-
-
-@dataclass(frozen=True, slots=True)
-class _ReplayWindow:
-    """What a resume can actually be served, and what it costs to say so."""
-
-    frames: list[_ReplayFrame]
-    #: ``None`` when the window answers the cursor completely. Otherwise the
-    #: one reason this resume is short, emitted once before the frames.
-    gap_reason: str | None = None
-    first_sequence: int | None = None
-    #: The highest sequence this stream may treat as already delivered before
-    #: it emits anything. Never above a position the run has actually
-    #: produced, which is what keeps a client's own claim from silencing the
-    #: live stream: a cursor is a request, not evidence that the run ever
-    #: reached it.
-    dedup_floor: int = 0
-
-
-def _contiguous_tail(frames: list[_ReplayFrame]) -> list[_ReplayFrame]:
-    """Return the longest run of consecutive sequences ending at the newest frame.
-
-    A hole in the middle of a retained window is possible even though nothing
-    deletes from the middle: a ring that overflows, or a run evicted from the
-    writer's cache, loses frames that were delivered live before they were
-    ever written. Serving the frames on both sides of such a hole and
-    reporting only the first of them would describe a window that starts late
-    while quietly skipping a position inside it. Starting after the last hole
-    keeps one rule the consumer can rely on - after the notice below, every
-    sequence is consecutive - at the cost of frames that are older than a gap
-    the consumer is being told about anyway.
-    """
-    for index in range(len(frames) - 1, 0, -1):
-        if frames[index].sequence != frames[index - 1].sequence + 1:
-            return frames[index:]
-    return frames
-
-
-async def _replay_window(
-    *,
-    session_factory: async_sessionmaker[AsyncSession],
-    writer: RunEventWriter | None,
-    thread_id: str,
-    resume: _ResumePosition,
-) -> _ReplayWindow:
-    """Read what this resume can be served, and classify what it cannot.
-
-    Three honest answers, and the difference between them is the whole point
-    of the window being reported at all. A complete window carries no notice.
-    A window that starts later than the cursor asked for - because retention
-    trimmed the rest, or because a frame was delivered but never written -
-    carries ``replay_window_exceeded`` and the first sequence it can serve. A
-    replay that cannot be read at all, because the feature is off, the store
-    refused, or the cursor names a position this run has never reached,
-    carries ``replay_unavailable``: the consumer learns that the stream from
-    here is live-only rather than being left to assume it resumed.
-    """
-    if not settings.stream_replay_enabled:
-        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
-    try:
-        frames = await _retained_after(
-            session_factory=session_factory,
-            writer=writer,
-            thread_id=thread_id,
-            after_sequence=resume.after_sequence,
-        )
-    except Exception:
-        logger.warning(
-            "Could not read the replay window of run %s; its resume is served "
-            "live-only",
-            thread_id,
-            exc_info=True,
-            extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
-        )
-        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
-
-    if not frames:
-        return await _empty_replay_window(
-            session_factory=session_factory,
-            writer=writer,
-            thread_id=thread_id,
-            resume=resume,
-        )
-
-    served = _contiguous_tail(frames)
-    # A numbered cursor claims a position, so a window that does not continue
-    # from it lost frames. The window-start sentinel claims none, so only a
-    # hole INSIDE what is retained - which is what trimming the tail above
-    # removes - is a loss it has to be told about.
-    complete = (
-        len(served) == len(frames)
-        if resume.from_window_start
-        else served[0].sequence == resume.after_sequence + 1
-    )
-    # Frames exist after the cursor, so the run has passed it and the client's
-    # claim to hold everything up to it is one the window just corroborated.
-    floor = resume.after_sequence
-    if complete:
-        return _ReplayWindow(served, dedup_floor=floor)
-    return _ReplayWindow(
-        served, _REPLAY_WINDOW_EXCEEDED, served[0].sequence, dedup_floor=floor
-    )
-
-
-async def _empty_replay_window(
-    *,
-    session_factory: async_sessionmaker[AsyncSession],
-    writer: RunEventWriter | None,
-    thread_id: str,
-    resume: _ResumePosition,
-) -> _ReplayWindow:
-    """Classify a resume with nothing after its cursor.
-
-    Three cases wear the same empty answer and must not be reported the same
-    way. A client at the head of the window has missed nothing, and telling it
-    otherwise would send a resynchronization notice on every ordinary
-    reconnect. A run with nothing retained at all cannot serve a resume from
-    any position, and saying nothing there would present a live-only stream as
-    a resumed one. A cursor ABOVE the run's high-water mark is the third: it
-    names a position this run has never produced, so there is nothing between
-    it and the live stream either to serve or to resume from.
-
-    That third case takes ``replay_unavailable`` rather than
-    ``replay_window_exceeded``, and the choice is the vocabulary's own.
-    ``replay_window_exceeded`` says "frames you asked for are gone, the
-    replay restarts HERE" and carries the first sequence it serves; neither
-    half is true when no frame was ever lost and none can be named. What the
-    consumer actually has to learn is that its position cannot be honoured
-    and the stream from here is live-only, which is exactly what
-    ``replay_unavailable`` says.
-
-    The de-duplication floor is clamped to the mark in every case. A stream
-    that trusted the cursor instead dropped every live frame at or below a
-    number the client invented, and a cursor far above the run silenced the
-    stream completely.
-    """
-    store = RunEventStore(session_factory)
-    try:
-        retained = await store.high_water_mark(thread_id)
-    except Exception:
-        logger.warning(
-            "Could not read the replay high-water mark of run %s",
-            thread_id,
-            exc_info=True,
-            extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
-        )
-        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
-    # The ring holds what the table does not have yet, so the run's mark is
-    # the higher of the two rather than the durable one alone.
-    held = [record.sequence for record in writer.pending(thread_id)] if writer else []
-    if retained is not None:
-        held.append(retained)
-    if not held:
-        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
-    mark = max(held)
-    if resume.after_sequence > mark:
-        logger.info(
-            "Resume of run %s names position %d, past its highest produced %d",
-            thread_id,
-            resume.after_sequence,
-            mark,
-            extra={
-                "thread_id": thread_id,
-                "action": "stream_resume_ahead_of_run",
-                "sequence": resume.after_sequence,
-            },
-        )
-        return _ReplayWindow([], _REPLAY_UNAVAILABLE, dedup_floor=mark)
-    return _ReplayWindow([], dedup_floor=min(resume.after_sequence, mark))
-
-
-def _replay_frame_bytes(thread_id: str, frame: _ReplayFrame) -> bytes:
+def _replay_frame_bytes(thread_id: str, frame: ReplayFrame) -> bytes:
     """Encode one retained frame exactly as its live delivery was encoded.
 
     Including the id: a replayed frame is retained by definition, so the
@@ -577,265 +300,339 @@ def _replay_frame_bytes(thread_id: str, frame: _ReplayFrame) -> bytes:
     )
 
 
-def _resync_frames(
-    aggregator: EventAggregator, client_id: str, thread_id: str
-) -> Iterator[bytes]:
-    """Emit one backpressure notice covering everything dropped since the last."""
-    dropped = aggregator.take_dropped_count(client_id)
-    if dropped:
+class _ThreadStream:
+    """One viewer's attachment to a run, served as an ordered run of SSE frames.
+
+    Holds what the phases share and nothing else: the registry id this viewer
+    occupies a slot under, the moment it was admitted, the de-duplication mark
+    that the replay and the live loop both move, and the flag that says a
+    terminal has already been served. Each phase below is one step of the fixed
+    order, and the shared mark is why they are methods rather than free
+    functions threading four values between them.
+    """
+
+    __slots__ = ("_client_id", "_closed", "_highest_emitted", "_request", "_start_time")
+
+    def __init__(self, request: ThreadStreamRequest) -> None:
+        self._request = request
+        self._client_id = f"sse-{uuid4()}"
+        self._start_time = 0.0
+        # The highest sequence this connection may treat as already held. It is
+        # what makes the early subscription safe: the queue collects frames
+        # while the replay reads them, so the same sequence can arrive twice
+        # and only the first delivery counts.
+        #
+        # It starts at zero and is raised only by the replay, which clamps the
+        # client's cursor to a position the run has actually produced. Taking
+        # the cursor on trust instead let a client silence its own stream: a
+        # resume at a number the run had never reached dropped every live frame
+        # at or below it, which is every frame the run would ever send.
+        self._highest_emitted = 0
+        self._closed = False
+
+    @property
+    def _thread_id(self) -> str:
+        return self._request.thread_id
+
+    @property
+    def _aggregator(self) -> EventAggregator:
+        return self._request.aggregator
+
+    async def frames(self) -> AsyncGenerator[bytes]:
+        """Every frame this viewer is served, in order, from cursor to close."""
+        cursor = self._request.resume_cursor
+        resume = None if cursor is None else resume_position(cursor, self._thread_id)
+        if cursor is not None and resume is None:
+            yield self._cursor_refusal()
+            return
+        queue = self._attach()
+        if queue is None:
+            yield _rejection_frame(self._thread_id, "stream_limit_exceeded")
+            return
+        async for frame in self._serve(resume, queue):
+            yield frame
+
+    def release(self) -> None:
+        """Give the registry slot back, whether or not one was ever taken.
+
+        Unregistering is a pop, so releasing an id that never registered - a
+        refused cursor, or a registration that lost the capacity race - removes
+        nothing and disturbs no other viewer.
+        """
+        self._aggregator.remove_subscriber(self._client_id)
+
+    def _cursor_refusal(self) -> bytes:
+        """Refuse a cursor this run cannot honour, before anything is attached.
+
+        A cursor this stream cannot honour is a property of the request alone,
+        and replaying another run's history to satisfy it would be worse than
+        refusing: the caller would receive frames of a run it never asked
+        about, under ids it would then resume from.
+        """
         logger.warning(
-            "Stream %s lost %d events to backpressure on thread %s",
-            client_id,
-            dropped,
-            thread_id,
+            "Refused SSE stream for thread %s: resumption cursor names "
+            "another run or no position at all",
+            self._thread_id,
             extra={
-                "client_id": client_id,
-                "thread_id": thread_id,
-                "action": "stream_backpressure_resync",
-                "dropped": dropped,
+                "client_id": self._client_id,
+                "thread_id": self._thread_id,
+                "action": "stream_resume_refused",
             },
         )
-        yield _backpressure_frame(thread_id, dropped)
+        return _rejection_frame(self._thread_id, _FOREIGN_RUN_REASON)
 
+    def _attach(self) -> asyncio.Queue[SequencedEvent] | None:
+        """Take one of the gateway's bounded stream slots, or ``None`` at capacity.
 
-async def _stream_thread_events(
-    *,
-    aggregator: EventAggregator,
-    thread_id: str,
-    session_factory: async_sessionmaker[AsyncSession],
-    resume_cursor: str | None = None,
-    replay_writer: RunEventWriter | None = None,
-) -> AsyncGenerator[bytes]:
-    """Yield thread-scoped events from the shared subscriber queue as SSE."""
-    client_id = f"sse-{uuid4()}"
-    resume: _ResumePosition | None = None
-    if resume_cursor is not None:
-        resume = _resume_position(resume_cursor, thread_id)
-        if resume is None:
-            # Refused before anything is registered or read. A cursor this
-            # stream cannot honour is a property of the request alone, and
-            # replaying another run's history to satisfy it would be worse
-            # than refusing: the caller would receive frames of a run it never
-            # asked about, under ids it would then resume from.
+        The route refuses at capacity before the thread lookup, but that check
+        and this registration are separated by the response-start boundary: the
+        body does not run until the client begins reading it. A concurrent
+        stream can take the last slot in between, so the registry's own refusal
+        is authoritative, and the caller learns of it as a terminal frame
+        rather than a connection that dies mid-response.
+        """
+        try:
+            queue = self._aggregator.add_subscriber(self._client_id)
+        except EventAggregatorError:
             logger.warning(
-                "Refused SSE stream for thread %s: resumption cursor names "
-                "another run or no position at all",
-                thread_id,
+                "Refused SSE stream for thread %s: subscriber registry at capacity",
+                self._thread_id,
                 extra={
-                    "client_id": client_id,
-                    "thread_id": thread_id,
-                    "action": "stream_resume_refused",
+                    "client_id": self._client_id,
+                    "thread_id": self._thread_id,
+                    "action": "stream_refused",
                 },
             )
-            yield _rejection_frame(thread_id, _FOREIGN_RUN_REASON)
-            return
-    try:
-        queue = aggregator.add_subscriber(client_id)
-    except EventAggregatorError:
-        # The route refuses at capacity before the thread lookup, but that check
-        # and this registration are separated by the response-start boundary:
-        # this generator does not run until the client begins reading the body.
-        # A concurrent stream can take the last slot in between, so the
-        # registry's own refusal is authoritative, and the caller learns of it as
-        # a terminal frame rather than a connection that dies mid-response.
-        logger.warning(
-            "Refused SSE stream for thread %s: subscriber registry at capacity",
-            thread_id,
-            extra={
-                "client_id": client_id,
-                "thread_id": thread_id,
-                "action": "stream_refused",
-            },
-        )
-        yield _rejection_frame(thread_id, "stream_limit_exceeded")
-        return
+            return None
+        self._start_time = time.monotonic()
+        return queue
 
-    start_time = time.monotonic()
-
-    # Registration and its cleanup guard open together, deliberately. The client
-    # holds one of the gateway's bounded stream slots from the moment
-    # ``add_subscriber`` returns, so every statement that follows must sit inside
-    # the ``finally`` that gives the slot back - a raise between the two would
-    # strand the registration for the life of the process.
-    try:
-        aggregator.subscribe(client_id, [thread_id])
+    async def _serve(
+        self, resume: ResumePosition | None, queue: asyncio.Queue[SequencedEvent]
+    ) -> AsyncGenerator[bytes]:
+        """Snapshot, replay, then either the durable terminal or the live loop."""
+        self._aggregator.subscribe(self._client_id, [self._thread_id])
 
         # Authority is read only now. Before, it was read first and the
         # subscription attached after, so an outcome relayed in between reached
         # neither: the read was too early to see it and the queue too late to
         # receive it, and the viewer heartbeated over a run that had ended.
-        state = await _read_durable_state(session_factory, thread_id)
+        state = await _read_durable_state(
+            self._request.session_factory, self._thread_id
+        )
         if state is None:
             # The run existed when the route answered and does not now.
-            yield _rejection_frame(thread_id, "run_not_found")
+            yield _rejection_frame(self._thread_id, "run_not_found")
             return
 
-        yield _snapshot_frame(thread_id, state.status)
-
-        # The highest sequence this connection may treat as already held. It
-        # is what makes the subscription attached above safe: the queue was
-        # collecting frames while the replay below read them, so the same
-        # sequence can arrive twice and only the first delivery counts.
-        #
-        # It starts at zero and is raised only by the replay, which clamps the
-        # client's cursor to a position the run has actually produced. Taking
-        # the cursor on trust instead let a client silence its own stream: a
-        # resume at a number the run had never reached dropped every live
-        # frame at or below it, which is every frame the run would ever send.
-        highest_emitted = 0
+        yield _snapshot_frame(self._thread_id, state.status)
 
         if resume is not None:
-            window = await _replay_window(
-                session_factory=session_factory,
-                writer=replay_writer,
-                thread_id=thread_id,
-                resume=resume,
-            )
-            highest_emitted = window.dedup_floor
-            if window.gap_reason is not None:
-                # Exactly one notice, ahead of the frames it qualifies, so
-                # everything after it is contiguous. A short replay is never
-                # presented as a complete one.
-                logger.info(
-                    "Resume of run %s is short: %s",
-                    thread_id,
-                    window.gap_reason,
-                    extra={
-                        "thread_id": thread_id,
-                        "client_id": client_id,
-                        "action": "stream_resume_gap",
-                        "reason": window.gap_reason,
-                    },
-                )
-                yield _replay_gap_frame(
-                    thread_id, window.gap_reason, window.first_sequence
-                )
-            for frame in window.frames:
-                yield _replay_frame_bytes(thread_id, frame)
-                highest_emitted = frame.sequence
-                if frame.event_type == "thread_terminal":
-                    # The run ended inside the replayed window. Closing on the
-                    # retained frame rather than on the durable terminal below
-                    # keeps the terminal's own sequence in the delivered set,
-                    # so the union across both connections has no hole at its
-                    # last position.
-                    return
+            async for frame in self._replayed(resume):
+                yield frame
+        if self._closed:
+            return
 
         if state.terminal:
-            for frame in _terminal_replay_frames(thread_id, state):
+            for frame in _terminal_replay_frames(self._thread_id, state):
                 yield frame
             return
 
-        while True:
-            try:
-                item = await asyncio.wait_for(
-                    queue.get(),
-                    timeout=settings.stream_heartbeat_interval_seconds,
-                )
-            except TimeoutError:
-                for frame in _resync_frames(aggregator, client_id, thread_id):
-                    yield frame
-                # An idle beat is also where a run that ended without this
-                # viewer hearing about it is caught. The relay fans out before
-                # it persists, so a terminal delivered in that gap belongs to
-                # neither side; re-reading here bounds how long such a stream can
-                # heartbeat over a finished run to one beat, rather than forever.
-                settled = await _read_durable_state(session_factory, thread_id)
-                if settled is not None and settled.terminal:
-                    for frame in _terminal_replay_frames(thread_id, settled):
-                        yield frame
-                    return
-                heartbeat = HeartbeatEvent(
-                    timestamp=datetime.now(UTC),
-                    server_uptime_seconds=time.monotonic() - start_time,
-                )
-                yield encode_sse_frame(
-                    heartbeat.model_dump(mode="json"),
-                    event=ServerEventType.HEARTBEAT,
-                    thread_id=thread_id,
-                )
-                continue
+        async for frame in self._live(queue):
+            yield frame
 
-            for frame in _resync_frames(aggregator, client_id, thread_id):
+    async def _replayed(self, resume: ResumePosition) -> AsyncGenerator[bytes]:
+        """Serve what the retained window holds, and say once when it is short."""
+        window = await replay_window(
+            session_factory=self._request.session_factory,
+            writer=self._request.replay_writer,
+            thread_id=self._thread_id,
+            resume=resume,
+        )
+        self._highest_emitted = window.dedup_floor
+        if window.gap_reason is not None:
+            # Exactly one notice, ahead of the frames it qualifies, so
+            # everything after it is contiguous. A short replay is never
+            # presented as a complete one.
+            self._log_resume_gap(window.gap_reason)
+            yield _replay_gap_frame(
+                self._thread_id, window.gap_reason, window.first_sequence
+            )
+        for frame in window.frames:
+            yield _replay_frame_bytes(self._thread_id, frame)
+            self._highest_emitted = frame.sequence
+            if frame.event_type == "thread_terminal":
+                # The run ended inside the replayed window. Closing on the
+                # retained frame rather than on the durable terminal keeps the
+                # terminal's own sequence in the delivered set, so the union
+                # across both connections has no hole at its last position.
+                self._closed = True
+                return
+
+    def _log_resume_gap(self, reason: str) -> None:
+        """Record which of the two short-replay reasons this resume took."""
+        logger.info(
+            "Resume of run %s is short: %s",
+            self._thread_id,
+            reason,
+            extra={
+                "thread_id": self._thread_id,
+                "client_id": self._client_id,
+                "action": "stream_resume_gap",
+                "reason": reason,
+            },
+        )
+
+    async def _live(
+        self, queue: asyncio.Queue[SequencedEvent]
+    ) -> AsyncGenerator[bytes]:
+        """Relay queued events until the run ends, beating while it is idle.
+
+        The resynchronization notice leads every turn, idle or not, so a drop
+        is disclosed before whatever the consumer is handed next.
+        """
+        while not self._closed:
+            item = await self._next_item(queue)
+            for frame in self._resync():
+                yield frame
+            for frame in await self._turn_frames(item):
                 yield frame
 
-            # In-process events are projected onto the positive progress
-            # allowlist here; relayed worker payloads were already projected
-            # at the relay seam. The encode boundary re-applies the allowlist
-            # to both, so a forbidden body cannot cross by either path.
-            # Local domain events carry sequence wrappers; worker relay events
-            # have already crossed the positive projection as plain mappings.
-            payload = _queue_progress_payload(item)
-            if payload is None:
-                continue
+    async def _next_item(self, queue: asyncio.Queue[SequencedEvent]) -> object:
+        """The next queued event, or the idle sentinel when the beat elapses first."""
+        try:
+            return await asyncio.wait_for(
+                queue.get(), timeout=settings.stream_heartbeat_interval_seconds
+            )
+        except TimeoutError:
+            return _IDLE_BEAT
 
-            event_type = payload.get("type")
-            # Read per frame rather than once at attachment: a run reaches its
-            # numbering on its first relayed batch, which can land after a
-            # viewer has already subscribed and been handed its snapshot.
-            sequence = (
-                _retained_sequence(payload)
-                if _replay_is_served(aggregator, thread_id)
-                else None
+    async def _turn_frames(self, item: object) -> list[bytes]:
+        """What one turn of the live loop emits after its resynchronization notice."""
+        if item is _IDLE_BEAT:
+            return await self._idle_frames()
+        live = self._live_frame(item)
+        return [] if live is None else [live]
+
+    async def _idle_frames(self) -> list[bytes]:
+        """An idle beat: the terminal a run settled to unheard, else a heartbeat.
+
+        An idle beat is where a run that ended without this viewer hearing
+        about it is caught. The relay fans out before it persists, so a
+        terminal delivered in that gap belongs to neither side; re-reading here
+        bounds how long such a stream can heartbeat over a finished run to one
+        beat, rather than forever.
+        """
+        settled = await _read_durable_state(
+            self._request.session_factory, self._thread_id
+        )
+        if settled is not None and settled.terminal:
+            self._closed = True
+            return list(_terminal_replay_frames(self._thread_id, settled))
+        heartbeat = HeartbeatEvent(
+            timestamp=datetime.now(UTC),
+            server_uptime_seconds=time.monotonic() - self._start_time,
+        )
+        return [
+            encode_sse_frame(
+                heartbeat.model_dump(mode="json"),
+                event=ServerEventType.HEARTBEAT,
+                thread_id=self._thread_id,
             )
-            if sequence is not None:
-                if sequence <= highest_emitted:
-                    # Already delivered: by the replay above, by this
-                    # connection, or - up to the clamped resume floor - by
-                    # the connection this one continues, whose position the
-                    # replay confirmed against what the run had produced. The
-                    # mark therefore never names a sequence the run has not
-                    # reached, so a live frame is dropped only when it is
-                    # genuinely a repeat, and the terminal - the newest frame
-                    # a run ever sends - is never one.
-                    continue
-                highest_emitted = sequence
-            yield encode_sse_frame(
-                payload,
-                event=str(event_type) if isinstance(event_type, str) else None,
-                thread_id=thread_id,
-                sequence=sequence,
+        ]
+
+    def _live_frame(self, item: object) -> bytes | None:
+        """Encode one queued event, or ``None`` when this viewer is not served it.
+
+        In-process events are projected onto the positive progress allowlist
+        here; relayed worker payloads were already projected at the relay seam.
+        The encode boundary re-applies the allowlist to both, so a forbidden
+        body cannot cross by either path. Local domain events carry sequence
+        wrappers; worker relay events have already crossed the positive
+        projection as plain mappings.
+        """
+        payload = _queue_progress_payload(item)
+        if payload is None:
+            return None
+
+        # Read per frame rather than once at attachment: a run reaches its
+        # numbering on its first relayed batch, which can land after a viewer
+        # has already subscribed and been handed its snapshot.
+        sequence = (
+            retained_sequence(payload)
+            if replay_is_served(self._aggregator, self._thread_id)
+            else None
+        )
+        if sequence is not None:
+            if sequence <= self._highest_emitted:
+                # Already delivered: by the replay, by this connection, or - up
+                # to the clamped resume floor - by the connection this one
+                # continues, whose position the replay confirmed against what
+                # the run had produced. The mark therefore never names a
+                # sequence the run has not reached, so a live frame is dropped
+                # only when it is genuinely a repeat, and the terminal - the
+                # newest frame a run ever sends - is never one.
+                return None
+            self._highest_emitted = sequence
+
+        event_type = payload.get("type")
+        if event_type == "thread_terminal":
+            self._closed = True
+        return encode_sse_frame(
+            payload,
+            event=str(event_type) if isinstance(event_type, str) else None,
+            thread_id=self._thread_id,
+            sequence=sequence,
+        )
+
+    def _resync(self) -> Iterator[bytes]:
+        """Emit one backpressure notice covering everything dropped since the last."""
+        dropped = self._aggregator.take_dropped_count(self._client_id)
+        if dropped:
+            logger.warning(
+                "Stream %s lost %d events to backpressure on thread %s",
+                self._client_id,
+                dropped,
+                self._thread_id,
+                extra={
+                    "client_id": self._client_id,
+                    "thread_id": self._thread_id,
+                    "action": "stream_backpressure_resync",
+                    "dropped": dropped,
+                },
             )
-            if event_type == "thread_terminal":
-                return
+            yield _backpressure_frame(self._thread_id, dropped)
+
+
+async def _stream_thread_events(request: ThreadStreamRequest) -> AsyncGenerator[bytes]:
+    """Yield thread-scoped events from the shared subscriber queue as SSE.
+
+    The phases and the cleanup guard open together, deliberately. The client
+    holds one of the gateway's bounded stream slots from the moment the attach
+    phase returns a queue, so every phase after it must sit inside the
+    ``finally`` that gives the slot back - a raise between the two would strand
+    the registration for the life of the process.
+    """
+    stream = _ThreadStream(request)
+    try:
+        async for frame in stream.frames():
+            yield frame
     finally:
-        aggregator.remove_subscriber(client_id)
+        stream.release()
 
 
 async def build_thread_stream_response(
-    *,
-    db: AsyncSession,
-    session_factory: async_sessionmaker[AsyncSession],
-    aggregator: EventAggregator,
-    thread_id: str,
-    not_found_detail: str = "Thread not found",
-    resume_cursor: str | None = None,
-    replay_writer: RunEventWriter | None = None,
+    request: ThreadStreamRequest, *, db: AsyncSession
 ) -> StreamingResponse:
     """Build the SSE ``StreamingResponse`` for a thread, or raise a 404.
 
     The single code path behind the versioned ``/v1/runs/{run_id}/stream`` verb
-    (a run id is the thread id). Callers pass ``not_found_detail`` so the 404
-    speaks their own resource vocabulary.
+    (a run id is the thread id).
 
     *db* answers the one question that must be settled before the response
     starts - does this run exist - and is the caller's request-scoped session.
-    *session_factory* is what the body then reads authority through, in sessions
-    of its own that close as soon as each read is done, because the body outlives
-    the request scope.
-
-    *resume_cursor* is the id a reconnecting viewer last received, already
-    resolved from the request by :func:`offered_resume_cursor`. It is carried
-    into the body rather than acted on here: a cursor this run cannot honour is
-    answered with a typed frame on a 200 stream, not an HTTP error, because the
-    client that sends one is an ``EventSource`` that would otherwise see only a
-    failed connection.
-
-    *replay_writer* is the gateway's seated recorder, read rather than created:
-    it holds the newest frames the replay table does not have yet, so a resume
-    taken between an allocation and its flush still sees them. A caller with
-    none - a host embedding this stream without the relay - serves the table
-    alone.
+    Everything the body itself reads from travels in *request*, which outlives
+    that scope.
     """
     # Refused before the thread lookup, deliberately. The limit exists to stop a
     # caller exhausting queues and delivery tasks, so it must be decided from
@@ -847,25 +644,19 @@ async def build_thread_stream_response(
     # once the response body starts, and the shared subscriber registry enforces
     # the same limit at the moment of registration, which is where it holds.
     limit = settings.max_stream_connections
-    if limit > 0 and aggregator.subscriber_count() >= limit:
+    if limit > 0 and request.aggregator.subscriber_count() >= limit:
         raise HTTPException(
             status_code=503,
             detail=("Gateway is at its progress-stream connection limit; retry later"),
             headers={"Retry-After": "5"},
         )
 
-    thread = await get_thread(db, thread_id)
+    thread = await get_thread(db, request.thread_id)
     if thread is None:
-        raise HTTPException(status_code=404, detail=not_found_detail)
+        raise HTTPException(status_code=404, detail=request.not_found_detail)
 
     return StreamingResponse(
-        _stream_thread_events(
-            aggregator=aggregator,
-            thread_id=thread_id,
-            session_factory=session_factory,
-            resume_cursor=resume_cursor,
-            replay_writer=replay_writer,
-        ),
+        _stream_thread_events(request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

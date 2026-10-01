@@ -23,7 +23,7 @@ from ...streaming.aggregator import EventAggregator
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
 from ...thread.enums import ThreadStatus
-from ..thread_stream import _retained_after
+from .._stream_replay import retained_after
 from ._sse_reader import SseFrame, SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
 
@@ -240,7 +240,7 @@ async def test_the_rows_and_the_ring_are_unioned_by_sequence_not_concatenated(
     # Produced after the flush: in the ring, not yet in the table.
     _seat_ring(writer, _RUN, range(6, 8))
 
-    served = await _retained_after(
+    served = await retained_after(
         session_factory=session_factory,
         writer=writer,
         thread_id=_RUN,
@@ -268,7 +268,7 @@ async def test_a_flush_landing_during_the_read_changes_nothing_it_serves(
     _seat_ring(writer, _RUN, range(4, 10))
 
     served, written = await asyncio.gather(
-        _retained_after(
+        retained_after(
             session_factory=session_factory,
             writer=writer,
             thread_id=_RUN,

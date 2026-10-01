@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-10-01'
-body_hash: 'sha256:88b1194014f83739324e038c6700b6d702bb662ae4cb155b32d28c29cba9595e'
+body_hash: 'sha256:f59595a5b373e5c68aad322650152fd17e044bace93ff5acf3ee071187af9167'
 related: []
 ---
 
@@ -755,6 +755,14 @@ Fixed in W06.P12.S47 (c26cf06): the helpers are public where they now live and d
 ### compiled-test-graph-is-any | low | a compiled test graph is untyped at the test boundary
 
 Recorded from W06.P12.S28. `graph/tests/_state_graph_helpers.compile_test_graph` returns `Any` by design, so graph reads in every suite routed through it are unchecked; a concrete compiled-graph protocol (the one in `thread/tests/_graph_helpers.py` is a model) would restore checking across the test tree.
+
+### broadcast-complexity-over-ceiling | low | the subscriber broadcast crossed the cognitive-complexity ceiling
+
+Open, owned by W07.P14.S48. `SubscriberManager.broadcast` (`streaming/subscribers.py`) reads complexipy 16 against 15 after the stream-resumption repairs added the retainable-frame check to the fan-out chokepoint; it was 14 before.
+
+### stream-route-parameters-are-the-openapi-surface | info | the run stream route's six parameters are FastAPI declarations
+
+Recorded from W07.P13.S32. `run_stream_endpoint` (`api/routes/_gateway_read_endpoints.py`) takes six parameters, one over the shape ceiling, and each is a `Depends`, `Header` or `Query` declaration; folding them into a parameter object changes the generated OpenAPI document, so the decision belongs with the routes, not with a decomposition.
 
 ## Recommendations
 

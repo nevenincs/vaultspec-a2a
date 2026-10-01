@@ -5,7 +5,7 @@ tags:
 date: '2026-07-19'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:f379ca425ae1ed4cf308a526fdbdefbcdc5ca9d6f50b696001e63139c7551647'
+body_hash: 'sha256:65cd622ff204d4a01c824bd722444f64c74ae654aa261664976108a0dd4b4afc'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -213,6 +213,18 @@ related:
 - `S47` `verify:` `python -m dev lint type-strict` -> `pass`
 - `S47` `verify:` `python -m dev lint all` -> `pass`
 - `S47` `verify:` `pytest graph streaming control worker database -n 4 --require-prerequisite=postgres` -> `pass`
+- `S32` `A` `src/vaultspec_a2a/api/_stream_replay.py`
+- `S32` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_attachment_order.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_connection_limit.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_quota_entry_points.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_gap.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_replay.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_slot_release.py`
+- `S32` `M` `src/vaultspec_a2a/api/thread_stream.py`
+- `S32` `verify:` `python -m dev lint all` -> `pass`
+- `S32` `verify:` `pytest src/vaultspec_a2a/api src/vaultspec_a2a/streaming -n 4 --require-prerequisite=postgres` -> `pass`
+- `S32` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -226,3 +238,4 @@ related:
 - `S28` Defects found while typing: a research-rung test passed an ignored field to a fake model and so tested the stub answer; a dead supervisor fallback; two identical branches in the custom-text transformer.
 - `S47` Partial: 120 to 1 on the branch; the residual is a private langgraph snapshot type the retention guard must recognise, which needs a decision. Merged over the W07 decomposition, the tree reads 23, mostly helpers moved across modules under private names; owned by the same Step.
 - `S47` Closed by the orchestrator: merge residue made public where the helpers now live; the private langgraph snapshot import retired on evidence that the metadata counter already marks every delta dependency (a snapshot-every-step graph prunes with its value intact). type-strict reads zero.
+- `S32` Partial: the stream hotspot is decomposed (radon 24 to 0, complexipy 43 to 0, limits 23 to 18 tree-wide); release() now also runs on the two refusal exits, proven harmless by a new test. `run_stream_endpoint` keeps six FastAPI parameters, because folding Depends/Header/Query declarations would change the served OpenAPI surface; api/schemas/gateway.py module length remains. Step stays open for those.

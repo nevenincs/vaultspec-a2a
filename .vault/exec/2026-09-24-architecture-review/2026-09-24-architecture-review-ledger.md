@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:f87dbe18ab89967dcef513aace95f5c65ca8f16e75904e4bb62a65ac79146362'
+body_hash: 'sha256:63988c516a8fd4fe93ed4b33d29c64eb2e1cbdde0a41ff7287afac35514fd3e7'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -443,6 +443,37 @@ related:
 - `S46` `verify:` `pytest src/vaultspec_a2a/providers` -> `pass`
 - `S46` `verify:` `real Claude CLI 2.1.286 and vendored 2.1.207 against a scripted loopback endpoint` -> `pass`
 - `S46` `by:` `vaultspec-high-executor`
+- `S34` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S34` `A` `src/vaultspec_a2a/worker/tests/test_ipc_confirmation_budget.py`
+- `S34` `verify:` `pytest src/vaultspec_a2a/worker src/vaultspec_a2a/control src/vaultspec_a2a/lifecycle src/vaultspec_a2a/api` -> `pass`
+- `S34` `by:` `vaultspec-high-executor`
+- `S39` `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `S39` `M` `src/vaultspec_a2a/tests/_checkpoint_seeding.py`
+- `S39` `M` `src/vaultspec_a2a/conftest.py`
+- `S39` `A` `src/vaultspec_a2a/thread/tests/test_input_checkpoint_evidence.py`
+- `S39` `A` `src/vaultspec_a2a/worker/tests/test_executor_input_checkpoint_redelivery.py`
+- `S39` `A` `src/vaultspec_a2a/control/tests/test_input_checkpoint_recovery.py`
+- `S39` `M` `src/vaultspec_a2a/control/tests/test_thread_list_bulk_checkpoints.py`
+- `S39` `verify:` `pytest worker control lifecycle api thread streaming database --require-prerequisite=postgres` -> `pass`
+- `S39` `by:` `vaultspec-high-executor`
+- `S42` `M` `src/vaultspec_a2a/lifecycle/shutdown.py`
+- `S42` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S42` `M` `src/vaultspec_a2a/api/app.py`
+- `S42` `M` `src/vaultspec_a2a/api/internal.py`
+- `S42` `M` `src/vaultspec_a2a/api/tests/conftest.py`
+- `S42` `A` `src/vaultspec_a2a/api/tests/test_checkpoint_prune_shutdown.py`
+- `S42` `M` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
+- `S42` `verify:` `pytest api control lifecycle worker thread` -> `pass`
+- `S42` `by:` `vaultspec-high-executor`
+- `S47` `M` `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`
+- `S47` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S47` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S47` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+- `S47` `A` `src/vaultspec_a2a/api/tests/test_run_action_refusal_vocabulary.py`
+- `S47` `M` `openapi.json`
+- `S47` `verify:` `pytest control api thread` -> `pass`
+- `S47` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -480,3 +511,5 @@ related:
 - `S33` Scope correction: the permission verb's dispatch and service modules also changed, because they were the only consumers of the failure flag.
 - `S38` Behaviour-neutral by decision: retention is the rule, so each test was proven load-bearing against the rejected alternative instead of pre-fix code.
 - `S46` The executor's commit was refused twice by the permission system; the user approved committing it on 2026-10-01 and the orchestrator applied, re-verified and committed the change.
+- `S39` Scope correction: the evidence reader lives in `thread/checkpoint_evidence.py,` shared by the worker preflight and gateway recovery; no change to `state_projection.py` was needed.
+- `S47` Dashboard contract event: permission respond answers a worker `run_busy` with a typed 409 (was 500), capacity with 503 (was 502), `incompatible_state` with a typed 409 (was 502); openapi documents 409/502/503 on that route and 502/503 on the messages route.

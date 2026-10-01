@@ -12,7 +12,7 @@ related:
   - '[[2026-02-26-event-aggregation-server-side-replay-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:abe67cdb0cc7f96a4d8c9b888edce981eb57672d901a33c9b33fc319b6f6ee8e'
+body_hash: 'sha256:3819c41ed081fbdabf5b62a4f8935a4562e5e70a12ad3fef8f98da6b97e1dde3'
 ---
 
 # `stream-resumption` plan
@@ -48,10 +48,10 @@ Out of scope. The reconciliation edits the stream-resumption ADR proposes to the
 
 Delivers the durable substrate the decision rests on: the per-run event table, its repository, one gateway-side sequence allocator at the fan-out chokepoint that survives a restart, and the batched write that lands behind fan-out.
 
-- [ ] `P01.S01` - Create the run_events table with its composite thread_id and sequence primary key, projected payload column, allocation-time UTC stamp, nullable W3C trace and span ids, a created_at index for the sweep, and cascade removal with its thread, in an Alembic revision named by purpose; `src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/migrations/versions/, src/vaultspec_a2a/database/tests/`.
-- [ ] `P01.S02` - Add the run-event repository: one executemany append, a replay read strictly after a cursor, the per-run high-water mark, the newest-N window trim, and the age-bounded delete, all on the application engine and never on the checkpointer connection; `src/vaultspec_a2a/database/run_event_repository.py, src/vaultspec_a2a/database/__init__.py, src/vaultspec_a2a/database/tests/`.
-- [ ] `P01.S03` - Allocate one authoritative per-run sequence at the fan-out chokepoint in enqueue_payload and broadcast, seeding on first touch after a gateway start from the replay table's high-water mark, else threads.last_sequence, else zero, and demote the worker's per-thread counter to a worker-local ordering aid whose number the relay overwrites; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/streaming/emitters.py, src/vaultspec_a2a/streaming/tests/`.
-- [ ] `P01.S04` - Append each allocation to a bounded per-run ring and flush it as one batch behind the fan-out, per ingested relay batch or every 50 ms, trimming the run to its window in the same batch, degrading to the ring on a flush failure, under the new stream_replay_enabled and stream_replay_window_events settings; `src/vaultspec_a2a/streaming/run_event_writer.py, src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/streaming/tests/, src/vaultspec_a2a/service_tests/`.
+- [x] `P01.S01` - Create the run_events table with its composite thread_id and sequence primary key, projected payload column, allocation-time UTC stamp, nullable W3C trace and span ids, a created_at index for the sweep, and cascade removal with its thread, in an Alembic revision named by purpose; `src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/migrations/versions/, src/vaultspec_a2a/database/tests/`.
+- [x] `P01.S02` - Add the run-event repository: one executemany append, a replay read strictly after a cursor, the per-run high-water mark, the newest-N window trim, and the age-bounded delete, all on the application engine and never on the checkpointer connection; `src/vaultspec_a2a/database/run_event_repository.py, src/vaultspec_a2a/database/__init__.py, src/vaultspec_a2a/database/tests/`.
+- [x] `P01.S03` - Allocate one authoritative per-run sequence at the fan-out chokepoint in enqueue_payload and broadcast, seeding on first touch after a gateway start from the replay table's high-water mark, else threads.last_sequence, else zero, and demote the worker's per-thread counter to a worker-local ordering aid whose number the relay overwrites; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/streaming/emitters.py, src/vaultspec_a2a/streaming/tests/`.
+- [x] `P01.S04` - Append each allocation to a bounded per-run ring and flush it as one batch behind the fan-out, per ingested relay batch or every 50 ms, trimming the run to its window in the same batch, degrading to the ring on a flush failure, under the new stream_replay_enabled and stream_replay_window_events settings; `src/vaultspec_a2a/streaming/run_event_writer.py, src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/streaming/tests/, src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P02` - resumable stream surface
 

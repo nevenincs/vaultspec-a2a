@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:787463e88de055a891562d434e2777f207624cc9b27e34ee421c4bf1351f8c16'
+body_hash: 'sha256:5e130aa3c424788dd4027fbb9847ec7112345660c8073c0e50218c8d4e10b967'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -158,7 +158,7 @@ Status: open; decided by `2026-10-01-stream-resumption-adr` (durable per-run eve
 
 ### content-derived-idempotency | medium | follow-up idempotency keys are derived from message content
 
-Status: open; decided by `2026-10-01-run-continuation-adr` (content-derived keys are retired for the messages verb in favour of a required client-supplied idempotency key), implementation planned under feature `run-continuation`. Original finding: The default key hashes thread, agent, and content (`src/vaultspec_a2a/thread/idempotency.py:29-33`), so a second identical "continue" in one run silently returns `dispatched=False` (`src/vaultspec_a2a/control/message_service.py:92-98`). A2A deduplicates on a client-supplied `messageId`.
+Status: fixed in P01.S03 of `2026-10-01-run-continuation-plan`: the messages verb requires a client-supplied `Idempotency-Key` and answers 422 without one; the content-derived default is deleted (`src/vaultspec_a2a/thread/idempotency.py`). Earlier status: open; decided by `2026-10-01-run-continuation-adr` (content-derived keys are retired for the messages verb in favour of a required client-supplied idempotency key), implementation planned under feature `run-continuation`. Original finding: The default key hashes thread, agent, and content (`src/vaultspec_a2a/thread/idempotency.py:29-33`), so a second identical "continue" in one run silently returns `dispatched=False` (`src/vaultspec_a2a/control/message_service.py:92-98`). A2A deduplicates on a client-supplied `messageId`.
 
 ### postgres-checkpointer-single-connection | medium | the Postgres checkpointer runs on one connection with no pool or reconnect
 
@@ -453,7 +453,7 @@ Status: open from P02.S11. The request id is derived from the task's checkpoint 
 
 ### input-checkpoint-crash-window | low | a crash between the input checkpoint and the first superstep refuses the redelivered first ingest
 
-Status: open from P02.S12. LangGraph's step -1 input checkpoint holds the input before any channel carries the action receipt, so receipt evidence reads it as incompatible and the preflight refuses the redelivery, failing closed rather than delivering the input twice. Recognising `metadata.source == "input"` in `read_checkpoint_evidence`, which gateway recovery shares, would let it continue.
+Status: fixed in P06.S39: `read_checkpoint_evidence` (`src/vaultspec_a2a/thread/checkpoint_evidence.py`) folds an input checkpoint's staged `__start__` writes through the receipt reducers, so the crash window reads as pending and the worker continues with `None` input, delivering the input once; gateway recovery shares the reader. An earlier action's input checkpoint now reads as a prior action rather than incompatible. Original finding: LangGraph's step -1 input checkpoint holds the input before any channel carries the action receipt, so receipt evidence reads it as incompatible and the preflight refuses the redelivery, failing closed rather than delivering the input twice. Recognising `metadata.source == "input"` in `read_checkpoint_evidence`, which gateway recovery shares, would let it continue.
 
 ### at-capacity-marks-failed | medium | a capacity refusal still marks the dispatch failed
 
@@ -461,7 +461,7 @@ Status: fixed in P06.S33, with transport-unreachable, which the same ruling cove
 
 ### ipc-client-timeout-shorter-than-terminal-confirmation | medium | the worker's event client gives up before the gateway can confirm a terminal
 
-Status: open from P03.S19; the prune no longer adds to it. The worker's 10 s client timeout (`src/vaultspec_a2a/worker/ipc.py`) is shorter than the gateway's worst-case terminal confirmation, a durable write plus a checkpoint read bounded at 10 s, so a slow store makes the worker re-post a terminal the gateway is accepting.
+Status: fixed in P06.S34: `event_client_timeout()` (`src/vaultspec_a2a/worker/ipc.py`) derives the client budget from the gateway's checkpoint-read bound plus a named allowance, so raising one raises the other; `test_a_terminal_held_for_the_whole_confirmation_is_posted_once` holds a real terminal POST for the whole bound. Original finding: the worker's 10 s client timeout (`src/vaultspec_a2a/worker/ipc.py`) is shorter than the gateway's worst-case terminal confirmation, a durable write plus a checkpoint read bounded at 10 s, so a slow store makes the worker re-post a terminal the gateway is accepting.
 
 ### terminal-fanout-before-persist | low | a stream learns of a terminal before it is durable, closed only to one heartbeat
 
@@ -515,7 +515,7 @@ Status: fixed; the guard was removed (`src/vaultspec_a2a/api/schemas/gateway.py`
 
 ### prune-wait-has-two-uncovered-shutdown-edges | low | a spent shutdown budget or a cross-loop task can leave the prune wait ineffective
 
-Status: open. When the shared shutdown budget is spent, `finish_before` closes the prune wait without running it (`src/vaultspec_a2a/lifecycle/shutdown.py`), so an in-flight prune can outlive the checkpointer; and `_prune_tasks` is module state shared by every app instance in a process (`src/vaultspec_a2a/control/event_handlers.py`), as `_settlement_tasks` already is. Recommendation: give the prune phase a reserve and key the pending set to the app whose lifespan waits on it.
+Status: fixed in P06.S42: `finish_before` takes a `minimum` the prune phase keeps when the shared budget is spent, and pending prunes live in a `CheckpointPruneRegistry` seated on each app (`src/vaultspec_a2a/control/event_handlers.py`, `src/vaultspec_a2a/api/app.py`). Residual: `_settlement_tasks` is still process-wide state that no shutdown phase waits for, and the cross-loop edge is narrowed to an app relaying on a loop other than its lifespan's, which no production path does. Original finding: when the shared shutdown budget was spent, `finish_before` closed the prune wait without running it (`src/vaultspec_a2a/lifecycle/shutdown.py`), so an in-flight prune can outlive the checkpointer; and `_prune_tasks` is module state shared by every app instance in a process (`src/vaultspec_a2a/control/event_handlers.py`), as `_settlement_tasks` already is. Recommendation: give the prune phase a reserve and key the pending set to the app whose lifespan waits on it.
 
 ### claude-rule-paths-anchor-at-the-working-directory | medium | absolute deny and scope rules are written in the CLI's working-directory-relative form
 
@@ -527,7 +527,7 @@ Status: recorded. 32 findings in the original Findings section (above "## Execut
 
 ### permission-respond-busy-answers-500 | low | a permission answer to a busy run is served as an internal error
 
-Status: open, owned by P06.S47; raised by the P06.S33 executor. A worker `run_busy` refusal gives the permission verb no error status, and the route answers `result.error_status_code or 500` (`src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`), so a client is told the gateway failed when the run is merely busy. A capacity refusal on the same verb is a 502 while the follow-up verb serves 503 for it. The two verbs should serve one typed vocabulary for the same dispatch outcome.
+Status: fixed in P06.S47: one mapping in `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`, `_refused_dispatch`, serves both verbs; permission respond now answers a busy run with a typed 409, capacity with 503 and an incompatible state with a typed 409, a dashboard contract event recorded in the ledger. Originally raised by the P06.S33 executor. A worker `run_busy` refusal gives the permission verb no error status, and the route answers `result.error_status_code or 500` (`src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`), so a client is told the gateway failed when the run is merely busy. A capacity refusal on the same verb is a 502 while the follow-up verb serves 503 for it. The two verbs should serve one typed vocabulary for the same dispatch outcome.
 
 ### dispatch-failure-policy-mostly-discarded | info | six of seven callers discard the failure policy pair
 
@@ -548,3 +548,11 @@ Recorded from P06.S41. The simulator advertises modes but does not implement `se
 ### model-stack-warmup-timing-under-parallel-load | low | the loop-responsiveness test failed once under parallel load
 
 Recorded during P06.S46 verification. `test_compiling_a_graph_keeps_the_loop_serving` in `src/vaultspec_a2a/providers/tests/test_model_stack_warmup.py` failed in a three-worker run of the provider suite and passed five of five alone. It measures event-loop latency during graph compilation, so CPU contention from sibling test workers reaches its threshold. Not a root cause yet: the next full gate either reproduces it, which makes it a defect in the bound or in the offload, or does not.
+
+### settlement-tasks-outlive-their-app | low | settlement callbacks are process-wide state no shutdown phase waits for
+
+Recorded from P06.S42. `_settlement_tasks` in `src/vaultspec_a2a/control/event_handlers.py` is still module state shared by every app in a process, the shape the prune set just lost, and no lifespan phase waits for it, so a desktop settlement callback can outlive the app that started it.
+
+### event-client-budget-delays-health-probe | info | the derived client budget also lengthens the worker's startup probe
+
+Recorded from P06.S34. The derived budget governs every request the worker's event client makes, so a hung gateway now delays the worker's startup health probe and a heartbeat by 15 s rather than 10 s; the heartbeat interval is 30 s and shutdown stays bounded by its own deadline.

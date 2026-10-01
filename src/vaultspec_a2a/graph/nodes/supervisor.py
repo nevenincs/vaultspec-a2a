@@ -536,6 +536,59 @@ def _carrying_finish_block(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _GateContext:
+    """What every gate between a named route and the run judges it against.
+
+    Fixed for one evaluation: the run's state and the vault index read off it,
+    the phase that index implies, the map from worker to phase, and whether
+    the run may pass a human approval unattended.
+    """
+
+    state: TeamState
+    vault_index: dict[str, list[str]]
+    inferred_phase: str
+    worker_phase_map: dict[str, str] | None
+    autonomous: bool
+
+
+def _gated_decision(
+    gates: _GateContext, next_route: str, finish_block: _SupervisorDecision | None
+) -> _SupervisorDecision | None:
+    """The decision a phase gate or the plan approval forces on *next_route*.
+
+    ``None`` means every gate let the route through with nothing to carry.
+    """
+    gate_decision = _phase_gate_decision(
+        gates.state,
+        gates.vault_index,
+        next_route,
+        gates.inferred_phase,
+        gates.worker_phase_map,
+    )
+    if gate_decision is not None and gate_decision.refused:
+        return _carrying_finish_block(gate_decision, finish_block)
+    approval_decision = _plan_approval_decision(
+        gates.state,
+        gates.vault_index,
+        next_route,
+        gates.worker_phase_map,
+        autonomous=gates.autonomous,
+    )
+    if approval_decision is not None:
+        # A gate that only warned still lets the route through, so it must not
+        # also let the route past the human who approves the plan; its warning
+        # travels with the approval instead.
+        if gate_decision is not None:
+            approval_decision = replace(
+                approval_decision, routing_error=gate_decision.routing_error
+            )
+        return _carrying_finish_block(approval_decision, finish_block)
+    if gate_decision is not None:
+        return _carrying_finish_block(gate_decision, finish_block)
+    return finish_block
+
+
 def _evaluate_supervisor_response(
     *,
     state: TeamState,
@@ -583,31 +636,19 @@ def _evaluate_supervisor_response(
             finish_block = blocked
             next_route = cast("str", blocked.next_route)
 
-    gate_decision = _phase_gate_decision(
-        state, vault_index, next_route, inferred_phase, worker_phase_map
-    )
-    if gate_decision is not None and gate_decision.refused:
-        return _carrying_finish_block(gate_decision, finish_block)
-    approval_decision = _plan_approval_decision(
-        state,
-        vault_index,
+    gated = _gated_decision(
+        _GateContext(
+            state=state,
+            vault_index=vault_index,
+            inferred_phase=inferred_phase,
+            worker_phase_map=worker_phase_map,
+            autonomous=autonomous,
+        ),
         next_route,
-        worker_phase_map,
-        autonomous=autonomous,
+        finish_block,
     )
-    if approval_decision is not None:
-        # A gate that only warned still lets the route through, so it must not
-        # also let the route past the human who approves the plan; its warning
-        # travels with the approval instead.
-        if gate_decision is not None:
-            approval_decision = replace(
-                approval_decision, routing_error=gate_decision.routing_error
-            )
-        return _carrying_finish_block(approval_decision, finish_block)
-    if gate_decision is not None:
-        return _carrying_finish_block(gate_decision, finish_block)
-    if finish_block is not None:
-        return finish_block
+    if gated is not None:
+        return gated
 
     _logger.debug("supervisor routed to %r (raw=%r)", next_route, response_text[:80])
     return _SupervisorDecision(

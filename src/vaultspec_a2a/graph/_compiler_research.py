@@ -164,10 +164,8 @@ _RA_PLAN_GATE = "plan_gate"
 def _resolve_research_adr_models(
     team_config: Any,
     agent_configs: dict[str, Any],
-    workspace_root: Path | None,
+    options: _CompileResearchAdrOptions,
     *,
-    provider_factory: ProviderFactoryProtocol,
-    frozen_assignment: dict[str, dict[str, Any]] | None = None,
     researcher_branches: int = 1,
 ) -> tuple[dict[str, tuple[BaseChatModel, dict[str, str]]], list[BaseChatModel]]:
     """Resolve one model, and its node metadata, per required research_adr role.
@@ -211,9 +209,9 @@ def _resolve_research_adr_models(
             ref_by_role[role],
             cfg_by_role[role],
             team_config,
-            workspace_root,
-            provider_factory=provider_factory,
-            frozen_assignment=frozen_assignment,
+            options.get("workspace_root"),
+            provider_factory=options["provider_factory"],
+            frozen_assignment=options.get("frozen_assignment"),
         )
 
     resolved: dict[str, tuple[BaseChatModel, dict[str, str]]] = {}
@@ -473,9 +471,7 @@ def _compile_research_adr(
     models, researcher_models = _resolve_research_adr_models(
         team_config,
         agent_configs,
-        options.get("workspace_root"),
-        provider_factory=options["provider_factory"],
-        frozen_assignment=options.get("frozen_assignment"),
+        options,
         researcher_branches=len(specs),
     )
     researcher_model, researcher_metadata = models["researcher"]

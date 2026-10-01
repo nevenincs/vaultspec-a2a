@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-10-01'
-body_hash: 'sha256:9a18800b0b1b99d9960f71c5a1fdfb7a50cb230bba69c528d7eaec96f39a18d9'
+body_hash: 'sha256:88b1194014f83739324e038c6700b6d702bb662ae4cb155b32d28c29cba9595e'
 related: []
 ---
 
@@ -746,11 +746,11 @@ Open; observed by the W07 executor. `lifecycle/tests/test_manager.py::test_serve
 
 ### strict-types-private-langgraph-snapshot | medium | the retention guard depends on a private langgraph type
 
-Open, owned by W06.P12.S47; needs a decision. `database/checkpoint_retention.py` must recognise `langgraph.checkpoint.serde.types._DeltaSnapshot`, because a delta channel rebuilds its value from the nearest snapshot and pruning past a non-snapshot head empties it. langgraph exposes no public alias (its own `channels.delta` and Postgres saver import the private name). Options: a local stub that falsely publishes the name (a suppression in another spelling), carrying the finding until upstream adds an alias, or a public probe (`get_delta_channel_history`) that changes what the guard tests and needs its own evidence. It is the last strict diagnostic on the branch the Step produced.
+Fixed in W06.P12.S47 (cca8367) without a stub or a probe change: LangGraph's loop keeps `counters_since_delta_snapshot` in the checkpoint metadata whenever any delta channel has written since its last snapshot and removes it only when every delta channel snapshotted, and a snapshot holds the whole value, so the private-type branch only ever refused a safe prune; a real snapshot-every-step graph proves the value survives, and the guard reads the metadata alone. Original finding: `database/checkpoint_retention.py` had to recognise `langgraph.checkpoint.serde.types._DeltaSnapshot`, because a delta channel rebuilds its value from the nearest snapshot and pruning past a non-snapshot head empties it. langgraph exposes no public alias (its own `channels.delta` and Postgres saver import the private name). Options: a local stub that falsely publishes the name (a suppression in another spelling), carrying the finding until upstream adds an alias, or a public probe (`get_delta_channel_history`) that changes what the guard tests and needs its own evidence. It is the last strict diagnostic on the branch the Step produced.
 
 ### strict-types-merge-residue | low | the strict pass and the decomposition met at private helper names
 
-Open, owned by W06.P12.S47. Merging the strict pass over W07 left 22 diagnostics, mostly `reportPrivateUsage` and `reportUnusedFunction` where helpers moved into new graph modules kept their private names while imported across modules.
+Fixed in W06.P12.S47 (c26cf06): the helpers are public where they now live and declared in each module's exports; `type-strict` reads zero. Original finding: merging the strict pass over W07 left 22 diagnostics, mostly `reportPrivateUsage` and `reportUnusedFunction` where helpers moved into new graph modules kept their private names while imported across modules.
 
 ### compiled-test-graph-is-any | low | a compiled test graph is untyped at the test boundary
 

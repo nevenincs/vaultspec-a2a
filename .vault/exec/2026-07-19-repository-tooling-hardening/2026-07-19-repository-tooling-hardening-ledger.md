@@ -5,7 +5,7 @@ tags:
 date: '2026-07-19'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:e5472fca50d67454bbb978ff76b5a73d8af247fd3996c3c5bbdde91021dd4c5f'
+body_hash: 'sha256:f379ca425ae1ed4cf308a526fdbdefbcdc5ca9d6f50b696001e63139c7551647'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -196,6 +196,23 @@ related:
 - `S47` `verify:` `python -m dev lint all` -> `pass`
 - `S47` `verify:` `python -m dev lint type-strict` -> `fail`
 - `S47` `by:` `vaultspec-high-executor`
+- `S47` `M` `src/vaultspec_a2a/control/tests/_continuation.py`
+- `S47` `M` `src/vaultspec_a2a/graph/_compiler_models.py`
+- `S47` `M` `src/vaultspec_a2a/graph/_compiler_prompts.py`
+- `S47` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S47` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S47` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S47` `M` `src/vaultspec_a2a/graph/nodes/_worker_permissions.py`
+- `S47` `M` `src/vaultspec_a2a/graph/nodes/_worker_tool_calls.py`
+- `S47` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S47` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S47` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S47` `M` `src/vaultspec_a2a/graph/tests/test_persona_web_composition.py`
+- `S47` `M` `src/vaultspec_a2a/streaming/subscribers.py`
+- `S47` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S47` `verify:` `python -m dev lint type-strict` -> `pass`
+- `S47` `verify:` `python -m dev lint all` -> `pass`
+- `S47` `verify:` `pytest graph streaming control worker database -n 4 --require-prerequisite=postgres` -> `pass`
 
 ## Notes
 
@@ -208,3 +225,4 @@ related:
 - `S27` Measured clean at f72a99a: zero strict diagnostics across the 27 lifecycle modules, so no change was made.
 - `S28` Defects found while typing: a research-rung test passed an ignored field to a fake model and so tested the stub answer; a dead supervisor fallback; two identical branches in the custom-text transformer.
 - `S47` Partial: 120 to 1 on the branch; the residual is a private langgraph snapshot type the retention guard must recognise, which needs a decision. Merged over the W07 decomposition, the tree reads 23, mostly helpers moved across modules under private names; owned by the same Step.
+- `S47` Closed by the orchestrator: merge residue made public where the helpers now live; the private langgraph snapshot import retired on evidence that the metadata counter already marks every delta dependency (a snapshot-every-step graph prunes with its value intact). type-strict reads zero.

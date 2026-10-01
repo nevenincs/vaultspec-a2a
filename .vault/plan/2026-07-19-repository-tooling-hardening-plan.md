@@ -9,7 +9,7 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
 modified: '2026-10-01'
-body_hash: 'sha256:d567b9ac39cb82e91596f92807f7d0d2782b26b360cbac5640b346d7bb09e607'
+body_hash: 'sha256:ada62efae24fd67ca6e4e1e06acede2b62809707701631788441d077ece66728'
 ---
 
 # `repository-tooling-hardening` plan
@@ -139,7 +139,7 @@ Repair production typing by bounded domain with no suppressions or compatibility
 - [x] `W06.P12.S26` - Repair strict types in provider/service tests and the bounded callback-observability contracts they require after production contracts stabilize.; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests, src/vaultspec_a2a/conftest.py, src/vaultspec_a2a/tests/test_prerequisite_rule.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/nodes/diverge.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/tests/nodes/test_diverge.py`.
 - [x] `W06.P12.S27` - Repair strict types in lifecycle test helpers and their production contracts.; `src/vaultspec_a2a/lifecycle, src/vaultspec_a2a/lifecycle/tests`.
 - [x] `W06.P12.S28` - Repair strict types in graph, authoring, worker, and streaming domains.; `src/vaultspec_a2a/graph, src/vaultspec_a2a/authoring, src/vaultspec_a2a/worker, src/vaultspec_a2a/streaming`.
-- [ ] `W06.P12.S47` - Resolve every residual Ty and Basedpyright diagnostic across the canonical Python roots before any strict-type graduation.; `src, dev, docs, scripts, packaging`.
+- [x] `W06.P12.S47` - Resolve every residual Ty and Basedpyright diagnostic across the canonical Python roots before any strict-type graduation.; `src, dev, docs, scripts, packaging`.
 
 ## Wave `W07` - structural complexity remediation
 

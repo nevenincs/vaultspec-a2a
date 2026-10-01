@@ -53,8 +53,21 @@ _BATCH_CONTENT_TYPE = "application/json"
 
 @dataclass(slots=True)
 class _BatchState:
+    """The buffered events and everything that governs draining them.
+
+    The lock and the closing flag belong with the buffer they guard. One flush
+    at a time: the deferred cadence flush and the immediate flush a terminal
+    event forces used to be able to run together, each taking a slice of the
+    same buffer, so the gateway received two overlapping posts whose ordering
+    nothing established and a failure in one re-queued events the other had
+    already sent. ``closing`` is set once shutdown begins, so a failed final
+    flush cannot schedule a redrive onto a client about to close under it.
+    """
+
     events: list[dict[str, Any]] = field(default_factory=list)
     flush_task: asyncio.Task[None] | None = None
+    flush_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    closing: bool = False
 
 
 def event_client_timeout() -> httpx.Timeout:
@@ -169,15 +182,6 @@ class WorkerBridge:
 
         # Event batching state
         self._batch = _BatchState()
-        # One flush at a time. The deferred cadence flush and the immediate flush
-        # a terminal event forces used to be able to run together, each taking a
-        # slice of the same buffer: the gateway then received two overlapping
-        # posts whose ordering nothing established, and a failure in one re-queued
-        # events the other had already sent.
-        self._flush_lock = asyncio.Lock()
-        # Set once shutdown begins, so a failed final flush cannot schedule a
-        # redrive onto a client that is about to close under it.
-        self._closing = False
 
         # Consecutive heartbeat failure tracking for escalating logs.
         self._consecutive_hb_failures: int = 0
@@ -208,7 +212,7 @@ class WorkerBridge:
         retains a small independent allowance when delivery has consumed the
         shared deadline.
         """
-        self._closing = True
+        self._batch.closing = True
         pending = self._batch.flush_task
         pending_joined = True
         if pending is not None and not pending.done():
@@ -364,7 +368,7 @@ class WorkerBridge:
         pending flush would leave that backlog waiting for an event a finished
         run never sends.
         """
-        if self._closing:
+        if self._batch.closing:
             return
         pending = self._batch.flush_task
         if pending is None or pending.done() or pending is asyncio.current_task():
@@ -472,7 +476,7 @@ class WorkerBridge:
         Failures are logged but never raised -- the worker must not crash because
         the gateway is temporarily unavailable.
         """
-        async with self._flush_lock:
+        async with self._batch.flush_lock:
             return await self._flush_locked(deadline=deadline)
 
     async def _flush_locked(self, *, deadline: float | None) -> bool:

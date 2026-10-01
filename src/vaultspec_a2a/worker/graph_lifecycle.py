@@ -74,15 +74,13 @@ type GraphCacheKey = tuple[str, str | None, bool, str, str, str]
 
 
 def graph_cache_key(
-    team_preset: str,
-    workspace_root: str | None,
-    autonomous: bool,
-    assignment_digest: str,
-    graph_definition_digest: str,
-    *,
-    thread_id: str,
+    compilation: GraphCompilationKey, *, thread_id: str
 ) -> GraphCacheKey:
     """Form the cache key for a compiled team graph.
+
+    Takes the compilation identity whole, which is what the signature says a
+    cache key is: everything a graph is compiled from, plus the run it belongs
+    to.
 
     A compiled graph holds its nodes' model instances, and a provider model
     refuses concurrent use, so two runs of one preset sharing a graph failed
@@ -101,12 +99,13 @@ def graph_cache_key(
     key handed in through the registration seam, which does not cross the
     dispatch wire and so is not minted by it.
     """
+    team_preset, workspace_root, autonomous, assignment, definition = compilation
     return (
         team_preset,
         canonical_project_root(workspace_root) if workspace_root else None,
         autonomous,
-        assignment_digest,
-        graph_definition_digest,
+        assignment,
+        definition,
         thread_id,
     )
 
@@ -352,7 +351,7 @@ class GraphLifecycleManager:
         here so a graph installed through this seam shares the entry a dispatch
         for the same workspace would find, rather than shadowing it.
         """
-        cache_key = graph_cache_key(*compilation_key, thread_id=thread_id)
+        cache_key = graph_cache_key(compilation_key, thread_id=thread_id)
         bound = self._state.thread_compilation_digests.get(thread_id)
         if bound is not None and bound != (cache_key[3], cache_key[4]):
             raise GraphCompilationError(
@@ -497,11 +496,13 @@ class GraphLifecycleManager:
         workspace_root = req.workspace_root
         autonomous = req.autonomous
         new_key = graph_cache_key(
-            team_preset,
-            workspace_root,
-            autonomous,
-            assignment_digest,
-            definition_digest,
+            (
+                team_preset,
+                workspace_root,
+                autonomous,
+                assignment_digest,
+                definition_digest,
+            ),
             thread_id=req.thread_id,
         )
 

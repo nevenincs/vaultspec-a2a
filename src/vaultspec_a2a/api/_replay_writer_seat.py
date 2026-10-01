@@ -22,9 +22,22 @@ from ..database.run_event_repository import RunEventStore
 from ..streaming import RunEventWriter, RunSequenceAllocator, SequencedEvent
 from .event_adapter import sequenced_to_positive_payload
 
-__all__ = ["seated_replay_writer"]
+__all__ = ["replay_writer_seat", "seated_replay_writer"]
 
 _STATE_ATTRIBUTE = "run_event_writer"
+
+
+def replay_writer_seat(app: Any) -> RunEventWriter | None:
+    """Return the app's replay recorder if one is seated, seating nothing.
+
+    The read-only companion to :func:`seated_replay_writer`, for the stream
+    that serves a replay rather than records one. Seating binds the run
+    numbering authority as a side effect, which belongs to the relay that
+    writes frames and not to a viewer that reads them: a gateway with no
+    recorder has retained nothing in memory, so a resume reads the table and
+    is complete.
+    """
+    return cast("RunEventWriter | None", getattr(app.state, _STATE_ATTRIBUTE, None))
 
 
 def _outgoing_frame_body(frame: object) -> Mapping[str, object] | None:

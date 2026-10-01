@@ -24,6 +24,7 @@ de-duplication below necessary.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ from fastapi.responses import StreamingResponse
 
 from ..control.config import settings
 from ..database import get_thread
+from ..database.run_event_repository import RunEventStore
 from ..graph.enums import ServerEventType
 from ..providers.conditions import ProviderCondition
 from ..streaming.sse_frames import encode_sse_frame
@@ -50,7 +52,9 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ..database.run_event_repository import RunEventRecord
     from ..streaming.aggregator import EventAggregator
+    from ..streaming.run_event_writer import RunEventWriter
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +282,103 @@ def _terminal_replay_frames(thread_id: str, state: _DurableRunState) -> Iterator
     yield encode_sse_frame(terminal, event="thread_terminal", thread_id=thread_id)
 
 
+@dataclass(frozen=True, slots=True)
+class _ReplayFrame:
+    """One retained frame, decoded back into the body a subscriber was handed."""
+
+    sequence: int
+    event_type: str
+    body: dict[str, object]
+
+
+def _decoded(record: RunEventRecord) -> _ReplayFrame | None:
+    """Decode one retained row, or ``None`` when its body is not a frame.
+
+    A row this gateway wrote is a JSON object by construction, so ``None``
+    here means the stored bytes are no longer what was written. Dropping the
+    row rather than raising keeps one damaged frame from costing the whole
+    resume; the window it leaves behind is then discontiguous, which the
+    caller reports instead of papering over.
+    """
+    try:
+        body = json.loads(record.payload_json)
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        logger.warning(
+            "Retained progress frame %d of run %s is not a decodable frame body",
+            record.sequence,
+            record.thread_id,
+            extra={
+                "thread_id": record.thread_id,
+                "sequence": record.sequence,
+                "action": "run_event_row_undecodable",
+            },
+        )
+        return None
+    return _ReplayFrame(
+        sequence=record.sequence,
+        event_type=record.event_type,
+        body=cast("dict[str, object]", body),
+    )
+
+
+async def _retained_after(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    writer: RunEventWriter | None,
+    thread_id: str,
+    after_sequence: int,
+) -> list[_ReplayFrame]:
+    """Return the run's retained frames after *after_sequence*, oldest first.
+
+    The two sources are unioned BY SEQUENCE, never concatenated. A flush does
+    not empty the ring - it only moves the mark of what the table already
+    holds - so for any window that has been written the ring and the rows name
+    the same frames, and appending one to the other would hand a resuming
+    client every one of them twice. A flush landing between the two reads
+    widens the overlap rather than changing its nature, so the union is
+    correct under any interleaving and the read needs no lock.
+
+    The durable read is bounded by the retention window, which is the most the
+    table can hold for one run; the ring contributes the newest frames the
+    table does not have yet. The session closes before this returns, so no
+    pooled connection is held for the life of the stream.
+    """
+    store = RunEventStore(session_factory)
+    merged: dict[int, RunEventRecord] = {
+        record.sequence: record
+        for record in await store.read_after(
+            thread_id=thread_id,
+            after_sequence=after_sequence,
+            limit=settings.stream_replay_window_events,
+        )
+    }
+    if writer is not None:
+        for record in writer.pending(thread_id):
+            if record.sequence > after_sequence:
+                merged.setdefault(record.sequence, record)
+    return [
+        frame
+        for sequence in sorted(merged)
+        if (frame := _decoded(merged[sequence])) is not None
+    ]
+
+
+def _replay_frame_bytes(thread_id: str, frame: _ReplayFrame) -> bytes:
+    """Encode one retained frame exactly as its live delivery was encoded.
+
+    Including the id: a replayed frame is retained by definition, so the
+    position it names is one the next reconnect can resume from too.
+    """
+    return encode_sse_frame(
+        frame.body,
+        event=frame.event_type or None,
+        thread_id=thread_id,
+        sequence=frame.sequence,
+    )
+
+
 def _resync_frames(
     aggregator: EventAggregator, client_id: str, thread_id: str
 ) -> Iterator[bytes]:
@@ -305,6 +406,7 @@ async def _stream_thread_events(
     thread_id: str,
     session_factory: async_sessionmaker[AsyncSession],
     resume_cursor: str | None = None,
+    replay_writer: RunEventWriter | None = None,
 ) -> AsyncGenerator[bytes]:
     """Yield thread-scoped events from the shared subscriber queue as SSE."""
     client_id = f"sse-{uuid4()}"
@@ -372,6 +474,30 @@ async def _stream_thread_events(
 
         yield _snapshot_frame(thread_id, state.status)
 
+        # The highest sequence this connection has delivered. It starts at the
+        # client's own cursor, because everything at or below that it already
+        # holds, and it is what makes the subscription attached above safe: the
+        # queue was collecting frames while the replay below read them, so the
+        # same sequence can arrive twice and only the first delivery counts.
+        highest_emitted = resume.after_sequence if resume is not None else 0
+
+        if resume is not None:
+            for frame in await _retained_after(
+                session_factory=session_factory,
+                writer=replay_writer,
+                thread_id=thread_id,
+                after_sequence=resume.after_sequence,
+            ):
+                yield _replay_frame_bytes(thread_id, frame)
+                highest_emitted = frame.sequence
+                if frame.event_type == "thread_terminal":
+                    # The run ended inside the replayed window. Closing on the
+                    # retained frame rather than on the durable terminal below
+                    # keeps the terminal's own sequence in the delivered set,
+                    # so the union across both connections has no hole at its
+                    # last position.
+                    return
+
         if state.terminal:
             for frame in _terminal_replay_frames(thread_id, state):
                 yield frame
@@ -429,6 +555,14 @@ async def _stream_thread_events(
                 if _replay_is_served(aggregator, thread_id)
                 else None
             )
+            if sequence is not None:
+                if sequence <= highest_emitted:
+                    # Already delivered - by the replay above, or by this
+                    # connection. A terminal can never be dropped here: the
+                    # mark only passes a sequence this stream has emitted, and
+                    # emitting a terminal returns.
+                    continue
+                highest_emitted = sequence
             yield encode_sse_frame(
                 payload,
                 event=str(event_type) if isinstance(event_type, str) else None,
@@ -449,6 +583,7 @@ async def build_thread_stream_response(
     thread_id: str,
     not_found_detail: str = "Thread not found",
     resume_cursor: str | None = None,
+    replay_writer: RunEventWriter | None = None,
 ) -> StreamingResponse:
     """Build the SSE ``StreamingResponse`` for a thread, or raise a 404.
 
@@ -468,6 +603,12 @@ async def build_thread_stream_response(
     answered with a typed frame on a 200 stream, not an HTTP error, because the
     client that sends one is an ``EventSource`` that would otherwise see only a
     failed connection.
+
+    *replay_writer* is the gateway's seated recorder, read rather than created:
+    it holds the newest frames the replay table does not have yet, so a resume
+    taken between an allocation and its flush still sees them. A caller with
+    none - a host embedding this stream without the relay - serves the table
+    alone.
     """
     # Refused before the thread lookup, deliberately. The limit exists to stop a
     # caller exhausting queues and delivery tasks, so it must be decided from
@@ -496,6 +637,7 @@ async def build_thread_stream_response(
             thread_id=thread_id,
             session_factory=session_factory,
             resume_cursor=resume_cursor,
+            replay_writer=replay_writer,
         ),
         media_type="text/event-stream",
         headers={

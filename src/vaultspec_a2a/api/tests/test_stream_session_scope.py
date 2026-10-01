@@ -117,3 +117,68 @@ async def test_attached_viewers_hold_no_pooled_connection(
         finally:
             for stream in streams:
                 await stream.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_resuming_viewer_hands_its_replay_connection_back(
+    engine: AsyncEngine,
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Replaying a window is a read that ends, not a read that watches.
+
+    A resume adds a second database read to the attachment path, and it is the
+    one most tempting to hold open: the obvious shape streams rows out of a
+    cursor as the client consumes them, which would pin a pooled connection
+    for the life of the stream and reintroduce the exhaustion the scoping
+    above fixed. The count is read after the replayed frames have arrived, so
+    the read is demonstrably finished rather than not yet started.
+    """
+    aggregator = EventAggregator()
+    app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
+    run_id, _receipt = await _seed_live_thread(session_factory, title="resume-pool")
+
+    pool = engine.sync_engine.pool
+    assert isinstance(pool, _CheckedOutPool)
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        relayed = await client.post(
+            "/internal/events/batch",
+            json={
+                "events": [
+                    {
+                        "thread_id": run_id,
+                        "ts": float(index),
+                        "payload": {
+                            "type": "agent_status",
+                            "event_type": "agent_status",
+                            "thread_id": run_id,
+                            "agent_id": "coder",
+                            "state": "working",
+                            "sequence": index,
+                        },
+                    }
+                    for index in (1, 2)
+                ]
+            },
+        )
+        assert relayed.status_code == 200, relayed.text
+
+        async with client.stream(
+            "GET", f"/v1/runs/{run_id}/stream", headers={"Last-Event-ID": "-"}
+        ) as response:
+            assert response.status_code == 200
+            body = response.aiter_bytes()
+            received = b""
+            # Read until the second replayed frame has arrived; the replay read
+            # necessarily completed before the first of them was written.
+            while received.count(b"agent_status") < 2:
+                received += await anext(body)
+            await _wait_for_subscribers(agg, 1)
+
+            assert pool.checkedout() == 0, (
+                "the replay read is still holding a pooled connection"
+            )

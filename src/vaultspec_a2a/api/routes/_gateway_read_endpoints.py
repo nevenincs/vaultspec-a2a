@@ -62,6 +62,7 @@ from ...thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
+from .._replay_writer_seat import replay_writer_seat
 from .._utils import trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -441,6 +442,7 @@ async def run_stream_endpoint(
         thread_id=run_id,
         not_found_detail="Run not found",
         resume_cursor=offered_resume_cursor(last_event_id_header, last_event_id),
+        replay_writer=replay_writer_seat(request.app),
     )
 
 

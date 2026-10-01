@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:db079956522b83d5c7ca2a6d95cb57140c1266374d7d2b7c986e013a5ca8dc75'
+body_hash: 'sha256:a49b061a434cae8be537bacc64919bd6e071df1856de8b0af0a750c7ec4f4a05'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"

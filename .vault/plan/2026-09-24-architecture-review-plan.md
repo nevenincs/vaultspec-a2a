@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:cc38f47a8154a1a75803b52a3e12599d40351fdc749d4a9daf6dd5b169ec2777'
+body_hash: 'sha256:a227117e38b6a1d211789a87819390b08f46b24191c591461e2cb8f612e762cf'
 ---
 
 # `architecture-review` plan

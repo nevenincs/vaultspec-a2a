@@ -443,4 +443,3 @@ The local contract test still required `workflow_dispatch` as the only release t
 ### merge-integration-review | low/review | reconciled release and remediation histories are coherent | PASS
 
 Review traced the combined release-please dispatch, tag/ref validation, reusable qualification gate, native build matrix, checksum validation, provenance attestation, exact cohort upload, attached-provenance verification, and final draft publication. It also checked the remote remediation source resolutions against their focused tests and validated the merged vault corpus. The two high and one medium merge findings above are resolved. No critical, high, or unowned medium finding remains from this reconciliation pass.
-

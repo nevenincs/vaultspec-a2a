@@ -19,7 +19,11 @@ from fastapi import (
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...control._permission_response_contract import PermissionInput, PermissionRuntime
+from ...control._permission_response_contract import (
+    PermissionInput,
+    PermissionResult,
+    PermissionRuntime,
+)
 from ...control._worker_health import worker_liveness
 from ...control.clarification_service import (
     ClarificationRuntime,
@@ -80,6 +84,7 @@ from ..schemas.gateway import (
     RunMessageRefusalResponse,
     RunMessageRequest,
     RunMessageResponse,
+    RunPermissionRefusalResponse,
     RunPermissionRespondRequest,
     RunPermissionRespondResponse,
     ServiceStateResponse,
@@ -179,39 +184,73 @@ __all__ = ["_summarize_preset", "route_signature"]
 # ---------------------------------------------------------------------------
 
 
-# The refusals this verb answers with 409. Each says the run cannot take the
-# turn now and nothing was reserved, so they share one status and are told apart
+# The refusals a run action answers with 409. Each says the run cannot take the
+# work now and nothing was reserved, so they share one status and are told apart
 # by the typed code in the body rather than by parsing the message.
-_MESSAGE_REFUSALS: frozenset[FailureType] = frozenset(
+_RUN_REFUSALS: frozenset[FailureType] = frozenset(
     FailureType(code.value) for code in RunMessageRefusalCode
 )
 
+# The dispatch outcomes that mean the gateway is temporarily unable to deliver,
+# rather than that the request was wrong or the far side broken.
+_RUN_UNAVAILABLE: frozenset[FailureType] = frozenset(
+    {FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY}
+)
 
-def _message_refusal(result: MessageResult) -> HTTPException:
-    """Build the typed 409 for a follow-up the run cannot accept."""
-    failure_type = result.failure_type
-    if failure_type is None:
-        raise RuntimeError("refused follow-up carries no failure type")
-    detail = RunMessageRefusalDetail(
-        code=RunMessageRefusalCode(failure_type.value),
-        message=result.error_detail or "The run cannot accept a follow-up turn",
-    )
-    return HTTPException(status_code=409, detail=detail.model_dump(mode="json"))
+
+def _refused_dispatch(failure_type: FailureType, detail: str | None) -> HTTPException:
+    """Serve one dispatch outcome the same way whichever verb met it.
+
+    A follow-up turn and a permission answer reach the worker through the same
+    dispatch, so the same refusal must not mean two different things to a
+    client: a worker holding the run's slot is a conflict about that run on
+    both, and a saturated or shut-out worker is the gateway asking to be tried
+    again on both. Deriving the status per verb is what let the same busy
+    worker read as an internal gateway failure on one verb and a conflict on
+    the other.
+    """
+    if failure_type in _RUN_UNAVAILABLE:
+        return HTTPException(status_code=503, detail=detail)
+    if failure_type in _RUN_REFUSALS:
+        body = RunMessageRefusalDetail(
+            code=RunMessageRefusalCode(failure_type.value),
+            # The served field is bounded, and the detail is composed upstream
+            # from worker text; truncating here keeps an over-long message a
+            # refusal rather than a validation fault inside the error path.
+            message=(detail or "The run cannot take this now")[:1024],
+        )
+        return HTTPException(status_code=409, detail=body.model_dump(mode="json"))
+    return HTTPException(status_code=502, detail=detail)
 
 
 async def _raise_for_message_dispatch_failure(
     request: Request, result: MessageResult
 ) -> None:
-    if result.failure_type is None:
+    failure_type = result.failure_type
+    if failure_type is None:
         return
     # A failed follow-up can settle without a terminal worker event.
     if result.thread_status == ThreadStatus.FAILED.value:
         drain_gate = getattr(request.app.state, "drain_gate", None)
         if drain_gate is not None:
             await drain_gate.release(result.thread_id)
-    if result.failure_type in (FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY):
-        raise HTTPException(status_code=503, detail=result.error_detail)
-    raise HTTPException(status_code=502, detail=result.error_detail)
+    raise _refused_dispatch(failure_type, result.error_detail)
+
+
+def _refused_permission_response(result: PermissionResult) -> HTTPException:
+    """Serve a refused permission answer, dispatch outcomes through one mapping.
+
+    The guards this verb applies before anything is dispatched each name their
+    own status, because they are about this request and this permission rather
+    than about reaching the worker. Everything that got as far as a dispatch
+    carries only its typed failure and is served by the shared mapping.
+    """
+    detail = result.error_detail or "Permission response failed"
+    if result.error_status_code is not None:
+        return HTTPException(status_code=result.error_status_code, detail=detail)
+    if result.failure_type is not None:
+        return _refused_dispatch(result.failure_type, detail)
+    return HTTPException(status_code=500, detail=detail)
 
 
 @router.post(
@@ -231,6 +270,21 @@ async def _raise_for_message_dispatch_failure(
                 "The run cannot accept a follow-up turn. Nothing was reserved "
                 "and nothing was dispatched; the typed code names which "
                 "condition refused it."
+            ),
+        },
+        502: {
+            "description": (
+                "The turn was accepted and retained but the worker could not "
+                "be reached or failed inside itself. Reconcile from run-status."
+            ),
+        },
+        # Restates the router's token refusal because naming a response here
+        # replaces the router-wide description for this route.
+        503: {
+            "description": (
+                "Gateway service token is not configured, or the worker is "
+                "saturated or shut out by the failure breaker and the turn "
+                "was retained for retry."
             ),
         },
     },
@@ -289,8 +343,8 @@ async def run_message_endpoint(
         # Same status the run-creation seam returns for the same missing
         # invariant, so one rule reads identically at both entry points.
         raise HTTPException(status_code=422, detail=result.error_detail)
-    if result.failure_type in _MESSAGE_REFUSALS:
-        raise _message_refusal(result)
+    if result.failure_type is not None and result.failure_type in _RUN_REFUSALS:
+        raise _refused_dispatch(result.failure_type, result.error_detail)
 
     if result.dispatched:
         worker_liveness(context.request.app.state).record_contact()
@@ -315,6 +369,32 @@ async def run_message_endpoint(
 @router.post(
     "/runs/{run_id}/permissions/{request_id}/respond",
     response_model=RunPermissionRespondResponse,
+    responses={
+        409: {
+            "model": RunPermissionRefusalResponse,
+            "description": (
+                "The answer was not taken. A worker that refused the dispatch "
+                "is reported with the typed refusal code every run action "
+                "shares; a request-state conflict carries a plain sentence. "
+                "Nothing was applied either way."
+            ),
+        },
+        502: {
+            "description": (
+                "The answer was accepted and retained but the worker could not "
+                "be reached or failed inside itself. Reconcile from run-status."
+            ),
+        },
+        # Restates the router's token refusal because naming a response here
+        # replaces the router-wide description for this route.
+        503: {
+            "description": (
+                "Gateway service token is not configured, or the worker is "
+                "saturated or shut out by the failure breaker and the answer "
+                "was retained for retry."
+            ),
+        },
+    },
 )
 async def run_permission_respond_endpoint(
     run_id: PathSafeRunId,
@@ -371,13 +451,8 @@ async def run_permission_respond_endpoint(
 
     if result.dispatched:
         worker_liveness(context.request.app.state).record_contact()
-    if result.circuit_open:
-        raise HTTPException(status_code=503, detail=result.error_detail)
     if result.error_detail:
-        raise HTTPException(
-            status_code=result.error_status_code or 500,
-            detail=result.error_detail,
-        )
+        raise _refused_permission_response(result)
 
     return RunPermissionRespondResponse(
         run_id=result.thread_id,

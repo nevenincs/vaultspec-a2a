@@ -90,9 +90,6 @@ from .dispatch import DispatchOutcome, safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .graph_definition import read_accepted_graph_definition
-from .permission_dispatch import (
-    permission_dispatch_error as _permission_dispatch_error,
-)
 from .permission_dispatch import permission_resume_value
 from .repair_transitions import (
     apply_dispatch_failure,
@@ -890,6 +887,7 @@ async def _failed_permission_dispatch(
     policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
     if typed_failure is None:
         raise RuntimeError("failed dispatch carries no failure type")
+    detail = outcome.detail or "Worker dispatch failed"
     await begin_write_transaction(db)
     settlement = await record_dispatch_failure(
         db, claim, typed_failure, detail=outcome.detail
@@ -904,13 +902,8 @@ async def _failed_permission_dispatch(
             db,
             thread_id,
             failed_status=ThreadStatus.INPUT_REQUIRED,
-            reason=outcome.detail or "Worker dispatch failed",
+            reason=detail,
         )
-
-    error_detail, error_status_code = _permission_dispatch_error(
-        outcome,
-        failure_type=typed_failure,
-    )
 
     await db.commit()
     return PermissionResult(
@@ -923,8 +916,10 @@ async def _failed_permission_dispatch(
         idempotency_key=resolved_idempotency_key,
         approval_status=transition.approval_status,
         circuit_open=policy.is_circuit_open,
-        error_detail=error_detail,
-        error_status_code=error_status_code,
+        # No status is chosen here. A dispatch outcome carries its typed failure
+        # and nothing else, so the one protocol mapping decides what every verb
+        # that met the same outcome serves for it.
+        error_detail=detail,
         failure_type=typed_failure,
     )
 

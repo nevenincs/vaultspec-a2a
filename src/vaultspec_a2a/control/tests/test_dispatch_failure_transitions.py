@@ -448,9 +448,12 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
 
     assert result.accepted is False
     assert result.failure_type is FailureType.AT_CAPACITY
-    # The caller still learns the answer did not land, on the status it always
-    # carried; only the run's own state is left alone.
-    assert result.error_status_code == 502
+    # The caller still learns the answer did not land, and learns it as the
+    # typed outcome rather than as a status this service picked: a dispatch
+    # outcome is served identically by every verb that can meet it, so the
+    # status belongs to the one protocol mapping and not to here.
+    assert result.error_detail
+    assert result.error_status_code is None
 
     async with session_factory() as session:
         thread = await get_thread(session, thread_id)
@@ -501,7 +504,8 @@ async def test_an_unreachable_worker_leaves_the_parked_run_answerable(
 
     assert result.accepted is False
     assert result.failure_type is FailureType.UNREACHABLE
-    assert result.error_status_code == 502
+    assert result.error_detail
+    assert result.error_status_code is None
 
     async with session_factory() as session:
         thread = await get_thread(session, thread_id)

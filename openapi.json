@@ -721,7 +721,7 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured."
+            "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker and the turn was retained for retry."
           },
           "409": {
             "description": "The run cannot accept a follow-up turn. Nothing was reserved and nothing was dispatched; the typed code names which condition refused it.",
@@ -732,6 +732,9 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "The turn was accepted and retained but the worker could not be reached or failed inside itself. Reconcile from run-status."
           },
           "422": {
             "description": "Validation Error",
@@ -820,7 +823,20 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured."
+            "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker and the answer was retained for retry."
+          },
+          "409": {
+            "description": "The answer was not taken. A worker that refused the dispatch is reported with the typed refusal code every run action shares; a request-state conflict carries a plain sentence. Nothing was applied either way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPermissionRefusalResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The answer was accepted and retained but the worker could not be reached or failed inside itself. Reconcile from run-status."
           },
           "422": {
             "description": "Validation Error",
@@ -3434,7 +3450,7 @@
           "run_busy"
         ],
         "title": "RunMessageRefusalCode",
-        "description": "The conditions a follow-up turn can be refused for.\n\nA closed subset of the dispatch failure vocabulary, so the published\ncontract names only what this refusal can carry rather than every failure\nthe gateway knows. Each value is spelled as its failure-type counterpart."
+        "description": "The conditions a run action can be refused for.\n\nA closed subset of the dispatch failure vocabulary, so the published\ncontract names only what this refusal can carry rather than every failure\nthe gateway knows. Each value is spelled as its failure-type counterpart.\n\nShared by every verb that reaches the worker through a run dispatch, not\nonly the follow-up turn: the same worker refusal must mean the same thing\nwhichever verb met it."
       },
       "RunMessageRefusalDetail": {
         "properties": {
@@ -3641,6 +3657,27 @@
         ],
         "title": "RunPermissionDecision",
         "description": "One permission decision this run settled, as the audit log recorded it.\n\nAnswers which tool call was approved or refused, with which option, and when.\nCarries no tool INPUT and no prompt text, so a caller reviewing what a run was\npermitted to do never has to read what it was asked to do.\n\n``agent_id`` is nullable because it is genuinely not knowable at the decision\nseam rather than merely unset: the interrupt payload carries the tool, its\ninput, and the options, but no agent. An unattributed decision is still a real\nrecord, and the alternative is fabricating attribution."
+      },
+      "RunPermissionRefusalResponse": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunMessageRefusalDetail"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "RunPermissionRefusalResponse",
+        "description": "The body served when a permission answer is refused with a conflict.\n\nTwo shapes, deliberately stated as one union rather than as one shape the\nverb does not always serve. A worker that refused the dispatch is reported\nwith the typed refusal every run action shares, because the condition is\nthe dispatch outcome and a consumer must be able to tell a busy run from a\nrequest it should never send again. The guards this verb applies before\nanything is dispatched - an answer to a request that is no longer pending,\nan option the request never offered, a key already bound to a different\nanswer - carry a plain sentence, because they are conditions of this\nrequest rather than of reaching the worker."
       },
       "RunPermissionRespondRequest": {
         "properties": {

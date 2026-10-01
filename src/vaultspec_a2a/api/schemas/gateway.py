@@ -80,6 +80,7 @@ __all__ = [
     "RunMessageRefusalCode",
     "RunMessageRefusalDetail",
     "RunMessageRefusalResponse",
+    "RunPermissionRefusalResponse",
     "RunPrepareResponse",
     "RunReleaseResponse",
     "RunStage",
@@ -714,11 +715,15 @@ class RunMessageResponse(BaseModel):
 
 
 class RunMessageRefusalCode(StrEnum):
-    """The conditions a follow-up turn can be refused for.
+    """The conditions a run action can be refused for.
 
     A closed subset of the dispatch failure vocabulary, so the published
     contract names only what this refusal can carry rather than every failure
     the gateway knows. Each value is spelled as its failure-type counterpart.
+
+    Shared by every verb that reaches the worker through a run dispatch, not
+    only the follow-up turn: the same worker refusal must mean the same thing
+    whichever verb met it.
     """
 
     INPUT_REQUIRED = FailureType.INPUT_REQUIRED.value
@@ -747,6 +752,23 @@ class RunMessageRefusalResponse(BaseModel):
     """The body served for a refused follow-up turn."""
 
     detail: RunMessageRefusalDetail
+
+
+class RunPermissionRefusalResponse(BaseModel):
+    """The body served when a permission answer is refused with a conflict.
+
+    Two shapes, deliberately stated as one union rather than as one shape the
+    verb does not always serve. A worker that refused the dispatch is reported
+    with the typed refusal every run action shares, because the condition is
+    the dispatch outcome and a consumer must be able to tell a busy run from a
+    request it should never send again. The guards this verb applies before
+    anything is dispatched - an answer to a request that is no longer pending,
+    an option the request never offered, a key already bound to a different
+    answer - carry a plain sentence, because they are conditions of this
+    request rather than of reaching the worker.
+    """
+
+    detail: RunMessageRefusalDetail | str
 
 
 class RunPermissionRespondRequest(BaseModel):

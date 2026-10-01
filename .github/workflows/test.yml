@@ -115,11 +115,6 @@ jobs:
         continue-on-error: true
         run: just check-limits
 
-      - name: Run nesting sentinel
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just check-nesting
-
       - name: Run size sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true

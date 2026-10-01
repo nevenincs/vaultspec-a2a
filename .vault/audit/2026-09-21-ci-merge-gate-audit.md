@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:1eaaf58aa8fdf07e5e4453b17ea04598a30470453edf8082afa8443134fcf9c8'
+body_hash: 'sha256:e540bc8c20f84d5e14a8cc0c72c67bd3b53e461bbcf95e753e3fa6b354c169b1'
 related:
   - "[[2026-09-21-ci-merge-gate-plan]]"
 ---
@@ -123,4 +123,9 @@ Type: CI authorization and required-check correctness. Status: fixed during 2026
 ### pr88-main-reconciliation | high | release and trust regression prevented
 
 Type: merge integration. Status: fixed and verified. The stale admission-timeout branch conflicted with main's release cut and required verdict permissions. The resolution retains main's release tests, trust checks and scoped permissions while preserving the branch's execution budgets and verdict class. Review of the resulting diff against main found only the intended timeout configuration. Twelve CI, release and trust tests and actionlint pass.
+
+
+### pr80-main-reconciliation | high | required verdict skip regression prevented
+
+Type: merge integration and authorization. Status: fixed and verified. Automatic merging retained the stale fork condition on the required verdict, which could make a skipped required check count as passed. The resolution restores main's always-running verdict and current timeout, permissions, release cut, runner policy and release tests while retaining admission budgets and the verdict resource class. Twelve focused CI, release and trust tests and actionlint pass. No unresolved merge-specific finding remains.
 

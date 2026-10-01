@@ -33,7 +33,7 @@ def main() -> int:
     os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
     try:
         if completion_endpoint:
-            from .plugin import send_completion_message
+            from .completion import send_completion_message
 
             send_completion_message(completion_endpoint, "hello")
         exit_status = pytest.main(_seated_arguments(sys.argv[1:]))
@@ -41,7 +41,7 @@ def main() -> int:
         # pytest.main() returns.  Publish only after that teardown completes so
         # the outer owner can distinguish a root that is still shutting down
         # from one that has exited while a descendant remains.
-        from .plugin import send_completion_receipt
+        from .completion import send_completion_receipt
 
         try:
             if completion_endpoint:

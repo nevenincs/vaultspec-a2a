@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:7083182454d6279aa69d15d7eba9005046f3e68fec7a4f267938403a6f3feba7'
+body_hash: 'sha256:f90cdb874f4ee888ded121ef6b430b555b6a67aee51c3d943c7f0f1a93265ea7'
 related:
   - "[[2026-10-01-provider-binary-policy-adr]]"
   - "[[2026-10-01-tool-permission-model-adr]]"
@@ -86,6 +86,10 @@ All of the following are enrollments into already-accepted decision coverage; no
 - Action (ADR amendment, not a code Step): correct `2026-10-01-tool-permission-model-adr`'s Rationale and Considered-options prose, which names moving to `dontAsk` as the target state once the `PreToolUse` hook is proven. On the upgraded adapter `dontAsk` is not offered at all (confirmed live and by source), so that reconsideration path is foreclosed, not merely gated on the hook probe. This is a wording correction to an accepted ADR, via the amendment mechanism the vaultspec system section describes, not a new decision and not owned by this plan.
 - No Step proposed for the pre-existing `fs/read_text_file` offset-vs-line gap or the native-floor title-matching gap: both are already owned by open Steps (`2026-08-02-llm-context-provider-abstraction-plan` `P01.S01`; `2026-10-01-tool-permission-model-plan` `P01.S02`/`P07.S21` respectively) and this research only reconfirms them against the target SDK version.
 - No Step proposed for `providers/set`/`providers/list`/`providers/disable` (Z.ai routing cleanup) or for ACP elicitation as a clarification transport: both are opportunities that would need their own new decision (a wire-contract ADR amendment and a clarification-transport ADR respectively) before any code lands; naming them here is not authorization to pursue either.
+
+## Correction after execution
+
+The live probe note above has the root behaviour inverted. Measured during P01.S17 on this host, which runs as root: with `IS_SANDBOX` set the adapter treats bypass as available, passes the CLI's skip-permissions flag, and `session/new` fails because the CLI refuses that flag for root; with `IS_SANDBOX` unset, `session/new` succeeds. Setting `IS_SANDBOX` arms the failure rather than curing it. The defect predates the upgrade, and only the new adapter lets a client decline bypass, which this lane now does (`2026-10-01-provider-binary-policy-audit`, `root-session-armed-skip-permissions`).
 
 ## Sources
 

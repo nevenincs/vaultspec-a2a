@@ -6,10 +6,12 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:61c0cda4aa0c59fc6769be0df181048d85289f21080ae8c1e7b820b5ce9f1afc'
+body_hash: 'sha256:9c620e2b4b81186d15cb5f42a36a77e6145b610051b5524188de8d4874700e6d'
 related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
   - '[[2026-10-01-provider-binary-policy-adr]]'
+  - '[[2026-10-01-provider-binary-policy-audit]]'
+  - '[[2026-10-01-provider-binary-policy-ledger]]'
   - '[[2026-10-01-provider-binary-policy-plan]]'
   - '[[2026-10-01-provider-binary-policy-research]]'
 ---
@@ -23,6 +25,14 @@ Auto-generated index of all documents tagged with `#provider-binary-policy`.
 ### adr
 
 - `2026-10-01-provider-binary-policy-adr` - `provider-binary-policy` adr: `profile-scoped provider binary authority, proof-bound version ranges, and recorded runtime identity` | (**status:** `accepted`)
+
+### audit
+
+- `2026-10-01-provider-binary-policy-audit` - `provider-binary-policy` audit: `execution of the vendored adapter upgrade`
+
+### exec
+
+- `2026-10-01-provider-binary-policy-ledger` - `provider-binary-policy` ledger
 
 ### plan
 

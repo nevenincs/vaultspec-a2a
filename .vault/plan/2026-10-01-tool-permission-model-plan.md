@@ -11,8 +11,9 @@ related:
   - '[[2026-07-15-agent-harness-provisioning-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:f8d4e972fc2b188a1cfc5c3cb0cedfe0881fc5cfc4620a99532c4e740811ba94'
+body_hash: 'sha256:bf2e766fa52800a33f67985f8134246bd7061e35876361ad4449c946719267c8'
 ---
+
 # `tool-permission-model` plan
 
 One compiled run-bound tool policy, rendered per lane, with a2a-owned expiring grants and one attributed decision log.
@@ -61,6 +62,7 @@ Makes each lane a renderer of the compiled policy rather than a second derivatio
 - [ ] `P03.S08` - Replace the ACP rung's own allowed-set derivation with a call to policy.decide, so _autonomous_option_id and the two pre-rung guards read one answer; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_kimi_permission.py`.
 - [ ] `P03.S09` - Add the Codex renderer for enabled_tools and per-tool approval mode and route CodexPermissionRung._autonomous_action through policy.decide; `src/vaultspec_a2a/providers/_codex_permission.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
 - [ ] `P03.S10` - Pin both lane postures with executable guards: the claude autonomous mode stays default, and the codex lane stays approval_policy never with sandbox read-only until a command-approval handler is registered; `src/vaultspec_a2a/providers/_claude_tool_policy.py, src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/tests/test_lane_posture_guard.py`.
+- [ ] `P03.S23` - Identify a Claude tool call by the tool name and MCP server the adapter attaches to the permission request rather than by its title; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
 
 ### Phase `P04` - complete mediation on the claude family
 

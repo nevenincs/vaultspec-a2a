@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:6aaa1a680614da0bc8c0318caa4cc22f9e2bc714016315b365556cab91146b43'
+body_hash: 'sha256:1afce7edfa6b120b71b397099d5407f70e7a59bc6c69e0b3846f8665fe82992f'
 ---
 
 # `provider-binary-policy` plan
@@ -48,7 +48,7 @@ Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer i
 - [ ] `P01.S04` - Rewrite pin_claude_executable into the profile-scoped authority order returning the absolute path and the rung that answered, with an armed capsule exclusive and fail-loud over an inherited executable override, and update the served-turn and catalog-probe call sites; `src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/factory.py`.
 - [ ] `P01.S05` - Refuse a served Claude or Z.ai launch and the Claude catalog probe when no rung resolves a CLI, with a typed runtime-unavailable reason instead of an unpinned child; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/cli_resolution.py`.
 - [ ] `P01.S06` - Install one exact Claude CLI version in the Compose worker image and name it to the service through the new setting; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.
-- [ ] `P01.S17` - Bump the vendored Claude ACP adapter to its latest release and re-prove the protocol surface the ACP layer depends on; `package.json, package-lock.json, src/vaultspec_a2a/graph/tests/acp_simulator.py, src/vaultspec_a2a/providers/`.
+- [x] `P01.S17` - Bump the vendored Claude ACP adapter to its latest release and re-prove the protocol surface the ACP layer depends on; `package.json, package-lock.json, src/vaultspec_a2a/graph/tests/acp_simulator.py, src/vaultspec_a2a/providers/`.
 
 ### Phase `P02` - Proof-bound version ranges at the eligibility service
 
@@ -85,6 +85,8 @@ The session/load branch and the session id option no production path can reach l
 Take up what the newer vendored adapter offers this lane, as the upgrade research found it, without a new decision.
 
 - [ ] `P06.S18` - Carry the per-model token usage the adapter now reports on each prompt result into the turn's usage metadata; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_types.py`.
+- [ ] `P06.S19` - Handle or log every session update kind the adapter emits, including usage, config option and session info updates; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_protocol.py`.
+- [ ] `P06.S20` - State and record that the adapter's managed-policy tier reaches the provider child, correcting the claim that no setting sources drops managed configuration; `src/vaultspec_a2a/providers/_claude_tool_policy.py, src/vaultspec_a2a/providers/_acp_session.py`.
 
 ## Parallelization
 

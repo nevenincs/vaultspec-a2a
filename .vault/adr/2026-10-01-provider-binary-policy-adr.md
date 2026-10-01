@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:fadf9628bcbc3890953229bc215de5ab8798fcba9e240776206cb5edb65618e7'
+body_hash: 'sha256:7e3920566f07bbb323f8e3b7893ec15e369393bb50bdbb29e631d3961f97e79a'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -321,3 +321,7 @@ D4's declared `claude_auth_channel` exception (opt-in `oauth_token`, default
 edit above is applied accordingly.
 
 Accepted 2026-10-01 under the user's blanket approval of that date.
+
+## Amendment - provider-binary-policy (2026-10-01, managed policy)
+
+The vendored adapter applies the Claude managed-policy settings tier before any session exists, writing its `env` entries into the environment the CLI child inherits; a client cannot suppress it, and passing no setting sources does not (`2026-10-01-provider-binary-policy-audit`, `managed-policy-env-reaches-the-child`). That tier is the operator organisation's own authority over Claude Code on the host, so this record honours it rather than working around the adapter: a served Claude lane runs under whatever managed policy the host carries, and the lane's runtime identity records that a managed tier was present. No source, comment or document of this repository may claim that the lane drops managed configuration.

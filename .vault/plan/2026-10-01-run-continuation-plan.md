@@ -12,7 +12,7 @@ related:
   - '[[2026-08-02-clarification-continuation-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:6654ca118a0affbd484c21457b5e59c7f35936c5b2d5c6cd50c67067ea977ea8'
+body_hash: 'sha256:3c27153019d3884567887c69873c82f5d05a170e9d9f12fea48a200a87658856'
 ---
 
 # `run-continuation` plan
@@ -57,17 +57,19 @@ A semantic refusal about one run stops opening the shared breaker, the run_busy 
 
 The control-action journal can hold a queued continuation with a position, and the per-run depth, service-wide cap and maximum run lifetime are served configuration.
 
-- [ ] `P02.S04` - Migrate the control-action journal to carry a queued continuation position and a queued result status, naming the revision for its purpose and taking the next free id at execution; `src/vaultspec_a2a/database/migrations/versions/, src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/thread/enums.py`.
-- [ ] `P02.S05` - Serve the per-run continuation depth, the service-wide queue cap and the maximum run lifetime as configuration, and add the journal queries that reserve, count, position and read the next queued continuation; new file src/vaultspec_a2a/control/repositories/continuation_queue.py; `src/vaultspec_a2a/domain_config.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/control/repositories/__init__.py`.
+- [x] `P02.S04` - Migrate the control-action journal to carry a queued continuation position and a queued result status, naming the revision for its purpose and taking the next free id at execution; `src/vaultspec_a2a/database/migrations/versions/, src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/thread/enums.py`.
+- [x] `P02.S05` - Serve the per-run continuation depth, the service-wide queue cap and the maximum run lifetime as configuration, and add the journal queries that reserve, count, position and read the next queued continuation; new file src/vaultspec_a2a/control/repositories/continuation_queue.py; `src/vaultspec_a2a/domain_config.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/control/repositories/__init__.py`.
 
 ### Phase `P03` - Promotion: defer terminal settlement while a continuation is queued
 
 A proven terminal checkpoint promotes a queued continuation inside the same run write transaction instead of settling, recovers once after a crash, and the abandoned-transition reconciler treats such a run as owned.
 
-- [ ] `P03.S06` - Check the queue inside the terminal write transaction and promote instead of settling: bind the graph action receipt, install the writer, re-derive the deadline, dispatch the ingest, leave the run RUNNING, and publish no terminal frame or settled-history prune; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/dispatch_receipts.py, src/vaultspec_a2a/control/repositories/continuation_queue.py`.
-- [ ] `P03.S07` - Make promotion a durable recovery attempt under the existing lease machinery so a gateway killed between settlement and dispatch promotes the same queued action exactly once on restart; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/recovery_authority.py`.
-- [ ] `P03.S08` - Treat a run holding a queued continuation as owned by the promotion dispatcher until that action lease expires, so the abandoned-transition reconciler never settles it or drops the queued turn; `src/vaultspec_a2a/control/recovery_authority.py, src/vaultspec_a2a/database/reconciliation.py`.
-- [ ] `P03.S09` - Bound the total lifetime of a run across promotions, refusing to promote past the configured maximum and settling the run with its own terminal instead; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/domain_config.py`.
+- [x] `P03.S06` - Check the queue inside the terminal write transaction and promote instead of settling: bind the graph action receipt, install the writer, re-derive the deadline, dispatch the ingest, leave the run RUNNING, and publish no terminal frame or settled-history prune; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/dispatch_receipts.py, src/vaultspec_a2a/control/repositories/continuation_queue.py`.
+- [x] `P03.S07` - Make promotion a durable recovery attempt under the existing lease machinery so a gateway killed between settlement and dispatch promotes the same queued action exactly once on restart; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/recovery_authority.py`.
+- [x] `P03.S08` - Treat a run holding a queued continuation as owned by the promotion dispatcher until that action lease expires, so the abandoned-transition reconciler never settles it or drops the queued turn; `src/vaultspec_a2a/control/recovery_authority.py, src/vaultspec_a2a/database/reconciliation.py`.
+- [x] `P03.S09` - Bound the total lifetime of a run across promotions, refusing to promote past the configured maximum and settling the run with its own terminal instead; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/domain_config.py`.
+- [ ] `P03.S18` - Refuse every queued continuation in the settlement transaction of a run whose turn settles FAILED or CANCELLED, so a continuation is never left waiting on a settled run nor promoted past a failed turn; `src/vaultspec_a2a/control/recovery_authority.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/control/tests/`.
+- [ ] `P03.S19` - Withhold the client-visible terminal frame and replay record of a turn whose run promotes a queued continuation, gating the relay on the control plane's settlement disposition so a viewer sees one terminal at the last turn's end; `src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/streaming/, src/vaultspec_a2a/api/tests/`.
 
 ### Phase `P04` - Admission: queue one continuation on a busy run
 

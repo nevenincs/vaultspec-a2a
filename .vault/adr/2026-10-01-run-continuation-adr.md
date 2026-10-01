@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:f38e15a7d3101da1e22a4b8e49cca32473eddcca0151c21243437021eaa5b0dd'
+body_hash: 'sha256:21f03b4269cd6e53dd315d2769035894652301dcf773f62b91c43c95ee185887'
 related:
   - "[[2026-10-01-run-continuation-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -284,5 +284,24 @@ gives continuity at the price of one optional field.
   more than it helps, if the dashboard declines the delayed-terminal semantics, or if the
   A2A-capability decision adopts a multi-run thread, which would make a turn boundary a
   run boundary and retire the deferral entirely.
+
+Accepted 2026-10-01 under the user's blanket approval of that date.
+
+## Amendment 2026-10-01: a failed or cancelled turn refuses its continuation
+
+Promotion waits behind a proven terminal checkpoint, which only a completed turn
+produces; a turn that settles FAILED or CANCELLED settles from failure or cessation
+evidence and is not the boundary a continuation queued behind. Such a run settles with
+its own terminal, and every continuation queued on it is refused in the same settlement
+transaction with `rejected_invalid_state`, its position retained and `applied_at` set.
+It is never promoted past a failed turn and never left waiting on a settled run, which
+would be the silent drop the binding constraints forbid. A client that wants to go on
+after a failure starts a new run naming its predecessor, as for any settled run.
+
+Promotion is durable and its delivery belongs to the existing recovery dispatcher, the
+revisable hypothesis this record names; the abandonment bound for a promoted turn is the
+action's run-derived recovery deadline, and for a still-queued continuation its claim
+lease. Evidence: the P02-P03 execution of `2026-10-01-run-continuation-plan`, recorded in
+`2026-10-01-run-continuation-audit` as `queued-continuation-survives-a-failed-or-cancelled-run`.
 
 Accepted 2026-10-01 under the user's blanket approval of that date.

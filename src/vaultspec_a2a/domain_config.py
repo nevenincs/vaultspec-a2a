@@ -191,6 +191,46 @@ class DomainConfig(ProjectSettings):
         ),
     )
 
+    # -- Run continuation ----------------------------------------------------
+
+    run_continuation_queue_depth: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "How many continuations one busy run may hold waiting behind its "
+            "in-flight turn. One is the served value: a second waiting turn "
+            "would be composed against a conversation state the first has "
+            "already changed, so the caller is refused and can decide again "
+            "once the first has run."
+        ),
+    )
+    run_continuation_service_queue_cap: int = Field(
+        default=64,
+        ge=1,
+        description=(
+            "How many continuations may wait across the whole service. "
+            "Deliberately conservative and matched to the recovery pass's own "
+            "page size, so one pass can examine every continuation the "
+            "service admitted rather than leaving a tail of them to the next "
+            "pass. At the served per-run depth of one this is also the number "
+            "of distinct runs that may hold a waiting turn at once. Exceeding "
+            "it is a typed refusal, never a silent drop."
+        ),
+    )
+    max_run_lifetime_seconds: int = Field(
+        default=86_400,
+        ge=1,
+        description=(
+            "Total wall-clock lifetime of one run, measured from its creation "
+            "and spanning every turn a continuation adds. A queue must not "
+            "make a run immortal, so a continuation is never promoted past "
+            "this bound: the run settles with the terminal its last turn "
+            "reached instead. A day is well above any legitimate multi-turn "
+            "session and well below a leak, and a continuation that arrives "
+            "after it is served by starting a new run."
+        ),
+    )
+
     # -- LangGraph execution -------------------------------------------------
 
     graph_recursion_limit: int = Field(

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:e2eeb00e0aa46a716975f5342762d975424eee3eeed21334e2cf63a845c9e829'
+body_hash: 'sha256:63bd69658a0c9acd3ceded87b47568ccd74f3f6b08a3f7ca782407338d664433'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -34,9 +34,52 @@ related:
 - `S03` `M` `openapi.json`
 - `S03` `verify:` `pytest control api thread database --require-prerequisite=postgres` -> `pass`
 - `S03` `by:` `vaultspec-high-executor`
+- `S04` `M` `src/vaultspec_a2a/thread/enums.py`
+- `S04` `M` `src/vaultspec_a2a/database/control_action_schema.py`
+- `S04` `M` `src/vaultspec_a2a/database/models.py`
+- `S04` `A` `src/vaultspec_a2a/database/migrations/versions/0024_control_action_continuation_queue.py`
+- `S04` `A` `src/vaultspec_a2a/database/tests/test_continuation_queue_schema.py`
+- `S04` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S04` `by:` `vaultspec-high-executor`
+- `S05` `M` `src/vaultspec_a2a/domain_config.py`
+- `S05` `M` `.env.example`
+- `S05` `A` `src/vaultspec_a2a/control/repositories/continuation_queue.py`
+- `S05` `M` `src/vaultspec_a2a/control/repositories/__init__.py`
+- `S05` `A` `src/vaultspec_a2a/control/repositories/tests/test_continuation_queue.py`
+- `S05` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S05` `by:` `vaultspec-high-executor`
+- `S06` `M` `src/vaultspec_a2a/control/recovery_authority.py`
+- `S06` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S06` `M` `src/vaultspec_a2a/control/repositories/continuation_queue.py`
+- `S06` `A` `src/vaultspec_a2a/control/tests/test_continuation_promotion.py`
+- `S06` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S06` `by:` `vaultspec-high-executor`
+- `S07` `M` `src/vaultspec_a2a/control/recovery_authority.py`
+- `S07` `M` `src/vaultspec_a2a/control/repositories/continuation_queue.py`
+- `S07` `A` `src/vaultspec_a2a/control/tests/_continuation.py`
+- `S07` `A` `src/vaultspec_a2a/control/tests/test_continuation_promotion_recovery.py`
+- `S07` `M` `src/vaultspec_a2a/control/tests/test_continuation_promotion.py`
+- `S07` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S07` `by:` `vaultspec-high-executor`
+- `S08` `M` `src/vaultspec_a2a/control/recovery_authority.py`
+- `S08` `M` `src/vaultspec_a2a/control/repositories/continuation_queue.py`
+- `S08` `M` `src/vaultspec_a2a/database/reconciliation.py`
+- `S08` `A` `src/vaultspec_a2a/control/tests/test_continuation_queue_ownership.py`
+- `S08` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S08` `by:` `vaultspec-high-executor`
+- `S09` `M` `src/vaultspec_a2a/control/recovery_authority.py`
+- `S09` `M` `src/vaultspec_a2a/control/repositories/continuation_queue.py`
+- `S09` `A` `src/vaultspec_a2a/control/tests/test_continuation_lifetime.py`
+- `S09` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S09` `by:` `vaultspec-high-executor`
 
 ## Notes
 
 - `S02` Satisfied by architecture-review P06.S38 (commit e76fd43): the busy-worker retention rule is stated once as `DEFINITE_NON_DELIVERY` and `test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running` drives the worker's real `run_busy.`
 - `S01` Already satisfied in production: dispatch records a refusal, not a failure, for a 429 and every non-5xx answer; a guard test now fails if either opens the breaker.
 - `S03` Dashboard contract event: POST `/v1/runs/{run_id}/messages` requires Idempotency-Key (1-255 chars), 422 when absent; `RunMessageResponse.idempotency_key` is always the caller key.
+- `S04` Migration 0024 follows 0023 (stream replay log); its downgrade refuses while any continuation is still queued, because the earlier schema cannot express one.
+- `S05` Served service-wide cap is 64, matched to the recovery page size so one recovery pass examines every admitted continuation.
+- `S06` Scope correction: COMPLETED settlement lives in `control/recovery_authority.py,` not `event_handlers.py;` dispatch the ingest is realised as hand the promoted turn to the durable recovery dispatcher, a revisable hypothesis the ADR names. The client-visible terminal frame is still relayed before the control plane decides; owned by a new P03 Step.
+- `S07` Scope correction: `direct_control_recovery.py` needed no change. The settlement transaction now opens with a write transaction, because a SQLite read-first transaction cannot upgrade once another connection commits; this surfaced as database is locked in the real-gateway restart suite.
+- `S09` Scope correction: the bound is enforced in `recovery_authority.py` at promotion; `event_handlers.py` and `domain_config.py` were changed in S06 and S05.

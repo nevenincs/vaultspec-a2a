@@ -105,6 +105,17 @@ class RunEventWriter:
     # In front of the fan-out: in-memory only
     # ------------------------------------------------------------------
 
+    def retains(self, frame: object) -> bool:
+        """Whether this writer would keep *frame*, were it numbered.
+
+        Asked in front of :meth:`record` so the chokepoint can withhold a
+        number from a frame that would leave no row. It costs a second
+        projection of the frame, which is the price of keeping the run's
+        sequence space contiguous: a numbered frame with no row is a hole,
+        and the replay reader discards every retained frame older than one.
+        """
+        return not self._closed and self._project(frame) is not None
+
     def record(self, allocation: SequenceAllocation, frame: object) -> None:
         """Hold one numbered frame for the next batch.
 

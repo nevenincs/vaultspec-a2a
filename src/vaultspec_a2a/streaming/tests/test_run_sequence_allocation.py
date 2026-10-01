@@ -14,6 +14,8 @@ the first time it shipped.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -31,17 +33,21 @@ from ...graph.enums import AgentLifecycleState
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..aggregator import EventAggregator
+from ..run_event_writer import RunEventWriter
 from ..subscribers import RunSequenceAllocator
 from ..types import SequencedEvent
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import AsyncIterator
     from pathlib import Path
 
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 _RUN = "sequence-authority-proof"
+
+#: A flush cadence no test below reaches by waiting, so every write here is one
+#: a test asked for and the unflushed window is under the test's control.
+_IDLE_CADENCE = 30.0
 
 
 class _Backend:
@@ -116,6 +122,17 @@ def _worker_frame(sequence: int, *, thread_id: str = _RUN) -> dict[str, object]:
     }
 
 
+def _terminal_frame(sequence: int, *, thread_id: str = _RUN) -> dict[str, object]:
+    """The relayed frame that settles a run, as the worker posts it."""
+    return {
+        "type": "thread_terminal",
+        "event_type": "thread_terminal",
+        "thread_id": thread_id,
+        "status": ThreadStatus.COMPLETED.value,
+        "sequence": sequence,
+    }
+
+
 def _attach(aggregator: EventAggregator, thread_id: str = _RUN) -> asyncio.Queue[Any]:
     """Register one viewer and return the queue it actually receives on.
 
@@ -134,6 +151,33 @@ def _numbered_aggregator(backend: _Backend) -> EventAggregator:
     aggregator = EventAggregator()
     aggregator.bind_sequence_allocator(RunSequenceAllocator(backend.store))
     return aggregator
+
+
+def _recording_aggregator(
+    backend: _Backend,
+) -> tuple[EventAggregator, RunEventWriter]:
+    """A numbered aggregator with the real recorder seated behind it.
+
+    The recorder is what makes the unflushed window real: a number is held in
+    its ring from the moment it is allocated until a flush this test asks
+    for, which is the state a terminal arriving mid-batch actually finds.
+    """
+    writer = RunEventWriter(
+        backend.store, window=100, flush_interval_seconds=_IDLE_CADENCE
+    )
+    aggregator = EventAggregator()
+    aggregator.bind_sequence_allocator(RunSequenceAllocator(backend.store), sink=writer)
+    return aggregator, writer
+
+
+async def _retained(backend: _Backend) -> list[tuple[int, int]]:
+    """Each retained row as ``(row sequence, the sequence in its body)``."""
+    rows = await backend.store.read_after(thread_id=_RUN, after_sequence=0, limit=1000)
+    bodies = [cast("dict[str, Any]", json.loads(row.payload_json)) for row in rows]
+    return [
+        (row.sequence, int(body["sequence"]))
+        for row, body in zip(rows, bodies, strict=True)
+    ]
 
 
 @pytest.mark.asyncio
@@ -268,6 +312,113 @@ async def test_a_forgotten_run_reseeds_from_the_durable_mark(
 
     await aggregator.prepare_run(_RUN)
     assert allocator.allocate(_RUN) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_run_forgotten_before_its_flush_never_reuses_a_sequence(
+    backend: _Backend,
+) -> None:
+    """A terminal purges a run's state INSIDE the batch that carries it.
+
+    Three frames, one ingested batch, one flush at the end of it - which is
+    the production ordering: the terminal handler clears the aggregator's
+    thread state before the relay route flushes, so the reseed in the middle
+    sees a replay table that still holds nothing at all. Reseeding from that
+    emptiness would hand the third frame the number the first already has,
+    the second row would be swallowed by the idempotent insert, and a live
+    viewer would de-duplicate the frame away. The decision's "monotonic per
+    run, never reused" has to hold across the purge, not only within a
+    counter's lifetime.
+    """
+    await backend.seed_thread()
+    aggregator, writer = _recording_aggregator(backend)
+    queue = _attach(aggregator)
+
+    await aggregator.prepare_run(_RUN)
+    aggregator.relay_payload(_RUN, _worker_frame(1))
+    aggregator.relay_payload(_RUN, _terminal_frame(2))
+    # Exactly what the terminal relay does, and it does it here: before the
+    # batch is flushed, so the two frames above are still only in the ring.
+    aggregator.clear_thread_state(_RUN)
+    assert writer.pending(_RUN), "the proof needs the ring to still hold them"
+    aggregator.subscribe("allocation-proof-viewer", [_RUN])
+
+    # A trailing frame of the same run, in the same batch. A late relay or a
+    # settlement racing the fan-out produces exactly this.
+    await aggregator.prepare_run(_RUN)
+    aggregator.relay_payload(_RUN, _worker_frame(1))
+    written = await writer.flush()
+    await writer.aclose()
+
+    delivered = [
+        cast("dict[str, object]", queue.get_nowait())["sequence"] for _ in range(3)
+    ]
+    assert delivered == [1, 2, 3], "a forgotten run restarted its numbering"
+    assert written == 3
+    assert await _retained(backend) == [(1, 1), (2, 2), (3, 3)], (
+        "every allocated frame must keep its own row"
+    )
+
+
+@pytest.mark.asyncio
+async def test_two_first_touches_of_one_run_cannot_rewind_the_counter(
+    backend: _Backend,
+) -> None:
+    """Seeding awaits the store, and a second touch arrives inside that await.
+
+    Reachable without contriving anything: the worker bridge re-posts a batch
+    the gateway is still processing, or the WebSocket and HTTP ingest paths
+    carry one run at once. Both callers find the run unseeded, both read the
+    same mark, and the later assignment used to overwrite a counter the
+    earlier one had already advanced - so six frames went out under three
+    numbers and three of them were never stored.
+    """
+    await backend.seed_thread()
+    aggregator = _numbered_aggregator(backend)
+    queue = _attach(aggregator)
+
+    async def touch_then_relay() -> None:
+        await aggregator.prepare_run(_RUN)
+        for index in range(3):
+            aggregator.relay_payload(_RUN, _worker_frame(index + 1))
+
+    await asyncio.gather(touch_then_relay(), touch_then_relay())
+
+    delivered = [
+        cast("dict[str, object]", queue.get_nowait())["sequence"] for _ in range(6)
+    ]
+    assert delivered == [1, 2, 3, 4, 5, 6], "a concurrent seed rewound the counter"
+
+
+@pytest.mark.asyncio
+async def test_a_frame_the_gateway_cannot_stamp_takes_no_number(
+    backend: _Backend,
+) -> None:
+    """A number nothing retains is a hole, and a hole costs the older window.
+
+    The replay reader serves the longest consecutive tail of what it finds,
+    so one missing position discards every retained frame before it. A frame
+    the chokepoint can neither stamp nor hand to the recorder therefore takes
+    no number at all; it still reaches every subscriber.
+    """
+    await backend.seed_thread()
+    aggregator, writer = _recording_aggregator(backend)
+    queue = _attach(aggregator)
+
+    await aggregator.prepare_run(_RUN)
+    # A relayed payload that is not a frame body at all. The projector returns
+    # it untouched, the chokepoint cannot stamp it, and the recorder declines
+    # it - so nothing about it can ever be replayed.
+    aggregator.relay_payload(_RUN, "not a frame body")
+    aggregator.relay_payload(_RUN, _worker_frame(1))
+
+    assert await writer.flush() == 1
+    await writer.aclose()
+
+    assert queue.get_nowait() == "not a frame body"
+    stamped = cast("dict[str, object]", queue.get_nowait())
+    assert stamped["sequence"] == 1, "a declined frame burned the run's first number"
+    assert await _retained(backend) == [(1, 1)]
 
 
 @pytest.mark.asyncio

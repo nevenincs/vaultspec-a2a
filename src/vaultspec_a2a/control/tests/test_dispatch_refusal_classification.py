@@ -212,7 +212,7 @@ async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
 
     assert outcome.failure_type == FailureType.INCOMPATIBLE_STATE.value
     assert breaker.state == "closed"
-    assert breaker.pre_dispatch() is True
+    assert breaker.pre_dispatch() is not None
 
 
 @pytest.mark.asyncio
@@ -289,7 +289,8 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
 
         # Take the single probe without settling it, exactly as an in-flight
         # dispatch holds it, and prove the next caller is refused.
-        assert breaker.pre_dispatch() is True
+        probe = breaker.pre_dispatch()
+        assert probe is not None
         blocked = await safe_dispatch(
             client,
             _ingest(tmp_path, "probe-thread", "probe-blocked", with_receipt=True),
@@ -298,7 +299,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
         )
         assert blocked.failure_type == FailureType.CIRCUIT_OPEN.value
 
-        breaker.release_probe()
+        breaker.release_probe(probe)
         admitted = await safe_dispatch(
             client,
             _ingest(tmp_path, "probe-thread", "probe-admitted", with_receipt=True),

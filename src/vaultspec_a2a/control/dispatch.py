@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.models import ThreadModel
-    from .circuit_breaker import WorkerCircuitBreaker
+    from .circuit_breaker import DispatchAdmission, WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
@@ -188,9 +188,11 @@ async def dispatch_to_worker(
     # Cancellation bypasses admission but not classification: it must reach a
     # worker the circuit has shut out, and it still reports honestly on whether
     # the transport worked when it got there.
-    admitted = dispatch.action != "cancel"
-    if admitted and not circuit_breaker.pre_dispatch():
-        raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)
+    admission: DispatchAdmission | None = None
+    if dispatch.action != "cancel":
+        admission = circuit_breaker.pre_dispatch()
+        if admission is None:
+            raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)
 
     headers = dict(trace_headers) if trace_headers else {}
 
@@ -221,9 +223,11 @@ async def dispatch_to_worker(
         # Every arm above settles the breaker, so this only matters for an
         # attempt abandoned without one - a cancellation, or a fault in this
         # function. An unreturned probe would leave the half-open circuit
-        # admitting nothing until the process restarted.
-        if admitted:
-            circuit_breaker.release_probe()
+        # admitting nothing until the process restarted. The breaker takes this
+        # dispatch's own admission, so an attempt that outlived a transition
+        # into half-open returns nothing rather than another request's probe.
+        if admission is not None:
+            circuit_breaker.release_probe(admission)
 
 
 def _retry_after_seconds(resp: httpx.Response) -> float | None:

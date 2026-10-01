@@ -85,7 +85,7 @@ jobs:
   gate:
     name: "Check: Merge gate (Linux)"
     needs: [basic]
-    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (always()) }}
+    if: always()
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 125
     permissions:

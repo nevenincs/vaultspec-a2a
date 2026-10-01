@@ -20,7 +20,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 RELEASE_PLEASE_ACTION = (
-    "googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071"
+    "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
 )
 
 

@@ -15,9 +15,10 @@ related:
   - '[[2026-08-02-control-action-leases-adr]]'
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
   - '[[2026-10-01-langgraph-conformance-core-reader-parity-adr]]'
+  - '[[2026-10-01-langgraph-conformance-core-runtime-dependency-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:7bfc5114b1aa1d0930c9f6581377869be2bd4328aecd0183af3a609f66b79d15'
+body_hash: 'sha256:1a5f8a59a1e92a9328604bb2780f89ddb542e215af94336adca39cebef270d87'
 ---
 
 # `langgraph-conformance` plan
@@ -121,6 +122,9 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S44` - Correct the compiler comment that says strict msgpack refuses an unknown type; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P07.S45` - Settle an answer a failed turn consumed without moving the finished run back to running; `src/vaultspec_a2a/control/_event_application.py`.
 - [x] `P07.S46` - Re-raise a non-Exception BaseException a node raises instead of reporting it as a provider failure; `src/vaultspec_a2a/streaming/ingest.py`.
+- [ ] `P07.S47` - Declare vaultspec-core a runtime project dependency; `pyproject.toml, uv.lock`.
+- [ ] `P07.S48` - Refuse body links with core's own check and split frontmatter with core's split, deleting the port; `src/vaultspec_a2a/authoring/submitter.py, src/vaultspec_a2a/authoring/_prose.py`.
+- [ ] `P07.S49` - Read rule frontmatter with core's parser; `src/vaultspec_a2a/context/rules.py`.
 
 ## Parallelization
 

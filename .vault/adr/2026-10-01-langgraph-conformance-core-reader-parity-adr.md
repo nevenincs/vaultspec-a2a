@@ -1,17 +1,17 @@
 ---
 tags:
-  - '#adr'
-  - '#langgraph-conformance'
+  - "#adr"
+  - "#langgraph-conformance"
 date: '2026-10-01'
-modified: '2026-10-01'
-body_schema: 'body-v2'
-body_hash: 'sha256:39593c07e57c0a7d12ad62dabbc9c9de172b199f53a6c9b291bdeaae7846d455'
 related:
   - "[[2026-09-30-langgraph-conformance-audit]]"
   - "[[2026-07-16-authoring-contract-adr]]"
+superseded_by: '2026-10-01-langgraph-conformance-core-runtime-dependency-adr'
+modified: '2026-10-01'
+body_schema: 'body-v2'
+body_hash: 'sha256:7fc69b116a959ce81e066ef901661da41c0d723685994b4d603480aa4504815e'
 ---
-
-# `langgraph-conformance` adr: `core reader parity` | (**status:** `accepted`)
+# `langgraph-conformance` adr: `core reader parity` | (**status:** `superseded`)
 
 ## Problem Statement
 

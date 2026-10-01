@@ -308,17 +308,18 @@ LINT = Verb(
     summary="Run gating static analysis; a finding fails the build.",
     note=(
         "'all' chains only the dimensions that hold the line today. complexity, "
-        "cyclomatic, shape, limits, nesting, size, and type-strict are REAL GATES at "
+        "cyclomatic, shape, limits, nesting, and size are REAL GATES at "
         "industry thresholds whose burndown is unfinished - run each by name, or "
         "'just health' for the ranked backlog. Chaining a permanently-red gate "
         "would hide every dimension behind it and teach people to ignore red. A "
         "dimension graduates into 'all' when it reaches zero and can hold it; "
-        "'imports' was the first, and 'type-platforms' has since followed. That "
-        "one earns its place: `ty` resolves `sys.platform` against the machine it "
-        "runs on, so a Windows-only call in unguarded code passes for everyone on "
-        "Windows and fails only on the Linux runner. Advisory, it reported a real "
-        "defect that shipped anyway; gating, the sweep answers the same on every "
-        "machine."
+        "'imports' was the first, 'type-platforms' followed, and 'type-strict' "
+        "graduated on 2026-10-01. 'type-platforms' earns its place for a reason "
+        "worth stating on its own: `ty` resolves `sys.platform` against the "
+        "machine it runs on, so a Windows-only call in unguarded code passes for "
+        "everyone on Windows and fails only on the Linux runner. Advisory, it "
+        "reported a real defect that shipped anyway; gating, the sweep answers "
+        "the same on every machine."
     ),
     targets=(
         Target(
@@ -481,12 +482,19 @@ LINT = Verb(
             # `exports`) is NOT chained: it opened at 8, 53 and 155 findings,
             # which is a burndown, and lives in `strict` and `audit` until it
             # reaches zero.
+            #
+            # `type-strict` GRADUATED on 2026-10-01: the basedpyright strict
+            # pass held zero across two clean locked runs at unchanged scope
+            # and threshold, with no new exclusion, suppression, baseline, or
+            # duplication behind the number, which is the same bar `imports`
+            # set.
             tuple(
                 Ref(name)
                 for name in (
                     "python",
                     "type",
                     "type-platforms",
+                    "type-strict",
                     "type-guards",
                     "imports",
                     "imports-load",

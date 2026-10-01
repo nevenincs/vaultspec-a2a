@@ -24,6 +24,7 @@ from ...control.cancel_service import (
     cancel_thread,
     raise_for_cancel_failure,
 )
+from ...control.config import settings
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
 from ...control.thread_listing import list_threads_service
@@ -44,6 +45,7 @@ from ...database import (
     resolve_session_factory,
 )
 from ...database.checkpoints import Checkpointer
+from ...database.run_event_repository import RunEventStore
 from ...domain_config import domain_config
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
@@ -286,9 +288,45 @@ def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
     return None
 
 
+async def _stream_is_resumable(app: Any, run_id: str) -> bool:
+    """Whether this run's stream can be resumed from the id its frames carry.
+
+    Both halves of the posture, because either alone misreports it. The
+    switch governs the whole mechanism; the retained rows say whether THIS
+    run has a window behind it, which a run that has produced nothing - or
+    one whose window has expired - does not. The writer's unflushed ring
+    counts as retained: a resume taken in that interval reads it, so
+    answering false there would understate a capability the stream has.
+
+    A store that cannot answer reports false, which is the safe direction:
+    a client told it cannot resume loses nothing but an optimisation, while
+    one told it can and then refused has already thrown away its position.
+    """
+    if not settings.stream_replay_enabled:
+        return False
+    writer = replay_writer_seat(app)
+    if writer is not None and writer.pending(run_id):
+        return True
+    try:
+        return (
+            await RunEventStore(resolve_session_factory(app.state)).high_water_mark(
+                run_id
+            )
+        ) is not None
+    except Exception:
+        logger.warning(
+            "Could not read the replay window of run %s for run-status",
+            run_id,
+            exc_info=True,
+            extra={"thread_id": run_id, "action": "run_event_replay_failed"},
+        )
+        return False
+
+
 @router.get("/runs/{run_id}", response_model=RunStatusResponse)
 async def run_status_endpoint(
     run_id: PathSafeRunId,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
@@ -336,6 +374,10 @@ async def run_status_endpoint(
         approval_request_id=snapshot.approval_request_id,
         checkpoint_id=snapshot.checkpoint_id,
         last_sequence=snapshot.last_sequence,
+        # Read beside the cursor it qualifies: last_sequence says where the
+        # run's numbering stood, and this says whether that number is one the
+        # stream will honour as a resumption point.
+        stream_resumable=await _stream_is_resumable(request.app, run_id),
         repair_status=_optional_enum(RepairStatus, snapshot.repair_status),
         execution_readiness=_optional_enum(RepairStatus, snapshot.execution_readiness),
         degraded_reasons=snapshot.degraded_reasons,

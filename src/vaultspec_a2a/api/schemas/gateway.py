@@ -501,6 +501,17 @@ class RunStatusResponse(BaseModel):
     approval_request_id: str | None = None
     checkpoint_id: str | None = None
     last_sequence: int = 0
+    # Whether this run's progress stream can be RESUMED from the id its frames
+    # carry, as opposed to merely re-attached. The two postures are otherwise
+    # indistinguishable without probing: a stream that serves no replay emits
+    # no id at all, so a client would have to attach, wait for a frame, and
+    # find no id on it to learn what this field says outright. False whenever
+    # retention is switched off for the service or nothing is retained for
+    # this run - a settled run whose window has expired, or one that has yet
+    # to emit a frame. Additive, and never a statement about run state: a
+    # resumable stream and an authoritative one are different things, and this
+    # response remains the authority either way.
+    stream_resumable: bool = False
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     # Left as bare strings pending the narrowing, NOT because this list lacks an

@@ -4220,6 +4220,11 @@
             "title": "Last Sequence",
             "default": 0
           },
+          "stream_resumable": {
+            "type": "boolean",
+            "title": "Stream Resumable",
+            "default": false
+          },
           "repair_status": {
             "anyOf": [
               {

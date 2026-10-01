@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:05c132cd2c12914e140356ee836e70f7c86213387a08eabd04160822292e3c4b'
+body_hash: 'sha256:cc38f47a8154a1a75803b52a3e12599d40351fdc749d4a9daf6dd5b169ec2777'
 ---
 
 # `architecture-review` plan
@@ -116,12 +116,13 @@ Close the decision-free findings the plan-close review and its re-review left op
 - [ ] `P06.S43` - Escape setext-style role headings in rendered message content; `src/vaultspec_a2a/providers/_prompt_render.py`.
 - [x] `P06.S44` - Probe the container's own hostname in the Compose healthchecks; `service/docker/`.
 - [ ] `P06.S45` - Reconcile finding statuses that later Steps closed; `.vault/audit/2026-09-24-architecture-review-audit.md, .vault/audit/2026-09-30-langgraph-conformance-audit.md`.
+- [ ] `P06.S46` - Write absolute Claude permission rule paths with the CLI's absolute anchor so deny and scope rules match the paths they name; `src/vaultspec_a2a/providers/_claude_tool_policy.py`.
 
 ## Parallelization
 
 `P01` runs first and alone, because P01.S01 changes the lock every other Step builds on and P01 reshapes the graph builder that P02 edits. After P01.S01 lands, `P03` and `P04` run in parallel with `P01`/`P02`, each in an isolated worktree owned by one executor: `P03` owns `src/vaultspec_a2a/api/`, `src/vaultspec_a2a/streaming/` (except `transformer.py`, which P01.S07 owns), `src/vaultspec_a2a/control/`, `src/vaultspec_a2a/thread/message_policy.py`, `src/vaultspec_a2a/worker/app.py`, `src/vaultspec_a2a/worker/ipc.py`, the Postgres saver in `src/vaultspec_a2a/database/checkpoints.py`, and `service/`; `P04` owns `src/vaultspec_a2a/providers/` and `src/vaultspec_a2a/workspace/environment.py`. The orchestrator owns `P01`, `P02`, and `P05`, every edit to `src/vaultspec_a2a/graph/nodes/worker.py` (P04.S22 and P04.S23 hand their worker-side wiring to the orchestrator), all `.vault/` records, ledger rows, Step closure, and integration merges. Executors commit code only on their worktree branches; the orchestrator merges each branch, reruns the gates on the merged tree, and closes the Steps.
 
-`P06` runs three executors in isolated worktrees on disjoint ownership. The control executor owns P06.S33, P06.S37 and P06.S38 (`src/vaultspec_a2a/thread/dispatch_policy.py`, `src/vaultspec_a2a/control/circuit_breaker.py`, `src/vaultspec_a2a/control/direct_control_recovery.py` and their tests). The worker executor owns P06.S34, P06.S39 and P06.S42 (`src/vaultspec_a2a/worker/ipc.py`, the checkpoint-evidence reader, `src/vaultspec_a2a/lifecycle/shutdown.py`, the prune scheduling in `src/vaultspec_a2a/control/event_handlers.py`, and `src/vaultspec_a2a/api/app.py`). The provider executor owns P06.S36, P06.S40, P06.S41 and P06.S43 (`src/vaultspec_a2a/providers/` and `src/vaultspec_a2a/graph/tests/acp_simulator.py`). The orchestrator owns P06.S35, P06.S44 and P06.S45, every `.vault/` record, and the integration merges.
+`P06` runs three executors in isolated worktrees on disjoint ownership. The control executor owns P06.S33, P06.S37 and P06.S38 (`src/vaultspec_a2a/thread/dispatch_policy.py`, `src/vaultspec_a2a/control/circuit_breaker.py`, `src/vaultspec_a2a/control/direct_control_recovery.py` and their tests). The worker executor owns P06.S34, P06.S39 and P06.S42 (`src/vaultspec_a2a/worker/ipc.py`, the checkpoint-evidence reader, `src/vaultspec_a2a/lifecycle/shutdown.py`, the prune scheduling in `src/vaultspec_a2a/control/event_handlers.py`, and `src/vaultspec_a2a/api/app.py`). The provider executor owns P06.S36, P06.S40, P06.S41 and P06.S43 (`src/vaultspec_a2a/providers/` and `src/vaultspec_a2a/graph/tests/acp_simulator.py`). The provider executor also takes P06.S46. The orchestrator owns P06.S35, P06.S44 and P06.S45, every `.vault/` record, and the integration merges.
 
 ## Verification
 

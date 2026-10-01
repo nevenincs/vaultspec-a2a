@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:f8033ea36a0004a399e0ef302682b0b0030ccdb6972c1ca404e5b1c9df0a3f60'
+body_hash: 'sha256:6113acf550b941c5601da624f8fe6d7e07c00c2973087ceddd10c7884dc33a5a'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -516,3 +516,7 @@ Status: fixed; the guard was removed (`src/vaultspec_a2a/api/schemas/gateway.py`
 ### prune-wait-has-two-uncovered-shutdown-edges | low | a spent shutdown budget or a cross-loop task can leave the prune wait ineffective
 
 Status: open. When the shared shutdown budget is spent, `finish_before` closes the prune wait without running it (`src/vaultspec_a2a/lifecycle/shutdown.py`), so an in-flight prune can outlive the checkpointer; and `_prune_tasks` is module state shared by every app instance in a process (`src/vaultspec_a2a/control/event_handlers.py`), as `_settlement_tasks` already is. Recommendation: give the prune phase a reserve and key the pending set to the app whose lifespan waits on it.
+
+### claude-rule-paths-anchor-at-the-working-directory | medium | absolute deny and scope rules are written in the CLI's working-directory-relative form
+
+Status: open, owned by P06.S46; raised by the tool-permission-model research and confirmed against the current Claude Code permissions reference, which states that a single leading slash anchors a session rule at the primary working directory and that `//path` is the absolute form. `CLAUDE_DENIED_READ_PATHS` (`src/vaultspec_a2a/providers/_claude_tool_policy.py`) writes `/proc/**`, so the deny covers `<workspace>/proc` rather than the process table, and `workspace_scoped_tool_rule` writes `Read(<absolute workspace>/**)`, which resolves under the working directory and matches nothing. The home-relative denies are unaffected. Exposure is bounded: an out-of-workspace read still reaches the permission rung, which an autonomous run refuses, so this is a lost defence layer rather than an open read. Whether the pinned CLI shares the documented grammar is to be proven at the fix.

@@ -54,9 +54,9 @@ __all__ = [
 class AuthoringBridgeSettings(ProjectSettings):
     """The bridge's configuration, handed to it by the provider-side builder.
 
-    Read from the process environment only, never from a dotenv: the bridge runs
-    in the agent's working directory, and a file there must not be able to point
-    the bridge at another engine or hand it another bearer.
+    Read from the process environment only, never a setting from a file: the
+    bridge runs in the agent's working directory, and a file there must not be
+    able to point the bridge at another engine or hand it another bearer.
     """
 
     model_config = SettingsConfigDict(

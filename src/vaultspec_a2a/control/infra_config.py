@@ -158,7 +158,7 @@ class InfraConfig(ProjectSettings):
     """Infrastructure fields — ports, hosts, URLs, keys, filesystem paths."""
 
     model_config = SettingsConfigDict(
-        env_file=ProjectSettings.project_dotenv(),
+        env_file=ProjectSettings.operator_env_file(),
         env_file_encoding="utf-8",
         env_prefix=ENV_PREFIX,
         extra="ignore",

@@ -34,11 +34,56 @@ spelling, with the ``VAULTSPEC_A2A_`` name winning when both are set. The
 repository's ``.env.example`` lists every setting, and a test holds the example
 and the settings to each other in both directions.
 
+**Where a value comes from.** In one order, highest first: the construction
+call, the process environment, the operator's settings file when this process
+names one, a credential the project's ``.env`` supplies under the gate below,
+then a file secret, then the field's default.
+
+**The operator's settings file.** ``VAULTSPEC_A2A_ENV_FILE`` names it, resolved
+against the project root. It is never discovered: a file nobody named is never
+read, and a named file that does not exist is refused by name rather than
+ignored. Because the operator named it, it ranks with the session environment.
+Starting the service directly, name it on the process::
+
+   VAULTSPEC_A2A_ENV_FILE=.env vaultspec-a2a serve
+
+An absolute path works the same way. Under ``just``, the recipes that run the
+service name this checkout's ``.env`` for you, so nothing extra is needed
+there.
+
+.. rubric:: Moving a checkout to the settings file
+
+*What changed.* A workspace ``.env`` used to supply every setting, to any
+process started anywhere inside the project. It no longer supplies any: it is
+content that arrives with a clone, and reading settings from it let the
+repository decide which ports the service binds, which database it opens and
+which endpoint it talks to. Only the credentials listed at the head of
+``.env.example`` are still read from it, under the gate above.
+
+*Why.* A setting now comes from somewhere a person chose on this machine - the
+process environment, or a file named outright - so trusting a file is a
+decision rather than a side effect of the working directory.
+
+*What to do.* Keep the settings where they are and name the file:
+``VAULTSPEC_A2A_ENV_FILE=.env``, exported in your shell or given per command,
+or point it at a settings file outside the checkout. Export the settings in
+the process environment instead if you prefer. Either way, a value in neither
+place falls back to its documented default, and a named file that is missing
+stops the service by name rather than starting it on defaults.
+
+**The project's ``.env``.** It is content of the project a2a serves, so it
+configures nothing. Only the credentials listed at the head of
+``.env.example`` are read from it, one name at a time, and only when the
+running interpreter belongs to that project and the project runs vaultspec-a2a
+as a dependency or dev dependency - vaultspec-core's gate, shared by every
+vaultspec package. Anywhere else, a credential comes from the process
+environment or the operator's file.
+
 **Project root.** ``VAULTSPEC_A2A_PROJECT_ROOT`` names the project a2a serves;
 unset, it is the nearest ancestor of the working directory holding
 ``.vaultspec/`` or ``.vault/``, then one holding ``.git``, else the working
-directory. The project's ``.env`` is read from that root, so a process started
-anywhere inside the project reads the same file. The root itself is read from
+directory. Both files above are resolved from that root, so a process started
+anywhere inside the project reads the same ones. The root itself is read from
 the process environment only.
 
 **State home.** ``VAULTSPEC_A2A_HOME`` defaults to ``.vault/data/agents`` in the

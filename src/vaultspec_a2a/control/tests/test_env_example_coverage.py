@@ -171,8 +171,10 @@ def test_the_integration_example_names_only_settings_the_service_reads() -> None
     """The integration profile's example is held to the same reverse check."""
     named = set(_NAME.findall(documented(INTEGRATION_EXAMPLE)))
 
+    admitted = _all_declared_env_names() | set(DOCUMENTED_BUT_NOT_READ)
+
     assert named, "the integration example names no settings at all"
-    assert named <= _all_declared_env_names(), sorted(named - _all_declared_env_names())
+    assert named <= admitted, sorted(named - admitted)
 
 
 def test_compose_provider_identity_defaults_aredocumented() -> None:

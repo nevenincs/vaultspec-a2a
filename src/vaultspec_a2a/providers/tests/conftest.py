@@ -11,17 +11,15 @@ import pytest_asyncio
 
 from ...testing import forfeits_purity
 from .._acp_types import AcpSessionContext
-from .._factory_commands import _CLAUDE_ACP_JS
+from .._factory_commands import claude_acp_entry
 
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
-# ``_CLAUDE_ACP_JS`` is install_root/node_modules/@agentclientprotocol/
+# ``claude_acp_entry()`` is install_root/node_modules/@agentclientprotocol/
 # claude-agent-acp/dist/index.js; the package root one level above ``dist`` is
 # what ``npm install`` places, and everything the Node ACP lane reads - the
 # entry point itself, the adapter's own bundled source, its SDK dependency's
 # type declarations - lives under it or beside it in the same install.
-_ACP_ADAPTER_PACKAGE_ROOT = _CLAUDE_ACP_JS.parents[1]
-_ACP_ADAPTER_INSTALL_ROOT = _CLAUDE_ACP_JS.parents[4]
 
 # Echoes each stdin line straight back on stdout, so a frame written to the
 # child's stdin is readable from the same context's stdout.
@@ -118,13 +116,16 @@ def installed_acp_adapter() -> Path:
     bare worktree's result reads as a missing prerequisite rather than a
     regression.
     """
-    if not _ACP_ADAPTER_PACKAGE_ROOT.is_dir():
+    entry = claude_acp_entry()
+    package_root = entry.parents[1]
+    install_root = entry.parents[4]
+    if not package_root.is_dir():
         pytest.fail(
             "missing prerequisite: @agentclientprotocol/claude-agent-acp is not "
-            f"installed at {_ACP_ADAPTER_PACKAGE_ROOT}; run 'npm install' in "
-            f"{_ACP_ADAPTER_INSTALL_ROOT} to install it"
+            f"installed at {package_root}; run 'npm install' in "
+            f"{install_root} to install it"
         )
-    return _ACP_ADAPTER_PACKAGE_ROOT
+    return package_root
 
 
 @dataclass(frozen=True, slots=True)

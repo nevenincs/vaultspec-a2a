@@ -47,7 +47,7 @@ from ...workspace.environment import resolve_env_vars
 from .._acp_session import claude_session_options
 from .._acp_types import AcpModelConfig
 from .._claude_tool_policy import AUTONOMOUS_PERMISSION_MODE, MODE_CONFIG_OPTION_ID
-from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
+from .._factory_commands import _classify_acp_command, claude_acp_entry
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
@@ -201,7 +201,7 @@ async def _start_acp_session(proc: Process, workspace: str) -> tuple[str, str, s
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_migrated_adapter_preserves_handshake_surface() -> None:
-    if settings.acp_backend != "binary" and not _CLAUDE_ACP_JS.exists():
+    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
         pytest.fail(
             "migrated ACP node entry not installed; run 'npm install' "
             "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"

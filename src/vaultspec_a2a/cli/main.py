@@ -19,10 +19,11 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast, override
 
 import click
 import httpx
+from vaultspec_core.config import ConfigurationError
 
 from ..control.config import setting_env, settings
 from ..gateway_auth import gateway_auth_headers
@@ -80,7 +81,25 @@ def _request(method: str, url: str, **kwargs: Any) -> httpx.Response:
         ) from exc
 
 
-@click.group()
+class _ConfigurationAwareGroup(click.Group):
+    """Render a refused configuration as one CLI error, not as a traceback.
+
+    The settings are read the first time a command touches them, which is
+    inside this group's invocation. A value of the wrong shape or a named
+    settings file that is not there is a mistake the operator makes on the
+    command line's own terms, so it is reported the way every other operator
+    mistake here is - a named message and a non-zero status.
+    """
+
+    @override
+    def invoke(self, ctx: click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        except ConfigurationError as refused:
+            raise click.ClickException(str(refused)) from refused
+
+
+@click.group(cls=_ConfigurationAwareGroup)
 @click.version_option(package_version(), "--version", "-V", prog_name="vaultspec-a2a")
 def main() -> None:
     """Operator CLI for the vaultspec-a2a orchestration gateway."""

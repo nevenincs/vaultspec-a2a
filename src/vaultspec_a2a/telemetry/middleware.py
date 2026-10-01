@@ -30,7 +30,7 @@ from opentelemetry import propagate, trace
 from opentelemetry.trace import SpanKind, StatusCode
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .instrumentation import SDK_DISABLED, get_tracer
+from .instrumentation import get_tracer, telemetry_settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -188,7 +188,7 @@ async def ws_span(
     """
     # when the OTel SDK is explicitly disabled, skip real span creation
     # and yield a no-op span to avoid unnecessary overhead.
-    if SDK_DISABLED:
+    if telemetry_settings().sdk_disabled:
         yield trace.NonRecordingSpan(trace.INVALID_SPAN_CONTEXT)
         return
 

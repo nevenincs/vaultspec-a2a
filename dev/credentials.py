@@ -28,6 +28,15 @@ fails as a missing key rather than surfacing eight layers down as an opaque
 established keeps the wider scope rather than a guessed narrow one. Losing a
 credential a recipe needed is a worse failure than carrying one it did not.
 
+SETTINGS are a separate question from credentials, and this module answers it
+once rather than per name. A scope that RUNS the service names this checkout's
+`.env` as the operator's settings file, through `VAULTSPEC_A2A_ENV_FILE`; the
+service reads it whole from there, so a setting added to `.env.example` reaches
+a developer's run without being copied into a list here that would drift out of
+date the day it was written. A scope that runs the TEST SUITE names no such
+file: the suite declares the environment it runs in, and a developer's `.env`
+has no say in it.
+
 Stdlib-only: this runs under the same `--no-default-groups` profiles the
 recipes do, and must not add a dependency to any of them.
 """
@@ -52,6 +61,12 @@ REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 #: declares, and never echoed.
 ENV_FILE: Final = REPO_ROOT / ".env"
 
+#: The variable the service reads its operator settings file from. Spelled out
+#: rather than imported: this module is stdlib-only, and the name is held to
+#: the settings schema by a test rather than by an import the recipes' profiles
+#: could not satisfy.
+ENV_FILE_VARIABLE: Final = "VAULTSPEC_A2A_ENV_FILE"
+
 #: Exit status for a scope whose required variables are not all present. It is
 #: `FAILED` rather than a new number on purpose: a missing credential is a
 #: gating result the command reported, not a class of failure the fleet's
@@ -71,11 +86,16 @@ class Scope:
             without when they are not. A provider lane whose credential is
             absent skips its live tests; that is a designed outcome, not a
             failure, so those names live here.
+        settings_file: Whether the command RUNS the service and should
+            therefore be pointed at this checkout's `.env` as the operator's
+            settings file. A scope that runs the test suite leaves this off:
+            the suite's environment is declared by the suite.
     """
 
     summary: str
     required: tuple[str, ...] = ()
     optional: tuple[str, ...] = field(default_factory=tuple)
+    settings_file: bool = False
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -116,30 +136,6 @@ _TELEMETRY: Final[tuple[str, ...]] = (
     "OTEL_EXPORTER_OTLP_INSECURE",
 )
 
-#: Runtime configuration the gateway and worker read. Not credentials, but they
-#: belong to the same file and the same commands, and a service started without
-#: them silently runs on defaults that disagree with the operator's `.env`.
-_SERVICE_RUNTIME: Final[tuple[str, ...]] = (
-    "VAULTSPEC_A2A_ACCESS_LOG",
-    "VAULTSPEC_A2A_ACP_BACKEND",
-    "VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED",
-    "VAULTSPEC_A2A_AUTO_SPAWN_WORKER",
-    "VAULTSPEC_A2A_CHECKPOINT_BACKEND",
-    "VAULTSPEC_A2A_DATABASE_BACKEND",
-    "VAULTSPEC_A2A_DB_POOL_MAX_OVERFLOW",
-    "VAULTSPEC_A2A_DB_POOL_SIZE",
-    "VAULTSPEC_A2A_ENVIRONMENT",
-    "VAULTSPEC_A2A_HOST",
-    "VAULTSPEC_A2A_LOG_LEVEL",
-    "VAULTSPEC_A2A_MAX_CONCURRENT_THREADS",
-    "VAULTSPEC_A2A_PORT",
-    "VAULTSPEC_A2A_POSTGRES_REQUIRED",
-    "VAULTSPEC_A2A_PROVIDER_TIMEOUT_SECONDS",
-    "VAULTSPEC_A2A_SQLITE_BUSY_TIMEOUT_MS",
-    "VAULTSPEC_A2A_WORKER_HOST",
-    "VAULTSPEC_A2A_WORKER_PORT",
-)
-
 #: The scopes, keyed by the name a recipe passes.
 SCOPES: Final[dict[str, Scope]] = {
     "service": Scope(
@@ -149,7 +145,12 @@ SCOPES: Final[dict[str, Scope]] = {
         # calls at all - so this is the one place a missing name is worth
         # stopping for.
         required=("VAULTSPEC_A2A_INTERNAL_TOKEN",),
-        optional=(*_PROVIDER_CREDENTIALS, *_TELEMETRY, *_SERVICE_RUNTIME),
+        optional=(*_PROVIDER_CREDENTIALS, *_TELEMETRY),
+        # The service reads every other setting out of the same file itself,
+        # named below. Listing those names here instead would be a second copy
+        # of the settings schema, kept by hand, in a module that cannot import
+        # it to check itself.
+        settings_file=True,
     ),
     "compose": Scope(
         summary="Renders or runs a Docker Compose project.",
@@ -159,12 +160,14 @@ SCOPES: Final[dict[str, Scope]] = {
         # connection or accepts anonymous ones. Neither is a state to discover
         # later.
         required=("POSTGRES_PASSWORD", "VAULTSPEC_A2A_INTERNAL_TOKEN"),
+        # Exactly what the Compose files interpolate. A container's own
+        # settings are declared in the Compose file's `environment:` block, so
+        # nothing else here reaches one.
         optional=(
             "JAEGER_OTLP_PORT",
             "JAEGER_UI_PORT",
             "VAULTSPEC_A2A_PORT",
             "VIDAIMOCK_PORT",
-            *_SERVICE_RUNTIME,
         ),
     ),
     "live-tests": Scope(
@@ -174,7 +177,11 @@ SCOPES: Final[dict[str, Scope]] = {
         # it, and into a failure only when the caller declared it present with
         # `--require-prerequisite`. That is a better contract than this module
         # could impose, so it is left to do its job.
-        optional=(*_PROVIDER_CREDENTIALS, *_TELEMETRY, *_SERVICE_RUNTIME),
+        #
+        # No settings file: a suite that read a developer's `.env` as settings
+        # would pass or fail differently on every machine, and the session's
+        # own conftest is what declares the environment these tests run in.
+        optional=(*_PROVIDER_CREDENTIALS, *_TELEMETRY),
     ),
 }
 
@@ -219,7 +226,10 @@ def read_env_file(path: Path = ENV_FILE) -> dict[str, str]:
 
 
 def resolve(
-    scope: Scope, base: dict[str, str], declared: dict[str, str]
+    scope: Scope,
+    base: dict[str, str],
+    declared: dict[str, str],
+    env_file: Path = ENV_FILE,
 ) -> dict[str, str]:
     """Build the child environment for one scope.
 
@@ -227,13 +237,19 @@ def resolve(
         scope: The scope being granted.
         base: The environment this process inherited.
         declared: The parsed `.env` mapping.
+        env_file: The file ``declared`` was parsed from, and the one a
+            service-running scope names as the operator's settings file.
 
     Returns:
         A copy of ``base`` with the scope's names filled in from ``declared``
-        where they are not already set. An inherited value always wins: a
-        caller who exported a key for this one command meant that key, and
-        `.env` silently overriding it would be the same class of surprise this
-        whole change exists to remove.
+        where they are not already set, and - for a scope that runs the
+        service - `VAULTSPEC_A2A_ENV_FILE` naming ``env_file``. An inherited
+        value always wins, for the credential names and for the settings file
+        alike: a caller who exported one for this command meant it, and `.env`
+        silently overriding it would be the same class of surprise this whole
+        change exists to remove. The file is named only when it exists, since
+        the service refuses a named file that is not there rather than falling
+        back to defaults.
     """
     child = dict(base)
     for name in scope.names:
@@ -242,6 +258,12 @@ def resolve(
         value = declared.get(name)
         if value:
             child[name] = value
+    if (
+        scope.settings_file
+        and not (base.get(ENV_FILE_VARIABLE) or "").strip()
+        and env_file.is_file()
+    ):
+        child[ENV_FILE_VARIABLE] = str(env_file)
     return child
 
 
@@ -293,6 +315,12 @@ def describe(scope_name: str) -> int:
     scope = SCOPES[scope_name]
     child = resolve(scope, dict(os.environ), read_env_file())
     print(f"scope '{scope_name}': {scope.summary}", flush=True)
+    if scope.settings_file:
+        named = child.get(ENV_FILE_VARIABLE)
+        print(
+            f"  {ENV_FILE_VARIABLE}: {named or 'unset'} (settings file)",
+            flush=True,
+        )
     for name in scope.names:
         present = bool((child.get(name) or "").strip())
         tier = "required" if name in scope.required else "optional"

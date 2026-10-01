@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:e540bc8c20f84d5e14a8cc0c72c67bd3b53e461bbcf95e753e3fa6b354c169b1'
+body_hash: 'sha256:fb8f83248a979c1a52ac70f195c2f73d0dd554ba396a8494f4166b0c92facef3'
 related:
   - "[[2026-09-21-ci-merge-gate-plan]]"
 ---
@@ -129,3 +129,15 @@ Type: merge integration. Status: fixed and verified. The stale admission-timeout
 
 Type: merge integration and authorization. Status: fixed and verified. Automatic merging retained the stale fork condition on the required verdict, which could make a skipped required check count as passed. The resolution restores main's always-running verdict and current timeout, permissions, release cut, runner policy and release tests while retaining admission budgets and the verdict resource class. Twelve focused CI, release and trust tests and actionlint pass. No unresolved merge-specific finding remains.
 
+
+### main-consolidation-settings | high | configuration and provider contracts reconciled
+
+Type: merge integration. Status: fixed and verified. Consolidating env-parity with the stream branch exposed stale eager ACP entry references and a registry entry for the removed service-owned Claude OAuth field. Kept the lazy entry lookup, absolute service executable resolution, current read-only MCP surface and operator-selected settings file. Removed the obsolete credential registry entry and example name. Updated the shared environment declaration reader to include the registered loader variable. All 120 focused settings, startup, redaction, provider resolution, confinement and session-root tests pass; repository Ruff and Ty checks pass.
+
+### main-consolidation-windows-path | medium | confinement test uses a real absolute path
+
+Type: test portability. Status: fixed and verified. The trusted-search test assumed a drive-less Windows rooted path was absolute. It now supplies the real temporary directory and continues asserting exclusion of empty and relative entries. The actual adapter confinement handshake also passes.
+
+### main-consolidation-history | low | duplicate merge metadata avoided
+
+Type: history and record integrity. Status: fixed. The release branch had already been ported into main; merging its history attempted to duplicate ledger frontmatter and regress the required verdict timeout. Retained current metadata and controls, preserving the release branch as an ancestor. The admission audit entries from both branches are retained. Local framework edits were compared with main; 91 files match and the remaining dependency and hook changes are superseded by main's current configuration. The disabled untracked example trigger is preserved on main.

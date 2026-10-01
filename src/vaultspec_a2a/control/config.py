@@ -25,7 +25,13 @@ from .infra_config import (
     _synchronous_url,
     _warn_seating_discard,
 )
-from .settings_base import env_name, is_absolute_path, resolve_against
+from .settings_base import (
+    built_at_first_use,
+    env_name,
+    is_absolute_path,
+    read_configuration,
+    resolve_against,
+)
 from .state_layout import (
     ENGINE_DISCOVERY_RECORD,
     StateLayout,
@@ -53,7 +59,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
     """
 
     model_config = SettingsConfigDict(
-        env_file=InfraConfig.project_dotenv(),
+        env_file=InfraConfig.operator_env_file(),
         env_file_encoding="utf-8",
         env_prefix=ENV_PREFIX,
         extra="ignore",
@@ -570,5 +576,9 @@ def setting_env(field: str) -> str:
     return env_name(Settings, field)
 
 
-# Global settings instance
-settings = Settings()
+#: The process-wide settings, built the first time one is read rather than
+#: when this module is imported. A configuration the settings refuse - a
+#: named file that is not there, a value of the wrong shape - is then a
+#: named error at the site that started the process, not a pydantic
+#: traceback handed to whichever module imported this one first.
+settings = built_at_first_use(lambda: read_configuration(Settings))

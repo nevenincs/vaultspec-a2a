@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from pathlib import Path
 
@@ -12,7 +13,6 @@ from .cli_resolution import resolve_provider_cli_executable, resolve_service_exe
 
 __all__ = [
     "_BIN_PATH",
-    "_CLAUDE_ACP_JS",
     "_build_kimi_env",
     "_build_zai_env",
     "_classify_acp_command",
@@ -22,20 +22,31 @@ __all__ = [
     "capsule_acp_entry",
     "capsule_node_executable",
     "classify_provider_command",
+    "claude_acp_entry",
     "kimi_temporary_model_configuration_reason",
 ]
+
 
 # Resolve the claude-agent-acp entry point from the checkout's node_modules.
 # install_root names THIS SERVICE's own shipped assets, never a place to put
 # data and never a directory an agent runs in; see Settings.install_root.
-_CLAUDE_ACP_JS = (
-    settings.install_root
-    / "node_modules"
-    / "@agentclientprotocol"
-    / "claude-agent-acp"
-    / "dist"
-    / "index.js"
-)
+#
+# Resolved at the first call rather than at import: this module is reached by
+# importing the provider factory, and reading a setting there would hand a
+# refused configuration to the import machinery instead of to the entry point
+# that can name it. Cached, so the answer is still one per process.
+@functools.cache
+def claude_acp_entry() -> Path:
+    """Return the project-local claude-agent-acp entry point."""
+    return (
+        settings.install_root
+        / "node_modules"
+        / "@agentclientprotocol"
+        / "claude-agent-acp"
+        / "dist"
+        / "index.js"
+    )
+
 
 # Resolve the precompiled Bun binary from the package-local bin/ directory.
 # Node backend is the default; binary mode is experimental and requires a
@@ -309,9 +320,10 @@ def _classify_acp_command(
     )
     if root is not None:
         return _classify_capsule_acp_command(root)
-    if not _CLAUDE_ACP_JS.exists():
+    entry = claude_acp_entry()
+    if not entry.exists():
         raise ConfigError(
-            f"Claude ACP entry point not found: {_CLAUDE_ACP_JS}. "
+            f"Claude ACP entry point not found: {entry}. "
             "Run 'npm install' to install @agentclientprotocol/claude-agent-acp."
         )
     # The adapter is a Node entry point, so the Node runtime is part of the
@@ -322,16 +334,16 @@ def _classify_acp_command(
     if node_executable is None:
         raise ConfigError(
             "Node.js runtime not found on this service's PATH, so the Claude ACP "
-            f"entry point {_CLAUDE_ACP_JS} cannot be launched. Install the Node "
+            f"entry point {claude_acp_entry()} cannot be launched. Install the Node "
             "version named by .node-version and make it reachable from the "
             "service environment."
         )
-    return [node_executable, str(_CLAUDE_ACP_JS)], {
+    return [node_executable, str(claude_acp_entry())], {
         "runtime_authority": "project_local",
         "command_origin": "project_node_modules_entry",
         "command_kind": "node_entry",
         "command_executable": Path(node_executable).name,
-        "command_target": str(_CLAUDE_ACP_JS),
+        "command_target": str(claude_acp_entry()),
         "acp_backend": "node",
     }
 

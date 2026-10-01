@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ...control.config import Settings
+from ...control.env_registry import ENV_FILE_VARIABLE
 from ...control.settings_base import field_env_names
 from ...protocols.mcp.authoring_stdio import AuthoringBridgeSettings
 from ...testing.session_root import TestSessionSettings
@@ -41,6 +42,7 @@ _HARNESS_HEADING = "# Development harness\n"
 #: Names the example documents that the service does not read, each with the
 #: owner that does. Anything else in the file is a dead or misspelled setting.
 DOCUMENTED_BUT_NOT_READ = {
+    "VAULTSPEC_A2A_ENV_FILE": "the settings loader",
     # Read by the langsmith SDK straight from the process environment.
     "LANGSMITH_API_KEY": "langsmith SDK",
     "LANGSMITH_ENDPOINT": "langsmith SDK",
@@ -123,7 +125,7 @@ def declared_names() -> set[str]:
     the test harness's own session settings: the three places a name can be
     declared, so the three a name spelled in the code can legitimately mean.
     """
-    return {
+    return {ENV_FILE_VARIABLE.env_name} | {
         name
         for settings_cls in (Settings, AuthoringBridgeSettings, TestSessionSettings)
         for field in settings_cls.model_fields

@@ -15,12 +15,12 @@ from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import ConfigError
 from .._factory_commands import (
     _BIN_PATH,
-    _CLAUDE_ACP_JS,
     _build_kimi_env,
     _build_zai_env,
     _classify_acp_command,
     _kimi_home_env,
     classify_provider_command,
+    claude_acp_entry,
     kimi_temporary_model_configuration_reason,
 )
 from ..acp_chat_model import AcpChatModel
@@ -234,13 +234,16 @@ def test_build_zai_env_omits_blank_base_url() -> None:
 
 def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
     """Z.ai rides the claude-agent-acp wrapper: same command as the Claude path."""
-    if not _CLAUDE_ACP_JS.exists():
+    if not claude_acp_entry().exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
         return
     model = ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
     assert isinstance(model, AcpChatModel)
-    assert model.command == [resolve_service_executable("node"), str(_CLAUDE_ACP_JS)]
+    assert model.command == [
+        resolve_service_executable("node"),
+        str(claude_acp_entry()),
+    ]
     assert model.provider == Provider.ZAI.value
     assert model.acp_backend == "node"
     assert model.use_exec is False
@@ -249,7 +252,7 @@ def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
 
 def test_provider_factory_zai_retains_requested_model_for_acp_selection() -> None:
     """A frozen Z.ai catalog value must reach the shared Claude ACP model."""
-    if not _CLAUDE_ACP_JS.exists():
+    if not claude_acp_entry().exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
         return
@@ -261,7 +264,7 @@ def test_provider_factory_zai_retains_requested_model_for_acp_selection() -> Non
 
 def test_provider_factory_zai_injects_configured_token() -> None:
     """When a Z.ai token is configured, both Anthropic gateway vars are injected."""
-    if not _CLAUDE_ACP_JS.exists():
+    if not claude_acp_entry().exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
         return
@@ -384,7 +387,7 @@ def test_classify_provider_command_kimi_resolves_or_hints_install() -> None:
 
 def test_classify_provider_command_zai_returns_acp_meta() -> None:
     """Z.ai classifies to the same ACP wrapper command metadata as Claude."""
-    if not _CLAUDE_ACP_JS.exists():
+    if not claude_acp_entry().exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             classify_provider_command(Provider.ZAI)
         return
@@ -471,7 +474,7 @@ def test_factory_applies_exact_acp_session_controls(
 
 
 def test_factory_restarts_the_frozen_acp_backend_not_the_current_default() -> None:
-    if not _CLAUDE_ACP_JS.exists():
+    if not claude_acp_entry().exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             ProviderFactory().create(
                 Provider.CLAUDE,
@@ -486,7 +489,10 @@ def test_factory_restarts_the_frozen_acp_backend_not_the_current_default() -> No
     )
     assert isinstance(model, AcpChatModel)
     assert model.acp_backend == "node"
-    assert model.command == [resolve_service_executable("node"), str(_CLAUDE_ACP_JS)]
+    assert model.command == [
+        resolve_service_executable("node"),
+        str(claude_acp_entry()),
+    ]
 
 
 def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable() -> (

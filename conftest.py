@@ -67,9 +67,24 @@ os.environ.setdefault("OTEL_METRICS_EXPORTER", "none")
 # settings singleton: the state home, the process registry and pytest's own
 # basetemp all land under the ignored `.pytest-tmp/`, never in the user profile
 # or the system temporary directory. See vaultspec_a2a.testing.session_root.
+#
+# Importing the two settings modules here reads nothing: each builds its
+# singleton at the first read of a value, not at import. The build is asked
+# for below, once the seating above is in place.
+from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.control.settings_base import build_now
+from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.testing.session_root import seat_test_session
 
 seat_test_session(Path(__file__).resolve().parent)
+
+# BUILD both settings singletons now, against the session declared above. A
+# service wants the deferral - it keeps a refused configuration out of an
+# importer's traceback - but in a session it would hand the first build to
+# whichever test happened to touch one first, inside that test's own temporary
+# environment, and every later test would then read that test's configuration.
+build_now(settings)
+build_now(domain_config)
 
 pytest_plugins = ("vaultspec_a2a.testing.plugin",)
 

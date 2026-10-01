@@ -20,10 +20,10 @@ import pytest
 from ...testing import session_scratch_dir
 from ...thread.errors import ConfigError
 from .._factory_commands import (
-    _CLAUDE_ACP_JS,
     _classify_acp_command,
     capsule_acp_entry,
     capsule_node_executable,
+    claude_acp_entry,
 )
 from ..cli_resolution import resolve_service_executable
 
@@ -204,7 +204,7 @@ print(json.dumps({{
     assert str(configured_root) in report["omitted"]["message"]
     assert report["explicit_none"]["command"] == [
         resolve_service_executable("node"),
-        str(_CLAUDE_ACP_JS),
+        str(claude_acp_entry()),
     ]
     assert report["explicit_none"]["metadata"]["runtime_authority"] == "project_local"
     assert report["explicit_none"]["metadata"]["command_origin"] == (
@@ -218,6 +218,6 @@ def test_explicit_none_keeps_project_backend_behavior(
     """Explicit None selects the existing Compose/project-local classifier."""
     del installed_acp_adapter
     command, meta = _classify_acp_command("node", capsule_assets_root=None)
-    assert command == [resolve_service_executable("node"), str(_CLAUDE_ACP_JS)]
+    assert command == [resolve_service_executable("node"), str(claude_acp_entry())]
     assert meta["runtime_authority"] == "project_local"
     assert meta["command_origin"] == "project_node_modules_entry"

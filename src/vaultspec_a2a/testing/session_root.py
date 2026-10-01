@@ -20,7 +20,9 @@ pytest run started by a test is its own controller and takes its own seat, so it
 can never clear the basetemp its parent is still using.
 
 A value the caller set explicitly is respected; a value inherited from a parent
-session's seat is replaced, since it names the parent's private directories.
+session's seat is replaced, since it names the parent's private directories. The
+one class of value the seat always takes away is a variable naming a settings
+FILE, which would hand the session a bundle of settings it never declared.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from ..control.settings_base import ProjectSettings, env_name
+from ..control.settings_base import ENV_FILE_ENV, ProjectSettings, env_name
 from .harness_names import TEST_ENV_PREFIX
 
 __all__ = [
@@ -48,6 +50,11 @@ __all__ = [
 #: The ignored worktree directory every test artifact lives under.
 TEST_ROOT_NAME = ".pytest-tmp"
 
+#: Every variable that names a SOURCE of settings rather than one setting.
+#: None of them survives into a test session; see
+#: :func:`_drop_undeclared_settings_sources`.
+_UNDECLARED_SETTINGS_SOURCES: tuple[str, ...] = (ENV_FILE_ENV,)
+
 #: Sessions older than this are pruned when a new session is seated.
 _SESSION_RETENTION_SECONDS = 24 * 60 * 60
 #: The newest sessions kept regardless of age, for triage of recent failures.
@@ -57,8 +64,9 @@ _SESSIONS_KEPT = 5
 class TestSessionSettings(ProjectSettings):
     """The harness's own configuration, read from the process environment only.
 
-    Never from a dotenv: these values describe one pytest process tree and are
-    handed from a controller to its children, so a file on disk has no say.
+    Never a setting from a file: these values describe one pytest process tree
+    and are handed from a controller to its children, so a file on disk has no
+    say.
     """
 
     __test__ = False
@@ -134,8 +142,29 @@ def _is_xdist_worker() -> bool:
     return "PYTEST_XDIST_WORKER" in os.environ and sys.argv[:1] == ["-c"]
 
 
+def _drop_undeclared_settings_sources() -> None:
+    """Remove the names that hand this session settings it never declared.
+
+    A single exported variable is a visible choice: whoever set
+    ``VAULTSPEC_A2A_PORT`` before running the suite meant that port. A
+    variable naming a settings FILE is not - it is a bundle of values nobody
+    listed, and the documentation now tells developers to export it, so the
+    ordinary case is a developer whose checkout ``.env`` would quietly decide
+    this session's ports, database and timeouts. A file named but absent is
+    worse still: the settings refuse it, and the refusal lands in collection.
+
+    So the seat takes the file away. What the session does declare - the
+    environment, the exporters, its own seat - it declares by name, and the
+    per-test cases that exercise an operator file set the variable themselves,
+    inside the block that restores it.
+    """
+    for name in _UNDECLARED_SETTINGS_SOURCES:
+        os.environ.pop(name, None)
+
+
 def seat_test_session(rootdir: Path) -> SessionSeat:
     """Seat this controller's session under ``rootdir``; idempotent per process."""
+    _drop_undeclared_settings_sources()
     harness = TestSessionSettings()
     procs_home = rootdir / TEST_ROOT_NAME / "procs"
     inherited = harness.session_root is not None and (

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...workspace.environment import resolve_env_vars
-from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
+from .._factory_commands import _classify_acp_command, claude_acp_entry
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import _absolute_search_directories, resolve_service_executable
 
@@ -119,18 +119,18 @@ def test_classified_acp_command_names_an_absolute_service_runtime(
     del installed_acp_adapter
     command, metadata = _classify_acp_command("node")
 
-    assert command == [resolve_service_executable("node"), str(_CLAUDE_ACP_JS)]
+    assert command == [resolve_service_executable("node"), str(claude_acp_entry())]
     assert Path(command[0]).is_absolute()
     assert Path(command[0]).is_file()
     assert metadata["command_executable"] == Path(command[0]).name
-    assert metadata["command_target"] == str(_CLAUDE_ACP_JS)
+    assert metadata["command_target"] == str(claude_acp_entry())
 
 
-def test_trusted_search_drops_working_directory_entries() -> None:
+def test_trusted_search_drops_working_directory_entries(tmp_path: Path) -> None:
     """Relative and empty search entries never take part in resolution."""
-    search_path = os.pathsep.join(["", ".", "relative/bin", os.sep + "usr/bin"])
+    search_path = os.pathsep.join(["", ".", "relative/bin", str(tmp_path)])
 
-    assert _absolute_search_directories(search_path) == (os.sep + "usr/bin",)
+    assert _absolute_search_directories(search_path) == (str(tmp_path),)
 
 
 def test_trusted_resolution_refuses_a_name_carrying_a_directory() -> None:

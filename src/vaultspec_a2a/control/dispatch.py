@@ -33,6 +33,7 @@ from ..ipc.schemas import (
     DispatchRequest,
     DispatchResponse,
 )
+from ..thread.dispatch_policy import FailureType
 from ..thread.enums import ThreadStatus
 from ..utils.coercion import coerce_object_mapping
 from ._thread_metadata import workspace_root_from_metadata
@@ -70,6 +71,14 @@ class DispatchOutcome:
     failure_type: str | None = None
     exception: Exception | None = None
     detail: str | None = None
+    retry_after_seconds: float | None = None
+    """How long the worker itself asked the caller to wait, when it said so.
+
+    Present only on a refusal the worker answered with a ``Retry-After``. It is
+    the worker's own account of when it expects to have room, which is better
+    information than a blind backoff curve, so a scheduler takes the later of
+    the two rather than retrying into a wall it was told about.
+    """
 
 
 class DispatchError(Exception):
@@ -91,9 +100,15 @@ class WorkerCircuitOpenError(DispatchError):
 class WorkerAtCapacityError(DispatchError):
     """Raised when the worker returns HTTP 429 (too many requests)."""
 
-    def __init__(self, thread_id: str, dispatch_id: str) -> None:
+    def __init__(
+        self,
+        thread_id: str,
+        dispatch_id: str,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         self.thread_id = thread_id
         self.dispatch_id = dispatch_id
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(
             f"Worker at capacity (429) for dispatch_id={dispatch_id} thread {thread_id}"
         )
@@ -108,11 +123,13 @@ class WorkerDispatchRejectedError(DispatchError):
         dispatch_id: str,
         status_code: int,
         body: str,
+        condition: str | None = None,
     ) -> None:
         self.thread_id = thread_id
         self.dispatch_id = dispatch_id
         self.status_code = status_code
         self.body = body
+        self.condition = condition
         super().__init__(
             f"Worker rejected dispatch_id={dispatch_id} thread {thread_id}"
             f" with status {status_code}"
@@ -168,33 +185,77 @@ async def dispatch_to_worker(
             raise IncompatibleDispatchAuthorityError(str(exc)) from exc
     await spawner.ensure_worker()
 
-    if dispatch.action != "cancel" and not circuit_breaker.pre_dispatch():
+    # Cancellation bypasses admission but not classification: it must reach a
+    # worker the circuit has shut out, and it still reports honestly on whether
+    # the transport worked when it got there.
+    admitted = dispatch.action != "cancel"
+    if admitted and not circuit_breaker.pre_dispatch():
         raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)
 
     headers = dict(trace_headers) if trace_headers else {}
 
     try:
-        resp = await worker_client.post(
-            "/dispatch",
-            json=dispatch.model_dump(),
-            headers=headers or None,
-        )
-    except httpx.HTTPError as exc:
-        circuit_breaker.record_failure()
-        logger.warning(
-            "Failed to dispatch %s dispatch_id=%s for thread %s",
-            dispatch.action,
-            dispatch.dispatch_id,
-            dispatch.thread_id,
-            exc_info=True,
-        )
-        raise WorkerUnreachableError(
-            thread_id=dispatch.thread_id,
-            dispatch_id=dispatch.dispatch_id,
-            cause=exc,
-        ) from exc
+        try:
+            resp = await worker_client.post(
+                "/dispatch",
+                json=dispatch.model_dump(),
+                headers=headers or None,
+            )
+        except httpx.HTTPError as exc:
+            circuit_breaker.record_failure()
+            logger.warning(
+                "Failed to dispatch %s dispatch_id=%s for thread %s",
+                dispatch.action,
+                dispatch.dispatch_id,
+                dispatch.thread_id,
+                exc_info=True,
+            )
+            raise WorkerUnreachableError(
+                thread_id=dispatch.thread_id,
+                dispatch_id=dispatch.dispatch_id,
+                cause=exc,
+            ) from exc
 
-    return _dispatch_response_or_raise(resp, dispatch, circuit_breaker)
+        return _dispatch_response_or_raise(resp, dispatch, circuit_breaker)
+    finally:
+        # Every arm above settles the breaker, so this only matters for an
+        # attempt abandoned without one - a cancellation, or a fault in this
+        # function. An unreturned probe would leave the half-open circuit
+        # admitting nothing until the process restarted.
+        if admitted:
+            circuit_breaker.release_probe()
+
+
+def _retry_after_seconds(resp: httpx.Response) -> float | None:
+    """Read a ``Retry-After`` delay the worker stated in seconds.
+
+    Only the delta-seconds form is honoured. The HTTP-date form is legal but the
+    worker never sends it, and parsing a date against a clock this process does
+    not share would turn a hint into a wrong answer.
+    """
+    raw = resp.headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        seconds = float(raw.strip())
+    except ValueError:
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def _refusal_condition(resp: httpx.Response) -> str | None:
+    """Read the typed condition the worker named for a refusal, if any."""
+    try:
+        body = coerce_object_mapping(resp.json())
+    except ValueError:
+        return None
+    if body is None:
+        return None
+    detail = coerce_object_mapping(body.get("detail"))
+    if detail is None:
+        return None
+    condition = detail.get("condition")
+    return condition if isinstance(condition, str) else None
 
 
 def _dispatch_response_or_raise(
@@ -202,9 +263,15 @@ def _dispatch_response_or_raise(
     dispatch: DispatchRequest,
     circuit_breaker: WorkerCircuitBreaker,
 ) -> DispatchResponse:
-    """Classify the worker's HTTP response and update circuit health."""
+    """Classify the worker's HTTP response and update circuit health.
+
+    Only an unreachable worker and a worker that failed inside itself are
+    transport health. A refusal the worker composed and returned - capacity, or
+    a request it will not serve - proves the opposite, so it settles the breaker
+    as healthy and leaves the retry decision to the caller's own policy.
+    """
     if resp.status_code == HTTPStatus.TOO_MANY_REQUESTS:
-        circuit_breaker.record_failure()
+        circuit_breaker.record_refusal()
         logger.warning(
             "Worker at capacity (429) for dispatch_id=%s thread %s",
             dispatch.dispatch_id,
@@ -213,12 +280,13 @@ def _dispatch_response_or_raise(
         raise WorkerAtCapacityError(
             thread_id=dispatch.thread_id,
             dispatch_id=dispatch.dispatch_id,
+            retry_after_seconds=_retry_after_seconds(resp),
         )
 
-    if not resp.is_success:
+    if resp.is_server_error:
         circuit_breaker.record_failure()
         logger.warning(
-            "Worker rejected dispatch_id=%s thread %s with status %d",
+            "Worker failed dispatch_id=%s thread %s with status %d",
             dispatch.dispatch_id,
             dispatch.thread_id,
             resp.status_code,
@@ -228,6 +296,24 @@ def _dispatch_response_or_raise(
             dispatch_id=dispatch.dispatch_id,
             status_code=resp.status_code,
             body=resp.text,
+        )
+
+    if not resp.is_success:
+        circuit_breaker.record_refusal()
+        condition = _refusal_condition(resp)
+        logger.warning(
+            "Worker refused dispatch_id=%s thread %s with status %d (%s)",
+            dispatch.dispatch_id,
+            dispatch.thread_id,
+            resp.status_code,
+            condition or "unclassified",
+        )
+        raise WorkerDispatchRejectedError(
+            thread_id=dispatch.thread_id,
+            dispatch_id=dispatch.dispatch_id,
+            status_code=resp.status_code,
+            body=resp.text,
+            condition=condition,
         )
 
     circuit_breaker.record_success()
@@ -572,9 +658,10 @@ async def safe_dispatch(
         )
         return DispatchOutcome(
             success=False,
-            failure_type="at_capacity",
+            failure_type=FailureType.AT_CAPACITY.value,
             exception=exc,
             detail=str(exc),
+            retry_after_seconds=exc.retry_after_seconds,
         )
     except WorkerUnreachableError as exc:
         logger.warning(
@@ -597,7 +684,24 @@ async def safe_dispatch(
         )
         return DispatchOutcome(
             success=False,
-            failure_type="rejected",
+            failure_type=_rejected_failure_type(exc).value,
             exception=exc,
             detail=str(exc),
         )
+
+
+def _rejected_failure_type(exc: WorkerDispatchRejectedError) -> FailureType:
+    """Adopt the worker's own condition when it named one this layer knows.
+
+    A worker that refuses for a reason - the thread already has a turn running,
+    the dispatch authority does not match - has classified the outcome better
+    than the status code can. Collapsing every refusal into ``rejected`` made a
+    duplicate delivery indistinguishable from a broken request, and the recovery
+    coordinator then released work that was in fact being done.
+    """
+    if exc.condition is None:
+        return FailureType.REJECTED
+    try:
+        return FailureType(exc.condition)
+    except ValueError:
+        return FailureType.REJECTED

@@ -31,8 +31,8 @@ from ..control.recovery_authority import (
 )
 from ..control.snapshot import (
     MinimalState,
+    checkpoint_history_depth,
     enrich_snapshot_from_state,
-    load_checkpoint_history_depth,
 )
 from ..database import ThreadModel, get_thread
 from ..domain_config import domain_config
@@ -300,18 +300,9 @@ async def _read_projected_checkpoint(
         )
         if checkpoint_tuple is not None:
             checkpoint_present = True
-            history_depth: int | None = None
-            try:
-                history_depth = await asyncio.wait_for(
-                    load_checkpoint_history_depth(checkpointer, config),
-                    timeout=10.0,
-                )
-            except TimeoutError:
-                if "checkpoint_history_timeout" not in snapshot.degraded_reasons:
-                    snapshot.degraded_reasons.append("checkpoint_history_timeout")
-            except Exception:
-                if "checkpoint_history_unavailable" not in snapshot.degraded_reasons:
-                    snapshot.degraded_reasons.append("checkpoint_history_unavailable")
+            # Read off the tuple above, so there is no second listing to time
+            # out or fail and no degradation this read can report.
+            history_depth = checkpoint_history_depth(checkpoint_tuple)
             projection = project_checkpoint_tuple(
                 checkpoint_tuple,
                 thread_id=thread_id,

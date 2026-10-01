@@ -93,6 +93,7 @@ class RecoveryCondition(StrEnum):
     TERMINAL = "terminal"
     INPUT_REQUIRED = "input_required"
     CONFLICT = "conflict"
+    RUN_BUSY = "run_busy"
 
 
 class ReplayStatus(StrEnum):
@@ -132,8 +133,10 @@ class DegradedReason(StrEnum):
     """
 
     AUTHORING_RUN_PRODUCED_NO_PROPOSAL = "authoring_run_produced_no_proposal"
-    CHECKPOINT_HISTORY_TIMEOUT = "checkpoint_history_timeout"
-    CHECKPOINT_HISTORY_UNAVAILABLE = "checkpoint_history_unavailable"
+    # History depth is read off the checkpoint tuple the caller already holds.
+    # The separate history read that could time out or find the store
+    # unreachable is gone, and with it the two reasons naming those failures:
+    # depth is either known or it is not.
     CHECKPOINT_HISTORY_UNKNOWN = "checkpoint_history_unknown"
     CHECKPOINT_MISSING = "checkpoint_missing"
     CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW = (
@@ -143,6 +146,8 @@ class DegradedReason(StrEnum):
     CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
     EXECUTION_STATE_PROJECTION_MISSING = "execution_state_projection_missing"
     EXECUTION_STATE_PROJECTION_STALE = "execution_state_projection_stale"
+    EXECUTION_STATE_PROJECTION_TIMEOUT = "execution_state_projection_timeout"
+    EXECUTION_STATE_PROJECTION_UNAVAILABLE = "execution_state_projection_unavailable"
     EXECUTION_STATE_PROJECTION_UNREADABLE = "execution_state_projection_unreadable"
     INCOMPATIBLE_EXECUTION_AUTHORITY = "incompatible_execution_authority"
     INVALID_AGENT_DESCRIPTORS = "invalid_agent_descriptors"
@@ -155,7 +160,6 @@ class DegradedReason(StrEnum):
     TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE = (
         "terminal_thread_pending_permission_residue"
     )
-    UNKNOWN = "unknown"
 
 
 class TranscriptAvailability(StrEnum):

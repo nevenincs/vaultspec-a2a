@@ -37,10 +37,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ....providers._native_read_tools import NATIVE_READ_TOOL_NAMES
 from ....providers.lane_admission import web_tool_names_for
 from ....team import load_agent_config
 from ...nodes.worker import create_worker_node
+from ._native_read_floor import scoped_read_floor
 
 if TYPE_CHECKING:
     from ....thread.state import TeamState
@@ -155,7 +155,7 @@ async def test_an_unproven_lane_surfaces_no_web_tool_name(
     # wired-but-dead failure mode, caught by the test that established darkness.
     assert [name for name in allowed if _WEB_TOOL_NAME.search(name)] == []
     assert allowed == [
-        *NATIVE_READ_TOOL_NAMES,
+        *scoped_read_floor(tmp_path),
         *web_tool_names_for(provider),
     ]
 
@@ -192,7 +192,10 @@ async def test_an_unproven_lane_adds_no_web_capability_text(
     await node(_make_state())
 
     blocks = _prompt_blocks(json.loads(prompt_file.read_text(encoding="utf-8")))
-    assert blocks[0] == persona
+    # The persona arrives verbatim under its role label: the shared prompt
+    # renderer says which voice a block is, and a system instruction that
+    # cannot be told apart from a user's request is the defect it closes.
+    assert blocks[0] == f"# System\n{persona}"
     # The provider's own web built-ins are the capability this gate governs; no
     # unproven-lane run may name one, whatever else a persona discusses.
     joined = " ".join(blocks)

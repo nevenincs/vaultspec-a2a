@@ -13,6 +13,7 @@ Token hygiene: tokens are never logged and never rendered in
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast, override
 from urllib.parse import quote
 
@@ -200,7 +201,12 @@ class AuthoringClient:
         re-resolved: an unreadable service.json means the engine is genuinely
         unreachable, not merely rotated.
         """
-        endpoint = self._bearer_resolver() if self._bearer_resolver else None
+        # Discovery reads files and probes the engine over HTTP: off the loop.
+        endpoint = (
+            await asyncio.to_thread(self._bearer_resolver)
+            if self._bearer_resolver
+            else None
+        )
         if endpoint is None:
             raise AuthoringError(
                 "engine unreachable while re-resolving the machine bearer after a "

@@ -1,23 +1,54 @@
 name: Release Please
 
+# THE PROPOSAL KEEPS UP; THE RELEASE WAITS TO BE ASKED FOR.
+#
+# - PROPOSAL. Every commit that lands on main refreshes the release pull
+#   request. `always-update` in the config rebuilds its branch on main's newest
+#   head every time, so the proposal is never behind main. This path never
+#   creates a release, a tag or a publication, and merging the proposal by hand
+#   does not release it either.
+# - CUT. A maintainer dispatches this workflow when a release is wanted. It
+#   proves the proposal's head with the full merge gate, squash-merges it, and
+#   has release-please force the tag and create the draft release seconds
+#   later, then starts the release lane. The draft is published last, by that
+#   lane, once every archive it claims is attached and its provenance verified.
+#
+# The proof comes before the merge because a release tag cannot be deleted: a
+# release commit that fails its gate after its tag exists stays a permanent tag
+# of a commit nobody can ship.
+#
+# The tag follows the merge with nothing in between because the default token
+# cannot create a tag on a commit whose `.github/workflows` differ from main's
+# head. A workflow change that lands between a merge and its tag leaves the
+# release untaggable by any later run.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  actions: write
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
-  group: release-please-${{ github.ref }}
+  # One group per path. A proposal refresh still waiting for a runner is
+  # superseded by the next push: release-please reads main's head, so the
+  # newest refresh does the work of every one it replaces. A cut never waits
+  # behind a proposal, and a second cut queues behind the first.
+  group: release-please-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
   release-please:
     name: "Build: Release proposal (Linux)"
+    if: github.event_name == 'push'
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
+    # Opens and rewrites the release pull request, pushes its lock refresh and
+    # dispatches its gate.
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
     steps:
       - name: Run release-please
         id: release
@@ -25,9 +56,11 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Releases are cut on dispatch only.
+          skip-github-release: true
 
       - name: Check out the release branch
-        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        if: steps.release.outputs.pr
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
@@ -35,14 +68,14 @@ jobs:
           persist-credentials: true
 
       - name: Set up uv
-        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        if: steps.release.outputs.pr
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: false
           version: "0.11.29"
 
       - name: Set up just
-        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        if: steps.release.outputs.pr
         uses: taiki-e/install-action@6012bba2f8e3e666a2b212f8823c06831704ce92 # just
         with:
           tool: just@1.38.0
@@ -52,7 +85,7 @@ jobs:
       # merges. The branch is regenerated on each push to main, so this is
       # re-applied each time and is a no-op when the lock already agrees.
       - name: Refresh the release branch lockfile
-        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        if: steps.release.outputs.pr
         run: |
           just deps-lock
           if git diff --quiet uv.lock; then
@@ -83,10 +116,215 @@ jobs:
       # its own run's commit, which is the commit its check is reported on, so
       # a branch that moves meanwhile cannot have one commit validated and
       # another marked green. `pr` is guarded because a step's env is evaluated
-      # before its `if`.
+      # before its `if`. Last, so it validates the lockfile commit pushed above.
       - name: Dispatch the merge gate for the release pull request
-        if: steps.release.outputs.pr && !steps.release.outputs.release_created
+        if: steps.release.outputs.pr
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_BRANCH: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
         run: gh workflow run merge-gate.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_BRANCH"
+
+  candidate:
+    name: "Check: Release candidate (Linux)"
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      number: ${{ steps.find.outputs.number }}
+      sha: ${{ steps.find.outputs.sha }}
+      merged: ${{ steps.find.outputs.merged }}
+    steps:
+      # A proposal merged by hand and not yet tagged is finished first:
+      # release-please opens no new proposal while one is pending, so it is the
+      # only candidate there can be.
+      - name: Find the release pull request and the commit to prove
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PENDING: "autorelease: pending"
+        run: |
+          set -euo pipefail
+          merged=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state merged \
+            --label "$PENDING" --json number,mergeCommit \
+            --jq '.[] | "\(.number) \(.mergeCommit.oid)"')
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
+            --label "$PENDING" --json number,headRefOid \
+            --jq '.[] | "\(.number) \(.headRefOid)"')
+          if [ -n "${merged}" ]; then
+            [ "$(printf '%s\n' "${merged}" | wc -l)" -eq 1 ] || {
+              echo "::error::more than one merged release pull request awaits a tag: ${merged}"; exit 1;
+            }
+            read -r number sha <<<"${merged}"
+            state=true
+          elif [ -n "${open}" ]; then
+            [ "$(printf '%s\n' "${open}" | wc -l)" -eq 1 ] || {
+              echo "::error::more than one open release pull request: ${open}"; exit 1;
+            }
+            read -r number sha <<<"${open}"
+            state=false
+            behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...${sha}" --jq '.behind_by')
+            if [ "${behind}" != "0" ]; then
+              echo "::error::release pull request #${number} is ${behind} commit(s) behind main. release-please rebuilds it on main's next push; dispatch again after that."
+              exit 1
+            fi
+          else
+            echo "::error::there is no release pull request to cut"
+            exit 1
+          fi
+          if ! [[ "${sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::release pull request #${number} resolved to no commit"
+            exit 1
+          fi
+          {
+            echo "number=${number}"
+            echo "sha=${sha}"
+            echo "merged=${state}"
+          } >> "$GITHUB_OUTPUT"
+          echo "cutting #${number} at ${sha} (merged=${state})"
+
+  # The full merge gate, on the exact head that will merge.
+  prove-gate:
+    name: "Test: Release gate (Linux)"
+    needs: candidate
+    uses: ./.github/workflows/merge-gate.yml
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: write
+    with:
+      ref: ${{ needs.candidate.outputs.sha }}
+
+  # Reached only when the gate passed: a job's default condition is the success
+  # of everything it needs, and a called workflow's result is its gate job's.
+  cut:
+    name: "Build: Release cut (Linux)"
+    needs: [candidate, prove-gate]
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NUMBER: ${{ needs.candidate.outputs.number }}
+      SHA: ${{ needs.candidate.outputs.sha }}
+      MERGED: ${{ needs.candidate.outputs.merged }}
+    # Merges the proposal, creates the tag and draft, and dispatches the
+    # release lane.
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      # A squash of a head that is not behind main is exactly the proven tree;
+      # the comparison below refuses to tag anything else.
+      - name: Merge the proven release pull request
+        id: merge
+        run: |
+          set -euo pipefail
+          if [ "${MERGED}" = "true" ]; then
+            echo "commit=${SHA}" >> "$GITHUB_OUTPUT"
+            echo "#${NUMBER} was merged by hand at ${SHA}"
+            exit 0
+          fi
+          head=$(gh pr view "${NUMBER}" --repo "$GITHUB_REPOSITORY" \
+            --json state,headRefOid --jq '"\(.state) \(.headRefOid)"')
+          if [ "${head}" != "OPEN ${SHA}" ]; then
+            echo "::error::release pull request #${NUMBER} is now '${head}', not the proven ${SHA}; dispatch again"
+            exit 1
+          fi
+          behind=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...${SHA}" --jq '.behind_by')
+          if [ "${behind}" != "0" ]; then
+            echo "::error::main moved while ${SHA} was proven; dispatch again once release-please has rebuilt the proposal"
+            exit 1
+          fi
+          gh pr merge "${NUMBER}" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "${SHA}" || {
+            echo "::error::could not merge #${NUMBER}. Merge it by hand and dispatch again: the cut then tags the merged commit."
+            exit 1
+          }
+          commit=$(gh pr view "${NUMBER}" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq '.mergeCommit.oid')
+          proven=$(gh api "repos/$GITHUB_REPOSITORY/commits/${SHA}" --jq '.commit.tree.sha')
+          landed=$(gh api "repos/$GITHUB_REPOSITORY/commits/${commit}" --jq '.commit.tree.sha')
+          if [ "${proven}" != "${landed}" ]; then
+            echo "::error::merged commit ${commit} does not carry the proven tree of ${SHA}; dispatch again to prove and tag ${commit}"
+            exit 1
+          fi
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+          echo "merged #${NUMBER} as ${commit}"
+
+      - name: Create the release for the merged proposal
+        id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+      # The default token never holds the `workflows` permission, and without it
+      # GitHub refuses any tag or release that targets a commit whose workflow
+      # files differ from the branch head, even once the tag exists. When a
+      # workflow change lands between a release commit's merge and its tag,
+      # release-please fails "Resource not accessible by integration" on every
+      # later run. The API error names neither the tag nor the cause, so this
+      # step does.
+      - name: Name a release this token cannot tag
+        if: failure() && steps.release.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNBOOK: docs/development.rst
+        run: |
+          set -euo pipefail
+          repo="repos/${GITHUB_REPOSITORY}"
+          tip=$(gh api "${repo}/commits/${GITHUB_REF_NAME}" --jq .sha)
+          gh pr list --repo "${GITHUB_REPOSITORY}" --base "${GITHUB_REF_NAME}" \
+            --state merged --label "autorelease: pending" \
+            --json number,mergeCommit --jq '.[] | "\(.number) \(.mergeCommit.oid)"' |
+            while read -r number sha; do
+              version=$(gh api "${repo}/contents/.release-please-manifest.json?ref=${sha}" \
+                --jq '.content | @base64d | fromjson | ."."')
+              tag="v${version}"
+              if gh api "${repo}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+                continue
+              fi
+              changed=$(gh api "${repo}/compare/${sha}...${tip}" \
+                --jq '[.files[]?.filename | select(startswith(".github/workflows/"))] | join(", ")')
+              if [ -n "${changed}" ]; then
+                echo "::error::${tag} cannot be created by this job: #${number} merged it at ${sha}, and ${GITHUB_REF_NAME} has since changed ${changed}. Rerunning cannot finish it; release it with maintainer credentials as ${RUNBOOK} describes."
+              fi
+            done
+
+      # The draft creates no tag of its own; `force-tag-creation` does, and the
+      # whole lane builds from it. Refuse a tag on anything but the proven tree.
+      - name: Require the tag on the proven commit
+        env:
+          CREATED: ${{ steps.release.outputs.release_created }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          COMMIT: ${{ steps.merge.outputs.commit }}
+        run: |
+          set -euo pipefail
+          if [ "${CREATED}" != "true" ] || [ -z "${TAG}" ]; then
+            echo "::error::release-please created no release for ${COMMIT}"
+            exit 1
+          fi
+          refs=$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" "${TAG}")
+          tagged=$(awk -v ref="refs/tags/${TAG}" '$2 == ref "^{}" { print $1; exit }' <<<"${refs}")
+          [ -n "${tagged}" ] || tagged=$(awk -v ref="refs/tags/${TAG}" '$2 == ref { print $1; exit }' <<<"${refs}")
+          if [ "${tagged}" != "${COMMIT}" ]; then
+            echo "::error::${TAG} points at ${tagged}, not the proven ${COMMIT}"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_ENV"
+
+      # ONE consumer. The release lane freezes every declared target, attaches
+      # the archives and their checksums to the draft, verifies their
+      # provenance, and only then publishes the draft. Nothing else starts it:
+      # a tag-push or release-event trigger would double-start it here.
+      #
+      # `ref=main`, NOT `ref=${TAG}`: the dispatch ref resolves the WORKFLOW -
+      # its target matrix and release policy stay current - while the lane
+      # checks out the tag for the SOURCE. Dispatched at its own tag, a lane
+      # rebuilds a target a later commit had already withdrawn.
+      - name: Dispatch the release lane
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: gh workflow run release.yml --repo "${GITHUB_REPOSITORY}" --ref main -f "tag=${TAG}"

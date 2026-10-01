@@ -21,12 +21,18 @@ there is no principal to key a quota on and no honest test to write for one.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ThreadStatus
 from ..thread_stream import _stream_thread_events
+from .conftest import seed_run_with_status
+
+if TYPE_CHECKING:
+    from .conftest import SessionFactory
 
 
 def _occupy(aggregator: EventAggregator, count: int, *, prefix: str) -> None:
@@ -36,7 +42,9 @@ def _occupy(aggregator: EventAggregator, count: int, *, prefix: str) -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_stream_refused_at_registration_is_told_why() -> None:
+async def test_a_stream_refused_at_registration_is_told_why(
+    session_factory: SessionFactory,
+) -> None:
     """The registry's refusal reaches the SSE caller as a frame, not a dead socket.
 
     The route's pre-check and the registration it authorises are separated by the
@@ -57,7 +65,7 @@ async def test_a_stream_refused_at_registration_is_told_why() -> None:
         async for frame in _stream_thread_events(
             aggregator=aggregator,
             thread_id="run-1",
-            initial_status=ThreadStatus.RUNNING.value,
+            session_factory=session_factory,
         )
     ]
 
@@ -70,7 +78,9 @@ async def test_a_stream_refused_at_registration_is_told_why() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_served_stream_gives_its_slot_back_and_spares_the_held_ones() -> None:
+async def test_a_served_stream_gives_its_slot_back_and_spares_the_held_ones(
+    session_factory: SessionFactory,
+) -> None:
     """An admitted stream releases its slot, and refusing it disturbs nobody.
 
     The counterpart to the refusal case. A cap only stays meaningful if admitted
@@ -81,18 +91,22 @@ async def test_a_served_stream_gives_its_slot_back_and_spares_the_held_ones() ->
     aggregator = EventAggregator()
     _occupy(aggregator, 2, prefix="held")
     before = aggregator.subscriber_count()
+    await seed_run_with_status(session_factory, "run-terminal", ThreadStatus.COMPLETED)
 
     frames = [
         frame
         async for frame in _stream_thread_events(
             aggregator=aggregator,
             thread_id="run-terminal",
-            initial_status=ThreadStatus.COMPLETED.value,
+            session_factory=session_factory,
         )
     ]
 
-    assert len(frames) == 1
-    assert "thread_terminal" in frames[0].decode("utf-8")
+    # The snapshot leads even an already-finished run, so the consumer learns
+    # the state it attached to before it is told the run is over.
+    assert len(frames) == 2
+    assert "stream_snapshot" in frames[0].decode("utf-8")
+    assert "thread_terminal" in frames[1].decode("utf-8")
     assert aggregator.subscriber_count() == before
     assert aggregator.get_subscriber_queue("held-0") is not None
     assert aggregator.get_subscriber_queue("held-1") is not None

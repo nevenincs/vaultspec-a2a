@@ -143,6 +143,29 @@ class TestMergeTokenUsage:
         result = merge_token_usage(existing, new)
         assert result["agent-a"] == {"input": 120, "output": 60, "total": 180}
 
+    def test_accumulates_the_reported_breakdown_and_leaves_the_rest(self) -> None:
+        """Cache and reasoning counts add up; a counter no turn carried stays out."""
+        existing = {"agent-a": {"input": 100, "output": 50, "total": 150}}
+        new = {
+            "agent-a": {
+                "input": 20,
+                "output": 10,
+                "total": 30,
+                "cache_read": 15,
+                "reasoning": 4,
+            }
+        }
+        once = merge_token_usage(existing, new)
+        twice = merge_token_usage(once, new)
+        assert twice["agent-a"] == {
+            "input": 140,
+            "output": 70,
+            "total": 210,
+            "cache_read": 30,
+            "reasoning": 8,
+        }
+        assert "cache_write" not in twice["agent-a"]
+
     def test_adds_new_agent(self) -> None:
         """A new agent key is added without affecting existing agents."""
         existing = {"agent-a": {"input": 10, "output": 5, "total": 15}}
@@ -282,13 +305,13 @@ class TestTeamStateStructure:
             "active_graph_action_receipt",
             "graph_completion_receipts",
             "routing_error",
+            "supervisor_reasks",
+            "supervisor_finish_blocks",
             # SDD blackboard awareness fields
             "active_feature",
             "pipeline_phase",
             "vault_index",
             "validation_errors",
-            # transient mounted document content
-            "mounted_context",
             # task queue pointer
             "current_task_id",
             # authoring proposal references
@@ -298,9 +321,12 @@ class TestTeamStateStructure:
             # plan approval gate
             "approval_status",
             "approval_request_id",
+            # tool permission gate
+            "permission_answers",
             # document phase machine
             "research_findings",
             "gate_phase",
+            "review_revisions",
             "gate_verdict",
             "gate_pending_proposal_id",
             # mid-run clarification

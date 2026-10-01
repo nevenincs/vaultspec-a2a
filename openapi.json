@@ -659,7 +659,7 @@
     "/v1/runs/{run_id}/messages": {
       "post": {
         "summary": "Run Message Endpoint",
-        "description": "Send a follow-up turn into an existing run.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nAccepted is not applied: the turn is handed to the worker and execution\ncontinues asynchronously, so a caller reconciles from the stream or\nrun-status rather than from this response.",
+        "description": "Send a follow-up turn into an existing run.\n\nNo run state admits a follow-up today, so every request that names a run is\nrefused with the typed 409: a run with a turn in flight is busy, a parked run\nanswers through its own respond verb, and a settled run is over. Taking a\nturn needs a continuation model this surface does not have yet, and the 202\nshape below is what that model will answer with. The verb is published now\nso a caller learns the refusal from its code rather than from a missing\nroute.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nA run whose current turn has not finished refuses with a typed 409 rather\nthan taking the turn. Admitting it would hand the run's write authority to\nthe new turn while the old one is still executing, after which the executing\nturn's own completion is refused as superseded and the run quarantines. The\nrefusal reserves nothing and dispatches nothing, so the caller loses no\nstate by meeting it; a queued continuation is a separate capability.\n\nA parked run is likewise refused: a pause is answered through its own typed\nrespond verb, and a message here would start a new turn and orphan the pause.\n\nAccepted is not applied: an accepted turn is handed to the worker and\nexecution continues asynchronously, so a caller reconciles from the stream or\nrun-status rather than from this response.",
         "operationId": "run_message_endpoint_v1_runs__run_id__messages_post",
         "security": [
           {
@@ -708,7 +708,7 @@
         },
         "responses": {
           "202": {
-            "description": "Successful Response",
+            "description": "Reserved for a follow-up turn the run can take. No run state admits one yet, so this response is not currently served.",
             "content": {
               "application/json": {
                 "schema": {
@@ -722,6 +722,16 @@
           },
           "503": {
             "description": "Gateway service token is not configured."
+          },
+          "409": {
+            "description": "The run cannot accept a follow-up turn. Nothing was reserved and nothing was dispatched; the typed code names which condition refused it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunMessageRefusalResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -2219,8 +2229,15 @@
             "title": "Agent Id"
           },
           "timestamp": {
-            "type": "string",
-            "format": "date-time",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Timestamp"
           }
         },
@@ -3406,6 +3423,50 @@
         ],
         "title": "RunHistoryResponse",
         "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves.\n\nThe transcript is the one part of the record this verb cannot always\ndeliver, because it lives only in the checkpoint. ``transcript_available``\nand ``transcript_status`` say so outright, so ``state.messages`` is never\nread as \"this run had no conversation\" when the truth is that its\nconversation could not be read. They are the transcript's counterpart to the\nsnapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing.\n\n``permission_decisions`` is the settled counterpart to the snapshot's PENDING\npermissions. A gate leaves the pending list the moment it is answered or the\nrun ends, so without this the record of a decision a human actually made was\ndurable in the audit log and readable nowhere - a run could be reviewed whole\nwith no trace that anyone had approved anything."
+      },
+      "RunMessageRefusalCode": {
+        "type": "string",
+        "enum": [
+          "input_required",
+          "terminal",
+          "conflict",
+          "incompatible_state",
+          "run_busy"
+        ],
+        "title": "RunMessageRefusalCode",
+        "description": "The conditions a follow-up turn can be refused for.\n\nA closed subset of the dispatch failure vocabulary, so the published\ncontract names only what this refusal can carry rather than every failure\nthe gateway knows. Each value is spelled as its failure-type counterpart."
+      },
+      "RunMessageRefusalDetail": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/RunMessageRefusalCode"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 1024,
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "RunMessageRefusalDetail",
+        "description": "Why a follow-up turn was refused, in terms a program can match.\n\nThe refusals this verb can raise are several distinct conditions sharing one\nstatus code, and a prose message is the wrong place for a consumer to learn\nwhich one it met. ``code`` is the closed refusal vocabulary; ``message`` is\nthe same sentence an operator reads. A refused follow-up changed nothing, so\nthe consumer's next move is always to re-read run-status rather than to\nreconcile from this body."
+      },
+      "RunMessageRefusalResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/RunMessageRefusalDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "RunMessageRefusalResponse",
+        "description": "The body served for a refused follow-up turn."
       },
       "RunMessageRequest": {
         "properties": {
@@ -4839,7 +4900,8 @@
                 "type": "null"
               }
             ],
-            "title": "Checkpoint Parent Id"
+            "title": "Checkpoint Parent Id",
+            "description": "The parent the current checkpoint records. It may name a checkpoint that no longer exists: once a run settles, its superseded history is pruned and only this reference to it remains. Do not read it as a checkpoint that can be fetched."
           },
           "checkpoint_source": {
             "anyOf": [
@@ -4891,7 +4953,8 @@
                 "type": "null"
               }
             ],
-            "title": "History Depth"
+            "title": "History Depth",
+            "description": "How deep the current checkpoint's recorded ancestry goes: 2 when it names a parent, 1 when it is the first of its thread, null when no checkpoint was read. Recorded ancestry, not stored rows - a settled run's history is pruned and its depth does not fall."
           },
           "next_nodes": {
             "items": {

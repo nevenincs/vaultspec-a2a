@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#blackboard-content-mounting'
 date: 2026-03-03
-modified: '2026-07-15'
-body_hash: 'sha256:141fec0c6de6d57e0ccddd1da90f5f16e7ddde4781af11782aaad6552a10f8c8'
+modified: '2026-09-30'
+body_hash: 'sha256:bddc02a2c229e94c041ae336b7ce47420f770dfb34e020345678cbd2a309f4d1'
 related:
 - '[[2026-02-28-thread-metadata-context-injection-adr]]'
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
@@ -457,3 +457,9 @@ posture). Any WRITE-side artifact production this record implies now routes
 through the engine authoring API as a reviewed proposal - agents never
 mount-then-write a vault file. See `2026-07-14-a2a-edge-conformance-adr`
 (R2) and `2026-07-14-a2a-edge-conformance-reference`.
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+Mounted document text is never checkpointed. The `mounted_context` state field this record specifies does not exist. The mount node writes only the refreshed vault index (`src/vaultspec_a2a/graph/nodes/vault_reader.py`). The document blocks are assembled per invocation by a mounter the worker node calls, then passed directly into that turn's message list (`src/vaultspec_a2a/graph/nodes/vault_reader.py`, `src/vaultspec_a2a/graph/nodes/worker.py`).
+
+This is the stronger form of the single-invocation rule the record already wanted. The write-then-clear pair it describes in sections 2.2 and 2.4 had a transient window in which document text sat in checkpointed state. Passing the text as a call argument removes that window rather than closing it, and no node may reintroduce a state channel carrying document content. The message ordering in section 2.5, the per-invocation cache in section 2.6 and the phase-scoped selection rules are unchanged. Grounding: `2026-09-30-langgraph-conformance-audit`.

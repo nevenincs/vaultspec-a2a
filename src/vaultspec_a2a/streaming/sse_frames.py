@@ -291,11 +291,11 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 #
 # Keys are ``ServerEventType`` members wherever a member exists, so a value
 # respelled at the enum carries this catalog with it rather than silently
-# stranding an entry that can then never match. The three bare literals below -
-# ``thread_terminal``, ``stream_rejected``, ``progress_dropped`` - are transport
-# frame kinds the stream itself mints, which no graph event produces and the enum
-# therefore does not declare. Their spelling here is the mixture reading
-# correctly, not a conversion left half finished.
+# stranding an entry that can then never match. The four bare literals below -
+# ``stream_snapshot``, ``thread_terminal``, ``stream_rejected``,
+# ``progress_dropped`` - are transport frame kinds the stream itself mints, which
+# no graph event produces and the enum therefore does not declare. Their spelling
+# here is the mixture reading correctly, not a conversion left half finished.
 PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     ServerEventType.MESSAGE_CHUNK: {
         "content": _Text(MAX_PROGRESS_CONTENT_CHARS),
@@ -337,6 +337,13 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "message": _Text(512),
         "recoverable": _Flag(),
     },
+    # The first frame of every stream: the run's durable status as it stood the
+    # moment after this viewer was attached, which is what lets a consumer tell
+    # the live frames that follow from whatever it may have missed before it
+    # arrived. It carries the status and nothing else, deliberately - it is a
+    # relay frame like the rest, so it says where to go for authority rather
+    # than trying to be it.
+    "stream_snapshot": {"status": _ENUM},
     "thread_terminal": {
         "status": _ENUM,
         "replay": _Flag(),
@@ -344,7 +351,11 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     },
     ServerEventType.HEARTBEAT: {"server_uptime_seconds": _Number()},
     "stream_rejected": {"reason": _Text(64)},
-    "progress_dropped": {"reason": _Text(64), "dropped_type": _Text(64)},
+    "progress_dropped": {
+        "reason": _Text(64),
+        "dropped_type": _Text(64),
+        "dropped_count": _Integer(),
+    },
     ServerEventType.PERMISSION_REQUEST: {
         "request_id": _Text(128),
         "tool_call": _Text(128),
@@ -498,6 +509,14 @@ def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
     character costs bytes (which :data:`MAX_SSE_FRAME_BYTES` is sized for) and
     buys the guarantee that the serialized payload holds no character
     ``splitlines`` can break on.
+
+    No frame carries an SSE ``id``. The only number a frame could offer is the
+    run's event sequence, which the worker keeps in memory and restarts from zero
+    when it does, and the gateway keeps no buffer a ``Last-Event-ID`` could
+    resume from. An id would therefore promise a resumption that does not exist,
+    and a consumer that deduplicated by it would discard a restarted worker's
+    events as ones it already held. The sequence stays in the body, where it
+    orders a run's frames without claiming to identify them across restarts.
     """
     lines: list[str] = []
     if event:

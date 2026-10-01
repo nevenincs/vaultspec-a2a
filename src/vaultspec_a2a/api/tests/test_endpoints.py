@@ -34,10 +34,12 @@ from ...database import (
     create_artifact,
     create_control_action,
     create_thread,
-    get_control_action_by_dispatch_id,
     get_control_action_by_idempotency_key,
+    get_latest_control_action,
+    get_thread,
     record_permission_request,
     record_permission_response_submission,
+    supersede_permission_requests,
 )
 from ...database.models import (
     PermissionRequestModel,
@@ -45,8 +47,14 @@ from ...database.models import (
     ThreadModel,
 )
 from ...streaming.aggregator import EventAggregator
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
-from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
+from ...thread.dispatch_policy import FailureType
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    ThreadStatus,
+)
 from .conftest import catalog_run_fields, make_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -613,12 +621,11 @@ class TestListThreads:
 
         async def _seed_checkpoint_mismatch() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-list-checkpoint-drift", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-list-current"
             await checkpointer.aput(
-                _checkpoint_config("thread-list-checkpoint-drift", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -880,12 +887,11 @@ class TestThreadState:
 
         async def _corrupt_permission() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-corrupt-permission-state", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-corrupt-permission-state"
             await checkpointer.aput(
-                _checkpoint_config("thread-corrupt-permission-state", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -937,12 +943,11 @@ class TestThreadState:
 
         async def _seed_stale_execution_state() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-stale-state-endpoint", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-fresh-state-endpoint"
             await checkpointer.aput(
-                _checkpoint_config("thread-stale-state-endpoint", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -999,12 +1004,11 @@ class TestThreadState:
 
         async def _seed_plan_without_tool_call() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-plan-no-tool-call-endpoint", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-plan-no-tool-call-endpoint"
             await checkpointer.aput(
-                _checkpoint_config("thread-plan-no-tool-call-endpoint", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1066,12 +1070,11 @@ class TestThreadState:
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-state-aggregator-only", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-thread-state-aggregator-only"
             await checkpointer.aput(
-                _checkpoint_config("thread-state-aggregator-only", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1217,12 +1220,11 @@ class TestThreadState:
 
         async def _seed_terminal_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-state-terminal-permission-residue", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-thread-state-terminal-permission-residue"
             await checkpointer.aput(
-                _checkpoint_config("thread-state-terminal-permission-residue", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1275,12 +1277,11 @@ class TestThreadState:
 
         async def _seed_answered_permission() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-state-answered-pending-apply", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-thread-state-answered-pending-apply"
             await checkpointer.aput(
-                _checkpoint_config("thread-state-answered-pending-apply", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1333,12 +1334,11 @@ class TestThreadState:
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            seed_config = _checkpoint_config("thread-state-checkpoint-only", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-thread-state-checkpoint-only"
             config = await checkpointer.aput(
-                _checkpoint_config("thread-state-checkpoint-only", ""),
+                seed_config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -1414,11 +1414,30 @@ class TestSendMessage:
             )
         assert resp.status_code == 404
 
-    def test_202_accepted_dispatches_to_worker(
+    def test_refuses_a_follow_up_while_the_run_is_busy(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Returns 202 and dispatches ingest to worker."""
+        """A run whose turn has not finished refuses, reserving nothing.
+
+        The refusal is the whole behaviour: admitting the turn used to make the
+        follow-up the run's writer, after which the executing turn's own
+        completion was refused as superseded and the run quarantined. So this
+        asserts the negative side too - no journal action, no writer transition,
+        no dispatch - because a refusal that still wrote would be the same bug
+        wearing a 409.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _thread_state() -> tuple[str, str | None, str | None]:
+            async with session_factory() as session:
+                thread = await get_thread(session, "endpoints-run-07")
+                assert thread is not None
+                latest = await get_latest_control_action(session, thread_id=thread.id)
+                return (
+                    thread.status,
+                    thread.last_requested_action,
+                    latest.id if latest is not None else None,
+                )
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -1430,165 +1449,23 @@ class TestSendMessage:
                     **catalog_run_fields(client),
                 },
             )
-            thread_id = create_resp.json()["run_id"]
-            worker.clear()  # Clear the create dispatch if any
-
-            resp = client.post(
-                f"/v1/runs/{thread_id}/messages",
-                json={"content": "Follow-up message"},
-            )
-        assert resp.status_code == 202
-        data = resp.json()
-        assert data["accepted"] is True
-        assert data["action_status"]
-        assert data["run_id"] == thread_id
-
-        # Verify dispatch was sent to worker
-        assert len(worker.dispatches) == 1
-        dispatch = worker.dispatches[0]
-        assert dispatch["action"] == "ingest"
-        assert dispatch["thread_id"] == thread_id
-        assert dispatch["content"] == "Follow-up message"
-        assert dispatch["agent_id"] == "vaultspec-supervisor"
-
-    def test_followup_dispatch_marks_message_followup_as_applied(
-        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
-    ) -> None:
-        """The worker's application receipt - not its acknowledgement - stamps applied.
-
-        A 202 only proves the worker accepted the dispatch for scheduling; the
-        turn is applied when the graph actually starts consuming it, which the
-        worker reports by returning the dispatch identity on the private
-        ``dispatch_applied`` receipt. The receipt travels the production relay
-        (``/internal/events`` -> ``relay_event`` -> the progress handler), so
-        this drives both halves of the settlement rather than asserting the
-        acknowledgement alone.
-        """
-        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-
-        async def _applied_action() -> tuple[str | None, datetime | None]:
-            async with session_factory() as session:
-                thread = await session.get(ThreadModel, thread_id)
-                assert thread is not None
-                assert thread.repair_status == "healthy"
-                assert thread.execution_readiness == "healthy"
-                assert (
-                    thread.last_requested_action
-                    == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value
-                )
-                action = await get_control_action_by_dispatch_id(
-                    session, thread_id=thread_id, dispatch_id=dispatch_id
-                )
-                assert action is not None
-                return thread.last_applied_action, action.applied_at
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            create_resp = client.post(
-                "/v1/runs",
-                json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
-                    "message": "Hello",
-                    "run_id": "endpoints-run-08",
-                    **catalog_run_fields(client),
-                },
-            )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
+            before = asyncio.run(_thread_state())
             worker.clear()
 
             resp = client.post(
                 f"/v1/runs/{thread_id}/messages",
                 json={"content": "Follow-up message"},
             )
-            assert resp.status_code == 202
-            assert len(worker.dispatches) == 1
-            dispatch_id = cast("str", worker.dispatches[0]["dispatch_id"])
 
-            # Accepted is not applied: the acknowledgement leaves the journal
-            # action unsettled, so nothing may claim the follow-up was applied.
-            before_applied, before_stamp = asyncio.run(_applied_action())
-            assert before_applied != ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
-            assert before_stamp is None
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == FailureType.RUN_BUSY.value
+        assert "in flight" in detail["message"] or "dispatched" in detail["message"]
 
-            # The application event is proof only when its named checkpoint
-            # incorporates the same durable graph action receipt.
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            graph_receipt = cast(
-                "dict[str, object]", worker.dispatches[0]["graph_action_receipt"]
-            )
-            assert isinstance(graph_receipt, dict)
-            checkpoint_id = "cp-followup-applied"
-
-            async def _record_applied_checkpoint() -> None:
-                checkpoint = empty_checkpoint()
-                checkpoint["id"] = checkpoint_id
-                checkpoint["channel_values"] = {
-                    "active_graph_action_receipt": graph_receipt,
-                    "graph_action_receipts": {dispatch_id: graph_receipt},
-                }
-                checkpoint["channel_versions"] = {
-                    "active_graph_action_receipt": 1,
-                    "graph_action_receipts": 1,
-                }
-                await checkpointer.aput(
-                    _checkpoint_config(thread_id, ""),
-                    checkpoint,
-                    {"source": "loop", "step": 1, "parents": {}},
-                    checkpoint["channel_versions"],
-                )
-
-            asyncio.run(_record_applied_checkpoint())
-
-            receipt = client.post(
-                "/internal/events",
-                json={
-                    "thread_id": thread_id,
-                    "payload": {
-                        "type": "dispatch_applied",
-                        "dispatch_id": dispatch_id,
-                        "action": "ingest",
-                        "graph_action_receipt": graph_receipt,
-                        "checkpoint_id": checkpoint_id,
-                    },
-                },
-            )
-            assert receipt.status_code == 200
-
-        after_applied, after_stamp = asyncio.run(_applied_action())
-        assert after_applied == ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
-        assert after_stamp is not None
-
-    def test_dispatch_includes_team_preset(
-        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
-    ) -> None:
-        """Ingest DispatchRequest includes team_preset from DB for lazy recompile."""
-        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            create_resp = client.post(
-                "/v1/runs",
-                json={
-                    "message": "Hello",
-                    "team_preset": _BUNDLE_FREE_PRESET,
-                    "run_id": "endpoints-run-09",
-                    **catalog_run_fields(client),
-                },
-            )
-            assert create_resp.status_code == 201
-            thread_id = create_resp.json()["run_id"]
-            worker.dispatches.clear()
-
-            resp = client.post(
-                f"/v1/runs/{thread_id}/messages",
-                json={"content": "Follow-up"},
-            )
-
-        assert resp.status_code == 202
-        assert len(worker.dispatches) == 1
-        dispatch = worker.dispatches[0]
-        assert dispatch["action"] == "ingest"
-        assert dispatch["team_preset"] == _BUNDLE_FREE_PRESET
+        assert worker.dispatches == []
+        assert asyncio.run(_thread_state()) == before
 
     def test_content_length_limit(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -1641,10 +1518,12 @@ class TestSendMessage:
             )
 
         assert resp.status_code == 409
-        assert (
-            resp.json()["detail"]
-            == "Cannot send messages while thread is in 'repair_needed' repair state"
-        )
+        assert resp.json()["detail"] == {
+            "code": FailureType.TERMINAL.value,
+            "message": (
+                "Cannot send messages while thread is in 'repair_needed' repair state"
+            ),
+        }
 
     def test_rejects_followup_while_thread_is_reconciling(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -1673,10 +1552,12 @@ class TestSendMessage:
             )
 
         assert resp.status_code == 409
-        assert (
-            resp.json()["detail"]
-            == "Cannot send messages while thread is in 'reconciling' repair state"
-        )
+        assert resp.json()["detail"] == {
+            "code": FailureType.TERMINAL.value,
+            "message": (
+                "Cannot send messages while thread is in 'reconciling' repair state"
+            ),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -2155,7 +2036,10 @@ class TestPermissionRespond:
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
-        assert dispatch["option_id"] == "allow_once"
+        assert dispatch["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": request_id,
+        }
         _assert_resume_dispatch_log(
             caplog,
             thread_id=thread_id,
@@ -2549,10 +2433,15 @@ class TestPermissionRespond:
         )
         assert len(worker.dispatches) == 1
 
-    def test_rejects_stale_permission_request_when_newer_interrupt_exists(
+    def test_rejects_a_permission_request_the_run_has_moved_past(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Only the active pending interrupt for a thread may be resumed."""
+        """A request the run has left behind is refused; a live one is not.
+
+        Two requests both still outstanding are two live questions - a fan-out
+        stage parks each of its branches on its own - so being the older of two
+        is not what makes a request stale. Having been superseded is.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_permissions() -> None:
@@ -2587,6 +2476,11 @@ class TestPermissionRespond:
                     ],
                     tool_call="bash",
                 )
+                await supersede_permission_requests(
+                    session,
+                    thread_id=thread_id,
+                    except_request_id=new_request_id,
+                )
                 await session.commit()
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -2619,7 +2513,77 @@ class TestPermissionRespond:
         assert stale.json()["detail"] == "Permission request is no longer pending"
         assert active.status_code == 200
         assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == "allow_once"
+        assert worker.dispatches[0]["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": new_request_id,
+        }
+
+    def test_two_outstanding_requests_are_both_answerable(
+        self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        """A run waiting on two questions can be answered on either of them.
+
+        A fan-out stage parks each of its branches on its own request, so both
+        are live and each dispatches its own resume. Only the run's checkpoint
+        knows which interrupts it still holds, so the worker - not this route -
+        is what turns an answer away that no pending interrupt asked for.
+        """
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_permissions() -> None:
+            async with session_factory() as session:
+                for request_id in (left_request_id, right_request_id):
+                    await record_permission_request(
+                        session,
+                        request_id=request_id,
+                        thread_id=thread_id,
+                        pause_reason_type="bash",
+                        description="Allow this branch?",
+                        allowed_options=[
+                            {
+                                "option_id": "allow_once",
+                                "name": "Allow once",
+                                "kind": "allow_once",
+                            }
+                        ],
+                        tool_call="bash",
+                    )
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/v1/runs",
+                json={
+                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "message": "parallel permission test",
+                    "run_id": "endpoints-run-19b",
+                    **catalog_run_fields(client),
+                },
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["run_id"]
+            left_request_id = f"{thread_id}:req-left"
+            right_request_id = f"{thread_id}:req-right"
+            asyncio.run(_seed_permissions())
+
+            worker.dispatches.clear()
+            left = client.post(
+                f"/v1/runs/{thread_id}/permissions/{left_request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+            right = client.post(
+                f"/v1/runs/{thread_id}/permissions/{right_request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        assert left.status_code == 200
+        assert right.status_code == 200
+        assert [
+            dispatch["option_id"]["request_id"] for dispatch in worker.dispatches
+        ] == [
+            left_request_id,
+            right_request_id,
+        ]
 
     def test_plan_approval_uses_live_pending_request_over_stale_thread_pointer(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -2682,6 +2646,7 @@ class TestPermissionRespond:
         assert worker.dispatches[0]["option_id"] == {
             "verdict": "approved",
             "notes": None,
+            "request_id": live_request_id,
         }
 
     def test_respond_notes_field_survives_into_verdict_resume_payload(
@@ -2742,6 +2707,7 @@ class TestPermissionRespond:
         assert worker.dispatches[0]["option_id"] == {
             "verdict": "approved",
             "notes": "Looks solid, ship it.",
+            "request_id": request_id,
         }
 
 
@@ -2756,12 +2722,11 @@ class TestDeleteThread:
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-delete-input-required", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-delete-input-required"
             await checkpointer.aput(
-                _checkpoint_config("thread-delete-input-required", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
@@ -2802,20 +2767,20 @@ class TestDeleteThread:
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
-            from langgraph.checkpoint.base import empty_checkpoint
-
-            checkpoint = empty_checkpoint()
+            config = _checkpoint_config("thread-delete-terminal", "")
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-delete-terminal-thread-root"
             await checkpointer.aput(
-                _checkpoint_config("thread-delete-terminal", ""),
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},
             )
-            child_checkpoint = empty_checkpoint()
+            child_config = _checkpoint_config("thread-delete-terminal", "worker:child")
+            child_checkpoint = await real_checkpoint()
             child_checkpoint["id"] = "cp-delete-terminal-thread-child"
             await checkpointer.aput(
-                _checkpoint_config("thread-delete-terminal", "worker:child"),
+                child_config,
                 child_checkpoint,
                 {"source": "loop", "step": 2, "parents": {}},
                 {},
@@ -2976,7 +2941,11 @@ class TestDeleteThread:
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
-        assert dispatch["option_id"] == {"verdict": "approved", "notes": None}
+        assert dispatch["option_id"] == {
+            "verdict": "approved",
+            "notes": None,
+            "request_id": request_id,
+        }
 
     def test_rejects_stale_second_response_after_submission(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -3047,7 +3016,10 @@ class TestDeleteThread:
             == "Permission request already has a different response"
         )
         assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == "allow_once"
+        assert worker.dispatches[0]["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": request_id,
+        }
 
     def _seed_bash_permission(
         self,
@@ -3161,7 +3133,10 @@ class TestDeleteThread:
 
         assert second.status_code == 200
         assert len(worker.dispatches) == 1
-        assert worker.dispatches[0]["option_id"] == "allow_once"
+        assert worker.dispatches[0]["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": request_id,
+        }
 
     def test_ambiguous_resume_dispatch_keeps_the_answer_and_replays(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

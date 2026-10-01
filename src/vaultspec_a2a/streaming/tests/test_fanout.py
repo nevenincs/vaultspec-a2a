@@ -29,7 +29,7 @@ def test_a_payload_reaches_a_queue_with_room() -> None:
     """The ordinary case enqueues and reports success."""
     queue: asyncio.Queue[object] = asyncio.Queue(maxsize=4)
 
-    assert deliver_bounded(queue, "event-1", client_id="c1") is True
+    assert deliver_bounded(queue, "event-1", client_id="c1").delivered is True
     assert _drain(queue) == ["event-1"]
 
 
@@ -39,7 +39,7 @@ def test_a_full_queue_loses_its_oldest_event_not_the_new_one() -> None:
     queue.put_nowait("oldest")
     queue.put_nowait("middle")
 
-    assert deliver_bounded(queue, "newest", client_id="slow") is True
+    assert deliver_bounded(queue, "newest", client_id="slow").delivered is True
     assert _drain(queue) == ["middle", "newest"]
 
 
@@ -50,7 +50,9 @@ def test_delivery_into_a_full_queue_keeps_it_at_capacity() -> None:
         queue.put_nowait(f"event-{index}")
 
     for index in range(3, 6):
-        assert deliver_bounded(queue, f"event-{index}", client_id="slow") is True
+        assert (
+            deliver_bounded(queue, f"event-{index}", client_id="slow").delivered is True
+        )
 
     assert queue.qsize() == 3
     assert _drain(queue) == ["event-3", "event-4", "event-5"]
@@ -61,7 +63,7 @@ def test_an_unbounded_queue_never_drops() -> None:
     queue: asyncio.Queue[object] = asyncio.Queue()
 
     for index in range(50):
-        assert deliver_bounded(queue, index, client_id="fast") is True
+        assert deliver_bounded(queue, index, client_id="fast").delivered is True
 
     assert queue.qsize() == 50
 
@@ -78,7 +80,7 @@ def test_structured_context_is_accepted_without_changing_the_outcome() -> None:
         log_extra={"thread_id": "t1", "queue_maxsize": 1},
     )
 
-    assert delivered is True
+    assert delivered.delivered is True
     assert _drain(queue) == ["newest"]
 
 
@@ -120,7 +122,9 @@ def test_a_terminal_outlives_a_flood_of_progress() -> None:
     queue.put_nowait(_terminal_frame())
 
     for index in range(40):
-        assert deliver_bounded(queue, f"chunk-{index}", client_id="slow") is True
+        assert (
+            deliver_bounded(queue, f"chunk-{index}", client_id="slow").delivered is True
+        )
         assert queue.qsize() <= 4, "the bound must hold on every delivery"
 
     drained = _drain(queue)
@@ -143,7 +147,9 @@ def test_an_error_outlives_a_flood_of_progress() -> None:
     queue.put_nowait(failure)
 
     for index in range(30):
-        assert deliver_bounded(queue, f"chunk-{index}", client_id="slow") is True
+        assert (
+            deliver_bounded(queue, f"chunk-{index}", client_id="slow").delivered is True
+        )
 
     drained = _drain(queue)
     assert queue.qsize() == 0
@@ -164,7 +170,7 @@ def test_progress_ahead_of_an_outcome_is_evicted_before_it() -> None:
     queue.put_nowait("chunk-a")
     queue.put_nowait("chunk-b")
 
-    assert deliver_bounded(queue, "chunk-c", client_id="slow") is True
+    assert deliver_bounded(queue, "chunk-c", client_id="slow").delivered is True
 
     assert _drain(queue) == [failure, "chunk-b", "chunk-c"]
 
@@ -182,7 +188,28 @@ def test_a_queue_of_outcomes_still_yields_its_oldest() -> None:
     queue.put_nowait(first)
     queue.put_nowait(second)
 
-    assert deliver_bounded(queue, _terminal_frame(), client_id="slow") is True
+    assert deliver_bounded(queue, _terminal_frame(), client_id="slow").delivered is True
 
     assert queue.qsize() == 2
     assert _drain(queue) == [second, _terminal_frame()]
+
+
+def test_an_eviction_is_reported_to_the_caller_not_only_to_the_log() -> None:
+    """A drop the consumer is never told about reads as a complete history."""
+    queue: asyncio.Queue[object] = asyncio.Queue(maxsize=1)
+    queue.put_nowait("oldest")
+
+    outcome = deliver_bounded(queue, "newest", client_id="slow")
+
+    assert outcome.delivered is True
+    assert outcome.dropped == 1
+
+
+def test_a_delivery_with_room_costs_the_client_nothing() -> None:
+    """A client keeping up must never be told it lost something."""
+    queue: asyncio.Queue[object] = asyncio.Queue(maxsize=4)
+
+    outcome = deliver_bounded(queue, "event", client_id="fast")
+
+    assert outcome.delivered is True
+    assert outcome.dropped == 0

@@ -79,15 +79,26 @@ repo = "local"
   pass_filenames = false
   types = ["markdown"]
 
+  # Repository-owned, so it lives outside the block Core re-renders: Core's own
+  # commit gate blocks only on error-level findings a commit introduces, while
+  # this repository fails on any template annotation left in the vault.
+  [[repos.hooks]]
+  entry = "uv run --no-sync python dev/vault_annotations_gate.py"
+  id = "vault-sanitize-annotations"
+  language = "system"
+  name = "Check Vault annotations"
+  pass_filenames = false
+  types = ["markdown"]
+
 # >>> vaultspec-managed hooks (do not edit this block) >>>
 [[repos]]
 repo = "local"
 
-[[repos.hooks]]
-id = "vaultspec-commit-gate"
-name = "Vaultspec commit gate"
-entry = "uv run --no-sync vaultspec-core commit-gate"
-always_run = true
-language = "system"
-pass_filenames = true
-# <<< vaultspec-managed hooks <<<
+  [[repos.hooks]]
+  always_run = true
+  entry = "uv run --no-sync vaultspec-core commit-gate"
+  id = "vaultspec-commit-gate"
+  language = "system"
+  name = "Vaultspec commit gate"
+  pass_filenames = true
+  # <<< vaultspec-managed hooks <<<

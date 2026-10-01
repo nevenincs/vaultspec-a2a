@@ -196,6 +196,78 @@ file:
 Don't hand-edit ``openapi.json``. It's generated output, and the exact-match
 assertion will reject any edit that the application doesn't itself produce.
 
+Cut a release
+-------------
+
+Write conventional commit subjects such as ``feat:``, ``fix:``, and ``feat!:``.
+release-please keeps a release pull request open with the next version and the
+changelog it derives, and rebuilds that branch on ``main``'s newest head after
+every commit that lands. That path releases nothing, and merging the pull
+request by hand doesn't release it either.
+
+To release, dispatch the **Release Please** workflow. Its cut:
+
+#. Finds the pending release pull request and refuses a candidate that is behind
+   ``main`` or ambiguous.
+#. Proves that pull request's exact head with the full merge gate. A release tag
+   can't be deleted, so the proof comes first: a release commit that failed its
+   gate after being tagged would be a permanent tag of a commit nobody can ship.
+#. Squash-merges only that head, then refuses the merge if the landed tree isn't
+   the proven one.
+#. Has release-please force the tag into existence and create an unpublished
+   draft release, seconds after the merge.
+#. Dispatches **Release** with that tag.
+
+The tag has to follow the merge with nothing in between. The default workflow
+token never holds the ``workflows`` permission, and without it GitHub refuses any
+tag or release targeting a commit whose ``.github/workflows`` differ from the
+branch head. A workflow change landing between a release commit's merge and its
+tag therefore leaves the release untaggable by every later run.
+
+**Release** then freezes every declared target natively, proves each frozen
+artifact starts, serves, and stops, attaches the archives and their ``.sha256``
+sidecars to the draft, attests and verifies their provenance, and publishes the
+draft as its last step. A visible release therefore carries everything it claims
+to, and a failure anywhere in the lane leaves a draft nobody has been shown.
+Fix the cause and dispatch **Release** again for the same tag.
+
+Recover a release this token can't tag
+--------------------------------------
+
+A cut can stop in ``Create the release for the merged proposal`` with ``Resource
+not accessible by integration``. Its ``Name a release this token cannot tag``
+step then names the tag and the workflow files that block it. This happens when
+a workflow change lands between the release commit's merge and its tag, as when
+a release pull request merged by hand waits for a cut. No rerun and no later cut
+can finish it.
+
+Finish it with your own credentials, as the cut would have. Relabel the pull
+request first, so the next cut doesn't pick it up again:
+
+.. code-block:: console
+
+   REPO=nevenincs/vaultspec-a2a
+   PR=<release pull request number>
+   VERSION=<version>
+   TAG="v$VERSION"
+   SHA=$(gh pr view "$PR" --repo "$REPO" --json mergeCommit --jq .mergeCommit.oid)
+
+   gh pr edit "$PR" --repo "$REPO" \
+     --remove-label "autorelease: pending" --add-label "autorelease: tagged"
+   git fetch origin "$SHA"
+   git push origin "$SHA:refs/tags/$TAG"
+   git show "$SHA:CHANGELOG.md" \
+     | awk -v h="## [$VERSION]" 'index($0, "## [") == 1 { p = index($0, h) == 1 } p' \
+     > release-notes.md
+   gh release create "$TAG" --repo "$REPO" --verify-tag --draft \
+     --title "vaultspec-a2a v$VERSION" --notes-file release-notes.md
+   gh workflow run release.yml --repo "$REPO" --ref main -f tag="$TAG"
+
+``--draft`` is required: the lane publishes the release itself once every archive
+is attached and verified. ``--verify-tag`` refuses to invent a tag, so the push
+above has to have succeeded. The ``awk`` filter takes the one changelog section
+for this version from the release commit's own ``CHANGELOG.md``.
+
 Continue with :doc:`operations` for runtime commands and :doc:`architecture`
 for ownership boundaries. Before proposing changes, read the `contribution
 guide <https://github.com/nevenincs/vaultspec-a2a/blob/main/CONTRIBUTING.md>`_;

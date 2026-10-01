@@ -30,13 +30,17 @@ _IMPURE_CORE_FILES = frozenset(
         "test_compiler.py",
         "test_harness_topology_reach.py",
         # Live AsyncSqliteSaver against a real database file.
+        "test_checkpointed_value_types.py",
         "test_diverge.py",
         "test_persona_web_composition.py",
         "test_research_adr.py",
         "test_research_adr_clarification.py",
+        "test_research_permission_rung.py",
         "test_research_web_locators.py",
         # Real async engine and session maker.
         "test_task_queue.py",
+        # Real .vault/ trees on disk, scanned by the index refresh.
+        "test_vault_index_refresh.py",
         "test_vault_reader.py",
         "test_vault_write_isolation.py",
         # Real HTTP against a live engine. This file declares its own ``service``

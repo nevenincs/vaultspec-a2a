@@ -22,10 +22,9 @@ def test_vaultspec_validation_hooks_are_read_only() -> None:
     """Keep repair commands out of the default validation pipeline."""
     hooks = _hooks()
     managed_ids = {
-        "vault-fix",
+        "vault-doctor",
         "vault-sanitize-annotations",
-        "check-provider-artifacts",
-        "spec-check",
+        "vaultspec-commit-gate",
     }
     vaultspec_entries: dict[str, str] = {}
     for hook in hooks:
@@ -39,6 +38,9 @@ def test_vaultspec_validation_hooks_are_read_only() -> None:
     assert vaultspec_entries["vault-sanitize-annotations"] == (
         "uv run --no-sync python dev/vault_annotations_gate.py"
     )
+    assert vaultspec_entries["vaultspec-commit-gate"] == (
+        "uv run --no-sync vaultspec-core commit-gate"
+    )
     assert all(
         marker not in entry
         for entry in vaultspec_entries.values()
@@ -47,6 +49,14 @@ def test_vaultspec_validation_hooks_are_read_only() -> None:
 
     justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
     assert "vault-sanitize:\n    {{core}} vault sanitize annotations" in justfile
+
+
+def test_the_repository_annotation_gate_survives_a_core_sync() -> None:
+    """Core re-renders its managed block on sync and drops anything inside it."""
+    config = (ROOT / "prek.toml").read_text(encoding="utf-8")
+    managed_start = config.index(">>> vaultspec-managed hooks")
+
+    assert config.index('id = "vault-sanitize-annotations"') < managed_start
 
 
 def _write_fixture(root: Path, *, with_annotation: bool) -> Path:

@@ -6,9 +6,9 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from ...tests._checkpoint_seeding import real_checkpoint
 from ..checkpoint_schema import (
     install_checkpoint_schema_identity,
     open_checkpoint_read_only,
@@ -27,8 +27,6 @@ if TYPE_CHECKING:
 
 
 async def _write_legacy_checkpoint(path: Path) -> RunnableConfig:
-    checkpoint = empty_checkpoint()
-    checkpoint["channel_values"] = {"messages": []}
     config: RunnableConfig = {
         "configurable": {
             "thread_id": "legacy-thread",
@@ -36,12 +34,12 @@ async def _write_legacy_checkpoint(path: Path) -> RunnableConfig:
         }
     }
     async with AsyncSqliteSaver.from_conn_string(str(path)) as checkpointer:
+        checkpoint = await real_checkpoint()
+        checkpoint["channel_values"] = {"messages": []}
         return await checkpointer.aput(config, checkpoint, {}, {})
 
 
 async def _write_start_staging_checkpoint(path: Path) -> RunnableConfig:
-    checkpoint = empty_checkpoint()
-    checkpoint["channel_values"] = {"__start__": {"messages": []}}
     config: RunnableConfig = {
         "configurable": {
             "thread_id": "start-staging-thread",
@@ -49,6 +47,8 @@ async def _write_start_staging_checkpoint(path: Path) -> RunnableConfig:
         }
     }
     async with AsyncSqliteSaver.from_conn_string(str(path)) as checkpointer:
+        checkpoint = await real_checkpoint()
+        checkpoint["channel_values"] = {"__start__": {"messages": []}}
         return await checkpointer.aput(config, checkpoint, {}, {})
 
 

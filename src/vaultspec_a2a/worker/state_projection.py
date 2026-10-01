@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, cast
 
 from ..domain_config import domain_config
@@ -20,20 +22,137 @@ from ..ipc.schemas import (
 )
 from ..providers import ProviderCondition
 from ..thread.cancellation_evidence import CancellationEvidence
-from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
+from ..thread.checkpoint_evidence import (
+    CheckpointEvidenceKind,
+    read_checkpoint_evidence,
+)
+from ..thread.enums import TERMINAL_STATUSES, DegradedReason, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ..thread.snapshots import tasks_past_their_interrupt
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from ..database.checkpoints import Checkpointer
     from ..streaming.types import StreamableGraph
+    from ..thread.action_receipts import GraphActionReceipt
+    from .graph_lifecycle import RegisteredCompiledGraph
     from .ipc import WorkerBridge
 
-__all__ = ["StateProjector"]
+__all__ = [
+    "PreflightDecision",
+    "ResumeAdmission",
+    "ResumeRefusal",
+    "ResumeRefusalCause",
+    "StateProjector",
+    "answered_request_id",
+]
 
 logger = logging.getLogger(__name__)
+
+
+class ResumeRefusalCause(StrEnum):
+    """Why a resume must not be handed to the graph."""
+
+    NOT_PARKED = "resume_not_parked"
+    REQUEST_NOT_PENDING = "resume_request_not_pending"
+    STATE_UNREADABLE = "resume_state_unreadable"
+    AMBIGUOUS_TARGET = "resume_target_ambiguous"
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeRefusal:
+    """One refused resume, on the operator's channel and the client's.
+
+    Attributes:
+        cause: The vocabulary term a consumer branches on.
+        detail: What the client is told, without the run identifier it is
+            already looking at.
+        pending_request_ids: The requests the run is actually waiting on, for
+            the operator's log. Empty when the run is waiting on none, or when
+            its state could not be read.
+    """
+
+    cause: ResumeRefusalCause
+    detail: str
+    pending_request_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeAdmission:
+    """How one admitted resume must be handed to the graph.
+
+    Attributes:
+        interrupt_id: The interrupt this answer belongs to, when the run is
+            waiting on more than one. LangGraph refuses a bare value while
+            several are pending, because a bare value says nothing about which
+            of them it answers, so the answer is addressed to its interrupt
+            instead. ``None`` when exactly one is pending and the plain value
+            is unambiguous.
+    """
+
+    interrupt_id: str | None = None
+
+
+def answered_request_id(resume_value: object) -> str | None:
+    """The request a resume value names, or ``None`` when it names none.
+
+    Every typed answer this system dispatches - a tool permission, a
+    clarification resolution, a plan or document verdict - carries the
+    identifier of the request it answers. A value that carries none cannot be
+    matched against what the run is parked on, and only the weaker
+    parked-at-all check applies to it.
+    """
+    if not isinstance(resume_value, dict):
+        return None
+    named = cast("dict[str, object]", resume_value).get("request_id")
+    return named if isinstance(named, str) and named else None
+
+
+def _pending_requests(interrupts: Iterable[object]) -> dict[str, str]:
+    """The request each pending interrupt asks, keyed by the request id.
+
+    The value is the interrupt's own identifier, which is how an answer is
+    addressed while more than one interrupt is pending. An interrupt whose
+    payload names no request, or which carries no identifier, contributes
+    nothing: neither can be matched to an answer.
+    """
+    found: dict[str, str] = {}
+    for interrupt in interrupts:
+        payload = coerce_object_mapping(getattr(interrupt, "value", interrupt))
+        if payload is None:
+            continue
+        request_id = payload.get("request_id")
+        interrupt_id = getattr(interrupt, "id", None)
+        if (
+            isinstance(request_id, str)
+            and request_id
+            and isinstance(interrupt_id, str)
+            and interrupt_id
+        ):
+            found[request_id] = interrupt_id
+    return found
+
+
+@dataclass(frozen=True, slots=True)
+class PreflightDecision:
+    """What the latest checkpoint says an arriving ingest dispatch should do.
+
+    Attributes:
+        outcome: ``"completed"``, ``"failed"`` or ``"interrupted"`` when this
+            action already reached that state and must not run again; ``None``
+            when it should run.
+        is_first_ingest: No checkpoint exists for the thread at all.
+        resume_from_checkpoint: This action's input is already in the
+            checkpoint and the run stopped part-way, so it continues from there
+            with no input rather than receiving its input a second time.
+        refusal: Why the dispatch must not run, when the checkpoint cannot say
+            what running it would do.
+    """
+
+    outcome: str | None = None
+    is_first_ingest: bool = False
+    resume_from_checkpoint: bool = False
+    refusal: str | None = None
 
 
 class _LogExtraFn(Protocol):
@@ -113,12 +232,26 @@ def _interrupt_details(interrupts: Iterable[object]) -> tuple[list[str], list[st
     return interrupt_ids, interrupt_types
 
 
+def _task_interrupts(task: object, answered: Collection[str]) -> tuple[object, ...]:
+    """The interrupts *task* is still stopped on, dropping the ones it answered.
+
+    A snapshot lists every interrupt write the checkpoint holds against a
+    task, including one it has since run past: the superstep that would have
+    cleared it has not committed. ``answered`` is read from those held writes
+    and is the only thing that separates the two.
+    """
+    if str(getattr(task, "id", "")) in answered:
+        return ()
+    return tuple(getattr(task, "interrupts", ()) or ())
+
+
 def _task_projection(
     task: object,
+    answered: Collection[str] = (),
 ) -> tuple[ExecutionTaskProjectionPayload, list[str]]:
     """Project one pending LangGraph task and retain its interrupt types."""
     interrupt_ids, interrupt_types = _interrupt_details(
-        getattr(task, "interrupts", ()) or ()
+        _task_interrupts(task, answered)
     )
     error = getattr(task, "error", None)
     return (
@@ -139,17 +272,55 @@ def _task_projection(
 
 def _task_projections(
     state_tasks: Iterable[object],
+    answered: Collection[str] = (),
 ) -> tuple[list[ExecutionTaskProjectionPayload], list[str]]:
     """Project every pending task while preserving first-seen interrupt order."""
     tasks: list[ExecutionTaskProjectionPayload] = []
     interrupt_types: list[str] = []
     for task in state_tasks:
-        projection, task_interrupt_types = _task_projection(task)
+        projection, task_interrupt_types = _task_projection(task, answered)
         tasks.append(projection)
         for interrupt_type in task_interrupt_types:
             if interrupt_type not in interrupt_types:
                 interrupt_types.append(interrupt_type)
     return tasks, interrupt_types
+
+
+def _parked_next_nodes(
+    state_next: Iterable[object],
+    tasks: Iterable[ExecutionTaskProjectionPayload],
+) -> list[str]:
+    """Return the nodes the run resumes at, counting every parked task.
+
+    LangGraph leaves a task out of ``next`` once it holds a resume write, so a
+    node that asks again after an answer that did not settle it is parked on a
+    live interrupt yet absent from ``next``. The run still resumes at that
+    node, and the phase it reports must not fall back to a generic one.
+    """
+    next_nodes = [str(node) for node in state_next]
+    for task in tasks:
+        if task.interrupt_ids and task.name and task.name not in next_nodes:
+            next_nodes.append(task.name)
+    return next_nodes
+
+
+def _live_interrupts(
+    state: _ExecutionStateSnapshot, answered: Collection[str]
+) -> tuple[object, ...]:
+    """The interrupts the run is still stopped on, across every pending task.
+
+    ``state.interrupts`` is the union of the held interrupt writes, so it
+    keeps listing the question a fanned-out branch already answered. Each
+    interrupt is attributed to its task instead, and the tasks the held writes
+    show finished are dropped. A snapshot with no tasks to attribute to is
+    read as it stands.
+    """
+    tasks = tuple(state.tasks or ())
+    if not tasks:
+        return tuple(state.interrupts or ())
+    return tuple(
+        interrupt for task in tasks for interrupt in _task_interrupts(task, answered)
+    )
 
 
 def _state_interrupt_types(interrupts: Iterable[object]) -> list[str]:
@@ -273,92 +444,231 @@ class StateProjector:
     async def pre_flight_checkpoint(
         self,
         thread_id: str,
+        receipt: GraphActionReceipt,
         *,
-        thread_known: bool,
         timeout_seconds: float = 5.0,
-    ) -> tuple[str | None, bool]:
-        """Inspect the latest checkpoint before running an ingest.
+    ) -> PreflightDecision:
+        """Decide from the latest checkpoint what an arriving ingest should do.
 
-        Resolves the reconciliation window gap: after a worker restart the
-        gateway moves non-terminal threads to ``RECONCILING`` and re-dispatches
-        them.  If the thread actually completed or errored *before* the crash
-        (checkpoint was written but the DB update was lost), LangGraph would
-        silently start another generation.  Inspecting the checkpoint first
-        lets us detect and short-circuit these cases.
+        An ingest is delivered again after a worker restart - a crash, or a
+        shutdown that drained the run at a superstep boundary - so the
+        checkpoint may already hold this very action. The decision is read
+        from the action receipts the checkpoint carries rather than from its
+        pending writes alone: an empty set of pending writes means only that
+        no superstep was mid-flight, which is as true of a drained run half
+        way through as of a finished one, and of an earlier turn's end.
 
-        Also corrects ``is_first_ingest``: after a restart the in-memory cache
-        is empty so every dispatch looks like a first ingest, which would pass
-        initial-state fields (``active_agent``, ``artifacts``, ``current_plan``)
-        and overwrite accumulated checkpoint values.  Using checkpoint truth
-        prevents that overwrite.
-
-        Parameters
-        ----------
-        thread_id:
-            The thread to inspect.
-        thread_known:
-            ``True`` when the thread is already tracked in the graph cache.
-            Used as fallback when checkpoint inspection fails.
-
-        Returns
-        -------
-        ``(outcome, is_first_ingest)`` where *outcome* is one of:
-
-        * ``None``           -- proceed normally with ingest
-        * ``"completed"``    -- graph ran to END before crash; emit and skip
-        * ``"failed"``       -- unhandled error before crash; emit and skip
-        * ``"interrupted"``  -- graph paused at ``interrupt()``; skip and
-                                await a resume dispatch
-
-        *is_first_ingest* is ``True`` only when no prior checkpoint row
-        exists (``aget_tuple`` returns ``None``).
+        * No checkpoint: a new thread; run with the full first-turn input.
+        * An earlier action's checkpoint: a new turn; run with this input.
+        * This action's checkpoint, part-way: continue from it with no input,
+          so the message is not delivered twice and finished nodes do not
+          re-run.
+        * This action completed, failed or parked: report that, do not re-run.
+        * Unreadable or foreign to this action: refuse, because running it
+          blind could deliver its input a second time.
         """
-        # Sentinel channel constants from langgraph.checkpoint.serde.types.
-        interrupt_ch = "__interrupt__"
-        error_ch = "__error__"
-
-        try:
-            checkpoint_tuple = await asyncio.wait_for(
-                self._checkpointer.aget_tuple(
-                    {"configurable": {"thread_id": thread_id}}
+        evidence = await read_checkpoint_evidence(
+            self._checkpointer, receipt, timeout_seconds=timeout_seconds
+        )
+        kind = evidence.kind
+        if kind is CheckpointEvidenceKind.ABSENT:
+            return PreflightDecision(is_first_ingest=True)
+        if kind is CheckpointEvidenceKind.PRIOR_ACTION:
+            return PreflightDecision()
+        if kind is CheckpointEvidenceKind.COMPLETED:
+            return PreflightDecision(outcome=ThreadStatus.COMPLETED)
+        if kind is CheckpointEvidenceKind.FAILED:
+            return PreflightDecision(outcome=ThreadStatus.FAILED)
+        if kind is CheckpointEvidenceKind.INTERRUPTED:
+            return PreflightDecision(outcome="interrupted")
+        if kind is CheckpointEvidenceKind.PENDING:
+            logger.info(
+                "Thread %s checkpoint holds this action part-way; continuing "
+                "from it instead of delivering the input again",
+                thread_id,
+                extra=self._log_extra_fn(
+                    thread_id=thread_id,
+                    action="checkpoint_preflight_resume",
+                    checkpoint_id=evidence.checkpoint_id,
                 ),
+            )
+            return PreflightDecision(resume_from_checkpoint=True)
+        logger.warning(
+            "Thread %s checkpoint evidence is %s; refusing the ingest",
+            thread_id,
+            kind.value,
+            extra=self._log_extra_fn(
+                thread_id=thread_id,
+                action="checkpoint_preflight_refused",
+                evidence=kind.value,
+            ),
+        )
+        if kind is CheckpointEvidenceKind.UNAVAILABLE:
+            return PreflightDecision(
+                refusal=(
+                    "The run's checkpoint could not be read, so the dispatch was "
+                    "not run: running it blind could deliver its input twice"
+                )
+            )
+        return PreflightDecision(
+            refusal=(
+                "The run's checkpoint belongs to a different action than this "
+                "dispatch, so the dispatch was not run"
+            )
+        )
+
+    async def pre_flight_resume(
+        self,
+        thread_id: str,
+        graph: RegisteredCompiledGraph,
+        config: dict[str, Any],
+        receipt: GraphActionReceipt,
+        *,
+        resume_value: object,
+        timeout_seconds: float,
+    ) -> ResumeRefusal | ResumeAdmission:
+        """How this resume must reach the graph, or why it must not.
+
+        A resume is an answer to one question the run stopped to ask. Handed to
+        a run that is not stopped, LangGraph gives the value to whatever the
+        next superstep interrupts on first, so an answer nobody gave for that
+        question settles it - a probe approved a plan that never parked. An
+        answer is therefore admitted only against the question it answers.
+
+        Three things are decided, in order of what the run's state can prove:
+
+        * The run is parked. The live snapshot is authoritative; when it cannot
+          be read, durable checkpoint evidence deciding ``INTERRUPTED`` stands
+          in for it, and anything else refuses.
+        * Where the answer names a request and the snapshot could be read, one
+          of the pending interrupts asks that request. An answer naming a
+          request the run is not waiting on is refused rather than spent on a
+          different question.
+        * Which interrupt the answer is addressed to, when the run is waiting
+          on more than one. A bare value is refused there rather than handed
+          over: LangGraph refuses it too, but as a fault inside the run rather
+          than as an answer the client can correct.
+
+        A refusal leaves the run exactly as it was. It is not a failure of the
+        run: the question is still open and a correct answer still resolves it.
+        """
+        snapshot: object = None
+        try:
+            snapshot = await asyncio.wait_for(
+                graph.aget_state(config), timeout=timeout_seconds
+            )
+        except Exception:
+            logger.warning(
+                "Thread %s live state could not be read before resuming; "
+                "falling back to durable checkpoint evidence",
+                thread_id,
+                exc_info=True,
+                extra=self._log_extra_fn(
+                    thread_id=thread_id, action="resume_preflight_state_unavailable"
+                ),
+            )
+            return await self._durable_resume_refusal(
+                receipt, timeout_seconds=timeout_seconds
+            )
+        if not _is_execution_state_snapshot(snapshot):
+            return await self._durable_resume_refusal(
+                receipt, timeout_seconds=timeout_seconds
+            )
+        answered = tasks_past_their_interrupt(
+            await self._held_writes(snapshot.config, timeout_seconds=timeout_seconds)
+        )
+        interrupts = _live_interrupts(snapshot, answered)
+        if not interrupts:
+            return ResumeRefusal(
+                cause=ResumeRefusalCause.NOT_PARKED,
+                detail=(
+                    "The run is not waiting on a question, so the answer was "
+                    "not applied"
+                ),
+            )
+        pending = _pending_requests(interrupts)
+        named = answered_request_id(resume_value)
+        if named is not None and named not in pending:
+            return ResumeRefusal(
+                cause=ResumeRefusalCause.REQUEST_NOT_PENDING,
+                detail=(
+                    "The answer names a request the run is not waiting on, so "
+                    "it was not applied"
+                ),
+                pending_request_ids=tuple(pending),
+            )
+        if len(interrupts) == 1:
+            return ResumeAdmission()
+        if named is None:
+            return ResumeRefusal(
+                cause=ResumeRefusalCause.AMBIGUOUS_TARGET,
+                detail=(
+                    "The run is waiting on more than one question and the "
+                    "answer names none of them, so it was not applied"
+                ),
+                pending_request_ids=tuple(pending),
+            )
+        return ResumeAdmission(interrupt_id=pending[named])
+
+    async def _held_writes(
+        self, config: Mapping[str, object], *, timeout_seconds: float
+    ) -> tuple[object, ...]:
+        """The writes the store holds against the checkpoint *config* names.
+
+        Read from the store because a snapshot does not carry a task's resume
+        writes, and those are what distinguish a question still being asked
+        from one already answered. A read that fails returns nothing, which
+        leaves every held interrupt reading as pending: the snapshot's own
+        reading, and the one that keeps disclosing a question rather than
+        stranding an answer on a momentary store failure.
+        """
+        try:
+            stored = await asyncio.wait_for(
+                self._checkpointer.aget_tuple(cast("Any", config)),
                 timeout=timeout_seconds,
             )
         except Exception:
             logger.warning(
-                "Could not inspect checkpoint for thread %s before ingest"
-                " — falling back to in-memory heuristic",
-                thread_id,
+                "Checkpoint writes could not be read; every interrupt the "
+                "snapshot lists will be reported as still pending",
                 exc_info=True,
-                extra=self._log_extra_fn(
-                    thread_id=thread_id,
-                    action="checkpoint_preflight_fallback",
-                    fallback_strategy="in_memory_heuristic",
-                ),
+                extra=self._log_extra_fn(action="held_writes_unavailable"),
             )
-            is_first_ingest = not thread_known
-            return None, is_first_ingest
+            return ()
+        if stored is None:
+            return ()
+        return tuple(cast("Any", stored.pending_writes) or ())
 
-        if checkpoint_tuple is None:
-            # No prior checkpoint -- genuinely new thread.
-            return None, True
+    async def _durable_resume_refusal(
+        self,
+        receipt: GraphActionReceipt,
+        *,
+        timeout_seconds: float,
+    ) -> ResumeRefusal | ResumeAdmission:
+        """Admit a resume on durable evidence when the live read failed.
 
-        pending_writes = checkpoint_tuple.pending_writes or []
-        if not pending_writes:
-            # Empty pending_writes: graph ran to END cleanly before crash.
-            return ThreadStatus.COMPLETED, False
-
-        channels = {w[1] for w in pending_writes}
-        if error_ch in channels:
-            # Unhandled task error flushed to checkpoint before crash.
-            return ThreadStatus.FAILED, False
-        if interrupt_ch in channels:
-            # Graph paused at interrupt() -- needs a resume, not a new ingest.
-            return "interrupted", False
-
-        # Normal pending task writes: thread was mid-execution.
-        # LangGraph will restart from the last persisted checkpoint.
-        return None, False
+        The checkpoint records that the run stopped at an interrupt but not
+        which request it asked, so this admits the answer on the weaker
+        parked-at-all proof, addressed to no interrupt in particular.
+        Refusing every resume whose live state momentarily could not be read
+        would strand runs that are genuinely waiting.
+        """
+        evidence = await read_checkpoint_evidence(
+            self._checkpointer, receipt, timeout_seconds=timeout_seconds
+        )
+        if evidence.kind is CheckpointEvidenceKind.INTERRUPTED:
+            return ResumeAdmission()
+        return ResumeRefusal(
+            cause=(
+                ResumeRefusalCause.STATE_UNREADABLE
+                if evidence.kind is CheckpointEvidenceKind.UNAVAILABLE
+                else ResumeRefusalCause.NOT_PARKED
+            ),
+            detail=(
+                "The run's state does not show it waiting on a question, so "
+                "the answer was not applied"
+            ),
+        )
 
     # ------------------------------------------------------------------
     # State normalization
@@ -367,23 +677,34 @@ class StateProjector:
     @staticmethod
     def normalize_execution_state(
         state: _ExecutionStateSnapshot,
+        held_writes: Iterable[object] = (),
     ) -> ExecutionStateProjectionPayload:
-        """Normalize LangGraph runtime state into a durable worker payload."""
+        """Normalize LangGraph runtime state into a durable worker payload.
+
+        *held_writes* are the writes the checkpoint holds against this
+        snapshot. They are the only thing that tells a question still being
+        asked from one a fanned-out branch has already answered, because the
+        snapshot lists both. Omitted, every interrupt the snapshot carries is
+        read as pending, which is the snapshot's own reading of itself.
+        """
+        answered = tasks_past_their_interrupt(held_writes)
         state_interrupts = state.interrupts or ()
-        tasks, interrupt_types = _task_projections(state.tasks or ())
-        if state_interrupts and not interrupt_types:
+        tasks, interrupt_types = _task_projections(state.tasks or (), answered)
+        interrupt_count = sum(len(task.interrupt_ids) for task in tasks)
+        if state_interrupts and not tasks:
+            # No task to attribute an interrupt to, so there is nothing the
+            # held writes can narrow and the state-level list is the reading.
+            interrupt_types = _state_interrupt_types(state_interrupts)
+            interrupt_count = len(state_interrupts)
+        elif interrupt_count and not interrupt_types:
             interrupt_types = _state_interrupt_types(state_interrupts)
         return ExecutionStateProjectionPayload(
             checkpoint_id=_checkpoint_id(state.config),
             parent_checkpoint_id=_checkpoint_id(state.parent_config),
             snapshot_created_at=_snapshot_created_at_value(state.created_at),
-            next_nodes=[str(node) for node in state.next],
+            next_nodes=_parked_next_nodes(state.next, tasks),
             interrupt_types=interrupt_types,
-            interrupt_count=(
-                len(state_interrupts)
-                if state_interrupts
-                else sum(len(task.interrupt_ids) for task in tasks)
-            ),
+            interrupt_count=interrupt_count,
             task_count=len(tasks),
             tasks=tasks,
         )
@@ -406,10 +727,18 @@ class StateProjector:
             )
             if not _is_execution_state_snapshot(state):
                 raise TypeError("Graph returned an incomplete execution-state snapshot")
-            payload = self.normalize_execution_state(state)
+            payload = self.normalize_execution_state(
+                state,
+                await self._held_writes(
+                    state.config,
+                    timeout_seconds=domain_config.aget_state_timeout_seconds,
+                ),
+            )
         except TimeoutError:
             payload = ExecutionStateProjectionPayload(
-                degraded_reasons=["execution_state_projection_timeout"]
+                degraded_reasons=[
+                    DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT.value
+                ]
             )
         except Exception:
             logger.warning(
@@ -422,7 +751,9 @@ class StateProjector:
                 ),
             )
             payload = ExecutionStateProjectionPayload(
-                degraded_reasons=["execution_state_projection_unavailable"]
+                degraded_reasons=[
+                    DegradedReason.EXECUTION_STATE_PROJECTION_UNAVAILABLE.value
+                ]
             )
         await self._bridge.send_event(thread_id, payload.model_dump(mode="json"))
 

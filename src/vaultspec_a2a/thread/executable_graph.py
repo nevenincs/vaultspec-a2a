@@ -93,6 +93,11 @@ class FrozenGraphDefinition(BaseModel):
         return timeout
 
     @property
+    def recursion_limit(self) -> int:
+        """The superstep budget the accepted preset declares for one invocation."""
+        return TeamConfig.model_validate(self.team).graph.recursion_limit
+
+    @property
     def run_timeout_seconds(self) -> int:
         timeout = TeamConfig.model_validate(self.team).graph.run_timeout_seconds
         if timeout is None or timeout <= 0:

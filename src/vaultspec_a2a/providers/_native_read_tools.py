@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ..authoring.contract import is_document_authoring_role
 from ..thread.errors import ConfigError
+from ._claude_tool_policy import CLAUDE_PATH_RULE_TOOLS, workspace_scoped_tool_rule
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -24,6 +25,7 @@ __all__ = [
     "NativeWebToolBounds",
     "_require_bounds_match_the_egress_axis",
     "compose_native_read_tools",
+    "native_read_floor_rules",
 ]
 
 # The spawned CLI's own built-in read tools. These execute agent-side over the
@@ -32,6 +34,11 @@ __all__ = [
 # code, discover files. They are added by exact name — never a wildcard — so a
 # document role in autonomous mode can invoke them without a local prompt while
 # every write/exec built-in stays gated (the .vault deny remains write-only).
+# Each name is composed under the workspace scope its rule syntax admits
+# (:func:`workspace_scoped_tool_rule`): "agent-side over the workspace fs" is
+# where these tools are AIMED, not where they are bounded - a bare name permits
+# the whole host, which is the operator's credentials and every other project
+# on it.
 # Named here because there is nothing to ask. Every other tool surface in this
 # system is enumerated by its provider - the engine serves its authoring catalog,
 # the harness registry declares its servers - and is consumed rather than
@@ -235,6 +242,30 @@ def _declared_native_tool_names(extra_tool_names: Sequence[str] | None) -> list[
     return composed_names
 
 
+def native_read_floor_rules(workspace_root: str | None) -> list[str]:
+    """Return the read floor's pre-approval rules for a run's workspace.
+
+    Each floor tool is pre-approved under the workspace wherever its rule grammar
+    takes a path. A floor tool whose grammar takes none is WITHHELD rather than
+    approved by bare name, because a bare name approves the tool against any path
+    on the host - which, for a content search, is every file the operator can
+    read. Withholding it does not remove it: the session runs with the workspace
+    as its working directory, where the CLI's own posture already lets a
+    read-only built-in proceed, and a call naming a path outside it is raised to
+    the permission rung, which an autonomous run answers with a refusal.
+
+    A run with no workspace has no scope to compose, so every floor tool keeps
+    its bare name, as :func:`workspace_scoped_tool_rule` does for one tool.
+    """
+    if not workspace_root:
+        return list(NATIVE_READ_TOOL_NAMES)
+    return [
+        workspace_scoped_tool_rule(name, workspace_root)
+        for name in NATIVE_READ_TOOL_NAMES
+        if name in CLAUDE_PATH_RULE_TOOLS
+    ]
+
+
 def compose_native_read_tools(
     model: BaseChatModel,
     *,
@@ -281,8 +312,23 @@ def compose_native_read_tools(
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         return model
+    # The permission a role needs is its own workspace, not the host. The
+    # workspace is read off the model rather than passed in because it is
+    # already the run's, carried on the same instance the session is opened
+    # from - a second parameter could name a different directory than the one
+    # the CLI will actually run in.
+    workspace_root = getattr(model, "workspace_root", None)
+    scope = workspace_root if isinstance(workspace_root, str) else None
+    composed_rules = [
+        *native_read_floor_rules(scope),
+        *(
+            workspace_scoped_tool_rule(name, scope)
+            for name in composed_names
+            if name not in NATIVE_READ_TOOL_NAMES
+        ),
+    ]
     existing = list(getattr(model, "allowed_tools", []) or [])
-    combined = existing + [name for name in composed_names if name not in existing]
+    combined = existing + [rule for rule in composed_rules if rule not in existing]
     if combined == existing:
         return model
     return attach(list(getattr(model, "mcp_servers", []) or []), combined)

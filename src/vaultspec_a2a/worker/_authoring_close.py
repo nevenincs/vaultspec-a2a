@@ -42,7 +42,7 @@ async def close_authoring_session_best_effort(
         if not isinstance(session_id, str) or not session_id:
             return
         actor_token = token_store.actor_token(thread_id, _CLOSE_SESSION_ROLE)
-        engine = resolve_engine()
+        engine = await asyncio.to_thread(resolve_engine)
         if not actor_token or engine is None:
             return
         # Origin and fallback bearer come from the same engine resolution.

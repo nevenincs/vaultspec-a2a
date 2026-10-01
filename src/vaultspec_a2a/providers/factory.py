@@ -38,6 +38,7 @@ from ._factory_commands import (
 from .acp_catalog import discover_acp_catalog
 from .antigravity_catalog import discover_antigravity_catalog
 from .antigravity_cli import resolve_antigravity_command
+from .cli_resolution import pin_claude_executable
 from .codex_catalog import discover_codex_catalog
 from .in_process_catalog import (
     IN_PROCESS_EXECUTION_MODES,
@@ -209,6 +210,10 @@ async def _discover_claude_catalog(
             transport=HealthState.UNAVAILABLE,
         )
     env = resolve_env_vars(workspace_root)
+    # The probe drives the same CLI a served turn will. Unpinned, the adapter
+    # falls back to its vendored binary, so the catalog this builds would
+    # describe a different Claude from the one the lane then runs.
+    pin_claude_executable(env)
     use_exec = metadata["acp_backend"] == "binary"
     if use_exec:
         env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"

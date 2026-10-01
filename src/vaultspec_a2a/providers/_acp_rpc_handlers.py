@@ -32,13 +32,14 @@ from ._acp_types import (
     AcpSessionContext,
     require_workspace_root,
 )
+from ._harness_mcp_registry import harness_tool_is_withheld
 from ._json_contract import (
     JsonObject,
-    JsonValue,
     lenient_json_object,
     lenient_json_object_list,
 )
 from ._native_read_tools import NATIVE_READ_TOOL_NAMES
+from ._project_scope import foreign_project_argument
 
 __all__: list[str] = []
 
@@ -358,48 +359,95 @@ def _strip_mcp_prefix(tool_name: str) -> str:
 def _option_id_at(options: list[JsonObject], index: int, *, default: str) -> str:
     """Return the id of the option at ``index``, or ``default`` if it has none.
 
-    Positional, never scanning: these call sites pick an option by CONVENTION
-    (first is the least restrictive, last the most), so silently sliding to a
-    neighbour when the conventional entry is malformed would substitute an
-    option with the opposite meaning. Reading the id through the canonical
-    extractor instead of subscripting is what keeps a malformed entry from
-    raising ``KeyError`` on a path that exists to handle malformed input.
+    Positional, never scanning: the caller picks an option by CONVENTION (first
+    is the least restrictive), so silently sliding to a neighbour when the
+    conventional entry is malformed would substitute an option with the opposite
+    meaning. Reading the id through the canonical extractor instead of
+    subscripting is what keeps a malformed entry from raising ``KeyError`` on a
+    path that exists to handle malformed input.
     """
     if not options:
         return default
     return option_id_of(options[index]) or default
 
 
-def _first_offered_option_id(options: list[JsonObject], *, default: str) -> str:
-    """Return the first option id actually offered, or ``default`` if none is.
+def _is_approval_option(option: JsonObject) -> bool:
+    """Whether one offered option would let the tool call proceed.
 
-    Unlike :func:`_option_id_at` this scans, because its caller has already
-    established that SOME id is on offer and only needs a real one.
+    Asked by the refusal paths so none of them can answer with an approval. Read
+    from the kind where the backend states one and from the id's own spelling
+    where it does not, because a fail-closed path that trusts only the typed
+    field is one malformed option away from granting what it meant to refuse.
     """
-    return next(
-        (option_id for option in options if (option_id := option_id_of(option))),
-        default,
+    option_id = (option_id_of(option) or "").lower()
+    return option.get("kind") in ("allow_once", "allow_always") or (
+        "allow" in option_id or "approve" in option_id
     )
 
 
-def _denial_option_id(options: list[JsonObject]) -> str:
-    """Return the id of the most restrictive offered option.
+def _offered_refusal_option_id(options: list[JsonObject]) -> str | None:
+    """Return an offered refusal of any spelling, or ``None`` if none is offered."""
+    for option in options:
+        option_id = option_id_of(option)
+        if option_id and (
+            option.get("kind") in ("reject_once", "reject_always")
+            or "reject" in option_id.lower()
+            or "deny" in option_id.lower()
+        ):
+            return option_id
+    return None
 
-    Prefer the first option whose id names a denial; fall back to the last
-    option in the list (conventionally the most restrictive), then to the
-    literal ``"deny"``. The literal is the deliberate answer when the last
-    option is malformed: an id the agent does not recognise makes it decline
-    the tool call, whereas scanning back down the list for any usable id could
-    hand this fail-closed path an APPROVAL.
+
+def _refusal_option_id(options: list[JsonObject]) -> str:
+    """Return the id every refusing path answers with.
+
+    An offered refusal first, whatever the backend spells it. Failing that, the
+    last option - conventionally the most restrictive - but ONLY when it is not
+    an approval, and otherwise the literal ``"reject"``. The literal is a
+    deliberate answer rather than a gap: an id the agent does not recognise makes
+    it decline the tool call, which is the direction a refusal must fail in,
+    while any scan that could land on an approval turns one malformed or unusual
+    option list into a grant.
     """
-    return next(
-        (
-            option_id
-            for option in options
-            if (option_id := option_id_of(option)) and "deny" in option_id.lower()
-        ),
-        _option_id_at(options, -1, default="deny"),
-    )
+    offered = _offered_refusal_option_id(options)
+    if offered is not None:
+        return offered
+    if options and not _is_approval_option(options[-1]):
+        return option_id_of(options[-1]) or "reject"
+    return "reject"
+
+
+def _selected_outcome(rpc_id: AcpRpcId, option_id: str) -> JsonObject:
+    """Build the response frame selecting one offered option."""
+    return {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "result": {"outcome": {"optionId": option_id, "outcome": "selected"}},
+    }
+
+
+def _refused_outcome(rpc_id: AcpRpcId, options: list[JsonObject]) -> JsonObject:
+    """Build the response frame that refuses one tool call.
+
+    A refusal is expressed by SELECTING an offered refusal wherever the request
+    offers one, because that is the answer the agent can act on: the pinned
+    adapter turns it into a denial the model is told about while the turn
+    continues. Where the request offers nothing to refuse with, the protocol's
+    own ``cancelled`` outcome is the answer - it carries no option id at all, so
+    it cannot be mistaken for a selection, and the adapter aborts the tool use.
+    Never an approval, and never an empty frame.
+    """
+    offered = _offered_refusal_option_id(options)
+    if offered is not None:
+        return _selected_outcome(rpc_id, offered)
+    last_id = option_id_of(options[-1]) if options else None
+    if last_id and not _is_approval_option(options[-1]):
+        return _selected_outcome(rpc_id, last_id)
+    return {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "result": {"outcome": {"outcome": "cancelled"}},
+    }
 
 
 def _approval_option_id(options: list[JsonObject]) -> str:
@@ -418,17 +466,54 @@ def _approval_option_id(options: list[JsonObject]) -> str:
     return _option_id_at(options, 0, default="approve")
 
 
-def _rejection_option_id(options: list[JsonObject]) -> str:
-    """Return the id of an offered rejection, scanning for a refusal of any spelling."""
-    for option in options:
-        option_id = option_id_of(option)
-        if option_id and (
-            option.get("kind") in ("reject_once", "reject_always")
-            or "reject" in option_id.lower()
-            or "deny" in option_id.lower()
-        ):
-            return option_id
-    return _option_id_at(options, -1, default="reject")
+def _is_always_option(option: JsonObject) -> bool:
+    """Whether one offered option commits the CLI to remember an approval."""
+    option_id = option_id_of(option) or ""
+    return option.get("kind") == "allow_always" or "always" in option_id.lower()
+
+
+def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str:
+    """Return the once-only spelling of a chosen approval.
+
+    An "always" approval is not this project's to give. The CLI persists it as a
+    permission rule in the operator's own settings, outside anything a run can
+    see or retract, and a rule written that way widens every later run on that
+    machine - including the unattended ones, whose whole posture is that nothing
+    is approved that was not approved for them. A human at the prompt is
+    answering for THIS call, so this call is what the answer is applied to.
+
+    The narrowest offered approval is chosen through the same reader the
+    autonomous rung uses, so both rungs answer the same way about the same
+    option list. If a session offers no once-only approval at all, the choice is
+    left as made rather than converted into a refusal the human did not give -
+    and that case is logged, because it is the one where an approval outlives
+    its call.
+    """
+    chosen = next(
+        (
+            option
+            for option in options
+            if option_id_of(option) == option_id and _is_always_option(option)
+        ),
+        None,
+    )
+    if chosen is None:
+        return option_id
+    narrowed = _approval_option_id(options)
+    if narrowed == option_id:
+        logger.warning(
+            "Permission option %r remembers the approval and the session offers "
+            "no single-use alternative; the CLI will persist a rule this run "
+            "cannot retract",
+            option_id,
+        )
+        return option_id
+    logger.info(
+        "Narrowed a remembered permission approval to a single use: %r -> %r",
+        option_id,
+        narrowed,
+    )
+    return narrowed
 
 
 def _autonomous_option_id(
@@ -457,78 +542,7 @@ def _autonomous_option_id(
     )
     if canonical in allowed:
         return _approval_option_id(options)
-    return _rejection_option_id(options)
-
-
-# Tool-call argument keys that name a project to operate on. The search tools a
-# run is handed take their root this way - ``project_root`` on every
-# vaultspec-rag tool - which is how a scope escape arrives as an ARGUMENT that no
-# per-server trust assertion can express. Both the snake_case and camelCase
-# spellings are listed because the argument crosses a JSON boundary where either
-# convention is admissible.
-_PROJECT_ARGUMENT_KEYS: frozenset[str] = frozenset(
-    {"project_root", "projectRoot", "workspace_root", "workspaceRoot"}
-)
-
-# Depth bound for the argument scan. Tool inputs are flat in practice (the search
-# adapter exposes a deliberately flat schema), so this exists only so untrusted,
-# deeply nested input cannot turn a permission decision into a recursion.
-_MAX_ARGUMENT_SCAN_DEPTH = 6
-
-
-def _foreign_project_field(key: str, value: JsonValue, config: AcpModelConfig) -> bool:
-    return (
-        key in _PROJECT_ARGUMENT_KEYS
-        and isinstance(value, str)
-        and bool(value.strip())
-        and not config.binds_project_path(value.strip())
-    )
-
-
-def _scan_foreign_project_mapping(
-    value: JsonObject, config: AcpModelConfig, depth: int
-) -> str | None:
-    for key, item in value.items():
-        if _foreign_project_field(key, item, config):
-            return str(item)
-        if (
-            found := _scan_foreign_project_argument(item, config, depth + 1)
-        ) is not None:
-            return found
-    return None
-
-
-def _scan_foreign_project_argument(
-    value: JsonValue, config: AcpModelConfig, depth: int
-) -> str | None:
-    if depth > _MAX_ARGUMENT_SCAN_DEPTH:
-        return None
-    if isinstance(value, dict):
-        return _scan_foreign_project_mapping(value, config, depth)
-    if isinstance(value, list):
-        for item in value:
-            if (
-                found := _scan_foreign_project_argument(item, config, depth + 1)
-            ) is not None:
-                return found
-    return None
-
-
-def _foreign_project_argument(args: JsonObject, config: AcpModelConfig) -> str | None:
-    """Return the first argument naming a project outside the run's, or ``None``.
-
-    The escape this closes is argument-borne: the run's grounding tools resolve a
-    caller-supplied root against any enrolled workspace on the machine, so a call
-    the registry considers entirely read-only and entirely local still returns
-    another project's content. The trust boundary is therefore the call, and this
-    is where calls already pass.
-
-    A named project that is not the run's is REPORTED, not corrected. Rewriting
-    the argument to the bound project would answer a different question than the
-    agent asked and hide that it asked it.
-    """
-
-    return _scan_foreign_project_argument(args, config, 0)
+    return _refusal_option_id(options)
 
 
 async def on_request_permission(
@@ -564,23 +578,28 @@ async def on_request_permission(
     # refusal and the run's own bound project: the R7 discipline this handler
     # already follows keeps agent-supplied payload out of the log, and a
     # caller-chosen path is payload.
-    if _foreign_project_argument(args, config) is not None:
+    if foreign_project_argument(args, config) is not None:
         logger.warning(
             "Refused cross-project tool call: tool=%s named a project outside "
             "the run's bound project (bound=%s)",
             name,
             config.bound_project_root(),
         )
-        deny_id = _denial_option_id(options)
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
-        }
+        return _refused_outcome(rpc_id, options)
+
+    # A withheld harness tool is served by a server the run mounts but is never
+    # callable, so it is refused ahead of the human rung as well: a person at the
+    # prompt cannot see that the call would send vault text off the host, and
+    # the registry's no-egress declaration rests on nobody being asked.
+    if harness_tool_is_withheld(_canonical_tool_identity(name, config)):
+        logger.warning("Refused a withheld harness tool: tool=%s", name)
+        return _refused_outcome(rpc_id, options)
 
     if config.permission_callback:
         try:
-            option_id = await config.permission_callback(name, args, options)
+            option_id = _narrowed_to_one_use(
+                await config.permission_callback(name, args, options), options
+            )
         except GraphBubbleUp as exc:
             ctx.interrupt_exc.append(exc)
             try:
@@ -589,24 +608,14 @@ async def on_request_permission(
                 logger.warning("Chunk queue full — dropping interrupt sentinel")
             # H9 fix: return a proper JSON-RPC denial response instead of
             # an empty dict `{}` which would produce a malformed frame.
-            deny_id = _denial_option_id(options)
-            return {
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
-            }
+            return _refused_outcome(rpc_id, options)
         except Exception:
             logger.exception(
                 "Permission callback raised; denying permission (fail-closed)"
             )
             # TOAD reference pattern: return a denial outcome (not a JSON-RPC
             # error) so the ACP subprocess can cleanly decline the tool call.
-            deny_id = _denial_option_id(options)
-            return {
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
-            }
+            return _refused_outcome(rpc_id, options)
     else:
         # Autonomous: no permission_callback means no human rung, on ANY lane.
         # Under autonomy the worker leaves the callback unset, so every
@@ -625,20 +634,23 @@ async def on_request_permission(
     # nothing instead of admitting ``None`` as a "valid" answer.
     valid_ids = valid_option_ids(options)
     if valid_ids and option_id not in valid_ids:
+        # An answer naming an option that was never offered is not a decision
+        # this handler can carry out, so the call is REFUSED rather than mapped
+        # onto a neighbour. Substituting the first offered option was the same
+        # bug in two directions: the pinned adapter orders its options
+        # allow_always first, so a refusal whose id did not match resolved to the
+        # broadest possible grant - and any substitution answers a question the
+        # decider was not asked.
         logger.warning(
-            "Permission callback returned option_id=%r not in valid options %r; "
-            "falling back to first option",
+            "Permission answer option_id=%r is not among the offered options %r; "
+            "refusing the tool call rather than substituting one",
             option_id,
             sorted(valid_ids),
         )
-        option_id = _first_offered_option_id(options, default=option_id)
+        return _refused_outcome(rpc_id, options)
 
     logger.info("ACP permission decision: tool=%s option=%s", name, option_id)
-    return {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {"outcome": {"optionId": option_id, "outcome": "selected"}},
-    }
+    return _selected_outcome(rpc_id, option_id)
 
 
 async def on_fs_read_text_file(

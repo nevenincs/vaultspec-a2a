@@ -285,6 +285,15 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         probe=_docker_compose_present,
     ),
     ExternalPrerequisite(
+        "postgres",
+        what="a reachable PostgreSQL server for the checkpoint backend",
+        supply=(
+            "start PostgreSQL and export VAULTSPEC_A2A_TEST_POSTGRES_URL as a "
+            "postgresql:// connection string to a database the tests may write"
+        ),
+        probe=_env_set("VAULTSPEC_A2A_TEST_POSTGRES_URL"),
+    ),
+    ExternalPrerequisite(
         "dashboard-engine",
         what="the cross-repository dashboard serve command",
         supply=(

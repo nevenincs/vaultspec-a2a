@@ -1,15 +1,13 @@
-"""Pin what each LangGraph event family emits, before it is decomposed.
+"""Pin what each family of graph stream frame emits.
 
-The transformer's ``process_langgraph_event`` is a single long function with one
-branch per event family. It has no direct tests - only the aggregator suite
-exercises it indirectly - which makes it exactly the code a refactor can change
-without anyone noticing.
+A run reaches a client through two surfaces: the graph's public stream modes
+and the tool-lifecycle callbacks seated beside them. These characterize the
+observable contract of both - given one frame or one callback, what wire
+events reach a subscriber, and with what key fields.
 
-These characterize the observable contract: given one LangGraph callback event,
-what wire events reach a subscriber, and with what key fields. Everything runs
-through the real aggregator - real emitters, real buffering, real subscriber
-queue - with no mocks, so the assertions describe the behaviour a client sees
-rather than the shape of the code.
+Everything runs through the real aggregator - real emitters, real buffering,
+real subscriber queue - with no mocks, so the assertions describe the
+behaviour a client sees rather than the shape of the code.
 """
 
 from __future__ import annotations
@@ -17,8 +15,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict
 from typing import Any
+from uuid import uuid4
 
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 
 from ...streaming.aggregator import EventAggregator
 
@@ -26,20 +26,28 @@ _THREAD = "t-char"
 _AGENT = "a-char"
 _NODE = "researcher"
 
+type _Frame = tuple[tuple[str, ...], str, object]
+type _Drained = list[tuple[str, dict[str, Any]]]
 
-async def _drive(events: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
-    """Feed events through the real aggregator and drain the subscriber queue."""
+
+async def _drive(
+    frames: list[_Frame], callbacks: list[tuple[str, dict[str, Any]]] | None = None
+) -> _Drained:
+    """Feed frames and callbacks through the real aggregator and drain the queue."""
     aggregator = EventAggregator()
     queue = aggregator.add_subscriber("client")
     aggregator.subscribe("client", [_THREAD])
+    handler = aggregator.run_lifecycle_callbacks(_THREAD, _AGENT)
 
-    for event in events:
-        await aggregator.process_langgraph_event(
-            event, thread_id=_THREAD, agent_id=_AGENT
+    for namespace, mode, payload in frames:
+        await aggregator.process_stream_frame(
+            namespace, mode, payload, thread_id=_THREAD, agent_id=_AGENT
         )
+    for name, kwargs in callbacks or []:
+        await getattr(handler, name)(**kwargs)
     await asyncio.sleep(0.05)
 
-    drained: list[tuple[str, dict[str, Any]]] = []
+    drained: _Drained = []
     while not queue.empty():
         sequenced = queue.get_nowait()
         event = sequenced.event
@@ -49,31 +57,35 @@ async def _drive(events: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]
     return drained
 
 
-def _run(events: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
-    return asyncio.run(_drive(events))
+def _run(
+    frames: list[_Frame], callbacks: list[tuple[str, dict[str, Any]]] | None = None
+) -> _Drained:
+    return asyncio.run(_drive(frames, callbacks))
 
 
-def _stream(chunk: AIMessageChunk, run_id: str = "r1") -> dict[str, Any]:
-    return {
-        "event": "on_chat_model_stream",
-        "run_id": run_id,
-        "metadata": {"langgraph_node": _NODE},
-        "data": {"chunk": chunk},
-    }
+def _stream(chunk: AIMessageChunk) -> _Frame:
+    return ((), "messages", (chunk, {"langgraph_node": _NODE}))
 
 
-def _end(output: Any = None, run_id: str = "r1") -> dict[str, Any]:
-    return {
-        "event": "on_chat_model_end",
-        "run_id": run_id,
-        "metadata": {"langgraph_node": _NODE},
-        "data": {"output": output},
-    }
+def _llm_end(
+    message: AIMessage, tags: list[str] | None = None
+) -> tuple[str, dict[str, Any]]:
+    return (
+        "on_llm_end",
+        {
+            "response": LLMResult(generations=[[ChatGeneration(message=message)]]),
+            "run_id": uuid4(),
+            "tags": tags or [],
+        },
+    )
 
 
 def test_a_string_content_chunk_becomes_a_buffered_message_chunk() -> None:
     """Plain text streams as a message chunk, flushed at model end."""
-    emitted = _run([_stream(AIMessageChunk(content="hello world")), _end()])
+    emitted = _run(
+        [_stream(AIMessageChunk(content="hello world", id="r1"))],
+        [_llm_end(AIMessage(content="hello world", id="r1"))],
+    )
 
     names = [name for name, _ in emitted]
     assert "MessageChunk" in names
@@ -84,36 +96,89 @@ def test_a_string_content_chunk_becomes_a_buffered_message_chunk() -> None:
 
 def test_a_finish_reason_at_end_emits_a_terminal_message_chunk() -> None:
     """The model-end finish reason surfaces on a final empty chunk."""
-    output = AIMessage(content="", response_metadata={"finish_reason": "stop"})
-
-    emitted = _run([_end(output=output)])
+    emitted = _run(
+        [],
+        [
+            _llm_end(
+                AIMessage(
+                    content="", id="r1", response_metadata={"finish_reason": "stop"}
+                )
+            )
+        ],
+    )
 
     finals = [p for n, p in emitted if n == "MessageChunk" and p.get("finish_reason")]
     assert finals, emitted
     assert finals[0]["finish_reason"] == "stop"
 
 
-def test_a_tool_start_on_a_node_emits_a_tool_call_start() -> None:
+def test_a_tool_start_emits_a_tool_call_start() -> None:
     """A tool invocation inside a node surfaces to the client."""
     emitted = _run(
+        [],
         [
-            {
-                "event": "on_tool_start",
-                "run_id": "r-tool",
-                "name": "vaultspec-rag",
-                "metadata": {"langgraph_node": _NODE},
-                "data": {"input": {"query": "x"}},
-            }
-        ]
+            (
+                "on_tool_start",
+                {
+                    "serialized": {"name": "vaultspec-rag"},
+                    "input_str": "{'query': 'x'}",
+                    "run_id": uuid4(),
+                    "metadata": {"langgraph_node": _NODE},
+                    "inputs": {"query": "x"},
+                    "tool_call_id": "call_RAG",
+                },
+            )
+        ],
     )
 
-    assert any(name == "ToolCallStart" for name, _ in emitted), emitted
+    starts = [p for n, p in emitted if n == "ToolCallStart"]
+    assert starts, emitted
+    assert starts[0]["tool_call_id"] == "call_RAG"
+    assert starts[0]["agent_id"] == _NODE
+
+
+def test_a_tool_end_resolves_the_call_the_start_registered() -> None:
+    """One tool call carries one identity from registration to resolution."""
+    run_id = uuid4()
+    emitted = _run(
+        [],
+        [
+            (
+                "on_tool_start",
+                {
+                    "serialized": {"name": "vaultspec-rag"},
+                    "input_str": "{}",
+                    "run_id": run_id,
+                    "metadata": {"langgraph_node": _NODE},
+                    "inputs": {"query": "x"},
+                    "tool_call_id": "call_RAG",
+                },
+            ),
+            (
+                "on_tool_end",
+                {
+                    "output": ToolMessage(
+                        content="hit", name="vaultspec-rag", tool_call_id="call_RAG"
+                    ),
+                    "run_id": run_id,
+                    "tool_call_id": "call_RAG",
+                },
+            ),
+        ],
+    )
+
+    identities = {
+        p["tool_call_id"]
+        for n, p in emitted
+        if n in ("ToolCallStart", "ToolCallUpdate")
+    }
+    assert identities == {"call_RAG"}
 
 
 def test_a_reasoning_block_chunk_emits_a_thought_chunk() -> None:
     """A reasoning content block streams as a thought, not a message."""
     chunk = AIMessageChunk(
-        content=[{"type": "reasoning", "content": "thinking about it"}]
+        content=[{"type": "reasoning", "content": "thinking about it"}], id="r1"
     )
 
     emitted = _run([_stream(chunk)])
@@ -126,9 +191,13 @@ def test_a_reasoning_block_chunk_emits_a_thought_chunk() -> None:
 def test_text_delta_block_is_buffered_as_message_content() -> None:
     emitted = _run(
         [
-            _stream(AIMessageChunk(content=[{"type": "text_delta", "text": "hello"}])),
-            _end(),
-        ]
+            _stream(
+                AIMessageChunk(
+                    content=[{"type": "text_delta", "text": "hello"}], id="r1"
+                )
+            )
+        ],
+        [_llm_end(AIMessage(content="hello", id="r1"))],
     )
 
     messages = [payload for name, payload in emitted if name == "MessageChunk"]
@@ -141,6 +210,7 @@ def test_additional_reasoning_emits_once_without_content_blocks() -> None:
             _stream(
                 AIMessageChunk(
                     content="",
+                    id="r1",
                     additional_kwargs={"reasoning_content": "thinking separately"},
                 )
             )
@@ -151,24 +221,27 @@ def test_additional_reasoning_emits_once_without_content_blocks() -> None:
     assert [payload["content"] for payload in thoughts] == ["thinking separately"]
 
 
-def test_an_event_without_a_node_and_no_family_emits_nothing() -> None:
-    """A sub-runnable event with no matching family is filtered out."""
-    emitted = _run(
-        [{"event": "on_chain_start", "run_id": "r", "metadata": {}, "data": {}}]
-    )
+def test_a_frame_of_a_mode_this_projection_ignores_emits_nothing() -> None:
+    """A mode consumed for the run's own classification produces no wire event."""
+    emitted = _run([((), "updates", {"researcher": {"note": "x"}})])
 
     assert emitted == []
 
 
-def test_chunks_share_the_run_id_as_message_id() -> None:
-    """Two chunks of one model run carry one message id, so a client can join them."""
+def test_chunks_share_the_message_id_so_a_client_can_join_them() -> None:
+    """Two chunks of one model turn carry one message id.
+
+    The model's own message id is used, not the run id behind it, because
+    that same id is what the settled run's REST snapshot reports for the
+    message these chunks make up.
+    """
     emitted = _run(
         [
-            _stream(AIMessageChunk(content="part one "), run_id="run-A"),
-            _stream(AIMessageChunk(content="part two"), run_id="run-A"),
-            _end(run_id="run-A"),
-        ]
+            _stream(AIMessageChunk(content="part one ", id="msg-A")),
+            _stream(AIMessageChunk(content="part two", id="msg-A")),
+        ],
+        [_llm_end(AIMessage(content="part one part two", id="msg-A"))],
     )
 
     message_ids = {p["message_id"] for n, p in emitted if n == "MessageChunk"}
-    assert message_ids == {"run-A"}, emitted
+    assert message_ids == {"msg-A"}, emitted

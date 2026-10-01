@@ -130,18 +130,24 @@ class TestStreamThreadEvents:
 
         assert resp.status_code == 200
         frames = _sse_frames(resp.text)
-        assert [name for name, _ in frames] == ["error", "thread_terminal"], (
-            "a replayed failure carries the coded frame before its terminal, "
-            "in the order a live client received them"
+        assert [name for name, _ in frames] == [
+            "stream_snapshot",
+            "error",
+            "thread_terminal",
+        ], (
+            "the snapshot states what was attached to, then the replayed failure "
+            "carries its coded frame before its terminal, in the order a live "
+            "client received them"
         )
+        assert frames[0][1]["status"] == ThreadStatus.FAILED.value
 
-        error = frames[0][1]
+        error = frames[1][1]
         assert error["code"] == ProviderCondition.THROTTLED.value
         assert error["message"] == "RateLimitError: too many requests"
         # The run is over; nothing about it is retryable any more.
         assert error["recoverable"] is False
 
-        terminal = frames[1][1]
+        terminal = frames[2][1]
         assert terminal["status"] == ThreadStatus.FAILED.value
         assert terminal["replay"] is True
         assert terminal["error_detail"] == "RateLimitError: too many requests"
@@ -179,10 +185,14 @@ class TestStreamThreadEvents:
             resp = client.get(f"/v1/runs/{thread_id}/stream")
 
         frames = _sse_frames(resp.text)
-        assert [name for name, _ in frames] == ["error", "thread_terminal"]
-        assert frames[0][1]["code"] == ProviderCondition.UNKNOWN.value
-        assert frames[0][1]["message"] == "ValueError: bad workspace root"
-        assert frames[1][1]["error_detail"] == "ValueError: bad workspace root"
+        assert [name for name, _ in frames] == [
+            "stream_snapshot",
+            "error",
+            "thread_terminal",
+        ]
+        assert frames[1][1]["code"] == ProviderCondition.UNKNOWN.value
+        assert frames[1][1]["message"] == "ValueError: bad workspace root"
+        assert frames[2][1]["error_detail"] == "ValueError: bad workspace root"
 
     def test_stream_terminal_success_replays_no_error_frame(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -212,6 +222,6 @@ class TestStreamThreadEvents:
             resp = client.get(f"/v1/runs/{thread_id}/stream")
 
         frames = _sse_frames(resp.text)
-        assert [name for name, _ in frames] == ["thread_terminal"]
+        assert [name for name, _ in frames] == ["stream_snapshot", "thread_terminal"]
         assert frames[0][1]["status"] == ThreadStatus.COMPLETED.value
         assert "error_detail" not in frames[0][1]

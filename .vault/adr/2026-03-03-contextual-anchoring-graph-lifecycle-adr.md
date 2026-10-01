@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#contextual-anchoring-graph-lifecycle'
 date: 2026-03-03
-modified: '2026-07-15'
-body_hash: 'sha256:eafafe320ba64f85a2f46a2b147a6af26c56093fc28801261e91b0bb2537a8f7'
+modified: '2026-09-30'
+body_hash: 'sha256:0ddab9ef03dba345b46b7fe7410315c1c93b441133535b150e04eb5c12759381'
 related:
 - '[[2026-02-27-team-composition-topology-adr]]'
 - '[[2026-02-28-thread-metadata-context-injection-adr]]'
@@ -417,3 +417,13 @@ read-only compiled view. Any write-side artifact production it implies now
 routes through the engine authoring API as a reviewed proposal. See
 `2026-07-14-a2a-edge-conformance-adr` (R2) and
 `2026-07-14-a2a-edge-conformance-reference`.
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+A completion gate no longer reroutes a blocked FINISH to `workers[0]`. It routes to the worker that owns the phase that can satisfy the gate. When the team has no such worker, it refuses the decision back to the supervisor with the reason attached (`src/vaultspec_a2a/graph/nodes/supervisor.py`). The roster-ordering workaround in section 3 is withdrawn. First-in-roster was not a safe fallback but the livelock itself: on the shipped star preset it sent a demand for an audit artifact to a worker that cannot produce one.
+
+The validation errors that block FINISH belong to the exec-phase worker the gate reroutes to, and that worker's finished turn retires them (`src/vaultspec_a2a/graph/nodes/worker.py`). Without that, nothing outside the document topology ever cleared the channel, so a star run that acquired one error could only end in a routing failure. A worker of any other phase leaves them in place.
+
+Both unaccepted outcomes are budgeted. Each budget has its own counter, because a refusal costs one supervisor turn while a blocked FINISH also costs a worker turn (`src/vaultspec_a2a/thread/state.py`, `src/vaultspec_a2a/domain_config.py`). A spent budget ends the run with a typed routing error rather than an anonymous recursion limit. Reporting the run complete is not available to either path, because that would claim a gate passed which refused. The budget is enforced at compile time: a team that can spend it must carry a recursion limit of at least three supersteps per blocked FINISH plus one, or it is refused (`src/vaultspec_a2a/graph/compiler.py`).
+
+The refusal reason must reach the model on the re-ask. Anchoring is empty when no feature is bound, so in that case the reason is injected directly. A re-ask with a prompt identical to the one that just failed is not a re-ask. When a blocked FINISH is rerouted to a worker that needs plan approval, the reason travels with the approval request rather than a pass later. Grounding: `2026-09-30-langgraph-conformance-audit`.

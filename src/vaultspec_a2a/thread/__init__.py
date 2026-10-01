@@ -45,11 +45,13 @@ if TYPE_CHECKING:
     from .errors import ConfigError as ConfigError
     from .errors import ContextOverflowError as ContextOverflowError
     from .errors import DatabaseError as DatabaseError
+    from .errors import DocumentConformanceError as DocumentConformanceError
     from .errors import EventAggregatorError as EventAggregatorError
     from .errors import NicknameConflictError as NicknameConflictError
     from .errors import PermissionDeniedError as PermissionDeniedError
     from .errors import ProtocolError as ProtocolError
     from .errors import ProviderSessionError as ProviderSessionError
+    from .errors import SupervisorRoutingError as SupervisorRoutingError
     from .errors import TeamConfigNotFoundError as TeamConfigNotFoundError
     from .errors import TokenBudgetExceededError as TokenBudgetExceededError
     from .errors import VaultspecError as VaultspecError
@@ -76,6 +78,7 @@ if TYPE_CHECKING:
     from .snapshots import normalize_artifacts as normalize_artifacts
     from .snapshots import normalize_plan_entries as normalize_plan_entries
     from .snapshots import project_checkpoint_tuple as project_checkpoint_tuple
+    from .snapshots import stamp_message_created_at as stamp_message_created_at
     from .state import TeamState as TeamState
 
 _LAZY_IMPORTS = {
@@ -99,11 +102,13 @@ _LAZY_IMPORTS = {
     "ConfigError": ".errors",
     "ContextOverflowError": ".errors",
     "DatabaseError": ".errors",
+    "DocumentConformanceError": ".errors",
     "EventAggregatorError": ".errors",
     "NicknameConflictError": ".errors",
     "PermissionDeniedError": ".errors",
     "ProtocolError": ".errors",
     "ProviderSessionError": ".errors",
+    "SupervisorRoutingError": ".errors",
     "TeamConfigNotFoundError": ".errors",
     "TokenBudgetExceededError": ".errors",
     "VaultspecError": ".errors",
@@ -124,6 +129,7 @@ _LAZY_IMPORTS = {
     "normalize_artifacts": ".snapshots",
     "normalize_plan_entries": ".snapshots",
     "project_checkpoint_tuple": ".snapshots",
+    "stamp_message_created_at": ".snapshots",
     "TeamState": ".state",
 }
 
@@ -157,6 +163,7 @@ __all__ = [
     "ControlActionResultStatus",
     "ControlActionType",
     "DatabaseError",
+    "DocumentConformanceError",
     "EventAggregatorError",
     "ExecutionStateProjection",
     "InvalidTransitionError",
@@ -169,6 +176,7 @@ __all__ = [
     "ProtocolError",
     "ProviderSessionError",
     "RepairStatus",
+    "SupervisorRoutingError",
     "TeamConfigNotFoundError",
     "TeamState",
     "ThreadStatus",
@@ -184,5 +192,6 @@ __all__ = [
     "normalize_plan_entries",
     "pending_clarification",
     "project_checkpoint_tuple",
+    "stamp_message_created_at",
     "validate_clarification_answers",
 ]

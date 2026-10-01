@@ -121,7 +121,7 @@ async def test_researcher_producer_advertises_declared_harness_server(
 
 
 @pytest.mark.asyncio
-async def test_autonomous_worker_auto_permits_composed_rag_read_tools(
+async def test_autonomous_worker_leaves_composed_rag_tools_to_the_rung(
     tmp_path: Path,
 ) -> None:
     """A headless worker turn joins the composed rag read tools to allowedTools.
@@ -142,9 +142,13 @@ async def test_autonomous_worker_auto_permits_composed_rag_read_tools(
 
     await node(_state())
     allowed = _allowed_tools(record_file)
-    assert "mcp__vaultspec-rag__search_vault" in allowed
-    assert "mcp__vaultspec-rag__search_codebase" in allowed
-    assert "mcp__vaultspec-rag__get_code_file" in allowed
+    # The search server's tools take their project per call, so they are NOT
+    # pre-approved: a static approval is taken with the arguments unknown and
+    # would put the cross-project refusal out of reach. They stay in the run's
+    # composed surface and are decided at the permission rung instead, while
+    # the server itself is still mounted for the run.
+    assert not [name for name in allowed if name.startswith("mcp__vaultspec-rag__")]
+    assert _server_names(record_file) == ["vaultspec-rag"]
     # The read-only boundary holds at the allowlist too: no write verb.
     assert not any("reindex" in t for t in allowed)
 
@@ -175,7 +179,7 @@ async def test_supervised_worker_does_not_auto_permit_harness_tools(
 
 
 @pytest.mark.asyncio
-async def test_autonomous_researcher_producer_auto_permits_rag_read_tools(
+async def test_autonomous_researcher_producer_leaves_rag_tools_to_the_rung(
     tmp_path: Path,
 ) -> None:
     """The researcher producer path auto-permits the composed rag read tools too.
@@ -195,9 +199,10 @@ async def test_autonomous_researcher_producer_auto_permits_rag_read_tools(
 
     await producer(_state(), {"thread_id": "t1", "topic": "x", "instructions": ""})
     allowed = _allowed_tools(record_file)
-    assert "mcp__vaultspec-rag__search_vault" in allowed
-    assert "mcp__vaultspec-rag__search_codebase" in allowed
-    assert "mcp__vaultspec-rag__get_code_file" in allowed
+    # Decided at the permission rung rather than pre-approved; see the
+    # worker-node test above for why, and the server is still mounted.
+    assert not [name for name in allowed if name.startswith("mcp__vaultspec-rag__")]
+    assert _server_names(record_file) == ["vaultspec-rag"]
     assert not any("reindex" in t for t in allowed)
 
 

@@ -22,7 +22,9 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import interrupt
 from opentelemetry.sdk.resources import Resource
@@ -34,12 +36,13 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...domain_config import domain_config
+from ...graph.compiler import compile_team_graph
 from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import model_assignment_digest
-from ...team.team_config import load_team_config
+from ...team.team_config import load_agent_config, load_team_config
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -50,12 +53,15 @@ from ...thread.executable_graph import freeze_graph_definition
 from .._dispatch_contract import (
     _INGEST_GUARDS,
     _RESUME_GUARDS,
+    CAPACITY_ACCEPTED,
+    CAPACITY_FULL,
+    CAPACITY_THREAD_ACTIVE,
     DispatchCapacityReservation,
 )
 from ..executor import Executor
 from ..graph_lifecycle import (
-    GraphCacheKey,
     GraphCompilationError,
+    GraphCompilationKey,
     GraphLifecycleManager,
     RegisteredCompiledGraph,
 )
@@ -162,7 +168,9 @@ _TEST_CACHE_KEY = (
 _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 
 
-def _current_ingest_dispatch(thread_id: str) -> DispatchRequest:
+def _current_ingest_dispatch(
+    thread_id: str, *, recursion_limit: int = 10
+) -> DispatchRequest:
     workspace = pathlib.Path(_WORKSPACE)
     definition = freeze_graph_definition(
         load_team_config("mock-success-single", workspace_root=workspace),
@@ -176,7 +184,7 @@ def _current_ingest_dispatch(thread_id: str) -> DispatchRequest:
         workspace_root=_WORKSPACE,
         team_preset="mock-success-single",
         graph_definition=definition,
-        recursion_limit=10,
+        recursion_limit=recursion_limit,
         model_assignment=_mock_assignment(),
     )
     accepted = freeze_accepted_input(request, intent={"content": "build it"})
@@ -234,7 +242,10 @@ def _current_resume_dispatch(
 
 
 def _inject_graph(
-    executor: Executor, thread_id: str, *, cache_key: GraphCacheKey = _TEST_CACHE_KEY
+    executor: Executor,
+    thread_id: str,
+    *,
+    cache_key: GraphCompilationKey = _TEST_CACHE_KEY,
 ) -> None:
     """Register a real terminal graph through the public executor seam."""
 
@@ -291,8 +302,9 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                result = await executor.reserve_dispatch_capacity("t-1")
+                result, reason = await executor.reserve_dispatch_capacity("t-1")
                 assert result is not None
+                assert reason == CAPACITY_ACCEPTED
             finally:
                 await bridge.close()
 
@@ -304,8 +316,9 @@ class TestIngestGating:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 await executor.reserve_dispatch_capacity("t-1")
-                result = await executor.reserve_dispatch_capacity("t-1")
+                result, reason = await executor.reserve_dispatch_capacity("t-1")
                 assert result is None
+                assert reason == CAPACITY_THREAD_ACTIVE
             finally:
                 await bridge.close()
 
@@ -319,7 +332,7 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                first = await executor.reserve_dispatch_capacity("aba-thread")
+                first, _reason = await executor.reserve_dispatch_capacity("aba-thread")
                 assert first is not None
 
                 # Queue A's terminal release and B's reserve on the production
@@ -334,7 +347,7 @@ class TestIngestGating:
                 )
                 executor._ingest_lock.release()
                 assert await release_first is True
-                second = await reserve_second
+                second, _second_reason = await reserve_second
                 assert second is not None
                 assert second != first
 
@@ -344,13 +357,18 @@ class TestIngestGating:
                 assert await executor.release_dispatch_capacity(first) is False
                 others: list[DispatchCapacityReservation] = []
                 for index in range(domain_config.max_concurrent_threads - 1):
-                    owned = await executor.reserve_dispatch_capacity(f"other-{index}")
+                    owned, _owned_reason = await executor.reserve_dispatch_capacity(
+                        f"other-{index}"
+                    )
                     assert owned is not None
                     others.append(owned)
                 assert (
                     executor.active_ingest_count == domain_config.max_concurrent_threads
                 )
-                assert await executor.reserve_dispatch_capacity("over-capacity") is None
+                assert await executor.reserve_dispatch_capacity("over-capacity") == (
+                    None,
+                    CAPACITY_FULL,
+                )
 
                 assert await executor.release_dispatch_capacity(second) is True
                 for owned in others:
@@ -366,8 +384,8 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                assert await executor.reserve_dispatch_capacity("t-1") is not None
-                assert await executor.reserve_dispatch_capacity("t-2") is not None
+                assert (await executor.reserve_dispatch_capacity("t-1"))[0] is not None
+                assert (await executor.reserve_dispatch_capacity("t-2"))[0] is not None
             finally:
                 await bridge.close()
 
@@ -378,13 +396,13 @@ class TestIngestGating:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                reservation = await executor.reserve_dispatch_capacity("t-1")
+                reservation, _reason = await executor.reserve_dispatch_capacity("t-1")
                 assert reservation is not None
                 await executor._mark_ingest_done(
                     "t-1", ThreadStatus.COMPLETED, reservation
                 )
                 # Slot is now free -- can re-acquire
-                result = await executor.reserve_dispatch_capacity("t-1")
+                result, _retry_reason = await executor.reserve_dispatch_capacity("t-1")
                 assert result is not None
             finally:
                 await bridge.close()
@@ -474,7 +492,8 @@ class TestIngestGating:
                 assert not executor._graph_lifecycle.has_thread(
                     f"terminal-{outcome.value}"
                 )
-                assert executor.graph_count == 1
+                # The run's own graph is released with it.
+                assert executor.graph_count == 0
             finally:
                 await bridge.close()
 
@@ -511,7 +530,8 @@ class TestIngestGating:
                     await executor._mark_ingest_done(thread_id, ThreadStatus.COMPLETED)
 
                 assert executor._graph_lifecycle.thread_binding_count == 0
-                assert executor.graph_count == 1
+                # Each settled run's own graph goes with it.
+                assert executor.graph_count == 0
             finally:
                 await bridge.close()
 
@@ -672,7 +692,9 @@ class TestHandleDispatch:
             bridge = _make_bridge(relayed=relayed)
             executor = Executor(checkpointer=cp, bridge=bridge)
             try:
-                reservation = await executor.reserve_dispatch_capacity(thread_id)
+                reservation, _reason = await executor.reserve_dispatch_capacity(
+                    thread_id
+                )
                 assert reservation is not None
                 graph = _terminal_graph(executor)
                 if outcome == ThreadStatus.COMPLETED:
@@ -956,6 +978,10 @@ class TestGraphInputBuilding:
         assert inp["current_plan"] == []
         assert inp["thread_id"] == "t-init"
         assert inp["token_usage"] == {}
+        # The run's input is stamped when it is accepted as a turn.
+        assert all(
+            "created_at" in message.response_metadata for message in inp["messages"]
+        )
 
     def test_followup_ingest_omits_plan_fields(self) -> None:
         """On follow-up ingest, graph_input omits current_plan/active_agent/artifacts
@@ -980,6 +1006,13 @@ class TestGraphInputBuilding:
         # These keys must still be present.
         assert inp["thread_id"] == "t-followup"
         assert len(inp["messages"]) == 1
+        # Every turn starts with the supervisor's whole re-ask budget, the
+        # whole blocked-FINISH budget, and the whole loop ceiling: each is a
+        # budget for ONE turn, and a follow-up that inherited a spent one got
+        # fewer passes than its preset grants, or none at all.
+        assert inp["supervisor_reasks"] == 0
+        assert inp["supervisor_finish_blocks"] == 0
+        assert inp["loop_count"] == 0
 
     def test_thread_id_matches_request(self) -> None:
         """thread_id in graph_input must match the request thread_id."""
@@ -1876,7 +1909,9 @@ class TestUnhandledDispatchTerminal:
             try:
                 # The slot the ingest took before it died, taken through the
                 # executor's own gate rather than by reaching into its state.
-                reservation = await executor.reserve_dispatch_capacity(thread_id)
+                reservation, _reason = await executor.reserve_dispatch_capacity(
+                    thread_id
+                )
                 assert reservation is not None
                 await executor._fail_unhandled_dispatch(
                     _current_ingest_dispatch(thread_id),
@@ -1926,7 +1961,9 @@ class TestUnhandledDispatchTerminal:
             try:
                 # The slot a live ingest would hold, taken through the executor's
                 # own gate rather than by reaching into its state.
-                assert await executor.reserve_dispatch_capacity(thread_id) is not None
+                assert (await executor.reserve_dispatch_capacity(thread_id))[
+                    0
+                ] is not None
                 await executor._fail_unhandled_dispatch(
                     DispatchRequest(
                         action="cancel",
@@ -2382,3 +2419,113 @@ class TestTheFailureStashCannotOutliveItsRun:
             finally:
                 await bridge.close()
                 await executor.shutdown()
+
+
+class _LoopReviewFactory:
+    """The loop node never passes; every other worker just reports back."""
+
+    def create(
+        self,
+        provider: Any,
+        *,
+        model: Any | None = None,
+        agent_config: Any | None = None,
+        workspace_root: Any | None = None,
+        **kwargs: Any,
+    ) -> FakeListChatModel:
+        del provider, model, workspace_root, kwargs
+        agent_id = getattr(agent_config, "id", "")
+        if agent_id == "mock-reviewer":
+            return FakeListChatModel(
+                responses=["REVISION REQUIRED\n1. Still not right."]
+            )
+        return FakeListChatModel(responses=[f"{agent_id} did its part"])
+
+
+def _loop_assignment(team: Any) -> dict[str, dict[str, Any]]:
+    lane: dict[str, Any] = {
+        "schema_version": 1,
+        "provider": "deterministic",
+        "execution_mode": "in-process-deterministic",
+        "catalog_revision": "test-revision",
+        "entry_id": "test-entry",
+        "model_name": "deterministic",
+        "controls": [],
+        "fallbacks": [],
+        "provenance": {"selection_source": "team_selection"},
+    }
+    return {
+        "__supervisor__": dict(lane),
+        **{ref.agent_id: dict(lane) for ref in team.workers},
+    }
+
+
+def _loop_turn_input(
+    request: DispatchRequest, *, is_first_ingest: bool
+) -> dict[str, Any]:
+    """Build a turn's graph input the way the executor builds one."""
+    graph_input = GraphLifecycleManager.build_graph_input(
+        _graph_input_request(request), is_first_ingest=is_first_ingest
+    )
+    receipt = GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=request.thread_id,
+        action_id=request.dispatch_id or "ingest",
+        action_type=ControlActionType.INGEST,
+        payload_fingerprint=control_action_payload_fingerprint(
+            {"run": request.dispatch_id}
+        ),
+        dispatch_id=request.dispatch_id or "ingest",
+        run_revision=1,
+        writer_generation=1,
+    ).model_dump(mode="json")
+    graph_input["graph_action_receipts"] = {request.dispatch_id or "ingest": receipt}
+    graph_input["active_graph_action_receipt"] = receipt
+    return graph_input
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_follow_up_turn_gets_the_whole_loop_ceiling() -> None:
+    """Each turn gets its preset's loop budget, not what the last one left.
+
+    ``loop_count`` is a per-turn ceiling that no node ever reset, so a
+    follow-up on a thread whose first turn had run to the ceiling started
+    already at it: the loop router finished the turn before the loop ran
+    once. Driven through the real per-turn input builder over a real
+    compiled loop graph, two turns on one thread.
+    """
+    team = load_team_config("mock-autonomous")
+    max_loops = team.topology.max_loops
+    graph: Any = compile_team_graph(
+        team_config=team,
+        agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
+        checkpointer=InMemorySaver(),
+        provider_factory=_LoopReviewFactory(),
+        model_assignment=_loop_assignment(team),
+    )
+    config: Any = {"configurable": {"thread_id": "loop-turns"}}
+
+    async def _turn(dispatch: str, *, first: bool) -> list[str]:
+        request = DispatchRequest(
+            action="ingest",
+            workspace_root=_WORKSPACE,
+            thread_id="loop-turns",
+            dispatch_id=dispatch,
+            content="Carry it forward.",
+            team_preset="mock-autonomous",
+            recursion_limit=25,
+        )
+        visited: list[str] = []
+        async for update in graph.astream(
+            _loop_turn_input(request, is_first_ingest=first),
+            config,
+            stream_mode="updates",
+        ):
+            visited.extend(cast("dict[str, Any]", update))
+        return visited
+
+    first_turn = await _turn("loop-turns-d1", first=True)
+    assert first_turn.count("mock-reviewer") == max_loops
+
+    second_turn = await _turn("loop-turns-d2", first=False)
+    assert second_turn.count("mock-reviewer") == max_loops

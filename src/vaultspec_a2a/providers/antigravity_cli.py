@@ -8,7 +8,7 @@ therefore not recoverable from "gemini", which is why the lane is its own
 
 The awkward part is resolution. The installer does NOT put ``agy`` on PATH; it
 writes the binary into a per-user application directory and exposes it through a
-wrapper script elsewhere. A plain ``shutil.which("agy")`` therefore reports the
+wrapper script elsewhere. A plain PATH lookup therefore reports the
 CLI missing on a machine where it works perfectly, which is exactly the class of
 false negative that made the lane probe lie earlier in this tree. So the
 order is: the operator's explicit override, then PATH for a host that did put it
@@ -21,8 +21,9 @@ drift and disagree about whether the lane exists.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
+
+from .cli_resolution import resolve_service_executable
 
 __all__ = ["resolve_antigravity_command"]
 
@@ -53,7 +54,7 @@ def resolve_antigravity_command(
         candidate = Path(override)
         return candidate if candidate.is_file() else None
 
-    found = shutil.which("agy") or shutil.which("agy.exe")
+    found = resolve_service_executable("agy") or resolve_service_executable("agy.exe")
     if found is not None:
         return Path(found)
 

@@ -58,6 +58,8 @@ from .._harness_mcp_registry import (
     _declare_registry,
     _launch_spec,
     _require_root_pin,
+    harness_server_addresses_projects_per_call,
+    interpreter_pin_args,
 )
 from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
@@ -78,6 +80,9 @@ if TYPE_CHECKING:
 
 RAG = "vaultspec-rag"
 RAG_PIN_VARIABLE = "VAULTSPEC_RAG_ROOT"
+# The interpreter the rendered launch names, read from the production seam rather
+# than restated: the value is a fact about the host running these tests.
+_PYTHON_PIN = interpreter_pin_args("uvx")[1]
 
 # A live stdio handshake plus one tool call against the runtime-acquired search
 # server. Warm it is seconds; the ceiling covers a cold `uvx` acquisition without
@@ -613,6 +618,7 @@ def _declared_entry(name: str, root_pin: str | None) -> FrozenJsonObject:
                 "network_egress": False,
                 "root_pin": root_pin,
                 "exact_surface": False,
+                "per_call_project": False,
             }
         }
     )
@@ -658,6 +664,44 @@ def test_registry_construction_refuses_an_omitted_root_pin() -> None:
     assert "probe" in message
 
 
+def test_registry_construction_refuses_an_omitted_per_call_project_axis() -> None:
+    """A server that never said whether a CALL chooses its project is refused.
+
+    The axis decides whether the entry's tools may be approved before the call
+    that chooses a project exists, so an entry that omits it would be approved
+    statically by default - the reachability the permission rung exists to close.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _declare_registry(
+            {
+                "probe": {
+                    "name": "probe",
+                    "command": "uvx",
+                    "args": [],
+                    "read_only": True,
+                    "network_egress": False,
+                    "root_pin": "PROBE_ROOT",
+                    "exact_surface": False,
+                }
+            }
+        )
+    message = str(excinfo.value)
+    assert "per_call_project" in message
+    assert "probe" in message
+
+
+def test_every_shipped_entry_declares_whether_a_call_chooses_its_project() -> None:
+    """The axis is declared where entries are written, not only where read."""
+    for name in _KNOWN_MCP_SERVERS:
+        entry = _shipped_entry(name)
+        assert isinstance(entry.get("per_call_project"), bool), (
+            f"{name} declares no per-call-project axis"
+        )
+        assert harness_server_addresses_projects_per_call(name) is (
+            entry["per_call_project"] is True
+        )
+
+
 @pytest.mark.parametrize("declared", [True, "", 7, []])
 def test_registry_construction_refuses_a_malformed_root_pin(
     declared: JsonValue,
@@ -675,6 +719,7 @@ def test_registry_construction_refuses_a_malformed_root_pin(
                     "network_egress": False,
                     "root_pin": declared,
                     "exact_surface": False,
+                    "per_call_project": False,
                 }
             }
         )
@@ -714,6 +759,7 @@ def test_registry_construction_refuses_an_env_declaration(env: JsonValue) -> Non
                     "network_egress": False,
                     "root_pin": "PROBE_ROOT",
                     "exact_surface": False,
+                    "per_call_project": False,
                 }
             }
         )
@@ -792,7 +838,14 @@ def test_pin_carries_the_bound_project_through_the_declared_channel(
     # The pin is additive: what to launch is unchanged, only which project it
     # serves is now stated.
     assert spec["command"] == "uvx"
-    assert spec["args"] == ["--from", "vaultspec-rag[mcp]", "vaultspec-search-mcp"]
+    assert spec["args"] == [
+        "--python",
+        _PYTHON_PIN,
+        "--from",
+        "vaultspec-rag[mcp]",
+        "vaultspec-search-mcp",
+        "--read-only",
+    ]
 
 
 def test_pin_returns_fresh_specs_and_mutates_no_input(tmp_path: Path) -> None:
@@ -965,8 +1018,22 @@ async def test_the_declared_channel_is_the_servers_own_root_authority(
         # the exact distribution selected by this checkout so the stdio client
         # and its private data-plane service cannot drift independently.
         spec_args = spec["args"]
-        assert spec_args == ["--from", "vaultspec-rag[mcp]", "vaultspec-search-mcp"]
-        spec["args"] = ["--from", rag_requirement, "vaultspec-search-mcp"]
+        assert spec_args == [
+            "--python",
+            _PYTHON_PIN,
+            "--from",
+            "vaultspec-rag[mcp]",
+            "vaultspec-search-mcp",
+            "--read-only",
+        ]
+        spec["args"] = [
+            "--python",
+            _PYTHON_PIN,
+            "--from",
+            rag_requirement,
+            "vaultspec-search-mcp",
+            "--read-only",
+        ]
         spec_env = spec["env"]
         assert isinstance(spec_env, list)
         for item in spec_env:

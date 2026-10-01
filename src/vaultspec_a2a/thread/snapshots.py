@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.base import WRITES_IDX_MAP
+from langgraph.checkpoint.serde.types import INTERRUPT
 
 from ..graph.enums import AgentLifecycleState, PermissionType, Provider
 from .enums import (
@@ -27,12 +29,13 @@ from .enums import (
 from .models import PlanEntry
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
     "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
+    "MESSAGE_CREATED_AT_KEY",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "TERMINAL_STATUS_MAP",
     "AgentData",
@@ -65,6 +68,8 @@ __all__ = [
     "normalize_plan_entries",
     "normalize_wire_event_type",
     "project_checkpoint_tuple",
+    "stamp_message_created_at",
+    "tasks_past_their_interrupt",
     "wire_event_type",
 ]
 
@@ -334,7 +339,9 @@ class MessageData:
     message_id: str
     role: str
     content: str
-    timestamp: datetime
+    # None when the message carries no production time: an older run's
+    # history, recorded before messages were stamped.
+    timestamp: datetime | None
     agent_id: str | None = None
 
 
@@ -591,6 +598,10 @@ def extract_checkpoint_fields(
     channel_values = cast(
         "dict[str, Any]", _object_dict(checkpoint.get("channel_values", {}))
     )
+    # The parent the checkpoint records, which is not the same as a parent that
+    # still exists: a settled run's superseded history is pruned and this
+    # reference outlives it. Carried through as recorded, and the served field
+    # says so rather than this projection guessing at what is still stored.
     parent_checkpoint_id_raw = configurable_parent.get("checkpoint_id")
     checkpoint_source_raw = metadata.get("source")
     checkpoint_step_raw = metadata.get("step")
@@ -622,6 +633,45 @@ def extract_checkpoint_fields(
     if projection.checkpoint_id is not None:
         projection.config["configurable"]["checkpoint_id"] = projection.checkpoint_id
     return projection
+
+
+#: The channels a saver holds in a fixed slot per task rather than appending:
+#: what the loop records ABOUT a task - the interrupt it raised, the resume
+#: values it consumed, its error, its schedule. Every other write in a task's
+#: set is output the task itself produced, down to the marker meaning "ended
+#: with nothing to say".
+_TASK_BOOKKEEPING_CHANNELS = frozenset(WRITES_IDX_MAP)
+
+
+def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
+    """Return the tasks whose held interrupt is a leftover, not a live question.
+
+    A task's interrupt write is never cleared when the answer lets that task
+    run on. With work fanned out, the superstep another branch is still parked
+    in has not committed, so the answered branch's interrupt stays in the
+    checkpoint beside the output its node produced afterwards. Every reader of
+    the held interrupts then sees a question that has been answered, and
+    re-asks it - or admits its answer a second time.
+
+    A task that produced output is the one that got past its question. A task
+    holding only bookkeeping has not: it is stopped at an interrupt, or it
+    consumed an answer and asked again, or it failed before finishing, and all
+    three are still waiting. A malformed write says nothing either way and is
+    skipped, leaving its task reading as waiting - the direction that keeps
+    disclosing a question rather than hiding one.
+    """
+    finished: set[str] = set()
+    for write in pending_writes or ():
+        if not isinstance(write, tuple | list) or len(write) != 3:
+            continue
+        task_id, channel = cast("object", write[0]), cast("object", write[1])
+        if (
+            isinstance(task_id, str)
+            and isinstance(channel, str)
+            and channel not in _TASK_BOOKKEEPING_CHANNELS
+        ):
+            finished.add(task_id)
+    return frozenset(finished)
 
 
 def _project_pending_interrupt(
@@ -673,15 +723,18 @@ def fold_pending_writes(
     pending_writes: list[tuple[object, object, object]] = (
         checkpoint_tuple.pending_writes or []
     )
+    # Every held write is counted and its channel recorded: those describe the
+    # checkpoint. Only the questions are narrowed, to the tasks still asking.
+    answered = tasks_past_their_interrupt(pending_writes)
     for index, pending_write in enumerate(pending_writes):
-        _task_id, channel, value = pending_write
+        task_id, channel, value = pending_write
         projection.pending_write_count += 1
         if (
             isinstance(channel, str)
             and channel not in projection.pending_write_channels
         ):
             projection.pending_write_channels.append(channel)
-        if channel != "__interrupt__":
+        if channel != INTERRUPT or task_id in answered:
             continue
         raw_interrupts: list[object] = (
             list(cast("list[object] | tuple[object, ...]", value))
@@ -736,8 +789,30 @@ def classify_message_role(msg: Any) -> str:
     return "system"
 
 
-def extract_message_timestamp(msg: Any) -> datetime:
-    """Extract message timestamp from response metadata; falls back to now()."""
+#: The metadata key a produced message records its production time under.
+MESSAGE_CREATED_AT_KEY = "created_at"
+
+
+def stamp_message_created_at(msg: Any, *, at: datetime | None = None) -> Any:
+    """Record when *msg* was produced, unless it already says.
+
+    Kept in ``response_metadata``, which the message carries through the
+    checkpoint but no provider integration sends back to a model.
+    """
+    metadata: object = getattr(msg, "response_metadata", None)
+    if isinstance(metadata, dict) and MESSAGE_CREATED_AT_KEY not in metadata:
+        cast("dict[str, object]", metadata)[MESSAGE_CREATED_AT_KEY] = (
+            at or datetime.now(UTC)
+        ).isoformat()
+    return msg
+
+
+def extract_message_timestamp(msg: Any) -> datetime | None:
+    """Return when *msg* was produced, or ``None`` when it does not say.
+
+    The time a projection happens to read the message is not when it was
+    produced, so an unstamped message reports no time rather than that one.
+    """
     ts: datetime | None = None
     response_metadata_raw: object = getattr(msg, "response_metadata", None) or {}
     additional_kwargs_raw: object = getattr(msg, "additional_kwargs", None) or {}
@@ -747,7 +822,9 @@ def extract_message_timestamp(msg: Any) -> datetime:
             if isinstance(meta_src_raw, dict)
             else {}
         )
-        raw_ts: object = meta_src.get("created_at") or meta_src.get("timestamp")
+        raw_ts: object = meta_src.get(MESSAGE_CREATED_AT_KEY) or meta_src.get(
+            "timestamp"
+        )
         if isinstance(raw_ts, datetime):
             ts = raw_ts
             break
@@ -756,8 +833,6 @@ def extract_message_timestamp(msg: Any) -> datetime:
                 ts = datetime.fromisoformat(raw_ts)
             if ts is not None:
                 break
-    if ts is None:
-        ts = datetime.now(UTC)
     return ts
 
 

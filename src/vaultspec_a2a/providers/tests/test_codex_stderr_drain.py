@@ -16,11 +16,8 @@ from collections import deque
 
 import pytest
 
-from .._codex_app_server_client import (
-    CLEANUP_TIMEOUT_SECONDS,
-    STDERR_TAIL_LINES,
-    drain_stderr_into,
-)
+from .._codex_app_server_client import CLEANUP_TIMEOUT_SECONDS
+from .._subprocess import STDERR_TAIL_LINES, drain_stderr_into
 
 
 async def _drain_lines(lines: list[bytes]) -> list[str]:

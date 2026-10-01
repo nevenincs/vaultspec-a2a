@@ -41,6 +41,7 @@ from ..control.clarification_service import (
 from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
+from ..control.event_handlers import settle_pending_checkpoint_prunes
 from ..control.health import (
     FullHealthRuntime,
     assemble_health_status,
@@ -58,7 +59,6 @@ from ..database import (
     seat_sqlite_posture,
 )
 from ..database.checkpoints import Checkpointer, open_checkpointer
-from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.reconciliation import reconcile_threads_on_startup
 from ..domain_config import domain_config
 from ..lifecycle.discovery import (
@@ -317,8 +317,6 @@ async def _initialize_gateway_database(app: FastAPI, *, armed: bool) -> AsyncEng
             settings.resolved_database_backend,
         )
     app.state.sqlite_fallback_diagnostics = build_sqlite_fallback_diagnostics()
-    if not armed and settings.resolved_checkpoint_backend == "sqlite":
-        backfill_teamstate_sdd_fields(settings.checkpoint_path)
     return engine
 
 
@@ -531,6 +529,9 @@ async def _shutdown_gateway(
     )
     await finish_before(worker_client.aclose(), deadline, phase="worker HTTP client")
     await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
+    await finish_before(
+        settle_pending_checkpoint_prunes(), deadline, phase="checkpoint prunes"
+    )
     await finish_before(close_db(), deadline, phase="database")
 
     await _shutdown_observability(deadline)

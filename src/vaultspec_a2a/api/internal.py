@@ -400,15 +400,15 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     ``payload``).
     """
     content_length = request.headers.get("content-length")
-    # Allow larger batches: 4 MB limit for batch payloads.
+    # A batch carries many events in one request, so it is allowed a larger body
+    # than a single-event post. The worker sizes its batches against the same
+    # figure, which is why the figure has one home.
+    batch_limit = settings.internal_max_event_batch_bytes
     try:
-        if (
-            content_length is not None
-            and int(content_length) > settings.internal_max_http_body_bytes * 4
-        ):
+        if content_length is not None and int(content_length) > batch_limit:
             raise HTTPException(
                 status_code=413,
-                detail="Payload too large (max 4 MB)",
+                detail=f"Payload too large (max {batch_limit} bytes)",
             )
     except ValueError as e:
         raise HTTPException(

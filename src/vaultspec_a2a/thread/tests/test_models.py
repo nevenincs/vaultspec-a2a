@@ -35,6 +35,30 @@ class TestTokenUsageEntry:
         assert entry.agent_id == "vaultspec-plan-author"
         assert entry.to_dict() == original
 
+    def test_a_reported_breakdown_round_trips_and_an_unreported_one_stays_out(
+        self,
+    ) -> None:
+        entry = TokenUsageEntry(
+            agent_id="coder",
+            input_tokens=100,
+            output_tokens=50,
+            total=150,
+            cache_read_tokens=70,
+            reasoning_tokens=0,
+        )
+        counters = entry.to_dict()
+        # A measured zero is kept; the unreported cache-write count is absent.
+        assert counters == {
+            "input": 100,
+            "output": 50,
+            "total": 150,
+            "cache_read": 70,
+            "reasoning": 0,
+        }
+        again = TokenUsageEntry.from_dict("coder", counters)
+        assert again.cache_write_tokens is None
+        assert again.to_dict() == counters
+
     def test_from_dict_missing_keys_default_to_zero(self) -> None:
         """Missing keys in the source dict default to 0."""
         entry = TokenUsageEntry.from_dict("agent-x", {})

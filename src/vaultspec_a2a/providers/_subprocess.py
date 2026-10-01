@@ -28,14 +28,25 @@ from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
 
 if TYPE_CHECKING:
+    from collections import deque
     from collections.abc import Mapping
 
 __all__ = [
+    "STDERR_TAIL_LINES",
+    "drain_stderr_into",
     "kill_process_tree",
     "process_containment",
     "redact_secrets",
     "spawn_acp_process",
 ]
+
+STDERR_TAIL_LINES = 200
+"""How many redacted stderr lines any provider lane retains for diagnosis.
+
+One bound for every lane, beside the one redactor, because the thing being bounded
+is the same on all of them: what a failing child said about itself, kept long
+enough to explain the failure and no longer.
+"""
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +100,32 @@ def redact_secrets(text: str) -> str:
         return f"{match.group(1)}{replacement}"
 
     return _SECRET_PATTERN.sub(_mask, text)
+
+
+async def drain_stderr_into(
+    stream: asyncio.StreamReader | None, tail: deque[str]
+) -> None:
+    """Read *stream* to end, appending each redacted non-empty line to *tail*.
+
+    Module-level rather than a method so the behaviour can be driven directly
+    against a real stream, without reaching into a half-built client.
+
+    Never raises: a diagnostic channel must not be able to fail a turn. Each line
+    is redacted before retention because provider subprocesses report their
+    configuration when they fail, and configuration is where credentials live.
+    """
+    if stream is None:
+        return
+    try:
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                tail.append(redact_secrets(text))
+    except (OSError, ValueError, asyncio.CancelledError):
+        return
 
 
 # Attribute the run-owned provider's OS containment is stashed on so the shared
@@ -160,6 +197,23 @@ def _provider_execution_command(command: list[str]) -> list[str]:
             f"provider identity launcher is unavailable: {launcher_path}"
         )
     return [str(launcher_path), str(uid), str(gid), "--", *command]
+
+
+def _confined_search_env(env: dict[str, str]) -> dict[str, str]:
+    """Return the child environment with Windows working-directory search off.
+
+    Windows resolves a bare program name against the working directory before
+    PATH, both in ``CreateProcess`` and in the ``cmd.exe`` shim path this module
+    takes for ``.cmd`` launchers, and the working directory of every provider
+    child is the agent's own workspace. ``NoDefaultCurrentDirectoryInExePath``
+    is the documented way to turn that lookup off, and it is inherited, so it
+    also covers the tools the child launches. Provider launchers are already
+    resolved to absolute paths before they reach here; this closes the same hole
+    for the names a child resolves for itself.
+    """
+    if sys.platform != "win32":
+        return env
+    return {**env, "NoDefaultCurrentDirectoryInExePath": "1"}
 
 
 async def spawn_acp_process(
@@ -238,6 +292,7 @@ async def _spawn_acp_process(
     # the equivalent leak survive elsewhere in this codebase.
     try:
         command = _provider_execution_command(command)
+        env = _confined_search_env(env)
         if sys.platform == "win32":
             if use_exec:
                 process = await asyncio.create_subprocess_exec(

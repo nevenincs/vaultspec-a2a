@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from langgraph.store.base import BaseStore
     from langgraph.types import Command
 
     from ...database.checkpoints import Checkpointer
@@ -65,7 +66,9 @@ class ClarificationGraphBuilder(Protocol):
 
     def add_edge(self, start_key: str, end_key: str) -> None: ...
 
-    def compile(self, *, checkpointer: Checkpointer) -> RegisteredCompiledGraph: ...
+    def compile(
+        self, *, checkpointer: Checkpointer, store: BaseStore | None = None
+    ) -> RegisteredCompiledGraph: ...
 
 
 class _GraphState(Protocol):

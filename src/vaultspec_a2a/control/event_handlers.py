@@ -64,6 +64,7 @@ __all__ = [
     "_handle_progress_event",
     "_handle_terminal_event",
     "relay_event",
+    "settle_pending_checkpoint_prunes",
 ]
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,9 @@ _RUN_LEASE_METADATA_KEY = "run_lease"
 # Strong references to in-flight settlement callbacks so a fire-and-forget task is
 # not garbage-collected before it completes; each removes itself when done.
 _settlement_tasks: set[asyncio.Task[None]] = set()
+# The same for settled-history prunes, kept apart because shutdown waits for these
+# before the checkpointer they delete through is closed.
+_prune_tasks: set[asyncio.Task[None]] = set()
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 
@@ -607,6 +611,55 @@ async def _accept_terminal_event(
     return await _confirm_failed_terminal(thread_id, payload, factory, last_sequence)
 
 
+async def _prune_settled_history(
+    thread_id: str, checkpointer: Checkpointer | None
+) -> None:
+    """Drop a settled run's superseded checkpoints; never fails the relay.
+
+    Runs here rather than in the worker because the relay applies a thread's
+    events in order: every application receipt the run emitted, each pinned to
+    the checkpoint it names, has been checked by the time its terminal lands.
+    """
+    if checkpointer is None:
+        return
+    from ..database.checkpoints import prune_settled_thread
+    from ..domain_config import domain_config
+
+    try:
+        await asyncio.wait_for(
+            prune_settled_thread(checkpointer, thread_id),
+            timeout=domain_config.aget_state_timeout_seconds,
+        )
+    except Exception:
+        logger.warning(
+            "Could not prune the settled checkpoint history of %s",
+            thread_id,
+            exc_info=True,
+            extra={"thread_id": thread_id, "action": "checkpoint_prune_failed"},
+        )
+
+
+def _schedule_settled_history_prune(
+    thread_id: str, checkpointer: Checkpointer | None
+) -> None:
+    """Prune a settled run's history without holding up the relay.
+
+    The relay applies a thread's events in order, so a prune awaited here would
+    delay every later event of every run behind one run's delete.
+    """
+    if checkpointer is None:
+        return
+    task = asyncio.create_task(_prune_settled_history(thread_id, checkpointer))
+    _prune_tasks.add(task)
+    task.add_done_callback(_prune_tasks.discard)
+
+
+async def settle_pending_checkpoint_prunes() -> None:
+    """Wait for every settled-history prune already started to finish."""
+    while _prune_tasks:
+        await asyncio.gather(*tuple(_prune_tasks), return_exceptions=True)
+
+
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
@@ -642,6 +695,7 @@ async def _handle_terminal_event(
     if not accepted or factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
+    _schedule_settled_history_prune(thread_id, checkpointer)
     if drain_gate is not None:
         await drain_gate.release(thread_id)
     if aggregator is not None:

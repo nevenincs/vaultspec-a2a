@@ -52,32 +52,38 @@ def _record_config_home(path: str) -> None:
 
 
 # The permission modes a session advertises, copied from the pinned adapter's
-# own session result (claude-agent-acp, buildAvailableModes) rather than
-# invented: the ids, names and descriptions are what a real lane reports, and
-# "default" is current because that is where a session with no ambient settings
-# sources lands. A client pins an unattended run to a mode and verifies it
-# against this list, so a simulator that reports nothing here is a lane whose
-# permission posture cannot be established at all.
+# own session result (claude-agent-acp, SessionModeManager.buildAvailableModes)
+# rather than invented: the ids, names and descriptions are what a real lane
+# reports, and "default" is current because that is where a session with no
+# ambient settings sources lands. A client pins an unattended run to a mode and
+# verifies it against this list, so a simulator that reports nothing here is a
+# lane whose permission posture cannot be established at all.
+#
+# This is the catalog of a session that has DECLINED the permission bypass
+# capability, which is every session this project opens. A session that keeps
+# it also reports "bypassPermissions"; none here does. The adapter withdrew
+# "dontAsk" from the catalog while still accepting the spelling in its parser,
+# so a simulator that advertised it would offer a mode no real lane will set.
 _AVAILABLE_MODES: list[dict[str, str]] = [
     {
         "id": "default",
         "name": "Manual",
-        "description": "Standard behavior, prompts for dangerous operations",
+        "description": "Always ask before making changes",
     },
     {
         "id": "acceptEdits",
-        "name": "Accept Edits",
-        "description": "Auto-accept file edit operations",
+        "name": "Accept edits",
+        "description": "Automatically accept all file edits",
     },
     {
         "id": "plan",
-        "name": "Plan Mode",
-        "description": "Planning mode, no actual tool execution",
+        "name": "Plan",
+        "description": "Create a plan before making changes",
     },
     {
-        "id": "dontAsk",
-        "name": "Don't Ask",
-        "description": "Don't prompt for permissions, deny if not pre-approved",
+        "id": "auto",
+        "name": "Auto",
+        "description": "Claude handles permission decisions",
     },
 ]
 

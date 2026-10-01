@@ -51,12 +51,26 @@ _UNDECLARED_VERBS: list[str] = [
     "get_index_status",
 ]
 
-# Options as claude-agent-acp 0.19.2 offers them (dist/acp-agent.js, canUseTool).
+# Options as the pinned claude-agent-acp offers them, in its own order
+# (dist/permissions/options.js and options/shared.js): the single-use approval
+# leads, the rule-writing approval follows, and the refusal is last. The ids
+# and kinds are the adapter's, so a rung that answered with a spelling this
+# adapter does not offer would be caught here rather than at a live turn.
 _CLAUDE_OPTIONS: list[JsonObject] = [
-    {"optionId": "allow_always", "name": "Always Allow", "kind": "allow_always"},
-    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-    {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
+    {"optionId": "allow-once", "name": "Yes", "kind": "allow_once"},
+    {
+        "optionId": "allow-with-updates",
+        "name": "Yes, and don't ask again for these commands",
+        "kind": "allow_always",
+    },
+    {"optionId": "reject", "name": "No", "kind": "reject_once"},
 ]
+
+#: The adapter's ids for the two answers this rung ever gives. Named so a test
+#: states which ANSWER it expects rather than repeating a wire spelling that
+#: moves with the pin.
+_ALLOW = "allow-once"
+_REJECT = "reject"
 
 
 def _config(
@@ -143,7 +157,7 @@ async def test_a_search_naming_a_second_workspace_is_refused(
         acp_session_context,
     )
 
-    assert decision == "reject"
+    assert decision == _REJECT
 
 
 @pytest.mark.asyncio
@@ -161,7 +175,7 @@ async def test_the_same_search_against_its_own_project_still_runs(
             config,
             acp_session_context,
         )
-        == "allow"
+        == _ALLOW
     )
     assert (
         await _decide(
@@ -170,7 +184,7 @@ async def test_the_same_search_against_its_own_project_still_runs(
             config,
             acp_session_context,
         )
-        == "allow"
+        == _ALLOW
     )
     assert (
         await _decide(
@@ -179,7 +193,7 @@ async def test_the_same_search_against_its_own_project_still_runs(
             config,
             acp_session_context,
         )
-        == "allow"
+        == _ALLOW
     )
 
 
@@ -211,7 +225,7 @@ async def test_a_differently_spelled_bound_root_is_still_the_bound_root(
         acp_session_context,
     )
 
-    assert decision == "allow"
+    assert decision == _ALLOW
 
 
 @pytest.mark.asyncio
@@ -238,7 +252,7 @@ async def test_a_recased_root_follows_the_filesystem_it_names(
         acp_session_context,
     )
 
-    assert decision == ("allow" if names_the_same_directory else "reject")
+    assert decision == (_ALLOW if names_the_same_directory else _REJECT)
 
 
 @pytest.mark.asyncio
@@ -256,7 +270,7 @@ async def test_the_parent_of_the_bound_project_is_not_the_bound_project(
         acp_session_context,
     )
 
-    assert decision == "reject"
+    assert decision == _REJECT
 
 
 @pytest.mark.asyncio
@@ -274,7 +288,7 @@ async def test_a_cross_project_read_is_refused_before_the_human_rung(
 
     async def callback(name: str, _args: JsonObject, _options: list[JsonObject]) -> str:
         consulted.append(name)
-        return "allow"
+        return _ALLOW
 
     config = _config(workspace_root=str(bound), permission_callback=callback)
 
@@ -285,7 +299,7 @@ async def test_a_cross_project_read_is_refused_before_the_human_rung(
         acp_session_context,
     )
 
-    assert decision == "reject"
+    assert decision == _REJECT
     assert consulted == []
 
 
@@ -304,7 +318,7 @@ async def test_a_run_with_no_bound_project_may_name_no_project(
         acp_session_context,
     )
 
-    assert decision == "reject"
+    assert decision == _REJECT
 
 
 @pytest.mark.asyncio
@@ -325,7 +339,7 @@ async def test_a_nested_or_recased_project_argument_is_still_seen(
         acp_session_context,
     )
 
-    assert decision == "reject"
+    assert decision == _REJECT
 
 
 @pytest.mark.asyncio
@@ -351,7 +365,7 @@ async def test_an_undeclared_server_verb_is_refused_under_autonomy(
         acp_session_context,
     )
 
-    assert decision == "reject"
+    assert decision == _REJECT
 
 
 @pytest.mark.asyncio
@@ -383,7 +397,7 @@ async def test_an_uncovered_claude_call_is_refused_not_blanket_approved(
 
     decision = await _decide(title, {}, config, acp_session_context)
 
-    assert decision == "reject"
+    assert decision == _REJECT
 
 
 @pytest.mark.asyncio
@@ -397,7 +411,7 @@ async def test_the_claude_native_read_floor_reaches_its_own_project(
     bound, _ = two_projects
     config = _config(workspace_root=str(bound))
 
-    assert await _decide(tool, {"path": "src"}, config, acp_session_context) == "allow"
+    assert await _decide(tool, {"path": "src"}, config, acp_session_context) == _ALLOW
 
 
 @pytest.mark.asyncio
@@ -420,7 +434,7 @@ async def test_the_claude_native_read_floor_stops_at_the_project_boundary(
     config = _config(workspace_root=str(bound))
     raw_input: JsonObject = {"path": str(other)} if named == "another_project" else {}
 
-    assert await _decide(tool, raw_input, config, acp_session_context) == "reject"
+    assert await _decide(tool, raw_input, config, acp_session_context) == _REJECT
 
 
 @pytest.mark.asyncio

@@ -211,11 +211,28 @@ _ACP_KIND_CONDITIONS: Mapping[str, ProviderCondition] = {
     # The remedy is a credential or account action, not waiting or paying, so
     # it belongs with the other credential failures rather than apart.
     "oauth_org_not_allowed": ProviderCondition.UNAUTHENTICATED,
+    # The organization has not completed console verification, and the adapter
+    # states plainly that logging in again does not repair it. It is still an
+    # account action rather than a wait, a payment or a different request, so
+    # it resolves with the other credential failures - which is also where the
+    # adapter files it, in the access lane beside the kind below.
+    "verification_required": ProviderCondition.UNAUTHENTICATED,
+    # A cloud-provider credential (Bedrock, Vertex, Foundry) the CLI could not
+    # load. The CLI retries internally and asks the operator to check or
+    # refresh it, so by the time the kind reaches this wire the remedy is the
+    # credential and repeating the request only spends quota against a
+    # credential that is still missing.
+    "cloud_credential_error": ProviderCondition.UNAUTHENTICATED,
     # The provider's billing refusal. It does NOT separate a depleted balance
     # from a reached spend ceiling, so the coarser of the two paid-remedy
     # members is used; the budget member stays reserved for a lane that names a
     # caller-configured ceiling in its own right, which this lane never does.
     "billing_error": ProviderCondition.CREDITS_EXHAUSTED,
+    # The account itself is suspended. The adapter files it with the billing
+    # refusal above, and the remedy is the same billing or account action, so
+    # it resolves to the same member rather than to a finer one this wire never
+    # distinguishes.
+    "account_on_hold": ProviderCondition.CREDITS_EXHAUSTED,
     # The hard information limit on this lane. The CLI assigns this one kind to
     # a short-term rate refusal AND to an exhausted usage window, branching
     # between them only on a response header it consumes internally. Mapping it

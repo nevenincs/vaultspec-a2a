@@ -35,6 +35,8 @@ from ..acp_exceptions import AcpSessionError
 from ._acp_frames import read_acp_frame
 from ._installed_vocabulary import (
     acp_adapter_permission_mode_ids,
+    acp_adapter_session_mode_source,
+    acp_adapter_shell_tool_names,
     acp_adapter_source,
 )
 
@@ -166,7 +168,7 @@ def test_installed_adapter_lets_the_client_choose_its_setting_sources(
 
     default = source.index('settingSources: ["user", "project", "local"]')
     spread = source.index("...userProvidedOptions,", default)
-    reassigned = source.index("permissionMode,", default)
+    reassigned = source.index("permissionMode: initialPermissionMode,", default)
 
     # The client block is merged over the adapter's defaults, so the empty
     # source list this project sends replaces them ...
@@ -200,17 +202,85 @@ def test_the_pinned_mode_is_the_one_that_still_asks_this_project(
 ) -> None:
     """The pin keeps the permission rung in the path, by the adapter's own words.
 
-    The alternative reads as the stricter choice and is the opposite: a mode that
-    never asks decides every uncovered call inside the CLI, where this run's
-    exact-name allowlist and its cross-project refusal do not exist.
+    Every other mode the adapter advertises decides an uncovered call somewhere
+    this run's exact-name allowlist and its cross-project refusal do not exist -
+    inside the CLI, or inside a classifier model. The pinned mode is the only
+    one that routes the call back out to this project's own rung, which is the
+    whole reason an unattended session pins a mode at all.
+    """
+    del installed_acp_adapter
+    source = acp_adapter_session_mode_source()
+
+    assert AUTONOMOUS_PERMISSION_MODE == "default"
+    assert f'id: "{AUTONOMOUS_PERMISSION_MODE}",' in source
+    assert "Always ask before making changes" in source
+    # The alternatives, in the adapter's own words. Each of them answers an
+    # uncovered call without asking this project: two decide it inside the CLI
+    # and one hands the decision to a model.
+    assert "Automatically accept all file edits" in source
+    assert "Accepts all permissions" in source
+    assert "Claude handles permission decisions" in source
+
+
+def test_the_unattended_mode_is_one_the_adapter_will_actually_accept(
+    installed_acp_adapter: Path,
+) -> None:
+    """The pinned mode is advertised, not merely parseable.
+
+    The adapter still PARSES mode names it no longer offers, and rejects the
+    request when one is asked for, so "the adapter knows this name" is not the
+    property a pin needs. What it needs is membership of the catalog a session
+    reports, which is the list the adapter validates a configuration change
+    against.
+    """
+    del installed_acp_adapter
+    advertised = acp_adapter_permission_mode_ids()
+
+    assert AUTONOMOUS_PERMISSION_MODE in advertised
+    # Withdrawn from the catalog upstream while the parser still accepts the
+    # spelling: asking for it now fails the session rather than pinning it.
+    assert "dontAsk" not in advertised
+    assert 'case "dontAsk":' in acp_adapter_session_mode_source()
+
+
+def test_the_session_declines_the_permission_bypass_capability(
+    tmp_path: Path,
+) -> None:
+    """The lane refuses the capability to step around its own permission rung.
+
+    The adapter grants bypass to any session that does not decline it, and a
+    granted bypass is both a mode in the catalog and a skip-permissions flag on
+    the spawned CLI. Pinning the mode does not withdraw either, so the capability
+    is declined where a client can decline it - in the session options block.
+    """
+    options = claude_session_options(
+        _config(agent_id="vaultspec-adr-author", workspace_root=tmp_path)
+    )
+
+    assert options["allowDangerouslySkipPermissions"] is False
+
+
+def test_the_installed_adapter_reads_the_declined_bypass_capability(
+    installed_acp_adapter: Path,
+) -> None:
+    """The option this lane declines is the one the adapter's gate reads.
+
+    The gate is read off the RAW session meta rather than off the merged option
+    block, so the key has to be spelled where the adapter looks for it. An
+    option sent under a name the gate never reads would leave the capability
+    granted while reading, here and in review, as though it were refused.
     """
     del installed_acp_adapter
     source = acp_adapter_source()
 
-    assert AUTONOMOUS_PERMISSION_MODE == "default"
-    assert f'id: "{AUTONOMOUS_PERMISSION_MODE}",' in source
-    assert "prompts for dangerous operations" in source
-    assert "Don't prompt for permissions, deny if not pre-approved" in source
+    assert (
+        "sessionMeta?.claudeCode?.options?.allowDangerouslySkipPermissions !== false"
+        in source
+    )
+    # The same resolved value arms both halves of the capability: the flag the
+    # CLI is spawned with, and whether the catalog offers the bypass mode.
+    assert "allowDangerouslySkipPermissions: allowBypass," in source
+    assert "this.buildAvailableModes(allowBypass)" in acp_adapter_session_mode_source()
 
 
 @pytest.mark.asyncio
@@ -603,3 +673,32 @@ def test_installed_sdk_admits_a_path_pattern_for_every_scoped_tool(
     for tool in CLAUDE_PATH_RULE_TOOLS:
         assert f'"{tool}"' in declaration, tool
     assert '"Grep"' not in declaration
+
+
+def test_a_terminal_less_persona_is_denied_every_shell_tool_the_adapter_knows(
+    installed_acp_adapter: Path,
+) -> None:
+    """A persona that may not run commands may not run them under any tool name.
+
+    The deny list names the command-execution built-ins one at a time, so it
+    goes stale silently: a CLI that grows a second shell tool leaves a persona
+    with ``terminal = false`` holding it, and nothing fails. The adapter binds
+    every tool whose call is a command line to one shared shell reporter, which
+    is its own answer to the same question, so the list is checked against that
+    binding rather than against memory.
+    """
+    del installed_acp_adapter
+    denied = set(
+        _tool_names(
+            claude_session_options(
+                _config(agent_id="vaultspec-adr-author", workspace_root=Path.cwd())
+            ).get("disallowedTools", [])
+        )
+    )
+
+    undenied = sorted(acp_adapter_shell_tool_names() - denied)
+
+    assert not undenied, (
+        f"the pinned adapter renders {undenied} as shell commands, but a "
+        "persona declaring no terminal capability is not denied them"
+    )

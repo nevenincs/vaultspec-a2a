@@ -16,14 +16,17 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..team.team_config import AgentConfig
+    from ._json_contract import JsonObject
 
 __all__ = [
     "AUTONOMOUS_PERMISSION_MODE",
+    "BYPASS_CAPABILITY_OPTION",
     "CLAUDE_DENIED_READ_PATHS",
     "CLAUDE_FILE_WRITE_TOOLS",
     "CLAUDE_PATH_RULE_TOOLS",
     "CLAUDE_TERMINAL_TOOLS",
     "MODE_CONFIG_OPTION_ID",
+    "claude_bypass_declined_meta",
     "claude_disallowed_tools",
     "claude_rule_path",
     "workspace_scoped_tool_rule",
@@ -43,16 +46,26 @@ CLAUDE_FILE_WRITE_TOOLS: tuple[str, ...] = (
     "NotebookEdit",
 )
 
-# The CLI's command-execution built-in and the background-task verbs that
-# observe and stop what it started. `Bash` is the SDK's only bash-prefix rule
+# The CLI's command-execution built-ins and the background-task verbs that
+# observe and stop what they started. `Bash` is the SDK's only bash-prefix rule
 # tool; the others are the installed CLI's own aliases for reading and killing a
 # background shell, denied with it so a terminal-less persona cannot reach the
 # output of a command by another name.
+#
+# `PowerShell` is the CLI's SECOND shell, and denying it is not hypothetical
+# housekeeping: it is Windows-only and opt-in through
+# `CLAUDE_CODE_USE_POWERSHELL_TOOL`, but on a Windows host without Git Bash the
+# CLI requires a shell tool and this is the one it uses. A deny list naming only
+# the bash family would therefore leave a persona that declares no terminal
+# capability running commands on exactly the hosts where bash is absent. The
+# rule is the bare name because PowerShell is in neither of the SDK's
+# pattern-taking rule families, so no path pattern can narrow it.
 CLAUDE_TERMINAL_TOOLS: tuple[str, ...] = (
     "Bash",
     "BashOutput",
     "KillShell",
     "KillBash",
+    "PowerShell",
 )
 
 # Absolute paths no run has business reading, denied as path rules on the read
@@ -102,6 +115,32 @@ AUTONOMOUS_PERMISSION_MODE = "default"
 # with the option list the adapter now holds, so the mode can be verified in the
 # same exchange that sets it.
 MODE_CONFIG_OPTION_ID = "mode"
+
+# The session option that declines the permission-bypass CAPABILITY, as opposed
+# to the mode pin above, which only chooses among the capabilities a session
+# already has. The adapter grants bypass to any session that does not decline
+# it here - it asks only whether the option is explicitly `false` - and one
+# granted bypass arms two things at once: `bypassPermissions` joins the mode
+# catalog, and the spawned CLI is handed the skip-permissions flag. Neither
+# belongs on a lane whose permission decision IS the rung.
+#
+# Declining it is also what keeps the lane launchable where the adapter and the
+# CLI disagree about bypass. The adapter allows it for a root process that
+# declares a sandbox; the CLI refuses the flag for root regardless, and the
+# session dies at creation with the CLI's own message. A served turn and a
+# catalog probe both open sessions, so both decline it.
+BYPASS_CAPABILITY_OPTION = "allowDangerouslySkipPermissions"
+
+
+def claude_bypass_declined_meta() -> JsonObject:
+    """Return the ``session/new`` ``_meta`` that declines the bypass capability.
+
+    The smallest complete claude-family meta block, for a caller that opens a
+    session without composing a full option set - the catalog probe, which has
+    no persona, no tool allowlist and no model to name, but still has to open
+    the session under the posture the lane it is qualifying will run under.
+    """
+    return {"claudeCode": {"options": {BYPASS_CAPABILITY_OPTION: False}}}
 
 
 # The built-ins whose permission rule accepts a file pattern, read from the

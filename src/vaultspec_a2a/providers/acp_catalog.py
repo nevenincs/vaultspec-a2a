@@ -13,7 +13,7 @@ import hashlib
 import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Final, TypedDict, Unpack
+from typing import TYPE_CHECKING, Final, TypedDict, Unpack, cast
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -444,6 +444,14 @@ class _DiscoverAcpCatalogOptions(_DiscoverAcpCatalogRequired, total=False):
     use_exec: bool
     timeout: float
     metadata: Mapping[str, object] | None
+    # The lane-specific ``session/new`` ``_meta`` block, supplied by the caller
+    # that knows which lane this is. Discovery itself stays lane-agnostic: it
+    # speaks ACP, and the namespaces inside ``_meta`` belong to one backend
+    # each. It is forwarded rather than composed here because the posture a
+    # probe opens its session under has to be the posture the served turn will
+    # run under - a probe that qualified a lane under different session options
+    # qualified a lane nobody will run.
+    session_meta: Mapping[str, object] | None
 
 
 async def discover_acp_catalog(
@@ -457,6 +465,7 @@ async def discover_acp_catalog(
     use_exec = options.get("use_exec", False)
     timeout = options.get("timeout", 30.0)
     metadata = options.get("metadata")
+    session_meta = options.get("session_meta")
     if not command:
         raise ValueError("command must not be empty")
     process = await spawn_acp_process(
@@ -491,11 +500,14 @@ async def discover_acp_catalog(
         # higher-frequency one, since one catalog read probes every lane. A
         # caller passing a per-invocation directory leaves a partition per
         # invocation behind; passing a stable one leaves a single partition.
+        session_params: JsonObject = {"cwd": cwd, "mcpServers": list[JsonValue]()}
+        if session_meta is not None:
+            session_params["_meta"] = cast("JsonValue", dict(session_meta))
         session = await _request(
             process,
             request_id=1,
             method="session/new",
-            params={"cwd": cwd, "mcpServers": list[JsonValue]()},
+            params=session_params,
             timeout=timeout,
             output_budget=output_budget,
         )

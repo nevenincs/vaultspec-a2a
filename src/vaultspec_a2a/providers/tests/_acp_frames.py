@@ -22,13 +22,17 @@ __all__ = ["SESSION_MODES", "read_acp_frame"]
 # adapter's own session-result shape. An unattended session is pinned to a mode
 # and verifies it against this list, and a lane that advertises none is refused,
 # so a responder that opens a session has to say it - the real one always does.
+#
+# The ids are the catalog a session reports when it has declined the permission
+# bypass capability, which is every session this project opens. A session that
+# keeps the capability also reports `bypassPermissions`; no lane here does.
 SESSION_MODES: JsonObject = {
     "currentModeId": "default",
     "availableModes": [
         {"id": "default", "name": "Manual"},
-        {"id": "acceptEdits", "name": "Accept Edits"},
-        {"id": "plan", "name": "Plan Mode"},
-        {"id": "dontAsk", "name": "Don't Ask"},
+        {"id": "acceptEdits", "name": "Accept edits"},
+        {"id": "plan", "name": "Plan"},
+        {"id": "auto", "name": "Auto"},
     ],
 }
 

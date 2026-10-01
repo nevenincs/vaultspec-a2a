@@ -8,6 +8,6 @@
     "node": "26.8.1"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.59.0"
+    "@agentclientprotocol/claude-agent-acp": "0.84.0"
   }
 }

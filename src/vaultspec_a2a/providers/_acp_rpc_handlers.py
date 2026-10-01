@@ -332,13 +332,15 @@ def _canonical_tool_identity(title: str, config: AcpModelConfig) -> str:
     adapter rather than assumed.
 
     - kimi-cli titles are ``"ToolName"`` or ``"ToolName: subtitle"``.
-    - claude-agent-acp 0.19.2 (``dist/tools.js``) hand-writes a label for each
-      built-in it knows and falls through to ``title: name`` for everything else,
-      which is what makes an MCP tool's title its exact ``mcp__<server>__<tool>``
-      name. The label branches are deliberately NOT parsed: a title like
-      ``"Read <path>"`` is prose, and matching its leading word would let a
-      sub-agent task whose description merely BEGINS with an allowlisted word
-      canonicalise into an approval.
+    - claude-agent-acp keeps a reporter per built-in it knows
+      (``dist/tool-calls/reporters/``) and falls through to a generic reporter
+      that titles the call with the tool's own name, which is what makes an MCP
+      tool's title its exact ``mcp__<server>__<tool>`` name. The per-built-in
+      reporters are deliberately NOT parsed: their titles are prose - ``Read``
+      renders ``"Read <path>"`` and ``Grep`` renders an equivalent grep command
+      line - and matching a leading word would let a sub-agent task whose
+      description merely BEGINS with an allowlisted word canonicalise into an
+      approval.
     """
     if config.acp_family == "kimi":
         return title.split(": ", 1)[0]
@@ -686,10 +688,10 @@ async def on_request_permission(
         # An answer naming an option that was never offered is not a decision
         # this handler can carry out, so the call is REFUSED rather than mapped
         # onto a neighbour. Substituting the first offered option was the same
-        # bug in two directions: the pinned adapter orders its options
-        # allow_always first, so a refusal whose id did not match resolved to the
-        # broadest possible grant - and any substitution answers a question the
-        # decider was not asked.
+        # bug in two directions: the pinned adapter sorts its options by kind
+        # with the approvals first, so a refusal whose id did not match resolved
+        # to a grant - and any substitution answers a question the decider was
+        # not asked.
         logger.warning(
             "Permission answer option_id=%r is not among the offered options %r; "
             "refusing the tool call rather than substituting one",

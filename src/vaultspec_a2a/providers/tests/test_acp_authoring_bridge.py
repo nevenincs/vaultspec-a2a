@@ -39,6 +39,7 @@ from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
 from ...testing.ports import free_port
 from ...workspace.environment import resolve_env_vars
 from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
+from .._claude_tool_policy import claude_bypass_declined_meta
 from .._factory_commands import _classify_acp_command
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
@@ -185,6 +186,10 @@ async def test_real_agent_connects_to_authoring_bridge(
             "params": {
                 "cwd": workspace,
                 "mcpServers": list[JsonValue](build_authoring_mcp_servers(binding)),
+                # The posture a served session opens under. The bridge is
+                # reached from a real run, so the session that reaches it is
+                # created the way a real run creates one.
+                "_meta": claude_bypass_declined_meta(),
             },
         }
         proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")

@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:07c9e2d0484691bb4106adec416aeed258517a4c8fe07b0794d45b5b47037006'
+body_hash: 'sha256:0ec0ba4e21278d9dcfa27485601e84ece5160b7b7ae06e422e86d3330b6ad8bc'
 ---
 
 # `architecture-review` plan
@@ -105,7 +105,7 @@ Close the decision-free findings the plan-close review and its re-review left op
 
 - [ ] `P06.S33` - Retain accepted work on capacity and transport-unreachable refusals instead of marking the dispatch failed; `src/vaultspec_a2a/thread/dispatch_policy.py, src/vaultspec_a2a/control/direct_control_recovery.py`.
 - [ ] `P06.S34` - Make the worker event client outlast the gateway's worst-case terminal confirmation; `src/vaultspec_a2a/worker/ipc.py`.
-- [ ] `P06.S35` - Give each parallel research branch its own model instance so no two branches share one provider session; `src/vaultspec_a2a/graph/_compiler_research.py`.
+- [x] `P06.S35` - Give each parallel research branch its own model instance so no two branches share one provider session; `src/vaultspec_a2a/graph/_compiler_research.py`.
 - [ ] `P06.S36` - Approve a native floor tool at the autonomous rung only when its path arguments lie inside the bound project; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_kimi_permission.py`.
 - [ ] `P06.S37` - Scope the breaker's half-open probe to the dispatch that reserved it; `src/vaultspec_a2a/control/circuit_breaker.py`.
 - [ ] `P06.S38` - State and test the recovery lease rule for a busy worker and re-cover the definite-versus-ambiguous release rule on a surviving verb; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/tests/test_direct_control_leases.py`.

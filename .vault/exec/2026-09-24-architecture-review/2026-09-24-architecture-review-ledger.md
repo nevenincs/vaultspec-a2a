@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-09-30'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:d00559f47bc857d7f6714a0c63737f466dbfc173e6f70ce2011267eec59b93ad'
+body_hash: 'sha256:02d053c96c4d41a790b93af9bd0304a6babbfd654435ded679898f9c464a83c2'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -376,6 +376,11 @@ related:
 - `S27` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 - `S23` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 - `S14` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
+- `S35` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S35` `A` `src/vaultspec_a2a/graph/tests/test_research_branch_models.py`
+- `S35` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S35` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
+- `S35` `verify:` `ruff check+format, ty check src/vaultspec_a2a/graph` -> `pass`
 
 ## Notes
 

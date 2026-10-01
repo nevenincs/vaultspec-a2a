@@ -168,8 +168,16 @@ def _resolve_research_adr_models(
     *,
     provider_factory: ProviderFactoryProtocol,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, tuple[BaseChatModel, dict[str, str]]]:
+    researcher_branches: int = 1,
+) -> tuple[dict[str, tuple[BaseChatModel, dict[str, str]]], list[BaseChatModel]]:
     """Resolve one model, and its node metadata, per required research_adr role.
+
+    The researcher role is also resolved once per fan-out branch. The branches
+    run in one superstep, and a provider model owns a single provider session
+    that refuses a second concurrent turn, so branches sharing one instance
+    fail as soon as a fan-out has two of them on a real lane. The second
+    element holds one researcher model per branch, the first of which is the
+    researcher model in the role map.
 
     Raises ConfigError when a required role has no resolved AgentConfig among the
     team's workers.
@@ -198,9 +206,8 @@ def _resolve_research_adr_models(
             f"{list(RESEARCH_ADR_ROLES)}."
         )
 
-    resolved: dict[str, tuple[BaseChatModel, dict[str, str]]] = {}
-    for role in RESEARCH_ADR_ROLES:
-        model, provider, model_name = resolve_model_for_worker(
+    def resolve(role: str) -> tuple[BaseChatModel, Any, str]:
+        return resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],
             team_config,
@@ -208,9 +215,16 @@ def _resolve_research_adr_models(
             provider_factory=provider_factory,
             frozen_assignment=frozen_assignment,
         )
+
+    resolved: dict[str, tuple[BaseChatModel, dict[str, str]]] = {}
+    for role in RESEARCH_ADR_ROLES:
+        model, provider, model_name = resolve(role)
         metadata = _agent_node_metadata(cfg_by_role[role], provider, model_name)
         resolved[role] = (model, metadata)
-    return resolved
+    researchers = [resolved["researcher"][0]] + [
+        resolve("researcher")[0] for _ in range(researcher_branches - 1)
+    ]
+    return resolved, researchers
 
 
 def _make_research_producer(
@@ -452,12 +466,17 @@ def _compile_research_adr(
             "gates; the control layer injects the concrete authoring client."
         )
 
-    models = _resolve_research_adr_models(
+    specs: list[dict[str, Any]] = [
+        spec.model_dump() for spec in team_config.topology.research_threads
+    ] or [{"thread_id": "primary", "topic": "", "instructions": ""}]
+
+    models, researcher_models = _resolve_research_adr_models(
         team_config,
         agent_configs,
         options.get("workspace_root"),
         provider_factory=options["provider_factory"],
         frozen_assignment=options.get("frozen_assignment"),
+        researcher_branches=len(specs),
     )
     researcher_model, researcher_metadata = models["researcher"]
     synthesist_model, synthesist_metadata = models["synthesist"]
@@ -470,26 +489,28 @@ def _compile_research_adr(
     # on the harness schema today). Empty when no harness is declared.
     harness_mcp_servers = _research_harness_servers(team_config)
 
-    specs: list[dict[str, Any]] = [
-        spec.model_dump() for spec in team_config.topology.research_threads
-    ] or [{"thread_id": "primary", "topic": "", "instructions": ""}]
-
-    researcher_producer = _make_research_producer(
-        researcher_model,
-        _composed_role_prompt(
-            team_config, agent_configs, "researcher", researcher_model
-        ),
-        workspace_root=options.get("workspace_root"),
-        harness_mcp_servers=harness_mcp_servers,
-        autonomous=options.get("autonomous", False),
+    researcher_prompt = _composed_role_prompt(
+        team_config, agent_configs, "researcher", researcher_model
     )
+    branch_producers = {
+        id(spec): _make_research_producer(
+            branch_model,
+            researcher_prompt,
+            workspace_root=options.get("workspace_root"),
+            harness_mcp_servers=harness_mcp_servers,
+            autonomous=options.get("autonomous", False),
+        )
+        for spec, branch_model in zip(specs, researcher_models, strict=True)
+    }
 
     _wire_diverge_stage(
         builder,
         dispatch_name=_RA_DISPATCH,
         synthesis_name=_RA_SYNTHESIS,
         specs=specs,
-        make_researcher=lambda spec: create_researcher_node(spec, researcher_producer),
+        make_researcher=lambda spec: create_researcher_node(
+            spec, branch_producers[id(spec)]
+        ),
         researcher_metadata=researcher_metadata,
     )
 

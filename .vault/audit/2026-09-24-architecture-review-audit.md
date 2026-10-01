@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-09-30'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:8aebd73387b37ec866eefab45d83340aafe64299c3e8986d5058efa3485adcbd'
+body_hash: 'sha256:1197db3cd1afc666ba44d56cad9f49a90158ca907edc09ed6323f400aa6cbf90'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -469,7 +469,7 @@ Status: open decision from P03.S17. The stream re-reads durable status on each h
 
 ### parallel-researchers-share-one-model | medium | the research fan-out's parallel branches share one provider model instance
 
-Status: open from P02.S13, code reading only. Every researcher branch calls the one model resolved at compile time (`src/vaultspec_a2a/graph/_compiler_research.py`, `_make_research_producer`) and those branches run in one superstep, while `AcpChatModel` refuses concurrent use; `with_mcp_servers` copies share the original's transport. A per-branch model from the provider factory would separate them and belongs with the provider-lane work.
+Status: fixed in P06.S35, after reproduction: three branches over real ACP models failed with `AcpSessionBusyError` on the second branch, so any research fan-out wider than one thread failed on a real lane. The researcher role is now resolved once per branch (`src/vaultspec_a2a/graph/_compiler_research.py`, `_resolve_research_adr_models`), and `src/vaultspec_a2a/graph/tests/test_research_branch_models.py` drives three branches to the join. Original finding: every researcher branch calls the one model resolved at compile time (`src/vaultspec_a2a/graph/_compiler_research.py`, `_make_research_producer`) and those branches run in one superstep, while `AcpChatModel` refuses concurrent use; `with_mcp_servers` copies share the original's transport. A per-branch model from the provider factory would separate them and belongs with the provider-lane work.
 
 ### graph-cache-per-run | low | each run now compiles its own graph
 

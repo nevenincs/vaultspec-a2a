@@ -115,6 +115,18 @@ _COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS = 5.0
 _MAX_NATIVE_COMMAND_ARGUMENT_LENGTH = 8192
 
 
+def _redacted_stderr_tail(ctx: AcpSessionContext) -> str:
+    """Return the child's last words, redacted, or a marker when it said none.
+
+    One reader for every failure that has to explain a turn which did not
+    finish, because the question is the same whichever way it ended: a child
+    that left mid-turn and one that stopped speaking both leave their log as
+    the only account of why. The lines are redacted at capture, so reading them
+    here cannot widen what a failure discloses.
+    """
+    return ctx.rendered_stderr_tail() or "<empty>"
+
+
 class AcpChatModel(BaseChatModel):
     """A custom LangChain ChatModel that wraps ACP-compatible CLI agents."""
 
@@ -706,8 +718,13 @@ class AcpChatModel(BaseChatModel):
         idle_seconds = ctx.seconds_since_activity()
         if idle_seconds < idle_limit:
             return
+        # A hang is where the child's own account matters most: nothing arrived
+        # over the protocol, so the only thing that can say what the agent was
+        # doing is what it wrote to its log before it went quiet.
+        tail = _redacted_stderr_tail(ctx)
         logger.error(
-            "ACP turn exceeded the idle deadline",
+            "ACP turn exceeded the idle deadline; redacted stderr tail:\n%s",
+            tail,
             extra=runtime_log_extra(
                 self._state.config,
                 process=ctx.process,
@@ -719,7 +736,8 @@ class AcpChatModel(BaseChatModel):
         )
         raise AcpPromptError(
             f"ACP turn produced no protocol activity for {idle_seconds:.0f}s "
-            f"(deadline {idle_limit:.0f}s); treating the session as hung.",
+            f"(deadline {idle_limit:.0f}s); treating the session as hung; "
+            f"redacted stderr tail:\n{tail}",
             code=AcpErrorCode.INTERNAL_ERROR,
             data={"acp_outcome": "turn_idle_deadline_expired"},
         )
@@ -776,7 +794,7 @@ class AcpChatModel(BaseChatModel):
         because the reader of the log and the caller of the turn are different
         people with the same question.
         """
-        tail = ctx.rendered_stderr_tail() or "<empty>"
+        tail = _redacted_stderr_tail(ctx)
         detail = f" ({cause})" if cause is not None else ""
         logger.warning(
             "ACP subprocess exited before end_turn%s; redacted stderr tail:\n%s",

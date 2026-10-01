@@ -12,7 +12,7 @@ related:
   - '[[2026-02-26-event-aggregation-server-side-replay-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:3819c41ed081fbdabf5b62a4f8935a4562e5e70a12ad3fef8f98da6b97e1dde3'
+body_hash: 'sha256:af456c34b987b4345838cd68c571f5ff095643dffcb06acfa82b6a02d1c2bf53'
 ---
 
 # `stream-resumption` plan
@@ -57,18 +57,18 @@ Delivers the durable substrate the decision rests on: the per-run event table, i
 
 Delivers the served contract: the SSE id emitted only where replay is served, the resumption cursor on the run stream, replay after the snapshot, the gap-honest frames, and the additive run-status capability field.
 
-- [ ] `P02.S05` - Emit the SSE id as run_id colon decimal sequence on a frame whose replay is served, write no id where replay is disabled, unavailable, or outside the retained window, and replace the encoder's standing no-id rationale with the invariant it becomes; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/tests/test_sse_frames.py`.
-- [ ] `P02.S06` - Accept the resumption cursor on the run stream as the Last-Event-ID header and the last_event_id query fallback with the header winning, honour the dash sentinel as the start of the retained window, close a cursor naming another run with a stream_rejected frame of reason resume_cursor_foreign_run, and regenerate the committed openapi.json; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py, openapi.json, src/vaultspec_a2a/api/tests/`.
-- [ ] `P02.S07` - Replay the retained rows then the unflushed ring after the snapshot and before going live, tracking the highest sequence emitted so a live frame at or below it is dropped, and closing through the existing terminal path when a terminal is reached during replay; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/api/tests/test_stream_session_scope.py, src/vaultspec_a2a/api/tests/`.
-- [ ] `P02.S08` - Emit exactly one bounded resynchronization frame when a resume cannot be served completely, carrying progress_dropped reason replay_window_exceeded with the first sequence it can serve, or reason replay_unavailable, and never present a short replay as a complete one; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/api/tests/`.
-- [ ] `P02.S09` - Serve the additive run-status boolean stream_resumable from the served switch and the run's retained rows so a consumer can tell the two postures apart without probing, and regenerate the committed openapi.json; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, openapi.json, src/vaultspec_a2a/api/tests/`.
+- [x] `P02.S05` - Emit the SSE id as run_id colon decimal sequence on a frame whose replay is served, write no id where replay is disabled, unavailable, or outside the retained window, and replace the encoder's standing no-id rationale with the invariant it becomes; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/streaming/tests/test_sse_frames.py`.
+- [x] `P02.S06` - Accept the resumption cursor on the run stream as the Last-Event-ID header and the last_event_id query fallback with the header winning, honour the dash sentinel as the start of the retained window, close a cursor naming another run with a stream_rejected frame of reason resume_cursor_foreign_run, and regenerate the committed openapi.json; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/thread_stream.py, openapi.json, src/vaultspec_a2a/api/tests/`.
+- [x] `P02.S07` - Replay the retained rows then the unflushed ring after the snapshot and before going live, tracking the highest sequence emitted so a live frame at or below it is dropped, and closing through the existing terminal path when a terminal is reached during replay; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/api/tests/test_stream_session_scope.py, src/vaultspec_a2a/api/tests/`.
+- [x] `P02.S08` - Emit exactly one bounded resynchronization frame when a resume cannot be served completely, carrying progress_dropped reason replay_window_exceeded with the first sequence it can serve, or reason replay_unavailable, and never present a short replay as a complete one; `src/vaultspec_a2a/api/thread_stream.py, src/vaultspec_a2a/api/tests/`.
+- [x] `P02.S09` - Serve the additive run-status boolean stream_resumable from the served switch and the run's retained rows so a consumer can tell the two postures apart without probing, and regenerate the committed openapi.json; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, openapi.json, src/vaultspec_a2a/api/tests/`.
 
 ### Phase `P03` - retention, operations, and the contract event
 
 Delivers the bounds and the announcement: the age sweep that is independent of checkpoint retention in both directions, and the vault record of the cross-repository contract event the dashboard is told about before release.
 
-- [ ] `P03.S10` - Sweep the replay log on its own bounds under the new stream_replay_retention_hours setting, deleting rows of runs settled longer ago than the bound and rows of any run older than it from a gateway background task, reading and deleting no checkpoint; `src/vaultspec_a2a/database/run_event_retention.py, src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/database/tests/`.
-- [ ] `P03.S11` - Record the cross-repository contract event as a vault reference under this feature, naming the id on run-stream frames, the honoured Last-Event-ID cursor and its query fallback, the two new progress_dropped reasons, the new stream_rejected reason, and the run-status stream_resumable field; the dashboard repository is out of scope here; `.vault/reference/`.
+- [x] `P03.S10` - Sweep the replay log on its own bounds under the new stream_replay_retention_hours setting, deleting rows of runs settled longer ago than the bound and rows of any run older than it from a gateway background task, reading and deleting no checkpoint; `src/vaultspec_a2a/database/run_event_retention.py, src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/database/tests/`.
+- [x] `P03.S11` - Record the cross-repository contract event as a vault reference under this feature, naming the id on run-stream frames, the honoured Last-Event-ID cursor and its query fallback, the two new progress_dropped reasons, the new stream_rejected reason, and the run-status stream_resumable field; the dashboard repository is out of scope here; `.vault/reference/`.
 
 ## Parallelization
 

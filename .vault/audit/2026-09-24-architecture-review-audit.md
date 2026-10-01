@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:27c395d462c0959239b52af526714d150ccf54f53f38fd7411cf65c5dec14e96'
+body_hash: 'sha256:d623d0dda37a507a775af0d4614f4315f91b0d9b795d6d7976ed7bfa7f31af11'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -604,3 +604,7 @@ Fixed at review: P06.S39 now names `src/vaultspec_a2a/thread/checkpoint_evidence
 ### docker-healthcheck-unproven | info | the hostname probes have not run under Docker
 
 Open until the Docker-backed service tier runs; a Docker daemon is now available in this environment, so the next product verification pass owns it.
+
+### quality-coverage-gates-red | medium | the unused-symbol and unconsumed-export gates fail, so the composed CI gate cannot pass
+
+Open, owned by P06.S50. Both gates run inside `lint all`, which `just ci` composes, and both report findings on the current branch: six unused symbols and one orphaned test module (also present on `main` at `72974d6`), and 29 published names with no importer, several added by this plan's residual Steps (`PathArgumentScan`, `event_client_timeout`). Each finding needs a consumer, a removal, or a narrower `__all__`.

@@ -22,7 +22,7 @@ related:
   - '[[2026-03-20-service-lifecycle-architecture-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:457a67bcdd392f23010967662b727951361ae728f252a70018dd714e75c9d82d'
+body_hash: 'sha256:cde02f6517c99763265146d2e0a692da9a8144172c4b03f5871a127cd950dac8'
 ---
 
 # `architecture-review` plan
@@ -121,6 +121,7 @@ Close the decision-free findings the plan-close review and its re-review left op
 - [x] `P06.S47` - Answer a permission response on a busy or saturated run with the same typed status the follow-up verb serves instead of 500 or 502; `src/vaultspec_a2a/control/permission_dispatch.py, src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`.
 - [ ] `P06.S48` - Remove the dead state the residual fixes left behind and flush the replay recorder on every relay transport; `src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/control/_permission_response_contract.py, src/vaultspec_a2a/graph/_compiler_research.py`.
 - [ ] `P06.S49` - Escape a role heading formed by a whole underlined paragraph and deliver a re-raised signal without awaiting the finalisation reads; `src/vaultspec_a2a/providers/_prompt_render.py, src/vaultspec_a2a/streaming/ingest.py`.
+- [ ] `P06.S50` - Bring the unused-symbol and unconsumed-export gates back to zero; `src/vaultspec_a2a/`.
 
 ## Parallelization
 

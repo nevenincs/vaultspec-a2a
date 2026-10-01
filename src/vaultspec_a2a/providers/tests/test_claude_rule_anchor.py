@@ -42,7 +42,9 @@ if TYPE_CHECKING:
     from ...conftest import ExternalPrerequisiteRule
     from .._json_contract import JsonObject
 
-_SECRET = "the-file-the-rule-decides-about"
+# What the target file holds: a marker that shows up in a tool result only
+# when the rule admitted the read.
+_FILE_MARKER = "the-file-the-rule-decides-about"
 _CLI_TIMEOUT_SECONDS = 120.0
 _TOOL_USE_ID = "toolu_rule_probe"
 
@@ -295,7 +297,7 @@ def probe_paths(tmp_path: Path) -> _ProbePaths:
     for directory in (workspace, home, elsewhere):
         directory.mkdir()
     target = elsewhere / "target.txt"
-    target.write_text(f"{_SECRET}\n", encoding="utf-8")
+    target.write_text(f"{_FILE_MARKER}\n", encoding="utf-8")
     return _ProbePaths(workspace=workspace, home=home, target=target)
 
 
@@ -309,7 +311,7 @@ def test_the_scope_rule_this_lane_writes_admits_the_path_it_names(
         allowed=workspace_scoped_tool_rule("Read", str(probe_paths.target.parent)),
     )
 
-    assert _SECRET in _answered(granted)
+    assert _FILE_MARKER in _answered(granted)
     assert granted.get("is_error") is not True
 
 
@@ -328,7 +330,7 @@ def test_a_single_slash_scope_rule_admits_nothing_at_the_path_it_names(
         allowed=f"Read({probe_paths.target.parent.as_posix()}/**)",
     )
 
-    assert _SECRET not in _answered(refused)
+    assert _FILE_MARKER not in _answered(refused)
     assert refused.get("is_error") is True
 
 
@@ -352,8 +354,8 @@ def test_the_deny_spelling_this_lane_writes_blocks_a_granted_read(
         denied=f"Read({claude_rule_path(str(target))})",
     )
 
-    assert _SECRET in _answered(granted)
-    assert _SECRET not in _answered(blocked)
+    assert _FILE_MARKER in _answered(granted)
+    assert _FILE_MARKER not in _answered(blocked)
     assert blocked.get("is_error") is True
 
 
@@ -375,4 +377,4 @@ def test_a_single_slash_deny_rule_blocks_nothing_at_the_path_it_names(
         denied=f"Read({target.as_posix()})",
     )
 
-    assert _SECRET in _answered(not_blocked)
+    assert _FILE_MARKER in _answered(not_blocked)

@@ -13,6 +13,12 @@ which is what lets a consumer tell "the run was already like this when I
 arrived" from "this just happened". Neither the snapshot nor any later frame is
 authoritative: they say where the run stood, and ``run-status`` says where it
 stands.
+
+A reconnecting viewer may offer the id it last received as a resumption cursor,
+and the snapshot still leads: the retained frames after the cursor follow it,
+and only then does the stream go live. The subscription is attached before any
+of that, which is what makes the handover seamless and also what makes the
+de-duplication below necessary.
 """
 
 from __future__ import annotations
@@ -48,7 +54,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["build_thread_stream_response"]
+__all__ = ["build_thread_stream_response", "offered_resume_cursor"]
 
 _UNRECORDED_REASON = "The run failed; no reason was recorded"
 """Stands in for a failed run whose durable row holds a condition and no reason.
@@ -56,6 +62,69 @@ _UNRECORDED_REASON = "The run failed; no reason was recorded"
 Says what is true of the RECORD rather than inventing an account of the failure,
 so a client is never handed a diagnosis nothing observed.
 """
+
+RESUME_WINDOW_START = "-"
+"""The cursor meaning "from the start of whatever is still retained".
+
+A client with no position of its own - a fresh viewer that wants the recent
+history, or one whose stored id has expired - asks for the window rather than
+guessing a number.
+"""
+
+_FOREIGN_RUN_REASON = "resume_cursor_foreign_run"
+
+#: An int64 sequence is at most nineteen digits. A longer run of digits names
+#: no position this log could hold, and parsing it would be work done on behalf
+#: of a caller that cannot be served.
+_MAX_CURSOR_DIGITS = 19
+
+
+@dataclass(frozen=True, slots=True)
+class _ResumePosition:
+    """Where in a run's retained window a reconnecting viewer wants to restart."""
+
+    after_sequence: int
+    #: True for the window-start sentinel, which claims no position of its own.
+    #: The difference matters to gap honesty: a window that starts later than a
+    #: NUMBERED cursor asked for lost frames, whereas a window is exactly what
+    #: the sentinel asked for.
+    from_window_start: bool
+
+
+def offered_resume_cursor(header: str | None, query: str | None) -> str | None:
+    """Return the resumption cursor a request offers, or ``None`` for none.
+
+    The ``Last-Event-ID`` header is what a conforming SSE client re-sends by
+    itself, so it wins; the query parameter exists because the browser
+    ``EventSource`` constructor cannot set a header, and a caller driving
+    resumption by hand needs some way in. An empty value on either is no
+    cursor: a client whose stored id is the empty string sends no position.
+    """
+    for offered in (header, query):
+        if offered is not None and (cursor := offered.strip()):
+            return cursor
+    return None
+
+
+def _resume_position(cursor: str, thread_id: str) -> _ResumePosition | None:
+    """Return the position *cursor* names on this run, or ``None`` if it names none.
+
+    ``None`` is the refusal case and covers more than a cursor from another
+    run: a value that is not a position at all cannot be honoured either, and
+    serving such a request as though it had no cursor would hand the caller a
+    live-only stream while it believed it had resumed. Both answers are the
+    same to the caller - this stream will not replay from what you sent.
+    """
+    if cursor == RESUME_WINDOW_START:
+        return _ResumePosition(after_sequence=0, from_window_start=True)
+    run_id, separator, decimal = cursor.rpartition(":")
+    if not separator or run_id != thread_id:
+        return None
+    if not decimal.isascii() or not decimal.isdigit():
+        return None
+    if len(decimal) > _MAX_CURSOR_DIGITS:
+        return None
+    return _ResumePosition(after_sequence=int(decimal), from_window_start=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,9 +304,31 @@ async def _stream_thread_events(
     aggregator: EventAggregator,
     thread_id: str,
     session_factory: async_sessionmaker[AsyncSession],
+    resume_cursor: str | None = None,
 ) -> AsyncGenerator[bytes]:
     """Yield thread-scoped events from the shared subscriber queue as SSE."""
     client_id = f"sse-{uuid4()}"
+    resume: _ResumePosition | None = None
+    if resume_cursor is not None:
+        resume = _resume_position(resume_cursor, thread_id)
+        if resume is None:
+            # Refused before anything is registered or read. A cursor this
+            # stream cannot honour is a property of the request alone, and
+            # replaying another run's history to satisfy it would be worse
+            # than refusing: the caller would receive frames of a run it never
+            # asked about, under ids it would then resume from.
+            logger.warning(
+                "Refused SSE stream for thread %s: resumption cursor names "
+                "another run or no position at all",
+                thread_id,
+                extra={
+                    "client_id": client_id,
+                    "thread_id": thread_id,
+                    "action": "stream_resume_refused",
+                },
+            )
+            yield _rejection_frame(thread_id, _FOREIGN_RUN_REASON)
+            return
     try:
         queue = aggregator.add_subscriber(client_id)
     except EventAggregatorError:
@@ -357,6 +448,7 @@ async def build_thread_stream_response(
     aggregator: EventAggregator,
     thread_id: str,
     not_found_detail: str = "Thread not found",
+    resume_cursor: str | None = None,
 ) -> StreamingResponse:
     """Build the SSE ``StreamingResponse`` for a thread, or raise a 404.
 
@@ -369,6 +461,13 @@ async def build_thread_stream_response(
     *session_factory* is what the body then reads authority through, in sessions
     of its own that close as soon as each read is done, because the body outlives
     the request scope.
+
+    *resume_cursor* is the id a reconnecting viewer last received, already
+    resolved from the request by :func:`offered_resume_cursor`. It is carried
+    into the body rather than acted on here: a cursor this run cannot honour is
+    answered with a typed frame on a 200 stream, not an HTTP error, because the
+    client that sends one is an ``EventSource`` that would otherwise see only a
+    failed connection.
     """
     # Refused before the thread lookup, deliberately. The limit exists to stop a
     # caller exhausting queues and delivery tasks, so it must be decided from
@@ -396,6 +495,7 @@ async def build_thread_stream_response(
             aggregator=aggregator,
             thread_id=thread_id,
             session_factory=session_factory,
+            resume_cursor=resume_cursor,
         ),
         media_type="text/event-stream",
         headers={

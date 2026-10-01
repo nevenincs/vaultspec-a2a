@@ -389,7 +389,7 @@
     "/v1/runs/{run_id}/stream": {
       "get": {
         "summary": "Run Stream Endpoint",
-        "description": "Re-serve the run's bounded, versioned v1 SSE progress frames.\n\nThe public streaming companion to run-status: run-status is the authoritative\nrecovery snapshot, this is the droppable live progress relay. A run id is the\nthread id, so this delegates to the same stream builder the internal\nprogress stream has always used - one code path, the same versioned\n256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames\nare non-authoritative by contract: a consumer reconciles run state from\nrun-status, never from a relay frame.",
+        "description": "Re-serve the run's bounded, versioned v1 SSE progress frames.\n\nThe public streaming companion to run-status: run-status is the authoritative\nrecovery snapshot, this is the droppable live progress relay. A run id is the\nthread id, so this delegates to the same stream builder the internal\nprogress stream has always used - one code path, the same versioned\n256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames\nare non-authoritative by contract: a consumer reconciles run state from\nrun-status, never from a relay frame.\n\nA reconnecting viewer may offer the id it last received, and the retained\nframes after it lead the live stream. Retention does not make those frames\nauthoritative either: a replayed frame is the same droppable progress it\nwas live.",
         "operationId": "run_stream_endpoint_v1_runs__run_id__stream_get",
         "security": [
           {
@@ -408,6 +408,44 @@
               "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
               "title": "Run Id"
             }
+          },
+          {
+            "name": "last_event_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 160
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Resumption cursor for callers that cannot set a header; the browser EventSource constructor is the reason this exists. The Last-Event-ID header wins when both are supplied.",
+              "title": "Last Event Id"
+            },
+            "description": "Resumption cursor for callers that cannot set a header; the browser EventSource constructor is the reason this exists. The Last-Event-ID header wins when both are supplied."
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 160
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The SSE id this viewer last received, re-sent to resume after the frame it names. A conforming client sends this by itself. '-' asks for the start of whatever window is still retained.",
+              "title": "Last-Event-Id"
+            },
+            "description": "The SSE id this viewer last received, re-sent to resume after the frame it names. A conforming client sends this by itself. '-' asks for the start of whatever window is still retained."
           }
         ],
         "responses": {

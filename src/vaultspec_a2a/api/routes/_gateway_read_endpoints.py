@@ -89,7 +89,7 @@ from ..schemas.gateway import (
     TopologyPosition,
 )
 from ..schemas.snapshots import ThreadStateSnapshot
-from ..thread_stream import build_thread_stream_response
+from ..thread_stream import build_thread_stream_response, offered_resume_cursor
 from ..workspace import require_existing_workspace_root
 from .gateway import (
     _modern_frozen_disclosure,
@@ -374,6 +374,12 @@ async def run_status_endpoint(
 # ---------------------------------------------------------------------------
 
 
+#: Bounds the resumption cursor at the route. A cursor is a run id, a colon
+#: and a decimal, so anything longer is not one; refusing to carry it further
+#: keeps an unbounded query string out of the stream body's parser.
+MAX_RESUME_CURSOR_CHARS = 160
+
+
 @router.get("/runs/{run_id}/stream")
 async def run_stream_endpoint(
     run_id: PathSafeRunId,
@@ -389,6 +395,29 @@ async def run_stream_endpoint(
     # moment the stream needs it.
     db: AsyncSession = Depends(get_db, scope="function"),
     aggregator: EventAggregator = Depends(get_aggregator),
+    last_event_id_header: Annotated[
+        str | None,
+        Header(
+            alias="Last-Event-ID",
+            max_length=MAX_RESUME_CURSOR_CHARS,
+            description=(
+                "The SSE id this viewer last received, re-sent to resume after "
+                "the frame it names. A conforming client sends this by itself. "
+                "'-' asks for the start of whatever window is still retained."
+            ),
+        ),
+    ] = None,
+    last_event_id: Annotated[
+        str | None,
+        Query(
+            max_length=MAX_RESUME_CURSOR_CHARS,
+            description=(
+                "Resumption cursor for callers that cannot set a header; the "
+                "browser EventSource constructor is the reason this exists. "
+                "The Last-Event-ID header wins when both are supplied."
+            ),
+        ),
+    ] = None,
 ) -> StreamingResponse:
     """Re-serve the run's bounded, versioned v1 SSE progress frames.
 
@@ -399,6 +428,11 @@ async def run_stream_endpoint(
     256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames
     are non-authoritative by contract: a consumer reconciles run state from
     run-status, never from a relay frame.
+
+    A reconnecting viewer may offer the id it last received, and the retained
+    frames after it lead the live stream. Retention does not make those frames
+    authoritative either: a replayed frame is the same droppable progress it
+    was live.
     """
     return await build_thread_stream_response(
         db=db,
@@ -406,6 +440,7 @@ async def run_stream_endpoint(
         aggregator=aggregator,
         thread_id=run_id,
         not_found_detail="Run not found",
+        resume_cursor=offered_resume_cursor(last_event_id_header, last_event_id),
     )
 
 

@@ -51,6 +51,37 @@ def _record_config_home(path: str) -> None:
         json.dump(payload, fh)
 
 
+# The permission modes a session advertises, copied from the pinned adapter's
+# own session result (claude-agent-acp, buildAvailableModes) rather than
+# invented: the ids, names and descriptions are what a real lane reports, and
+# "default" is current because that is where a session with no ambient settings
+# sources lands. A client pins an unattended run to a mode and verifies it
+# against this list, so a simulator that reports nothing here is a lane whose
+# permission posture cannot be established at all.
+_AVAILABLE_MODES: list[dict[str, str]] = [
+    {
+        "id": "default",
+        "name": "Manual",
+        "description": "Standard behavior, prompts for dangerous operations",
+    },
+    {
+        "id": "acceptEdits",
+        "name": "Accept Edits",
+        "description": "Auto-accept file edit operations",
+    },
+    {
+        "id": "plan",
+        "name": "Plan Mode",
+        "description": "Planning mode, no actual tool execution",
+    },
+    {
+        "id": "dontAsk",
+        "name": "Don't Ask",
+        "description": "Don't prompt for permissions, deny if not pre-approved",
+    },
+]
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ACP Protocol Simulator")
     parser.add_argument(
@@ -76,6 +107,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "be reached through the gateway at all: with no catalog entry there is "
         "no selection to name, and run creation is refused before admission. "
         "Omitted by default, so every existing caller is unaffected.",
+    )
+    parser.add_argument(
+        "--omit-modes",
+        action="store_true",
+        help="Answer session/new with no modes block. The pinned adapter always "
+        "advertises its permission modes, so this is the shape of another agent "
+        "speaking the same protocol - a lane whose permission posture an "
+        "unattended run cannot pin or verify.",
     )
     parser.add_argument(
         "--error", help="If set, return this error message for session/prompt"
@@ -150,6 +189,11 @@ def _session_new_response(
         with open(args.record_session_new, "w", encoding="utf-8") as fh:
             json.dump(req.get("params", {}), fh)
     session_result: dict[str, object] = {"sessionId": args.session_id}
+    if not args.omit_modes:
+        session_result["modes"] = {
+            "currentModeId": "default",
+            "availableModes": [dict(mode) for mode in _AVAILABLE_MODES],
+        }
     if args.advertise_model:
         # The real adapter's shape: one select whose category is "model",
         # carrying the ids it will accept. The catalog reads its entries

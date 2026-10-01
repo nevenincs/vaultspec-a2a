@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage
 from .._subprocess import STDERR_TAIL_LINES
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpError
+from ._acp_frames import SESSION_MODES
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -54,7 +55,10 @@ for line in sys.stdin:
             "authMethods": [],
         }})
     elif method == "session/new":
-        reply(message["id"], {{"sessionId": {json.dumps(_SESSION_ID)}}})
+        reply(message["id"], {{
+            "sessionId": {json.dumps(_SESSION_ID)},
+            "modes": {json.dumps(SESSION_MODES)},
+        }})
     elif method == "session/prompt":
         for text in {json.dumps(stderr_lines)}:
             print(text, file=sys.stderr)

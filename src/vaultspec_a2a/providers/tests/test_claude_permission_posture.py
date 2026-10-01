@@ -9,10 +9,12 @@ prove the posture actually leaves the process.
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from langchain_core.messages import HumanMessage
 
 from ...team.team_config import load_agent_config
 from ...utils.enums import AcpRequestId
@@ -27,6 +29,7 @@ from .._claude_tool_policy import (
     MODE_CONFIG_OPTION_ID,
     workspace_scoped_tool_rule,
 )
+from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpSessionError
 from ._acp_frames import read_acp_frame
 from ._installed_vocabulary import (
@@ -39,6 +42,9 @@ if TYPE_CHECKING:
 
 _SESSION_ID = "session-under-test"
 _TIMEOUT = 10.0
+_SIMULATOR = (
+    Path(__file__).parent.parent.parent / "graph" / "tests" / "acp_simulator.py"
+)
 
 # Echoes each stdin line back on stdout, so the frame a production seam wrote is
 # readable from the same context. A real pipe round-trip through a real process.
@@ -372,14 +378,15 @@ async def test_supervised_session_keeps_the_mode_it_negotiated(
 
 
 @pytest.mark.asyncio
-async def test_unattended_session_survives_an_agent_that_advertises_no_modes(
+async def test_unattended_session_refuses_an_agent_that_advertises_no_modes(
     echo_context: AcpSessionContext, tmp_path: Path
 ) -> None:
-    """An agent with no mode surface is run and reported, not refused.
+    """An agent with no mode surface cannot carry an unattended run.
 
     The pinned adapter always advertises its modes, so a session without them is
-    another agent of the same family whose posture is its own; there is nothing
-    to pin and the run stays bounded by its allowlist and the permission rung.
+    another agent of the same family - and one whose posture is its own is one
+    this run never chose. There is nothing to pin and nothing to verify, which
+    is the condition the pin exists to prevent rather than a lesser form of it.
     """
     config = _config(agent_id="vaultspec-adr-author", workspace_root=tmp_path)
     task = asyncio.create_task(setup_session(echo_context, config, {}, []))
@@ -391,9 +398,93 @@ async def test_unattended_session_survives_an_agent_that_advertises_no_modes(
         {"result": {"sessionId": _SESSION_ID}}
     )
 
+    with pytest.raises(AcpSessionError, match="advertises no permission modes"):
+        await task
+    assert AcpRequestId.SESSION_SET_CONFIG_OPTION not in echo_context.response_futures
+
+
+@pytest.mark.asyncio
+async def test_supervised_session_still_runs_against_an_agent_without_modes(
+    echo_context: AcpSessionContext, tmp_path: Path
+) -> None:
+    """The refusal is about the missing rung, not about the modes themselves.
+
+    A supervised run has a human at the permission prompt, which is what the
+    pinned mode exists to stand in for, so a lane with no mode surface is still
+    a lane that run can use.
+    """
+
+    async def callback(
+        _name: str, _args: JsonObject, _options: list[JsonObject]
+    ) -> str:
+        return "allow_once"
+
+    config = _config(
+        agent_id="vaultspec-adr-author",
+        workspace_root=tmp_path,
+        permission_callback=callback,
+    )
+    task = asyncio.create_task(setup_session(echo_context, config, {}, []))
+
+    await read_acp_frame(
+        echo_context.stdout, AcpRequestId.SESSION_SETUP, timeout=_TIMEOUT
+    )
+    echo_context.response_futures[AcpRequestId.SESSION_SETUP].set_result(
+        {"result": {"sessionId": _SESSION_ID}}
+    )
+
     result = await task
     assert result.session_id == _SESSION_ID
-    assert AcpRequestId.SESSION_SET_CONFIG_OPTION not in echo_context.response_futures
+
+
+def _simulator_model(tmp_path: Path, *extra_args: str) -> AcpChatModel:
+    """An unattended model over a real ACP subprocess, with no permission rung."""
+    return AcpChatModel(
+        command=[
+            sys.executable,
+            str(_SIMULATOR),
+            "--response",
+            "done",
+            *extra_args,
+        ],
+        env_vars={},
+        workspace_root=str(tmp_path),
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unattended_turn_against_a_modeless_lane_never_starts(
+    tmp_path: Path,
+) -> None:
+    """End to end over a real subprocess: no mode surface, no unattended turn.
+
+    The lane is driven through the whole production path - spawn, handshake,
+    session - rather than by handing a session result to the setup function, so
+    what is proven is that the turn does not happen.
+    """
+    model = _simulator_model(tmp_path, "--omit-modes")
+
+    with pytest.raises(AcpSessionError, match="advertises no permission modes"):
+        async for _ in model.astream([HumanMessage(content="go")]):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_the_same_lane_advertising_modes_completes_its_turn(
+    tmp_path: Path,
+) -> None:
+    """Control: the refusal is the missing mode surface and nothing else.
+
+    Identical lane, identical run, one flag apart. Without this the refusal
+    above would prove only that an unattended turn against the simulator fails.
+    """
+    model = _simulator_model(tmp_path)
+
+    served = ""
+    async for chunk in model.astream([HumanMessage(content="go")]):
+        served += str(chunk.content)
+
+    assert "done" in served
 
 
 def test_every_session_denies_the_credential_and_process_trees(

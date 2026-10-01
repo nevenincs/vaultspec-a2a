@@ -637,19 +637,20 @@ async def _pin_autonomous_permission_mode(
         return config_options, agent_modes
     available = _available_mode_ids(agent_modes)
     if not available:
-        # A session that advertises no modes offers nothing to pin: the pinned
-        # adapter always advertises them, so this is another agent speaking the
-        # same family, and its posture is its own. Said out loud rather than
-        # passed over, because an unattended run is then bounded only by the
-        # allowlist and the permission rung.
-        logger.warning(
-            "ACP session advertises no permission modes; an unattended run is "
-            "bounded only by its allowlist and the permission rung",
-            extra=runtime_log_extra(
-                config, process=ctx.process, handshake_step="session/new"
-            ),
+        # A session that advertises no modes offers nothing to pin, and an
+        # unattended run that cannot pin its mode is running under whatever
+        # posture the agent chose for itself - which is the ambient default
+        # this pin exists to replace. The pinned adapter always advertises its
+        # modes, so reaching here means another agent is speaking the same
+        # protocol; refusing it is the same answer this function already gives
+        # a lane that advertises modes but not the one an unattended run needs.
+        raise AcpSessionError(
+            "ACP session cannot run unattended: it advertises no permission "
+            "modes, so the mode an unattended run requires can be neither set "
+            "nor verified",
+            code=AcpErrorCode.INVALID_PARAMS,
+            condition=ProviderCondition.INVALID_REQUEST,
         )
-        return config_options, agent_modes
     if AUTONOMOUS_PERMISSION_MODE not in available:
         raise AcpSessionError(
             "ACP session cannot run unattended: it does not offer the "

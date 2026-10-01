@@ -176,10 +176,10 @@ def _cli_reports_logged_in(
 
 
 def _claude_credentialed() -> bool:
-    """The injected OAuth token, or the Claude CLI's own subscription login."""
-    from .control.config import settings
-
-    if (settings.claude_code_oauth_token or "").strip():
+    """An exported OAuth token, or the Claude CLI's own subscription login."""
+    # The CLI reads a token from the environment it inherits, which is the
+    # only place the product's Claude lane can take one from.
+    if (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip():
         return True
     # `claude auth status` emits JSON carrying "loggedIn", which answers the
     # expiry question a file on disk cannot. Only its silence falls back.

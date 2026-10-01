@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:768439d0284c9090dfdc1458f1bf0cf282abf141c714318466e0a9149628df66'
+body_hash: 'sha256:1278da35ab60156d006c511c077aefd75b0d76267ec47167fd96e2859c66b12a'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -335,6 +335,22 @@ Status: open; acceptable under the loopback contract, blocking for any networked
 ### contract-fidelity | low | the published contract under-describes streams, errors, and health
 
 Status: open. OpenAPI documents the stream as `application/json` with an empty schema and omits the SSE frame catalog; errors are bare `{"detail"}` rather than typed codes or RFC 9457 problem details; unarmed `/health` returns 200 even when degraded.
+
+### settings-declared-but-read-by-nothing | medium | nine settings were parsed and documented while no code read them
+
+Fixed outside a plan Step on user request (2026-10-01). Eight MCP transport and tool settings (`mcp_host`, `mcp_port`, `mcp_allowed_hosts`, `mcp_allowed_origins`, and four tool timeouts and limits) outlived the MCP HTTP server they configured, and `claude_code_oauth_token` was declared although the Claude lane deliberately takes no credential from the service; all were removed with their example lines, and the test harness reads an exported token from the environment it inherits, as the CLI does. Only the two allowlist settings had a validator, which is why a naive text scan missed them. `src/vaultspec_a2a/control/tests/test_env_example_drift.py` now fails on any declared setting no shipped code reads.
+
+### env-example-bound-every-interface | medium | the example's active host line bound the gateway to every interface
+
+Fixed outside a plan Step on user request (2026-10-01). `.env.example` carried an uncommented `VAULTSPEC_A2A_HOST=0.0.0.0` while the code binds loopback, so a copied file exposed the API beyond the host; the container images set 0.0.0.0 themselves. The example now shows the default, and every shown value is loaded through the real settings loader in a clean child process and compared with the code default, with each deliberate departure recorded and held live.
+
+### env-example-postgres-block-loaded-only-split | low | the Postgres profile's checkpoint URL sat outside its own block
+
+Fixed outside a plan Step on user request (2026-10-01). Prose separated the checkpoint URL from the three lines it is cross-validated with, so uncommenting the visible block alone was refused at startup; the four lines are now one contiguous block that the drift test loads whole on top of the copied file.
+
+### claude-token-reaches-the-cli-only-through-the-recipes | info | a token in .env reaches the Claude CLI only when a recipe starts the process
+
+Recorded 2026-10-01. The service never reads `CLAUDE_CODE_OAUTH_TOKEN`; the recipes' credential scopes (`dev/credentials.py`) export it from `.env` into the processes they start, and the CLI inherits it. A service started any other way needs it exported in its own environment; the example now says so.
 
 ## Recommendations
 

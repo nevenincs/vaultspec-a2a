@@ -1,12 +1,11 @@
 """Infrastructure settings fields and shared configuration path helpers."""
 
-import json
 import logging
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import NoDecode, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
 from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
 from .env_prefix import ENV_PREFIX
@@ -463,9 +462,10 @@ class InfraConfig(ProjectSettings):
     )
     # Other tools' settings: the a2a name wins, and the owning tool's own name is
     # read as a fallback so an existing login keeps working.
-    # ANTHROPIC_API_KEY is deliberately absent. The Claude lane authenticates with
-    # claude_code_oauth_token, and every agent subprocess has ANTHROPIC_API_KEY
-    # stripped from its environment by the workspace scrub
+    # No Claude credential is declared: that lane runs as the operator's own CLI
+    # session and is never handed a token, so a setting here would be read by
+    # nothing. ANTHROPIC_API_KEY is deliberately absent too: every agent
+    # subprocess has it stripped from its environment by the workspace scrub
     # (workspace/environment.py), because the key alongside an OAuth token
     # silently downgrades a flat-rate subscription to pay-as-you-go billing.
     # The scrub is the single removal site: the ACP layer re-injects only the
@@ -504,12 +504,6 @@ class InfraConfig(ProjectSettings):
     zhipu_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("VAULTSPEC_A2A_ZHIPU_API_KEY", "ZHIPU_API_KEY"),
-    )
-    claude_code_oauth_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"
-        ),
     )
     # Z.ai routes through the Claude ACP path against an Anthropic-Messages-
     # compatible endpoint. The base URL defaults to
@@ -639,38 +633,11 @@ class InfraConfig(ProjectSettings):
         default="",
         description=(
             "Base URL for reaching the gateway HTTP API. Used by the worker "
-            "IPC bridge and the MCP tool server. Auto-derived from host+port "
+            "IPC bridge and the command line. Auto-derived from host+port "
             "when not set explicitly. It also moves the spawned worker's "
             "heartbeat and pairing target, so a proxy set here redirects both."
         ),
     )
-    mcp_host: str = Field(
-        default="0.0.0.0",
-        description="Bind host for MCP streamable-http transport.",
-    )
-    mcp_port: int = Field(
-        default=8200,
-        description="Bind port for MCP streamable-http transport.",
-    )
-    # NoDecode: without it pydantic-settings JSON-decodes the env value before
-    # any validator runs, so the comma form below could never be normalized.
-    mcp_allowed_hosts: Annotated[list[str], NoDecode] = Field(
-        default=["localhost:*", "127.0.0.1:*"],
-        description=(
-            "Host header values the MCP streamable-http transport accepts. "
-            "Defaults to loopback only; a deployment that fronts MCP under a "
-            "real hostname must name it here. Empty disables the Host check."
-        ),
-    )
-    mcp_allowed_origins: Annotated[list[str], NoDecode] = Field(
-        default=["http://localhost:*", "http://127.0.0.1:*"],
-        description=(
-            "Origin header values the MCP streamable-http transport accepts. "
-            "Guards against DNS-rebinding from a browser context. A request "
-            "with no Origin header (the normal non-browser MCP client) passes."
-        ),
-    )
-
     # Worker process settings
     worker_port: int = Field(
         default=18001,
@@ -957,28 +924,6 @@ class InfraConfig(ProjectSettings):
         ),
     )
 
-    # MCP server
-    mcp_create_timeout_seconds: float = Field(
-        default=30.0,
-        description="MCP tool: timeout (seconds) for thread-create operations.",
-    )
-    mcp_query_timeout_seconds: float = Field(
-        default=15.0,
-        description=(
-            "MCP tool: timeout (seconds) for thread-query and status operations."
-        ),
-    )
-    mcp_max_initial_message_chars: int = Field(
-        default=32_000,
-        description=(
-            "MCP tool: maximum characters in the initial message before truncation."
-        ),
-    )
-    mcp_preview_truncate_len: int = Field(
-        default=200,
-        description="MCP tool: character limit for inline message previews.",
-    )
-
     # Environment Flags
     ci: bool = Field(
         default=False, validation_alias=AliasChoices("VAULTSPEC_A2A_CI", "CI")
@@ -1028,25 +973,6 @@ class InfraConfig(ProjectSettings):
             if not _valid_kimi_capability(token):
                 raise ValueError("Kimi model capability contains an invalid token")
         return ",".join(ordered_unique)
-
-    @field_validator("mcp_allowed_hosts", "mcp_allowed_origins", mode="before")
-    @classmethod
-    def _split_comma_separated_list(cls, value: object) -> object:
-        """Accept a comma-separated or JSON-array env value for these settings.
-
-        These fields carry ``NoDecode``, so the raw environment string arrives
-        here undecoded. Plain ``a,b`` is the documented form - pydantic-settings
-        would otherwise JSON-parse it and fail startup on the obvious spelling.
-        A JSON array is still honoured, because silently reading ``["a","b"]``
-        as two malformed comma items would be worse than either supporting it
-        or rejecting it.
-        """
-        if not isinstance(value, str):
-            return value
-        text = value.strip()
-        if text.startswith("["):
-            return json.loads(text)
-        return [item.strip() for item in text.split(",") if item.strip()]
 
 
 # Canonical names for the settings a2a writes into its own children's

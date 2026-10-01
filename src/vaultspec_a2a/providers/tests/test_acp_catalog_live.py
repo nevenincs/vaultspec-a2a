@@ -36,10 +36,9 @@ def _real_adapter_inputs() -> tuple[
         )
     command, metadata = _classify_acp_command(settings.acp_backend)
     workspace = Path.cwd()
+    # An exported CLAUDE_CODE_OAUTH_TOKEN passes through the workspace scrub,
+    # exactly as it reaches the CLI in a served run.
     environment = resolve_env_vars(workspace)
-    token = settings.claude_code_oauth_token
-    if token:
-        environment["CLAUDE_CODE_OAUTH_TOKEN"] = token
     environment.pop("ANTHROPIC_API_KEY", None)
     if claude := resolve_provider_cli_executable(Provider.CLAUDE):
         environment["CLAUDE_CODE_EXECUTABLE"] = claude

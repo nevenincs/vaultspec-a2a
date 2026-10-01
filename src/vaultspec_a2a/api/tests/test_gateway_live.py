@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -1341,7 +1342,7 @@ async def test_presets_list_is_truthful_and_resilient(
         raw = resp.text
         for secret_value in (
             settings.zai_auth_token,
-            settings.claude_code_oauth_token,
+            os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
             settings.openai_api_key,
             settings.zhipu_api_key,
         ):

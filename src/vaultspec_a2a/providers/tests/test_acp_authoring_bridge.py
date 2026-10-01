@@ -143,11 +143,10 @@ async def test_real_agent_connects_to_authoring_bridge(
 
     command, meta = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())
+    # An exported CLAUDE_CODE_OAUTH_TOKEN passes through the workspace scrub,
+    # exactly as it reaches the CLI in a served run.
     env = resolve_env_vars(Path(workspace))
-    token = settings.claude_code_oauth_token
-    if token:
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
-        env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("ANTHROPIC_API_KEY", None)
     sys_claude = resolve_provider_cli_executable(Provider.CLAUDE)
     if sys_claude:
         env["CLAUDE_CODE_EXECUTABLE"] = sys_claude

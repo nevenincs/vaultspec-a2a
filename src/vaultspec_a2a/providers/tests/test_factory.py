@@ -142,7 +142,7 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
 def test_provider_factory_claude_never_injects_an_env_token() -> None:
     """The Claude lane's identity is the operator's CLI session, never a token.
 
-    A configured ``CLAUDE_CODE_OAUTH_TOKEN`` (settings/.env) is a SEPARATE
+    An exported ``CLAUDE_CODE_OAUTH_TOKEN`` is a SEPARATE
     credential window from the account the operator is logged in as; injecting
     it would silently redirect every run onto that other identity. The factory
     must therefore construct the model with no token in ``env_vars`` regardless

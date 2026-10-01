@@ -11,8 +11,9 @@ related:
   - '[[2026-07-18-desktop-product-profile-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:2cb10acd68c335f6a05c9f24a7459f9a2a471bc0426afceac1b4a96fd4a8ecff'
+body_hash: 'sha256:3c3eda0662744fcd1e5c26d3780099cb13142705b33872f50d63d01cb3a89ec7'
 ---
+
 # `provider-binary-policy` plan
 
 Make the provider launch identity profile-scoped, proof-bound and recorded, wire the Claude OAuth token behind a declared channel, and delete the resume capability no production path can reach.
@@ -46,6 +47,7 @@ Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer i
 - [ ] `P01.S04` - Rewrite pin_claude_executable into the profile-scoped authority order returning the absolute path and the rung that answered, with an armed capsule exclusive and fail-loud over an inherited executable override, and update the served-turn and catalog-probe call sites; `src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/factory.py`.
 - [ ] `P01.S05` - Refuse a served Claude or Z.ai launch and the Claude catalog probe when no rung resolves a CLI, with a typed runtime-unavailable reason instead of an unpinned child; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/cli_resolution.py`.
 - [ ] `P01.S06` - Install one exact Claude CLI version in the Compose worker image and name it to the service through the new setting; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.
+- [ ] `P01.S17` - Bump the vendored Claude ACP adapter to its latest release and re-prove the protocol surface the ACP layer depends on; `package.json, package-lock.json, src/vaultspec_a2a/graph/tests/acp_simulator.py, src/vaultspec_a2a/providers/`.
 
 ### Phase `P02` - Proof-bound version ranges at the eligibility service
 

@@ -27,4 +27,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Reject hosted runner placement
-        run: uv run --isolated --no-project --python 3.13 dev/ci_contract.py --runner-placement-only
+        run: uv run --isolated --no-project --with PyYAML==6.0.3 --python 3.13 dev/ci_contract.py --runner-placement-only

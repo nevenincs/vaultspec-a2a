@@ -109,3 +109,7 @@ htmlcov/
 /dist/*.whl
 /dist/*.tar.gz
 *.egg-info/
+
+# Private VaultSpec environment (never commit)
+/.vaultspec/.env
+/.vaultspec/.env.*

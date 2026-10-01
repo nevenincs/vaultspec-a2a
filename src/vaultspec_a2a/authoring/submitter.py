@@ -44,6 +44,7 @@ from ..thread.state import read_untrusted_state_value
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
 from ._ids import derive_idempotency_key
+from ._prose import strip_non_prose
 from .client import AuthoringClient
 from .discovery import resolve_engine
 from .session import AuthoringSession
@@ -95,15 +96,10 @@ _FRONTMATTER_BLOCK_RE = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*\r?\n?", re.DOTA
 # (``vaultcore/checks/body_links.py``) so the submit-node guard refuses exactly
 # what ``vault set-body --check`` would refuse at materialization: wiki-links and
 # non-URL markdown links belong in ``related:`` frontmatter or a backtick span,
-# never in body prose. Code fences, inline code, and HTML comments are stripped
-# before scanning so a legitimately-quoted ``[[x]]`` in a code span is not flagged.
+# never in body prose. The scan reads only prose as core's reader defines it, so a
+# legitimately-quoted ``[[x]]`` in code or a comment is not flagged.
 _WIKI_LINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((?!https?://|#|mailto:)([^)]+)\)")
-_CODE_FENCE_RE = re.compile(
-    r"^(?:```|~~~)[^\n]*\n.*?^(?:```|~~~)\s*$", re.MULTILINE | re.DOTALL
-)
-_INLINE_CODE_RE = re.compile(r"`[^`]+`")
-_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 # A legacy ``## Status`` section — the canonical ADR template carries the status in
 # the H1 token ``# {feature} adr: {title} | (**status:** `accepted`)``, never a
@@ -576,10 +572,7 @@ def _conformance_notes(
         )
     # Body-links: scan ONLY the prose after the frontmatter (wiki-links are legal
     # in `related:` frontmatter), with code/comments stripped, exactly like core.
-    prose = _INLINE_CODE_RE.sub(
-        "", _HTML_COMMENT_RE.sub("", _CODE_FENCE_RE.sub("", prose_region))
-    )
-    notes.extend(_body_link_notes(prose))
+    notes.extend(_body_link_notes(strip_non_prose(prose_region)))
     # Web-source disclosure, RESEARCH ONLY. The vault's document boundary gives
     # each fact one home: the research document grounds, and every later document
     # cites it by stem without restating its evidence. A URL is evidence, so its

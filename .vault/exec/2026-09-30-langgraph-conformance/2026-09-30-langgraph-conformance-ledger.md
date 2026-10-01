@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#langgraph-conformance'
 date: '2026-09-30'
-modified: '2026-09-30'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:1beb705541dfdc0e7d09852b249b80104d673eaeecc66540daff21647a6f916d'
+body_hash: 'sha256:df4a546e9d596fa05fd4aedc168875e75e4f3bb47e33d199342778011ed3bf13'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -463,6 +463,12 @@ related:
 - `S28` `M` `.vault/research/2026-09-24-architecture-review-research.md`
 - `S28` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S28` `by:` `vaultspec-adr-researcher`
+- `S38` `A` `src/vaultspec_a2a/authoring/_prose.py`
+- `S38` `M` `src/vaultspec_a2a/authoring/submitter.py`
+- `S38` `A` `src/vaultspec_a2a/authoring/tests/test_prose_parity.py`
+- `S38` `A` `.vault/adr/2026-10-01-langgraph-conformance-core-reader-parity-adr.md`
+- `S38` `verify:` `pytest src/vaultspec_a2a/authoring` -> `pass`
+- `S38` `verify:` `ruff check+format, ty check src/vaultspec_a2a/authoring` -> `pass`
 
 ## Notes
 
@@ -507,3 +513,4 @@ related:
 - `S18` Correction from the plan-close review: the aggregator's projection seams had no production caller.
 - `S34` Correction from the re-review: an unavailable checkpoint read was logged as a receipt not yet due.
 - `S28` User approved the drafted amendments as recommended on 2026-09-30. team-composition-topology and orchestration-topology-pipeline accepted; event-aggregation amended but left proposed pending the user's accept-or-deprecate choice.
+- `S38` Unblocked on 2026-10-01: the user chose a port held to core by a parity test; recorded in the core-reader-parity ADR, accepted under the user's blanket approval.

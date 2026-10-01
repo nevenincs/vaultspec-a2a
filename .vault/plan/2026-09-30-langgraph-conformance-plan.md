@@ -14,9 +14,10 @@ related:
   - '[[2026-03-10-postgres-dual-backend-adr]]'
   - '[[2026-08-02-control-action-leases-adr]]'
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
+  - '[[2026-10-01-langgraph-conformance-core-reader-parity-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:a9c9c2e9f915fb04b4b1f7d60580ea2158379888ba5020f5e4a669ce70624ec0'
+body_hash: 'sha256:41e393d90f70d9135eb598279083ceb5d6b44beb099e7b67445c6f266165170b'
 ---
 
 # `langgraph-conformance` plan
@@ -111,7 +112,7 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S35` - Disclose only the unanswered fan-out interrupts on run-status and in the resume preflight; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/thread/snapshots.py`.
 - [x] `P07.S36` - Clear star and pipeline validation errors when their owner returns, bound the finish-block budget by the recursion limit, and keep the blocked-FINISH reason through a plan-approval reroute; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P07.S37` - Close the rag daemon egress and client-daemon skew gaps and drop torch from the rag extra; `src/vaultspec_a2a/providers/_harness_mcp_registry.py, src/vaultspec_a2a/providers/_mcp_contract.py, pyproject.toml`.
-- [ ] `P07.S38` - Strip body links with core's reader instead of mirrored regexes; `src/vaultspec_a2a/authoring/submitter.py`.
+- [x] `P07.S38` - Strip body links with a port of core's prose reader held to core by a parity test; `src/vaultspec_a2a/authoring/submitter.py`.
 - [x] `P07.S39` - Retire the unreachable checkpoint-history degradations, tie the retention schema pin to the saver version, and refuse closing a borrowed saver; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/database/checkpoints.py`.
 - [x] `P07.S40` - Attribute custom stream writes to their node and replace the aggregator's hand-written graph stubs with one error-injecting graph; `src/vaultspec_a2a/streaming/`.
 - [x] `P07.S41` - Make the provider tests name the adapter prerequisite they lack; `src/vaultspec_a2a/providers/tests/`.

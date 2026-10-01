@@ -84,34 +84,10 @@ repo = "local"
 repo = "local"
 
 [[repos.hooks]]
-id = "vault-fix"
-name = "Vault gate"
-entry = "uv run --no-sync vaultspec-core vault check all"
-types = ["markdown"]
-language = "system"
-pass_filenames = false
-
-[[repos.hooks]]
-id = "vault-sanitize-annotations"
-name = "Check Vault annotations"
-entry = "uv run --no-sync python dev/vault_annotations_gate.py"
-types = ["markdown"]
-language = "system"
-pass_filenames = false
-
-[[repos.hooks]]
-id = "check-provider-artifacts"
-name = "Check provider artifacts"
-entry = "uv run --no-sync vaultspec-core check-providers"
+id = "vaultspec-commit-gate"
+name = "Vaultspec commit gate"
+entry = "uv run --no-sync vaultspec-core commit-gate"
 always_run = true
 language = "system"
-pass_filenames = false
-
-[[repos.hooks]]
-id = "spec-check"
-name = "Spec check"
-entry = "uv run --no-sync vaultspec-core spec doctor --gate-errors"
-types = ["markdown"]
-language = "system"
-pass_filenames = false
+pass_filenames = true
 # <<< vaultspec-managed hooks <<<

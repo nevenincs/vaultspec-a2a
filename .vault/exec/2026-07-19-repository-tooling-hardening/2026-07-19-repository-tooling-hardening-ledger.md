@@ -5,7 +5,7 @@ tags:
 date: '2026-07-19'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:65cd622ff204d4a01c824bd722444f64c74ae654aa261664976108a0dd4b4afc'
+body_hash: 'sha256:413ae2a325a1feb3f742985e19d3d94f1b097eb0357b6a976018fcdbaabf7382'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -225,6 +225,31 @@ related:
 - `S32` `verify:` `python -m dev lint all` -> `pass`
 - `S32` `verify:` `pytest src/vaultspec_a2a/api src/vaultspec_a2a/streaming -n 4 --require-prerequisite=postgres` -> `pass`
 - `S32` `by:` `vaultspec-high-executor`
+- `S48` `M` `src/vaultspec_a2a/control/config.py`
+- `S48` `M` `src/vaultspec_a2a/control/state_layout.py`
+- `S48` `M` `src/vaultspec_a2a/control/tests/test_active_project_identity.py`
+- `S48` `M` `src/vaultspec_a2a/database/checkpoint_retention.py`
+- `S48` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S48` `M` `src/vaultspec_a2a/providers/_codex_auth.py`
+- `S48` `M` `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py`
+- `S48` `M` `src/vaultspec_a2a/streaming/_run_callbacks.py`
+- `S48` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S48` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S48` `M` `src/vaultspec_a2a/streaming/types.py`
+- `S48` `M` `src/vaultspec_a2a/testing/children.py`
+- `S48` `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `S48` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S48` `M` `src/vaultspec_a2a/thread/state.py`
+- `S48` `M` `src/vaultspec_a2a/worker/_dispatch_settlement.py`
+- `S48` `M` `src/vaultspec_a2a/worker/_executor_state.py`
+- `S48` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S48` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S48` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S48` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S48` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `S48` `verify:` `python -m dev lint all` -> `pass`
+- `S48` `verify:` `pytest worker thread database control streaming testing api graph -n 3 --require-prerequisite=postgres` -> `pass`
+- `S48` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -239,3 +264,4 @@ related:
 - `S47` Partial: 120 to 1 on the branch; the residual is a private langgraph snapshot type the retention guard must recognise, which needs a decision. Merged over the W07 decomposition, the tree reads 23, mostly helpers moved across modules under private names; owned by the same Step.
 - `S47` Closed by the orchestrator: merge residue made public where the helpers now live; the private langgraph snapshot import retired on evidence that the metadata counter already marks every delta dependency (a snapshot-every-step graph prunes with its value intact). type-strict reads zero.
 - `S32` Partial: the stream hotspot is decomposed (radon 24 to 0, complexipy 43 to 0, limits 23 to 18 tree-wide); release() now also runs on the two refusal exits, proven harmless by a new test. `run_stream_endpoint` keeps six FastAPI parameters, because folding Depends/Header/Query declarations would change the served OpenAPI surface; api/schemas/gateway.py module length remains. Step stays open for those.
+- `S48` Partial: every finding outside the concurrently edited files is cleared, the never-written ingest queue map is gone, and three dead exports are unpublished. A Postgres checkpointer bridge restarted after close now waits for its new selector loop. Remaining findings sit in control event handling, the gateway schemas, recovery authority, the continuation queue, the subscriber manager and the replay writer.

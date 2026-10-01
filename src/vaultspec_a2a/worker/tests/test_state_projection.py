@@ -255,7 +255,6 @@ async def test_a_resume_naming_an_answered_branch_is_refused() -> None:
     await _answer(graph, config, "request-alpha")
 
     answered_again = await projector.pre_flight_resume(
-        thread_id,
         graph,
         cast("dict[str, Any]", config),
         receipt,
@@ -268,7 +267,6 @@ async def test_a_resume_naming_an_answered_branch_is_refused() -> None:
     assert answered_again.pending_request_ids == ("request-beta",)
 
     still_open = await projector.pre_flight_resume(
-        thread_id,
         graph,
         cast("dict[str, Any]", config),
         receipt,

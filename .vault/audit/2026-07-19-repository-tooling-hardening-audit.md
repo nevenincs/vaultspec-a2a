@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-10-01'
-body_hash: 'sha256:f59595a5b373e5c68aad322650152fd17e044bace93ff5acf3ee071187af9167'
+body_hash: 'sha256:cb360fcf59fe71fbac5e27a692002487759e816632b045bcdad51af9d0d29784'
 related: []
 ---
 
@@ -738,7 +738,7 @@ Open, owned by W07.P13.S32, W07.P13.S33 and W07.P14.S48. After S29-S31 and S34-S
 
 ### ingest-queue-map-never-written | low | the ingest manager keeps a per-thread queue map nothing fills
 
-Open; found by W07.P13.S31. The map now held in `_ThreadState.ingest_queues` (`streaming/ingest.py`) is created and popped but never written; it was grouped rather than deleted to stay out of the concurrent dead-code work, and belongs to S48.
+Fixed in W07.P14.S48 (390543e): the map is removed. Original finding: the map held in `_ThreadState.ingest_queues` (`streaming/ingest.py`) is created and popped but never written; it was grouped rather than deleted to stay out of the concurrent dead-code work, and belongs to S48.
 
 ### lifecycle-pairing-test-fails-under-load | low | a lifecycle pairing test fails in a large parallel batch
 
@@ -763,6 +763,18 @@ Open, owned by W07.P14.S48. `SubscriberManager.broadcast` (`streaming/subscriber
 ### stream-route-parameters-are-the-openapi-surface | info | the run stream route's six parameters are FastAPI declarations
 
 Recorded from W07.P13.S32. `run_stream_endpoint` (`api/routes/_gateway_read_endpoints.py`) takes six parameters, one over the shape ceiling, and each is a `Depends`, `Header` or `Query` declaration; folding them into a parameter object changes the generated OpenAPI document, so the decision belongs with the routes, not with a decomposition.
+
+### load-sensitive-wall-clock-budgets | low | several tests assert a wall-clock budget inside the parallel unit lane
+
+Open; reported by the W07.P14.S48 and run-continuation P04 executors and under root-cause by the flaky-test executor. `test_repeated_cold_compiles_keep_serving_under_five_slot_cpu_load` (0.5 s loop gap, five CPU slots on four cores), `test_active_discovery_stays_indexed_and_bounded_at_large_history` (p95 250 ms) and `lifecycle/tests/test_discovery.py::test_single_resident_true_only_when_fresh_live_and_healthy` failed under host load and passed alone. A budget is only evidence if it is derived from the host or measured in isolation; one fixed literal asserted under arbitrary concurrency will keep failing.
+
+### checkpointer-bridge-restart-waited-on-a-stale-event | low | a restarted Postgres checkpointer bridge did not wait for its new loop
+
+Fixed in W07.P14.S48 (03a9590). `_SelectorThreadPostgresCheckpointer` kept one readiness event for its lifetime, so a bridge started again after close read the old loop's set event and proceeded before its new selector loop existed; the event is now created per start. No test exercises a restart.
+
+### worktree-provisioning-skips-node | info | an executor worktree lacks the vendored Node adapter until npm ci runs
+
+Recorded from W07.P14.S48. A fresh worktree carries no `node_modules`, so thirteen provider tests report the Claude ACP adapter missing until `npm ci` runs beside `uv sync`.
 
 ## Recommendations
 

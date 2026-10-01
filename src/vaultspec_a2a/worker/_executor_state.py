@@ -7,13 +7,17 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from langgraph.runtime import RunControl
+
 from ..streaming.aggregator import EventAggregator
+from ._dispatch_receipts import DispatchReceiptReporter
 from .catalog_store import RunCatalogStore
 from .token_store import RunTokenStore
 
 if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
     from ._dispatch_contract import DispatchCapacityReservation
+    from ._dispatch_settlement import TerminalArbitration
 
 
 @dataclass(slots=True)
@@ -30,10 +34,16 @@ class CheckpointAccess:
 
 @dataclass(slots=True)
 class DispatchCapacityState:
-    """Mutable admission, cancellation, and reservation state for one worker."""
+    """Mutable admission, cancellation, and reservation state for one worker.
+
+    The per-thread terminal arbitrations belong here with the admission slots
+    they bracket: both are keyed by thread, and a thread's arbitration is what
+    serializes the settlement that releases its slot.
+    """
 
     active_ingests: dict[str, DispatchCapacityReservation] = field(default_factory=dict)
     pending_cancellations: dict[str, str] = field(default_factory=dict)
+    terminal_arbitrations: dict[str, TerminalArbitration] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     next_generation: int = 0
     reservation: ContextVar[DispatchCapacityReservation | None] = field(
@@ -45,8 +55,62 @@ class DispatchCapacityState:
 
 @dataclass(slots=True)
 class RunResources:
-    """Worker-scoped event and provider state shared with graph execution."""
+    """Worker-scoped event and provider state shared with graph execution.
+
+    All four live for the worker rather than for one run, and all four are
+    pruned on the same per-run boundary, so they are held together.
+    """
 
     aggregator: EventAggregator = field(default_factory=EventAggregator)
     token_store: RunTokenStore = field(default_factory=RunTokenStore)
     catalog_store: RunCatalogStore = field(default_factory=RunCatalogStore)
+    receipts: DispatchReceiptReporter = field(default_factory=DispatchReceiptReporter)
+
+
+class RunControlRegistry:
+    """The drain handles of every run executing on one worker.
+
+    A drain is one-way, so the reason is held for the whole remaining life of
+    the registry rather than only for the runs that happened to hold a control
+    when it was asked for: a run whose control opens afterwards starts drained
+    and stops before its first node, and the owner refuses further dispatch.
+    """
+
+    def __init__(self) -> None:
+        self._controls: dict[str, RunControl] = {}
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self._drain_reason: str | None = None
+
+    @property
+    def draining(self) -> bool:
+        """Whether a drain has been requested of this registry."""
+        return self._drain_reason is not None
+
+    def open(self, thread_id: str) -> RunControl:
+        """Open one run's control, already drained when a drain is in force."""
+        control = RunControl()
+        if self._drain_reason is not None:
+            control.request_drain(self._drain_reason)
+        self._controls[thread_id] = control
+        self._idle.clear()
+        return control
+
+    def close(self, thread_id: str) -> None:
+        """Drop one run's control and signal idle once none is left."""
+        self._controls.pop(thread_id, None)
+        if not self._controls:
+            self._idle.set()
+
+    async def drain(self, reason: str) -> None:
+        """Ask every open control to drain, and wait until none is left.
+
+        A node already mid-turn finishes first, so a caller bounds this with
+        its own deadline and cancels what remains; a run that did drain left a
+        resumable checkpoint and no terminal status, so its open action is
+        delivered again after restart.
+        """
+        self._drain_reason = reason
+        for control in list(self._controls.values()):
+            control.request_drain(reason)
+        await self._idle.wait()

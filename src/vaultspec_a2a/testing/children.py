@@ -33,7 +33,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import psutil
 
@@ -41,7 +41,7 @@ from .progress import ProgressDeadline, ProgressStalledError
 from .session_root import session_scratch_dir
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
     from pathlib import Path
 
 __all__ = [
@@ -117,30 +117,46 @@ def measured_child_startup_s() -> float:
     return _measured_startup_s
 
 
+class ChildWatch(TypedDict, total=False):
+    """How a wait watches one child for progress.
+
+    Declared once so the wait and every call site name the same knobs, and so
+    adding a fifth is one edit rather than two.
+
+    *fingerprint* adds a caller-observable progress signal - typically the
+    size of the file the child writes - to the tree's own CPU and membership
+    signals. *diagnostic* supplies the context a stall report should carry,
+    such as the output captured so far. *ceiling_s* is for a child that polls:
+    a poll loop burns CPU forever, so CPU alone never calls it stalled; derive
+    it from :func:`measured_child_startup_s`, never from a literal.
+    """
+
+    idle_window_s: float
+    fingerprint: Callable[[], object] | None
+    diagnostic: Callable[[], str] | None
+    ceiling_s: float | None
+
+
 def await_child(
     process: subprocess.Popen[bytes],
     *,
     what: str,
-    idle_window_s: float = DEFAULT_IDLE_WINDOW_S,
-    fingerprint: Callable[[], object] | None = None,
-    diagnostic: Callable[[], str] | None = None,
-    ceiling_s: float | None = None,
+    **watch: Unpack[ChildWatch],
 ) -> int:
     """Wait for *process* to exit, failing on a stall and never on slowness.
 
-    *what* names the child in a failure. *fingerprint* adds a caller-observable
-    progress signal - typically the size of the file the child writes - to the
-    tree's own CPU and membership signals; *diagnostic* supplies the context a
-    stall report should carry, such as the output captured so far. A wedged
-    child is REAPED as a tree before :class:`~.progress.ProgressStalledError` is
-    raised, so a failed wait never leaves a process holding its ports, its
-    handles, and its share of the machine.
-
-    *ceiling_s* is for a child that polls: a poll loop burns CPU forever, so
-    CPU alone never calls it stalled. Derive it from
-    :func:`measured_child_startup_s`, never from a literal.
+    *what* names the child in a failure; :class:`ChildWatch` documents what
+    else the wait can be told to watch. A wedged child is REAPED as a tree
+    before :class:`~.progress.ProgressStalledError` is raised, so a failed
+    wait never leaves a process holding its ports, its handles, and its share
+    of the machine.
     """
-    deadline = ProgressDeadline(idle_window_s=idle_window_s)
+    fingerprint = watch.get("fingerprint")
+    diagnostic = watch.get("diagnostic")
+    ceiling_s = watch.get("ceiling_s")
+    deadline = ProgressDeadline(
+        idle_window_s=watch.get("idle_window_s", DEFAULT_IDLE_WINDOW_S)
+    )
     started = time.monotonic()
     observed: object = None
     while True:
@@ -204,6 +220,18 @@ def file_size_fingerprint(*paths: os.PathLike[str] | str) -> Callable[[], object
     return _sizes
 
 
+@contextlib.contextmanager
+def _capture_dir() -> Iterator[Path]:
+    """A scratch seat for one child's captured output, removed afterwards."""
+    capture = session_scratch_dir("child-output-")
+    try:
+        yield capture
+    finally:
+        # The files delete themselves; the directory that held them does not.
+        with contextlib.suppress(OSError):
+            capture.rmdir()
+
+
 def run_child(
     command: list[str],
     *,
@@ -222,28 +250,8 @@ def run_child(
     the wait reads. The files land in this session's own scratch seat inside the
     worktree, never in the system temporary directory.
     """
-    capture = session_scratch_dir("child-output-")
-    try:
-        return _run_captured(
-            command, capture, what=what, idle_window_s=idle_window_s, env=env, cwd=cwd
-        )
-    finally:
-        # The files delete themselves; the directory that held them does not.
-        with contextlib.suppress(OSError):
-            capture.rmdir()
-
-
-def _run_captured(
-    command: list[str],
-    capture: Path,
-    *,
-    what: str,
-    idle_window_s: float,
-    env: Mapping[str, str] | None,
-    cwd: os.PathLike[str] | str | None,
-) -> subprocess.CompletedProcess[str]:
-    """Run *command* with its output captured into files under *capture*."""
     with (
+        _capture_dir() as capture,
         tempfile.TemporaryFile(dir=capture) as out,
         tempfile.TemporaryFile(dir=capture) as err,
     ):

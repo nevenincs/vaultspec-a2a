@@ -22,7 +22,6 @@ __all__ = [
     "append_artifacts",
     "append_research_findings",
     "append_validation_errors",
-    "keep_last_resume_binding",
     "merge_permission_answers",
     "merge_token_usage",
     "merge_unique_strs",

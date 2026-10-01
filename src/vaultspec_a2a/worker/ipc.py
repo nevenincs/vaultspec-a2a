@@ -22,12 +22,13 @@ import httpx
 from fastapi.encoders import jsonable_encoder
 
 from ..control.config import settings
+from ..domain_config import domain_config
 from ..graph.enums import ServerEventType
 from ..streaming.fanout import PROTECTED_WIRE_TYPES
 from ..telemetry import inject_trace_context
 from ..thread.snapshots import wire_event_type
 
-__all__ = ["WorkerBridge"]
+__all__ = ["WorkerBridge", "event_client_timeout"]
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,13 @@ logger = logging.getLogger(__name__)
 # small allowance for that cleanup even when the shared delivery deadline has
 # already elapsed, while still preventing an unbounded transport teardown.
 _CLIENT_CLOSE_ALLOWANCE_SECONDS = 0.1
+
+_CONNECT_TIMEOUT_SECONDS = 5.0
+
+# What the gateway needs on top of its bounded checkpoint read to answer a post
+# carrying a terminal: the durable write that precedes the read, and the
+# loopback round trip around both.
+_TERMINAL_CONFIRMATION_ALLOWANCE_SECONDS = 5.0
 
 # The JSON envelope every batch body is wrapped in, measured once so a batch's
 # size can be accumulated event by event instead of re-serialized per candidate.
@@ -47,6 +55,23 @@ _BATCH_CONTENT_TYPE = "application/json"
 class _BatchState:
     events: list[dict[str, Any]] = field(default_factory=list)
     flush_task: asyncio.Task[None] | None = None
+
+
+def event_client_timeout() -> httpx.Timeout:
+    """Return the request budget the worker's event client gives the gateway.
+
+    The gateway confirms the terminal an event post carries before it answers:
+    a durable write, then a checkpoint read the operator's own
+    ``aget_state`` budget bounds. A client that gave up at that same bound
+    would abandon a confirmation still in progress and re-post a terminal the
+    gateway is in the middle of accepting, so the budget is read off that
+    bound rather than restated as a second number beside it.
+    """
+    return httpx.Timeout(
+        domain_config.aget_state_timeout_seconds
+        + _TERMINAL_CONFIRMATION_ALLOWANCE_SECONDS,
+        connect=_CONNECT_TIMEOUT_SECONDS,
+    )
 
 
 def _entry_event_type(entry: dict[str, Any]) -> str:
@@ -136,7 +161,7 @@ class WorkerBridge:
             headers["Authorization"] = f"Bearer {internal_token}"
         self._client = httpx.AsyncClient(
             base_url=self._api_url,
-            timeout=httpx.Timeout(10.0, connect=5.0),
+            timeout=event_client_timeout(),
             headers=headers,
         )
         self._active_threads: set[str] = set()

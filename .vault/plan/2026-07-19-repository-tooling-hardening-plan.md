@@ -3,13 +3,13 @@ tags:
   - '#plan'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-08-02'
-body_hash: 'sha256:db3031162571fe37b70822915230eea5c61ca8b51086668aa7eb0b0bbb4ca010'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
+modified: '2026-10-01'
+body_hash: 'sha256:92a0eb2530b401d0cec2b8259a40572f3b45a1ce6a2c85e5fb80c220721d345e'
 ---
 
 # `repository-tooling-hardening` plan
@@ -149,9 +149,9 @@ Reduce production complexity, shape, nesting, and module-size debt at the accept
 
 Decompose provider, streaming, API, and control hotspots while preserving their real behavior.
 
-- [ ] `W07.P13.S29` - Decompose ProviderFactory construction paths below the configured complexity and shape thresholds.; `src/vaultspec_a2a/providers/factory.py`.
-- [ ] `W07.P13.S30` - Decompose ACP composition, protocol, RPC, and chat-model hotspots without changing provider behavior.; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
-- [ ] `W07.P13.S31` - Decompose streaming transformation and interrupt emission hotspots with stream regression evidence.; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/ingest.py`.
+- [x] `W07.P13.S29` - Decompose ProviderFactory construction paths below the configured complexity and shape thresholds.; `src/vaultspec_a2a/providers/factory.py`.
+- [x] `W07.P13.S30` - Decompose ACP composition, protocol, RPC, and chat-model hotspots without changing provider behavior.; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [x] `W07.P13.S31` - Decompose streaming transformation and interrupt emission hotspots with stream regression evidence.; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/ingest.py`.
 - [ ] `W07.P13.S32` - Decompose API gateway and event-adapter hotspots while preserving authenticated edge behavior.; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/event_adapter.py`.
 - [ ] `W07.P13.S33` - Decompose control permission, dispatch, projection, snapshot, and worker-management hotspots.; `src/vaultspec_a2a/control`.
 
@@ -159,9 +159,9 @@ Decompose provider, streaming, API, and control hotspots while preserving their 
 
 Finish graph, lifecycle, desktop, and utility structural debt at the configured thresholds.
 
-- [ ] `W07.P14.S34` - Decompose graph compiler and node hotspots while retaining compiled-topology evidence.; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes`.
-- [ ] `W07.P14.S35` - Decompose lifecycle discovery and singleton hotspots without weakening ownership checks.; `src/vaultspec_a2a/lifecycle`.
-- [ ] `W07.P14.S36` - Decompose desktop filesystem and process-utility hotspots with real-process regression evidence.; `src/vaultspec_a2a/desktop, src/vaultspec_a2a/utils/process.py`.
+- [x] `W07.P14.S34` - Decompose graph compiler and node hotspots while retaining compiled-topology evidence.; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes`.
+- [x] `W07.P14.S35` - Decompose lifecycle discovery and singleton hotspots without weakening ownership checks.; `src/vaultspec_a2a/lifecycle`.
+- [x] `W07.P14.S36` - Decompose desktop filesystem and process-utility hotspots with real-process regression evidence.; `src/vaultspec_a2a/desktop, src/vaultspec_a2a/utils/process.py`.
 - [ ] `W07.P14.S48` - Resolve every residual production complexity, shape, nesting, and size finding before any structural-sentinel graduation.; `src/vaultspec_a2a`.
 
 ## Wave `W08` - evidence-bound graduation and audit

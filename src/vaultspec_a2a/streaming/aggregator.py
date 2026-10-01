@@ -26,7 +26,7 @@ from ..providers import ProviderCondition
 from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
-from .ingest import IngestManager, IngestRequest
+from .ingest import GraphInvocation, IngestManager, IngestRequest
 from .subscribers import AllocationSink, RunSequenceAllocator, SubscriberManager
 from .transformer import project_run_progress
 from .types import SequencedEvent, StreamableGraph
@@ -477,11 +477,13 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
                 thread_id,
                 agent_id,
                 graph,
-                graph_input,
-                config,
+                GraphInvocation(
+                    graph_input,
+                    config,
+                    options.get("context"),
+                    options.get("control"),
+                ),
                 options.get("on_graph_started"),
-                options.get("context"),
-                options.get("control"),
             )
         )
 

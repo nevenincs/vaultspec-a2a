@@ -19,7 +19,7 @@ from ._json_contract import (
 from ._subprocess import redact_secrets
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from typing import Literal
 
 
@@ -185,10 +185,8 @@ def interpreter_pin_args(command: str) -> tuple[str, ...]:
     return ("--python", f"{sys.version_info.major}.{sys.version_info.minor}")
 
 
-def _validate_registry_entry(name: str, value: JsonValue) -> None:
-    """Validate one declared server before registry freezing."""
-    if not isinstance(value, dict):
-        raise ConfigError(f"harness registry entry {name!r} must be a JSON object")
+def _validate_trust_axes(name: str, value: JsonObject) -> None:
+    """Require the two boolean trust axes to be stated outright."""
     for axis in _TRUST_AXES:
         if not isinstance(value.get(axis), bool):
             raise ConfigError(
@@ -197,6 +195,10 @@ def _validate_registry_entry(name: str, value: JsonValue) -> None:
                 "must be declared explicitly per entry - none is inferred from "
                 "another, and omission is never read as permission"
             )
+
+
+def _validate_root_pin_axis(name: str, value: JsonObject) -> None:
+    """Require the root-pin axis to name a variable or declare none."""
     if _ROOT_PIN_AXIS not in value:
         raise ConfigError(
             f"harness registry entry {name!r} does not declare "
@@ -213,6 +215,10 @@ def _validate_registry_entry(name: str, value: JsonValue) -> None:
             f"{pin!r}; the axis names the environment variable carrying the "
             "pin, or is null when the server cannot be pinned"
         )
+
+
+def _validate_surface_axes(name: str, value: JsonObject) -> None:
+    """Require both launch-surface axes to be stated outright."""
     if not isinstance(value.get(_EXACT_SURFACE_AXIS), bool):
         raise ConfigError(
             f"harness registry entry {name!r} does not declare "
@@ -230,27 +236,40 @@ def _validate_registry_entry(name: str, value: JsonValue) -> None:
             "project is chosen per call may not be approved ahead of the call "
             "that chooses it - omission is never read as permission"
         )
+
+
+def _withheld_tool_names(name: str, withheld: JsonValue) -> list[str]:
+    """Read a withheld-tools declaration as tool names, or refuse its shape."""
+    if isinstance(withheld, list):
+        names = [tool for tool in withheld if isinstance(tool, str) and tool]
+        if len(names) == len(withheld):
+            return names
+    raise ConfigError(
+        f"harness registry entry {name!r} declares "
+        f"{_WITHHELD_TOOLS_FIELD!r} as {withheld!r}; state the served "
+        "tools no run may call as a list of tool names"
+    )
+
+
+def _validate_withheld_tools(name: str, value: JsonObject) -> None:
+    """Require withheld tools to be named, and to be withheld or served, not both."""
     withheld = value.get(_WITHHELD_TOOLS_FIELD)
-    if withheld is not None:
-        declared = value.get("tools")
-        if not isinstance(withheld, list) or not all(
-            isinstance(tool, str) and tool for tool in withheld
-        ):
-            raise ConfigError(
-                f"harness registry entry {name!r} declares "
-                f"{_WITHHELD_TOOLS_FIELD!r} as {withheld!r}; state the served "
-                "tools no run may call as a list of tool names"
-            )
-        overlap = sorted(
-            tool
-            for tool in withheld
-            if isinstance(tool, str) and isinstance(declared, list) and tool in declared
+    if withheld is None:
+        return
+    names = _withheld_tool_names(name, withheld)
+    declared = value.get("tools")
+    if not isinstance(declared, list):
+        return
+    overlap = sorted(tool for tool in names if tool in declared)
+    if overlap:
+        raise ConfigError(
+            f"harness registry entry {name!r} both permits and withholds "
+            f"{overlap!r}; a tool is one or the other"
         )
-        if overlap:
-            raise ConfigError(
-                f"harness registry entry {name!r} both permits and withholds "
-                f"{overlap!r}; a tool is one or the other"
-            )
+
+
+def _refuse_declared_environment(name: str, value: JsonObject) -> None:
+    """Refuse an entry-level environment the two transports cannot share."""
     if _ENV_FIELD in value:
         raise ConfigError(
             f"harness registry entry {name!r} declares {_ENV_FIELD!r}; the "
@@ -262,6 +281,27 @@ def _validate_registry_entry(name: str, value: JsonValue) -> None:
             "run's project through the root-pin axis, which both transports "
             "render for themselves"
         )
+
+
+#: Every declaration check one registry entry must survive, in the order a
+#: reader of a rejection would want them applied: the axes that decide what the
+#: server is trusted with first, then the surface it serves, then the field it
+#: may not carry at all.
+_ENTRY_VALIDATORS: tuple[Callable[[str, JsonObject], None], ...] = (
+    _validate_trust_axes,
+    _validate_root_pin_axis,
+    _validate_surface_axes,
+    _validate_withheld_tools,
+    _refuse_declared_environment,
+)
+
+
+def _validate_registry_entry(name: str, value: JsonValue) -> None:
+    """Validate one declared server before registry freezing."""
+    if not isinstance(value, dict):
+        raise ConfigError(f"harness registry entry {name!r} must be a JSON object")
+    for validate in _ENTRY_VALIDATORS:
+        validate(name, value)
 
 
 def _declare_registry(

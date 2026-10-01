@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 from ...nodes.worker import (
     _build_worker_messages,
     _describe_worker_model,
+    _WorkerGrounding,
     _wrap_worker_exception,
 )
 
@@ -158,7 +159,7 @@ def test_build_worker_messages_grounds_feedback_when_present() -> None:
         system_prompt="You are the synthesist.",
         workspace_root=None,
         role="synthesist",
-        feedback_grounding=grounding,
+        grounding=_WorkerGrounding(feedback=grounding),
     )
     feedback_msgs = [
         m
@@ -178,7 +179,7 @@ def test_build_worker_messages_has_no_feedback_block_when_absent() -> None:
             system_prompt="You are the synthesist.",
             workspace_root=None,
             role="synthesist",
-            feedback_grounding=grounding,
+            grounding=_WorkerGrounding(feedback=grounding),
         )
         assert not any(
             isinstance(m, SystemMessage)

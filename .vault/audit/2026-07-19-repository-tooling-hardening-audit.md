@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-07-20'
-body_hash: 'sha256:5236eb2458040d5803c3707d08c00ec7d612a66660aa8112e09acdee39b31220'
+modified: '2026-10-01'
+body_hash: 'sha256:b8b6bc0ebecb2b30170734e127733bb6ec677bf759c10a3c7bed7424cd3040c6'
 related: []
 ---
 
@@ -727,6 +727,22 @@ exact path only to this worktree's local `.git/info/exclude`. Refreshed local
 and origin refs contain zero runtime-path objects, so no history rewrite or
 force-push is warranted. The local exclusion is immediate containment, not a
 published replacement for the upstream contract.
+
+### w07-complexity-gate-was-red | low | the complexity gate reported four offenders when the wave began
+
+Recorded from W07 (2026-10-01). The wave's brief took `lint complexity` as green at `f72a99a`; complexipy reported four functions over 15. S31 and S34 cleared `IngestManager.ingest` and `_permission_callback_for`; `_stream_thread_events` (`api/thread_stream.py`, 44) and `open_checkpointer` (`database/checkpoints.py`, 16) remain for S32 and S48.
+
+### w07-residual-structural-findings | medium | the structural gates still report findings outside the closed Steps
+
+Open, owned by W07.P13.S32, W07.P13.S33 and W07.P14.S48. After S29-S31 and S34-S36: cyclomatic 5 over, module length 3 over, function length 2 over, parameter count 9 over, ruff limits 23, pylint size 11. The worst is `_stream_thread_events` (`api/thread_stream.py`), over on five gates at once; the rest sit in `api/`, `control/`, `worker/`, `thread/`, `database/`, `streaming/` subscriber and replay-writer code, `providers/_codex_auth.py`, `testing/children.py` and two test helpers.
+
+### ingest-queue-map-never-written | low | the ingest manager keeps a per-thread queue map nothing fills
+
+Open; found by W07.P13.S31. The map now held in `_ThreadState.ingest_queues` (`streaming/ingest.py`) is created and popped but never written; it was grouped rather than deleted to stay out of the concurrent dead-code work, and belongs to S48.
+
+### lifecycle-pairing-test-fails-under-load | low | a lifecycle pairing test fails in a large parallel batch
+
+Open; observed by the W07 executor. `lifecycle/tests/test_manager.py::test_serve_up_records_and_injects_the_worker_gateway_pairing` failed under `-n 3 --dist=loadgroup` in a mixed batch and passed alone. A failure under load is a timing assumption in the test or the code, not noise; it needs its root cause.
 
 ## Recommendations
 

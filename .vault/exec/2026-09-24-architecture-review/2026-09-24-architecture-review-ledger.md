@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:4340beec0e66b9602571a4faf631df6bf41bfabcc583cc96b690dcdb970358e0'
+body_hash: 'sha256:89dc1a3c3ff8a35799b189930961aef30ae7d9c157728699423c57e82bed3eae'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -391,6 +391,25 @@ related:
 - `S45` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
 - `S45` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S45` `by:` `vaultspec-docs-curator`
+- `S33` `M` `src/vaultspec_a2a/thread/dispatch_policy.py`
+- `S33` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S33` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S33` `M` `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+- `S33` `M` `src/vaultspec_a2a/thread/tests/test_dispatch_policy.py`
+- `S33` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/thread` -> `pass`
+- `S33` `by:` `vaultspec-high-executor`
+- `S37` `M` `src/vaultspec_a2a/control/circuit_breaker.py`
+- `S37` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S37` `M` `src/vaultspec_a2a/control/tests/test_circuit_breaker_probe.py`
+- `S37` `M` `src/vaultspec_a2a/control/tests/test_dispatch_refusal_classification.py`
+- `S37` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/thread` -> `pass`
+- `S37` `by:` `vaultspec-high-executor`
+- `S38` `M` `src/vaultspec_a2a/control/action_lease.py`
+- `S38` `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `S38` `M` `src/vaultspec_a2a/control/tests/test_direct_control_recovery_current.py`
+- `S38` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `S38` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/thread` -> `pass`
+- `S38` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -425,3 +444,5 @@ related:
 - `S14` Correction from the fix re-review (refusal-code-import-guard-cannot-fail).
 - `S44` just test-service was not run: Docker is unavailable here, so the probes are proven by syntax, by a hostname round-trip on this host and by the Compose test only.
 - `S45` Each fixed or partially fixed status was verified against current code, not taken from a plan row; 27 original findings stay open without a Step in this plan, several owned by other open plans.
+- `S33` Scope correction: the permission verb's dispatch and service modules also changed, because they were the only consumers of the failure flag.
+- `S38` Behaviour-neutral by decision: retention is the rule, so each test was proven load-bearing against the rejected alternative instead of pre-fix code.

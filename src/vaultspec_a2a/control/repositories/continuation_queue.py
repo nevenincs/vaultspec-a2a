@@ -49,6 +49,7 @@ __all__ = [
     "next_queue_position",
     "open_promoted_continuation",
     "promoted_turn_deadline",
+    "promotion_dispatch_pending",
     "read_next_queued_continuation",
     "reserve_queued_continuation",
     "run_lifetime_deadline",
@@ -213,6 +214,25 @@ def promoted_turn_deadline(
     except (ValidationError, ValueError):
         return None
     return promoted_at + timedelta(seconds=timeout)
+
+
+def promotion_dispatch_pending(
+    action: ControlActionModel, *, observed_at: datetime
+) -> bool:
+    """Whether this action is a promoted turn the dispatcher still owes.
+
+    Three durable facts, all on the row: it came out of the queue, nothing has
+    applied it, and its own deadline has not passed. The deadline is the bound
+    on how long the promotion dispatcher's obligation lasts, and it is derived
+    from the run rather than from a flat global, which is what the
+    abandoned-transition rule requires of any such bound.
+    """
+    return (
+        action.queue_position is not None
+        and action.applied_at is None
+        and action.recovery_deadline_at is not None
+        and action.recovery_deadline_at > observed_at
+    )
 
 
 def open_promoted_continuation(

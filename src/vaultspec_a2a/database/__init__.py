@@ -113,6 +113,8 @@ from .permission_repository import (
 from .permission_repository import (
     supersede_permission_requests as supersede_permission_requests,
 )
+from .run_event_repository import RunEventRecord as RunEventRecord
+from .run_event_repository import RunEventStore as RunEventStore
 from .session import application_session_factory as application_session_factory
 from .session import begin_write_transaction as begin_write_transaction
 from .session import close_db as close_db
@@ -191,6 +193,8 @@ __all__ = [
     "PermissionRequestModel",
     "RecoveryAttemptModel",
     "RunEventModel",
+    "RunEventRecord",
+    "RunEventStore",
     "SchemaCompatibilityError",
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",

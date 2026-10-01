@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
     from pathlib import Path
 
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 __all__ = [
     "BACKENDS",
@@ -47,6 +47,7 @@ __all__ = [
     "backend",
     "downgrade",
     "migrated_database",
+    "migrated_engine",
     "migrated_session_factory",
     "synchronous_url",
     "upgrade",
@@ -159,14 +160,14 @@ def migrated_database(name: str, directory: Path) -> Iterator[Backend]:
 
 
 @asynccontextmanager
-async def migrated_session_factory(
+async def migrated_engine(
     name: str, directory: Path
-) -> AsyncIterator[tuple[Backend, async_sessionmaker[AsyncSession]]]:
-    """Yield a migrated database on *name* and a session factory over it.
+) -> AsyncIterator[tuple[Backend, AsyncEngine]]:
+    """Yield a migrated database on *name* and a pooled engine over it.
 
     The upgrade runs in a worker thread, exactly as the application's own
-    startup runner does: Alembic's env opens an event loop of its own, which it
-    cannot do on a loop that is already running.
+    startup runner does: Alembic's env opens an event loop of its own, which
+    it cannot do on a loop that is already running.
 
     The engine carries the application's own SQLite posture, so a cascade this
     schema declares is enforced here exactly as production enforces it. It is
@@ -179,6 +180,15 @@ async def migrated_session_factory(
         if target.is_sqlite:
             configure_sqlite_engine(engine)
         try:
-            yield target, async_sessionmaker(engine, expire_on_commit=False)
+            yield target, engine
         finally:
             await engine.dispose()
+
+
+@asynccontextmanager
+async def migrated_session_factory(
+    name: str, directory: Path
+) -> AsyncIterator[tuple[Backend, async_sessionmaker[AsyncSession]]]:
+    """Yield a migrated database on *name* and a session factory over it."""
+    async with migrated_engine(name, directory) as (target, engine):
+        yield target, async_sessionmaker(engine, expire_on_commit=False)

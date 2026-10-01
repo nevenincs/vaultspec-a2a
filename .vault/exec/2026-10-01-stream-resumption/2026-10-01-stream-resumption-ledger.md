@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:ec76db4a76d0b4b723be2ef384d72ea9b126db5d9828ad899fa9d563df3eb665'
+body_hash: 'sha256:d24f88cdba61da08989f6ad499fe0efe1393285f5327a0d0a3fa5722c8f42f5f'
 related:
   - "[[2026-10-01-stream-resumption-plan]]"
 ---
@@ -90,9 +90,12 @@ related:
 - `S10` `by:` `vaultspec-high-executor`
 - `S11` `A` `.vault/reference/2026-10-01-stream-resumption-dashboard-contract-event-reference.md`
 - `S11` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S10` `M` `.env.example`
+- `S10` `verify:` `pytest src/vaultspec_a2a/control/tests/test_env_example_coverage.py` -> `pass`
 
 ## Notes
 
 - `S01` Also fixed a pre-existing defect the dual-backend proof exposed: PostgreSQL 16 reflects trim() in a CHECK as TRIM(BOTH FROM ...), which the schema fingerprint did not fold, so no incremental migration past 0017 could run on Postgres.
 - `S04` Path correction: the restart-continuity proof lives in api/tests, inside the covering gate, not in the Docker-gated service tier; `api/_replay_writer_seat.py` keeps the edit to the conflict-prone relay module to a few lines. The relay context was merged by hand with the prune-registry change of architecture-review P06.S42.
 - `S06` An unparseable cursor is refused as `resume_cursor_foreign_run` rather than ignored, because ignoring would serve a live-only stream to a client that believes it resumed.
+- `S10` Plan-close review correction: the retention bound S10 added had no operator line; the env-example coverage gate failed on the integrated tree.

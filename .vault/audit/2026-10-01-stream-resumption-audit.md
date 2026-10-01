@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:e74d8939c3b05528374eb42790d9765b19d6c9f5ab5e7fe8673348de325c7013'
+body_hash: 'sha256:2bd77e321330c86bcf1ca0f21f9868de8abe02def350c9ae640962708651537d'
 related:
   - "[[2026-10-01-stream-resumption-plan]]"
 ---
@@ -88,7 +88,7 @@ Open; plan-close review, replaces `restart-test-failed-once-under-load`. `with s
 
 ### replay-retention-setting-missing-from-env-example | low | operators cannot discover the retention bound
 
-Open; plan-close review. `.env.example:272-280` documents the replay switch and window but not `VAULTSPEC_A2A_STREAM_REPLAY_RETENTION_HOURS`, which P03.S10 added. Repair: add the entry.
+Fixed as a P03.S10 correction: the line was added beside the other two, and the env-example coverage gate, which failed on the integrated tree, passes. Original finding: `.env.example:272-280` documented the replay switch and window but not `VAULTSPEC_A2A_STREAM_REPLAY_RETENTION_HOURS`, which P03.S10 added. Repair: add the entry.
 
 ### relay-payload-promises-a-return-it-never-makes | low | the documented stamped payload is always None
 

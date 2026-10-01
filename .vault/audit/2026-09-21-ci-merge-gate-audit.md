@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:8056062f395ce0d0b3c3a217a86df98d536c58ea1671430c163d0b3c09ed89e8'
+body_hash: 'sha256:1eaaf58aa8fdf07e5e4453b17ea04598a30470453edf8082afa8443134fcf9c8'
 related:
   - "[[2026-09-21-ci-merge-gate-plan]]"
 ---
@@ -119,3 +119,8 @@ Type: integrated workflow review. Status: verified. The stable chain is full tag
 ### required-gate-merge-condition | high | fixed and verified
 
 Type: CI authorization and required-check correctness. Status: fixed during 2026-10-01 main merge. The local fork guard combined with upstream's always-running verdict job made the required Check: Merge gate (Linux) conditional; a skipped required check could count as passed. The gate now uses if: always() and judges fork identity and the basic job result in its script. The fleet trust-boundary test, CI contract test, and actionlint pass.
+
+### pr88-main-reconciliation | high | release and trust regression prevented
+
+Type: merge integration. Status: fixed and verified. The stale admission-timeout branch conflicted with main's release cut and required verdict permissions. The resolution retains main's release tests, trust checks and scoped permissions while preserving the branch's execution budgets and verdict class. Review of the resulting diff against main found only the intended timeout configuration. Twelve CI, release and trust tests and actionlint pass.
+

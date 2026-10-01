@@ -27,7 +27,9 @@ jobs:
   migrate:
     if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && ((github.event.action != 'labeled' && (github.event.pull_request.author_association == 'OWNER' || github.event.pull_request.author_association == 'COLLABORATOR')) || (github.event.action == 'labeled' && github.event.label.name == 'ci:full' && github.event.sender.type == 'User'))) }}
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 20
+    env:
+      CI_EXEC_BUDGET_MINUTES: 20
+    timeout-minutes: 140
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -864,6 +864,18 @@ class InfraConfig(ProjectSettings):
             "per run and the furthest back a resume can reach."
         ),
     )
+    stream_replay_retention_hours: float = Field(
+        default=24.0,
+        gt=0,
+        description=(
+            "How long a replay row survives, in hours. The sweep deletes rows "
+            "produced longer ago than this and rows of runs that settled "
+            "longer ago than this. It is the replay log's OWN bound and is "
+            "independent of checkpoint retention in both directions: this "
+            "sweep reads and deletes no checkpoint, and the settled-checkpoint "
+            "prune reads and deletes no replay row."
+        ),
+    )
 
     # Internal IPC frame/body limits
     internal_max_frame_bytes: int = Field(

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import CursorResult, Delete, Insert, delete, func, select
 
+from ..thread.enums import TERMINAL_STATUS_VALUES
 from .models import RunEventModel, ThreadModel
 from .session import begin_write_transaction
 
@@ -224,6 +225,36 @@ class RunEventStore:
             result = cast(
                 "CursorResult[Any]",
                 await session.execute(_trim_statement(thread_id, window)),
+            )
+            await session.commit()
+            return result.rowcount
+
+    async def delete_for_runs_settled_before(self, cutoff: datetime) -> int:
+        """Delete every retained frame of a run that settled before *cutoff*.
+
+        The companion bound to :meth:`delete_produced_before`, and not a
+        duplicate of it. A frame is almost always produced before its run
+        settles, so the age bound usually reaches these rows first; what this
+        statement adds is the run whose LAST frame arrived after the terminal
+        - a late relay, a settlement racing the fan-out - whose row is young
+        on a run nobody will resume. A settled run is read from the
+        application's own threads table; no checkpoint is touched.
+        """
+        async with self.session_factory() as session:
+            await begin_write_transaction(session)
+            settled = (
+                select(ThreadModel.id)
+                .where(
+                    ThreadModel.status.in_(TERMINAL_STATUS_VALUES),
+                    ThreadModel.updated_at < cutoff,
+                )
+                .scalar_subquery()
+            )
+            result = cast(
+                "CursorResult[Any]",
+                await session.execute(
+                    delete(RunEventModel).where(RunEventModel.thread_id.in_(settled))
+                ),
             )
             await session.commit()
             return result.rowcount

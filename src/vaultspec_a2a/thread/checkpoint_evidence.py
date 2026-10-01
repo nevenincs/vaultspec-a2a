@@ -218,8 +218,32 @@ async def read_checkpoint_evidence(
     checkpoint_id: str | None = None,
 ) -> CheckpointEvidence:
     """Read terminal truth without compiling providers or guessing scheduled work."""
-    requested_checkpoint_id = checkpoint_id
-    configurable = {"thread_id": receipt.thread_id}
+    checkpoint = await _read_checkpoint(
+        checkpointer,
+        receipt.thread_id,
+        checkpoint_id,
+        timeout_seconds=timeout_seconds,
+    )
+    if isinstance(checkpoint, CheckpointEvidence):
+        return checkpoint
+    return _classify_checkpoint(
+        checkpoint, receipt, requested_checkpoint_id=checkpoint_id
+    )
+
+
+async def _read_checkpoint(
+    checkpointer: Checkpointer,
+    thread_id: str,
+    checkpoint_id: str | None,
+    *,
+    timeout_seconds: float,
+) -> Any | CheckpointEvidence:
+    """The stored checkpoint, or the evidence that stands in for not having one.
+
+    A read that failed and a thread with nothing stored are both answers in
+    themselves, and neither leaves anything to classify.
+    """
+    configurable = {"thread_id": thread_id}
     if checkpoint_id is not None:
         configurable["checkpoint_id"] = checkpoint_id
     try:
@@ -231,6 +255,16 @@ async def read_checkpoint_evidence(
         return CheckpointEvidence(CheckpointEvidenceKind.UNAVAILABLE, None, False)
     if checkpoint is None:
         return CheckpointEvidence(CheckpointEvidenceKind.ABSENT, None, False)
+    return checkpoint
+
+
+def _classify_checkpoint(
+    checkpoint: Any,
+    receipt: GraphActionReceipt,
+    *,
+    requested_checkpoint_id: str | None,
+) -> CheckpointEvidence:
+    """What one stored checkpoint says about the action the receipt names."""
     parsed = _checkpoint_values(checkpoint, requested_checkpoint_id)
     if isinstance(parsed, CheckpointEvidence):
         return parsed
@@ -252,5 +286,4 @@ async def read_checkpoint_evidence(
     completion_evidence = _completion_evidence(values, receipt, current_checkpoint_id)
     if completion_evidence is not None:
         return completion_evidence
-    incorporated = source == "loop"
-    return _pending_evidence(writes, current_checkpoint_id, incorporated)
+    return _pending_evidence(writes, current_checkpoint_id, source == "loop")

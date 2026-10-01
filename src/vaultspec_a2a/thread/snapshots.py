@@ -35,7 +35,6 @@ __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
     "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
-    "MESSAGE_CREATED_AT_KEY",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "TERMINAL_STATUS_MAP",
     "AgentData",
@@ -706,6 +705,35 @@ def _project_pending_interrupt(
     )
 
 
+def _record_pending_channel(projection: CheckpointProjection, channel: object) -> None:
+    """Record one held write's channel, once, on the projection."""
+    if isinstance(channel, str) and channel not in projection.pending_write_channels:
+        projection.pending_write_channels.append(channel)
+
+
+def _project_write_interrupts(
+    projection: CheckpointProjection,
+    value: object,
+    *,
+    thread_id: str,
+    write_index: int,
+) -> None:
+    """Project every interrupt one held interrupt write carries.
+
+    A single write holds either one interrupt or a sequence of them, so the
+    value is normalized to a sequence before any of it is projected.
+    """
+    raw_interrupts: list[object] = (
+        list(cast("list[object] | tuple[object, ...]", value))
+        if isinstance(value, list | tuple)
+        else [value]
+    )
+    for raw_interrupt in raw_interrupts:
+        _project_pending_interrupt(
+            projection, raw_interrupt, thread_id=thread_id, write_index=write_index
+        )
+
+
 def fold_pending_writes(
     projection: CheckpointProjection,
     checkpoint_tuple: Any,
@@ -729,21 +757,10 @@ def fold_pending_writes(
     for index, pending_write in enumerate(pending_writes):
         task_id, channel, value = pending_write
         projection.pending_write_count += 1
-        if (
-            isinstance(channel, str)
-            and channel not in projection.pending_write_channels
-        ):
-            projection.pending_write_channels.append(channel)
-        if channel != INTERRUPT or task_id in answered:
-            continue
-        raw_interrupts: list[object] = (
-            list(cast("list[object] | tuple[object, ...]", value))
-            if isinstance(value, list | tuple)
-            else [value]
-        )
-        for raw_interrupt in raw_interrupts:
-            _project_pending_interrupt(
-                projection, raw_interrupt, thread_id=thread_id, write_index=index
+        _record_pending_channel(projection, channel)
+        if channel == INTERRUPT and task_id not in answered:
+            _project_write_interrupts(
+                projection, value, thread_id=thread_id, write_index=index
             )
 
     if projection.pending_interrupts:

@@ -152,22 +152,32 @@ async def prune_settled_checkpoints(checkpointer: object, thread_id: str) -> boo
         )
         return False
     if isinstance(checkpointer, AsyncSqliteSaver):
-        if not await _sqlite_layout_is_the_expected_one(checkpointer):
-            return False
-        await _prune_sqlite(checkpointer, thread_id)
-        return True
+        return await _prune_sqlite_history(checkpointer, thread_id)
     postgres = _native_postgres_saver(checkpointer)
     if postgres is not None:
-        if not await _postgres_schema_is_the_expected_one(postgres):
-            return False
-        await _prune_postgres(postgres, thread_id)
-        return True
+        return await _prune_postgres_history(postgres, thread_id)
     logger.debug(
         "Checkpoint retention skipped for thread %s: unsupported saver %s",
         thread_id,
         type(checkpointer).__name__,
     )
     return False
+
+
+async def _prune_sqlite_history(saver: AsyncSqliteSaver, thread_id: str) -> bool:
+    """Prune a SQLite store's history, unless its layout is not the known one."""
+    if not await _sqlite_layout_is_the_expected_one(saver):
+        return False
+    await _prune_sqlite(saver, thread_id)
+    return True
+
+
+async def _prune_postgres_history(saver: Any, thread_id: str) -> bool:
+    """Prune a Postgres store's history, unless its schema is not the known one."""
+    if not await _postgres_schema_is_the_expected_one(saver):
+        return False
+    await _prune_postgres(saver, thread_id)
+    return True
 
 
 async def _sqlite_layout_is_the_expected_one(saver: AsyncSqliteSaver) -> bool:

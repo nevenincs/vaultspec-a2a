@@ -352,8 +352,6 @@ Control services
 
 .. py:data:: SERVICE_HEALTH_DEADLINE_SECONDS
 
-.. py:data:: SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS
-
 .. py:data:: SERVICE_WORKER_PROBE_TIMEOUT_SECONDS
 
 .. py:module:: vaultspec_a2a.control.run_discovery_service

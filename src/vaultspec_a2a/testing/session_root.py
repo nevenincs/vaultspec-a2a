@@ -40,7 +40,6 @@ from .harness_names import TEST_ENV_PREFIX
 
 __all__ = [
     "TEST_ROOT_NAME",
-    "SessionSeat",
     "TestSessionSettings",
     "seat_test_session",
     "session_scratch_dir",

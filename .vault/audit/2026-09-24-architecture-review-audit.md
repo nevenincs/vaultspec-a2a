@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:1278da35ab60156d006c511c077aefd75b0d76267ec47167fd96e2859c66b12a'
+body_hash: 'sha256:6dd61fd9c60b726242e1c95f3174d3fae305893715f9302f138f16dec14ad4d4'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -352,6 +352,22 @@ Fixed outside a plan Step on user request (2026-10-01). Prose separated the chec
 
 Recorded 2026-10-01. The service never reads `CLAUDE_CODE_OAUTH_TOKEN`; the recipes' credential scopes (`dev/credentials.py`) export it from `.env` into the processes they start, and the CLI inherits it. A service started any other way needs it exported in its own environment; the example now says so.
 
+### ingest-action-never-marked-applied | medium | a proven ingest dispatch leaves its control action unapplied
+
+Open, owned by P06.S51; found by the P06.S50 executor through the unused `mark_ingest_applied`. `commit_proven_application` (`src/vaultspec_a2a/control/_event_application.py:193-259`) settles a proven follow-up and a proven permission response, but has no branch for `ControlActionType.INGEST`, although the same module's wire-verb validation treats the two alike (`:124`). An ingest's journal row therefore never gains `applied_at` and the thread never records it as its last applied action; the repair transition is the same in both states, so the visible effect is on the journal and on anything that reads an unapplied action as owed work.
+
+### armed-readiness-database-probe-unbounded | low | the armed desktop readiness path probes the database without a deadline
+
+Open; raised by the P06.S50 executor. `probe_desktop_readiness` bounds its unarmed path but calls `probe_database_ready(db)` on the armed path with no `asyncio.wait_for`, so a hung database holds the readiness answer past the health deadline the removed `SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS` once documented.
+
+### codex-lane-lacks-the-path-argument-scan | medium | the Codex approval rung checks foreign projects but not path arguments
+
+Open; raised by the P06.S50 executor; needs research before a fix. `path_arguments_in_project` (`src/vaultspec_a2a/providers/_project_scope.py`) confines the ACP lane's floor calls (`_acp_rpc_handlers.py:_floor_call_is_confined`), and the module frames both lanes as its consumers, but `_codex_permission.py` checks only `foreign_project_argument`. Whether Codex's native tool permission model needs the same scan is a confinement question for `2026-10-01-tool-permission-model-adr` and its plan, not a lint fix.
+
+### harness-tool-name-parsed-twice | low | two modules split an mcp tool name into server and tool independently
+
+Open; raised by the P06.S50 executor. `harness_server_of_tool` (`providers/_acp_mcp.py`) and `harness_tool_is_withheld` (`providers/_harness_mcp_registry.py`) each parse `mcp__<server>__<tool>`; folding them means moving the parser against the current import direction, which belongs with the provider decomposition.
+
 ## Recommendations
 
 Defect fixes that restore an accepted decision or close a security hole, each small and local:
@@ -627,4 +643,4 @@ Open until the Docker-backed service tier runs; a Docker daemon is now available
 
 ### quality-coverage-gates-red | medium | the unused-symbol and unconsumed-export gates fail, so the composed CI gate cannot pass
 
-Open, owned by P06.S50. Both gates run inside `lint all`, which `just ci` composes, and both report findings on the current branch: six unused symbols and one orphaned test module (also present on `main` at `72974d6`), and 29 published names with no importer, several added by this plan's residual Steps (`PathArgumentScan`, `event_client_timeout`). Each finding needs a consumer, a removal, or a narrower `__all__`.
+Partly fixed in P06.S50: reachability is zero (six type-only testing modules, not five, all reached once the testing facade named them by absolute module name); symbols holds one name, `mark_ingest_applied`, whose gap P06.S51 owns; exports holds four names in database and thread files under concurrent run-continuation work, left to close after that merge. Original finding: both gates run inside `lint all`, which `just ci` composes, and both report findings on the current branch: six unused symbols and one orphaned test module (also present on `main` at `72974d6`), and 29 published names with no importer, several added by this plan's residual Steps (`PathArgumentScan`, `event_client_timeout`). Each finding needs a consumer, a removal, or a narrower `__all__`.

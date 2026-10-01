@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:559359738897fb770765a14c06e0afa886ebb4c0fcac21c32b96c12a73ab62b1'
+body_hash: 'sha256:bce1b934b5493966fcb5d2a5fca06a7c2ec9e15ca5b5915eea892fc14b2f554a'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -483,6 +483,41 @@ related:
 - `S49` `M` `uv.lock`
 - `S49` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming -n 4` -> `pass`
 - `S49` `verify:` `python -m dev lint all` -> `pass`
+- `S50` `M` `docs/api/modules.rst`
+- `S50` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S50` `M` `src/vaultspec_a2a/api/workspace.py`
+- `S50` `M` `src/vaultspec_a2a/control/action_lease.py`
+- `S50` `M` `src/vaultspec_a2a/control/health.py`
+- `S50` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S50` `M` `src/vaultspec_a2a/control/settings_base.py`
+- `S50` `M` `src/vaultspec_a2a/control/state_layout.py`
+- `S50` `M` `src/vaultspec_a2a/control/thread_listing.py`
+- `S50` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S50` `M` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
+- `S50` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S50` `M` `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+- `S50` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S50` `M` `src/vaultspec_a2a/lifecycle/procs_config.py`
+- `S50` `M` `src/vaultspec_a2a/lifecycle/singleton.py`
+- `S50` `M` `src/vaultspec_a2a/providers/_acp_mcp.py`
+- `S50` `M` `src/vaultspec_a2a/providers/_codex_auth.py`
+- `S50` `M` `src/vaultspec_a2a/providers/_project_scope.py`
+- `S50` `M` `src/vaultspec_a2a/providers/_prompt_render.py`
+- `S50` `M` `src/vaultspec_a2a/streaming/custom_writes.py`
+- `S50` `M` `src/vaultspec_a2a/streaming/fanout.py`
+- `S50` `M` `src/vaultspec_a2a/streaming/tests/_error_injecting_graph.py`
+- `S50` `M` `src/vaultspec_a2a/streaming/translation.py`
+- `S50` `M` `src/vaultspec_a2a/testing/__init__.py`
+- `S50` `M` `src/vaultspec_a2a/testing/session_root.py`
+- `S50` `M` `src/vaultspec_a2a/tests/gateway_boot.py`
+- `S50` `M` `src/vaultspec_a2a/worker/_dispatch_settlement.py`
+- `S50` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S50` `M` `src/vaultspec_a2a/worker/tests/test_ipc_confirmation_budget.py`
+- `S50` `verify:` `python -m dev lint reachability` -> `pass`
+- `S50` `verify:` `python -m dev lint all` -> `pass`
+- `S50` `verify:` `python -m dev lint symbols` -> `fail`
+- `S50` `verify:` `python -m dev lint exports` -> `fail`
+- `S50` `by:` `vaultspec-standard-executor`
 
 ## Notes
 
@@ -523,3 +558,4 @@ related:
 - `S39` Scope correction: the evidence reader lives in `thread/checkpoint_evidence.py,` shared by the worker preflight and gateway recovery; no change to `state_projection.py` was needed.
 - `S47` Dashboard contract event: permission respond answers a worker `run_busy` with a typed 409 (was 500), capacity with 503 (was 502), `incompatible_state` with a typed 409 (was 502); openapi documents 409/502/503 on that route and 502/503 on the messages route.
 - `S49` markdown-it-py joins the tooling group as the CommonMark reader the forgery tests read a rendered prompt with; it was already locked through rich.
+- `S50` Partial: reachability is zero; symbols holds `mark_ingest_applied,` which names a real gap owned by P06.S51; exports holds four names in database and thread files the run-continuation P04 executor is editing, left until it merges. The Step stays open.

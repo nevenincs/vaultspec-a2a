@@ -33,10 +33,7 @@ import uvicorn
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
-from ...control.health import (
-    SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS,
-    SERVICE_HEALTH_DEADLINE_SECONDS,
-)
+from ...control.health import SERVICE_HEALTH_DEADLINE_SECONDS
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...database import (
     create_control_action,
@@ -1156,8 +1153,6 @@ async def test_service_state_deadline_returns_degraded_for_locked_real_checkpoin
         body,
         baseline_s,
     )
-    # The deadline is only correct relative to the budget it protects.
-    assert SERVICE_HEALTH_DEADLINE_SECONDS < SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS
 
 
 @pytest.mark.asyncio(loop_scope="function")

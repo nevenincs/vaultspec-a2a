@@ -21,7 +21,7 @@ from ..database import (
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import RECOVERY_ACTION_TYPES, ControlActionType, RecoveryCondition
 from .dispatch_receipts import prepare_graph_action_receipt
-from .recovery import record_recovery_failure
+from .recovery import RecoveryAuthorityLostError, record_recovery_failure
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -603,17 +603,25 @@ async def record_dispatch_failure(
         ):
             return DispatchFailureDisposition.AUTHORITY_LOST
         disposition = DispatchFailureDisposition.DEFINITE_NON_DELIVERY
-    await record_recovery_failure(
-        db,
-        thread_id=action.thread_id,
-        authority=authority,
-        condition=RecoveryCondition(failure_type.value),
-        observed_at=instant,
-        next_eligible_at=min(
-            instant + timedelta(seconds=2),
-            deadline,
-        ),
-        deadline_at=deadline,
-        detail=detail,
-    )
+    try:
+        await record_recovery_failure(
+            db,
+            thread_id=action.thread_id,
+            authority=authority,
+            condition=RecoveryCondition(failure_type.value),
+            observed_at=instant,
+            next_eligible_at=min(
+                instant + timedelta(seconds=2),
+                deadline,
+            ),
+            deadline_at=deadline,
+            detail=detail,
+        )
+    except RecoveryAuthorityLostError:
+        # The authority checks above are not atomic with this write: a new
+        # dispatch can be accepted for this thread in between. Every other
+        # authority-loss branch in this function reports the typed
+        # disposition instead of raising, and this one is reached only by a
+        # race the prior checks cannot see coming.
+        return DispatchFailureDisposition.AUTHORITY_LOST
     return disposition

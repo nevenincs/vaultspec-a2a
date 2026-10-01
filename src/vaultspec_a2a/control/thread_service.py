@@ -59,7 +59,6 @@ from ..thread.enums import (
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.executable_graph import freeze_graph_definition
 from ..thread.lifecycle_guards import can_archive, can_delete
-from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
 from .repositories import (
     CleanupItemResult,
@@ -90,8 +89,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-_PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
 
 
 def require_admitted_workspace_root(value: str | Path) -> Path:

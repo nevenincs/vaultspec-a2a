@@ -37,7 +37,6 @@ from ..tools.task_queue import render_queue_view
 
 __all__ = [
     "ContextMounter",
-    "MountNode",
     "build_initial_vault_index",
     "create_context_mounter",
     "create_mount_node",

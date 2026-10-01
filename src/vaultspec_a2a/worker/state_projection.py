@@ -39,12 +39,10 @@ if TYPE_CHECKING:
     from .ipc import WorkerBridge
 
 __all__ = [
-    "PreflightDecision",
     "ResumeAdmission",
     "ResumeRefusal",
     "ResumeRefusalCause",
     "StateProjector",
-    "answered_request_id",
 ]
 
 logger = logging.getLogger(__name__)

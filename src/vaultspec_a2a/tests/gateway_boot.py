@@ -78,7 +78,6 @@ __all__ = [
     "FIRST_DEMAND_TIMEOUT",
     "LOOPBACK_TIMEOUT",
     "READINESS_TIMEOUT",
-    "WORKER_READY_TIMEOUT",
     "GatewayBootError",
     "armed_gateway_env",
     "await_gateway_ready",

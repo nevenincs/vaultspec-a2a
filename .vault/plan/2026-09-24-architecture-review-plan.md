@@ -22,7 +22,7 @@ related:
   - '[[2026-03-20-service-lifecycle-architecture-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:b8417e275d33fba83160bb9314c7a3eeba973737e17aecd5a5e3f2df0fc0fb95'
+body_hash: 'sha256:65210ebc55d8dccdd10e8a28c4446bd6d772749b48c0085040904d4f4ef48d32'
 ---
 
 # `architecture-review` plan
@@ -122,6 +122,7 @@ Close the decision-free findings the plan-close review and its re-review left op
 - [ ] `P06.S48` - Remove the dead state the residual fixes left behind and flush the replay recorder on every relay transport; `src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/control/_permission_response_contract.py, src/vaultspec_a2a/graph/_compiler_research.py`.
 - [x] `P06.S49` - Escape a role heading formed by a whole underlined paragraph and deliver a re-raised signal without awaiting the finalisation reads; `src/vaultspec_a2a/providers/_prompt_render.py, src/vaultspec_a2a/streaming/ingest.py`.
 - [ ] `P06.S50` - Bring the unused-symbol and unconsumed-export gates back to zero; `src/vaultspec_a2a/`.
+- [ ] `P06.S51` - Mark an INGEST control action applied when its dispatch proves application, recording it as the thread's last applied action in the same settlement as the follow-up branch does; `src/vaultspec_a2a/control/_event_application.py, src/vaultspec_a2a/control/repair_transitions.py, src/vaultspec_a2a/control/tests/`.
 
 ## Parallelization
 

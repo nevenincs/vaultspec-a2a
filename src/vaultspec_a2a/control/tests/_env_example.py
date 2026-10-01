@@ -19,7 +19,6 @@ from ...testing.session_root import TestSessionSettings
 __all__ = [
     "DOCUMENTED_BUT_NOT_READ",
     "ENV_EXAMPLE",
-    "HARNESS_HEADING",
     "INTEGRATION_EXAMPLE",
     "REPO_ROOT",
     "Assignment",
@@ -37,7 +36,7 @@ INTEGRATION_EXAMPLE = REPO_ROOT / ".env.integration.example"
 
 #: The heading of the section the repository's own tooling reads. Its names
 #: are held to the harness by ``dev/tests/test_harness_env_names.py``.
-HARNESS_HEADING = "# Development harness\n"
+_HARNESS_HEADING = "# Development harness\n"
 
 #: Names the example documents that the service does not read, each with the
 #: owner that does. Anything else in the file is a dead or misspelled setting.
@@ -80,15 +79,15 @@ def documented(path: Path = ENV_EXAMPLE) -> str:
 def service_section() -> str:
     """The example up to the development-harness section."""
     text = documented()
-    assert HARNESS_HEADING in text, "the harness section heading moved"
-    return text.split(HARNESS_HEADING, 1)[0]
+    assert _HARNESS_HEADING in text, "the harness section heading moved"
+    return text.split(_HARNESS_HEADING, 1)[0]
 
 
 def harness_section() -> str:
     """The development-harness section of the example."""
     text = documented()
-    assert HARNESS_HEADING in text, "the harness section heading moved"
-    return text.split(HARNESS_HEADING, 1)[1]
+    assert _HARNESS_HEADING in text, "the harness section heading moved"
+    return text.split(_HARNESS_HEADING, 1)[1]
 
 
 def assignments(text: str) -> list[Assignment]:

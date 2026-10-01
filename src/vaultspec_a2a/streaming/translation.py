@@ -31,7 +31,6 @@ __all__ = [
     "ModelStreamProjection",
     "ToolEmission",
     "emit_additional_reasoning",
-    "emit_tool_artifact",
     "text_field",
     "translate_content_blocks",
     "translate_tool_call_chunks",

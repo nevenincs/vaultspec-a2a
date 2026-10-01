@@ -28,7 +28,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
 from ...domain_config import domain_config
-from ..ipc import WorkerBridge
+from ..ipc import WorkerBridge, event_client_timeout
 
 # The worst case the gateway is allowed: a checkpoint read that spends its whole
 # bound, plus a durable write before it. Shorter than the client budget derived
@@ -83,9 +83,9 @@ def _probe_client_budget(*, bound_env: str) -> dict[str, Any]:
 
 
 def test_the_event_client_budget_exceeds_the_confirmation_bound() -> None:
-    """A real bridge's client must not expire inside the gateway's own bound."""
-    bridge = WorkerBridge(api_url="http://127.0.0.1:1", worker_id="budget")
-    budget = bridge._client.timeout.read
+    """The client budget the bridge is built with must not expire inside the
+    gateway's own bound."""
+    budget = event_client_timeout().read
     assert budget is not None
     assert budget > domain_config.aget_state_timeout_seconds, (
         "the worker's event client gives up at or before the gateway's bounded "

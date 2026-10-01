@@ -31,7 +31,6 @@ from .env_prefix import ENV_PREFIX
 
 __all__ = [
     "DEFAULT_HOME",
-    "DISCOVERY_RECORD",
     "ENGINE_DISCOVERY_RECORD",
     "HANDOFF_CREDENTIAL",
     "SEAL_FILE",

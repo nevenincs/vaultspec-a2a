@@ -37,8 +37,6 @@ __all__ = [
     "procs_config_path",
 ]
 
-_PROCS_TOML_NAME = "procs.toml"
-
 
 class ProcsConfigError(RuntimeError):
     """The procs.toml is missing, unreadable, or violates a band invariant."""

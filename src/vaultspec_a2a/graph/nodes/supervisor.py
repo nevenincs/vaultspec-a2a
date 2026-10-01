@@ -153,18 +153,6 @@ def _worker_owning_phase(
     return None
 
 
-def _select_phase_worker(
-    target_phase: str,
-    workers: list[str],
-    worker_phase_map: dict[str, str] | None,
-) -> str:
-    """Return the worker that owns *target_phase*, falling back to the first worker."""
-    owner = _worker_owning_phase(target_phase, workers, worker_phase_map)
-    if owner is not None:
-        return owner
-    return workers[0] if workers else "FINISH"
-
-
 def _phase_for_route(
     route: str,
     *,

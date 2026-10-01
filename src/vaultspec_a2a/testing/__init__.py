@@ -92,63 +92,101 @@ if TYPE_CHECKING:
     )
 
 
+#: Fully-qualified (never relative) submodule names: this dict's string values
+#: are themselves how a repository-configured surface names a shipped module by
+#: dotted string rather than by import (see ``string_module_edges`` in
+#: ``dev/audit/unreachable_code.py``), the same mechanism that keeps a uvicorn
+#: factory or a worker process target live. A relative ``".children"`` here
+#: would resolve identically at import time but would not be recognised as
+#: naming ``vaultspec_a2a.testing.children``, leaving every submodule this
+#: facade lazily loads misreported as reachable only through type checking.
 _LAZY_EXPORTS = {
-    "DEFAULT_IDLE_WINDOW_S": (".children", "DEFAULT_IDLE_WINDOW_S"),
-    "await_child": (".children", "await_child"),
-    "child_tree_progress": (".children", "child_tree_progress"),
-    "file_size_fingerprint": (".children", "file_size_fingerprint"),
-    "measured_child_startup_s": (".children", "measured_child_startup_s"),
-    "run_child": (".children", "run_child"),
-    "ResolvedService": (".endpoints", "ResolvedService"),
-    "resolve_gateway_url": (".endpoints", "resolve_gateway_url"),
-    "resolve_service": (".endpoints", "resolve_service"),
-    "resolve_worker_url": (".endpoints", "resolve_worker_url"),
-    "armed_desktop_app_home": (".environment", "armed_desktop_app_home"),
-    "session_scratch_dir": (".session_root", "session_scratch_dir"),
-    "armed_environment": (".environment", "armed_environment"),
-    "settings_override": (".environment", "settings_override"),
-    "LEASE_TTL_MS": (".leases", "LEASE_TTL_MS"),
-    "Lease": (".leases", "Lease"),
+    "DEFAULT_IDLE_WINDOW_S": (
+        "vaultspec_a2a.testing.children",
+        "DEFAULT_IDLE_WINDOW_S",
+    ),
+    "await_child": ("vaultspec_a2a.testing.children", "await_child"),
+    "child_tree_progress": ("vaultspec_a2a.testing.children", "child_tree_progress"),
+    "file_size_fingerprint": (
+        "vaultspec_a2a.testing.children",
+        "file_size_fingerprint",
+    ),
+    "measured_child_startup_s": (
+        "vaultspec_a2a.testing.children",
+        "measured_child_startup_s",
+    ),
+    "run_child": ("vaultspec_a2a.testing.children", "run_child"),
+    "ResolvedService": ("vaultspec_a2a.testing.endpoints", "ResolvedService"),
+    "resolve_gateway_url": (
+        "vaultspec_a2a.testing.endpoints",
+        "resolve_gateway_url",
+    ),
+    "resolve_service": ("vaultspec_a2a.testing.endpoints", "resolve_service"),
+    "resolve_worker_url": ("vaultspec_a2a.testing.endpoints", "resolve_worker_url"),
+    "armed_desktop_app_home": (
+        "vaultspec_a2a.testing.environment",
+        "armed_desktop_app_home",
+    ),
+    "session_scratch_dir": (
+        "vaultspec_a2a.testing.session_root",
+        "session_scratch_dir",
+    ),
+    "armed_environment": ("vaultspec_a2a.testing.environment", "armed_environment"),
+    "settings_override": ("vaultspec_a2a.testing.environment", "settings_override"),
+    "LEASE_TTL_MS": ("vaultspec_a2a.testing.leases", "LEASE_TTL_MS"),
+    "Lease": ("vaultspec_a2a.testing.leases", "Lease"),
     "LeaseAcquisitionTimeoutError": (
-        ".leases",
+        "vaultspec_a2a.testing.leases",
         "LeaseAcquisitionTimeoutError",
     ),
-    "hold_lease": (".leases", "hold_lease"),
-    "lease_home": (".leases", "lease_home"),
-    "plant_link_to_file": (".links", "plant_link_to_file"),
-    "apply_layer_markers": (".markers", "apply_layer_markers"),
-    "SCRATCH_ROLE": (".ports", "SCRATCH_ROLE"),
-    "PortAllocationError": (".ports", "PortAllocationError"),
-    "allocate_free_ports": (".ports", "allocate_free_ports"),
-    "free_port": (".ports", "free_port"),
-    "hold_for_process_lifetime": (".ports", "hold_for_process_lifetime"),
-    "reserve_scratch_ports": (".ports", "reserve_scratch_ports"),
-    "reserved_port": (".ports", "reserved_port"),
-    "LivenessWatch": (".progress", "LivenessWatch"),
-    "ProgressDeadline": (".progress", "ProgressDeadline"),
-    "ProgressStalledError": (".progress", "ProgressStalledError"),
-    "ResourceDiedError": (".progress", "ResourceDiedError"),
-    "registry_watch": (".progress", "registry_watch"),
-    "wait_for": (".progress", "wait_for"),
-    "IMPURE_FIXTURES": (".purity", "IMPURE_FIXTURES"),
-    "SERVICE_MARKER": (".purity", "SERVICE_MARKER"),
-    "forfeits_purity": (".purity", "forfeits_purity"),
-    "uses_impure_fixture": (".purity", "uses_impure_fixture"),
-    "MARKER_NAME": (".resources", "MARKER_NAME"),
-    "RESOURCES": (".resources", "RESOURCES"),
-    "SCRATCH_PREFIX": (".resources", "SCRATCH_PREFIX"),
-    "ResourceClaim": (".resources", "ResourceClaim"),
-    "ResourceDeclarationError": (".resources", "ResourceDeclarationError"),
-    "ResourceSpec": (".resources", "ResourceSpec"),
-    "declared_claims": (".resources", "declared_claims"),
-    "exclusive_keys": (".resources", "exclusive_keys"),
-    "resolve_spec": (".resources", "resolve_spec"),
-    "CPU_BUDGET_ENV": (".harness_names", "CPU_BUDGET_ENV"),
-    "SESSION_LEASE_KEY": (".sessions", "SESSION_LEASE_KEY"),
-    "effective_worker_count": (".sessions", "effective_worker_count"),
-    "live_peer_sessions": (".sessions", "live_peer_sessions"),
-    "machine_cpu_budget": (".sessions", "machine_cpu_budget"),
-    "register_session": (".sessions", "register_session"),
+    "hold_lease": ("vaultspec_a2a.testing.leases", "hold_lease"),
+    "lease_home": ("vaultspec_a2a.testing.leases", "lease_home"),
+    "plant_link_to_file": ("vaultspec_a2a.testing.links", "plant_link_to_file"),
+    "apply_layer_markers": ("vaultspec_a2a.testing.markers", "apply_layer_markers"),
+    "SCRATCH_ROLE": ("vaultspec_a2a.testing.ports", "SCRATCH_ROLE"),
+    "PortAllocationError": ("vaultspec_a2a.testing.ports", "PortAllocationError"),
+    "allocate_free_ports": ("vaultspec_a2a.testing.ports", "allocate_free_ports"),
+    "free_port": ("vaultspec_a2a.testing.ports", "free_port"),
+    "hold_for_process_lifetime": (
+        "vaultspec_a2a.testing.ports",
+        "hold_for_process_lifetime",
+    ),
+    "reserve_scratch_ports": (
+        "vaultspec_a2a.testing.ports",
+        "reserve_scratch_ports",
+    ),
+    "reserved_port": ("vaultspec_a2a.testing.ports", "reserved_port"),
+    "LivenessWatch": ("vaultspec_a2a.testing.progress", "LivenessWatch"),
+    "ProgressDeadline": ("vaultspec_a2a.testing.progress", "ProgressDeadline"),
+    "ProgressStalledError": ("vaultspec_a2a.testing.progress", "ProgressStalledError"),
+    "ResourceDiedError": ("vaultspec_a2a.testing.progress", "ResourceDiedError"),
+    "registry_watch": ("vaultspec_a2a.testing.progress", "registry_watch"),
+    "wait_for": ("vaultspec_a2a.testing.progress", "wait_for"),
+    "IMPURE_FIXTURES": ("vaultspec_a2a.testing.purity", "IMPURE_FIXTURES"),
+    "SERVICE_MARKER": ("vaultspec_a2a.testing.purity", "SERVICE_MARKER"),
+    "forfeits_purity": ("vaultspec_a2a.testing.purity", "forfeits_purity"),
+    "uses_impure_fixture": ("vaultspec_a2a.testing.purity", "uses_impure_fixture"),
+    "MARKER_NAME": ("vaultspec_a2a.testing.resources", "MARKER_NAME"),
+    "RESOURCES": ("vaultspec_a2a.testing.resources", "RESOURCES"),
+    "SCRATCH_PREFIX": ("vaultspec_a2a.testing.resources", "SCRATCH_PREFIX"),
+    "ResourceClaim": ("vaultspec_a2a.testing.resources", "ResourceClaim"),
+    "ResourceDeclarationError": (
+        "vaultspec_a2a.testing.resources",
+        "ResourceDeclarationError",
+    ),
+    "ResourceSpec": ("vaultspec_a2a.testing.resources", "ResourceSpec"),
+    "declared_claims": ("vaultspec_a2a.testing.resources", "declared_claims"),
+    "exclusive_keys": ("vaultspec_a2a.testing.resources", "exclusive_keys"),
+    "resolve_spec": ("vaultspec_a2a.testing.resources", "resolve_spec"),
+    "CPU_BUDGET_ENV": ("vaultspec_a2a.testing.harness_names", "CPU_BUDGET_ENV"),
+    "SESSION_LEASE_KEY": ("vaultspec_a2a.testing.sessions", "SESSION_LEASE_KEY"),
+    "effective_worker_count": (
+        "vaultspec_a2a.testing.sessions",
+        "effective_worker_count",
+    ),
+    "live_peer_sessions": ("vaultspec_a2a.testing.sessions", "live_peer_sessions"),
+    "machine_cpu_budget": ("vaultspec_a2a.testing.sessions", "machine_cpu_budget"),
+    "register_session": ("vaultspec_a2a.testing.sessions", "register_session"),
 }
 
 
@@ -158,7 +196,7 @@ def __getattr__(name: str) -> object:
         module_name, attribute_name = _LAZY_EXPORTS[name]
     except KeyError as exc:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
-    value = getattr(import_module(module_name, __name__), attribute_name)
+    value = getattr(import_module(module_name), attribute_name)
     globals()[name] = value
     return value
 

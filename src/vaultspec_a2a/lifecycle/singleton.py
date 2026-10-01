@@ -71,7 +71,6 @@ SINGLETON_RECORD_VERSION = 1
 
 _LOCK_NAME = "gateway.singleton.lock"
 _RECORD_NAME = "gateway.singleton.json"
-_RUNTIME_DIR = "runtime"
 
 # The runtime singleton the current process holds for its desktop application
 # home, if any. The desktop serve entrypoint acquires the singleton before the

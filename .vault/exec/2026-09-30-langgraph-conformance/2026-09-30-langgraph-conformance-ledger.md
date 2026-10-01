@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:d0878862223b9570fb296a6b6ec0a4e2f45d3d1fe77368dc25799e4169b75dde'
+body_hash: 'sha256:dcc6c584666c943de04e1716a01d8fb0b20e27b6ccda65f8cbb8e595a845ac0f'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -475,6 +475,10 @@ related:
 - `S46` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
 - `S46` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/worker` -> `pass`
 - `S46` `verify:` `ruff check+format, ty check src/vaultspec_a2a/streaming` -> `pass`
+- `S28` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
+- `S28` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S28` `M` `docs/operations.rst`
+- `S28` `D` `.vaultspec/triggers/example-audit-on-create.yaml`
 
 ## Notes
 
@@ -520,3 +524,4 @@ related:
 - `S34` Correction from the re-review: an unavailable checkpoint read was logged as a receipt not yet due.
 - `S28` User approved the drafted amendments as recommended on 2026-09-30. team-composition-topology and orchestration-topology-pipeline accepted; event-aggregation amended but left proposed pending the user's accept-or-deprecate choice.
 - `S38` Unblocked on 2026-10-01: the user chose a port held to core by a parity test; recorded in the core-reader-parity ADR, accepted under the user's blanket approval.
+- `S28` User decisions of 2026-10-01: event-aggregation accepted; the research fan-out stays on Send; no served star preset yet; the terminal fan-out keeps its one-heartbeat bound; the rag hosted-ranking rule is an operator rule; no repository override of the builtin hosted-search guidance; the retired example trigger deleted.

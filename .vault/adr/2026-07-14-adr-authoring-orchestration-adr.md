@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#adr-authoring-orchestration'
 date: '2026-07-14'
-modified: '2026-09-30'
-body_hash: 'sha256:f4368fcd67dbb942d07b351a75b399bc08656f4413d16838d8fc965363e6a5d4'
+modified: '2026-10-01'
+body_hash: 'sha256:411e7fd0e61571a5428812ae554becf7156f5b6ea58e487d693ef4839e6f9ab9'
 related:
   - "[[2026-07-14-document-authoring-orchestration-audit]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
@@ -257,7 +257,7 @@ The document-authoring topology is deliberately excluded from that refresh. Its 
 
 The fan-out's join point is a structural requirement, not a prompt convention. The synthesis stage is compiled as the join, and every branch's findings are rendered into its model input (`src/vaultspec_a2a/graph/_compiler_research.py`, `src/vaultspec_a2a/graph/nodes/worker.py`). A branch's findings accumulating in state with no reader is a defect, not a partial rollout. A persona sentence claiming the findings have been joined does not constitute the join.
 
-A fan-out branch is dispatched with `Send`, and LangGraph replays it on every resume with the payload it was dispatched with. The run's later channel values never reach a branch that parks, and that includes the permission answers the run records. A supervised branch therefore asks a human for tool permission through its own resume values. An answer settles only the request it names, and only with an option that request offered. A pull fan-out would give branches live state but departs from the `Send`-based diverge stage this record commits to; that choice remains open.
+A fan-out branch is dispatched with `Send`, and LangGraph replays it on every resume with the payload it was dispatched with. The run's later channel values never reach a branch that parks, and that includes the permission answers the run records. A supervised branch therefore asks a human for tool permission through its own resume values. An answer settles only the request it names, and only with an option that request offered. A pull fan-out would give branches live state but departs from the `Send`-based diverge stage this record commits to. The user settled the choice on 2026-10-01: the diverge stage stays on `Send`, and a branch's answers travel through its own resume values. That is LangGraph's documented contract for parallel interrupts, where each pending interrupt is resumed by a value keyed to it rather than through state written after dispatch. Each branch also runs on a model instance of its own, because the branches' turns overlap within one superstep.
 
 Each document gate binds its verdict to the proposal it parked on:
 

@@ -467,6 +467,8 @@ Status: open from P03.S19; the prune no longer adds to it. The worker's 10 s cli
 
 Status: open decision from P03.S17. The stream re-reads durable status on each heartbeat and closes on a terminal, bounding the race to one idle beat. Persisting before fan-out in `src/vaultspec_a2a/api/internal.py` would close it at the cost of delaying every relayed frame by a database write; that latency trade-off is the user's.
 
+Decided 2026-10-01 by the user: keep the one-heartbeat bound. Closed as an accepted risk; durable stream resumption is decided separately under the `stream-resumption` feature.
+
 ### parallel-researchers-share-one-model | medium | the research fan-out's parallel branches share one provider model instance
 
 Status: fixed in P06.S35, after reproduction: three branches over real ACP models failed with `AcpSessionBusyError` on the second branch, so any research fan-out wider than one thread failed on a real lane. The researcher role is now resolved once per branch (`src/vaultspec_a2a/graph/_compiler_research.py`, `_resolve_research_adr_models`), and `src/vaultspec_a2a/graph/tests/test_research_branch_models.py` drives three branches to the join. Original finding: every researcher branch calls the one model resolved at compile time (`src/vaultspec_a2a/graph/_compiler_research.py`, `_make_research_producer`) and those branches run in one superstep, while `AcpChatModel` refuses concurrent use; `with_mcp_servers` copies share the original's transport. A per-branch model from the provider factory would separate them and belongs with the provider-lane work.

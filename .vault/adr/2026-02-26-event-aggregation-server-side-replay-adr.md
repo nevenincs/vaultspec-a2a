@@ -3,13 +3,13 @@ tags:
 - '#adr'
 - '#event-aggregation-server-side-replay'
 date: 2026-02-26
-modified: '2026-09-30'
-body_hash: 'sha256:ffa0b180e40fdf9026a7ab51803befc2cd5703dd182ada298c4a6f38109cae58'
+modified: '2026-10-01'
+body_hash: 'sha256:19fb826dc64c71bfe2727c47feda776a384d2561a15229be2dde981f2d6242a6'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
 
-# `event-aggregation-server-side-replay` adr: `adr-4` | (**status:** `proposed`)
+# `event-aggregation-server-side-replay` adr: `adr-4` | (**status:** `accepted`)
 
 ## Migration Note
 
@@ -148,3 +148,5 @@ Tool-call lifecycle is not a graph superstep and appears in no stream mode. It r
 A run that keeps checkpoints asks for `durability="sync"`, so every superstep is persisted before the next one starts (`src/vaultspec_a2a/streaming/ingest.py`). LangGraph's default, `"async"`, persists a superstep while the next one executes and may lose the most recent one to a crash, which the checkpoint-first recovery this service depends on cannot tolerate. A graph compiled without a checkpointer is left on the library default, because langgraph 1.2.12 kills such a run when durability is requested. That guard is an implementation hypothesis, not a commitment, and is removed when the upstream defect is fixed.
 
 Checkpoint sourcing is no longer SQLite-only; `2026-03-10-postgres-dual-backend-adr` chooses the backend. Grounding: `2026-09-30-langgraph-conformance-audit`.
+
+Accepted 2026-10-01 by the user, with this amendment as its binding content; the parts the 2026-07-15 amendment marks superseded stay superseded.

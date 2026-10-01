@@ -215,6 +215,8 @@ Fixed in P05.S29 and P05.S30. The `<0.3` cap never protected the core MCP lane: 
 
 Open. Since vaultspec-rag 0.4.34 a daemon holding `VAULTSPEC_RAG_TYPESAFE_API_KEY` sends candidates to a hosted API for every root it serves, while the registry declares the rag entry `network_egress: False`. The run's launch never supplies the key; the daemon is operator configuration the contract probe cannot see (`tools/list` passes either way). Recommendation: probe the daemon's reported hosted-ranking state before admitting the lane, or record that operator daemons must run without the key.
 
+Decided 2026-10-01 by the user: an operator rule, documented in `docs/operations.rst` ("Semantic search server"); a2a cannot observe or enforce the daemon's ranking mode. Closed as operator configuration.
+
 ### rag-client-daemon-version-skew | low | an unpinned rag client and an older running daemon fail every search while the contract passes
 
 Open. The 0.5.3 client requires the exact daemon release and a `readiness` field older daemons do not send; the registry deliberately leaves the rag requirement unpinned, so the next release reaches `uvx` while a running daemon stays behind, and `src/vaultspec_a2a/providers/_mcp_contract.py` verifies only `tools/list`.
@@ -225,15 +227,19 @@ Open. `pyproject.toml` declares `rag = ["torch>=2.4", "vaultspec-rag[mcp]>=0.5.3
 
 ### submitter-link-stripping-drift | low | the authoring submitter mirrors core's body-link stripping with regexes core has replaced
 
-Open. `src/vaultspec_a2a/authoring/submitter.py:94-106` reproduces core's link stripping, which 0.3.2 performs with a CommonMark-aware reader (`vaultspec_core/vaultcore/links.py`); edge-case documents may now be judged differently on each side.
+Fixed in P07.S38 under `2026-10-01-langgraph-conformance-core-reader-parity-adr`: the submitter reads prose with a port of core's reader, held to the installed core by `src/vaultspec_a2a/authoring/tests/test_prose_parity.py`. Original finding: `src/vaultspec_a2a/authoring/submitter.py:94-106` reproduced core's link stripping, which 0.3.2 performs with a CommonMark-aware reader (`vaultspec_core/vaultcore/links.py`); edge-case documents may now be judged differently on each side.
 
 ### framework-advertises-hosted-search | low | the upgraded framework guidance tells agents to use hosted search this project withholds
 
 Open. The 0.3.2 builtin rules, skills and personas direct agents to `vault search`, `vault adr crossref` and the MCP `search`/`crossref` tools. They do not reach a2a's own agent prompts (`src/vaultspec_a2a/context/rules.py` excludes `*.builtin.md`), but a developer session following them on this repository would send vault text to the hosted API if a key is configured.
 
+Decided 2026-10-01 by the user: no repository rule overriding the builtin guidance; hosted `search` and `crossref` stay served but never permitted, as chosen earlier in the conformance work. Closed as accepted.
+
 ### retired-example-trigger | low | an example trigger with a retired event warns on every sync
 
 Open. The `trigger_split` migration moved `.vaultspec/hooks/example-audit-on-create.yaml` to `.vaultspec/triggers/`; its `vault.document.created` event was retired in 0.2.4 and never fired. It is the user's policy source, so it is left for them to delete.
+
+Deleted on 2026-10-01 at the user's request, and `vaultspec-core sync` re-run.
 
 ### legacy-empty-checkpoint-fixtures | low | test fixtures seed checkpoints with LangGraph's deprecated helper
 
@@ -326,6 +332,8 @@ Correction to `finish-block-budget-outruns-a-small-recursion-limit`. Driving a r
 ### only-one-shipped-preset-is-a-star | low | the star topology's gates and budgets ship almost untested against real presets
 
 Open, surfaced by P07.S36; needs a decision. Of twenty presets under `src/vaultspec_a2a/team/presets/teams/`, only `mock-supervisor-human-in-loop.toml` declares a star topology, so every supervisor gate and budget is exercised only by synthetic teams built inside tests. `vaultspec-solo-coder.toml`, the preset closest to a production star run, is a pipeline with a recursion limit of 10, below the finish-block floor, so making it a star would trip the new compile-time refusal. Recommendation: decide whether a shipped star preset should exist and what its recursion limit is.
+
+Decided 2026-10-01 by the user: no served star preset yet. Star stays a tested topology with only the mock preset until a lane has completed-turn proof for a supervisor role; the finish-block floor applies to whatever preset is added then. Closed as accepted.
 
 ### plan-approval-is-skipped-when-a-soft-phase-gate-warns | low | a warned exec route would reach its worker without plan approval
 

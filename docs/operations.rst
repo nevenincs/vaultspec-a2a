@@ -146,6 +146,19 @@ Authentication is implemented by
 ``allow_unauthenticated_v1_for_testing`` application option is test-only and
 must never be enabled by an operator deployment.
 
+Semantic search server
+----------------------
+
+A team harness can attach the shared ``vaultspec-rag`` server to research
+roles. The harness registry declares that server local: it reads the project
+and reaches nothing outside the host. A rag daemon started with
+``VAULTSPEC_RAG_TYPESAFE_API_KEY`` set breaks that declaration, because it
+ranks every search through a hosted API and sends the candidate passages with
+the request. The server's MCP surface does not report which ranking a daemon
+uses, so the gateway cannot detect or refuse an egressing daemon. Start any
+rag daemon that serves projects driven by this service with that variable
+unset.
+
 Desktop store migration
 -----------------------
 

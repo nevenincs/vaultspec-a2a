@@ -355,6 +355,12 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "reason": _Text(64),
         "dropped_type": _Text(64),
         "dropped_count": _Integer(),
+        # The first sequence a short replay CAN serve. Carried here because a
+        # resynchronization notice that cannot say where the stream picks up
+        # again leaves the consumer unable to tell a brief gap from a lost
+        # run, and the catalog is projection by omission: a field absent from
+        # this entry never reaches the wire however carefully it is set.
+        "first_sequence": _Integer(),
     },
     ServerEventType.PERMISSION_REQUEST: {
         "request_id": _Text(128),

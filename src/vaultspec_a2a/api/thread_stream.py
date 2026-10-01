@@ -77,6 +77,15 @@ guessing a number.
 
 _FOREIGN_RUN_REASON = "resume_cursor_foreign_run"
 
+#: A resume served from later than it asked for, because the frames between
+#: are no longer retained - trimmed by the window bound, or delivered live and
+#: lost before they were written.
+_REPLAY_WINDOW_EXCEEDED = "replay_window_exceeded"
+
+#: A resume that could not be read at all: the feature is off, the store
+#: refused, or this run has nothing retained to resume from.
+_REPLAY_UNAVAILABLE = "replay_unavailable"
+
 #: An int64 sequence is at most nineteen digits. A longer run of digits names
 #: no position this log could hold, and parsing it would be work done on behalf
 #: of a caller that cannot be served.
@@ -235,6 +244,26 @@ def _backpressure_frame(thread_id: str, dropped: int) -> bytes:
     )
 
 
+def _replay_gap_frame(thread_id: str, reason: str, first_sequence: int | None) -> bytes:
+    """Say that a resume is short, and where the stream picks up again.
+
+    The same bounded resynchronization indication as a backpressure drop, with
+    the same remedy - re-read run-status - because the consequence for the
+    consumer is the same: its history of this run has a hole in it. It carries
+    no id of its own; the position a client resumes from is the next retained
+    frame, not the notice that something before it is missing.
+    """
+    frame: dict[str, object] = {
+        "type": "progress_dropped",
+        "event_type": "progress_dropped",
+        "thread_id": thread_id,
+        "reason": reason,
+    }
+    if first_sequence is not None:
+        frame["first_sequence"] = first_sequence
+    return encode_sse_frame(frame, event="progress_dropped", thread_id=thread_id)
+
+
 def _rejection_frame(thread_id: str, reason: str) -> bytes:
     """Close a stream that cannot be served, in the client's own vocabulary."""
     return encode_sse_frame(
@@ -365,6 +394,123 @@ async def _retained_after(
     ]
 
 
+@dataclass(frozen=True, slots=True)
+class _ReplayWindow:
+    """What a resume can actually be served, and what it costs to say so."""
+
+    frames: list[_ReplayFrame]
+    #: ``None`` when the window answers the cursor completely. Otherwise the
+    #: one reason this resume is short, emitted once before the frames.
+    gap_reason: str | None = None
+    first_sequence: int | None = None
+
+
+def _contiguous_tail(frames: list[_ReplayFrame]) -> list[_ReplayFrame]:
+    """Return the longest run of consecutive sequences ending at the newest frame.
+
+    A hole in the middle of a retained window is possible even though nothing
+    deletes from the middle: a ring that overflows, or a run evicted from the
+    writer's cache, loses frames that were delivered live before they were
+    ever written. Serving the frames on both sides of such a hole and
+    reporting only the first of them would describe a window that starts late
+    while quietly skipping a position inside it. Starting after the last hole
+    keeps one rule the consumer can rely on - after the notice below, every
+    sequence is consecutive - at the cost of frames that are older than a gap
+    the consumer is being told about anyway.
+    """
+    for index in range(len(frames) - 1, 0, -1):
+        if frames[index].sequence != frames[index - 1].sequence + 1:
+            return frames[index:]
+    return frames
+
+
+async def _replay_window(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    writer: RunEventWriter | None,
+    thread_id: str,
+    resume: _ResumePosition,
+) -> _ReplayWindow:
+    """Read what this resume can be served, and classify what it cannot.
+
+    Three honest answers, and the difference between them is the whole point
+    of the window being reported at all. A complete window carries no notice.
+    A window that starts later than the cursor asked for - because retention
+    trimmed the rest, or because a frame was delivered but never written -
+    carries ``replay_window_exceeded`` and the first sequence it can serve. A
+    replay that cannot be read at all, because the feature is off or the store
+    refused, carries ``replay_unavailable``: the consumer learns that the
+    stream from here is live-only rather than being left to assume it resumed.
+    """
+    if not settings.stream_replay_enabled:
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
+    try:
+        frames = await _retained_after(
+            session_factory=session_factory,
+            writer=writer,
+            thread_id=thread_id,
+            after_sequence=resume.after_sequence,
+        )
+    except Exception:
+        logger.warning(
+            "Could not read the replay window of run %s; its resume is served "
+            "live-only",
+            thread_id,
+            exc_info=True,
+            extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
+        )
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
+
+    if not frames:
+        return await _empty_replay_window(
+            session_factory=session_factory, writer=writer, thread_id=thread_id
+        )
+
+    served = _contiguous_tail(frames)
+    # A numbered cursor claims a position, so a window that does not continue
+    # from it lost frames. The window-start sentinel claims none, so only a
+    # hole INSIDE what is retained - which is what trimming the tail above
+    # removes - is a loss it has to be told about.
+    complete = (
+        len(served) == len(frames)
+        if resume.from_window_start
+        else served[0].sequence == resume.after_sequence + 1
+    )
+    if complete:
+        return _ReplayWindow(served)
+    return _ReplayWindow(served, _REPLAY_WINDOW_EXCEEDED, served[0].sequence)
+
+
+async def _empty_replay_window(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    writer: RunEventWriter | None,
+    thread_id: str,
+) -> _ReplayWindow:
+    """Classify a resume with nothing after its cursor.
+
+    Two cases wear the same empty answer and must not be reported the same
+    way. A client at the head of the window has missed nothing, and telling it
+    otherwise would send a resynchronization notice on every ordinary
+    reconnect. A run with nothing retained at all cannot serve a resume from
+    any position, and saying nothing there would present a live-only stream as
+    a resumed one.
+    """
+    store = RunEventStore(session_factory)
+    try:
+        retained = await store.high_water_mark(thread_id)
+    except Exception:
+        logger.warning(
+            "Could not read the replay high-water mark of run %s",
+            thread_id,
+            exc_info=True,
+            extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
+        )
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
+    held = retained is not None or bool(writer and writer.pending(thread_id))
+    return _ReplayWindow([]) if held else _ReplayWindow([], _REPLAY_UNAVAILABLE)
+
+
 def _replay_frame_bytes(thread_id: str, frame: _ReplayFrame) -> bytes:
     """Encode one retained frame exactly as its live delivery was encoded.
 
@@ -482,12 +628,31 @@ async def _stream_thread_events(
         highest_emitted = resume.after_sequence if resume is not None else 0
 
         if resume is not None:
-            for frame in await _retained_after(
+            window = await _replay_window(
                 session_factory=session_factory,
                 writer=replay_writer,
                 thread_id=thread_id,
-                after_sequence=resume.after_sequence,
-            ):
+                resume=resume,
+            )
+            if window.gap_reason is not None:
+                # Exactly one notice, ahead of the frames it qualifies, so
+                # everything after it is contiguous. A short replay is never
+                # presented as a complete one.
+                logger.info(
+                    "Resume of run %s is short: %s",
+                    thread_id,
+                    window.gap_reason,
+                    extra={
+                        "thread_id": thread_id,
+                        "client_id": client_id,
+                        "action": "stream_resume_gap",
+                        "reason": window.gap_reason,
+                    },
+                )
+                yield _replay_gap_frame(
+                    thread_id, window.gap_reason, window.first_sequence
+                )
+            for frame in window.frames:
                 yield _replay_frame_bytes(thread_id, frame)
                 highest_emitted = frame.sequence
                 if frame.event_type == "thread_terminal":

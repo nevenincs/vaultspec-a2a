@@ -26,7 +26,6 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .checkpoint_schema import LANGGRAPH_TABLE_COLUMNS
@@ -118,18 +117,21 @@ async def _thread_uses_a_delta_channel(checkpointer: Any, thread_id: str) -> boo
     """Whether *thread_id*'s state depends on ancestors these statements delete.
 
     A delta channel writes a sentinel and rebuilds its value by walking back to
-    the nearest snapshot, so the surviving latest checkpoint is usually not a
-    snapshot point and pruning its ancestors would leave the channel
-    reconstructing as empty - returning no value rather than raising.
+    the nearest snapshot, so a latest checkpoint that is not a snapshot point
+    would reconstruct the channel as empty once its ancestors are gone -
+    returning no value rather than raising.
+
+    LangGraph records exactly that dependency: the latest checkpoint's
+    metadata counts the writes each delta channel has taken since its last
+    snapshot, and drops the count only when every delta channel snapshotted
+    in that checkpoint. A snapshot holds the channel's whole accumulated value,
+    so a head with no count needs nothing older and is pruned like any other.
     """
     latest = await checkpointer.aget_tuple({"configurable": {"thread_id": thread_id}})
     if latest is None:
         return False
     metadata: Mapping[str, object] = latest.metadata or {}
-    if metadata.get(_DELTA_COUNTERS_KEY):
-        return True
-    values: Mapping[str, object] = latest.checkpoint.get("channel_values") or {}
-    return any(isinstance(value, _DeltaSnapshot) for value in values.values())
+    return bool(metadata.get(_DELTA_COUNTERS_KEY))
 
 
 async def prune_settled_checkpoints(checkpointer: object, thread_id: str) -> bool:

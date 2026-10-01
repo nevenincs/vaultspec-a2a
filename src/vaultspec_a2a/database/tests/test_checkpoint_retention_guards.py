@@ -53,6 +53,12 @@ class _DeltaLog(TypedDict):
     log: Annotated[list[str], DeltaChannel(_accumulate, list, snapshot_frequency=1000)]
 
 
+class _SnapshottingDeltaLog(TypedDict):
+    # snapshot_frequency of one: every checkpoint that writes the log is a
+    # snapshot point, so the surviving latest checkpoint carries the whole value.
+    log: Annotated[list[str], DeltaChannel(_accumulate, list, snapshot_frequency=1)]
+
+
 def _one_step_graph(saver: Checkpointer, state_schema: type[Any]) -> Any:
     """One node appending a turn to *state_schema*'s log, compiled over *saver*.
 
@@ -105,6 +111,39 @@ async def test_a_delta_channel_thread_is_left_alone(
     assert await prune_settled_checkpoints(sqlite_saver, thread_id) is False
 
     assert await stored_history(sqlite_saver, thread_id) == before
+    assert (
+        await graph.aget_state(cast("Any", config_for(thread_id)))
+    ).values == settled
+
+
+@pytest.mark.asyncio
+async def test_a_delta_thread_whose_head_is_a_snapshot_is_pruned_without_loss(
+    sqlite_saver: AsyncSqliteSaver,
+) -> None:
+    """A snapshot head needs no history, so refusing it only keeps dead rows.
+
+    When every delta channel snapshotted in the latest checkpoint, that
+    checkpoint holds each channel's whole value and LangGraph records no
+    writes since a snapshot. Pruning it must succeed and leave the value
+    exactly as it was - the check that refused this case guarded nothing and
+    leaned on a type LangGraph does not publish.
+    """
+    graph = _one_step_graph(sqlite_saver, _SnapshottingDeltaLog)
+    thread_id = f"delta-snapshot-{uuid4()}"
+    for turn in ("one", "two", "three"):
+        await graph.ainvoke(
+            cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
+        )
+    before = await stored_history(sqlite_saver, thread_id)
+    settled = (await graph.aget_state(cast("Any", config_for(thread_id)))).values
+    assert settled["log"], "the delta channel must hold a value to lose"
+    assert all(len(ids) > 1 for ids in before.values())
+
+    assert await prune_settled_checkpoints(sqlite_saver, thread_id) is True
+
+    assert await stored_history(sqlite_saver, thread_id) == {
+        namespace: [max(ids)] for namespace, ids in before.items()
+    }
     assert (
         await graph.aget_state(cast("Any", config_for(thread_id)))
     ).values == settled

@@ -45,7 +45,7 @@ from ...database import (
     resolve_session_factory,
 )
 from ...database.checkpoints import Checkpointer
-from ...database.run_event_repository import RunEventStore
+from ...database.run_event_repository import retained_high_water_mark
 from ...domain_config import domain_config
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
@@ -288,7 +288,7 @@ def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
     return None
 
 
-async def _stream_is_resumable(app: Any, run_id: str) -> bool:
+async def _stream_is_resumable(app: Any, db: AsyncSession, run_id: str) -> bool:
     """Whether this run's stream can be resumed from the id its frames carry.
 
     Both halves of the posture, because either alone misreports it. The
@@ -297,6 +297,12 @@ async def _stream_is_resumable(app: Any, run_id: str) -> bool:
     one whose window has expired - does not. The writer's unflushed ring
     counts as retained: a resume taken in that interval reads it, so
     answering false there would understate a capability the stream has.
+
+    Probed on the REQUEST's own session rather than through a factory of its
+    own. This is the hottest read on the gateway and it already holds a
+    pooled connection; opening a second one beside it for an additive
+    boolean halved how many of these calls an engine could serve at once,
+    and on a small pool that is the difference between answering and waiting.
 
     A store that cannot answer reports false, which is the safe direction:
     a client told it cannot resume loses nothing but an optimisation, while
@@ -308,11 +314,7 @@ async def _stream_is_resumable(app: Any, run_id: str) -> bool:
     if writer is not None and writer.pending(run_id):
         return True
     try:
-        return (
-            await RunEventStore(resolve_session_factory(app.state)).high_water_mark(
-                run_id
-            )
-        ) is not None
+        return (await retained_high_water_mark(db, run_id)) is not None
     except Exception:
         logger.warning(
             "Could not read the replay window of run %s for run-status",
@@ -377,7 +379,7 @@ async def run_status_endpoint(
         # Read beside the cursor it qualifies: last_sequence says where the
         # run's numbering stood, and this says whether that number is one the
         # stream will honour as a resumption point.
-        stream_resumable=await _stream_is_resumable(request.app, run_id),
+        stream_resumable=await _stream_is_resumable(request.app, db, run_id),
         repair_status=_optional_enum(RepairStatus, snapshot.repair_status),
         execution_readiness=_optional_enum(RepairStatus, snapshot.execution_readiness),
         degraded_reasons=snapshot.degraded_reasons,

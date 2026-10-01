@@ -13,16 +13,19 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...streaming.aggregator import EventAggregator
 from ...testing import settings_override
 from ...thread.enums import ThreadStatus
+from .._replay_writer_seat import replay_writer_seat
 from ._sse_reader import SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
 from .test_stream_resume_replay import _progress_event, _relay
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
     from .conftest import SessionFactory
 
@@ -83,3 +86,57 @@ async def test_a_switched_off_service_reports_no_resumable_stream(
 
     assert status.status_code == 200
     assert status.json()["stream_resumable"] is False
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_status_answers_the_field_on_one_pooled_connection(
+    engine: AsyncEngine, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """The additive boolean must not cost the request a second connection.
+
+    run-status is the hottest read on this gateway, and its handler already
+    holds a request-scoped session for the life of the request. Probing the
+    replay log through a factory of its own opened a second pooled
+    connection beside that one, halving how many of these calls an engine
+    could serve at once - which is not an abstraction to be argued about but
+    a bound to be measured, so this engine has exactly one connection and a
+    one-second patience.
+
+    Two gateways over one database, because the probe only reaches the store
+    when the recorder holds nothing: the producing gateway's unflushed ring
+    answers from memory, and the gateway that has only the table is the
+    state any second process, or any restart, actually finds.
+    """
+    producer, _agg, _worker, _cp = make_app(
+        session_factory, checkpointer, EventAggregator()
+    )
+    single = create_async_engine(
+        engine.url, pool_size=1, max_overflow=0, pool_timeout=1.0
+    )
+    viewer, _vagg, _vworker, _vcp = make_app(
+        async_sessionmaker(single, expire_on_commit=False),
+        checkpointer,
+        EventAggregator(),
+    )
+    await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
+
+    try:
+        async with (
+            _live_server(producer) as producer_base,
+            httpx.AsyncClient(base_url=producer_base, timeout=10.0) as relay_client,
+        ):
+            await _relay(relay_client, [_progress_event(_RUN, 1)])
+        assert replay_writer_seat(viewer) is None, (
+            "the viewer gateway must reach the store, not another app's ring"
+        )
+
+        async with (
+            _live_server(viewer) as viewer_base,
+            httpx.AsyncClient(base_url=viewer_base, timeout=10.0) as client,
+        ):
+            status = await client.get(f"/v1/runs/{_RUN}")
+    finally:
+        await single.dispose()
+
+    assert status.status_code == 200
+    assert status.json()["stream_resumable"] is True

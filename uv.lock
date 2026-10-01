@@ -3311,6 +3311,7 @@ dependencies = [
     { name = "starlette" },
     { name = "typing-extensions" },
     { name = "uvicorn" },
+    { name = "vaultspec-core" },
     { name = "websockets" },
 ]
 
@@ -3352,7 +3353,6 @@ all = [
     { name = "tomlkit" },
     { name = "ty" },
     { name = "types-jsonschema" },
-    { name = "vaultspec-core" },
     { name = "vulture" },
     { name = "websockets" },
     { name = "zstandard" },
@@ -3382,7 +3382,6 @@ dev = [
     { name = "tomlkit" },
     { name = "ty" },
     { name = "types-jsonschema" },
-    { name = "vaultspec-core" },
     { name = "vulture" },
     { name = "websockets" },
     { name = "zstandard" },
@@ -3392,7 +3391,6 @@ docs = [
 ]
 freeze = [
     { name = "pyinstaller" },
-    { name = "vaultspec-core" },
 ]
 tooling = [
     { name = "actionlint-py" },
@@ -3419,7 +3417,6 @@ tooling = [
     { name = "tomlkit" },
     { name = "ty" },
     { name = "types-jsonschema" },
-    { name = "vaultspec-core" },
     { name = "vulture" },
     { name = "websockets" },
     { name = "zstandard" },
@@ -3456,6 +3453,7 @@ requires-dist = [
     { name = "starlette", git = "https://github.com/Kludex/starlette.git?rev=bbee894422c6cc1306327335ae385b901ccfec13" },
     { name = "typing-extensions", specifier = ">=4.16.0" },
     { name = "uvicorn", specifier = ">=0.41.0" },
+    { name = "vaultspec-core", specifier = ">=0.3.2" },
     { name = "vaultspec-rag", extras = ["mcp"], marker = "extra == 'rag'", specifier = ">=0.5.3" },
     { name = "websockets", specifier = ">=16.0" },
 ]
@@ -3488,7 +3486,6 @@ all = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vaultspec-core", specifier = ">=0.3.2" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
@@ -3518,16 +3515,12 @@ dev = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vaultspec-core", specifier = ">=0.3.2" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
 ]
 docs = [{ name = "sphinx", specifier = ">=8.2" }]
-freeze = [
-    { name = "pyinstaller", specifier = ">=6.11" },
-    { name = "vaultspec-core", specifier = ">=0.3.2" },
-]
+freeze = [{ name = "pyinstaller", specifier = ">=6.11" }]
 tooling = [
     { name = "actionlint-py", specifier = "==1.7.12.24" },
     { name = "bandit", specifier = ">=1.9.4" },
@@ -3553,7 +3546,6 @@ tooling = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vaultspec-core", specifier = ">=0.3.2" },
     { name = "vulture", specifier = ">=2.16" },
     { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },

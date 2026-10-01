@@ -41,6 +41,10 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.40",
   "starlette>=0.52.1",
   "uvicorn>=0.41.0",
+  # The framework this service serves. Its readers and checks are called rather
+  # than copied, so the runtime refuses exactly what the framework refuses. No
+  # upper bound: the framework moves and this service moves with it.
+  "vaultspec-core>=0.3.2",
   "websockets>=16.0",
   "alembic>=1.15.1",
   "click>=8.1",
@@ -152,19 +156,18 @@ tooling = [
   # without these its calls type as Unknown.
   "types-jsonschema>=4.26",
   "ty>=0.0.15",
-  "vaultspec-core>=0.3.2",
   # Dead-code detection. Advisory: it infers reachability it cannot always see,
   # so a finding is a lead to confirm rather than a verdict.
   "vulture>=2.16",
   "websockets>=16.0",
   "zstandard>=0.25.0",
 ]
-# The frozen-binary build closure: PyInstaller itself plus vaultspec-core,
-# which the binary dispatches via its run-module verb (never a static import,
-# so the spec collects it explicitly). Installed by scripts/build_binary.py's
-# caller (the dashboard release pipeline), not by ordinary development.
+# The frozen-binary build closure: PyInstaller. vaultspec-core, which the binary
+# also dispatches via its run-module verb, is a runtime dependency and so is
+# already present. Installed by scripts/build_binary.py's caller (the dashboard
+# release pipeline), not by ordinary development.
 all = [{ include-group = "docs" }, { include-group = "tooling" }]
-freeze = ["pyinstaller>=6.11", "vaultspec-core>=0.3.2"]
+freeze = ["pyinstaller>=6.11"]
 
 [tool.uv]
 default-groups = []
@@ -436,11 +439,6 @@ known_first_party = ["vaultspec_a2a"]
     "sphinx",
     "tenacity",
     "tomlkit",
-    # The grounding-parity test drives the real vaultspec-core CLI, which the
-    # `freeze` group owns because the frozen binary dispatches it. Importing it
-    # from a test is the same construction as every entry above: the wheel packs
-    # only `src/vaultspec_a2a`, so nothing shipped depends on it.
-    "vaultspec_core",
   ]
 
 [tool.ty.environment]

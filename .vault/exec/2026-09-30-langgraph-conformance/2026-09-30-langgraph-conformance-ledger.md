@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:dcc6c584666c943de04e1716a01d8fb0b20e27b6ccda65f8cbb8e595a845ac0f'
+body_hash: 'sha256:a87abfdbb964e62cbfc627187fffd94a32084496daeeca137e146045ce35dfd5'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -479,6 +479,12 @@ related:
 - `S28` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
 - `S28` `M` `docs/operations.rst`
 - `S28` `D` `.vaultspec/triggers/example-audit-on-create.yaml`
+- `S47` `M` `pyproject.toml`
+- `S47` `M` `uv.lock`
+- `S47` `M` `scripts/build_binary.py`
+- `S47` `verify:` `deptry src` -> `pass`
+- `S47` `verify:` `uv export --no-default-groups lists vaultspec-core` -> `pass`
+- `S47` `verify:` `pytest src/vaultspec_a2a/control/tests/test_sync_url_derivation.py` -> `pass`
 
 ## Notes
 

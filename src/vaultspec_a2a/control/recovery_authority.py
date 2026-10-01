@@ -43,6 +43,7 @@ from .repositories.continuation_queue import (
     open_promoted_continuation,
     promoted_turn_deadline,
     promotion_dispatch_pending,
+    promotion_owner_holds_run,
     read_next_queued_continuation,
 )
 
@@ -79,6 +80,14 @@ class RecoveryTrigger(StrEnum):
 CONTINUATION_PROMOTED = "continuation_promoted"
 CONTINUATION_NOT_PROMOTABLE = "continuation_not_promotable"
 AWAITING_PROMOTION_DISPATCH = "awaiting_promotion_dispatch"
+HOLDS_QUEUED_CONTINUATION = "holds_queued_continuation"
+
+#: The conditions that say a promoter, not a dead writer, explains this run.
+#: A startup pass counts these apart from its repair backlog, because an
+#: owned run needs nobody's attention.
+PROMOTION_OWNED_CONDITIONS = frozenset(
+    {AWAITING_PROMOTION_DISPATCH, HOLDS_QUEUED_CONTINUATION}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,23 +113,30 @@ class _CheckpointDecision:
     #: dispatcher has delivered yet. Read off the journal row before the read
     #: transaction closes, because a rollback expires it.
     promotion_pending: bool = False
+    #: Whether a waiting continuation's live lease still owns this run.
+    queue_owned: bool = False
 
 
-def _promotion_dispatcher_owns(decision: _CheckpointDecision) -> bool:
-    """Whether the promotion window, not abandonment, explains this run.
+def _promotion_owner(decision: _CheckpointDecision) -> str | None:
+    """Name the promoter answerable for this run, or ``None`` if there is none.
 
-    A promoted turn that has not reached the graph leaves a checkpoint naming
-    the turn before it, which from the outside is indistinguishable from a
-    writer that died mid-run. The difference is durable and local: the run's
-    writer is an accepted continuation, unapplied, inside its own deadline,
-    and the recovery owner is obliged to deliver it. Reconciling it would
-    move the run into repair and settle the attempt as conflicted, which
-    strands exactly the turn the obligation covers.
+    Two shapes of the same window, and both look exactly like a writer that
+    died. A promoted turn that has not reached the graph leaves a checkpoint
+    naming the turn before it; a turn still waiting leaves a run that is
+    RUNNING with no live worker. Each is distinguished by a durable local
+    fact - the writer is an undelivered continuation inside its own deadline,
+    or a waiting reservation still holds its lease - and each names someone
+    answerable. Reconciling either would move the run into repair underneath
+    the promoter and strand the turn it owes.
     """
-    return (
+    if (
         decision.promotion_pending
         and decision.evidence.kind is CheckpointEvidenceKind.PRIOR_ACTION
-    )
+    ):
+        return AWAITING_PROMOTION_DISPATCH
+    if decision.queue_owned:
+        return HOLDS_QUEUED_CONTINUATION
+    return None
 
 
 async def _reconcile_incomplete_checkpoint(
@@ -128,10 +144,9 @@ async def _reconcile_incomplete_checkpoint(
 ) -> RecoveryObservation:
     status = decision.status
     evidence = decision.evidence
-    if _promotion_dispatcher_owns(decision):
-        return RecoveryObservation(
-            status, AWAITING_PROMOTION_DISPATCH, evidence.checkpoint_id, False
-        )
+    owner = _promotion_owner(decision)
+    if owner is not None:
+        return RecoveryObservation(status, owner, evidence.checkpoint_id, False)
     if decision.trigger is RecoveryTrigger.STARTUP and status not in {
         ThreadStatus.RECONCILING,
         ThreadStatus.INPUT_REQUIRED,
@@ -354,8 +369,10 @@ async def reconcile_run_checkpoint(
     if receipt is None or action is None:
         return RecoveryObservation(status, "incompatible_action_receipt", None, False)
     action_id = action.id
-    promotion_pending = promotion_dispatch_pending(
-        action, observed_at=datetime.now(UTC)
+    observed_at = datetime.now(UTC)
+    promotion_pending = promotion_dispatch_pending(action, observed_at=observed_at)
+    queue_owned = await promotion_owner_holds_run(
+        db, thread_id=thread_id, observed_at=observed_at
     )
     # The checkpoint store is a different transaction owner. Release this read
     # snapshot before awaiting it; the later election compares the saved witness.
@@ -372,6 +389,7 @@ async def reconcile_run_checkpoint(
         request.trigger,
         request.last_sequence,
         promotion_pending,
+        queue_owned,
     )
     if evidence.kind is not CheckpointEvidenceKind.COMPLETED:
         return await _reconcile_incomplete_checkpoint(db, decision)

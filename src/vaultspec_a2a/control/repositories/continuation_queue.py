@@ -50,6 +50,7 @@ __all__ = [
     "open_promoted_continuation",
     "promoted_turn_deadline",
     "promotion_dispatch_pending",
+    "promotion_owner_holds_run",
     "read_next_queued_continuation",
     "reserve_queued_continuation",
     "run_lifetime_deadline",
@@ -214,6 +215,33 @@ def promoted_turn_deadline(
     except (ValidationError, ValueError):
         return None
     return promoted_at + timedelta(seconds=timeout)
+
+
+async def promotion_owner_holds_run(
+    session: AsyncSession, *, thread_id: str, observed_at: datetime
+) -> bool:
+    """Whether a waiting continuation's live lease still owns this run.
+
+    A run whose turn has ended and whose continuation has not been promoted
+    yet is RUNNING with no live worker, which from the outside looks exactly
+    like a writer that died. The lease on the waiting reservation is the
+    difference: while it is held, a promoter is answerable for this run, and
+    reconciling it as abandoned would move it into repair underneath them.
+    When the lease expires nobody is answerable any more and ordinary
+    reconciliation resumes, which is what keeps the ownership bounded.
+    """
+    return (
+        await session.scalar(
+            select(ControlActionModel.id)
+            .where(
+                ControlActionModel.thread_id == thread_id,
+                ControlActionModel.result_status == _QUEUED,
+                ControlActionModel.claim_expires_at.is_not(None),
+                ControlActionModel.claim_expires_at > observed_at,
+            )
+            .limit(1)
+        )
+    ) is not None
 
 
 def promotion_dispatch_pending(

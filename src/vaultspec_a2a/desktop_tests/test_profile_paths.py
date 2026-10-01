@@ -147,7 +147,7 @@ def test_a_relative_database_url_names_one_file_from_any_launch_folder(
     launch_a.mkdir()
     launch_b.mkdir()
 
-    resolved = []
+    resolved: list[Path] = []
     for launch in (launch_a, launch_b):
         with _working_directory(launch):
             resolved.append(

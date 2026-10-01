@@ -12,6 +12,8 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from ..checkpoints import Checkpointer
 
 __all__ = ["config_for", "stored_history"]
@@ -26,7 +28,9 @@ async def stored_history(saver: Checkpointer, thread_id: str) -> dict[str, list[
     """The checkpoint ids *saver* holds for *thread_id*, keyed by namespace."""
     by_namespace: dict[str, list[str]] = defaultdict(list)
     async for item in saver.alist(cast("Any", config_for(thread_id))):
-        configurable = item.config["configurable"]
+        configurable = cast("Mapping[str, Mapping[str, str]]", item.config)[
+            "configurable"
+        ]
         by_namespace[configurable["checkpoint_ns"]].append(
             configurable["checkpoint_id"]
         )

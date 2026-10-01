@@ -232,9 +232,8 @@ async def test_the_bridge_does_not_claim_what_the_saver_behind_it_cannot_do(
     """
     for name in ("aprune", "adelete_for_runs", "acopy_thread", "prune", "copy_thread"):
         assert getattr(type(bridge), name) is getattr(BaseCheckpointSaver, name), name
-        assert getattr(type(bridge._inner()), name) is getattr(
-            BaseCheckpointSaver, name
-        ), name
+        inner: object = bridge._inner()
+        assert getattr(type(inner), name) is getattr(BaseCheckpointSaver, name), name
 
     with pytest.raises(NotImplementedError):
         await bridge.aprune([f"selector-prune-{uuid4().hex}"])

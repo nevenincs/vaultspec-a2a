@@ -29,7 +29,7 @@ from .enums import (
 from .models import PlanEntry
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Mapping, Sequence
 
 __all__ = [
     "CHECKPOINT_ERROR_REPAIR_MAP",
@@ -662,9 +662,12 @@ def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
     """
     finished: set[str] = set()
     for write in pending_writes or ():
-        if not isinstance(write, tuple | list) or len(write) != 3:
+        entry: Sequence[object] = (
+            cast("Sequence[object]", write) if isinstance(write, tuple | list) else ()
+        )
+        if len(entry) != 3:
             continue
-        task_id, channel = cast("object", write[0]), cast("object", write[1])
+        task_id, channel = entry[0], entry[1]
         if (
             isinstance(task_id, str)
             and isinstance(channel, str)

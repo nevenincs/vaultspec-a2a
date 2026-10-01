@@ -345,17 +345,18 @@ def _read_frontmatter(path: Path) -> dict[str, object]:
 
     The rule corpus is vaultspec-core's format, so core's parser reads it: the
     fence, a leading byte-order mark and malformed YAML are core's to decide.
-    Returns an empty dict for an unreadable file or a non-mapping block. The
-    compile path still strips the whole frontmatter afterwards via
-    :func:`_strip_frontmatter`; this only PEEKS at it for the role filter and the
-    compile-order sort key.
+    Returns an empty dict for an unreadable file; a non-mapping block is
+    already empty by the time it gets here, because ``parse_frontmatter``
+    coerces one at its own boundary. The compile path still strips the whole
+    frontmatter afterwards via :func:`_strip_frontmatter`; this only PEEKS at
+    it for the role filter and the compile-order sort key.
     """
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
         return {}
     meta, _body = parse_frontmatter(raw)
-    return cast("dict[str, object]", meta) if isinstance(meta, dict) else {}
+    return cast("dict[str, object]", meta)
 
 
 def _roles_from_meta(meta: dict[str, object]) -> frozenset[str]:

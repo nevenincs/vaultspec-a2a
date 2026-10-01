@@ -22,7 +22,7 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
 __all__ = [
@@ -76,7 +76,7 @@ def release_lock(fd: int) -> None:
 @contextlib.contextmanager
 def held_exclusive_lock(
     path: Path, *, timeout_seconds: float, poll_seconds: float = 0.05
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold the lock at *path*, or raise ``TimeoutError`` naming the wait.
 
     Polled rather than blocking on the OS call: the Windows and POSIX primitives

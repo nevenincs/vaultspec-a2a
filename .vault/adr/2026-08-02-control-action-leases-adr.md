@@ -3,14 +3,15 @@ tags:
   - '#adr'
   - '#control-action-leases'
 date: '2026-08-02'
-modified: '2026-09-06'
+modified: '2026-10-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:4c23b131d2f12e830ea4e861fb89e49e46b2812a5f3d2131d7f30e3f621104fa'
+body_hash: 'sha256:d384385e841c0f8d787fbd091194d877898b142fa4ae96a917a93f5fbf052a3d'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
+  - '[[2026-10-01-run-continuation-adr]]'
 ---
 # `control-action-leases` adr: `durable leased dispatch claims` | (**status:** `accepted`)
 
@@ -120,3 +121,21 @@ Every accepted dispatch, including follow-up, permission, clarification, verdict
 The current accepted dispatch envelope carries the complete resolved team, worker and required supervisor compiler inputs under one executable-graph version, including a declared positive graph step timeout. Admission resolves these inputs before reserving the action. A preset identifier alone is not executable authority. Later graph actions read the initial accepted definition and its immutable receipt; they do not reload team or agent files. The graph-definition digest and catalog-assignment digest bind the worker cache and durable checkpoint to the same program. Missing fields, missing declared limits, changed definitions and retired envelope versions receive bounded refusal without defaults, translation or backfill.
 
 The accepted request explicitly supplies the recursion budget. Worker execution and resume consume it without team or global fallback. Delivery may attach the existing receipt only when every effective non-secret request field matches the accepted envelope. A positive step timeout is one prerequisite of the run-derived execution deadline; it does not itself define elapsed run time, retry eligibility or a client observation deadline.
+
+## Amendment - run-continuation (2026-10-01)
+
+Two refinements to the Implementation section, both additive and neither reversing the
+decision.
+
+The pending-delivery paragraph names a dispatcher that "drains eligible messages in durable
+acceptance order" without saying what makes a message eligible. Addition: a follow-up is
+eligible only once the predecessor turn's terminal checkpoint evidence has committed; the
+per-run queue limit is one, and promotion defers the run's terminal settlement rather than
+reviving a settled run.
+
+The breaker paragraph states that worker saturation is admission backpressure, not transport
+failure, and does not open the shared failure breaker. Addition: a worker's `run_busy`
+refusal is likewise a semantic conflict about one run, not transport failure; it does not
+open the shared breaker, and it retains the action lease because the worker is executing
+that run. This settles the open finding `run-busy-not-in-the-recovery-lease-release-set`.
+Grounding: `2026-10-01-run-continuation-adr`, `2026-09-24-architecture-review-audit`.

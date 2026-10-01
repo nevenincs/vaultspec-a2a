@@ -6,9 +6,10 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:90f85fcb88846fac43b79eef7706b2e07a3a0d9c2326675a1d8d1b5e55468130'
+body_hash: 'sha256:6f27ef843a2e0775db9d1fc26443d6c9bf13fdbed6bd4cfe3c7cd778ce815514'
 related:
   - '[[2026-10-01-stream-resumption-adr]]'
+  - '[[2026-10-01-stream-resumption-plan]]'
   - '[[2026-10-01-stream-resumption-research]]'
 ---
 
@@ -20,7 +21,11 @@ Auto-generated index of all documents tagged with `#stream-resumption`.
 
 ### adr
 
-- `2026-10-01-stream-resumption-adr` - `stream-resumption` adr: `durable event sequence and bounded replay for resumable progress streams` | (**status:** `proposed`)
+- `2026-10-01-stream-resumption-adr` - `stream-resumption` adr: `durable event sequence and bounded replay for resumable progress streams` | (**status:** `accepted`)
+
+### plan
+
+- `2026-10-01-stream-resumption-plan` - `stream-resumption` plan
 
 ### research
 

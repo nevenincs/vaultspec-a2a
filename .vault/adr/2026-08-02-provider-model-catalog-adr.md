@@ -9,9 +9,10 @@ related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-07-15-model-profiles-adr]]"
   - "[[2026-07-15-multi-provider-execution-adr]]"
+  - '[[2026-10-01-provider-binary-policy-adr]]'
 supersedes:
   - '2026-07-15-model-profiles-adr'
-modified: '2026-09-05'
+modified: '2026-10-01'
 body_schema: 'body-v1'
 body_hash: 'sha256:5a357a13a10db1ea9d8fb36498b41b915483c5a73d48f086fa782ed93863ec5b'
 ---

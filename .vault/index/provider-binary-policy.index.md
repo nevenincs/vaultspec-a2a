@@ -6,9 +6,10 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:7762bca19c2a41132b1d4eb1677b4a4bf62f651f55440283ecfb5fe27ef6f91a'
+body_hash: 'sha256:787fd844155e9473d7e2cce3242b14a67c272cfd4086b5daf2185340710e7133'
 related:
   - '[[2026-10-01-provider-binary-policy-adr]]'
+  - '[[2026-10-01-provider-binary-policy-plan]]'
   - '[[2026-10-01-provider-binary-policy-research]]'
 ---
 
@@ -20,7 +21,11 @@ Auto-generated index of all documents tagged with `#provider-binary-policy`.
 
 ### adr
 
-- `2026-10-01-provider-binary-policy-adr` - `provider-binary-policy` adr: `profile-scoped provider binary authority, proof-bound version ranges, and recorded runtime identity` | (**status:** `proposed`)
+- `2026-10-01-provider-binary-policy-adr` - `provider-binary-policy` adr: `profile-scoped provider binary authority, proof-bound version ranges, and recorded runtime identity` | (**status:** `accepted`)
+
+### plan
+
+- `2026-10-01-provider-binary-policy-plan` - `provider-binary-policy` plan
 
 ### research
 

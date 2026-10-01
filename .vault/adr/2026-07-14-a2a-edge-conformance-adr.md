@@ -9,12 +9,15 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
+  - '[[2026-10-01-run-continuation-adr]]'
+  - '[[2026-10-01-tool-permission-model-adr]]'
+  - '[[2026-10-01-stream-resumption-adr]]'
 supersedes:
   - '2026-02-28-react-tailwind-figma-migration-adr'
   - '2026-02-26-frontend-backend-contract-adr'
   - '2026-04-05-contract-validation-adr'
-modified: '2026-09-05'
-body_hash: 'sha256:30dff3518912a9f23fb1620072d433cf37a8f1980ff3e9ff30f1afec7d6cea8e'
+modified: '2026-10-01'
+body_hash: 'sha256:0eaaf68f9c582c0421adbc9cc4a6c5e6e276428722fb4e6bb47619459803c24c'
 ---
 
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
@@ -371,3 +374,56 @@ versioned with the engine that owns them.
   only end-to-end consumer of the SSE surface; the plan must replace that
   coverage with gateway-level tests or the streaming layer regresses
   silently.
+
+## Amendment - run-continuation (2026-10-01)
+
+R6 gains two additive contract events, in the style of the 2026-07-19 discovery-event
+paragraph above. First: the messages verb (`POST /v1/runs/{run_id}/messages`) gains a
+reachable `202` with `action_status="queued"` on a busy run, a sixth refusal code
+`queue_full`, and a bounded `queued_messages` count on `run-status`. Second: `run-start`
+and `run-status` gain an optional `continues_run_id`, naming a settled run's successor.
+Both are additive; a client that only ever saw `409` keeps working. The behavioural change
+neither schema shows on its own: a run with a queued continuation emits no terminal frame
+at the end of its first turn, so a consumer must not treat a quiet turn boundary as
+completion.
+
+Adopting A2A's new-task-in-the-same-context SHAPE for a settled run is not adopting the
+protocol: `continues_run_id` is a local lineage link, carries no protocol commitment, and
+the A2A-capability question stays open. `2026-02-26-protocol-ecosystem-bridge-adr` is not
+amended by this record - its heading still reads `proposed`, so it is not an accepted home
+for this clarification, and its own proposed A2A-drop remains an open item. Grounding:
+`2026-10-01-run-continuation-adr`, `2026-10-01-run-continuation-research`.
+
+## Amendment - tool-permission-model (2026-10-01)
+
+The autonomous permission-surface clause offers "optionally `dontAsk` mode as a hard-deny
+for unlisted tools where the pinned ACP adapter threads it". Superseded sentence:
+"optionally `dontAsk` mode as a hard-deny for unlisted tools where the pinned ACP adapter
+threads it - autonomous presets only, human-in-the-loop presets unchanged, the granted
+surface logged per run." Replacement: the `dontAsk` option is withdrawn under the pinned
+adapter. The pinned CLI maps `dontAsk` to a denial of anything that would prompt WITHOUT
+calling the client rung, and it does not narrow the pre-approved surface, so it would
+remove the cross-project refusal and the withheld-harness refusal rather than add a hard
+deny. The autonomous posture is `default`, pinned and verified on the session, with refusal
+supplied at the rung; the granted surface stays logged per run exactly as before. `dontAsk`
+returns only once the policy is evaluated in a `PreToolUse` hook, per
+`2026-10-01-tool-permission-model-adr`. R7's no-payload-in-logs discipline is unchanged and
+now binds the permission decision log.
+
+## Amendment - stream-resumption (2026-10-01)
+
+The R6 paragraph on stream attachment closes with: "Overflow emits a bounded
+resynchronization indication directing the consumer to run status; droppable progress
+frames do not become durable history." Superseded sentence: "droppable progress frames do
+not become durable history." Its intent - that a progress frame is never authoritative -
+survives intact; what changes is the "no durable record at all" reading. Replacement:
+droppable progress frames are never authoritative history - `run-status` is the sole
+authority, and a frame's durable retention does not change that. A bounded replay window
+may be retained so a disconnected consumer can resume by `Last-Event-ID` under
+`2026-10-01-stream-resumption-adr`; it expires by its own retention and is not run history.
+
+Addition to the same paragraph: stream attachment accepts a resumption cursor and replays
+the retained window after the snapshot. An `id:` is served only where its replay is served.
+Introducing the cursor, the id, and the `stream_resumable` field on `run-status` is a
+contract event on the frozen edge and is announced to the dashboard before release.
+Grounding: `2026-10-01-stream-resumption-adr`.

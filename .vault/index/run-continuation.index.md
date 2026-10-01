@@ -6,9 +6,10 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:2a8553b6064fd9ee1a9e3e9273a6a167c5ed988e40bd3d67fceead944549a216'
+body_hash: 'sha256:6b8de5b85e56ee434cbbee0c63f5e07a536b551cab254d72786c690cb038ce9b'
 related:
   - '[[2026-10-01-run-continuation-adr]]'
+  - '[[2026-10-01-run-continuation-plan]]'
   - '[[2026-10-01-run-continuation-research]]'
 ---
 
@@ -20,7 +21,11 @@ Auto-generated index of all documents tagged with `#run-continuation`.
 
 ### adr
 
-- `2026-10-01-run-continuation-adr` - `run-continuation` adr: `enqueue-one continuation for a busy run; typed respond for a parked one; new run for a settled one` | (**status:** `proposed`)
+- `2026-10-01-run-continuation-adr` - `run-continuation` adr: `enqueue-one continuation for a busy run; typed respond for a parked one; new run for a settled one` | (**status:** `accepted`)
+
+### plan
+
+- `2026-10-01-run-continuation-plan` - `run-continuation` plan
 
 ### research
 

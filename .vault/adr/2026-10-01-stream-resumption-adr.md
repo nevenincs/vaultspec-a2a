@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:88b8feb27f5df9ed1aee0edd67ef3e5216cac15a89b6109759d9228e7fb71a08'
+body_hash: 'sha256:0a9d27e6a99c064dad8cda44866f820e244f98cb9ce4cfc117b47a3886635adc'
 related:
   - "[[2026-10-01-stream-resumption-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -17,7 +17,7 @@ related:
   - "[[2026-03-10-postgres-dual-backend-adr]]"
 ---
 
-# `stream-resumption` adr: `durable event sequence and bounded replay for resumable progress streams` | (**status:** `proposed`)
+# `stream-resumption` adr: `durable event sequence and bounded replay for resumable progress streams` | (**status:** `accepted`)
 
 ## Problem Statement
 
@@ -119,3 +119,5 @@ Proposed addition to the 2026-07-15 amendment, so its scope cannot be read as co
 **`2026-03-10-postgres-dual-backend-adr`.** No edit proposed. The new table is application schema under Alembic and backend-agnostic by construction, which is exactly the boundary that record draws; it is named here only so a reader does not look for a missing reconciliation.
 
 **`2026-08-05-served-capability-contract-state-truthfulness-adr`.** No edit proposed. T4 forbids a structured field contradicting a run's outcome; a replayed frame is ordered before the durable terminal the same stream then emits, so the replay path satisfies T4 rather than straining it.
+
+Accepted 2026-10-01 under the user's blanket approval of that date.

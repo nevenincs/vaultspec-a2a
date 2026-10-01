@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:aa205a49857b0c8ad38c1ff8f211f6ddb88729f1898129887a60375c8a1f59ae'
+body_hash: 'sha256:fadf9628bcbc3890953229bc215de5ab8798fcba9e240776206cb5edb65618e7'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -19,7 +19,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
 ---
 
-# `provider-binary-policy` adr: `profile-scoped provider binary authority, proof-bound version ranges, and recorded runtime identity` | (**status:** `proposed`)
+# `provider-binary-policy` adr: `profile-scoped provider binary authority, proof-bound version ranges, and recorded runtime identity` | (**status:** `accepted`)
 
 ## Problem Statement
 
@@ -310,8 +310,14 @@ replacement.
   `2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr` needs no
   edit: no client wire shape changes.
 - Policy source `no-unproven-providers-in-served-profiles`, Admission rule.
-  Proposed addition, for the user to apply through the rules verbs and a sync:
-  "A lane proof binds to the binary identity that completed the turn. The served
-  eligibility encodes the admitted version range, and a resolved binary outside it
-  is ineligible exactly as an unproven lane is." This keeps the rule and D2 from
-  disagreeing about what proof means.
+  Addition, applied through the rules verbs and a sync as part of accepting this
+  record: "A lane proof binds to the binary identity that completed the turn. The
+  served eligibility encodes the admitted version range, and a resolved binary
+  outside it is ineligible exactly as an unproven lane is." This keeps the rule and
+  D2 from disagreeing about what proof means.
+
+D4's declared `claude_auth_channel` exception (opt-in `oauth_token`, default
+`subscription_login`) is accepted as drafted; the harness-provisioning no-auth clause
+edit above is applied accordingly.
+
+Accepted 2026-10-01 under the user's blanket approval of that date.

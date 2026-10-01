@@ -3,11 +3,12 @@ tags:
   - '#adr'
   - '#current-project-binding'
 date: '2026-08-03'
-modified: '2026-08-03'
+modified: '2026-10-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:2ff30d4abc3a3d96d01aa6fc052acb4c5c55ffd749639ce0510e734ea2878db0'
+body_hash: 'sha256:360fb0a26a8dcba8e7ff857d8eba35aa90ad992640b53161b8774f338fe1b44a'
 related:
   - "[[2026-08-03-current-project-binding-research]]"
+  - '[[2026-10-01-tool-permission-model-adr]]'
 ---
 
 # `current-project-binding` adr: `the active project is a run-bound scope, and the trust boundary is the call` | (**status:** `accepted`)
@@ -176,3 +177,16 @@ child-process working-directory inheritance stops being load-bearing once pinnin
 is explicit, but is not itself resolved. Version authority for agent-facing
 tooling, and whether post-start control-plane verbs should assert project
 identity, are deferred as separate decisions.
+
+## Amendment - tool-permission-model (2026-10-01)
+
+The Implementation sentence "Until that lands, the orchestrator refuses a tool call whose
+arguments name a project other than the run's, at the permission layer where calls already
+pass" rests on a false premise. Superseded clause: "at the permission layer where calls
+already pass". Replacement: calls do not all pass the permission layer - a pre-approved
+tool is resolved by the provider before the client rung is consulted, so the scope refusal
+was unreachable for exactly the declared grounding tools. The refusal moves to the run's
+permission decision point, evaluated at the earliest seam each lane offers, and widens from
+the four project-root argument keys to path-valued arguments. The decision to pin at the
+call, and the layering of server-side locking over an orchestrator-side refusal, are
+unchanged. Grounding: `2026-10-01-tool-permission-model-adr`.

@@ -4,9 +4,10 @@ tags:
 - '#event-aggregation-server-side-replay'
 date: 2026-02-26
 modified: '2026-10-01'
-body_hash: 'sha256:19fb826dc64c71bfe2727c47feda776a384d2561a15229be2dde981f2d6242a6'
+body_hash: 'sha256:fd113ce8e69827a623574019e0b7c0e4688c88043186babe3c8f8970df7fd6c6'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
+- '[[2026-10-01-stream-resumption-adr]]'
 ---
 
 # `event-aggregation-server-side-replay` adr: `adr-4` | (**status:** `accepted`)
@@ -150,3 +151,24 @@ A run that keeps checkpoints asks for `durability="sync"`, so every superstep is
 Checkpoint sourcing is no longer SQLite-only; `2026-03-10-postgres-dual-backend-adr` chooses the backend. Grounding: `2026-09-30-langgraph-conformance-audit`.
 
 Accepted 2026-10-01 by the user, with this amendment as its binding content; the parts the 2026-07-15 amendment marks superseded stay superseded.
+
+## Amendment - stream-resumption (2026-10-01)
+
+Section 4's rejection of a Custom Event Logging Database is reversed in bounded form, and
+the reversal is recorded here where the rejection lives. Superseded bullet: "**Custom Event
+Logging Database:** Rejected. LangGraph's `checkpoint-sqlite` covers 95% of our event
+persistence needs natively. Building a parallel, custom event-sourcing database introduces
+unnecessary complexity and potential data divergence." Replacement: **Custom Event Logging
+Database:** Rejected for CONVERSATIONAL history, which the checkpointer owns and still
+owns. Reinstated, in a bounded form, for the PROGRESS stream: `2026-10-01-stream-resumption-adr`
+adds an append-only per-run event table whose only purpose is a replay window for
+`Last-Event-ID` resumption and a durable record of what a run emitted. It is not a parallel
+event-sourcing database for state: nothing is reconstructed from it, it carries only
+already-projected frames, and it is deleted by its own retention. The divergence this
+rejection feared is prevented by `run-status` remaining the sole authority, not by the
+absence of the table.
+
+Addition to the 2026-07-15 amendment above, so its scope cannot be read as covering this:
+server-side replay for DOCUMENT lifecycle remains the engine's `/authoring/v1/events`
+outbox. Replay of this service's own orchestration PROGRESS stream is a different subject
+and is decided by `2026-10-01-stream-resumption-adr`.

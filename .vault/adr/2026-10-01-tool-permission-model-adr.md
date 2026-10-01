@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:66b945905df5fd562d58ecfb41b92c379ea8ab6d7b55a34fdca136030dd2e583'
+body_hash: 'sha256:7fcb72c2f22077b17b76371f64fbaeb85eaefc1f9abc9ab05e692f848a20bc07'
 related:
   - "[[2026-10-01-tool-permission-model-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -20,7 +20,7 @@ related:
   - "[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]"
 ---
 
-# `tool-permission-model` adr: `one compiled policy, one durable grant store, one attributed decision log` | (**status:** `proposed`)
+# `tool-permission-model` adr: `one compiled policy, one durable grant store, one attributed decision log` | (**status:** `accepted`)
 
 ## Problem Statement
 
@@ -178,8 +178,11 @@ unobserved without the hook; that is stated as a residual, not papered over.
 (`allow`, `deny`), `granted_via` (`human_prompt`, `operator_config`), `granted_by`,
 `request_id` (nullable, to `permission_requests`), `created_at`, `expires_at` (not null),
 `revoked_at`, `revoked_by`, with an index on `(scope, scope_key, revoked_at)`. A run grant
-expires with the run; thread and project grants take a bounded TTL with a 24 hour default and
-a configured ceiling. `decide` consults live grants before the human rung, so a matching grant
+expires with the run; `thread` and `project` are both authorized grant scopes, and each takes
+a bounded TTL with a 24 hour default and a 24 hour ceiling - the default is the ceiling, so no
+thread or project grant outlives one day. A `project`-scoped grant's `scope_key` is the run's
+canonical bound project root (`2026-08-03-current-project-binding-adr`), never a bare path or
+name. `decide` consults live grants before the human rung, so a matching grant
 answers without asking and the hit is logged with its `rule_id`. The wire stays closed:
 `_narrowed_to_one_use` (`src/vaultspec_a2a/providers/_acp_rpc_handlers.py:475-516`) stays, and
 `_offered_options` (`src/vaultspec_a2a/graph/nodes/worker.py:797-813`) stops silently stripping
@@ -334,6 +337,9 @@ this draft.
    rather than permitted by bare name. The emitted anchor form is gated on a live probe of the
    pinned CLI's rule grammar; see `2026-10-01-tool-permission-model-adr`."
 
-Unresolved and owned by the user, not by this draft: whether a project-scoped grant may be
-created at all, or whether the grant store stops at thread scope; and the TTL ceiling for a
-thread or project grant, written above as a 24 hour default pending that choice.
+Resolved by the user: grants may be scoped `thread` or `project` - the grant store does not
+stop at thread scope - a `project` grant is bound to the canonical project root
+(`2026-08-03-current-project-binding-adr`), and the TTL default AND ceiling for a thread or
+project grant are both 24 hours. The `default` posture over `dontAsk` stands as drafted.
+
+Accepted 2026-10-01 under the user's blanket approval of that date.

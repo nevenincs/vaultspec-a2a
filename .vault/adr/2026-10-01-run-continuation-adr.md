@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:1872e86af10beb3563c9c7189878141ffe69aaddfd3bd2dd2201da6bcc3cca24'
+body_hash: 'sha256:f38e15a7d3101da1e22a4b8e49cca32473eddcca0151c21243437021eaa5b0dd'
 related:
   - "[[2026-10-01-run-continuation-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -17,7 +17,7 @@ related:
   - '[[2026-08-05-served-capability-contract-state-truthfulness-adr]]'
 ---
 
-# `run-continuation` adr: `enqueue-one continuation for a busy run; typed respond for a parked one; new run for a settled one` | (**status:** `proposed`)
+# `run-continuation` adr: `enqueue-one continuation for a busy run; typed respond for a parked one; new run for a settled one` | (**status:** `accepted`)
 
 ## Problem Statement
 
@@ -234,12 +234,13 @@ Proposed here, applied only on authorization; no other record is edited by this 
   must also state the behavioural change neither schema shows: a run with a queued
   continuation emits no terminal frame at the end of its first turn, so a consumer must
   not treat a quiet turn boundary as completion.
-- `2026-02-26-protocol-ecosystem-bridge-adr`, the 2026-07-15 amendment. Proposed
-  clarifying sentence: "Adopting A2A's new-task-in-the-same-context SHAPE for a settled
+- `2026-02-26-protocol-ecosystem-bridge-adr` is NOT edited by this decision: its heading
+  still reads `proposed`, so it is not an accepted home for this record's wording, and its
+  own proposed A2A-drop remains an open item this decision does not resolve. The
+  clarifying sentence - "Adopting A2A's new-task-in-the-same-context SHAPE for a settled
   run is not adopting the protocol; `continues_run_id` is a local lineage link and the
-  A2A-capability question stays open." Flagged rather than assumed: this record's heading
-  still reads `proposed`, so the A2A-drop it carries is not accepted authority on its own
-  and the edit may belong in the edge-conformance corpus instead.
+  A2A-capability question stays open." - is instead carried in the amendment this record
+  adds to `2026-07-14-a2a-edge-conformance-adr` R6.
 - No change is proposed to `.vaultspec/rules/clarifications-are-typed-interrupts.md`. Its
   prohibition holds verbatim and this decision strengthens it.
 
@@ -283,3 +284,5 @@ gives continuity at the price of one optional field.
   more than it helps, if the dashboard declines the delayed-terminal semantics, or if the
   A2A-capability decision adopts a multi-run thread, which would make a turn boundary a
   run boundary and retire the deferral entirely.
+
+Accepted 2026-10-01 under the user's blanket approval of that date.

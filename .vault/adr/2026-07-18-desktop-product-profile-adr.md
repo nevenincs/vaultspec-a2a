@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-07-19'
-body_hash: 'sha256:f4c2a78fed8264cf86fbba807d686de19cba07929548ca4dbd786b00092f540d'
+modified: '2026-10-01'
+body_hash: 'sha256:755069a8cdaad0ed8fa34477e850816e4e660abf10dbd3c8d5540427ca65e0fa'
 related:
   - "[[2026-07-18-desktop-product-profile-research]]"
   - "[[2026-07-18-desktop-product-profile-reference]]"
@@ -15,6 +15,7 @@ related:
   - "[[2026-03-31-database-migration-framework-adr]]"
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
+  - '[[2026-10-01-provider-binary-policy-adr]]'
 ---
 
 # `desktop-product-profile` adr: `a dashboard-managed companion profile alongside Compose` | (**status:** `accepted`)
@@ -320,3 +321,11 @@ behavior no longer stands in for product evidence.
 - Update transactions become more complex because database compatibility, process drain, receipt activation, and rollback are one product invariant.
 - The standalone MCP adapter remains independently invokable and therefore requires its own caller-owned lifecycle and certification path.
 - The profile creates a stable foundation for later size optimization, including a proven Bun-based provider payload, without making that optimization a prerequisite for shipment.
+
+## Amendment - provider-binary-policy (2026-10-01)
+
+Sharpening of the Implementation sentence "Providers resolve capsule-owned assets":
+providers resolve capsule-owned assets, including the provider CLI the ACP adapter
+drives. Capsule validation requires that asset, and a host CLI or an inherited executable
+override never substitutes for it. Without this clause the constraint reads as satisfied
+while the CLI escapes it. Grounding: `2026-10-01-provider-binary-policy-adr`.

@@ -52,6 +52,8 @@ from ._event_application import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..database.checkpoints import Checkpointer
@@ -92,12 +94,22 @@ _JSON_OBJECT = TypeAdapter(dict[str, object])
 _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 
 
+#: Fans out the terminal frame the relay is holding for this event.
+#:
+#: Synchronous because the fan-out is: it enqueues an already-projected body on
+#: each subscriber's queue and does no I/O. The relay hands it over instead of
+#: calling it, so the frame crosses to clients only on the side of the
+#: settlement decision where the run really is ending.
+type _TerminalPublisher = Callable[[], None]
+
+
 class _TerminalEventOptions(TypedDict, total=False):
     aggregator: EventAggregator | None
     session_factory: async_sessionmaker[AsyncSession] | None
     checkpointer: Checkpointer | None
     drain_gate: DrainGate | None
     prune_registry: CheckpointPruneRegistry | None
+    publish_terminal: _TerminalPublisher | None
 
 
 #: Read off the declaration rather than restated, so a new option cannot be
@@ -717,12 +729,43 @@ class CheckpointPruneRegistry:
             await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
 
 
+def _publish_terminal(thread_id: str, publish: _TerminalPublisher | None) -> None:
+    """Release the held terminal frame to this run's viewers.
+
+    A failure here is logged and nothing more. By the time it can happen the
+    settlement is already durable, so raising would abandon the release below
+    and leave the finished run holding its admission slot - a worse outcome
+    than one viewer missing a frame it can still resume for.
+    """
+    if publish is None:
+        return
+    try:
+        publish()
+    except Exception:
+        logger.warning(
+            "Could not fan out the terminal frame of %s",
+            thread_id,
+            exc_info=True,
+            extra={"thread_id": thread_id, "action": "terminal_frame_not_published"},
+        )
+
+
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
     **options: Unpack[_TerminalEventOptions],
 ) -> None:
-    """Settle a proven terminal event, then release drain and aggregator state."""
+    """Settle a proven terminal event, then release drain and aggregator state.
+
+    Also the gate on the client-visible terminal frame. The relay hands the
+    frame over as *publish_terminal* rather than fanning it out itself,
+    because only the settlement below knows whether this terminal ends the
+    RUN or only the TURN: a run with a continuation waiting takes the next
+    turn instead of ending, and a terminal shown there is a lie a viewer
+    cannot take back. Every other outcome publishes exactly where it always
+    did - in front of the prune, the drain release and the aggregator purge,
+    which is what keeps the frame deliverable at all.
+    """
     unknown = set(options).difference(_RELAY_OPTIONS)
     if unknown:
         unexpected = next(iter(unknown))
@@ -735,6 +778,7 @@ async def _handle_terminal_event(
     checkpointer = options.get("checkpointer")
     drain_gate = options.get("drain_gate")
     prune_registry = options.get("prune_registry")
+    publish = options.get("publish_terminal")
     if not is_terminal_event(payload):
         return
     # Capture before the durable write and before aggregator state is pruned.
@@ -743,11 +787,21 @@ async def _handle_terminal_event(
     )
     terminal_status = _validated_terminal_status(thread_id, payload)
     if terminal_status is None:
+        # Nothing was decided, so nothing is withheld: an unreadable terminal
+        # reaches viewers exactly as it did before this gate existed.
+        _publish_terminal(thread_id, publish)
         return
     factory = _session_factory(session_factory)
     disposition = await _accept_terminal_event(
         thread_id, payload, terminal_status, (factory, last_sequence, checkpointer)
     )
+    if disposition is _TerminalDisposition.PROMOTED:
+        # The turn ended, the run did not. The frame is dropped rather than
+        # deferred: it describes a run that is still going, it would take a
+        # number the next turn's frames need, and the replay log would then
+        # hand it to every reconnect for the rest of the run.
+        return
+    _publish_terminal(thread_id, publish)
     if disposition is not _TerminalDisposition.SETTLED or factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
@@ -1051,6 +1105,11 @@ async def relay_event(
     This function handles the DB-side event processing:
     permission journal, progress inference, execution state persistence,
     and terminal status updates with aggregator GC.
+
+    A terminal frame is the one exception to the caller owning the fan-out.
+    Whether it may be shown at all is this plane's answer, so the caller hands
+    it over as *publish_terminal* and :func:`_handle_terminal_event` releases
+    it; see that function for why.
     """
     unknown = set(options).difference(_RELAY_OPTIONS)
     if unknown:
@@ -1090,4 +1149,5 @@ async def relay_event(
         checkpointer=checkpointer,
         drain_gate=drain_gate,
         prune_registry=prune_registry,
+        publish_terminal=options.get("publish_terminal"),
     )

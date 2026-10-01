@@ -16,7 +16,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, cast
+from functools import partial
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import (
     APIRouter,
@@ -36,9 +37,12 @@ from ..control.event_handlers import (
     relay_event,
 )
 from ..graph.enums import ServerEventType
-from ..thread.snapshots import normalize_wire_event_type
+from ..thread.snapshots import is_terminal_event, normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer
 from ._replay_writer_seat import seated_replay_writer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = ["internal_router"]
 
@@ -205,6 +209,14 @@ async def _relay_single_event(
     *drain_gate* is the process-wide run-admission gate seated on ``app.state``;
     it travels to the terminal handler, which releases the run from it, exactly
     as *agg* and *session_factory* travel to their handlers.
+
+    One frame is relayed differently. A terminal says the RUN ended, and only
+    the control plane knows whether it did: a run with a continuation waiting
+    takes the next turn instead of settling, and this relay reaches the
+    aggregator first, so it used to show that run a terminal it then kept
+    running past. The terminal is therefore handed to the control plane as a
+    publisher rather than fanned out here, and released on the far side of the
+    decision. Every other frame crosses as it always has.
     """
     payload = normalize_wire_event_type(payload)
     if payload.get("type") == "execution_state_projection":
@@ -226,12 +238,21 @@ async def _relay_single_event(
         )
         return
 
+    publish_terminal: Callable[[], None] | None = None
     if context.agg is not None:
         # Establishes the run's durable numbering before the synchronous
         # chokepoint needs it; a no-op once seeded, and on a gateway that
         # numbers nothing.
         await context.agg.prepare_run(thread_id)
-        context.agg.relay_payload(thread_id, payload)
+        if is_terminal_event(payload):
+            publish_terminal = partial(context.agg.relay_payload, thread_id, payload)
+        else:
+            context.agg.relay_payload(thread_id, payload)
+        # Left in front of the decision even for a held terminal. This is the
+        # aggregator's own per-run counter, which no client reads and no frame
+        # carries - the number a subscriber sees is taken in ``relay_payload``
+        # above - and the settled run's recorded cursor is read off it, so
+        # moving it would change what a settlement records.
         context.agg.sync_worker_event(thread_id, payload)
     else:
         logger.warning(
@@ -252,6 +273,7 @@ async def _relay_single_event(
         checkpointer=context.checkpointer,
         drain_gate=context.drain_gate,
         prune_registry=context.prune_registry,
+        publish_terminal=publish_terminal,
     )
 
 

@@ -192,8 +192,23 @@ class RunSequenceAllocator:
         return advanced
 
     def is_numbered(self, thread_id: str) -> bool:
-        """Whether this run has an established counter on this gateway."""
-        return thread_id in self._counters
+        """Whether this gateway's own numbers are what this run's frames carry.
+
+        True for a run whose counter has been forgotten while its floor is
+        still remembered. Forgetting bounds memory; it does not retract the
+        numbers already stamped on frames still crossing the fan-out, nor the
+        rows those frames became. Read as "holds a live counter", it cost a
+        settled run's terminal its id: the purge that follows a settlement
+        runs in the same step as the release of that terminal, before any
+        subscriber has drained it.
+
+        False while a run is known unseedable, even if a floor from before
+        survives. Its frames carry the producing worker's own counter, which
+        restarts with that process and must never be offered back as a cursor.
+        """
+        if thread_id in self._unnumbered:
+            return False
+        return thread_id in self._counters or thread_id in self._issued
 
     def forget(self, thread_id: str) -> None:
         """Drop *thread_id*'s in-memory numbering state.

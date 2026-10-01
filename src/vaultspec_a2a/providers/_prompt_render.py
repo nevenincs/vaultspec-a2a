@@ -49,20 +49,45 @@ __all__ = [
     "speaker_label",
 ]
 
+# The words a heading would have to carry to read as one of the labels below:
+# the roles this layer writes, plus the ones a model would take for one. Shared
+# by both forgery patterns, so the two spellings of the same heading cannot come
+# to disagree about what reads as a role.
+_ROLE_WORDS = "system|developer|user|human|assistant|ai|tool|function|chat"
+
 # A content line that reads as one of the section headings below: the heading
 # depth this layer writes, any case, a role word it writes or a model would take
 # for one. Deeper headings are left alone, because mounted documents use them for
 # their own structure and are shown to the model as written.
 _FORGED_ROLE_HEADING = re.compile(
-    r"^([ \t]{0,3})(#(?!#)[ \t]*(?:system|developer|user|human|assistant|ai|tool|"
-    r"function|chat)\b)",
+    rf"^([ \t]{{0,3}})(#(?!#)[ \t]*(?:{_ROLE_WORDS})\b)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# The same heading written the other way round: a role word with a line of "="
+# under it is the setext spelling of the depth-one heading this layer writes, so
+# it opens a section exactly as the hash form does and has to be refused by the
+# same rule. The UNDERLINE is escaped rather than the words, so the text still
+# reaches the model as written.
+#
+# The line above is allowed to carry a hash of its own, because escaping one
+# turns that line into a paragraph - and an underline beneath a paragraph
+# promotes it straight back into a depth-one heading, which is why this pass
+# runs before the hash pass rather than after it.
+#
+# A "-" underline is deliberately NOT matched: it spells a depth-TWO heading,
+# which this layer never writes and a mounted document's own sections do.
+_FORGED_SETEXT_ROLE_HEADING = re.compile(
+    rf"^([ \t]{{0,3}}(?:\\?#[ \t]*)?(?:{_ROLE_WORDS})\b[^\n]*\n[ \t]{{0,3}})"
+    r"(=+[ \t]*)$",
     re.IGNORECASE | re.MULTILINE,
 )
 
 
 def _defused(text: str) -> str:
     """Escape every line of *text* that would read as a section heading."""
-    return _FORGED_ROLE_HEADING.sub(r"\1\\\2", text)
+    underlined = _FORGED_SETEXT_ROLE_HEADING.sub(r"\1\\\2", text)
+    return _FORGED_ROLE_HEADING.sub(r"\1\\\2", underlined)
 
 
 def speaker_label(message: BaseMessage) -> str | None:

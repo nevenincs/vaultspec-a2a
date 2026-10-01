@@ -14,6 +14,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..database import ThreadStatusElectionResult
     from ..database.models import ThreadModel
     from .circuit_breaker import DispatchAdmission, WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
@@ -368,6 +370,29 @@ def _reconciling_metadata(thread: ThreadModel) -> dict[str, object]:
     return coerce_object_mapping(raw_metadata) or {}
 
 
+async def _refuse_queue_on_settlement(
+    db: AsyncSession,
+    thread_id: str,
+    election: ThreadStatusElectionResult,
+    reason: str,
+) -> None:
+    """Answer a settling run's queue in the transaction that settles it.
+
+    The sweep's per-thread refusals are terminal settlements like any other,
+    so a continuation waiting on one would be left on a run that can never
+    promote it. Bound to the won election and written before the commit, so a
+    lost election refuses nothing: either the run settles and its queue is
+    answered, or neither happens.
+    """
+    from .repositories.continuation_queue import refuse_queued_continuations
+
+    if election.outcome is not ThreadStatusElectionOutcome.WON:
+        return
+    await refuse_queued_continuations(
+        db, thread_id=thread_id, refused_at=datetime.now(UTC), reason=reason
+    )
+
+
 async def _refuse_incompatible_authority(
     db: AsyncSession,
     thread: ThreadModel,
@@ -391,6 +416,9 @@ async def _refuse_incompatible_authority(
         failure_reason=(
             f"stored execution authority is incompatible ({exc.reason.value})"
         ),
+    )
+    await _refuse_queue_on_settlement(
+        db, thread.id, election, "the run's stored execution authority is incompatible"
     )
     await db.commit()
     if election.outcome is not ThreadStatusElectionOutcome.WON:
@@ -433,6 +461,9 @@ async def _refuse_missing_project(
             "run carries no active project: its stored metadata "
             "names no workspace_root, so it cannot be re-sited"
         ),
+    )
+    await _refuse_queue_on_settlement(
+        db, thread.id, election, "the run carries no active project"
     )
     await db.commit()
     if election.outcome is not ThreadStatusElectionOutcome.WON:

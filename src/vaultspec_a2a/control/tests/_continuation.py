@@ -1,11 +1,15 @@
 """Real durable state for the continuation suites: one busy run and a queue.
 
 Everything here builds production objects through production verbs - a real
-SQLite application database at the packaged schema, a real frozen graph
-definition, a real accepted dispatch envelope, a real journal reservation
-through the queue repository, and a real LangGraph run over a real
+application database brought to head by the packaged migration chain, a real
+frozen graph definition, a real accepted dispatch envelope, a real journal
+reservation through the queue repository, and a real LangGraph run over a real
 ``AsyncSqliteSaver`` for the completion receipt. The suites that import it
 assert on what those produce.
+
+The application store is reachable on either backend, so a suite whose claim
+depends on row locking can parametrize over both rather than prove half of it
+on the backend where ``FOR UPDATE`` is a no-op.
 """
 
 from __future__ import annotations
@@ -17,15 +21,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import (
     create_control_action,
     create_thread,
     get_control_action_by_dispatch_id,
 )
-from ...database.models import Base, ControlActionModel, RunWriteAuthority
-from ...database.session import configure_sqlite_transactions
+from ...database.models import ControlActionModel, RunWriteAuthority
+from ...database.tests._backends import migrated_session_factory
 from ...graph.compiler import CompiledTeamGraph, _add_node, _compile_graph
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
@@ -50,6 +53,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...thread.action_receipts import GraphActionReceipt
 
@@ -57,6 +61,8 @@ RUN = "promotion-run"
 PRESET = "mock-success-single"
 FIRST_RECEIPT = "first-turn-dispatch"
 ROOMY = ContinuationQueueLimits(per_run_depth=3, service_cap=9)
+#: The backend a suite gets when it makes no claim about row locking.
+DEFAULT_BACKEND = "sqlite"
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,48 +102,50 @@ def envelope(content: str, workspace: Path) -> dict[str, object]:
 
 @asynccontextmanager
 async def busy_run_state(
-    tmp_path: Path, *, created_at: datetime | None = None
+    tmp_path: Path,
+    *,
+    created_at: datetime | None = None,
+    backend: str = DEFAULT_BACKEND,
 ) -> AsyncIterator[BusyRun]:
     """Open a real application database holding one run mid-first-turn.
 
     *created_at* backdates the run's own creation, which is the only way to
-    reach the total-lifetime bound without waiting a day for it.
+    reach the total-lifetime bound without waiting a day for it. *backend*
+    names the application store this run lives in, so a suite asserting a
+    locked read can run the same proof where the lock is real.
     """
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    async with sessions() as db:
-        thread = await create_thread(
-            db,
-            thread_id=RUN,
-            status=ThreadStatus.RUNNING,
-            team_preset=PRESET,
-            write_authority=RunWriteAuthority(
-                0, 1, ControlActionType.INGEST, FIRST_RECEIPT
-            ),
-        )
-        if created_at is not None:
-            thread.created_at = created_at
-        await create_control_action(
-            db,
-            thread_id=RUN,
-            action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{RUN}",
-            dispatch_id=FIRST_RECEIPT,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
-            payload=envelope("first turn", tmp_path),
-        )
-        receipt = await prepare_graph_action_receipt(
-            db, thread_id=RUN, dispatch_id=FIRST_RECEIPT
-        )
-        if receipt is None:
-            raise RuntimeError("the seeded first turn could not take a receipt")
-        await db.commit()
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "graph.db")) as saver:
-        yield BusyRun(sessions, saver, receipt, tmp_path)
-    await engine.dispose()
+    async with migrated_session_factory(backend, tmp_path) as (_target, sessions):
+        async with sessions() as db:
+            thread = await create_thread(
+                db,
+                thread_id=RUN,
+                status=ThreadStatus.RUNNING,
+                team_preset=PRESET,
+                write_authority=RunWriteAuthority(
+                    0, 1, ControlActionType.INGEST, FIRST_RECEIPT
+                ),
+            )
+            if created_at is not None:
+                thread.created_at = created_at
+            await create_control_action(
+                db,
+                thread_id=RUN,
+                action_type=ControlActionType.INGEST,
+                idempotency_key=f"thread-create:{RUN}",
+                dispatch_id=FIRST_RECEIPT,
+                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
+                payload=envelope("first turn", tmp_path),
+            )
+            receipt = await prepare_graph_action_receipt(
+                db, thread_id=RUN, dispatch_id=FIRST_RECEIPT
+            )
+            if receipt is None:
+                raise RuntimeError("the seeded first turn could not take a receipt")
+            await db.commit()
+        async with AsyncSqliteSaver.from_conn_string(
+            str(tmp_path / "graph.db")
+        ) as saver:
+            yield BusyRun(sessions, saver, receipt, tmp_path)
 
 
 def _work(_state: TeamState) -> dict[str, object]:

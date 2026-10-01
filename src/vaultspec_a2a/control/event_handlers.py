@@ -148,6 +148,7 @@ async def _persist_proven_cancellation(
         thread_write_expectation,
     )
     from ..thread.enums import ControlActionResultStatus, ControlActionType
+    from .repositories.continuation_queue import refuse_queued_continuations
 
     async with factory() as db:
         await begin_write_transaction(db)
@@ -184,6 +185,12 @@ async def _persist_proven_cancellation(
             return False
         if last_sequence is not None:
             thread.last_sequence = last_sequence
+        await refuse_queued_continuations(
+            db,
+            thread_id=thread_id,
+            refused_at=_time_now_utc(),
+            reason="the run was cancelled",
+        )
         await expire_pending_permission_requests(db, thread_id=thread_id)
         await set_thread_approval_state(
             db,
@@ -242,6 +249,7 @@ async def _persist_proven_failure(
     )
     from ..thread.enums import NON_ACTIVE_STATUSES
     from .dispatch_receipts import validate_current_graph_receipt
+    from .repositories.continuation_queue import refuse_queued_continuations
 
     async with factory() as db:
         await begin_write_transaction(db)
@@ -277,6 +285,12 @@ async def _persist_proven_failure(
         if last_sequence is not None:
             thread.last_sequence = last_sequence
         await mark_control_action_applied(db, action.id)
+        await refuse_queued_continuations(
+            db,
+            thread_id=thread_id,
+            refused_at=_time_now_utc(),
+            reason="the run's turn failed",
+        )
         await expire_pending_permission_requests(db, thread_id=thread_id)
         await set_thread_approval_state(
             db,

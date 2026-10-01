@@ -168,7 +168,22 @@ class _RelayContext:
     session_factory: Any
     checkpointer: Any
     drain_gate: Any
+    prune_registry: Any
     transport: str = "http"
+
+    @classmethod
+    def of(cls, app: Any, agg: Any, transport: str = "http") -> _RelayContext:
+        """Read one app's relay collaborators off the state it seated them on."""
+        return cls(
+            agg,
+            _app_session_factory(app),
+            getattr(app.state, "checkpointer", None),
+            # Read, never get-or-created: a gate or a prune registry that was
+            # never seated has admitted and started nothing.
+            getattr(app.state, "drain_gate", None),
+            getattr(app.state, "checkpoint_prunes", None),
+            transport,
+        )
 
 
 async def _relay_single_event(
@@ -199,6 +214,7 @@ async def _relay_single_event(
             session_factory=context.session_factory,
             checkpointer=context.checkpointer,
             drain_gate=context.drain_gate,
+            prune_registry=context.prune_registry,
         )
         return
 
@@ -223,6 +239,7 @@ async def _relay_single_event(
         session_factory=context.session_factory,
         checkpointer=context.checkpointer,
         drain_gate=context.drain_gate,
+        prune_registry=context.prune_registry,
     )
 
 
@@ -247,16 +264,11 @@ async def _relay_worker_event(
         return
     thread_id = cast("str", thread_id_raw)
     payload = cast("dict[str, Any]", payload_raw)
-    session_factory = _app_session_factory(websocket.app)
     agg = getattr(websocket.app.state, "aggregator", None)
-    # Read the seated gate rather than get-or-creating it: a gate that has never
-    # been seated has admitted nothing, so there is nothing to release.
-    drain_gate = getattr(websocket.app.state, "drain_gate", None)
-    checkpointer = getattr(websocket.app.state, "checkpointer", None)
     await _relay_single_event(
         thread_id,
         payload,
-        _RelayContext(agg, session_factory, checkpointer, drain_gate, "ws"),
+        _RelayContext.of(websocket.app, agg, "ws"),
     )
 
 
@@ -377,16 +389,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
             detail="No relay target available -- gateway not ready",
         )
 
-    await _relay_single_event(
-        thread_id,
-        payload,
-        _RelayContext(
-            agg,
-            _app_session_factory(request.app),
-            getattr(request.app.state, "checkpointer", None),
-            getattr(request.app.state, "drain_gate", None),
-        ),
-    )
+    await _relay_single_event(thread_id, payload, _RelayContext.of(request.app, agg))
     return {"status": "ok"}
 
 
@@ -430,9 +433,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
             detail="No relay target available -- gateway not ready",
         )
 
-    session_factory = _app_session_factory(request.app)
-    drain_gate = getattr(request.app.state, "drain_gate", None)
-    checkpointer = getattr(request.app.state, "checkpointer", None)
+    context = _RelayContext.of(request.app, agg)
 
     for idx, evt in enumerate(events):
         thread_id = evt.get("thread_id", "")
@@ -447,11 +448,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     for evt in events:
         thread_id = evt.get("thread_id", "")
         payload = evt.get("payload", {})
-        await _relay_single_event(
-            thread_id,
-            payload,
-            _RelayContext(agg, session_factory, checkpointer, drain_gate),
-        )
+        await _relay_single_event(thread_id, payload, context)
 
     return {"status": "ok"}
 

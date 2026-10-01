@@ -26,7 +26,7 @@ from ...conftest import materialize_schema
 from ...database.models import ThreadModel
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus
-from ..event_handlers import _handle_terminal_event, settle_pending_checkpoint_prunes
+from ..event_handlers import CheckpointPruneRegistry, _handle_terminal_event
 from .test_terminal_sequence_capture import _seed_completed_authority
 
 if TYPE_CHECKING:
@@ -105,15 +105,17 @@ async def test_a_proven_completion_prunes_the_superseded_checkpoints(
         f"cp-{thread_id}",
     ]
 
+    prunes = CheckpointPruneRegistry()
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
         session_factory=session_factory,
         checkpointer=checkpointer,
+        prune_registry=prunes,
     )
     # The prune runs behind the relay rather than inside it; shutdown waits for
     # it the same way before closing the store.
-    await settle_pending_checkpoint_prunes()
+    await prunes.settle()
 
     assert await _status(session_factory, thread_id) == ThreadStatus.COMPLETED
     assert await _checkpoint_ids(checkpointer, thread_id) == [f"cp-{thread_id}"]
@@ -134,13 +136,15 @@ async def test_an_unproven_completion_keeps_the_whole_history(
     history = await _checkpoint_ids(checkpointer, thread_id)
     assert len(history) == 3
 
+    prunes = CheckpointPruneRegistry()
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
         session_factory=session_factory,
         checkpointer=checkpointer,
+        prune_registry=prunes,
     )
-    await settle_pending_checkpoint_prunes()
+    await prunes.settle()
 
     assert await _status(session_factory, thread_id) != ThreadStatus.COMPLETED
     assert await _checkpoint_ids(checkpointer, thread_id) == history

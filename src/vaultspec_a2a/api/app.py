@@ -41,7 +41,7 @@ from ..control.clarification_service import (
 from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
-from ..control.event_handlers import settle_pending_checkpoint_prunes
+from ..control.event_handlers import CheckpointPruneRegistry
 from ..control.health import (
     FullHealthRuntime,
     assemble_health_status,
@@ -104,6 +104,13 @@ logger = logging.getLogger(__name__)
 # emitting nothing never releases itself; the teardown that follows cancels and
 # reaps what is left.
 _DRAIN_QUIESCENCE_TIMEOUT_SECONDS = 5.0
+
+# Floor on the prune phase, kept even when the shared shutdown budget is
+# already spent. Skipping the wait does not stop an in-flight prune: it leaves
+# it deleting through a checkpointer the lines below then close under it. The
+# prunes themselves are each bounded by the checkpoint read budget, so the
+# floor is a short wait for work that is already ending.
+_PRUNE_SETTLE_MINIMUM_SECONDS = 2.0
 
 # The health probe's database dependency, bound once at module scope. The
 # session is created lazily per request and opens no connection unless the
@@ -410,6 +417,24 @@ def _start_gateway_discovery(
     return discovery_path, discovery_pid, serve_record, discovery_task
 
 
+async def _settle_checkpoint_prunes(app: FastAPI, deadline: ShutdownDeadline) -> None:
+    """Wait for this app's in-flight checkpoint prunes, budget spent or not.
+
+    Only the prunes this app started: another app in the same process owns its
+    own, and waiting for those here would hold this shutdown open on a store
+    this app does not close.
+    """
+    prunes = getattr(app.state, "checkpoint_prunes", None)
+    if prunes is None:
+        return
+    await finish_before(
+        prunes.settle(),
+        deadline,
+        phase="checkpoint prunes",
+        minimum=_PRUNE_SETTLE_MINIMUM_SECONDS,
+    )
+
+
 async def _shutdown_observability(deadline: ShutdownDeadline) -> None:
     provider = trace.get_tracer_provider()
     if isinstance(provider, SdkTracerProvider):
@@ -529,9 +554,7 @@ async def _shutdown_gateway(
     )
     await finish_before(worker_client.aclose(), deadline, phase="worker HTTP client")
     await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
-    await finish_before(
-        settle_pending_checkpoint_prunes(), deadline, phase="checkpoint prunes"
-    )
+    await _settle_checkpoint_prunes(app, deadline)
     await finish_before(close_db(), deadline, phase="database")
 
     await _shutdown_observability(deadline)
@@ -721,6 +744,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     async with open_checkpointer() as checkpointer:
         app.state.checkpointer = checkpointer
+        # Seated beside the store the prunes delete through, and inside its
+        # context, so the shutdown below waits for this app's own prunes while
+        # the checkpointer they hold is still open.
+        app.state.checkpoint_prunes = CheckpointPruneRegistry()
         logger.info(
             "LangGraph checkpointer initialised (%s)",
             settings.resolved_checkpoint_backend,

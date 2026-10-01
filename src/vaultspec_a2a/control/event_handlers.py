@@ -59,12 +59,12 @@ if TYPE_CHECKING:
     from .drain import DrainGate
 
 __all__ = [
+    "CheckpointPruneRegistry",
     "_handle_execution_state_event",
     "_handle_permission_event",
     "_handle_progress_event",
     "_handle_terminal_event",
     "relay_event",
-    "settle_pending_checkpoint_prunes",
 ]
 
 logger = logging.getLogger(__name__)
@@ -87,9 +87,6 @@ _RUN_LEASE_METADATA_KEY = "run_lease"
 # Strong references to in-flight settlement callbacks so a fire-and-forget task is
 # not garbage-collected before it completes; each removes itself when done.
 _settlement_tasks: set[asyncio.Task[None]] = set()
-# The same for settled-history prunes, kept apart because shutdown waits for these
-# before the checkpointer they delete through is closed.
-_prune_tasks: set[asyncio.Task[None]] = set()
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 
@@ -99,6 +96,12 @@ class _TerminalEventOptions(TypedDict, total=False):
     session_factory: async_sessionmaker[AsyncSession] | None
     checkpointer: Checkpointer | None
     drain_gate: DrainGate | None
+    prune_registry: CheckpointPruneRegistry | None
+
+
+#: Read off the declaration rather than restated, so a new option cannot be
+#: accepted by one handler and rejected as unknown by the other.
+_RELAY_OPTIONS = frozenset(_TerminalEventOptions.__optional_keys__)
 
 
 def _session_factory(
@@ -639,25 +642,37 @@ async def _prune_settled_history(
         )
 
 
-def _schedule_settled_history_prune(
-    thread_id: str, checkpointer: Checkpointer | None
-) -> None:
-    """Prune a settled run's history without holding up the relay.
+class CheckpointPruneRegistry:
+    """The settled-history prunes one application started and must wait for.
 
-    The relay applies a thread's events in order, so a prune awaited here would
-    delay every later event of every run behind one run's delete.
+    Owned by the application whose lifespan closes the checkpointer these
+    prunes delete through: that owner is the only one that knows when waiting
+    for them is over. Held as process state, a shutting-down application
+    waited on another application's deletes against a store it does not close,
+    and could not tell which of the pending work was its own.
     """
-    if checkpointer is None:
-        return
-    task = asyncio.create_task(_prune_settled_history(thread_id, checkpointer))
-    _prune_tasks.add(task)
-    task.add_done_callback(_prune_tasks.discard)
 
+    __slots__ = ("_tasks",)
 
-async def settle_pending_checkpoint_prunes() -> None:
-    """Wait for every settled-history prune already started to finish."""
-    while _prune_tasks:
-        await asyncio.gather(*tuple(_prune_tasks), return_exceptions=True)
+    def __init__(self) -> None:
+        self._tasks: set[asyncio.Task[None]] = set()
+
+    def schedule(self, thread_id: str, checkpointer: Checkpointer | None) -> None:
+        """Prune a settled run's history without holding up the relay.
+
+        The relay applies a thread's events in order, so a prune awaited there
+        would delay every later event of every run behind one run's delete.
+        """
+        if checkpointer is None:
+            return
+        task = asyncio.create_task(_prune_settled_history(thread_id, checkpointer))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def settle(self) -> None:
+        """Wait for every prune already started to finish."""
+        while self._tasks:
+            await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
 
 
 async def _handle_terminal_event(
@@ -666,9 +681,7 @@ async def _handle_terminal_event(
     **options: Unpack[_TerminalEventOptions],
 ) -> None:
     """Settle a proven terminal event, then release drain and aggregator state."""
-    unknown = set(options).difference(
-        {"aggregator", "session_factory", "checkpointer", "drain_gate"}
-    )
+    unknown = set(options).difference(_RELAY_OPTIONS)
     if unknown:
         unexpected = next(iter(unknown))
         raise TypeError(
@@ -679,6 +692,7 @@ async def _handle_terminal_event(
     session_factory = options.get("session_factory")
     checkpointer = options.get("checkpointer")
     drain_gate = options.get("drain_gate")
+    prune_registry = options.get("prune_registry")
     if not is_terminal_event(payload):
         return
     # Capture before the durable write and before aggregator state is pruned.
@@ -695,7 +709,10 @@ async def _handle_terminal_event(
     if not accepted or factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
-    _schedule_settled_history_prune(thread_id, checkpointer)
+    if prune_registry is not None:
+        # No registry, no prune: a delete nobody waits for outlives the
+        # checkpointer it writes through.
+        prune_registry.schedule(thread_id, checkpointer)
     if drain_gate is not None:
         await drain_gate.release(thread_id)
     if aggregator is not None:
@@ -993,9 +1010,7 @@ async def relay_event(
     permission journal, progress inference, execution state persistence,
     and terminal status updates with aggregator GC.
     """
-    unknown = set(options).difference(
-        {"aggregator", "session_factory", "checkpointer", "drain_gate"}
-    )
+    unknown = set(options).difference(_RELAY_OPTIONS)
     if unknown:
         unexpected = next(iter(unknown))
         raise TypeError(
@@ -1005,6 +1020,7 @@ async def relay_event(
     session_factory = options.get("session_factory")
     checkpointer = options.get("checkpointer")
     drain_gate = options.get("drain_gate")
+    prune_registry = options.get("prune_registry")
     await _handle_permission_event(
         thread_id,
         payload,
@@ -1031,4 +1047,5 @@ async def relay_event(
         session_factory=session_factory,
         checkpointer=checkpointer,
         drain_gate=drain_gate,
+        prune_registry=prune_registry,
     )

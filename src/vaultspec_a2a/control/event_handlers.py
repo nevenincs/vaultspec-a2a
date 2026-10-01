@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from pydantic import TypeAdapter, ValidationError
@@ -403,19 +404,20 @@ async def _confirm_completed_terminal(
     factory: async_sessionmaker[AsyncSession] | None,
     checkpointer: Checkpointer | None,
     last_sequence: int | None,
-) -> bool:
+) -> _TerminalDisposition:
     if factory is None:
         _skip_without_database("the completion reconciliation", thread_id)
-        return False
+        return _TerminalDisposition.REFUSED
     if checkpointer is None:
         logger.warning(
             "Refusing completion for %s: no checkpointer is available",
             thread_id,
             extra={"thread_id": thread_id, "action": "completion_proof_unavailable"},
         )
-        return False
+        return _TerminalDisposition.REFUSED
     from ..domain_config import domain_config
     from .recovery_authority import (
+        CONTINUATION_PROMOTED,
         RecoveryRequest,
         RecoveryTrigger,
         reconcile_run_checkpoint,
@@ -432,6 +434,17 @@ async def _confirm_completed_terminal(
                 last_sequence=last_sequence,
             ),
         )
+    if observation.condition == CONTINUATION_PROMOTED:
+        # The turn ended and the run did not. Nothing terminal may follow from
+        # this event: no settlement, no history prune, no release of the run's
+        # admission slot, and no reset of the numbering the next turn
+        # continues from.
+        logger.info(
+            "Turn boundary on %s: a queued continuation now owns the run",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "continuation_promoted"},
+        )
+        return _TerminalDisposition.PROMOTED
     if observation.status is not ThreadStatus.COMPLETED:
         logger.warning(
             "Refusing unproven completion for %s: %s",
@@ -443,8 +456,8 @@ async def _confirm_completed_terminal(
                 "action": "unproven_completion",
             },
         )
-        return False
-    return True
+        return _TerminalDisposition.REFUSED
+    return _TerminalDisposition.SETTLED
 
 
 async def _confirm_cancelled_terminal(
@@ -594,6 +607,20 @@ def _validated_terminal_status(
     return status
 
 
+class _TerminalDisposition(StrEnum):
+    """What a proven terminal event did to the run that emitted it.
+
+    Three outcomes, not two. ``PROMOTED`` is the one the deferred-terminal
+    model adds: the evidence was proven and accepted, and the run did not
+    settle because a continuation was waiting for it. Collapsing it into a
+    refusal would log every honest turn boundary as an unproven completion.
+    """
+
+    SETTLED = "settled"
+    PROMOTED = "promoted"
+    REFUSED = "refused"
+
+
 async def _accept_terminal_event(
     thread_id: str,
     payload: dict[str, object],
@@ -601,17 +628,32 @@ async def _accept_terminal_event(
     context: tuple[
         async_sessionmaker[AsyncSession] | None, int | None, Checkpointer | None
     ],
-) -> bool:
+) -> _TerminalDisposition:
     factory, last_sequence, checkpointer = context
     if terminal_status is ThreadStatus.COMPLETED:
         return await _confirm_completed_terminal(
             thread_id, factory, checkpointer, last_sequence
         )
     if terminal_status is ThreadStatus.CANCELLED:
-        return await _confirm_cancelled_terminal(
-            thread_id, payload.get("cancellation_evidence"), factory, last_sequence
+        return _settled_or_refused(
+            await _confirm_cancelled_terminal(
+                thread_id, payload.get("cancellation_evidence"), factory, last_sequence
+            )
         )
-    return await _confirm_failed_terminal(thread_id, payload, factory, last_sequence)
+    return _settled_or_refused(
+        await _confirm_failed_terminal(thread_id, payload, factory, last_sequence)
+    )
+
+
+def _settled_or_refused(accepted: bool) -> _TerminalDisposition:
+    """Classify the two terminals a continuation never defers.
+
+    Cancellation and failure settle from their own durable evidence rather
+    than from a proven checkpoint, so neither is the turn boundary a
+    continuation waits behind: a cancelled run is leaving, and a failed turn
+    has no state for a next turn to continue from.
+    """
+    return _TerminalDisposition.SETTLED if accepted else _TerminalDisposition.REFUSED
 
 
 async def _prune_settled_history(
@@ -703,10 +745,10 @@ async def _handle_terminal_event(
     if terminal_status is None:
         return
     factory = _session_factory(session_factory)
-    accepted = await _accept_terminal_event(
+    disposition = await _accept_terminal_event(
         thread_id, payload, terminal_status, (factory, last_sequence, checkpointer)
     )
-    if not accepted or factory is None:
+    if disposition is not _TerminalDisposition.SETTLED or factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
     if prune_registry is not None:

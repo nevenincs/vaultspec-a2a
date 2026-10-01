@@ -22,6 +22,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 
 from ...database import (
@@ -31,6 +32,8 @@ from ...database import (
 )
 from ...domain_config import domain_config
 from ...thread.enums import ControlActionResultStatus, ControlActionType
+from ...thread.executable_graph import FrozenGraphDefinition
+from ..accepted_input import AcceptedActionInput
 from ..action_lease import CONTROL_ACTION_LEASE_TTL
 
 if TYPE_CHECKING:
@@ -44,6 +47,8 @@ __all__ = [
     "count_queued_continuations",
     "count_service_queued_continuations",
     "next_queue_position",
+    "open_promoted_continuation",
+    "promoted_turn_deadline",
     "read_next_queued_continuation",
     "reserve_queued_continuation",
     "run_lifetime_deadline",
@@ -183,6 +188,52 @@ async def read_next_queued_continuation(
         .limit(1)
         .with_for_update()
     )
+
+
+def promoted_turn_deadline(
+    action: ControlActionModel, *, promoted_at: datetime
+) -> datetime | None:
+    """Re-derive the promoted turn's execution deadline from its own envelope.
+
+    Read from the envelope the admission froze, never from a preset reloaded
+    now: the turn was accepted against one program and must run under that
+    one. ``None`` says the stored envelope is not a usable ingest turn, which
+    is a refusal to promote rather than a deadline to invent.
+    """
+    if action.payload_json is None:
+        return None
+    try:
+        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        if accepted.dispatch["action"] != "ingest":
+            return None
+        definition = FrozenGraphDefinition.model_validate(
+            accepted.dispatch["graph_definition"]
+        )
+        timeout = definition.run_timeout_seconds
+    except (ValidationError, ValueError):
+        return None
+    return promoted_at + timedelta(seconds=timeout)
+
+
+def open_promoted_continuation(
+    action: ControlActionModel, *, deadline_at: datetime
+) -> None:
+    """Turn one waiting reservation into accepted work awaiting delivery.
+
+    Called before the writer and the receipt are installed, because a queued
+    row may hold neither: the journal's own invariant refuses a reservation
+    that owns anything, so the status has to stop saying "waiting" first.
+
+    The lease is released rather than held. Promotion is not the dispatcher -
+    the durable recovery owner delivers - and a lease kept here would make the
+    promoted turn wait out its own ownership window before anyone could send
+    it. The position stays, as the durable record of where this turn came
+    from.
+    """
+    action.result_status = ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value
+    action.recovery_deadline_at = deadline_at
+    action.claim_token = None
+    action.claim_expires_at = None
 
 
 async def reserve_queued_continuation(

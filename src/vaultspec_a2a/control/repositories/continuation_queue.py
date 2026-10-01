@@ -16,6 +16,7 @@ for the last place cannot both find room.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -52,10 +53,13 @@ __all__ = [
     "promotion_dispatch_pending",
     "promotion_owner_holds_run",
     "read_next_queued_continuation",
+    "refuse_queued_continuations",
     "reserve_queued_continuation",
     "run_lifetime_deadline",
     "served_continuation_queue_limits",
 ]
+
+logger = logging.getLogger(__name__)
 
 _QUEUED = ControlActionResultStatus.QUEUED.value
 _CONTINUATION = ControlActionType.MESSAGE_FOLLOWUP_REQUESTED
@@ -193,14 +197,20 @@ async def read_next_queued_continuation(
 
 
 def promoted_turn_deadline(
-    action: ControlActionModel, *, promoted_at: datetime
+    action: ControlActionModel,
+    *,
+    promoted_at: datetime,
+    lifetime_deadline_at: datetime,
 ) -> datetime | None:
     """Re-derive the promoted turn's execution deadline from its own envelope.
 
     Read from the envelope the admission froze, never from a preset reloaded
     now: the turn was accepted against one program and must run under that
-    one. ``None`` says the stored envelope is not a usable ingest turn, which
-    is a refusal to promote rather than a deadline to invent.
+    one. The run's remaining lifetime caps it, so the last turn a run is
+    allowed gets whatever time is left rather than a fresh full budget that
+    would carry it past the bound. ``None`` says the stored envelope is not a
+    usable ingest turn, which is a refusal to promote rather than a deadline
+    to invent.
     """
     if action.payload_json is None:
         return None
@@ -214,7 +224,53 @@ def promoted_turn_deadline(
         timeout = definition.run_timeout_seconds
     except (ValidationError, ValueError):
         return None
-    return promoted_at + timedelta(seconds=timeout)
+    return min(promoted_at + timedelta(seconds=timeout), lifetime_deadline_at)
+
+
+async def refuse_queued_continuations(
+    session: AsyncSession, *, thread_id: str, refused_at: datetime, reason: str
+) -> int:
+    """Settle every continuation still waiting on a run that will not promote.
+
+    A run about to enter a terminal state can never promote what is queued on
+    it, and a queued row left behind on one would wait for an event that
+    cannot arrive. Settling each as an invalid-state refusal records the
+    outcome where the caller's replay already looks, which is the difference
+    between refusing accepted work and losing it. The place each was given
+    stays, so the record says what was refused and where it sat.
+    """
+    waiting = (
+        await session.scalars(
+            select(ControlActionModel)
+            .where(
+                ControlActionModel.thread_id == thread_id,
+                ControlActionModel.result_status == _QUEUED,
+            )
+            .with_for_update()
+        )
+    ).all()
+    for action in waiting:
+        # One statement moves the row out of "waiting" and into "settled":
+        # the journal refuses a queued row that is already applied, so these
+        # two cannot be written apart.
+        action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
+        action.applied_at = refused_at
+        action.claim_token = None
+        action.claim_expires_at = None
+    if waiting:
+        await session.flush()
+        logger.warning(
+            "Refused %d continuation(s) waiting on %s: %s",
+            len(waiting),
+            thread_id,
+            reason,
+            extra={
+                "thread_id": thread_id,
+                "reason": reason,
+                "action": "continuation_refused",
+            },
+        )
+    return len(waiting)
 
 
 async def promotion_owner_holds_run(

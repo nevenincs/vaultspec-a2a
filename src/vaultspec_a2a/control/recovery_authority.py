@@ -45,6 +45,8 @@ from .repositories.continuation_queue import (
     promotion_dispatch_pending,
     promotion_owner_holds_run,
     read_next_queued_continuation,
+    refuse_queued_continuations,
+    run_lifetime_deadline,
 )
 
 if TYPE_CHECKING:
@@ -109,6 +111,10 @@ class _CheckpointDecision:
     evidence: CheckpointEvidence
     trigger: RecoveryTrigger
     last_sequence: int | None
+    #: The instant past which this run may run no further turn, derived from
+    #: its own creation. Snapshotted with everything else before the read
+    #: transaction closes.
+    lifetime_deadline_at: datetime
     #: Whether this run's current writer is a promoted continuation that no
     #: dispatcher has delivered yet. Read off the journal row before the read
     #: transaction closes, because a rollback expires it.
@@ -196,14 +202,31 @@ async def _promote_queued_continuation(
     settlement and defers it or meets a settled run. There is no third
     outcome, and that is what keeps a terminal state from ever being reopened.
 
-    Returns ``None`` when nothing is waiting, which leaves the caller to
-    settle exactly as it always has.
+    Returns ``None`` when nothing is waiting, and when nothing may be
+    promoted any more, which leaves the caller to settle exactly as it always
+    has.
     """
     waiting = await read_next_queued_continuation(db, thread_id=decision.thread_id)
     if waiting is None:
         return None
     promoted_at = datetime.now(UTC)
-    deadline_at = promoted_turn_deadline(waiting, promoted_at=promoted_at)
+    if promoted_at >= decision.lifetime_deadline_at:
+        # A queue must not make a run immortal. The run ends with the terminal
+        # its last turn actually reached, and everything still waiting is
+        # refused in the same transaction rather than left on a settled run
+        # waiting for a promotion that can never come.
+        await refuse_queued_continuations(
+            db,
+            thread_id=decision.thread_id,
+            refused_at=promoted_at,
+            reason="the run's total lifetime is spent",
+        )
+        return None
+    deadline_at = promoted_turn_deadline(
+        waiting,
+        promoted_at=promoted_at,
+        lifetime_deadline_at=decision.lifetime_deadline_at,
+    )
     dispatch_id = waiting.dispatch_id
     if deadline_at is None or dispatch_id is None:
         return await _refuse_promotion(db, decision, "unreadable accepted envelope")
@@ -370,6 +393,7 @@ async def reconcile_run_checkpoint(
         return RecoveryObservation(status, "incompatible_action_receipt", None, False)
     action_id = action.id
     observed_at = datetime.now(UTC)
+    lifetime_deadline_at = run_lifetime_deadline(thread.created_at)
     promotion_pending = promotion_dispatch_pending(action, observed_at=observed_at)
     queue_owned = await promotion_owner_holds_run(
         db, thread_id=thread_id, observed_at=observed_at
@@ -388,6 +412,7 @@ async def reconcile_run_checkpoint(
         evidence,
         request.trigger,
         request.last_sequence,
+        lifetime_deadline_at,
         promotion_pending,
         queue_owned,
     )

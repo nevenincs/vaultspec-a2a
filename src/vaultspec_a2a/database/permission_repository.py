@@ -47,6 +47,7 @@ __all__ = [
     "mark_control_action_duplicate",
     "mark_control_action_superseded",
     "mark_permission_request_applied",
+    "outstanding_permission_pause",
     "prune_repair_journal",
     "record_permission_request",
     "record_permission_response_submission",
@@ -183,6 +184,37 @@ async def get_pending_permission_requests(
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
     stmt = stmt.order_by(PermissionRequestModel.created_at.asc())
     return (await session.execute(stmt)).scalars().all()
+
+
+async def outstanding_permission_pause(
+    session: AsyncSession, *, thread_id: str
+) -> tuple[str, str] | None:
+    """Return the request id and status of the pause a run is holding.
+
+    The oldest request that is not settled, which is the one a parked run is
+    actually waiting on. Returned as a pair rather than a bare id because the
+    two outstanding statuses call for different advice: one still needs an
+    answer, the other already has one and is being applied. ``None`` says the
+    journal holds no permission pause for this run at all - for a parked run,
+    that means the pause is an interrupt rather than a permission request.
+    """
+    row = (
+        await session.execute(
+            select(
+                PermissionRequestModel.request_id,
+                PermissionRequestModel.request_status,
+            )
+            .where(
+                PermissionRequestModel.thread_id == thread_id,
+                PermissionRequestModel.request_status.in_(
+                    _OUTSTANDING_PERMISSION_STATUSES
+                ),
+            )
+            .order_by(PermissionRequestModel.created_at.asc())
+            .limit(1)
+        )
+    ).first()
+    return None if row is None else (row[0], row[1])
 
 
 async def record_permission_response_submission(

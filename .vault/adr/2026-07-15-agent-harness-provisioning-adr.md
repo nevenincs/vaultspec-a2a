@@ -3,14 +3,16 @@ tags:
   - '#adr'
   - '#agent-harness-provisioning'
 date: '2026-07-15'
-modified: '2026-09-05'
-body_hash: 'sha256:6e68a8f5490a374fece2a8560acd250a63d466867f12ba0c287fa9a6f2e55672'
+modified: '2026-10-01'
+body_hash: 'sha256:111002be584a9db1ec9afae94d4d34b5543f1f27ce37c69dbd5084bee1f5988f'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'
   - '[[2026-07-15-agent-harness-provisioning-research]]'
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
   - '[[2026-07-17-tool-cores-adr]]'
+  - '[[2026-10-01-provider-binary-policy-adr]]'
+  - '[[2026-10-01-tool-permission-model-adr]]'
 ---
 
 # `agent-harness-provisioning` adr: `the agent harness contract: skills, personas, rules, templates, and tools provisioned and verified per run` | (**status:** `accepted`)
@@ -161,3 +163,41 @@ blocked, hidden, dormant, or old-config compatibility lane. Harness verification
 must find no Gemini-specific provider branch or product surface. A future Gemini
 mechanism requires a new accepted provider decision and exact-mode proof; this
 ADR supplies no fallback authority.
+
+## Amendment - provider-binary-policy (2026-10-01)
+
+The 2026-08-02 amendment's Stack identity paragraph fixes the stack as the project-pinned
+adapter "driving the operator's installed `claude` CLI `2.1.220` through
+`CLAUDE_CODE_EXECUTABLE`". Superseded clause: "driving the operator's installed `claude`
+CLI `2.1.220` through `CLAUDE_CODE_EXECUTABLE`". Replacement: the adapter is
+project-pinned; the CLI it drives is profile-scoped and resolved by one service seam - a
+capsule asset under an armed desktop capsule, the image-pinned binary under Compose, the
+service's installed CLI in a checkout, and the lock-vendored binary as an explicit last
+resort. The version in force is recorded per run, not fixed by this record.
+
+The same amendment's no-auth contract reads: "the provider layer implements no
+authentication and injects no credential - the child resolves exactly the login an
+interactive `claude` resolves." That sentence stands as the default and gains a bounded
+exception, declared not inferred: when the operator sets the Claude authentication channel
+to the headless OAuth token, the worker injects that token and records the choice in the
+run's runtime identity. No other credential is injected, and `ANTHROPIC_API_KEY` remains
+scrubbed unconditionally. Without this exception the no-auth clause and
+`2026-10-01-provider-binary-policy-adr` D4 contradict each other. Grounding:
+`2026-10-01-provider-binary-policy-adr`, `2026-10-01-provider-binary-policy-research`.
+
+## Amendment - tool-permission-model (2026-10-01)
+
+The Scope notes paragraph of the 2026-08-02 amendment states that "the non-kimi autonomous
+permission branch still auto-approves the first offered option for any tool outside the
+static allowlist ... and closing the asymmetry remains the approval-shape ADR's open
+decision." Superseded clause: "The non-kimi autonomous permission branch still
+auto-approves the first offered option for any tool outside the static allowlist
+(`_acp_rpc_handlers.py`, D7 note); strict-MCP narrows its MCP blast radius to declared
+servers only, and closing the asymmetry remains the approval-shape ADR's open decision."
+(The 2026-08-03 amendment above already narrowed this to MCP-tool calls specifically; this
+amendment closes it for every tool.) Replacement: the asymmetry is closed. One rule now
+decides every lane's uncovered call and refuses it, and an answer naming an option that was
+never offered is refused rather than substituted. The approval-shape decision this note
+deferred is made in `2026-10-01-tool-permission-model-adr`, which also keeps the deleted
+projection channel closed: per-tool approval is enforced by withholding a rule from
+pre-approval, never by re-admitting a CLI setting source.

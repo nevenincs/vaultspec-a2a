@@ -312,14 +312,28 @@ def compose_native_read_tools(
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         return model
-    # The permission a role needs is its own workspace, not the host. The
-    # workspace is read off the model rather than passed in because it is
-    # already the run's, carried on the same instance the session is opened
-    # from - a second parameter could name a different directory than the one
-    # the CLI will actually run in.
+    existing = list(getattr(model, "allowed_tools", []) or [])
+    composed_rules = _workspace_scoped_rules(model, composed_names)
+    combined = existing + [rule for rule in composed_rules if rule not in existing]
+    if combined == existing:
+        return model
+    return attach(list(getattr(model, "mcp_servers", []) or []), combined)
+
+
+def _workspace_scoped_rules(
+    model: BaseChatModel, composed_names: Sequence[str]
+) -> list[str]:
+    """Return the allowlist rules *composed_names* take under the run's workspace.
+
+    The permission a role needs is its own workspace, not the host. The
+    workspace is read off the model rather than passed in because it is already
+    the run's, carried on the same instance the session is opened from - a
+    second parameter could name a different directory than the one the CLI will
+    actually run in.
+    """
     workspace_root = getattr(model, "workspace_root", None)
     scope = workspace_root if isinstance(workspace_root, str) else None
-    composed_rules = [
+    return [
         *native_read_floor_rules(scope),
         *(
             workspace_scoped_tool_rule(name, scope)
@@ -327,8 +341,3 @@ def compose_native_read_tools(
             if name not in NATIVE_READ_TOOL_NAMES
         ),
     ]
-    existing = list(getattr(model, "allowed_tools", []) or [])
-    combined = existing + [rule for rule in composed_rules if rule not in existing]
-    if combined == existing:
-        return model
-    return attach(list(getattr(model, "mcp_servers", []) or []), combined)

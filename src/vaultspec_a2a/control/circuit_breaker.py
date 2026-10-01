@@ -1,7 +1,7 @@
 """Worker circuit breaker.
 
 Tracks worker TRANSPORT health and rejects requests when the worker is down.
-Protocol-agnostic: callers are responsible for translating a ``False`` return
+Protocol-agnostic: callers are responsible for translating a ``None`` return
 from ``pre_dispatch()`` into the appropriate HTTP/WS error.
 
 What it does not track is admission. A worker that answers a dispatch - even to
@@ -17,9 +17,26 @@ from __future__ import annotations
 import logging
 import time
 
-__all__ = ["WorkerCircuitBreaker"]
+__all__ = ["DispatchAdmission", "WorkerCircuitBreaker"]
 
 logger = logging.getLogger(__name__)
+
+
+class DispatchAdmission:
+    """One caller's admission to dispatch, and the probe it may be holding.
+
+    Identity is the point. The breaker hands a distinct object to every
+    admitted caller and compares the one it is given back against the one that
+    actually reserved the half-open probe, so no caller can settle another's
+    reservation. Without that, a dispatch admitted while the circuit was closed
+    and finishing after it had reopened handed back a probe it never took, and
+    the half-open state admitted a second one.
+    """
+
+    __slots__ = ("holds_probe",)
+
+    def __init__(self, *, holds_probe: bool) -> None:
+        self.holds_probe = holds_probe
 
 
 class WorkerCircuitBreaker:
@@ -45,7 +62,7 @@ class WorkerCircuitBreaker:
         self._consecutive_failures = 0
         self._state: str = "closed"  # closed | open | half_open
         self._opened_at: float = 0.0
-        self._probe_in_flight = False
+        self._probe_owner: DispatchAdmission | None = None
 
     @property
     def state(self) -> str:
@@ -57,33 +74,35 @@ class WorkerCircuitBreaker:
             self._state = "half_open"
         return self._state
 
-    def pre_dispatch(self) -> bool:
+    def pre_dispatch(self) -> DispatchAdmission | None:
         """Reserve the right to dispatch, admitting one half-open probe at a time.
 
-        Returns ``True`` if the dispatch may proceed, ``False`` if the caller
-        should reject the request.  When ``False`` is returned the caller can use
-        ``rejection_detail`` for the error message.
+        Returns the caller's own admission if the dispatch may proceed, and
+        ``None`` if the caller should reject the request.  When ``None`` is
+        returned the caller can use ``rejection_detail`` for the error message.
 
-        A caller that receives ``True`` owns whatever it reserved and must settle
-        it exactly once, through ``record_success``, ``record_failure``,
-        ``record_refusal``, or ``release_probe`` on an abandoned attempt.
+        A caller that receives an admission owns whatever it reserved and must
+        settle it exactly once, through ``record_success``, ``record_failure``,
+        ``record_refusal``, or ``release_probe`` with that same admission on an
+        abandoned attempt.
         """
         if self.state == "open":
-            return False
+            return None
         if self.state == "half_open":
             # The recovery window is over but the worker is still unproven. One
             # request tests it; admitting the rest would send the same flood
             # that opened the circuit at a worker that has answered nothing yet.
-            if self._probe_in_flight:
-                return False
-            self._probe_in_flight = True
-        return True
+            if self._probe_owner is not None:
+                return None
+            self._probe_owner = DispatchAdmission(holds_probe=True)
+            return self._probe_owner
+        return DispatchAdmission(holds_probe=False)
 
     @property
     def rejection_detail(self) -> str:
         """Human-readable reason for the rejection.
 
-        Valid after ``pre_dispatch`` returns ``False``.
+        Valid after ``pre_dispatch`` returns ``None``.
         """
         return (
             "Worker circuit breaker OPEN — "
@@ -108,7 +127,7 @@ class WorkerCircuitBreaker:
 
     def record_failure(self) -> None:
         """Record a failed dispatch — may open the circuit."""
-        self._probe_in_flight = False
+        self._probe_owner = None
         self._consecutive_failures += 1
         if self._consecutive_failures >= self._failure_threshold:
             if self._state != "open":
@@ -119,21 +138,27 @@ class WorkerCircuitBreaker:
             self._state = "open"
             self._opened_at = time.monotonic()
 
-    def release_probe(self) -> None:
+    def release_probe(self, admission: DispatchAdmission) -> None:
         """Give back an admitted probe that settled no outcome.
 
         A dispatch abandoned before it produced either a reply or a transport
         error - cancelled, or failed in the caller - proved nothing about the
         worker. Without this the half-open state would hold a probe no one owns
         and admit nothing until the process restarted.
+
+        Only the admission that reserved the current probe returns it. Every
+        other admission - one taken while the circuit was closed, or one left
+        over from an earlier half-open window - is ignored, so a late settling
+        dispatch cannot hand back a probe another request is still using.
         """
-        self._probe_in_flight = False
+        if self._probe_owner is admission:
+            self._probe_owner = None
 
     def force_open(self) -> None:
         """Force the circuit open immediately (used by watchdog on crash)."""
         if self._state != "open":
             logger.warning("Worker circuit breaker forced OPEN by watchdog")
-        self._probe_in_flight = False
+        self._probe_owner = None
         self._consecutive_failures = self._failure_threshold
         self._state = "open"
         self._opened_at = time.monotonic()
@@ -142,6 +167,6 @@ class WorkerCircuitBreaker:
         """Settle any in-flight probe and return the circuit to closed."""
         if self._state != "closed":
             logger.info("Worker circuit breaker CLOSED (%s)", reason)
-        self._probe_in_flight = False
+        self._probe_owner = None
         self._consecutive_failures = 0
         self._state = "closed"

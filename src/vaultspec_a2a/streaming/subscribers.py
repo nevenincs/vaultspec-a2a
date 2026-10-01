@@ -3,12 +3,23 @@
 Manages client WebSocket connections, thread subscriptions, broadcast hooks,
 and the graph node metadata cache.  Extracted from the monolithic
 ``aggregator.py`` during the aggregator decomposition.
+
+This module also owns the one place a run's authoritative event sequence is
+allocated. Every frame a subscriber receives passes through
+:meth:`SubscriberManager.enqueue_payload` or :meth:`SubscriberManager.broadcast`,
+so numbering there - and only there - gives a relayed worker payload and an
+in-process domain event exactly one number each from one counter. A process
+that binds no allocator (the worker's own aggregator, or a gateway serving no
+replay) numbers nothing and behaves exactly as it did before.
 """
 
 import asyncio
 import logging
-from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections import OrderedDict, defaultdict
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Protocol, cast
 
 from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
@@ -18,6 +29,204 @@ from .node_metadata import node_metadata_from_graph
 from .types import SequencedEvent, StreamableGraph
 
 logger = logging.getLogger(__name__)
+
+#: Forgotten runs whose issued floor is remembered, so a reseed cannot rewind.
+#:
+#: Bounded for the same reason the writer bounds its rings: a gateway serving
+#: runs for weeks would otherwise keep one entry per run it has ever numbered.
+#: A floor evicted here belongs to a run that produced nothing while this many
+#: others did, by which time its allocations are long flushed and the durable
+#: mark answers at least as high.
+_REMEMBERED_FLOORS = 1024
+
+__all__ = [
+    "AllocationSink",
+    "RunSequenceAllocator",
+    "RunSequenceSeedSource",
+    "SequenceAllocation",
+    "SubscriberManager",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class SequenceAllocation:
+    """One run's authoritative number for one outgoing frame.
+
+    ``allocated_at`` is stamped here rather than where the frame is later
+    written, so the durable row records when the frame was PRODUCED. The write
+    sits behind the fan-out and may land much later; dating a row by its write
+    would misreport the age bound that expires it.
+    """
+
+    thread_id: str
+    sequence: int
+    allocated_at: datetime
+
+
+class RunSequenceSeedSource(Protocol):
+    """The two durable reads a run's numbering is established from."""
+
+    async def high_water_mark(self, thread_id: str) -> int | None:
+        """Return the greatest sequence already retained for this run."""
+        ...
+
+    async def settled_sequence(self, thread_id: str) -> int | None:
+        """Return the cursor captured on this run when it settled."""
+        ...
+
+
+class AllocationSink(Protocol):
+    """Where an allocation is recorded, between numbering and fan-out.
+
+    Synchronous on purpose: this runs IN FRONT of the fan-out, so it may only
+    do in-memory work. The durable write belongs behind the fan-out and is the
+    sink's own business.
+    """
+
+    def retains(self, frame: object) -> bool:
+        """Whether this sink would keep *frame* if it were numbered.
+
+        Asked BEFORE a number is taken, which is what keeps a run's sequence
+        space contiguous: a frame nothing retains leaves a permanent hole, and
+        a hole costs a resume every retained frame older than it.
+        """
+        ...
+
+    def record(self, allocation: SequenceAllocation, frame: object) -> None:
+        """Record one numbered frame for later durable writing."""
+        ...
+
+    def discard(self, thread_id: str) -> None:
+        """Drop everything held for a run whose durable home is gone."""
+        ...
+
+    async def aclose(self) -> None:
+        """Stop recording and make a last attempt to write what is held."""
+        ...
+
+
+class RunSequenceAllocator:
+    """One monotonic, restart-stable number per run, allocated in memory.
+
+    The counter is seeded once per run per gateway lifetime, from the run's
+    durable high-water mark, then advanced in process. Three outcomes, and the
+    difference between them is the whole point:
+
+    * seeded from a retained row - numbering continues where the last gateway
+      left off, which is what lets a consumer resume across a restart;
+    * seeded from the cursor captured at settle, or from zero for a run with
+      neither - the only honest starting points left;
+    * UNSEEDABLE, because the store could not be read - the run is left
+      unnumbered for this process's lifetime. Restarting its numbering instead
+      would hand two different frames the same number, which is exactly the
+      hazard that forced the SSE id to be withdrawn once already.
+
+    An unnumbered run still streams. It just carries no id, so no consumer is
+    handed a cursor it cannot resume from.
+    """
+
+    def __init__(self, seeds: RunSequenceSeedSource) -> None:
+        self._seeds = seeds
+        self._counters: dict[str, int] = {}
+        self._unnumbered: set[str] = set()
+        # The highest number this process has already handed a forgotten run.
+        # A reseed may never fall below it: the durable reads below see only
+        # what has been FLUSHED, and a run forgotten with allocations still in
+        # the writer's ring would otherwise restart inside a range it already
+        # issued, handing two frames one number.
+        self._issued: OrderedDict[str, int] = OrderedDict()
+        # Seeding awaits two reads, and a second first touch of the same run
+        # arriving in that window used to read the same mark and assign over
+        # the counter the first had already advanced.
+        self._seed_lock = asyncio.Lock()
+
+    def _established(self, thread_id: str) -> bool:
+        """Whether this process has already settled how this run is numbered."""
+        return thread_id in self._counters or thread_id in self._unnumbered
+
+    async def seed(self, thread_id: str) -> None:
+        """Establish *thread_id*'s counter if this process has not yet done so.
+
+        Idempotent and cheap after the first call: a run already seeded, or
+        already known unseedable, costs one dictionary lookup and no database
+        round trip, and never takes the lock.
+        """
+        if self._established(thread_id):
+            return
+        async with self._seed_lock:
+            # Re-asked under the lock, because the answer can have changed
+            # while this call waited for it.
+            if self._established(thread_id):
+                return
+            try:
+                retained = await self._seeds.high_water_mark(thread_id)
+                durable = (
+                    retained
+                    if retained is not None
+                    else (await self._seeds.settled_sequence(thread_id) or 0)
+                )
+            except Exception:
+                self._unnumbered.add(thread_id)
+                logger.warning(
+                    "Could not establish the event sequence of run %s; its stream "
+                    "will carry no resumable id for the life of this process",
+                    thread_id,
+                    exc_info=True,
+                    extra={"thread_id": thread_id, "action": "run_sequence_unseedable"},
+                )
+                return
+            self._counters[thread_id] = max(durable, self._issued.pop(thread_id, 0))
+
+    def allocate(self, thread_id: str) -> int | None:
+        """Return *thread_id*'s next number, or ``None`` when it has none.
+
+        ``None`` means the run was never seeded on this gateway, or could not
+        be. Both answers are the same to a caller: emit the frame, write no
+        durable row, and offer no id.
+        """
+        current = self._counters.get(thread_id)
+        if current is None:
+            return None
+        advanced = current + 1
+        self._counters[thread_id] = advanced
+        return advanced
+
+    def is_numbered(self, thread_id: str) -> bool:
+        """Whether this gateway's own numbers are what this run's frames carry.
+
+        True for a run whose counter has been forgotten while its floor is
+        still remembered. Forgetting bounds memory; it does not retract the
+        numbers already stamped on frames still crossing the fan-out, nor the
+        rows those frames became. Read as "holds a live counter", it cost a
+        settled run's terminal its id: the purge that follows a settlement
+        runs in the same step as the release of that terminal, before any
+        subscriber has drained it.
+
+        False while a run is known unseedable, even if a floor from before
+        survives. Its frames carry the producing worker's own counter, which
+        restarts with that process and must never be offered back as a cursor.
+        """
+        if thread_id in self._unnumbered:
+            return False
+        return thread_id in self._counters or thread_id in self._issued
+
+    def forget(self, thread_id: str) -> None:
+        """Drop *thread_id*'s in-memory numbering state.
+
+        Called when a run's aggregator state is purged, which the terminal
+        relay does before the batch holding that terminal has been flushed.
+        The counter goes, the floor it reached stays: a later frame for the
+        same run reseeds from the durable mark OR that floor, whichever is
+        higher, so forgetting costs a read and can never cost a number.
+        """
+        issued = self._counters.pop(thread_id, None)
+        self._unnumbered.discard(thread_id)
+        if issued is None:
+            return
+        self._issued[thread_id] = max(issued, self._issued.get(thread_id, 0))
+        self._issued.move_to_end(thread_id)
+        while len(self._issued) > _REMEMBERED_FLOORS:
+            self._issued.popitem(last=False)
 
 
 class SubscriberManager:
@@ -41,9 +250,115 @@ class SubscriberManager:
         # would evict another event to make room for the news that an event was
         # evicted. The consumer collects it on its way past instead.
         self._dropped: dict[str, int] = defaultdict(int)
-        # Lock for subscriber mutation
-        self._lock = asyncio.Lock()
         self._telemetry = telemetry
+        # Unbound by default. The worker's aggregator and a gateway serving no
+        # replay never bind one, and then nothing below numbers anything.
+        self._allocator: RunSequenceAllocator | None = None
+        self._allocation_sink: AllocationSink | None = None
+
+    # ------------------------------------------------------------------
+    # Sequence allocation
+    # ------------------------------------------------------------------
+
+    def bind_sequence_allocator(
+        self,
+        allocator: RunSequenceAllocator | None,
+        *,
+        sink: AllocationSink | None = None,
+    ) -> None:
+        """Seat the authority that numbers outgoing frames, and its recorder."""
+        self._allocator = allocator
+        self._allocation_sink = sink
+
+    @property
+    def sequence_allocator(self) -> RunSequenceAllocator | None:
+        """The seated numbering authority, or ``None`` where none is bound."""
+        return self._allocator
+
+    async def prepare_run(self, thread_id: str) -> None:
+        """Establish *thread_id*'s numbering before its frames are enqueued.
+
+        :meth:`enqueue_payload` is synchronous and cannot read a database, so
+        the ingest path that owns the await calls this first. A run reaching
+        the chokepoint unprepared is not numbered, which costs it its id and
+        never costs it a frame.
+        """
+        if self._allocator is not None:
+            await self._allocator.seed(thread_id)
+
+    async def shutdown_allocation_sink(self) -> None:
+        """Close the seated recorder, so a shutdown does not strand its ring."""
+        sink, self._allocation_sink = self._allocation_sink, None
+        if sink is None:
+            return
+        try:
+            await sink.aclose()
+        except Exception:
+            logger.warning("Replay recorder did not close cleanly", exc_info=True)
+
+    def discard_run_replay(self, thread_id: str) -> None:
+        """Drop what the recorder holds for a run whose durable home is gone.
+
+        Deliberately NOT part of :meth:`remove_thread`. A terminal purges a
+        run's aggregator state while the batch carrying that terminal is
+        still unflushed, so dropping the recorder's hold there would discard
+        the very frames a reconnect comes back for. Only a DELETED run has no
+        durable home left: the rows its held frames would become reference a
+        thread that is gone, so no flush can ever place them.
+        """
+        if self._allocation_sink is not None:
+            self._allocation_sink.discard(thread_id)
+
+    def _retainable(self, frame: object) -> bool:
+        """Whether a number spent on *frame* would leave a retained row behind.
+
+        A run's sequence space has to stay contiguous: the replay reader
+        serves the longest consecutive tail of what it finds, so one frame
+        numbered and never retained costs a resume every older frame in the
+        window. Asking the recorder first is what stops that, and a process
+        with no recorder retains nothing anyway, so nothing there is at stake.
+        """
+        sink = self._allocation_sink
+        return sink is None or sink.retains(frame)
+
+    def _allocate(self, thread_id: str) -> SequenceAllocation | None:
+        """Take this run's next number, or ``None`` where it has none."""
+        if self._allocator is None:
+            return None
+        sequence = self._allocator.allocate(thread_id)
+        if sequence is None:
+            return None
+        return SequenceAllocation(
+            thread_id=thread_id, sequence=sequence, allocated_at=datetime.now(UTC)
+        )
+
+    def _record(self, allocation: SequenceAllocation, frame: object) -> None:
+        """Hand the recorder the frame EXACTLY as subscribers will receive it.
+
+        Called after the number is stamped and before any fan-out, which is
+        both halves of the ordering this seam exists to keep. Stamping first
+        is what stops the retained row carrying the producer's own number
+        while the live frame carries the gateway's - the two would then
+        disagree about the identity a resume is taken against. Recording
+        first is what keeps the fan-out free of a database round trip; the
+        recorder does in-memory work only, and a recorder that fails costs
+        the run its replay, never its stream.
+        """
+        if self._allocation_sink is None:
+            return
+        try:
+            self._allocation_sink.record(allocation, frame)
+        except Exception:
+            logger.warning(
+                "Could not record event %d of run %s for replay",
+                allocation.sequence,
+                allocation.thread_id,
+                exc_info=True,
+                extra={
+                    "thread_id": allocation.thread_id,
+                    "action": "run_event_record_failed",
+                },
+            )
 
     # ------------------------------------------------------------------
     # Subscriber management
@@ -174,6 +489,8 @@ class SubscriberManager:
         for client_id in list(self._subscriptions):
             self._subscriptions[client_id].discard(thread_id)
         self._node_metadata.pop(thread_id, None)
+        if self._allocator is not None:
+            self._allocator.forget(thread_id)
 
     def remove_node_metadata(self, thread_id: str) -> None:
         """Drop the live graph descriptors for one terminal worker thread."""
@@ -213,12 +530,34 @@ class SubscriberManager:
         return sorted(all_threads)
 
     def enqueue_payload(self, thread_id: str, payload: object) -> None:
-        """Enqueue a pre-serialized payload for all subscribers of ``thread_id``."""
+        """Enqueue a pre-serialized payload for all subscribers of ``thread_id``.
+
+        Numbers the frame first, where a number is available AND the frame is
+        one the recorder will keep, and stamps that number over the body's own
+        ``sequence``. The worker's counter orders a run's events within one
+        worker lifetime and restarts with the process; the number stamped here
+        is the run's identity and survives a restart of either process, so the
+        relay overwrites rather than forwards.
+
+        A payload that is not a mapping cannot carry the stamp and is not
+        retained either, so it takes no number at all rather than leaving a
+        hole in the run's sequence space.
+        """
+        delivered = payload
+        if self._retainable(payload) and isinstance(payload, Mapping):
+            allocation = self._allocate(thread_id)
+            if allocation is not None:
+                stamped: dict[str, object] = {
+                    **cast("Mapping[str, object]", payload),
+                    "sequence": allocation.sequence,
+                }
+                self._record(allocation, stamped)
+                delivered = stamped
         for client_id, queue in list(self._subscribers.items()):
             client_subs = self._subscriptions.get(client_id, set())
             if thread_id not in client_subs:
                 continue
-            outcome = deliver_bounded(queue, payload, client_id=client_id)
+            outcome = deliver_bounded(queue, delivered, client_id=client_id)
             if outcome.dropped:
                 self._dropped[client_id] += outcome.dropped
 
@@ -259,6 +598,12 @@ class SubscriberManager:
     async def broadcast(self, sequenced: SequencedEvent) -> None:
         """Fan out a sequenced domain event to all interested subscribers.
 
+        An in-process domain event takes its number from the same counter a
+        relayed worker payload does, so two producers on one run cannot both
+        claim one number. The delivered wrapper is a new one rather than the
+        caller's: the hooks below are the worker's relay, which must keep
+        forwarding its own producer-side ordering untouched.
+
         Uses a drop-oldest strategy: if a subscriber queue is full,
         the oldest buffered event is discarded before inserting the new
         one.  This keeps the aggregator non-blocking while bounding
@@ -266,6 +611,20 @@ class SubscriberManager:
         """
         thread_id = getattr(sequenced.event, "thread_id", None)
         event_type = type(sequenced.event).__name__
+
+        delivered_event = sequenced
+        if thread_id is not None:
+            await self.prepare_run(thread_id)
+            # Same rule as the relay path: a frame the recorder would decline
+            # takes no number, so the run's sequence space stays contiguous.
+            allocation = (
+                self._allocate(thread_id) if self._retainable(sequenced) else None
+            )
+            if allocation is not None:
+                delivered_event = SequencedEvent(
+                    event=sequenced.event, sequence=allocation.sequence
+                )
+                self._record(allocation, delivered_event)
 
         with self._telemetry.start_span(
             "aggregator.broadcast",
@@ -276,7 +635,7 @@ class SubscriberManager:
                 client_subs = self._subscriptions.get(client_id, set())
                 if not (thread_id is None or thread_id in client_subs):
                     continue
-                outcome = deliver_bounded(queue, sequenced, client_id=client_id)
+                outcome = deliver_bounded(queue, delivered_event, client_id=client_id)
                 if outcome.dropped:
                     self._dropped[client_id] += outcome.dropped
                 if outcome.delivered:

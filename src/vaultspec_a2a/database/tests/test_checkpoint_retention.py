@@ -20,14 +20,13 @@ import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ..checkpoints import _SelectorThreadPostgresCheckpointer, prune_settled_thread
 from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
-
-    from langgraph.graph.state import CompiledStateGraph
 
     from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
@@ -52,34 +51,34 @@ async def _fail(state: _Log) -> dict[str, list[str]]:
     raise RuntimeError("the step failed")
 
 
-def _settling_graph(saver: Checkpointer) -> CompiledStateGraph[Any, Any, Any, Any]:
+def _settling_graph(saver: Checkpointer) -> Any:
     inner: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
-    inner.add_node("inner_step", _append("inner"))
+    add_test_node(inner, "inner_step", _append("inner"))
     inner.add_edge(START, "inner_step")
     inner.add_edge("inner_step", END)
 
     outer: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
-    outer.add_node("first", _append("first"))
-    outer.add_node("nested", inner.compile())
-    outer.add_node("last", _append("last"))
+    add_test_node(outer, "first", _append("first"))
+    add_test_node(outer, "nested", compile_test_graph(inner))
+    add_test_node(outer, "last", _append("last"))
     outer.add_edge(START, "first")
     outer.add_edge("first", "nested")
     outer.add_edge("nested", "last")
     outer.add_edge("last", END)
-    return outer.compile(checkpointer=saver)
+    return compile_test_graph(outer, checkpointer=saver)
 
 
-def _failing_graph(saver: Checkpointer) -> CompiledStateGraph[Any, Any, Any, Any]:
+def _failing_graph(saver: Checkpointer) -> Any:
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
-    builder.add_node("first", _append("first"))
-    builder.add_node("sibling", _append("sibling"))
-    builder.add_node("boom", _fail)
+    add_test_node(builder, "first", _append("first"))
+    add_test_node(builder, "sibling", _append("sibling"))
+    add_test_node(builder, "boom", _fail)
     builder.add_edge(START, "first")
     builder.add_edge("first", "sibling")
     builder.add_edge("first", "boom")
     builder.add_edge("sibling", END)
     builder.add_edge("boom", END)
-    return builder.compile(checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 async def _prove_a_settled_thread_keeps_only_its_latest(saver: Checkpointer) -> None:

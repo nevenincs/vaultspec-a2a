@@ -46,6 +46,7 @@ from ..conditions import (
 from ._installed_vocabulary import (
     MissingInstalledVocabularyError,
     acp_adapter_error_kinds,
+    acp_adapter_failure_categories,
     acp_error_kinds,
     codex_error_info_variants,
 )
@@ -118,6 +119,73 @@ def test_the_acp_mapping_resolves_every_installed_kind_to_a_member() -> None:
     for kind in sorted(installed):
         frame = {"code": AcpErrorCode.INTERNAL_ERROR, "data": {"errorKind": kind}}
         assert isinstance(condition_from_acp_error(frame), ProviderCondition)
+
+
+def _installed_acp_categories() -> dict[str, str]:
+    """Return the remedy category the installed adapter assigns each kind."""
+    try:
+        return acp_adapter_failure_categories()
+    except MissingInstalledVocabularyError as exc:
+        pytest.skip(str(exc))
+
+
+#: The adapter's own name for "I could not classify this either".
+_ADAPTER_UNCLASSIFIED = "provider_error"
+
+
+def _acp_condition(kind: str) -> ProviderCondition:
+    """Resolve one error kind through the real frame shape the adapter sends."""
+    frame = {"code": AcpErrorCode.INTERNAL_ERROR, "data": {"errorKind": kind}}
+    return condition_from_acp_error(frame)
+
+
+def test_a_kind_the_adapter_classifies_never_lands_on_our_floor() -> None:
+    """The floor is for kinds nobody classified, not for kinds we never mapped.
+
+    The adapter states, in the artefact that runs, which remedy each error kind
+    calls for. Where it names one, resolving that kind to the unknown member
+    throws away a diagnosis the wire DID carry - which is exactly what an SDK
+    bump does when it adds a member to the kind union and nothing here notices.
+    Only the adapter's own unclassified category justifies this project's floor.
+    """
+    categories = _installed_acp_categories()
+    classified = {
+        kind
+        for kind, category in categories.items()
+        if category != _ADAPTER_UNCLASSIFIED
+    }
+    assert classified, "the installed adapter classifies no error kind at all"
+    unresolved = sorted(
+        kind for kind in classified if _acp_condition(kind) is ProviderCondition.UNKNOWN
+    )
+    assert not unresolved, (
+        f"the installed adapter classifies {unresolved} but this mapping "
+        "resolves them to the unknown floor"
+    )
+
+
+def test_kinds_the_adapter_files_together_resolve_together() -> None:
+    """Kinds sharing one remedy in the adapter share one condition here.
+
+    The adapter groups its kinds by the action a user has to take. This project's
+    vocabulary is coarser but answers the same question, so two kinds the adapter
+    cannot tell apart must not be told apart here either - a split would claim a
+    distinction the wire never made, and it is how a newly added kind drifts away
+    from the established member its own group already resolves to.
+    """
+    categories = _installed_acp_categories()
+    by_category: dict[str, set[ProviderCondition]] = {}
+    for kind, category in categories.items():
+        by_category.setdefault(category, set()).add(_acp_condition(kind))
+    disagreeing = {
+        category: sorted(conditions)
+        for category, conditions in by_category.items()
+        if len(conditions) > 1
+    }
+    assert not disagreeing, (
+        f"the installed adapter files these kinds under one remedy each, but "
+        f"this mapping splits them: {disagreeing}"
+    )
 
 
 def test_the_acp_rate_limit_kind_never_claims_usage_exhaustion() -> None:

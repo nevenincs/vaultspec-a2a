@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-09-30'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:d00559f47bc857d7f6714a0c63737f466dbfc173e6f70ce2011267eec59b93ad'
+body_hash: 'sha256:7570ba7f86534710beda4e54775fc1b585f8e0e68caca77e2fd36029a9ee8124'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -376,6 +376,153 @@ related:
 - `S27` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 - `S23` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
 - `S14` `verify:` `runner worker providers api graph-nodes (1900) + openapi artifact + ruff + ty` -> `pass`
+- `S35` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S35` `A` `src/vaultspec_a2a/graph/tests/test_research_branch_models.py`
+- `S35` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S35` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
+- `S35` `verify:` `ruff check+format, ty check src/vaultspec_a2a/graph` -> `pass`
+- `S44` `M` `service/docker-compose.dev.yml`
+- `S44` `M` `service/docker-compose.integration.yml`
+- `S44` `M` `service/docker-compose.prod.yml`
+- `S44` `M` `src/vaultspec_a2a/control/tests/test_deployment_names.py`
+- `S44` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S44` `verify:` `pytest src/vaultspec_a2a/control/tests/test_deployment_names.py` -> `pass`
+- `S45` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S45` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
+- `S45` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S45` `by:` `vaultspec-docs-curator`
+- `S33` `M` `src/vaultspec_a2a/thread/dispatch_policy.py`
+- `S33` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S33` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S33` `M` `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+- `S33` `M` `src/vaultspec_a2a/thread/tests/test_dispatch_policy.py`
+- `S33` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/thread` -> `pass`
+- `S33` `by:` `vaultspec-high-executor`
+- `S37` `M` `src/vaultspec_a2a/control/circuit_breaker.py`
+- `S37` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S37` `M` `src/vaultspec_a2a/control/tests/test_circuit_breaker_probe.py`
+- `S37` `M` `src/vaultspec_a2a/control/tests/test_dispatch_refusal_classification.py`
+- `S37` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/thread` -> `pass`
+- `S37` `by:` `vaultspec-high-executor`
+- `S38` `M` `src/vaultspec_a2a/control/action_lease.py`
+- `S38` `M` `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `S38` `M` `src/vaultspec_a2a/control/tests/test_direct_control_recovery_current.py`
+- `S38` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `S38` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/thread` -> `pass`
+- `S38` `by:` `vaultspec-high-executor`
+- `S36` `M` `src/vaultspec_a2a/providers/_project_scope.py`
+- `S36` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S36` `M` `src/vaultspec_a2a/providers/tests/test_kimi_permission.py`
+- `S36` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S36` `M` `src/vaultspec_a2a/providers/tests/test_acp_permission_option_ids.py`
+- `S36` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
+- `S36` `by:` `vaultspec-high-executor`
+- `S40` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S40` `M` `src/vaultspec_a2a/providers/tests/test_acp_turn_deadline.py`
+- `S40` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
+- `S40` `by:` `vaultspec-high-executor`
+- `S41` `M` `src/vaultspec_a2a/graph/tests/acp_simulator.py`
+- `S41` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/_acp_frames.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_acp_stderr_tail.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S41` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
+- `S41` `by:` `vaultspec-high-executor`
+- `S43` `M` `src/vaultspec_a2a/providers/_prompt_render.py`
+- `S43` `M` `src/vaultspec_a2a/providers/tests/test_prompt_render.py`
+- `S43` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
+- `S43` `by:` `vaultspec-high-executor`
+- `S46` `M` `src/vaultspec_a2a/providers/_claude_tool_policy.py`
+- `S46` `A` `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp_egress_axis.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S46` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S46` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S46` `verify:` `pytest src/vaultspec_a2a/providers` -> `pass`
+- `S46` `verify:` `real Claude CLI 2.1.286 and vendored 2.1.207 against a scripted loopback endpoint` -> `pass`
+- `S46` `by:` `vaultspec-high-executor`
+- `S34` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S34` `A` `src/vaultspec_a2a/worker/tests/test_ipc_confirmation_budget.py`
+- `S34` `verify:` `pytest src/vaultspec_a2a/worker src/vaultspec_a2a/control src/vaultspec_a2a/lifecycle src/vaultspec_a2a/api` -> `pass`
+- `S34` `by:` `vaultspec-high-executor`
+- `S39` `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `S39` `M` `src/vaultspec_a2a/tests/_checkpoint_seeding.py`
+- `S39` `M` `src/vaultspec_a2a/conftest.py`
+- `S39` `A` `src/vaultspec_a2a/thread/tests/test_input_checkpoint_evidence.py`
+- `S39` `A` `src/vaultspec_a2a/worker/tests/test_executor_input_checkpoint_redelivery.py`
+- `S39` `A` `src/vaultspec_a2a/control/tests/test_input_checkpoint_recovery.py`
+- `S39` `M` `src/vaultspec_a2a/control/tests/test_thread_list_bulk_checkpoints.py`
+- `S39` `verify:` `pytest worker control lifecycle api thread streaming database --require-prerequisite=postgres` -> `pass`
+- `S39` `by:` `vaultspec-high-executor`
+- `S42` `M` `src/vaultspec_a2a/lifecycle/shutdown.py`
+- `S42` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S42` `M` `src/vaultspec_a2a/api/app.py`
+- `S42` `M` `src/vaultspec_a2a/api/internal.py`
+- `S42` `M` `src/vaultspec_a2a/api/tests/conftest.py`
+- `S42` `A` `src/vaultspec_a2a/api/tests/test_checkpoint_prune_shutdown.py`
+- `S42` `M` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
+- `S42` `verify:` `pytest api control lifecycle worker thread` -> `pass`
+- `S42` `by:` `vaultspec-high-executor`
+- `S47` `M` `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`
+- `S47` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S47` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S47` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+- `S47` `A` `src/vaultspec_a2a/api/tests/test_run_action_refusal_vocabulary.py`
+- `S47` `M` `openapi.json`
+- `S47` `verify:` `pytest control api thread` -> `pass`
+- `S47` `by:` `vaultspec-high-executor`
+- `S49` `M` `src/vaultspec_a2a/providers/_prompt_render.py`
+- `S49` `M` `src/vaultspec_a2a/providers/tests/test_prompt_render.py`
+- `S49` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S49` `A` `src/vaultspec_a2a/streaming/tests/_parked_signal_graph.py`
+- `S49` `A` `src/vaultspec_a2a/streaming/tests/test_ingest_signal.py`
+- `S49` `M` `pyproject.toml`
+- `S49` `M` `uv.lock`
+- `S49` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming -n 4` -> `pass`
+- `S49` `verify:` `python -m dev lint all` -> `pass`
+- `S50` `M` `docs/api/modules.rst`
+- `S50` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S50` `M` `src/vaultspec_a2a/api/workspace.py`
+- `S50` `M` `src/vaultspec_a2a/control/action_lease.py`
+- `S50` `M` `src/vaultspec_a2a/control/health.py`
+- `S50` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S50` `M` `src/vaultspec_a2a/control/settings_base.py`
+- `S50` `M` `src/vaultspec_a2a/control/state_layout.py`
+- `S50` `M` `src/vaultspec_a2a/control/thread_listing.py`
+- `S50` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S50` `M` `src/vaultspec_a2a/desktop_tests/test_readiness_model.py`
+- `S50` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S50` `M` `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+- `S50` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S50` `M` `src/vaultspec_a2a/lifecycle/procs_config.py`
+- `S50` `M` `src/vaultspec_a2a/lifecycle/singleton.py`
+- `S50` `M` `src/vaultspec_a2a/providers/_acp_mcp.py`
+- `S50` `M` `src/vaultspec_a2a/providers/_codex_auth.py`
+- `S50` `M` `src/vaultspec_a2a/providers/_project_scope.py`
+- `S50` `M` `src/vaultspec_a2a/providers/_prompt_render.py`
+- `S50` `M` `src/vaultspec_a2a/streaming/custom_writes.py`
+- `S50` `M` `src/vaultspec_a2a/streaming/fanout.py`
+- `S50` `M` `src/vaultspec_a2a/streaming/tests/_error_injecting_graph.py`
+- `S50` `M` `src/vaultspec_a2a/streaming/translation.py`
+- `S50` `M` `src/vaultspec_a2a/testing/__init__.py`
+- `S50` `M` `src/vaultspec_a2a/testing/session_root.py`
+- `S50` `M` `src/vaultspec_a2a/tests/gateway_boot.py`
+- `S50` `M` `src/vaultspec_a2a/worker/_dispatch_settlement.py`
+- `S50` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S50` `M` `src/vaultspec_a2a/worker/tests/test_ipc_confirmation_budget.py`
+- `S50` `verify:` `python -m dev lint reachability` -> `pass`
+- `S50` `verify:` `python -m dev lint all` -> `pass`
+- `S50` `verify:` `python -m dev lint symbols` -> `fail`
+- `S50` `verify:` `python -m dev lint exports` -> `fail`
+- `S50` `by:` `vaultspec-standard-executor`
+- `S51` `M` `src/vaultspec_a2a/control/_event_application.py`
+- `S51` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S51` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/database src/vaultspec_a2a/worker -n 3 --require-prerequisite=postgres` -> `pass`
+- `S51` `verify:` `python -m dev lint symbols` -> `pass`
+- `S51` `by:` `vaultspec-standard-executor`
 
 ## Notes
 
@@ -408,3 +555,12 @@ related:
 - `S27` Correction from the fix re-review (forged-heading-escape-rewrites-mounted-vault-headings).
 - `S23` Correction from the fix re-review (stale-comment-says-grep-composes-bare).
 - `S14` Correction from the fix re-review (refusal-code-import-guard-cannot-fail).
+- `S44` just test-service was not run: Docker is unavailable here, so the probes are proven by syntax, by a hostname round-trip on this host and by the Compose test only.
+- `S45` Each fixed or partially fixed status was verified against current code, not taken from a plan row; 27 original findings stay open without a Step in this plan, several owned by other open plans.
+- `S33` Scope correction: the permission verb's dispatch and service modules also changed, because they were the only consumers of the failure flag.
+- `S38` Behaviour-neutral by decision: retention is the rule, so each test was proven load-bearing against the rejected alternative instead of pre-fix code.
+- `S46` The executor's commit was refused twice by the permission system; the user approved committing it on 2026-10-01 and the orchestrator applied, re-verified and committed the change.
+- `S39` Scope correction: the evidence reader lives in `thread/checkpoint_evidence.py,` shared by the worker preflight and gateway recovery; no change to `state_projection.py` was needed.
+- `S47` Dashboard contract event: permission respond answers a worker `run_busy` with a typed 409 (was 500), capacity with 503 (was 502), `incompatible_state` with a typed 409 (was 502); openapi documents 409/502/503 on that route and 502/503 on the messages route.
+- `S49` markdown-it-py joins the tooling group as the CommonMark reader the forgery tests read a rendered prompt with; it was already locked through rich.
+- `S50` Partial: reachability is zero; symbols holds `mark_ingest_applied,` which names a real gap owned by P06.S51; exports holds four names in database and thread files the run-continuation P04 executor is editing, left until it merges. The Step stays open.

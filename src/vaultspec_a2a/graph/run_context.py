@@ -9,9 +9,11 @@ alone cannot say once a run has been resumed.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from langgraph.runtime import Runtime
 
     from ..thread.state import TeamState
@@ -43,5 +45,5 @@ def run_thread_id(state: TeamState, runtime: Runtime[Any] | None) -> str | None:
     context = runtime.context if runtime is not None else None
     if isinstance(context, RunContext):
         return context.thread_id
-    thread_id = state.get("thread_id")
+    thread_id = cast("Mapping[str, object]", state).get("thread_id")
     return thread_id if isinstance(thread_id, str) and thread_id else None

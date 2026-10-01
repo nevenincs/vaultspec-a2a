@@ -38,9 +38,9 @@ from ..thread.state import TeamState
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
-    from langgraph.checkpoint.base import Checkpoint
+    from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata
 
-__all__ = ["real_checkpoint"]
+__all__ = ["real_checkpoint", "real_input_checkpoint"]
 
 _SCRATCH_CONFIG: RunnableConfig = {
     "configurable": {"thread_id": "real-checkpoint-seed", "checkpoint_ns": ""}
@@ -50,6 +50,40 @@ _SCRATCH_CONFIG: RunnableConfig = {
 def _seed_node(_state: TeamState) -> dict[str, Any]:
     """Advance the graph one step without claiming any channel value."""
     return {}
+
+
+async def real_input_checkpoint(
+    graph_input: dict[str, Any],
+) -> tuple[Checkpoint, CheckpointMetadata]:
+    """Return the input checkpoint a real run commits before its first superstep.
+
+    LangGraph stages a run's input in the `__start__` channel and commits a
+    checkpoint of its own for it at step -1; the first superstep then
+    distributes that input into the state's own channels and commits a second
+    checkpoint. A process killed between the two leaves the first row and
+    nothing else - no pending writes, no step 0 - which is the durable state a
+    caller seeds with what this returns.
+
+    The run lands on the same kind of private saver `real_checkpoint` uses, and
+    the returned pair is a private copy, so the caller writes a checkpoint a
+    real graph produced rather than one assembled by hand.
+    """
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    add_test_node(builder, "seed", _seed_node)
+    builder.add_edge("__start__", "seed")
+    builder.add_edge("seed", "__end__")
+    scratch_saver = InMemorySaver()
+    graph = compile_test_graph(builder, checkpointer=scratch_saver)
+    await graph.ainvoke(graph_input, _SCRATCH_CONFIG)
+    staged = [
+        written
+        async for written in scratch_saver.alist(_SCRATCH_CONFIG)
+        if written.metadata.get("source") == "input"
+    ]
+    assert len(staged) == 1, staged
+    checkpoint = staged[0].checkpoint
+    assert set(checkpoint["channel_values"]) == {"__start__"}, checkpoint
+    return copy.deepcopy(checkpoint), copy.deepcopy(staged[0].metadata)
 
 
 async def real_checkpoint() -> Checkpoint:

@@ -3,8 +3,8 @@ tags:
   - '#reference'
   - '#a2a-edge-conformance'
 date: '2026-07-14'
-modified: '2026-07-14'
-body_hash: 'sha256:64cc71229dbcbb09bacf59ee782b419a78ef2b463dca92578390b638bb5b389a'
+modified: '2026-10-01'
+body_hash: 'sha256:8f0ca7db5fbc3a28572b35bc3c35578efae961e6781f968af8f82cfeb3e5b0cf'
 related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-plan]]'

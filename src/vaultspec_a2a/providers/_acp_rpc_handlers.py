@@ -39,7 +39,7 @@ from ._json_contract import (
     lenient_json_object_list,
 )
 from ._native_read_tools import NATIVE_READ_TOOL_NAMES
-from ._project_scope import foreign_project_argument
+from ._project_scope import foreign_project_argument, path_arguments_in_project
 
 __all__: list[str] = []
 
@@ -332,13 +332,15 @@ def _canonical_tool_identity(title: str, config: AcpModelConfig) -> str:
     adapter rather than assumed.
 
     - kimi-cli titles are ``"ToolName"`` or ``"ToolName: subtitle"``.
-    - claude-agent-acp 0.19.2 (``dist/tools.js``) hand-writes a label for each
-      built-in it knows and falls through to ``title: name`` for everything else,
-      which is what makes an MCP tool's title its exact ``mcp__<server>__<tool>``
-      name. The label branches are deliberately NOT parsed: a title like
-      ``"Read <path>"`` is prose, and matching its leading word would let a
-      sub-agent task whose description merely BEGINS with an allowlisted word
-      canonicalise into an approval.
+    - claude-agent-acp keeps a reporter per built-in it knows
+      (``dist/tool-calls/reporters/``) and falls through to a generic reporter
+      that titles the call with the tool's own name, which is what makes an MCP
+      tool's title its exact ``mcp__<server>__<tool>`` name. The per-built-in
+      reporters are deliberately NOT parsed: their titles are prose - ``Read``
+      renders ``"Read <path>"`` and ``Grep`` renders an equivalent grep command
+      line - and matching a leading word would let a sub-agent task whose
+      description merely BEGINS with an allowlisted word canonicalise into an
+      approval.
     """
     if config.acp_family == "kimi":
         return title.split(": ", 1)[0]
@@ -516,16 +518,43 @@ def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str:
     return narrowed
 
 
+def _floor_call_is_confined(
+    config: AcpModelConfig, args: JsonObject, locations: list[JsonObject]
+) -> bool:
+    """Whether a native floor call works only inside the project the run is bound to.
+
+    A floor tool is the one thing this rung approves by NAME alone: the CLI's own
+    read built-ins are served by no server and declared in no registry, so the
+    name is all the request carries about identity. The name says nothing about
+    REACH, and a read is bounded by its path rather than by its tool - a content
+    search named ``Grep`` reads whichever file it is pointed at, including every
+    file the operator can read.
+
+    So the call has to say where it works, and a call that says nowhere is
+    refused with one that says elsewhere: the rung cannot tell a read of the
+    project from a read of the host when neither is written down, and a floor
+    call that is genuinely inside the project is already pre-approved against
+    the workspace before it would ever reach here.
+    """
+    return path_arguments_in_project(args, locations, config).confined
+
+
 def _autonomous_option_id(
-    name: str, config: AcpModelConfig, options: list[JsonObject]
+    name: str,
+    config: AcpModelConfig,
+    options: list[JsonObject],
+    *,
+    args: JsonObject,
+    locations: list[JsonObject],
 ) -> str:
     """Return the option id for an autonomous permission decision, on any lane.
 
     An autonomous run has no human rung, so this IS the permission decision.
     Every lane gets the same rule: auto-approve EXACTLY the composed tools
     (``config.allowed_tools``, in both the qualified ``mcp__<server>__<tool>``
-    spelling a Claude title carries and the raw spelling Kimi carries)
-    plus the lane's native read floor; reject everything else.
+    spelling a Claude title carries and the raw spelling Kimi carries), and the
+    lane's native read floor only where the call's own path arguments lie inside
+    the bound project; reject everything else.
 
     Rejecting the uncovered case is the point. A permission request only reaches
     here for a call the CLI's own static pre-approval did not cover, and what a
@@ -533,15 +562,30 @@ def _autonomous_option_id(
     also serves index-rebuild and index-clean verbs beside its three declared
     reads. Approving the uncovered call, which is what the non-kimi lanes did,
     made the declared surface advisory and every unadvertised verb reachable.
+
+    The floor was the remaining way past that rule, because it is matched by
+    name and its names carry no scope: a title reducing to exactly ``Grep`` was
+    approved whatever host path the call named. The floor is therefore the one
+    branch that reads the ARGUMENTS as well as the name.
     """
     canonical = _canonical_tool_identity(name, config)
-    allowed = (
-        set(config.allowed_tools)
-        | {_strip_mcp_prefix(tool) for tool in config.allowed_tools}
-        | _native_read_tools(config)
-    )
-    if canonical in allowed:
+    composed = set(config.allowed_tools) | {
+        _strip_mcp_prefix(tool) for tool in config.allowed_tools
+    }
+    if canonical in composed:
         return _approval_option_id(options)
+    if canonical in _native_read_tools(config):
+        if _floor_call_is_confined(config, args, locations):
+            return _approval_option_id(options)
+        # The refused path is not logged, as above: a caller-chosen path is
+        # agent-supplied payload.
+        logger.warning(
+            "Refused a native read tool at the autonomous rung: tool=%s named no "
+            "path inside the run's bound project (bound=%s)",
+            name,
+            config.bound_project_root(),
+        )
+        return _refusal_option_id(options)
     return _refusal_option_id(options)
 
 
@@ -557,6 +601,11 @@ async def on_request_permission(
     name_value = tool_call.get("title")
     name = name_value if isinstance(name_value, str) else "unknown"
     args = lenient_json_object(tool_call.get("rawInput"))
+    # The adapter's own account of the files this call touches, read beside the
+    # raw input rather than instead of it: either half can name a path, and a
+    # scope decision that consulted only one would be decided by which half the
+    # backend happened to fill in.
+    locations = lenient_json_object_list(tool_call.get("locations"))
 
     # Diagnostic (R7: tool name + option ids only, never rawInput/payloads):
     # this handler firing means the SDK's canUseTool rung was reached — i.e. no
@@ -625,7 +674,9 @@ async def on_request_permission(
         # its CLI carries no config allowlist, and every other lane approved the
         # first offered option unconditionally, which approved an uncovered
         # mutating call exactly like a read. One rule now covers all of them.
-        option_id = _autonomous_option_id(name, config, options)
+        option_id = _autonomous_option_id(
+            name, config, options, args=args, locations=locations
+        )
 
     # M17: validate that option_id is among the offered options before returning.
     # Reject a callback-supplied id that is not in the options list to prevent
@@ -637,10 +688,10 @@ async def on_request_permission(
         # An answer naming an option that was never offered is not a decision
         # this handler can carry out, so the call is REFUSED rather than mapped
         # onto a neighbour. Substituting the first offered option was the same
-        # bug in two directions: the pinned adapter orders its options
-        # allow_always first, so a refusal whose id did not match resolved to the
-        # broadest possible grant - and any substitution answers a question the
-        # decider was not asked.
+        # bug in two directions: the pinned adapter sorts its options by kind
+        # with the approvals first, so a refusal whose id did not match resolved
+        # to a grant - and any substitution answers a question the decider was
+        # not asked.
         logger.warning(
             "Permission answer option_id=%r is not among the offered options %r; "
             "refusing the tool call rather than substituting one",

@@ -25,7 +25,10 @@ from ..cli_resolution import resolve_provider_cli_executable
 __all__ = [
     "MissingInstalledVocabularyError",
     "acp_adapter_error_kinds",
+    "acp_adapter_failure_categories",
     "acp_adapter_permission_mode_ids",
+    "acp_adapter_session_mode_source",
+    "acp_adapter_shell_tool_names",
     "acp_adapter_source",
     "acp_error_kinds",
     "codex_error_info_variants",
@@ -90,16 +93,39 @@ def acp_error_kinds() -> frozenset[str]:
     return kinds
 
 
-def _acp_adapter_bundle_path() -> Path:
-    """Return the installed ACP adapter bundle that attaches the error kind."""
+def _acp_adapter_dist() -> Path:
+    """Return the installed ACP adapter's compiled module directory."""
     return (
         _repo_root()
         / "node_modules"
         / "@agentclientprotocol"
         / "claude-agent-acp"
         / "dist"
-        / "acp-agent.js"
     )
+
+
+def _acp_adapter_bundle_path() -> Path:
+    """Return the installed ACP adapter bundle that attaches the error kind."""
+    return _acp_adapter_dist() / "acp-agent.js"
+
+
+def _acp_adapter_module_source(module: str) -> str:
+    """Return one compiled adapter module's source text.
+
+    The adapter is no longer a single bundle: the session surfaces this project
+    pins against are split across modules, and which module owns a surface is
+    itself a fact about the installed artefact. Naming the module at the call
+    site keeps that fact visible instead of hiding it behind a reader that
+    searches the whole tree and would quietly match a renamed neighbour.
+    """
+    path = _acp_adapter_dist() / module
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MissingInstalledVocabularyError(
+            "the installed @agentclientprotocol/claude-agent-acp bundle is "
+            f"unavailable at {path} (run the project's npm install)"
+        ) from exc
 
 
 def acp_adapter_source() -> str:
@@ -121,10 +147,24 @@ def acp_adapter_source() -> str:
         ) from exc
 
 
+#: The adapter module that owns the session permission-mode catalog.
+_ACP_SESSION_MODE_MODULE = "session-mode.js"
+
 _ACP_AVAILABLE_MODES = re.compile(
-    r"function buildAvailableModes\([^)]*\)\s*\{(.*?)\n\}", re.DOTALL
+    r"buildAvailableModes\([^)]*\)\s*\{(.*?)\n    \}", re.DOTALL
 )
 _ACP_MODE_ID = re.compile(r"""id:\s*["']([A-Za-z]+)["']""")
+
+
+def acp_adapter_session_mode_source() -> str:
+    """Return the installed adapter module that owns the mode catalog.
+
+    The catalog left the single bundle and now lives in its own module, so a
+    claim about which modes a session can run in is a claim about THIS file.
+    Handing it to the caller keeps the claim checkable against the artefact
+    that will run.
+    """
+    return _acp_adapter_module_source(_ACP_SESSION_MODE_MODULE)
 
 
 def acp_adapter_permission_mode_ids() -> frozenset[str]:
@@ -134,20 +174,106 @@ def acp_adapter_permission_mode_ids() -> frozenset[str]:
     client asking for one is asking for a member of THAT list. Parsed from the
     builder rather than restated, so a renamed or withdrawn mode surfaces here
     instead of at the first unattended run.
+
+    Only the ADVERTISED ids are returned. The adapter still parses a wider set
+    of mode names than it offers, and a name it parses but never advertises is
+    refused when a client asks for it, so the parser's list would overstate
+    what a session can actually be pinned to.
     """
-    builder = _ACP_AVAILABLE_MODES.search(acp_adapter_source())
+    builder = _ACP_AVAILABLE_MODES.search(acp_adapter_session_mode_source())
     if builder is None:
         raise MissingInstalledVocabularyError(
             "the installed ACP adapter no longer builds its available modes in "
-            f"{_acp_adapter_bundle_path()}; the permission-mode vocabulary moved"
+            f"{_acp_adapter_dist() / _ACP_SESSION_MODE_MODULE}; the "
+            "permission-mode vocabulary moved"
         )
     ids = frozenset(_ACP_MODE_ID.findall(builder.group(1)))
     if not ids:
         raise MissingInstalledVocabularyError(
             "the installed ACP adapter's mode builder lists no mode ids in "
-            f"{_acp_adapter_bundle_path()}"
+            f"{_acp_adapter_dist() / _ACP_SESSION_MODE_MODULE}"
         )
     return ids
+
+
+#: The adapter module that binds each tool name to the reporter that renders it.
+_ACP_REPORTER_MODULE = "tool-calls/reporters/index.js"
+
+_ACP_REPORTER_TABLE = re.compile(r"const reporters = \{(.*?)\n\};", re.DOTALL)
+_ACP_SHELL_REPORTER = re.compile(r"(\w+):\s*bash,")
+
+
+def acp_adapter_shell_tool_names() -> frozenset[str]:
+    """Return the tool names the installed adapter renders as shell commands.
+
+    The adapter binds one reporter per tool it knows, and the shell reporter is
+    shared by every tool whose call IS a command line. That binding is the
+    adapter's own answer to "which of the CLI's built-ins execute commands",
+    which is the question a terminal-less persona's deny list has to answer the
+    same way. Reading it is how a newly exposed shell tool shows up as a gap in
+    the deny list rather than as a command a denied persona can still run.
+    """
+    table = _ACP_REPORTER_TABLE.search(_acp_adapter_module_source(_ACP_REPORTER_MODULE))
+    if table is None:
+        raise MissingInstalledVocabularyError(
+            "the installed ACP adapter no longer binds tool reporters in "
+            f"{_acp_adapter_dist() / _ACP_REPORTER_MODULE}; the shell-tool "
+            "vocabulary moved"
+        )
+    names = frozenset(_ACP_SHELL_REPORTER.findall(table.group(1)))
+    if not names:
+        raise MissingInstalledVocabularyError(
+            "the installed ACP adapter's reporter table binds no tool to its "
+            f"shell reporter in {_acp_adapter_dist() / _ACP_REPORTER_MODULE}"
+        )
+    return names
+
+
+#: The adapter module that classifies a provider failure kind.
+_ACP_FAILURE_MODULE = "session-failure-extension.js"
+
+_ACP_FAILURE_SWITCH = re.compile(
+    r"function providerFailureCategory\([^)]*\)\s*\{(.*?)\n\}", re.DOTALL
+)
+_ACP_FAILURE_GROUP = re.compile(
+    r"((?:\s*case\s+(?:\"[a-z0-9_]+\"|undefined):)+)\s*\n\s*return \"([a-z_]+)\";"
+)
+_ACP_FAILURE_CASE = re.compile(r"""case\s+"([a-z0-9_]+)":""")
+
+
+def acp_adapter_failure_categories() -> dict[str, str]:
+    """Return the failure category the installed adapter assigns each error kind.
+
+    The adapter classifies every kind it forwards - which remedy the failure
+    calls for, in its own words - and that classification ships in the artefact
+    that runs. Reading it is what lets this project's own condition mapping be
+    checked against the adapter's judgement instead of against a reading of the
+    kind's NAME, which is all a hand-maintained table ever has.
+
+    The adapter's own floor category is included rather than filtered, because
+    "the adapter could not classify this either" is the one answer that
+    justifies this project resolving a kind to its own floor, and a reader that
+    dropped it would leave the caller unable to tell that case from an absent
+    one.
+    """
+    body = _ACP_FAILURE_SWITCH.search(_acp_adapter_module_source(_ACP_FAILURE_MODULE))
+    if body is None:
+        raise MissingInstalledVocabularyError(
+            "the installed ACP adapter no longer classifies provider failures in "
+            f"{_acp_adapter_dist() / _ACP_FAILURE_MODULE}; the category "
+            "vocabulary moved"
+        )
+    categories = {
+        kind: category
+        for cases, category in _ACP_FAILURE_GROUP.findall(body.group(1))
+        for kind in _ACP_FAILURE_CASE.findall(cases)
+    }
+    if not categories:
+        raise MissingInstalledVocabularyError(
+            "the installed ACP adapter's failure classifier lists no error kinds "
+            f"in {_acp_adapter_dist() / _ACP_FAILURE_MODULE}"
+        )
+    return categories
 
 
 _ACP_ADAPTER_OWN_KIND = re.compile(r"""errorKindData\(\s*["']([a-z0-9_]+)["']""")

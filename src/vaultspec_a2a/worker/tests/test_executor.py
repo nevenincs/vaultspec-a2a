@@ -639,7 +639,9 @@ class TestHandleDispatch:
 
                 # Pre-register a cancel event (as ingest would create one)
                 cancel_event = _asyncio.Event()
-                executor.aggregator._ingest._cancel_events["t-cancel-me"] = cancel_event
+                executor.aggregator._ingest._threads.cancel_events["t-cancel-me"] = (
+                    cancel_event
+                )
                 assert not cancel_event.is_set()
 
                 req = DispatchRequest(
@@ -739,7 +741,9 @@ class TestHandleDispatch:
                 ]
                 assert executor._pending_cancellations == {}
                 assert executor._terminal_arbitrations == {}
-                assert thread_id not in executor.aggregator._ingest._cancel_events
+                assert (
+                    thread_id not in executor.aggregator._ingest._threads.cancel_events
+                )
                 if outcome != ThreadStatus.CANCELLED:
                     assert (
                         len(

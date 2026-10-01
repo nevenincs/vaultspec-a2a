@@ -3,14 +3,15 @@ tags:
 - '#adr'
 - '#worker-process-architecture'
 date: 2026-03-04
-modified: '2026-09-30'
-body_hash: 'sha256:24a0a7f95ca2c7a9982537be44510573b87fc7595093a14f5b40974fee8f5465'
+modified: '2026-10-01'
+body_hash: 'sha256:4cfecf8f0c7d09182368ee7cb164bcaa8105972de54e6d2266f97741e5f022b0'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-observability-telemetry-integration-adr]]'
 - '[[2026-02-28-containerization-strategy-adr]]'
 - '[[2026-03-03-persistent-task-queue-schema-adr]]'
 - '[[2026-03-31-docs-vault-migration-research]]'
+- '[[2026-10-01-stream-resumption-adr]]'
 ---
 
 # `worker-process-architecture` adr: `adr-25` | (**status:** `accepted`)
@@ -272,3 +273,10 @@ Section 2.6 is corrected in two places.
 The section's naming of `graph.astream()` remains accurate and is the binding form.
 
 The module inventories in sections 2.5 and 6 are historical and are not maintained as a contract; the dependency-direction constraints in section 5 remain binding. Grounding: `2026-09-30-langgraph-conformance-audit`.
+
+## Amendment - stream-resumption (2026-10-01)
+
+Addition to section 2.2. The worker→gateway event relay carries no sequence authority. The
+worker's per-thread counter orders a run's events within one worker lifetime; the stream's
+identity is allocated by the gateway at fan-out and is durable across a restart of either
+process (`2026-10-01-stream-resumption-adr`).

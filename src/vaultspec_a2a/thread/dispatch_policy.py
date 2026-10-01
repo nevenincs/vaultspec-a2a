@@ -40,6 +40,12 @@ class FailureType(StrEnum):
     # this one is about the run's occupancy and nothing was reserved, so a caller
     # reconciles from run-status rather than resending under a new key.
     RUN_BUSY = "run_busy"
+    # A busy run whose continuation queue is already spent, per run or across
+    # the service. Distinct from RUN_BUSY, which is now the answer only for a
+    # run that admits no continuation at all: this one says the run would have
+    # taken the turn and has nowhere to put it, so the caller retries once the
+    # waiting turn has run rather than reconciling anything.
+    QUEUE_FULL = "queue_full"
     # A stored run whose metadata names no active project. Distinct from the
     # dispatch failures above: nothing was attempted and no worker was involved,
     # so it carries the same status as the equivalent refusal at run creation
@@ -62,14 +68,19 @@ class FailureAction:
 
 
 _POLICY: dict[str, FailureAction] = {
+    # An open circuit, a saturated worker and an unreachable one are all
+    # conditions that pass. The accepted work stays alive for the retry the
+    # recovery coordinator already scheduled, so none of them may move the run
+    # to a failed status: doing so quarantines a run that nothing is wrong with
+    # and strands work that was going to be delivered.
     FailureType.CIRCUIT_OPEN: FailureAction(
         should_mark_failed=False, is_circuit_open=True
     ),
     FailureType.AT_CAPACITY: FailureAction(
-        should_mark_failed=True, is_circuit_open=False
+        should_mark_failed=False, is_circuit_open=False
     ),
     FailureType.UNREACHABLE: FailureAction(
-        should_mark_failed=True, is_circuit_open=False
+        should_mark_failed=False, is_circuit_open=False
     ),
     FailureType.REJECTED: FailureAction(should_mark_failed=True, is_circuit_open=False),
     # The worker already holds this run's slot, so the dispatch was a duplicate

@@ -35,8 +35,6 @@ if TYPE_CHECKING:
     from ..database.models import ThreadExecutionStateModel, ThreadModel
 
 __all__ = [
-    "ListThreadsResult",
-    "ThreadSummaryData",
     "list_threads_service",
 ]
 

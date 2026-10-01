@@ -282,6 +282,7 @@ def _action_restore(name: str, yes: bool) -> None:
 # than none, because the operator stops looking.
 _CLEAR_ORDER: tuple[str, ...] = (
     "recovery_attempts",
+    "run_events",
     "artifacts",
     "permission_logs",
     "permission_requests",

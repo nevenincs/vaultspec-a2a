@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#kimi-provider'
 date: '2026-07-17'
-modified: '2026-09-05'
-body_hash: 'sha256:22a277efc44241e859ec74823503d307639ac07a24e32f77a394d008574800c4'
+modified: '2026-10-01'
+body_hash: 'sha256:c8c79bf10b7ced81dec1970588a7a9a2de0ee9590f06dea01b22d436416cc5cd'
 related:
   - '[[2026-07-17-kimi-provider-research]]'
   - '[[2026-07-17-tool-cores-adr]]'
@@ -12,6 +12,7 @@ related:
   - '[[2026-07-15-agent-harness-provisioning-adr]]'
   - '[[2026-08-02-provider-model-catalog-adr]]'
   - '[[2026-09-05-embedded-runtime-remediation-no-legacy-curation-audit]]'
+  - '[[2026-10-01-tool-permission-model-adr]]'
 ---
 # `kimi-provider` adr: `the kimi moonshot provider lane: native ACP reuse with per-backend conditioning and permission-RPC read-only enforcement` | (**status:** `accepted`)
 
@@ -112,3 +113,13 @@ The original lane-shape `MODEL_MAP` entries, additive profile values,
 `[team.profiles.kimi]` overlay, legacy environment names, and documented
 fallback language remain historical context only. Provider/model/control
 authority belongs exclusively to `2026-08-02-provider-model-catalog-adr`.
+
+## Amendment - tool-permission-model (2026-10-01)
+
+The read-only-enforcement paragraph states that the handler "auto-approves EXACTLY an
+explicit read-only allowlist - the composed `mcp__<server>__<tool>` read tools ... plus
+Kimi's native read tools". The native-floor half of that union is narrowed. A floor tool is
+approved at the rung only when the call's own path arguments lie inside the run's bound
+project; a bare native read name no longer approves a host-wide read. The allowlist itself
+is no longer assembled here but rendered from the run's compiled tool policy
+(`2026-10-01-tool-permission-model-adr`).

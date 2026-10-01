@@ -24,6 +24,7 @@ from ...control.cancel_service import (
     cancel_thread,
     raise_for_cancel_failure,
 )
+from ...control.config import settings
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
 from ...control.thread_listing import list_threads_service
@@ -44,6 +45,7 @@ from ...database import (
     resolve_session_factory,
 )
 from ...database.checkpoints import Checkpointer
+from ...database.run_event_repository import retained_high_water_mark
 from ...domain_config import domain_config
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
@@ -62,6 +64,7 @@ from ...thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
+from .._replay_writer_seat import replay_writer_seat
 from .._utils import trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -89,7 +92,11 @@ from ..schemas.gateway import (
     TopologyPosition,
 )
 from ..schemas.snapshots import ThreadStateSnapshot
-from ..thread_stream import build_thread_stream_response
+from ..thread_stream import (
+    ThreadStreamRequest,
+    build_thread_stream_response,
+    offered_resume_cursor,
+)
 from ..workspace import require_existing_workspace_root
 from .gateway import (
     _modern_frozen_disclosure,
@@ -285,9 +292,47 @@ def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
     return None
 
 
+async def _stream_is_resumable(app: Any, db: AsyncSession, run_id: str) -> bool:
+    """Whether this run's stream can be resumed from the id its frames carry.
+
+    Both halves of the posture, because either alone misreports it. The
+    switch governs the whole mechanism; the retained rows say whether THIS
+    run has a window behind it, which a run that has produced nothing - or
+    one whose window has expired - does not. The writer's unflushed ring
+    counts as retained: a resume taken in that interval reads it, so
+    answering false there would understate a capability the stream has.
+
+    Probed on the REQUEST's own session rather than through a factory of its
+    own. This is the hottest read on the gateway and it already holds a
+    pooled connection; opening a second one beside it for an additive
+    boolean halved how many of these calls an engine could serve at once,
+    and on a small pool that is the difference between answering and waiting.
+
+    A store that cannot answer reports false, which is the safe direction:
+    a client told it cannot resume loses nothing but an optimisation, while
+    one told it can and then refused has already thrown away its position.
+    """
+    if not settings.stream_replay_enabled:
+        return False
+    writer = replay_writer_seat(app)
+    if writer is not None and writer.pending(run_id):
+        return True
+    try:
+        return (await retained_high_water_mark(db, run_id)) is not None
+    except Exception:
+        logger.warning(
+            "Could not read the replay window of run %s for run-status",
+            run_id,
+            exc_info=True,
+            extra={"thread_id": run_id, "action": "run_event_replay_failed"},
+        )
+        return False
+
+
 @router.get("/runs/{run_id}", response_model=RunStatusResponse)
 async def run_status_endpoint(
     run_id: PathSafeRunId,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
@@ -335,6 +380,15 @@ async def run_status_endpoint(
         approval_request_id=snapshot.approval_request_id,
         checkpoint_id=snapshot.checkpoint_id,
         last_sequence=snapshot.last_sequence,
+        # Read beside the cursor it qualifies: last_sequence says where the
+        # run's numbering stood, and this says whether that number is one the
+        # stream will honour as a resumption point.
+        stream_resumable=await _stream_is_resumable(request.app, db, run_id),
+        # From the same capture as everything else, so a queue depth is never
+        # reported against a moment the run has already left. A run whose turn
+        # ended with a continuation waiting is RUNNING with a quiet stream,
+        # and this is the only field that distinguishes that from idle.
+        queued_messages=snapshot.queued_messages,
         repair_status=_optional_enum(RepairStatus, snapshot.repair_status),
         execution_readiness=_optional_enum(RepairStatus, snapshot.execution_readiness),
         degraded_reasons=snapshot.degraded_reasons,
@@ -374,6 +428,12 @@ async def run_status_endpoint(
 # ---------------------------------------------------------------------------
 
 
+#: Bounds the resumption cursor at the route. A cursor is a run id, a colon
+#: and a decimal, so anything longer is not one; refusing to carry it further
+#: keeps an unbounded query string out of the stream body's parser.
+MAX_RESUME_CURSOR_CHARS = 160
+
+
 @router.get("/runs/{run_id}/stream")
 async def run_stream_endpoint(
     run_id: PathSafeRunId,
@@ -389,6 +449,29 @@ async def run_stream_endpoint(
     # moment the stream needs it.
     db: AsyncSession = Depends(get_db, scope="function"),
     aggregator: EventAggregator = Depends(get_aggregator),
+    last_event_id_header: Annotated[
+        str | None,
+        Header(
+            alias="Last-Event-ID",
+            max_length=MAX_RESUME_CURSOR_CHARS,
+            description=(
+                "The SSE id this viewer last received, re-sent to resume after "
+                "the frame it names. A conforming client sends this by itself. "
+                "'-' asks for the start of whatever window is still retained."
+            ),
+        ),
+    ] = None,
+    last_event_id: Annotated[
+        str | None,
+        Query(
+            max_length=MAX_RESUME_CURSOR_CHARS,
+            description=(
+                "Resumption cursor for callers that cannot set a header; the "
+                "browser EventSource constructor is the reason this exists. "
+                "The Last-Event-ID header wins when both are supplied."
+            ),
+        ),
+    ] = None,
 ) -> StreamingResponse:
     """Re-serve the run's bounded, versioned v1 SSE progress frames.
 
@@ -399,13 +482,22 @@ async def run_stream_endpoint(
     256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames
     are non-authoritative by contract: a consumer reconciles run state from
     run-status, never from a relay frame.
+
+    A reconnecting viewer may offer the id it last received, and the retained
+    frames after it lead the live stream. Retention does not make those frames
+    authoritative either: a replayed frame is the same droppable progress it
+    was live.
     """
     return await build_thread_stream_response(
+        ThreadStreamRequest(
+            thread_id=run_id,
+            aggregator=aggregator,
+            session_factory=resolve_session_factory(request.app.state),
+            resume_cursor=offered_resume_cursor(last_event_id_header, last_event_id),
+            replay_writer=replay_writer_seat(request.app),
+            not_found_detail="Run not found",
+        ),
         db=db,
-        session_factory=resolve_session_factory(request.app.state),
-        aggregator=aggregator,
-        thread_id=run_id,
-        not_found_detail="Run not found",
     )
 
 
@@ -704,6 +796,11 @@ async def run_delete_endpoint(
             detail="Run deletion is in progress; retry to complete cleanup.",
         )
     aggregator.clear_thread_state(run_id)
+    # The run's thread is gone, so a progress frame still held for it can
+    # never become a row: its insert would reference a thread that no longer
+    # exists. Held rather than dropped, it refused this gateway's every later
+    # write of that run and offered a deleted run's frames to a resume.
+    aggregator.discard_run_replay(run_id)
     if result.abandoned_kinds:
         body = RunDeleteResponse(
             run_id=run_id,

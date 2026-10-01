@@ -251,7 +251,7 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
         # Each floor name carries the workspace it may read, in the rule syntax
         # the tool's own permission grammar admits; the SDK gives Grep no path
         # pattern at all, so it is withheld rather than approved everywhere.
-        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Glob(/tmp/ws/**)"]
+        assert wired.allowed_tools == ["Read(//tmp/ws/**)", "Glob(//tmp/ws/**)"]
         assert all(NATIVE_TOOL_EGRESS[name] is False for name in NATIVE_READ_TOOL_NAMES)
 
 
@@ -482,8 +482,8 @@ class TestEgressingBuiltinsMustStateTheirBounds:
         )
         assert isinstance(wired, AcpChatModel)
         assert wired.allowed_tools == [
-            "Read(/tmp/ws/**)",
-            "Glob(/tmp/ws/**)",
+            "Read(//tmp/ws/**)",
+            "Glob(//tmp/ws/**)",
             "WebSearch",
             "WebFetch",
         ]

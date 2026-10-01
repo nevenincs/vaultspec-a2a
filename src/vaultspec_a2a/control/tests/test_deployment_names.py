@@ -11,10 +11,14 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+from typing import TYPE_CHECKING, Any, cast
 
 from ...control.config import Settings
 from ...control.infra_config import InfraConfig
 from ...control.settings_base import field_env_names
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _SERVICE = pathlib.Path(__file__).resolve().parents[3].parent / "service"
 _NAME = re.compile(r"\b(VAULTSPEC_[A-Z0-9_]+)\b")
@@ -238,3 +242,35 @@ def test_no_compose_file_pins_a_served_app_back_to_loopback() -> None:
     ]
 
     assert pinned == []
+
+
+def test_every_served_healthcheck_probes_the_container_by_its_own_hostname() -> None:
+    """A loopback probe passes a server that only loopback can reach.
+
+    Docker runs a healthcheck inside the container, where ``localhost`` reaches a
+    server no peer container can. A gateway that regressed to a loopback bind
+    therefore stayed healthy while it refused the worker's relay. The container's
+    own hostname resolves to the address its peers use, so the probe fails exactly
+    when they would.
+    """
+    import yaml
+
+    probes: list[tuple[str, str, str]] = []
+    for path in _compose_files():
+        composed = cast(
+            "Mapping[str, Mapping[str, Mapping[str, Any]]]",
+            yaml.safe_load(path.read_text(encoding="utf-8")),
+        )
+        for name in _SHUTDOWN_SERVICES:
+            service: Mapping[str, Any] = composed.get("services", {}).get(name) or {}
+            check = service.get("healthcheck")
+            if check is None:
+                continue
+            probes.append((path.name, name, " ".join(map(str, check["test"]))))
+
+    assert len(probes) >= 2 * len(_SHUTDOWN_SERVICES), probes
+    loopback = [
+        probe for probe in probes if any(h in probe[2] for h in _LOOPBACK_HOSTS)
+    ]
+    assert loopback == []
+    assert all("socket.gethostname()" in probe[2] for probe in probes), probes

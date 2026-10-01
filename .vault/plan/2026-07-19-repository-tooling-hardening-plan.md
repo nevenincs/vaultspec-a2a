@@ -3,13 +3,13 @@ tags:
   - '#plan'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-08-02'
-body_hash: 'sha256:db3031162571fe37b70822915230eea5c61ca8b51086668aa7eb0b0bbb4ca010'
 tier: L3
 related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
+modified: '2026-10-01'
+body_hash: 'sha256:92524fed916d26d176ba11b44f3912d224457328e642813317454e030d3246ea'
 ---
 
 # `repository-tooling-hardening` plan
@@ -136,10 +136,10 @@ Repair production typing by bounded domain with no suppressions or compatibility
 
 - [x] `W06.P12.S24` - Repair strict types in the control and repository production domains.; `src/vaultspec_a2a/control, src/vaultspec_a2a/control/repositories, src/vaultspec_a2a/authoring/discovery.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/desktop_tests/test_worker_health_decode_contract.py`.
 - [x] `W06.P12.S25` - Repair strict types in the provider and ACP production domains.; `src/vaultspec_a2a/providers, src/vaultspec_a2a/desktop/profile.py, src/vaultspec_a2a/desktop/tests/test_profile.py, src/vaultspec_a2a/desktop_tests/test_profile_paths.py, src/vaultspec_a2a/cli/tests/test_desktop_serve.py, src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`.
-- [ ] `W06.P12.S26` - Repair strict types in provider/service tests and the bounded callback-observability contracts they require after production contracts stabilize.; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests, src/vaultspec_a2a/conftest.py, src/vaultspec_a2a/tests/test_prerequisite_rule.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/nodes/diverge.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/tests/nodes/test_diverge.py`.
-- [ ] `W06.P12.S27` - Repair strict types in lifecycle test helpers and their production contracts.; `src/vaultspec_a2a/lifecycle, src/vaultspec_a2a/lifecycle/tests`.
-- [ ] `W06.P12.S28` - Repair strict types in graph, authoring, worker, and streaming domains.; `src/vaultspec_a2a/graph, src/vaultspec_a2a/authoring, src/vaultspec_a2a/worker, src/vaultspec_a2a/streaming`.
-- [ ] `W06.P12.S47` - Resolve every residual Ty and Basedpyright diagnostic across the canonical Python roots before any strict-type graduation.; `src, dev, docs, scripts, packaging`.
+- [x] `W06.P12.S26` - Repair strict types in provider/service tests and the bounded callback-observability contracts they require after production contracts stabilize.; `src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests, src/vaultspec_a2a/conftest.py, src/vaultspec_a2a/tests/test_prerequisite_rule.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/nodes/diverge.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/tests/nodes/test_diverge.py`.
+- [x] `W06.P12.S27` - Repair strict types in lifecycle test helpers and their production contracts.; `src/vaultspec_a2a/lifecycle, src/vaultspec_a2a/lifecycle/tests`.
+- [x] `W06.P12.S28` - Repair strict types in graph, authoring, worker, and streaming domains.; `src/vaultspec_a2a/graph, src/vaultspec_a2a/authoring, src/vaultspec_a2a/worker, src/vaultspec_a2a/streaming`.
+- [x] `W06.P12.S47` - Resolve every residual Ty and Basedpyright diagnostic across the canonical Python roots before any strict-type graduation.; `src, dev, docs, scripts, packaging`.
 
 ## Wave `W07` - structural complexity remediation
 
@@ -149,9 +149,9 @@ Reduce production complexity, shape, nesting, and module-size debt at the accept
 
 Decompose provider, streaming, API, and control hotspots while preserving their real behavior.
 
-- [ ] `W07.P13.S29` - Decompose ProviderFactory construction paths below the configured complexity and shape thresholds.; `src/vaultspec_a2a/providers/factory.py`.
-- [ ] `W07.P13.S30` - Decompose ACP composition, protocol, RPC, and chat-model hotspots without changing provider behavior.; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
-- [ ] `W07.P13.S31` - Decompose streaming transformation and interrupt emission hotspots with stream regression evidence.; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/ingest.py`.
+- [x] `W07.P13.S29` - Decompose ProviderFactory construction paths below the configured complexity and shape thresholds.; `src/vaultspec_a2a/providers/factory.py`.
+- [x] `W07.P13.S30` - Decompose ACP composition, protocol, RPC, and chat-model hotspots without changing provider behavior.; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [x] `W07.P13.S31` - Decompose streaming transformation and interrupt emission hotspots with stream regression evidence.; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/ingest.py`.
 - [ ] `W07.P13.S32` - Decompose API gateway and event-adapter hotspots while preserving authenticated edge behavior.; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/event_adapter.py`.
 - [ ] `W07.P13.S33` - Decompose control permission, dispatch, projection, snapshot, and worker-management hotspots.; `src/vaultspec_a2a/control`.
 
@@ -159,9 +159,9 @@ Decompose provider, streaming, API, and control hotspots while preserving their 
 
 Finish graph, lifecycle, desktop, and utility structural debt at the configured thresholds.
 
-- [ ] `W07.P14.S34` - Decompose graph compiler and node hotspots while retaining compiled-topology evidence.; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes`.
-- [ ] `W07.P14.S35` - Decompose lifecycle discovery and singleton hotspots without weakening ownership checks.; `src/vaultspec_a2a/lifecycle`.
-- [ ] `W07.P14.S36` - Decompose desktop filesystem and process-utility hotspots with real-process regression evidence.; `src/vaultspec_a2a/desktop, src/vaultspec_a2a/utils/process.py`.
+- [x] `W07.P14.S34` - Decompose graph compiler and node hotspots while retaining compiled-topology evidence.; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes`.
+- [x] `W07.P14.S35` - Decompose lifecycle discovery and singleton hotspots without weakening ownership checks.; `src/vaultspec_a2a/lifecycle`.
+- [x] `W07.P14.S36` - Decompose desktop filesystem and process-utility hotspots with real-process regression evidence.; `src/vaultspec_a2a/desktop, src/vaultspec_a2a/utils/process.py`.
 - [ ] `W07.P14.S48` - Resolve every residual production complexity, shape, nesting, and size finding before any structural-sentinel graduation.; `src/vaultspec_a2a`.
 
 ## Wave `W08` - evidence-bound graduation and audit
@@ -172,14 +172,14 @@ Promote only verified zero-debt sentinels atomically and complete the required r
 
 Independently prove and atomically promote each deterministic strict sentinel only after two clean locked runs at unchanged scope and threshold on one clean candidate commit, no new exclusion, suppression, baseline, or duplication, a passing just ci, applicable runtime evidence, and a passing anti-drift guard.
 
-- [ ] `W08.P15.S49` - Review and classify production JSCPD findings before promotion to prove no deterministic sentinel reaches zero through duplicated code.; `.vault/audit, .vault/exec`.
-- [ ] `W08.P15.S37` - Prove cross-platform Ty is zero and atomically promote type-platforms into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
-- [ ] `W08.P15.S38` - Prove Basedpyright strict is zero and atomically promote type-strict into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [x] `W08.P15.S49` - Review and classify production JSCPD findings before promotion to prove no deterministic sentinel reaches zero through duplicated code.; `.vault/audit, .vault/exec`.
+- [x] `W08.P15.S37` - Prove cross-platform Ty is zero and atomically promote type-platforms into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [x] `W08.P15.S38` - Prove Basedpyright strict is zero and atomically promote type-strict into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S39` - Prove cognitive complexity is zero on the corrected production scope and atomically promote complexity.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S40` - Prove cyclomatic complexity is zero and atomically promote cyclomatic.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S41` - Prove module and function shape is zero and atomically promote shape.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S42` - Prove function limits are zero and atomically promote limits.; `dev/toolchain.py, .github/workflows/test.yml`.
-- [ ] `W08.P15.S43` - Prove nesting is zero and atomically promote nesting.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [x] `W08.P15.S43` - Prove nesting is zero and atomically promote nesting.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S44` - Prove size and design limits are zero and atomically promote size.; `dev/toolchain.py, .github/workflows/test.yml`.
 
 ### Phase `W08.P16` - closure and audit

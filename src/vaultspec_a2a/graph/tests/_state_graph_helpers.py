@@ -54,7 +54,7 @@ class _TypedBuilder(Protocol):
 
 
 def add_test_node(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     name: str,
     node: Callable[..., Any],
     *,
@@ -68,7 +68,7 @@ def add_test_node(
 
 
 def compile_test_graph(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     *,
     checkpointer: BaseCheckpointSaver[str] | bool | None = None,
     interrupt_before: list[str] | None = None,

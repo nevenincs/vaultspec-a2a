@@ -25,6 +25,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from ...api.app import _initialize_gateway_database
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...testing import settings_override
 from ...thread.state import TeamState
 from .. import close_db
@@ -42,10 +43,10 @@ def _graph(saver: Any) -> Any:
         return {"messages": [AIMessage(content="answered")]}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
-    builder.add_node("answer", answer)
+    add_test_node(builder, "answer", answer)
     builder.add_edge(START, "answer")
     builder.add_edge("answer", END)
-    return builder.compile(checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 def _legacy_input(thread_id: str) -> dict[str, Any]:

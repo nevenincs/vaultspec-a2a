@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#team-composition-topology'
 date: 2026-02-27
-modified: '2026-09-30'
-body_hash: 'sha256:f575bd3adec6ae5e98d5d72228f8ab007dbe0121756a8671c5c7eca3c6926d3f'
+modified: '2026-10-01'
+body_hash: 'sha256:338bbe22976a9e81d41fc6324a8b090d347595dea0f5272eb43de19c5ef9b37e'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-02-26-orchestration-topology-pipeline-adr]]'
@@ -12,6 +12,7 @@ related:
   - '[[2026-02-26-frontend-backend-contract-adr]]'
   - '[[2026-02-27-agent-definition-schema-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'
+  - '[[2026-10-01-tool-permission-model-adr]]'
 ---
 
 # `team-composition-topology` adr: `adr-11` | (**status:** `accepted`)
@@ -621,3 +622,14 @@ A null `step_timeout_seconds` does not mean "no timeout". Compilation requires a
 `recursion_limit` is not passed to `compile()`. The accepted dispatch request supplies the run's recursion budget, and the preset value serves only as the ceiling it is clamped to (`src/vaultspec_a2a/worker/executor.py`, `src/vaultspec_a2a/ipc/schemas.py`). The frozen-executable-graph authority in `2026-08-02-control-action-leases-adr` owns that rule, and this record defers to it. A star preset whose recursion limit cannot cover its blocked-FINISH budget is refused at compile time; `2026-03-03-contextual-anchoring-graph-lifecycle-adr` owns that budget.
 
 `team.topology.type` admits a fourth value, `research_adr`, whose structure and gates are owned by `2026-07-14-adr-authoring-orchestration-adr` (`src/vaultspec_a2a/team/team_config.py`). This record continues to own the config mechanics for all four. Grounding: `2026-09-30-langgraph-conformance-audit`.
+
+## Amendment - tool-permission-model (2026-10-01)
+
+Section 2.7 (already marked superseded for its `interrupt_before` assembly) states that
+`require_approval_for` "is retained in the schema for forward-compatibility but is not
+currently consumed" and "may be used in a future fine-grained per-tool approval
+implementation", and that "when `autonomous=True`, the callback auto-approves". The future
+implementation is `2026-10-01-tool-permission-model-adr`; the field is consumed by the run's
+compiled tool policy. The auto-approve sentence is also corrected: under autonomy no
+callback is wired at all, and the provider rung decides, refusing every call the policy does
+not cover.

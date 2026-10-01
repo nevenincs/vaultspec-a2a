@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from pydantic import TypeAdapter, ValidationError
@@ -51,6 +52,8 @@ from ._event_application import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..database.checkpoints import Checkpointer
@@ -59,12 +62,12 @@ if TYPE_CHECKING:
     from .drain import DrainGate
 
 __all__ = [
+    "CheckpointPruneRegistry",
     "_handle_execution_state_event",
     "_handle_permission_event",
     "_handle_progress_event",
     "_handle_terminal_event",
     "relay_event",
-    "settle_pending_checkpoint_prunes",
 ]
 
 logger = logging.getLogger(__name__)
@@ -87,11 +90,17 @@ _RUN_LEASE_METADATA_KEY = "run_lease"
 # Strong references to in-flight settlement callbacks so a fire-and-forget task is
 # not garbage-collected before it completes; each removes itself when done.
 _settlement_tasks: set[asyncio.Task[None]] = set()
-# The same for settled-history prunes, kept apart because shutdown waits for these
-# before the checkpointer they delete through is closed.
-_prune_tasks: set[asyncio.Task[None]] = set()
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
+
+
+#: Fans out the terminal frame the relay is holding for this event.
+#:
+#: Synchronous because the fan-out is: it enqueues an already-projected body on
+#: each subscriber's queue and does no I/O. The relay hands it over instead of
+#: calling it, so the frame crosses to clients only on the side of the
+#: settlement decision where the run really is ending.
+type _TerminalPublisher = Callable[[], None]
 
 
 class _TerminalEventOptions(TypedDict, total=False):
@@ -99,6 +108,13 @@ class _TerminalEventOptions(TypedDict, total=False):
     session_factory: async_sessionmaker[AsyncSession] | None
     checkpointer: Checkpointer | None
     drain_gate: DrainGate | None
+    prune_registry: CheckpointPruneRegistry | None
+    publish_terminal: _TerminalPublisher | None
+
+
+#: Read off the declaration rather than restated, so a new option cannot be
+#: accepted by one handler and rejected as unknown by the other.
+_RELAY_OPTIONS = frozenset(_TerminalEventOptions.__optional_keys__)
 
 
 def _session_factory(
@@ -136,7 +152,6 @@ async def _persist_proven_cancellation(
         elect_thread_status,
         expire_pending_permission_requests,
         get_control_action_by_dispatch_id,
-        get_thread,
         mark_control_action_applied,
         set_thread_approval_state,
         set_thread_repair_state,
@@ -144,10 +159,17 @@ async def _persist_proven_cancellation(
         thread_write_expectation,
     )
     from ..thread.enums import ControlActionResultStatus, ControlActionType
+    from .repositories.continuation_queue import (
+        lock_run_for_continuation_decision,
+        refuse_queued_continuations,
+    )
 
     async with factory() as db:
         await begin_write_transaction(db)
-        thread = await get_thread(db, thread_id)
+        # Locked against the same row an admission locks, so a continuation
+        # offered while this settles either lands before it and is refused
+        # below, or reads the cancelled status and is refused there.
+        thread = await lock_run_for_continuation_decision(db, thread_id=thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.dispatch_id
         )
@@ -180,6 +202,12 @@ async def _persist_proven_cancellation(
             return False
         if last_sequence is not None:
             thread.last_sequence = last_sequence
+        await refuse_queued_continuations(
+            db,
+            thread_id=thread_id,
+            refused_at=_time_now_utc(),
+            reason="the run was cancelled",
+        )
         await expire_pending_permission_requests(db, thread_id=thread_id)
         await set_thread_approval_state(
             db,
@@ -229,7 +257,6 @@ async def _persist_proven_failure(
         elect_thread_status,
         expire_pending_permission_requests,
         get_control_action_by_dispatch_id,
-        get_thread,
         mark_control_action_applied,
         set_thread_approval_state,
         set_thread_repair_state,
@@ -238,10 +265,17 @@ async def _persist_proven_failure(
     )
     from ..thread.enums import NON_ACTIVE_STATUSES
     from .dispatch_receipts import validate_current_graph_receipt
+    from .repositories.continuation_queue import (
+        lock_run_for_continuation_decision,
+        refuse_queued_continuations,
+    )
 
     async with factory() as db:
         await begin_write_transaction(db)
-        thread = await get_thread(db, thread_id)
+        # Locked against the same row an admission locks, so a continuation
+        # offered while this settles either lands before it and is refused
+        # below, or reads the failed status and is refused there.
+        thread = await lock_run_for_continuation_decision(db, thread_id=thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.action.dispatch_id
         )
@@ -273,6 +307,12 @@ async def _persist_proven_failure(
         if last_sequence is not None:
             thread.last_sequence = last_sequence
         await mark_control_action_applied(db, action.id)
+        await refuse_queued_continuations(
+            db,
+            thread_id=thread_id,
+            refused_at=_time_now_utc(),
+            reason="the run's turn failed",
+        )
         await expire_pending_permission_requests(db, thread_id=thread_id)
         await set_thread_approval_state(
             db,
@@ -400,19 +440,20 @@ async def _confirm_completed_terminal(
     factory: async_sessionmaker[AsyncSession] | None,
     checkpointer: Checkpointer | None,
     last_sequence: int | None,
-) -> bool:
+) -> _TerminalDisposition:
     if factory is None:
         _skip_without_database("the completion reconciliation", thread_id)
-        return False
+        return _TerminalDisposition.REFUSED
     if checkpointer is None:
         logger.warning(
             "Refusing completion for %s: no checkpointer is available",
             thread_id,
             extra={"thread_id": thread_id, "action": "completion_proof_unavailable"},
         )
-        return False
+        return _TerminalDisposition.REFUSED
     from ..domain_config import domain_config
     from .recovery_authority import (
+        CONTINUATION_PROMOTED,
         RecoveryRequest,
         RecoveryTrigger,
         reconcile_run_checkpoint,
@@ -429,6 +470,17 @@ async def _confirm_completed_terminal(
                 last_sequence=last_sequence,
             ),
         )
+    if observation.condition == CONTINUATION_PROMOTED:
+        # The turn ended and the run did not. Nothing terminal may follow from
+        # this event: no settlement, no history prune, no release of the run's
+        # admission slot, and no reset of the numbering the next turn
+        # continues from.
+        logger.info(
+            "Turn boundary on %s: a queued continuation now owns the run",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "continuation_promoted"},
+        )
+        return _TerminalDisposition.PROMOTED
     if observation.status is not ThreadStatus.COMPLETED:
         logger.warning(
             "Refusing unproven completion for %s: %s",
@@ -440,8 +492,8 @@ async def _confirm_completed_terminal(
                 "action": "unproven_completion",
             },
         )
-        return False
-    return True
+        return _TerminalDisposition.REFUSED
+    return _TerminalDisposition.SETTLED
 
 
 async def _confirm_cancelled_terminal(
@@ -591,6 +643,20 @@ def _validated_terminal_status(
     return status
 
 
+class _TerminalDisposition(StrEnum):
+    """What a proven terminal event did to the run that emitted it.
+
+    Three outcomes, not two. ``PROMOTED`` is the one the deferred-terminal
+    model adds: the evidence was proven and accepted, and the run did not
+    settle because a continuation was waiting for it. Collapsing it into a
+    refusal would log every honest turn boundary as an unproven completion.
+    """
+
+    SETTLED = "settled"
+    PROMOTED = "promoted"
+    REFUSED = "refused"
+
+
 async def _accept_terminal_event(
     thread_id: str,
     payload: dict[str, object],
@@ -598,17 +664,32 @@ async def _accept_terminal_event(
     context: tuple[
         async_sessionmaker[AsyncSession] | None, int | None, Checkpointer | None
     ],
-) -> bool:
+) -> _TerminalDisposition:
     factory, last_sequence, checkpointer = context
     if terminal_status is ThreadStatus.COMPLETED:
         return await _confirm_completed_terminal(
             thread_id, factory, checkpointer, last_sequence
         )
     if terminal_status is ThreadStatus.CANCELLED:
-        return await _confirm_cancelled_terminal(
-            thread_id, payload.get("cancellation_evidence"), factory, last_sequence
+        return _settled_or_refused(
+            await _confirm_cancelled_terminal(
+                thread_id, payload.get("cancellation_evidence"), factory, last_sequence
+            )
         )
-    return await _confirm_failed_terminal(thread_id, payload, factory, last_sequence)
+    return _settled_or_refused(
+        await _confirm_failed_terminal(thread_id, payload, factory, last_sequence)
+    )
+
+
+def _settled_or_refused(accepted: bool) -> _TerminalDisposition:
+    """Classify the two terminals a continuation never defers.
+
+    Cancellation and failure settle from their own durable evidence rather
+    than from a proven checkpoint, so neither is the turn boundary a
+    continuation waits behind: a cancelled run is leaving, and a failed turn
+    has no state for a next turn to continue from.
+    """
+    return _TerminalDisposition.SETTLED if accepted else _TerminalDisposition.REFUSED
 
 
 async def _prune_settled_history(
@@ -639,25 +720,58 @@ async def _prune_settled_history(
         )
 
 
-def _schedule_settled_history_prune(
-    thread_id: str, checkpointer: Checkpointer | None
-) -> None:
-    """Prune a settled run's history without holding up the relay.
+class CheckpointPruneRegistry:
+    """The settled-history prunes one application started and must wait for.
 
-    The relay applies a thread's events in order, so a prune awaited here would
-    delay every later event of every run behind one run's delete.
+    Owned by the application whose lifespan closes the checkpointer these
+    prunes delete through: that owner is the only one that knows when waiting
+    for them is over. Held as process state, a shutting-down application
+    waited on another application's deletes against a store it does not close,
+    and could not tell which of the pending work was its own.
     """
-    if checkpointer is None:
+
+    __slots__ = ("_tasks",)
+
+    def __init__(self) -> None:
+        self._tasks: set[asyncio.Task[None]] = set()
+
+    def schedule(self, thread_id: str, checkpointer: Checkpointer | None) -> None:
+        """Prune a settled run's history without holding up the relay.
+
+        The relay applies a thread's events in order, so a prune awaited there
+        would delay every later event of every run behind one run's delete.
+        """
+        if checkpointer is None:
+            return
+        task = asyncio.create_task(_prune_settled_history(thread_id, checkpointer))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def settle(self) -> None:
+        """Wait for every prune already started to finish."""
+        while self._tasks:
+            await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+
+
+def _publish_terminal(thread_id: str, publish: _TerminalPublisher | None) -> None:
+    """Release the held terminal frame to this run's viewers.
+
+    A failure here is logged and nothing more. By the time it can happen the
+    settlement is already durable, so raising would abandon the release below
+    and leave the finished run holding its admission slot - a worse outcome
+    than one viewer missing a frame it can still resume for.
+    """
+    if publish is None:
         return
-    task = asyncio.create_task(_prune_settled_history(thread_id, checkpointer))
-    _prune_tasks.add(task)
-    task.add_done_callback(_prune_tasks.discard)
-
-
-async def settle_pending_checkpoint_prunes() -> None:
-    """Wait for every settled-history prune already started to finish."""
-    while _prune_tasks:
-        await asyncio.gather(*tuple(_prune_tasks), return_exceptions=True)
+    try:
+        publish()
+    except Exception:
+        logger.warning(
+            "Could not fan out the terminal frame of %s",
+            thread_id,
+            exc_info=True,
+            extra={"thread_id": thread_id, "action": "terminal_frame_not_published"},
+        )
 
 
 async def _handle_terminal_event(
@@ -665,10 +779,18 @@ async def _handle_terminal_event(
     payload: dict[str, object],
     **options: Unpack[_TerminalEventOptions],
 ) -> None:
-    """Settle a proven terminal event, then release drain and aggregator state."""
-    unknown = set(options).difference(
-        {"aggregator", "session_factory", "checkpointer", "drain_gate"}
-    )
+    """Settle a proven terminal event, then release drain and aggregator state.
+
+    Also the gate on the client-visible terminal frame. The relay hands the
+    frame over as *publish_terminal* rather than fanning it out itself,
+    because only the settlement below knows whether this terminal ends the
+    RUN or only the TURN: a run with a continuation waiting takes the next
+    turn instead of ending, and a terminal shown there is a lie a viewer
+    cannot take back. Every other outcome publishes exactly where it always
+    did - in front of the prune, the drain release and the aggregator purge,
+    which is what keeps the frame deliverable at all.
+    """
+    unknown = set(options).difference(_RELAY_OPTIONS)
     if unknown:
         unexpected = next(iter(unknown))
         raise TypeError(
@@ -679,6 +801,8 @@ async def _handle_terminal_event(
     session_factory = options.get("session_factory")
     checkpointer = options.get("checkpointer")
     drain_gate = options.get("drain_gate")
+    prune_registry = options.get("prune_registry")
+    publish = options.get("publish_terminal")
     if not is_terminal_event(payload):
         return
     # Capture before the durable write and before aggregator state is pruned.
@@ -687,15 +811,28 @@ async def _handle_terminal_event(
     )
     terminal_status = _validated_terminal_status(thread_id, payload)
     if terminal_status is None:
+        # Nothing was decided, so nothing is withheld: an unreadable terminal
+        # reaches viewers exactly as it did before this gate existed.
+        _publish_terminal(thread_id, publish)
         return
     factory = _session_factory(session_factory)
-    accepted = await _accept_terminal_event(
+    disposition = await _accept_terminal_event(
         thread_id, payload, terminal_status, (factory, last_sequence, checkpointer)
     )
-    if not accepted or factory is None:
+    if disposition is _TerminalDisposition.PROMOTED:
+        # The turn ended, the run did not. The frame is dropped rather than
+        # deferred: it describes a run that is still going, it would take a
+        # number the next turn's frames need, and the replay log would then
+        # hand it to every reconnect for the rest of the run.
+        return
+    _publish_terminal(thread_id, publish)
+    if disposition is not _TerminalDisposition.SETTLED or factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
-    _schedule_settled_history_prune(thread_id, checkpointer)
+    if prune_registry is not None:
+        # No registry, no prune: a delete nobody waits for outlives the
+        # checkpointer it writes through.
+        prune_registry.schedule(thread_id, checkpointer)
     if drain_gate is not None:
         await drain_gate.release(thread_id)
     if aggregator is not None:
@@ -992,10 +1129,13 @@ async def relay_event(
     This function handles the DB-side event processing:
     permission journal, progress inference, execution state persistence,
     and terminal status updates with aggregator GC.
+
+    A terminal frame is the one exception to the caller owning the fan-out.
+    Whether it may be shown at all is this plane's answer, so the caller hands
+    it over as *publish_terminal* and :func:`_handle_terminal_event` releases
+    it; see that function for why.
     """
-    unknown = set(options).difference(
-        {"aggregator", "session_factory", "checkpointer", "drain_gate"}
-    )
+    unknown = set(options).difference(_RELAY_OPTIONS)
     if unknown:
         unexpected = next(iter(unknown))
         raise TypeError(
@@ -1005,6 +1145,7 @@ async def relay_event(
     session_factory = options.get("session_factory")
     checkpointer = options.get("checkpointer")
     drain_gate = options.get("drain_gate")
+    prune_registry = options.get("prune_registry")
     await _handle_permission_event(
         thread_id,
         payload,
@@ -1031,4 +1172,6 @@ async def relay_event(
         session_factory=session_factory,
         checkpointer=checkpointer,
         drain_gate=drain_gate,
+        prune_registry=prune_registry,
+        publish_terminal=options.get("publish_terminal"),
     )

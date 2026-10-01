@@ -217,6 +217,10 @@ class ControlActionResultStatus(StrEnum):
 
     ACCEPTED_NOT_APPLIED = "accepted_not_applied"
     APPLIED = "applied"
+    # Reserved, not yet dispatchable: the run is busy with an earlier turn, so
+    # this action holds a queue position and owns no write authority until the
+    # predecessor's terminal checkpoint evidence promotes it.
+    QUEUED = "queued"
     REJECTED_INVALID_STATE = "rejected_invalid_state"
     SUPERSEDED = "superseded"
     DUPLICATE = "duplicate"

@@ -41,7 +41,7 @@ from ..control.clarification_service import (
 from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
-from ..control.event_handlers import settle_pending_checkpoint_prunes
+from ..control.event_handlers import CheckpointPruneRegistry
 from ..control.health import (
     FullHealthRuntime,
     assemble_health_status,
@@ -60,6 +60,7 @@ from ..database import (
 )
 from ..database.checkpoints import Checkpointer, open_checkpointer
 from ..database.reconciliation import reconcile_threads_on_startup
+from ..database.run_event_retention import sweep_replay_log_periodically
 from ..domain_config import domain_config
 from ..lifecycle.discovery import (
     HEARTBEAT_REFRESH_SECONDS,
@@ -104,6 +105,13 @@ logger = logging.getLogger(__name__)
 # emitting nothing never releases itself; the teardown that follows cancels and
 # reaps what is left.
 _DRAIN_QUIESCENCE_TIMEOUT_SECONDS = 5.0
+
+# Floor on the prune phase, kept even when the shared shutdown budget is
+# already spent. Skipping the wait does not stop an in-flight prune: it leaves
+# it deleting through a checkpointer the lines below then close under it. The
+# prunes themselves are each bounded by the checkpoint read budget, so the
+# floor is a short wait for work that is already ending.
+_PRUNE_SETTLE_MINIMUM_SECONDS = 2.0
 
 # The health probe's database dependency, bound once at module scope. The
 # session is created lazily per request and opens no connection unless the
@@ -410,6 +418,24 @@ def _start_gateway_discovery(
     return discovery_path, discovery_pid, serve_record, discovery_task
 
 
+async def _settle_checkpoint_prunes(app: FastAPI, deadline: ShutdownDeadline) -> None:
+    """Wait for this app's in-flight checkpoint prunes, budget spent or not.
+
+    Only the prunes this app started: another app in the same process owns its
+    own, and waiting for those here would hold this shutdown open on a store
+    this app does not close.
+    """
+    prunes = getattr(app.state, "checkpoint_prunes", None)
+    if prunes is None:
+        return
+    await finish_before(
+        prunes.settle(),
+        deadline,
+        phase="checkpoint prunes",
+        minimum=_PRUNE_SETTLE_MINIMUM_SECONDS,
+    )
+
+
 async def _shutdown_observability(deadline: ShutdownDeadline) -> None:
     provider = trace.get_tracer_provider()
     if isinstance(provider, SdkTracerProvider):
@@ -427,7 +453,10 @@ async def _shutdown_observability(deadline: ShutdownDeadline) -> None:
 
 _WorkerShutdownResources = tuple[httpx.AsyncClient, LazyWorkerSpawner, EventAggregator]
 _GatewayShutdownTasks = tuple[
-    asyncio.Task[None], asyncio.Task[None], asyncio.Task[None] | None
+    asyncio.Task[None],
+    asyncio.Task[None],
+    asyncio.Task[None] | None,
+    asyncio.Task[None] | None,
 ]
 _DiscoveryRuntime = tuple[Path, int, ProcRecord | None, asyncio.Task[None]]
 
@@ -439,7 +468,12 @@ async def _shutdown_gateway(
     discovery: _DiscoveryRuntime,
 ) -> None:
     worker_client, worker_spawner, aggregator = workers
-    watchdog_task, reconcile_task, verdict_subscriber_task = tasks
+    (
+        watchdog_task,
+        reconcile_task,
+        verdict_subscriber_task,
+        replay_retention_task,
+    ) = tasks
     discovery_path, discovery_pid, serve_record, discovery_task = discovery
     # Close run admission first so the gateway admits no new run while it
     # drains and reaps its owned worker and run descendants below, then wait
@@ -480,6 +514,18 @@ async def _shutdown_gateway(
             asyncio.gather(verdict_subscriber_task, return_exceptions=True),
             deadline,
             phase="verdict subscriber",
+            reserve=4.0,
+        )
+
+    if replay_retention_task is not None:
+        # Cancelled rather than drained: a sweep in flight deletes rows the
+        # next start would delete anyway, so there is nothing here worth
+        # holding a shutdown open for.
+        replay_retention_task.cancel()
+        await finish_before(
+            asyncio.gather(replay_retention_task, return_exceptions=True),
+            deadline,
+            phase="replay retention",
             reserve=4.0,
         )
 
@@ -529,9 +575,7 @@ async def _shutdown_gateway(
     )
     await finish_before(worker_client.aclose(), deadline, phase="worker HTTP client")
     await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
-    await finish_before(
-        settle_pending_checkpoint_prunes(), deadline, phase="checkpoint prunes"
-    )
+    await _settle_checkpoint_prunes(app, deadline)
     await finish_before(close_db(), deadline, phase="database")
 
     await _shutdown_observability(deadline)
@@ -616,6 +660,30 @@ def _start_verdict_subscriber(
     )
     task = asyncio.create_task(verdict_subscriber.run())
     logger.info("Authoring verdict subscriber enabled")
+    return task
+
+
+def _start_replay_retention() -> asyncio.Task[None] | None:
+    """Start the replay log's own age sweep, or none when nothing is retained.
+
+    A background task rather than a step in any run's lifecycle, because the
+    bound it enforces is about time rather than about a run ending: a run that
+    settled while this gateway was down, and a run still going after a week,
+    are both out of reach of anything triggered by a terminal. It writes to the
+    application database only and touches no checkpoint.
+    """
+    if not settings.stream_replay_enabled:
+        return None
+    task = asyncio.create_task(
+        sweep_replay_log_periodically(
+            get_session_factory(),
+            retention_hours=settings.stream_replay_retention_hours,
+        )
+    )
+    logger.info(
+        "Replay retention sweeping at %.1f hours",
+        settings.stream_replay_retention_hours,
+    )
     return task
 
 
@@ -721,6 +789,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     async with open_checkpointer() as checkpointer:
         app.state.checkpointer = checkpointer
+        # Seated beside the store the prunes delete through, and inside its
+        # context, so the shutdown below waits for this app's own prunes while
+        # the checkpointer they hold is still open.
+        app.state.checkpoint_prunes = CheckpointPruneRegistry()
         logger.info(
             "LangGraph checkpointer initialised (%s)",
             settings.resolved_checkpoint_backend,
@@ -756,6 +828,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         verdict_subscriber_task = _start_verdict_subscriber(
             checkpointer, worker_client, circuit_breaker, worker_spawner
         )
+        replay_retention_task = _start_replay_retention()
 
         logger.info("Gateway startup complete")
 
@@ -764,7 +837,12 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await _shutdown_gateway(
             app,
             (worker_client, worker_spawner, aggregator),
-            (watchdog_task, reconcile_task, verdict_subscriber_task),
+            (
+                watchdog_task,
+                reconcile_task,
+                verdict_subscriber_task,
+                replay_retention_task,
+            ),
             (discovery_path, discovery_pid, serve_record, discovery_task),
         )
 

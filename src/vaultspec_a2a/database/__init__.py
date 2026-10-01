@@ -49,6 +49,7 @@ from .models import CostTrackingModel as CostTrackingModel
 from .models import PermissionLogModel as PermissionLogModel
 from .models import PermissionRequestModel as PermissionRequestModel
 from .models import RecoveryAttemptModel as RecoveryAttemptModel
+from .models import RunEventModel as RunEventModel
 from .models import TaskQueueEntryModel as TaskQueueEntryModel
 from .models import ThreadDeletionSagaModel as ThreadDeletionSagaModel
 from .models import ThreadExecutionStateModel as ThreadExecutionStateModel
@@ -92,6 +93,9 @@ from .permission_repository import (
     mark_permission_request_applied as mark_permission_request_applied,
 )
 from .permission_repository import (
+    outstanding_permission_pause as outstanding_permission_pause,
+)
+from .permission_repository import (
     record_permission_request as record_permission_request,
 )
 from .permission_repository import (
@@ -112,6 +116,8 @@ from .permission_repository import (
 from .permission_repository import (
     supersede_permission_requests as supersede_permission_requests,
 )
+from .run_event_repository import RunEventRecord as RunEventRecord
+from .run_event_repository import RunEventStore as RunEventStore
 from .session import application_session_factory as application_session_factory
 from .session import begin_write_transaction as begin_write_transaction
 from .session import close_db as close_db
@@ -189,6 +195,9 @@ __all__ = [
     "PermissionLogModel",
     "PermissionRequestModel",
     "RecoveryAttemptModel",
+    "RunEventModel",
+    "RunEventRecord",
+    "RunEventStore",
     "SchemaCompatibilityError",
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
@@ -244,6 +253,7 @@ __all__ = [
     "mark_task_complete",
     "migration_script_location",
     "normalize_workspace_identity",
+    "outstanding_permission_pause",
     "path_safe_run_id_clause",
     "record_permission_request",
     "record_permission_response_submission",

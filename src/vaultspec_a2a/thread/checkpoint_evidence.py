@@ -31,6 +31,13 @@ _RECEIPT_REDUCERS: dict[str, Callable[[Any, Any], object]] = {
     "graph_action_receipts": merge_graph_action_receipts,
 }
 
+# The channel a run's input is staged in, and the metadata source of the
+# checkpoint that holds it. LangGraph commits that checkpoint before the first
+# superstep distributes the input into the state's own channels, so between the
+# two a run's receipt is durable in the staging channel alone.
+_INPUT_STAGING_CHANNEL = "__start__"
+_INPUT_SOURCE = "input"
+
 
 class CheckpointEvidenceKind(StrEnum):
     ABSENT = "checkpoint_absent"
@@ -166,6 +173,26 @@ def _fold_pending_receipts(
     return folded
 
 
+def _staged_input_receipts(values: dict[str, object]) -> list[tuple[str, object]]:
+    """Return the receipt writes an input checkpoint stages but has not committed.
+
+    A first ingest redelivered after a crash in that window used to be refused:
+    the committed channels carry no receipt at all, which reads as a checkpoint
+    belonging to some other action. The staged input is the same action's own,
+    so it is folded in the way a pending write is, and the redelivery continues
+    from the checkpoint instead of delivering the input a second time.
+    """
+    staged = values.get(_INPUT_STAGING_CHANNEL)
+    if not isinstance(staged, dict):
+        return []
+    staged_values = cast("dict[str, object]", staged)
+    return [
+        (channel, staged_values[channel])
+        for channel in _RECEIPT_REDUCERS
+        if channel in staged_values
+    ]
+
+
 def _pending_evidence(
     writes: Sequence[tuple[str, object]], checkpoint_id: str, incorporated: bool
 ) -> CheckpointEvidence:
@@ -191,8 +218,32 @@ async def read_checkpoint_evidence(
     checkpoint_id: str | None = None,
 ) -> CheckpointEvidence:
     """Read terminal truth without compiling providers or guessing scheduled work."""
-    requested_checkpoint_id = checkpoint_id
-    configurable = {"thread_id": receipt.thread_id}
+    checkpoint = await _read_checkpoint(
+        checkpointer,
+        receipt.thread_id,
+        checkpoint_id,
+        timeout_seconds=timeout_seconds,
+    )
+    if isinstance(checkpoint, CheckpointEvidence):
+        return checkpoint
+    return _classify_checkpoint(
+        checkpoint, receipt, requested_checkpoint_id=checkpoint_id
+    )
+
+
+async def _read_checkpoint(
+    checkpointer: Checkpointer,
+    thread_id: str,
+    checkpoint_id: str | None,
+    *,
+    timeout_seconds: float,
+) -> Any | CheckpointEvidence:
+    """The stored checkpoint, or the evidence that stands in for not having one.
+
+    A read that failed and a thread with nothing stored are both answers in
+    themselves, and neither leaves anything to classify.
+    """
+    configurable = {"thread_id": thread_id}
     if checkpoint_id is not None:
         configurable["checkpoint_id"] = checkpoint_id
     try:
@@ -204,6 +255,16 @@ async def read_checkpoint_evidence(
         return CheckpointEvidence(CheckpointEvidenceKind.UNAVAILABLE, None, False)
     if checkpoint is None:
         return CheckpointEvidence(CheckpointEvidenceKind.ABSENT, None, False)
+    return checkpoint
+
+
+def _classify_checkpoint(
+    checkpoint: Any,
+    receipt: GraphActionReceipt,
+    *,
+    requested_checkpoint_id: str | None,
+) -> CheckpointEvidence:
+    """What one stored checkpoint says about the action the receipt names."""
     parsed = _checkpoint_values(checkpoint, requested_checkpoint_id)
     if isinstance(parsed, CheckpointEvidence):
         return parsed
@@ -211,7 +272,9 @@ async def read_checkpoint_evidence(
     writes = _pending_writes(checkpoint)
     if writes is None:
         return _incompatible(current_checkpoint_id)
-    folded = _fold_pending_receipts(values, writes)
+    source = checkpoint.metadata.get("source")
+    staged = _staged_input_receipts(values) if source == _INPUT_SOURCE else []
+    folded = _fold_pending_receipts(values, [*staged, *writes])
     if folded is None:
         return _incompatible(current_checkpoint_id)
     action_evidence = _action_evidence(folded, receipt, current_checkpoint_id)
@@ -223,5 +286,4 @@ async def read_checkpoint_evidence(
     completion_evidence = _completion_evidence(values, receipt, current_checkpoint_id)
     if completion_evidence is not None:
         return completion_evidence
-    incorporated = checkpoint.metadata.get("source") == "loop"
-    return _pending_evidence(writes, current_checkpoint_id, incorporated)
+    return _pending_evidence(writes, current_checkpoint_id, source == "loop")

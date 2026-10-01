@@ -23,13 +23,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .checkpoint_schema import LANGGRAPH_TABLE_COLUMNS
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = ["prune_settled_checkpoints"]
 
@@ -101,32 +103,35 @@ WHERE b.thread_id = %s
 def scalar(row: Any) -> Any:
     """Return the single column of *row*, whatever row factory produced it."""
     if isinstance(row, dict):
-        return next(iter(row.values()))
+        return next(iter(cast("dict[str, Any]", row).values()))
     return row[0]
 
 
 def _saver_prunes_itself(checkpointer: object) -> bool:
     """Whether *checkpointer* implements pruning rather than inheriting a refusal."""
     own = getattr(type(checkpointer), "aprune", None)
-    return own is not None and own is not BaseCheckpointSaver.aprune
+    return own is not None and own is not cast("object", BaseCheckpointSaver.aprune)
 
 
 async def _thread_uses_a_delta_channel(checkpointer: Any, thread_id: str) -> bool:
     """Whether *thread_id*'s state depends on ancestors these statements delete.
 
     A delta channel writes a sentinel and rebuilds its value by walking back to
-    the nearest snapshot, so the surviving latest checkpoint is usually not a
-    snapshot point and pruning its ancestors would leave the channel
-    reconstructing as empty - returning no value rather than raising.
+    the nearest snapshot, so a latest checkpoint that is not a snapshot point
+    would reconstruct the channel as empty once its ancestors are gone -
+    returning no value rather than raising.
+
+    LangGraph records exactly that dependency: the latest checkpoint's
+    metadata counts the writes each delta channel has taken since its last
+    snapshot, and drops the count only when every delta channel snapshotted
+    in that checkpoint. A snapshot holds the channel's whole accumulated value,
+    so a head with no count needs nothing older and is pruned like any other.
     """
     latest = await checkpointer.aget_tuple({"configurable": {"thread_id": thread_id}})
     if latest is None:
         return False
-    metadata = latest.metadata or {}
-    if metadata.get(_DELTA_COUNTERS_KEY):
-        return True
-    values = latest.checkpoint.get("channel_values") or {}
-    return any(isinstance(value, _DeltaSnapshot) for value in values.values())
+    metadata: Mapping[str, object] = latest.metadata or {}
+    return bool(metadata.get(_DELTA_COUNTERS_KEY))
 
 
 async def prune_settled_checkpoints(checkpointer: object, thread_id: str) -> bool:
@@ -152,22 +157,32 @@ async def prune_settled_checkpoints(checkpointer: object, thread_id: str) -> boo
         )
         return False
     if isinstance(checkpointer, AsyncSqliteSaver):
-        if not await _sqlite_layout_is_the_expected_one(checkpointer):
-            return False
-        await _prune_sqlite(checkpointer, thread_id)
-        return True
+        return await _prune_sqlite_history(checkpointer, thread_id)
     postgres = _native_postgres_saver(checkpointer)
     if postgres is not None:
-        if not await _postgres_schema_is_the_expected_one(postgres):
-            return False
-        await _prune_postgres(postgres, thread_id)
-        return True
+        return await _prune_postgres_history(postgres, thread_id)
     logger.debug(
         "Checkpoint retention skipped for thread %s: unsupported saver %s",
         thread_id,
         type(checkpointer).__name__,
     )
     return False
+
+
+async def _prune_sqlite_history(saver: AsyncSqliteSaver, thread_id: str) -> bool:
+    """Prune a SQLite store's history, unless its layout is not the known one."""
+    if not await _sqlite_layout_is_the_expected_one(saver):
+        return False
+    await _prune_sqlite(saver, thread_id)
+    return True
+
+
+async def _prune_postgres_history(saver: Any, thread_id: str) -> bool:
+    """Prune a Postgres store's history, unless its schema is not the known one."""
+    if not await _postgres_schema_is_the_expected_one(saver):
+        return False
+    await _prune_postgres(saver, thread_id)
+    return True
 
 
 async def _sqlite_layout_is_the_expected_one(saver: AsyncSqliteSaver) -> bool:
@@ -200,7 +215,8 @@ async def _postgres_schema_is_the_expected_one(saver: Any) -> bool:
     from psycopg_pool import AsyncConnectionPool
 
     if isinstance(saver.conn, AsyncConnectionPool):
-        async with saver.conn.connection() as connection:
+        pool = cast("AsyncConnectionPool[Any]", saver.conn)
+        async with pool.connection() as connection:
             version = await _postgres_schema_version(connection)
     else:
         async with saver.lock:
@@ -256,7 +272,8 @@ async def _prune_postgres(saver: Any, thread_id: str) -> None:
     from psycopg_pool import AsyncConnectionPool
 
     if isinstance(saver.conn, AsyncConnectionPool):
-        async with saver.conn.connection() as connection:
+        pool = cast("AsyncConnectionPool[Any]", saver.conn)
+        async with pool.connection() as connection:
             await _prune_postgres_connection(connection, thread_id)
         return
     async with saver.lock:

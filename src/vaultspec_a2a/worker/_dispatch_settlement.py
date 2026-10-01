@@ -47,7 +47,6 @@ if TYPE_CHECKING:
     from .state_projection import StateProjector
 
 __all__ = [
-    "FailureDisposition",
     "SettlementMixin",
     "TerminalArbitration",
 ]
@@ -119,11 +118,13 @@ class _SettlementHost(Protocol):
 
     _state_projector: StateProjector
     _graph_lifecycle: GraphLifecycleManager
-    _terminal_arbitrations: dict[str, TerminalArbitration]
 
     # Declared as properties, matching ``Executor``'s own declarations: a
     # plain-attribute stand-in here would make ``Executor``'s property an
     # incompatible override instead of the matching one it actually is.
+    @property
+    def _terminal_arbitrations(self) -> dict[str, TerminalArbitration]: ...
+
     @property
     def _aggregator(self) -> EventAggregator: ...
 

@@ -39,12 +39,10 @@ if TYPE_CHECKING:
     from .ipc import WorkerBridge
 
 __all__ = [
-    "PreflightDecision",
     "ResumeAdmission",
     "ResumeRefusal",
     "ResumeRefusalCause",
     "StateProjector",
-    "answered_request_id",
 ]
 
 logger = logging.getLogger(__name__)
@@ -153,6 +151,31 @@ class PreflightDecision:
     is_first_ingest: bool = False
     resume_from_checkpoint: bool = False
     refusal: str | None = None
+
+
+# The evidence kinds that decide an ingest on their own, with nothing to log
+# and nothing left to weigh. Shared instances: the decision is frozen.
+_SETTLED_PREFLIGHTS: Mapping[CheckpointEvidenceKind, PreflightDecision] = {
+    CheckpointEvidenceKind.ABSENT: PreflightDecision(is_first_ingest=True),
+    CheckpointEvidenceKind.PRIOR_ACTION: PreflightDecision(),
+    CheckpointEvidenceKind.COMPLETED: PreflightDecision(outcome=ThreadStatus.COMPLETED),
+    CheckpointEvidenceKind.FAILED: PreflightDecision(outcome=ThreadStatus.FAILED),
+    CheckpointEvidenceKind.INTERRUPTED: PreflightDecision(outcome="interrupted"),
+}
+
+_UNREADABLE_CHECKPOINT = PreflightDecision(
+    refusal=(
+        "The run's checkpoint could not be read, so the dispatch was "
+        "not run: running it blind could deliver its input twice"
+    )
+)
+
+_FOREIGN_CHECKPOINT = PreflightDecision(
+    refusal=(
+        "The run's checkpoint belongs to a different action than this "
+        "dispatch, so the dispatch was not run"
+    )
+)
 
 
 class _LogExtraFn(Protocol):
@@ -323,6 +346,48 @@ def _live_interrupts(
     )
 
 
+def _addressed_admission(
+    interrupts: tuple[object, ...], resume_value: object
+) -> ResumeRefusal | ResumeAdmission:
+    """Which of the run's open questions this answer is admitted against.
+
+    An answer is spent on exactly the question it names. A run waiting on one
+    question takes a bare value; a run waiting on several refuses one, because
+    a bare value says nothing about which of them it answers and LangGraph
+    would hand it to whichever interrupt the next superstep reaches first.
+    """
+    if not interrupts:
+        return ResumeRefusal(
+            cause=ResumeRefusalCause.NOT_PARKED,
+            detail=(
+                "The run is not waiting on a question, so the answer was not applied"
+            ),
+        )
+    pending = _pending_requests(interrupts)
+    named = answered_request_id(resume_value)
+    if named is not None and named not in pending:
+        return ResumeRefusal(
+            cause=ResumeRefusalCause.REQUEST_NOT_PENDING,
+            detail=(
+                "The answer names a request the run is not waiting on, so "
+                "it was not applied"
+            ),
+            pending_request_ids=tuple(pending),
+        )
+    if len(interrupts) == 1:
+        return ResumeAdmission()
+    if named is None:
+        return ResumeRefusal(
+            cause=ResumeRefusalCause.AMBIGUOUS_TARGET,
+            detail=(
+                "The run is waiting on more than one question and the "
+                "answer names none of them, so it was not applied"
+            ),
+            pending_request_ids=tuple(pending),
+        )
+    return ResumeAdmission(interrupt_id=pending[named])
+
+
 def _state_interrupt_types(interrupts: Iterable[object]) -> list[str]:
     """Project state-level interrupts when tasks carry no type metadata."""
     return [
@@ -443,7 +508,6 @@ class StateProjector:
 
     async def pre_flight_checkpoint(
         self,
-        thread_id: str,
         receipt: GraphActionReceipt,
         *,
         timeout_seconds: float = 5.0,
@@ -467,20 +531,14 @@ class StateProjector:
         * Unreadable or foreign to this action: refuse, because running it
           blind could deliver its input a second time.
         """
+        thread_id = receipt.thread_id
         evidence = await read_checkpoint_evidence(
             self._checkpointer, receipt, timeout_seconds=timeout_seconds
         )
         kind = evidence.kind
-        if kind is CheckpointEvidenceKind.ABSENT:
-            return PreflightDecision(is_first_ingest=True)
-        if kind is CheckpointEvidenceKind.PRIOR_ACTION:
-            return PreflightDecision()
-        if kind is CheckpointEvidenceKind.COMPLETED:
-            return PreflightDecision(outcome=ThreadStatus.COMPLETED)
-        if kind is CheckpointEvidenceKind.FAILED:
-            return PreflightDecision(outcome=ThreadStatus.FAILED)
-        if kind is CheckpointEvidenceKind.INTERRUPTED:
-            return PreflightDecision(outcome="interrupted")
+        settled = _SETTLED_PREFLIGHTS.get(kind)
+        if settled is not None:
+            return settled
         if kind is CheckpointEvidenceKind.PENDING:
             logger.info(
                 "Thread %s checkpoint holds this action part-way; continuing "
@@ -504,22 +562,11 @@ class StateProjector:
             ),
         )
         if kind is CheckpointEvidenceKind.UNAVAILABLE:
-            return PreflightDecision(
-                refusal=(
-                    "The run's checkpoint could not be read, so the dispatch was "
-                    "not run: running it blind could deliver its input twice"
-                )
-            )
-        return PreflightDecision(
-            refusal=(
-                "The run's checkpoint belongs to a different action than this "
-                "dispatch, so the dispatch was not run"
-            )
-        )
+            return _UNREADABLE_CHECKPOINT
+        return _FOREIGN_CHECKPOINT
 
     async def pre_flight_resume(
         self,
-        thread_id: str,
         graph: RegisteredCompiledGraph,
         config: dict[str, Any],
         receipt: GraphActionReceipt,
@@ -552,9 +599,35 @@ class StateProjector:
         A refusal leaves the run exactly as it was. It is not a failure of the
         run: the question is still open and a correct answer still resolves it.
         """
-        snapshot: object = None
+        snapshot = await self._resume_snapshot(
+            graph, config, receipt.thread_id, timeout_seconds=timeout_seconds
+        )
+        if snapshot is None:
+            return await self._durable_resume_refusal(
+                receipt, timeout_seconds=timeout_seconds
+            )
+        answered = tasks_past_their_interrupt(
+            await self._held_writes(snapshot.config, timeout_seconds=timeout_seconds)
+        )
+        return _addressed_admission(_live_interrupts(snapshot, answered), resume_value)
+
+    async def _resume_snapshot(
+        self,
+        graph: RegisteredCompiledGraph,
+        config: dict[str, Any],
+        thread_id: str,
+        *,
+        timeout_seconds: float,
+    ) -> _ExecutionStateSnapshot | None:
+        """The run's live state, or ``None`` when it cannot stand as evidence.
+
+        A read that failed and a read that returned something other than an
+        execution-state snapshot are the same thing to the caller: the live
+        state proves nothing about where the run is parked, so the durable
+        checkpoint has to answer instead.
+        """
         try:
-            snapshot = await asyncio.wait_for(
+            snapshot: object = await asyncio.wait_for(
                 graph.aget_state(config), timeout=timeout_seconds
             )
         except Exception:
@@ -567,48 +640,10 @@ class StateProjector:
                     thread_id=thread_id, action="resume_preflight_state_unavailable"
                 ),
             )
-            return await self._durable_resume_refusal(
-                receipt, timeout_seconds=timeout_seconds
-            )
+            return None
         if not _is_execution_state_snapshot(snapshot):
-            return await self._durable_resume_refusal(
-                receipt, timeout_seconds=timeout_seconds
-            )
-        answered = tasks_past_their_interrupt(
-            await self._held_writes(snapshot.config, timeout_seconds=timeout_seconds)
-        )
-        interrupts = _live_interrupts(snapshot, answered)
-        if not interrupts:
-            return ResumeRefusal(
-                cause=ResumeRefusalCause.NOT_PARKED,
-                detail=(
-                    "The run is not waiting on a question, so the answer was "
-                    "not applied"
-                ),
-            )
-        pending = _pending_requests(interrupts)
-        named = answered_request_id(resume_value)
-        if named is not None and named not in pending:
-            return ResumeRefusal(
-                cause=ResumeRefusalCause.REQUEST_NOT_PENDING,
-                detail=(
-                    "The answer names a request the run is not waiting on, so "
-                    "it was not applied"
-                ),
-                pending_request_ids=tuple(pending),
-            )
-        if len(interrupts) == 1:
-            return ResumeAdmission()
-        if named is None:
-            return ResumeRefusal(
-                cause=ResumeRefusalCause.AMBIGUOUS_TARGET,
-                detail=(
-                    "The run is waiting on more than one question and the "
-                    "answer names none of them, so it was not applied"
-                ),
-                pending_request_ids=tuple(pending),
-            )
-        return ResumeAdmission(interrupt_id=pending[named])
+            return None
+        return snapshot
 
     async def _held_writes(
         self, config: Mapping[str, object], *, timeout_seconds: float

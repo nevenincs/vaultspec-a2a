@@ -33,11 +33,12 @@ from ..utils.atomic_write import atomic_write_text
 from ..utils.file_lock import held_exclusive_lock
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
+
+    from ._json_contract import JsonValue
 
 __all__ = [
     "CODEX_AUTH_FILENAME",
-    "CodexAuthSeed",
     "codex_credential_store_mode",
     "seed_run_credential",
     "write_back_refreshed_credential",
@@ -102,10 +103,10 @@ def codex_credential_store_mode(base_home: Path) -> str:
     return mode if isinstance(mode, str) and mode else _DEFAULT_CREDENTIAL_STORE
 
 
-def _last_refresh(payload: bytes) -> datetime | None:
-    """Read the credential's own refresh stamp, or ``None`` when it has none."""
+def _refresh_stamp_text(payload: bytes) -> str | None:
+    """The ``last_refresh`` string a credential carries, when it carries one."""
     try:
-        document = json.loads(payload)
+        document: JsonValue = json.loads(payload)
     except ValueError:
         return None
     if not isinstance(document, dict):
@@ -113,17 +114,33 @@ def _last_refresh(payload: bytes) -> datetime | None:
     stamp = document.get("last_refresh")
     if not isinstance(stamp, str) or not stamp:
         return None
-    # Codex writes an RFC 3339 stamp with a trailing 'Z' and sub-second digits
-    # beyond what fromisoformat accepted before 3.11; normalise the zone and clamp
-    # the fraction to microseconds so a real stamp is never read as absent.
+    return stamp
+
+
+def _isoformat_ready(stamp: str) -> str:
+    """One Codex stamp in the shape ``datetime.fromisoformat`` reads.
+
+    Codex writes an RFC 3339 stamp with a trailing 'Z' and sub-second digits
+    beyond what fromisoformat accepted before 3.11; the zone is normalised and
+    the fraction clamped to microseconds so a real stamp is never read as
+    absent.
+    """
     text = stamp.strip().replace("Z", "+00:00")
-    if "." in text:
-        head, _, tail = text.partition(".")
-        fraction = "".join(ch for ch in tail if ch.isdigit())[:6]
-        zone = tail[len(fraction) :].lstrip("0123456789")
-        text = f"{head}.{fraction or '0'}{zone}"
+    if "." not in text:
+        return text
+    head, _, tail = text.partition(".")
+    fraction = "".join(ch for ch in tail if ch.isdigit())[:6]
+    zone = tail[len(fraction) :].lstrip("0123456789")
+    return f"{head}.{fraction or '0'}{zone}"
+
+
+def _last_refresh(payload: bytes) -> datetime | None:
+    """Read the credential's own refresh stamp, or ``None`` when it has none."""
+    stamp = _refresh_stamp_text(payload)
+    if stamp is None:
+        return None
     try:
-        parsed = datetime.fromisoformat(text)
+        parsed = datetime.fromisoformat(_isoformat_ready(stamp))
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
@@ -144,7 +161,9 @@ def _write_seed(run_home: Path, seed: CodexAuthSeed) -> None:
 
 def _read_seed(run_home: Path) -> CodexAuthSeed | None:
     try:
-        document = json.loads((run_home / _SEED_FILENAME).read_text(encoding="utf-8"))
+        document: JsonValue = json.loads(
+            (run_home / _SEED_FILENAME).read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         return None
     if not isinstance(document, dict):
@@ -206,7 +225,7 @@ def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None
 @contextlib.contextmanager
 def _credential_lock(
     source: Path, *, timeout_seconds: float = _LOCK_TIMEOUT_SECONDS
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold the write-back lock for one source login.
 
     The lock file is named next to the credential it guards, because that file -
@@ -238,23 +257,10 @@ def write_back_refreshed_credential(
     seed = _read_seed(run_home)
     if seed is None:
         return False
-    try:
-        payload = (run_home / CODEX_AUTH_FILENAME).read_bytes()
-    except OSError:
+    refreshed = _refreshed_credential(run_home, seed)
+    if refreshed is None:
         return False
-    if _digest(payload) == seed.digest:
-        return False
-    try:
-        text = payload.decode("utf-8")
-    except UnicodeDecodeError:
-        # Codex writes its login as JSON text. Bytes that do not decode are not a
-        # refresh it made, so they are never published over the operator's login.
-        logger.error(
-            "The credential left in the run home is not UTF-8 text, so it was not "
-            "written back to %s",
-            seed.source,
-        )
-        return False
+    payload, text = refreshed
     try:
         with _credential_lock(seed.source, timeout_seconds=lock_timeout_seconds):
             if _source_overtook_the_run(seed, payload):
@@ -276,6 +282,34 @@ def write_back_refreshed_credential(
         seed.source,
     )
     return True
+
+
+def _refreshed_credential(
+    run_home: Path, seed: CodexAuthSeed
+) -> tuple[bytes, str] | None:
+    """The credential this run should publish, as bytes and as its text.
+
+    ``None`` when there is nothing to publish: the run home holds no readable
+    credential, or it holds the very bytes that were seeded into it, or it
+    holds something that is not the JSON text Codex writes a login as.
+    """
+    try:
+        payload = (run_home / CODEX_AUTH_FILENAME).read_bytes()
+    except OSError:
+        return None
+    if _digest(payload) == seed.digest:
+        return None
+    try:
+        return payload, payload.decode("utf-8")
+    except UnicodeDecodeError:
+        # Codex writes its login as JSON text. Bytes that do not decode are not a
+        # refresh it made, so they are never published over the operator's login.
+        logger.error(
+            "The credential left in the run home is not UTF-8 text, so it was not "
+            "written back to %s",
+            seed.source,
+        )
+        return None
 
 
 def _source_overtook_the_run(seed: CodexAuthSeed, payload: bytes) -> bool:

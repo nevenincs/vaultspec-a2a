@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from ..control.recovery_authority import (
+    PROMOTION_OWNED_CONDITIONS,
     RecoveryRequest,
     RecoveryTrigger,
     reconcile_run_checkpoint,
@@ -46,7 +47,7 @@ async def reconcile_threads_on_startup(
         asyncio.get_running_loop().time()
         + domain_config.thread_list_checkpoint_deadline_seconds
     )
-    settled = paused = unavailable = 0
+    settled = paused = unavailable = owned = 0
     for thread_id in thread_ids:
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
@@ -63,6 +64,7 @@ async def reconcile_threads_on_startup(
         settled += int(observed.status is ThreadStatus.COMPLETED)
         paused += int(observed.status is ThreadStatus.INPUT_REQUIRED)
         unavailable += int(observed.condition == "checkpoint_unavailable")
+        owned += int(observed.condition in PROMOTION_OWNED_CONDITIONS)
     if retain_repair_boots > 0 and thread_ids:
         # The settlement loop above leaves whatever transaction it last opened;
         # the prune reads before it deletes, so it takes a fresh one that holds
@@ -75,7 +77,11 @@ async def reconcile_threads_on_startup(
             keep_rows=retain_repair_boots * _REPAIR_ROWS_PER_BOOT,
         )
     return {
-        "repair_backlog": len(thread_ids) - settled,
+        # A run a promoter is answerable for is not backlog: nobody has to
+        # look at it, and counting it would make an ordinary multi-turn
+        # conversation read as a boot that found damage.
+        "repair_backlog": len(thread_ids) - settled - owned,
         "paused_resumable": paused,
         "checkpoint_unavailable": unavailable,
+        "owned_by_promotion": owned,
     }

@@ -42,6 +42,7 @@ from .accepted_input import (
 )
 from .action_lease import (
     CONTROL_ACTION_LEASE_TTL,
+    DEFINITE_NON_DELIVERY,
     ControlActionClaim,
     ControlActionClaimRequest,
     finalize_control_action_acceptance,
@@ -513,11 +514,7 @@ async def _settle_delivery_failure(
         )
     if claim.claim_token is None:
         raise RuntimeError("recovery dispatch lost its action claim")
-    if failure_type in {
-        FailureType.CIRCUIT_OPEN,
-        FailureType.AT_CAPACITY,
-        FailureType.REJECTED,
-    }:
+    if failure_type in DEFINITE_NON_DELIVERY:
         await release_control_action_lease(
             db,
             claim.action_id,

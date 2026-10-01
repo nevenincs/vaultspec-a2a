@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...thread.errors import ConfigError
+from ...thread.errors import ConfigError, HarnessToolContractError
 from .._codex_permission import (
     DECLINE_ACTION,
     MCP_TOOL_CALL_APPROVAL_KIND,
@@ -29,7 +29,7 @@ from .._harness_mcp_registry import (
     harness_tool_is_withheld,
     withheld_harness_tools,
 )
-from .._mcp_contract import HarnessToolContractError, verify_declared_tool_contract
+from .._mcp_contract import verify_declared_tool_contract
 from .test_project_confinement import _config, _decide
 
 if TYPE_CHECKING:

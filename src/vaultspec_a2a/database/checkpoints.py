@@ -35,9 +35,9 @@ __all__ = [
     "Checkpointer",
     "concurrent_checkpointer",
     "open_checkpointer",
+    "postgres_checkpoint_pool",
     "prune_settled_thread",
     "setup_postgres_checkpointer",
-    "strict_checkpoint_serde",
 ]
 
 # Headroom over the worker's concurrent-run bound. Every run in flight can be
@@ -115,7 +115,7 @@ def _postgres_checkpoint_pool_size() -> int:
     )
 
 
-def _postgres_checkpoint_pool(conninfo: str) -> Any:
+def postgres_checkpoint_pool(conninfo: str) -> Any:
     """Build the unopened checkpoint connection pool for the Postgres backend.
 
     The saver used to run on ONE connection opened from a connection string,
@@ -170,7 +170,6 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
     def __init__(self, conn_string: str) -> None:
         super().__init__()
         self._conn_string = conn_string
-        self._loop_ready = threading.Event()
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._pool: Any = None
@@ -182,20 +181,25 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
     async def start(self) -> None:
         """Start the selector-loop thread and enter AsyncPostgresSaver."""
         if self._thread is None:
+            # The handshake belongs to the start that performs it, not to the
+            # bridge: a bridge started again after a close must wait for the
+            # new loop, not read an event the previous one already set.
+            ready = threading.Event()
             self._thread = threading.Thread(
                 target=self._run_loop,
+                args=(ready,),
                 name="vaultspec-postgres-checkpointer",
                 daemon=True,
             )
             self._thread.start()
-            await asyncio.to_thread(self._loop_ready.wait)
+            await asyncio.to_thread(ready.wait)
         await self._run_async("_open")
 
-    def _run_loop(self) -> None:
+    def _run_loop(self, ready: threading.Event) -> None:
         loop = asyncio.SelectorEventLoop()
         asyncio.set_event_loop(loop)
         self._loop = loop
-        self._loop_ready.set()
+        ready.set()
         try:
             loop.run_forever()
         finally:
@@ -209,7 +213,7 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         # very event loop this class exists to keep it off.
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-        self._pool = _postgres_checkpoint_pool(self._conn_string)
+        self._pool = postgres_checkpoint_pool(self._conn_string)
         await self._pool.open(wait=True)
         self._saver = AsyncPostgresSaver(
             conn=self._pool, serde=strict_checkpoint_serde()
@@ -592,53 +596,73 @@ async def _open_selector_thread_checkpointer(
 @asynccontextmanager
 async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
     """Open the configured LangGraph checkpointer backend."""
-    if settings.resolved_checkpoint_backend == "sqlite":
-        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    opener = (
+        _open_sqlite_checkpointer()
+        if settings.resolved_checkpoint_backend == "sqlite"
+        else _open_postgres_checkpointer()
+    )
+    async with opener as checkpointer:
+        yield checkpointer
 
-        connection = settings.checkpoint_connection_string
-        if connection != ":memory:":
-            # The store's directory is part of the state layout, not something an
-            # operator creates first - the same courtesy the application database
-            # engine extends to its own file.
-            settings.prepare_state_dir(Path(connection).parent)
-        async with AsyncSqliteSaver.from_conn_string(connection) as checkpointer:
-            # ``from_conn_string`` owns the connection but forwards no
-            # serializer, so the posture is set on the saver it yields; the
-            # saver derives nothing from ``serde`` at construction.
-            checkpointer.serde = strict_checkpoint_serde()
-            # Desktop profile boot must not mutate schema: ``setup()`` creates the
-            # checkpointer tables, so it is suppressed when the profile is armed.
-            # The staged-generation migration entrypoint runs setup instead, and
-            # ordinary armed boot has already validated the schema is present.
-            if settings.desktop_profile_armed:
-                # Not calling setup() does not prevent it: the saver runs it
-                # itself before its first read or write, so skipping the call
-                # here only deferred the same DDL to the first checkpoint.
-                # ``is_setup`` is how the saver records that it has nothing to
-                # create, and the validation that ran before this said so.
-                checkpointer.is_setup = True
-            else:
-                await checkpointer.setup()
-            # WAL lets the gateway's status reads run concurrently with the worker's
-            # checkpoint writes on the shared file, instead of blocking on a writer's
-            # lock (the recurring checkpoint_unavailable/missing degradations);
-            # busy_timeout bounds any residual lock wait rather than failing fast.
-            # The busy timeout was hardcoded here and ignored the configured value.
-            for statement in checkpoint_pragmas(settings.sqlite_busy_timeout_ms):
-                await checkpointer.conn.execute(statement)
-            journal_row = await (
-                await checkpointer.conn.execute("PRAGMA journal_mode")
-            ).fetchone()
-            if journal_row is None or str(journal_row[0]).lower() != "wal":
-                logger.warning(
-                    "Failed to enable WAL journal mode on the checkpoint store; "
-                    "actual mode: %r. Gateway status reads will contend with "
-                    "worker checkpoint writes.",
-                    None if journal_row is None else journal_row[0],
-                )
-            yield checkpointer
-        return
 
+@asynccontextmanager
+async def _open_sqlite_checkpointer() -> AsyncGenerator[Checkpointer]:
+    """Open the SQLite checkpoint store with the concurrency posture it needs."""
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    connection = settings.checkpoint_connection_string
+    if connection != ":memory:":
+        # The store's directory is part of the state layout, not something an
+        # operator creates first - the same courtesy the application database
+        # engine extends to its own file.
+        settings.prepare_state_dir(Path(connection).parent)
+    async with AsyncSqliteSaver.from_conn_string(connection) as checkpointer:
+        # ``from_conn_string`` owns the connection but forwards no
+        # serializer, so the posture is set on the saver it yields; the
+        # saver derives nothing from ``serde`` at construction.
+        checkpointer.serde = strict_checkpoint_serde()
+        # Desktop profile boot must not mutate schema: ``setup()`` creates the
+        # checkpointer tables, so it is suppressed when the profile is armed.
+        # The staged-generation migration entrypoint runs setup instead, and
+        # ordinary armed boot has already validated the schema is present.
+        if settings.desktop_profile_armed:
+            # Not calling setup() does not prevent it: the saver runs it
+            # itself before its first read or write, so skipping the call
+            # here only deferred the same DDL to the first checkpoint.
+            # ``is_setup`` is how the saver records that it has nothing to
+            # create, and the validation that ran before this said so.
+            checkpointer.is_setup = True
+        else:
+            await checkpointer.setup()
+        await _apply_sqlite_concurrency_pragmas(checkpointer)
+        yield checkpointer
+
+
+async def _apply_sqlite_concurrency_pragmas(checkpointer: Any) -> None:
+    """Put the SQLite store in WAL mode, and say so when it refuses.
+
+    WAL lets the gateway's status reads run concurrently with the worker's
+    checkpoint writes on the shared file, instead of blocking on a writer's
+    lock (the recurring checkpoint_unavailable/missing degradations);
+    busy_timeout bounds any residual lock wait rather than failing fast.
+    """
+    for statement in checkpoint_pragmas(settings.sqlite_busy_timeout_ms):
+        await checkpointer.conn.execute(statement)
+    journal_row = await (
+        await checkpointer.conn.execute("PRAGMA journal_mode")
+    ).fetchone()
+    if journal_row is None or str(journal_row[0]).lower() != "wal":
+        logger.warning(
+            "Failed to enable WAL journal mode on the checkpoint store; "
+            "actual mode: %r. Gateway status reads will contend with "
+            "worker checkpoint writes.",
+            None if journal_row is None else journal_row[0],
+        )
+
+
+@asynccontextmanager
+async def _open_postgres_checkpointer() -> AsyncGenerator[Checkpointer]:
+    """Open the Postgres checkpoint store on a loop psycopg accepts."""
     try:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     except ImportError as exc:
@@ -655,7 +679,7 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
             yield checkpointer
         return
 
-    pool = _postgres_checkpoint_pool(settings.checkpoint_connection_string)
+    pool = postgres_checkpoint_pool(settings.checkpoint_connection_string)
     await pool.open(wait=True)
     try:
         checkpointer = AsyncPostgresSaver(conn=pool, serde=strict_checkpoint_serde())

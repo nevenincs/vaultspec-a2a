@@ -15,19 +15,23 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import httpx
 from fastapi.encoders import jsonable_encoder
 
 from ..control.config import settings
+from ..domain_config import domain_config
 from ..graph.enums import ServerEventType
 from ..streaming.fanout import PROTECTED_WIRE_TYPES
 from ..telemetry import inject_trace_context
 from ..thread.snapshots import wire_event_type
 
-__all__ = ["WorkerBridge"]
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+__all__ = ["WorkerBridge", "event_client_timeout"]
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,13 @@ logger = logging.getLogger(__name__)
 # small allowance for that cleanup even when the shared delivery deadline has
 # already elapsed, while still preventing an unbounded transport teardown.
 _CLIENT_CLOSE_ALLOWANCE_SECONDS = 0.1
+
+_CONNECT_TIMEOUT_SECONDS = 5.0
+
+# What the gateway needs on top of its bounded checkpoint read to answer a post
+# carrying a terminal: the durable write that precedes the read, and the
+# loopback round trip around both.
+_TERMINAL_CONFIRMATION_ALLOWANCE_SECONDS = 5.0
 
 # The JSON envelope every batch body is wrapped in, measured once so a batch's
 # size can be accumulated event by event instead of re-serialized per candidate.
@@ -45,13 +56,43 @@ _BATCH_CONTENT_TYPE = "application/json"
 
 @dataclass(slots=True)
 class _BatchState:
+    """The buffered events and everything that governs draining them.
+
+    The lock and the closing flag belong with the buffer they guard. One flush
+    at a time: the deferred cadence flush and the immediate flush a terminal
+    event forces used to be able to run together, each taking a slice of the
+    same buffer, so the gateway received two overlapping posts whose ordering
+    nothing established and a failure in one re-queued events the other had
+    already sent. ``closing`` is set once shutdown begins, so a failed final
+    flush cannot schedule a redrive onto a client about to close under it.
+    """
+
     events: list[dict[str, Any]] = field(default_factory=list)
     flush_task: asyncio.Task[None] | None = None
+    flush_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    closing: bool = False
+
+
+def event_client_timeout() -> httpx.Timeout:
+    """Return the request budget the worker's event client gives the gateway.
+
+    The gateway confirms the terminal an event post carries before it answers:
+    a durable write, then a checkpoint read the operator's own
+    ``aget_state`` budget bounds. A client that gave up at that same bound
+    would abandon a confirmation still in progress and re-post a terminal the
+    gateway is in the middle of accepting, so the budget is read off that
+    bound rather than restated as a second number beside it.
+    """
+    return httpx.Timeout(
+        domain_config.aget_state_timeout_seconds
+        + _TERMINAL_CONFIRMATION_ALLOWANCE_SECONDS,
+        connect=_CONNECT_TIMEOUT_SECONDS,
+    )
 
 
 def _entry_event_type(entry: dict[str, Any]) -> str:
     """Return the wire event type of one buffered entry, or an empty string."""
-    payload = entry.get("payload")
+    payload: Mapping[str, Any] | None = entry.get("payload")
     return wire_event_type(payload) if isinstance(payload, dict) else ""
 
 
@@ -136,7 +177,7 @@ class WorkerBridge:
             headers["Authorization"] = f"Bearer {internal_token}"
         self._client = httpx.AsyncClient(
             base_url=self._api_url,
-            timeout=httpx.Timeout(10.0, connect=5.0),
+            timeout=event_client_timeout(),
             headers=headers,
         )
         self._active_threads: set[str] = set()
@@ -144,15 +185,6 @@ class WorkerBridge:
 
         # Event batching state
         self._batch = _BatchState()
-        # One flush at a time. The deferred cadence flush and the immediate flush
-        # a terminal event forces used to be able to run together, each taking a
-        # slice of the same buffer: the gateway then received two overlapping
-        # posts whose ordering nothing established, and a failure in one re-queued
-        # events the other had already sent.
-        self._flush_lock = asyncio.Lock()
-        # Set once shutdown begins, so a failed final flush cannot schedule a
-        # redrive onto a client that is about to close under it.
-        self._closing = False
 
         # Consecutive heartbeat failure tracking for escalating logs.
         self._consecutive_hb_failures: int = 0
@@ -183,7 +215,7 @@ class WorkerBridge:
         retains a small independent allowance when delivery has consumed the
         shared deadline.
         """
-        self._closing = True
+        self._batch.closing = True
         pending = self._batch.flush_task
         pending_joined = True
         if pending is not None and not pending.done():
@@ -339,7 +371,7 @@ class WorkerBridge:
         pending flush would leave that backlog waiting for an event a finished
         run never sends.
         """
-        if self._closing:
+        if self._batch.closing:
             return
         pending = self._batch.flush_task
         if pending is None or pending.done() or pending is asyncio.current_task():
@@ -447,7 +479,7 @@ class WorkerBridge:
         Failures are logged but never raised -- the worker must not crash because
         the gateway is temporarily unavailable.
         """
-        async with self._flush_lock:
+        async with self._batch.flush_lock:
             return await self._flush_locked(deadline=deadline)
 
     async def _flush_locked(self, *, deadline: float | None) -> bool:

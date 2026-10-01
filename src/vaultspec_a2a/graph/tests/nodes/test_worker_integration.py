@@ -18,7 +18,7 @@ from pydantic import PrivateAttr
 from ....conftest import materialize_schema
 from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState
-from ...nodes.worker import create_worker_node
+from ...nodes.worker import WorkerNode, create_worker_node
 from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
@@ -231,7 +231,7 @@ async def test_worker_turn_consumes_a_rejection_and_keeps_an_approval() -> None:
     """
     from ....providers.acp_chat_model import AcpChatModel
 
-    def _node() -> Any:
+    def _node() -> WorkerNode:
         model = AcpChatModel(
             command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "approved once"],
             env_vars={},

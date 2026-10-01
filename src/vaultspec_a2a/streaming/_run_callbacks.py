@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from langchain_core.callbacks import AsyncCallbackHandler
 from langgraph.constants import TAG_NOSTREAM
@@ -96,16 +96,13 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             emitters=self._emitters,
         )
 
+    @override
     async def on_tool_start(
         self,
         serialized: dict[str, Any],
         input_str: str,
         *,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: list[str] | None = None,
-        metadata: dict[str, Any] | None = None,
-        inputs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """Register a starting tool call under the id the model gave it.
@@ -115,11 +112,17 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
         again would put the same call on the wire twice; the call is advanced
         instead, from announced to running, carrying the input the tool was
         actually given.
+
+        The rest of LangChain's keyword contract is taken whole. Three of its
+        keywords are read here - the tool-call id, the node in the metadata,
+        and the resolved input - and each is read through a guard, because
+        what a callback carries is the library's to change.
         """
-        del input_str, parent_run_id, tags
+        del input_str
         tool_call_id = _tool_call_id(kwargs, run_id)
         tool_name = _tool_name(serialized)
-        node = _node(metadata)
+        node = _node(_mapping_argument(kwargs, "metadata"))
+        inputs = _mapping_argument(kwargs, "inputs")
         self._in_flight[tool_call_id] = _InFlightCall(node, tool_name, inputs)
         emission = self._emission(tool_call_id, node)
         announced = tool_call_id in self._emitters.get_tool_call_states(
@@ -143,6 +146,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             input_args=inputs,
         )
 
+    @override
     async def on_tool_end(
         self,
         output: Any,
@@ -163,6 +167,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             output,
         )
 
+    @override
     async def on_tool_error(
         self,
         error: BaseException,
@@ -192,6 +197,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             content=truncated_tool_content(error_msg),
         )
 
+    @override
     async def on_llm_end(
         self,
         response: LLMResult,
@@ -260,6 +266,12 @@ def _rendered_input(inputs: dict[str, Any] | None) -> str:
 def _tool_name(serialized: dict[str, Any] | None) -> str:
     name = (serialized or {}).get("name")
     return name if isinstance(name, str) and name else "unknown_tool"
+
+
+def _mapping_argument(kwargs: dict[str, Any], name: str) -> dict[str, Any] | None:
+    """One of a callback's mapping keywords, when it carries that shape."""
+    value = kwargs.get(name)
+    return cast("dict[str, Any]", value) if isinstance(value, dict) else None
 
 
 def _node(metadata: dict[str, Any] | None) -> str | None:

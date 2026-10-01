@@ -35,14 +35,29 @@ def test_no_production_caller_resumes_a_persisted_acp_session() -> None:
     assert not resuming, f"production callers resume persisted ACP sessions: {resuming}"
 
 
+def _acp_lane_sources() -> list[Path]:
+    """List every module the ACP chat lane is composed of.
+
+    The lane is the chat model plus the private modules it delegates to, so a
+    deletion call moved out of the model is still a deletion call the lane
+    acquired. Naming the whole set keeps the boundary attached to the lane
+    rather than to whichever file its code happens to live in today.
+    """
+    providers = _PACKAGE_ROOT / "providers"
+    sources = [providers / "acp_chat_model.py", *sorted(providers.glob("_acp_*.py"))]
+    assert len(sources) > 1, "the ACP lane module set went missing"
+    return sources
+
+
 def test_acp_lane_cannot_delete_the_operator_home() -> None:
     """The ACP lane cannot reclaim files in the operator's config home."""
-    source = _PACKAGE_ROOT / "providers" / "acp_chat_model.py"
-    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
     removers = {"rmtree", "unlink", "remove", "rmdir", "removedirs"}
     found = [
-        f"{node.func.attr} at line {node.lineno}"
-        for node in ast.walk(tree)
+        f"{source.name}:{node.lineno} calls {node.func.attr}"
+        for source in _acp_lane_sources()
+        for node in ast.walk(
+            ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        )
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in removers

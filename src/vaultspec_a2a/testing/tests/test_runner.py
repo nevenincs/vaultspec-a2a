@@ -15,8 +15,8 @@ from ..children import (
     measured_child_startup_s,
     run_child,
 )
+from ..completion import send_completion_receipt
 from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
-from ..plugin import send_completion_receipt
 from ..runner import (
     DESCENDANT_TIMEOUT_EXIT,
     RUN_TIMEOUT_EXIT,
@@ -81,6 +81,7 @@ def _run_runner(
     *,
     runner_args: tuple[str, ...] = (),
     run_timeout_s: float | None = None,
+    confine: bool = True,
 ) -> _RunnerResult:
     """Run the owner over *probe* and wait for it on progress, not a wall clock.
 
@@ -90,12 +91,16 @@ def _run_runner(
     budget - as a test failure. The wait itself fails only when the owner tree
     stops burning CPU and stops writing, so an owner that is merely slow is
     never killed and a wedged one is reaped with its output attached.
+
+    A confined run stops conftest discovery at the probe's directory; an
+    unconfined one loads the repository conftest and the harness plugin with it.
     """
     stdout_path = tmp_path / "runner.stdout"
     stderr_path = tmp_path / "runner.stderr"
     timeout_args = (
         () if run_timeout_s is None else ("--run-timeout", f"{run_timeout_s:g}")
     )
+    confinement = (f"--confcutdir={probe.parent}",) if confine else ()
     with (
         stdout_path.open("w", encoding="utf-8") as stdout,
         stderr_path.open("w", encoding="utf-8") as stderr,
@@ -110,7 +115,7 @@ def _run_runner(
                 f"{_exit_timeout_s():g}",
                 *runner_args,
                 "--",
-                f"--confcutdir={probe.parent}",
+                *confinement,
                 str(probe),
                 "-q",
             ],
@@ -223,6 +228,24 @@ def test_runner_reaps_a_process_that_hangs_after_its_passing_result(
     # reaping. Never late: it acted on that budget, not on some other wall.
     result_to_exit = _result_to_exit_s(completed.stderr)
     assert exit_timeout <= result_to_exit < 2 * exit_timeout + 10, completed.stderr
+
+
+def test_pytest_is_the_first_to_import_the_harness_plugin(tmp_path: Path) -> None:
+    """The owner's child imports nothing of the plugin before pytest loads it.
+
+    pytest rewrites a plugin's assertions only when it imports the module
+    itself. A child that imported the plugin first, to reach two socket
+    helpers, left every repository run warning that the plugin could not be
+    rewritten - a warning on every green run, which teaches a reader to skip
+    the warnings summary. The probe runs under the repository conftest, which
+    is what loads the plugin.
+    """
+    probe = Path(__file__).with_name("_runner_passing_probe.py")
+
+    completed = _run_runner(probe, tmp_path, confine=False)
+
+    assert completed.returncode == 0, completed.stderr
+    assert "PytestAssertRewriteWarning" not in completed.stdout + completed.stderr
 
 
 def test_nested_pytest_process_cannot_complete_its_parent_receipt() -> None:

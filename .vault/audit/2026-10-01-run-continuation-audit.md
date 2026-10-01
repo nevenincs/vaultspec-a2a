@@ -1,0 +1,114 @@
+---
+tags:
+  - '#audit'
+  - '#run-continuation'
+date: '2026-10-01'
+modified: '2026-10-01'
+body_schema: 'body-v2'
+body_hash: 'sha256:c44059b7a60bf4afc773b9391c9c92cc9b1b2cb21bfcbf340681ac6430fc90bc'
+related:
+  - "[[2026-10-01-run-continuation-plan]]"
+---
+
+# `run-continuation` audit: `execution of the continuation prerequisites`
+
+## Scope
+
+Findings raised while executing Phase P01 of `2026-10-01-run-continuation-plan` (P01.S01-S03) under `2026-10-01-run-continuation-adr`. Rolling: later Phases append here.
+
+## Findings
+
+### drain-refusal-counts-as-transport-failure | medium | a draining worker's 503 opens the shared breaker
+
+Open. A worker answering `CAPACITY_DRAINING` replies 503 (`src/vaultspec_a2a/worker/app.py`, `_capacity_refusal`), and the gateway's server-error branch records a transport failure for it (`src/vaultspec_a2a/control/dispatch.py`). The worker did answer, so by the breaker's own rule this is an admission outcome, not transport health; whether a departing worker should open the shared breaker is a ruling under `2026-08-02-control-action-leases-adr`, which already says capacity does not affect transport health.
+
+### capacity-refusal-lacks-retry-after | medium | a 503 for capacity carries no Retry-After although the delay is known
+
+Open. The worker sends `Retry-After` and `DispatchOutcome.retry_after_seconds` captures it, but neither the message result nor the permission result carries it to the route, so the gateway's 503 omits a header RFC 9110 section 15.6.4 says it should carry when the delay is known.
+
+### permission-pre-dispatch-refusals-untyped | medium | the permission verb's pre-dispatch 409s are untyped strings
+
+Open. Only the dispatch-outcome 409 is typed; the verb's own guards (no longer active, no longer pending, no valid options, unknown option, previously rejected, different response, no active project, incompatible state) still answer a bare string, so a client can tell them apart only by matching text. The served schema documents the union honestly.
+
+### idempotency-key-status-diverges-from-the-draft | info | a missing Idempotency-Key is a 422 where the IETF draft suggests 400
+
+Recorded from P01.S03. The httpapi Idempotency-Key draft says a server SHOULD answer a missing required key with 400 and key reuse with a different payload with 422; this surface answers 422 for a missing key, as FastAPI validates and as the plan Step states, and a typed 409 `conflict` for reuse. Both are deliberate divergences from a SHOULD in a draft.
+
+### dispatch-result-circuit-flags-unused | low | the result objects' circuit-open flags have no consumer
+
+Fixed for the message verb in P04.S10 (8eedbfa), which removed `MessageResult.circuit_open` with the dispatch path it described; the permission result's flag remains. Original finding: the route now maps a refusal from its failure type, so `MessageResult.circuit_open` and `PermissionResult.circuit_open` are read by nothing.
+
+### undocumented-403-and-404 | low | the follow-up and permission routes serve undocumented 403 and 404
+
+Open. Both routes can answer 403 and 404 that `openapi.json` does not list.
+
+### terminal-frame-still-relayed-on-a-promoted-turn | high | a promoted run still shows viewers a terminal frame at the first turn's end
+
+Fixed in P03.S19 (d379515): the relay hands the terminal to the settlement as a publisher; a promoting settlement drops it, so it takes no sequence and leaves no replay row, and every other outcome publishes it at the old point. Real-gateway tests on the HTTP and websocket relays prove one terminal at the second turn's end with contiguous numbering. Original finding: the control plane promoted instead of settling, but the client-visible `thread_terminal` frame is broadcast by `_relay_single_event` in `src/vaultspec_a2a/api/internal.py` through the aggregator before `relay_event` reaches any control-plane decision, so the ADR's "no terminal event is published" does not yet hold and P06.S17 cannot pass. The replay log records that frame too, so a resumed stream would also replay it.
+
+### queued-continuation-survives-a-failed-or-cancelled-run | high | a continuation queued on a run that fails or is cancelled waits forever
+
+Fixed in P03.S18 (687bb66): the proven-failure, proven-cancellation and both reconciling-sweep refusals call `refuse_queued_continuations` in their own transaction, bound to the won election; proven on both backends. Original finding (owned by P03.S18; the ADR amendment of 2026-10-01 rules the outcome): Promotion runs only on the COMPLETED path, so a run settling FAILED or CANCELLED leaves its queued row at `queued` on a terminal run, promoted by nothing and reported to no one. `refuse_queued_continuations` (P03.S09) is the needed verb and is not called from the failed or cancelled confirmation. Reachable once P04 admits continuations.
+
+### promotion-refusal-stalls-rather-than-settles | medium | a refused promotion leaves the run unsettled until its predecessor's deadline
+
+Open; raised by the P02-P03 executor. `_refuse_promotion` (unreadable envelope, lost election, refused receipt) settles nothing, so the run holds a proven but unsettled turn until the predecessor action's recovery deadline expires and it is quarantined to RECONCILING with operator intervention required. Bounded and visible, but the stall can last a whole run timeout, and a durably corrupt queued envelope hits it on every pass.
+
+### queued-rows-excluded-from-recovery-only-structurally | low | the dispatcher skips a queued row only because it joins on the writer
+
+Recorded from P03.S07. A queued continuation is invisible to `_expire_overdue_actions` and `seed_recovery_attempts` because both join on the thread's writer identity, which a queued row never holds; there is no explicit `result_status <> 'queued'` predicate. Nothing fails without one, so it is an invariant to keep if those queries are rewritten.
+
+### promotion-proofs-run-on-sqlite-only | low | the promotion suites prove the row locking on SQLite, where it is a no-op
+
+Recorded from P03.S06-S09. S04 and S05 prove both backends; the promotion, recovery, ownership and lifetime suites run on SQLite only, like their sibling recovery suites, so the `FOR UPDATE` locking they rely on is exercised only on PostgreSQL. P06.S17 is the natural home for the PostgreSQL lane.
+
+### real-worker-app-harness-needs-a-settings-mutation | low | the real worker app cannot be given its IPC credential without mutating settings
+
+Recorded from P03.S07. `create_worker_app()` answers a misconfigured 500 in an undeclared development environment with no internal token, and the established harness sets the token through a settings mutation the test rules forbid, so S07's dispatch receiver is a real FastAPI app rather than the production worker app. The worker needs an official way to take its IPC credential at construction.
+
+### settlement-transaction-read-first-lock-upgrade | info | a read-first SQLite settlement transaction could not upgrade to a write
+
+Fixed in P03.S07. Reading the queue made a SELECT the first statement of the settlement transaction, and a deferred SQLite transaction that reads first cannot upgrade once another connection has committed; the real-gateway restart suite failed with `database is locked`. The settlement transaction now opens as a write transaction.
+
+### terminal-shown-when-a-continuation-cannot-be-promoted | medium | a refused promotion publishes a terminal on a run that has not ended
+
+Open; raised by the P03.S19 executor. `_promote_queued_continuation` can refuse (unreadable envelope, lost election, refused receipt) and `_confirm_completed_terminal` folds that into `_TerminalDisposition.REFUSED`, which publishes; the run stays RUNNING with an accepted continuation waiting, so viewers see a terminal on a run that neither settled nor ended. It needs a disposition of its own, and it compounds `promotion-refusal-stalls-rather-than-settles`.
+
+### settled-cursor-and-stream-ids-are-different-number-spaces | medium | a run's recorded cursor and its stream ids come from different counters
+
+Open; raised by the P03.S19 executor. `thread.last_sequence` is written from the emitters' per-thread counter, while every client-visible id comes from the run sequence allocator; the replay store reads `last_sequence` as a reseed floor and the snapshot publishes it for gap detection against ids the other counter issued. It is safe today only because the retained high-water mark is preferred when present, and each promotion now advances the emitters' counter for a frame nobody saw, over-counting by one per promotion (the safe direction). The two should be one number.
+
+### a-settled-run-s-terminal-could-reach-the-wire-without-an-id | medium | a settled run's terminal could lose its resumable id
+
+Fixed in P03.S19 (d379515). The purge that forgets a run's counter runs in the same step as the terminal's release, and the stream asked `is_numbered` whether to stamp an id, so the settled terminal could reach the wire with none; it was scheduling-dependent before and deterministic after the release moved. `is_numbered` now answers for a forgotten run whose floor is remembered and stays false for a run known unseedable.
+
+### a-failed-terminal-fan-out-loses-the-frame | low | a fan-out that throws costs the live terminal rather than the relay
+
+Accepted in P03.S19. `_publish_terminal` logs instead of raising, because the settlement is already durable and raising would strand the run's admission slot; reachable only if `enqueue_payload` itself throws, which its bounded delivery is written not to do.
+
+### followup-admission-was-unserialized-on-postgresql | high | admission and settlement could both commit on PostgreSQL
+
+Fixed in P04.S11 (e3d2c21). Admission read the run with a plain SELECT and settlement locked the thread row only at its election update, so on PostgreSQL a settlement could read an empty queue while an uncommitted admission read a live run, and both committed - the queued row on a settled run that the decision forbids. Two concurrent admissions could likewise take the one free place. SQLite's `BEGIN IMMEDIATE` hid it. Admission and all three settlement paths now take `lock_run_for_continuation_decision`, proven by `control/tests/test_continuation_admission_race.py` on real PostgreSQL.
+
+### replay-after-settlement-reported-the-run-not-the-turn | medium | a retried admission on a settled run read as a turn that never ran
+
+Fixed in P04.S11. A repeat of an accepted key answered `terminal` once the run settled, so a caller retrying after a lost 202 could not learn its turn was accepted and ran, and would send the work twice; replay is now decided before eligibility and serves the journal row's own status.
+
+### followup-contract-narrowed | info | the follow-up route no longer documents 502 or the worker-saturation 503
+
+Recorded from P04.S10 for the P06.S16 contract event. Both answers are unreachable now that the verb never dispatches; the narrowing of a published contract belongs in R6 beside the reachable 202, `queue_full` and `queued_messages`.
+
+### promotion-is-the-only-dispatcher-for-a-follow-up | info | a follow-up reaches a worker only through promotion
+
+Recorded from P04.S10. A gateway that never runs its recovery pass accepts turns and never runs them; P06.S17's live proof is where that becomes observable, and the contract event should say it.
+
+### queue-full-is-not-in-the-dispatch-failure-policy-table | low | the admission refusal has no row in the dispatch failure policy
+
+Recorded from P04.S10. `FailureType.QUEUE_FULL` is not keyed in `thread/dispatch_policy.py`; it is an admission refusal and unreachable from a dispatch outcome, an invariant to keep if the two vocabularies merge.
+
+## Recommendations
+
+- Rule under `2026-08-02-control-action-leases-adr` whether a draining worker's refusal is admission or transport, then classify it (`drain-refusal-counts-as-transport-failure`).
+- Carry the worker's retry delay through to the 503 (`capacity-refusal-lacks-retry-after`).
+- Type the permission verb's guard refusals with the shared refusal vocabulary (`permission-pre-dispatch-refusals-untyped`).
+- Refuse queued continuations on every failed or cancelled settlement and gate the client terminal frame on the promotion disposition before P04 admits anything (`queued-continuation-survives-a-failed-or-cancelled-run`, `terminal-frame-still-relayed-on-a-promoted-turn`).

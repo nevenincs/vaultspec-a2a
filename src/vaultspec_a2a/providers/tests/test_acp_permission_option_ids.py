@@ -11,11 +11,16 @@ set as ``{o.get("optionId") for o in options}`` — unfiltered, camelCase-only.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from .._acp_rpc_handlers import _autonomous_option_id, on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._json_contract import JsonObject, JsonValue
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # An option dict with no identity field at all — exactly what the unfiltered set
 # comprehension turned into a ``None`` member of the "valid" ids.
@@ -26,11 +31,12 @@ def _config(
     *,
     permission_callback: PermissionCallback | None = None,
     acp_family: str = "claude",
+    workspace_root: str | None = None,
 ) -> AcpModelConfig:
     return AcpModelConfig(
         agent_config=None,
         permission_callback=permission_callback,
-        workspace_root=None,
+        workspace_root=workspace_root,
         command=["claude", "acp"],
         env_vars={},
         session_id=None,
@@ -241,16 +247,27 @@ async def test_a_denial_never_slides_onto_an_approval_on_a_bad_last_option(
     assert outcome == {"outcome": "cancelled"}
 
 
-def test_the_kimi_autonomous_lane_reads_snake_case_options() -> None:
+def test_the_kimi_autonomous_lane_reads_snake_case_options(tmp_path: Path) -> None:
     """The Kimi read-only enforcement resolves ids through the same rule."""
     options: list[JsonObject] = [
         {"option_id": "approve", "kind": "allow_once"},
         {"option_id": "reject", "kind": "reject_once"},
     ]
-    config = _config(acp_family="kimi")
+    config = _config(acp_family="kimi", workspace_root=str(tmp_path))
+    read: JsonObject = {"path": "a.py"}
 
-    assert _autonomous_option_id("ReadFile: a.py", config, options) == "approve"
-    assert _autonomous_option_id("WriteFile: a.py", config, options) == "reject"
+    assert (
+        _autonomous_option_id(
+            "ReadFile: a.py", config, options, args=read, locations=[]
+        )
+        == "approve"
+    )
+    assert (
+        _autonomous_option_id(
+            "WriteFile: a.py", config, options, args=read, locations=[]
+        )
+        == "reject"
+    )
 
 
 @pytest.mark.asyncio

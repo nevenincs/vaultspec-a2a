@@ -52,7 +52,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://localhost:18000/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
+          "import json, socket, sys, urllib.request; data = json.load(urllib.request.urlopen('http://' + socket.gethostname() + ':18000/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
         ]
       interval: 10s
       timeout: 5s
@@ -100,7 +100,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import os, urllib.request; tok = os.environ['VAULTSPEC_A2A_INTERNAL_TOKEN']; req = urllib.request.Request('http://localhost:18001/health', headers={'Authorization': 'Bearer ' + tok}); urllib.request.urlopen(req)",
+          "import os, socket, urllib.request; tok = os.environ['VAULTSPEC_A2A_INTERNAL_TOKEN']; req = urllib.request.Request('http://' + socket.gethostname() + ':18001/health', headers={'Authorization': 'Bearer ' + tok}); urllib.request.urlopen(req)",
         ]
       interval: 10s
       timeout: 5s

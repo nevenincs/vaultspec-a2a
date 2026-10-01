@@ -8,7 +8,7 @@ and lookup tables only.
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Protocol, TypedDict, Unpack, cast, runtime_checkable
 
 from langgraph.types import Command
 
@@ -17,6 +17,7 @@ from ..graph.events import DomainEvent
 
 __all__ = [
     "SequencedEvent",
+    "StreamOptions",
     "StreamableGraph",
     "action_detail_projection",
     "classify_tool_kind",
@@ -39,6 +40,20 @@ class SequencedEvent:
     sequence: int
 
 
+class StreamOptions(TypedDict, total=False):
+    """The keywords langgraph's ``astream`` takes that this project sets.
+
+    Declared once so the protocol below and every call site name the same
+    set, and so adding a sixth is one edit rather than two.
+    """
+
+    stream_mode: list[str]
+    subgraphs: bool
+    context: object | None
+    control: object | None
+    durability: str | None
+
+
 @runtime_checkable
 class StreamableGraph(Protocol):
     """Structural protocol for a compiled LangGraph graph this service streams.
@@ -52,12 +67,7 @@ class StreamableGraph(Protocol):
         self,
         graph_input: dict[str, Any] | Command[Any] | None,
         config: dict[str, Any],
-        *,
-        stream_mode: list[str],
-        subgraphs: bool = False,
-        context: object | None = None,
-        control: object | None = None,
-        durability: str | None = None,
+        **options: Unpack[StreamOptions],
     ) -> AsyncIterator[tuple[Any, Any, Any]]:
         """Yield stream frames under Runtime *context* and *control*."""
         ...

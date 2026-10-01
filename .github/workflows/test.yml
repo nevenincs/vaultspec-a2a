@@ -99,11 +99,6 @@ jobs:
       - name: Run canonical CI
         run: just ci
 
-      - name: Run type-strict sentinel
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just check-type-strict
-
       - name: Run complexity sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -123,11 +118,6 @@ jobs:
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: just check-limits
-
-      - name: Run nesting sentinel
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just check-nesting
 
       - name: Run size sentinel
         if: ${{ !cancelled() }}

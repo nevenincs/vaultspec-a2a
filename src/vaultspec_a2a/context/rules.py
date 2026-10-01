@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import cast
 
-import yaml
+from vaultspec_core.vaultcore.parser import parse_frontmatter, split_frontmatter
 
 __all__ = ["RuleManager"]
 
@@ -343,31 +343,20 @@ _DEFAULT_RULE_ORDER = 100
 def _read_frontmatter(path: Path) -> dict[str, object]:
     """Return the parsed YAML frontmatter of a rule file, or ``{}``.
 
-    Reads only the leading ``---``-delimited block. Returns an empty dict when the
-    file has no frontmatter, no closing fence, an unreadable file, or a malformed /
-    non-mapping block. The compile path still strips the whole frontmatter
-    afterwards via :func:`_strip_frontmatter`; this only PEEKS at it for the role
-    filter and the compile-order sort key.
+    The rule corpus is vaultspec-core's format, so core's parser reads it: the
+    fence, a leading byte-order mark and malformed YAML are core's to decide.
+    Returns an empty dict for an unreadable file; a non-mapping block is
+    already empty by the time it gets here, because ``parse_frontmatter``
+    coerces one at its own boundary. The compile path still strips the whole
+    frontmatter afterwards via :func:`_strip_frontmatter`; this only PEEKS at
+    it for the role filter and the compile-order sort key.
     """
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
         return {}
-    lines = raw.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
-    block: list[str] = []
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        block.append(line)
-    else:
-        return {}  # no closing fence — not valid frontmatter
-    try:
-        meta = yaml.safe_load("\n".join(block))
-    except yaml.YAMLError:
-        return {}
-    return cast("dict[str, object]", meta) if isinstance(meta, dict) else {}
+    meta, _body = parse_frontmatter(raw)
+    return cast("dict[str, object]", meta)
 
 
 def _roles_from_meta(meta: dict[str, object]) -> frozenset[str]:
@@ -402,20 +391,5 @@ def _order_from_meta(meta: dict[str, object]) -> int:
 
 
 def _strip_frontmatter(content: str) -> str:
-    """Remove YAML frontmatter from the start of a file.
-
-    If the content begins with a ``---`` line, everything up to and
-    including the closing ``---`` line is removed.
-    """
-    lines = content.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return content
-
-    # Find the closing ---
-    for i, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
-            # Return everything after the closing ---
-            return "\n".join(lines[i + 1 :])
-
-    # No closing --- found — return content unchanged
-    return content
+    """Return a rule file's body: everything after core's frontmatter split."""
+    return split_frontmatter(content).body

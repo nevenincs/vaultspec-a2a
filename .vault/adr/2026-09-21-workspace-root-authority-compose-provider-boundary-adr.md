@@ -10,9 +10,9 @@ related:
   - "[[2026-09-21-open-issue-remediation-audit]]"
 supersedes:
   - '2026-09-21-workspace-root-authority-adr'
-modified: '2026-09-21'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:8c0825bca0cf3c762ceca8747336f7c04f9abb94abdbc8f06e7e7987f1c9c49e'
+body_hash: 'sha256:a24e0e84719d691fb8ded06bd851383efeb8a89b796d0e2111b5dd41073097cb'
 ---
 # `workspace-root-authority` adr: `Compose provider execution is isolated from service state` | (**status:** `accepted`)
 

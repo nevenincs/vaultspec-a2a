@@ -34,8 +34,6 @@ from pydantic_settings import (
 from .env_prefix import ENV_PREFIX
 
 __all__ = [
-    "PROJECT_DOTENV",
-    "PROJECT_MARKERS",
     "PROJECT_ROOT_ENV",
     "ProjectSettings",
     "env_name",
@@ -204,6 +202,7 @@ class ProjectSettings(BaseSettings):
         return _PROJECT_DOTENV_MARKER
 
     @classmethod
+    @override
     def settings_customise_sources(
         cls,
         settings_cls: type[BaseSettings],

@@ -3,12 +3,13 @@ tags:
   - '#adr'
   - '#clarification-continuation'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-10-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:e7ce11145a7a8f8df58fcc5d08ceb03f6e6f058246e0f48bd2130fcd499ab8c0'
+body_hash: 'sha256:151c01290ebd4256faa976aebc85b26ac329d6b35277041bc5a81fa04010a4a1'
 related:
   - "[[2026-08-02-clarification-continuation-research]]"
   - "[[2026-08-02-clarification-continuation-reference]]"
+  - '[[2026-10-01-run-continuation-adr]]'
 ---
 
 # `clarification-continuation` adr: `typed new-prompt resolution for parked questions` | (**status:** `accepted`)
@@ -69,3 +70,15 @@ without deleting history.
 - Downstream stages receive the new prompt exactly once through normal message state.
 - Engine and dashboard schemas still require synchronized additive support for the prompt field.
 - Concurrent competing clarification resolutions remain an open control-journal hardening item.
+
+## Amendment - run-continuation (2026-10-01)
+
+The Considered options entry for routing ordinary messages across a parked clarification
+rests on a now-false premise. Superseded sentence: "Rejected because the message verb is
+outside the engine whitelist and ingest cannot cross an interrupt." The message verb is a
+published verb of the R6 surface (`2026-07-14-a2a-edge-conformance-adr`), so the whitelist
+half no longer holds. Replacement: rejected because ingest cannot cross an interrupt, and
+because a message admitted here would wait behind a pause only an answer can clear. The
+ruling is unchanged - a parked run still refuses an ordinary message and the typed respond
+verb remains the only continuation for it - and `2026-10-01-run-continuation-adr` extends it
+to the busy and settled states. Grounding: `2026-10-01-run-continuation-research`.

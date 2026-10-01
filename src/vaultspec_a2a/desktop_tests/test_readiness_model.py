@@ -22,10 +22,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from ..control.health import (
-    SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS,
-    SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
-)
+from ..control.health import SERVICE_WORKER_PROBE_TIMEOUT_SECONDS
 from ..tests.gateway_boot import (
     armed_gateway_env,
     gateway_script,
@@ -143,9 +140,6 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
         probe_elapsed_s
         <= SERVICE_WORKER_PROBE_TIMEOUT_SECONDS + trivial_round_trip_s + 1.0
     ), (service, trivial_round_trip_s)
-    # And that bound is only meaningful because it sits below the budget a
-    # service-state caller is entitled to - the relation the constants encode.
-    assert SERVICE_WORKER_PROBE_TIMEOUT_SECONDS < SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS
     # The bounded observation must not pretend the cold worker is ready:
     # service-state remains truthful and declines run admission.
     assert service["status"] == "degraded"

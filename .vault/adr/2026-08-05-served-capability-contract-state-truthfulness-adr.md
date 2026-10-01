@@ -3,13 +3,14 @@ tags:
   - '#adr'
   - '#served-capability-contract'
 date: '2026-08-05'
-modified: '2026-09-19'
+modified: '2026-10-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:d4e0fd8ac3491d8584c968c5bbe1cc3d5954fec71d4a2fb5751c849588b2e63e'
+body_hash: 'sha256:233a5cf1bf38e3c8e61d193ce91e11bdf4d9137a3e83368ad7c07573ff3b963d'
 related:
   - "[[2026-08-05-served-capability-contract-gateway-contract-audit]]"
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
+  - '[[2026-10-01-run-continuation-adr]]'
 ---
 # `served-capability-contract` adr: `terminal states, obligated writers, and fields that must not contradict the run` | (**status:** `accepted`)
 
@@ -243,3 +244,14 @@ Only current-schema ownership is admitted. Pre-current, retired or unknown owner
 Every served graph topology routes successful completion through one graph finalizer before END. The finalizer persists an immutable completion receipt for the explicitly active accepted graph action, matching its incorporation receipt. That receipt is graph output committed by the checkpointer; pending writes, a supervisor's finish intention, stream exhaustion and worker notifications cannot substitute for it.
 
 The graph input and resume command carry the active accepted receipt explicitly. Recovery reads completion for the exact current accepted action without compiling providers or consulting mutable graph configuration. A prior action's completion does not complete a newly accepted action. Missing or conflicting current-schema receipt state receives typed refusal. Cancellation uses separate durable cessation or no-op evidence and never obtains a graph-completion receipt by substitution.
+
+## Amendment - run-continuation (2026-10-01)
+
+Addition to T2. A run holding a queued continuation (`2026-10-01-run-continuation-adr`) is
+RUNNING with no live worker for the width of the promotion window. Without this addition
+T3's abandoned-transition reconciler would read that width as abandonment and move the run
+to a terminal value, silently dropping the queued turn. A run holding a queued continuation
+names the promotion dispatcher as the writer obliged to leave RUNNING; T3's reconciler
+treats it as owned, not abandoned, until that action's lease expires. T6 needs no change and
+is satisfied by construction: the queued-continuation record reopens no terminal result, it
+defers entering one. Grounding: `2026-10-01-run-continuation-adr`.

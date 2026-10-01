@@ -1,134 +1,143 @@
 """Message follow-up service — business logic extracted from the messages route.
 
-Owns the full send-followup-message workflow (thread lookup, idempotency,
-control-action creation, repair-state transitions, dispatch) without any
-FastAPI or HTTP coupling.  The route handler remains a thin adapter that
-parses the request, calls this service, commits, and maps the result to
-an HTTP response.
+Owns the full send-followup-message workflow (thread lookup, eligibility,
+queue reservation) without any FastAPI or HTTP coupling.  The route handler
+remains a thin adapter that parses the request, calls this service, and maps
+the result to an HTTP response.
+
+A follow-up is never dispatched from here. A run that admits one is a run with
+a turn already executing, and that turn owns the run's write authority: a
+second writer installed now would refuse the executing turn's own terminal.
+So this verb reserves a WAITING turn - a journal action with a queue position
+and a lease, no graph receipt, no writer, no dispatch - and the promotion path
+turns it into a dispatch once the predecessor's terminal checkpoint evidence
+commits.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from ..control.action_lease import (
-    ControlActionClaimRequest,
-    DispatchFailureDisposition,
-    finalize_control_action_acceptance,
-    prepare_control_action_claim,
-    record_dispatch_failure,
-)
-from ..control.dispatch import safe_dispatch
-from ..control.dispatch_receipts import bind_graph_action_receipt
-from ..control.repair_transitions import (
-    mark_message_followup_requested,
-    record_undelivered_dispatch,
-)
-from ..database import (
-    begin_write_transaction,
-    get_thread,
-    thread_write_expectation,
-)
+from ..database import begin_write_transaction, outstanding_permission_pause
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
-from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
-from ..thread.enums import ControlActionType
-from ..thread.idempotency import default_message_key
-from ..thread.message_policy import can_send_followup
+from ..thread.dispatch_policy import FailureType
+from ..thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
+from ..thread.message_policy import (
+    ParkedPause,
+    PauseAnswerability,
+    can_send_followup,
+)
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .graph_definition import read_accepted_graph_definition
+from .repositories.continuation_queue import (
+    QueuedContinuationDisposition,
+    QueuedContinuationRequest,
+    continuation_already_admitted,
+    lock_run_for_continuation_decision,
+    reserve_queued_continuation,
+    run_lifetime_deadline,
+    served_continuation_queue_limits,
+)
 
 if TYPE_CHECKING:
-    import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
-
-    from ..control.action_lease import ControlActionClaim
-    from ..control.circuit_breaker import WorkerCircuitBreaker
-    from ..control.dispatch import DispatchOutcome
-    from ..control.worker_management import LazyWorkerSpawner
 
 __all__ = ["MessageResult", "send_followup_message"]
 
 logger = logging.getLogger(__name__)
 
+_REPLAYED = QueuedContinuationDisposition.REPLAYED
+
+#: What each queue disposition means to a caller of this verb. Spelled as a
+#: mapping rather than a chain of branches so a disposition added to the queue
+#: repository cannot be answered here by falling through to "accepted".
+_REFUSALS: dict[QueuedContinuationDisposition, tuple[FailureType, str]] = {
+    QueuedContinuationDisposition.CONFLICT: (
+        FailureType.CONFLICT,
+        "Idempotency key is already bound to a different message",
+    ),
+    QueuedContinuationDisposition.QUEUE_FULL: (
+        FailureType.QUEUE_FULL,
+        "The run already holds the continuations it may hold, or the service "
+        "does. Nothing was reserved; retry once the waiting turn has run.",
+    ),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class MessageResult:
-    """Value object returned by :func:`send_followup_message`."""
+    """What one follow-up offer did to a run's continuation queue.
+
+    ``queued`` says a turn was taken; ``queue_position`` is the place it was
+    given, counting from one, and it is the same place a replay of the same
+    key reports. ``action_status`` is the journal row's own status, so a
+    replay says what became of the turn rather than restating that it was
+    once queued. A refusal carries none of the three and reserved nothing.
+    """
 
     action_id: str
     thread_id: str
     thread_status: str
-    dispatched: bool
+    queued: bool
+    queue_position: int | None = None
+    action_status: str = ""
     error_detail: str | None = None
-    circuit_open: bool = False
     failure_type: FailureType | None = None
 
 
-def _claim_message_failure(
-    claim: ControlActionClaim, thread_id: str, thread_status: str
-) -> MessageResult | None:
-    if not claim.authority_matches:
-        return MessageResult(
-            action_id=claim.action_id,
-            thread_id=thread_id,
-            thread_status=thread_status,
-            dispatched=False,
-            failure_type=FailureType.INCOMPATIBLE_STATE,
-            error_detail="Accepted action no longer owns the current run",
-        )
-    if not claim.payload_matches:
-        return MessageResult(
-            action_id=claim.action_id,
-            thread_id=thread_id,
-            thread_status=thread_status,
-            dispatched=False,
-            error_detail="Idempotency key is already bound to a different message",
-            failure_type=FailureType.CONFLICT,
-        )
-    if not claim.acquired:
-        return MessageResult(
-            action_id=claim.action_id,
-            thread_id=thread_id,
-            thread_status=thread_status,
-            dispatched=False,
-        )
-    return None
+def _now() -> datetime:
+    """Return the instant the run's remaining lifetime is measured against."""
+    return datetime.now(UTC)
 
 
-async def _settle_failed_message_dispatch(
-    db: AsyncSession,
-    claim: ControlActionClaim,
-    outcome: DispatchOutcome,
+async def _parked_pause(
+    db: AsyncSession, thread_id: str, status: str
+) -> ParkedPause | None:
+    """Read which pause a parked run holds, so the refusal can name its verb.
+
+    Asked of the journal rather than guessed from the status, because
+    INPUT_REQUIRED is one status over two unrelated pauses with two unrelated
+    respond verbs. An absent permission row is itself the answer: a parked run
+    with none is parked at a clarification interrupt, which lives in the
+    checkpoint and is disclosed on run-status.
+    """
+    if status != ThreadStatus.INPUT_REQUIRED.value:
+        return None
+    outstanding = await outstanding_permission_pause(db, thread_id=thread_id)
+    if outstanding is None:
+        return ParkedPause(run_id=thread_id)
+    request_id, request_status = outstanding
+    return ParkedPause(
+        run_id=thread_id,
+        permission_request_id=request_id,
+        answerability=(
+            PauseAnswerability.AWAITING_ANSWER
+            if request_status == PermissionRequestStatus.PENDING.value
+            else PauseAnswerability.APPLYING_ANSWER
+        ),
+    )
+
+
+def _refused(
     thread_id: str,
     thread_status: str,
+    failure_type: FailureType,
+    detail: str,
+    action_id: str = "",
 ) -> MessageResult:
-    policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-    detail = outcome.detail or "Worker dispatch failed"
-    if typed_failure is None:
-        raise RuntimeError("failed dispatch carries no failure type")
-    await begin_write_transaction(db)
-    settlement = await record_dispatch_failure(db, claim, typed_failure, detail=detail)
-    if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
-        # Only definite non-delivery may be recorded; ambiguous delivery keeps
-        # its lease for redrive and leaves the run's status untouched.
-        await record_undelivered_dispatch(
-            db,
-            thread_id,
-            reason=f"Follow-up message not delivered: {detail}",
-        )
-    await db.commit()
+    """Report one refusal that reserved nothing and queued nothing."""
     return MessageResult(
-        action_id=claim.action_id,
+        action_id=action_id,
         thread_id=thread_id,
         thread_status=thread_status,
-        dispatched=False,
-        circuit_open=policy.is_circuit_open,
+        queued=False,
         error_detail=detail,
-        failure_type=typed_failure,
+        failure_type=failure_type,
     )
 
 
@@ -136,58 +145,69 @@ class _FollowupMessageArgs(TypedDict):
     thread_id: str
     content: str
     agent_id: str
-    idempotency_key: str | None
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    worker_client: httpx.AsyncClient
-    recursion_limit: int
-    trace_headers: dict[str, str] | None
+    # No default is derived for this verb. Two deliberate identical
+    # continuations are two turns, and a key derived from the content folds the
+    # second into the first and answers it as an already-accepted replay.
+    idempotency_key: str
 
 
 async def send_followup_message(
     db: AsyncSession, **options: Unpack[_FollowupMessageArgs]
 ) -> MessageResult:
-    """Execute the send-followup-message workflow.
+    """Reserve a follow-up turn behind the one this run is executing.
 
     Returns a :class:`MessageResult` describing the outcome.  Never raises
     HTTP exceptions — the caller is responsible for translating the result
     into an appropriate HTTP response.  Commits the session before returning.
     """
     # -- Thread lookup & guard -------------------------------------------
-    # The guard reads the run before the claim writes it, so the acceptance
-    # transaction takes the write lock up front and waits for a racing sender
-    # rather than failing once that sender commits.
+    # The run's row is locked before its status is read, and held until this
+    # transaction ends. That lock is the single ordering point between this
+    # admission and a terminal settlement: a continuation either queues ahead
+    # of the settlement transaction, which then promotes or refuses it, or it
+    # waits and reads the settled status and is refused here. There is no
+    # third outcome, and that is what keeps a waiting turn from being left on
+    # a run that has ended.
     await begin_write_transaction(db)
-    # Every refusal before the claim below wrote nothing; each releases the
-    # write lock before it returns.
-    thread = await get_thread(db, options["thread_id"])
+    # Every refusal before the reservation wrote nothing; each releases the
+    # lock before it returns.
+    thread = await lock_run_for_continuation_decision(
+        db, thread_id=options["thread_id"]
+    )
     if thread is None:
         await db.rollback()
-        return MessageResult(
-            action_id="",
-            thread_id=options["thread_id"],
-            thread_status="",
-            dispatched=False,
-            error_detail="Thread not found",
-            failure_type=FailureType.NOT_FOUND,
+        return _refused(
+            options["thread_id"], "", FailureType.NOT_FOUND, "Run not found"
         )
 
     # Read before any rollback below expires the loaded row.
-    refused_status = thread.status
-    eligibility = can_send_followup(refused_status)
-    if not eligibility.allowed:
+    thread_status = thread.status
+    created_at = thread.created_at
+    # A repeat of an accepted key is not a new offer, so the run's current
+    # state is not an answer to it: the caller is asking what became of a turn
+    # it already sent. Eligibility decides new work only.
+    replaying = await continuation_already_admitted(
+        db,
+        thread_id=options["thread_id"],
+        idempotency_key=options["idempotency_key"],
+    )
+    eligibility = can_send_followup(
+        thread_status,
+        parked_on=await _parked_pause(db, options["thread_id"], thread_status),
+    )
+    if not replaying and not eligibility.allowed:
         # Nothing has been reserved at this point, so the refusal leaves the run
         # exactly as it was: no journal action, no writer, no dispatch. The
         # refusal is typed by the policy that decided it rather than re-derived
         # from the status here, so one status cannot mean two things.
         await db.rollback()
-        return MessageResult(
-            action_id="",
-            thread_id=options["thread_id"],
-            thread_status=refused_status,
-            dispatched=False,
-            error_detail=eligibility.reason,
-            failure_type=eligibility.failure_type,
+        if eligibility.failure_type is None:
+            raise RuntimeError("an ineligible follow-up carries no refusal type")
+        return _refused(
+            options["thread_id"],
+            thread_status,
+            eligibility.failure_type,
+            eligibility.reason or "The run cannot take this now",
         )
 
     logger.info(
@@ -196,28 +216,23 @@ async def send_followup_message(
         len(options["content"]),
     )
 
-    # The losing claim path rolls its transaction back, which expires ORM state.
-    # Snapshot every value needed after election before entering the shared lease
-    # primitive so a concurrent replay/conflict never triggers implicit async I/O.
-    thread_status = thread.status
-    write_expectation = thread_write_expectation(thread)
-    team_preset = thread.team_preset
+    # The losing reservation path rolls its transaction back, which expires ORM
+    # state. Snapshot every value needed afterwards before entering the queue
+    # repository so a concurrent replay or conflict never triggers implicit
+    # async I/O.
     thread_metadata = thread.thread_metadata
     try:
         graph_definition = await read_accepted_graph_definition(
             db, options["thread_id"]
         )
-        team_preset = graph_definition.team_id
         execution_authority = resolve_execution_authority(thread_metadata)
     except (ExecutionAuthorityError, ValueError) as exc:
         await db.rollback()
-        return MessageResult(
-            action_id="",
-            thread_id=options["thread_id"],
-            thread_status=thread_status,
-            dispatched=False,
-            error_detail=str(exc),
-            failure_type=FailureType.INCOMPATIBLE_STATE,
+        return _refused(
+            options["thread_id"],
+            thread_status,
+            FailureType.INCOMPATIBLE_STATE,
+            str(exc),
         )
 
     # -- Metadata extraction ---------------------------------------------
@@ -229,90 +244,94 @@ async def send_followup_message(
     workspace_root = dispatchable_workspace_root(thread_metadata)
     if workspace_root is None:
         await db.rollback()
-        return MessageResult(
-            action_id="",
-            thread_id=options["thread_id"],
-            thread_status=thread_status,
-            dispatched=False,
-            error_detail=(
-                "run carries no active project: its stored metadata names no "
-                "workspace_root, so a follow-up cannot be sited. Start a new run."
-            ),
-            failure_type=FailureType.NO_ACTIVE_PROJECT,
+        return _refused(
+            options["thread_id"],
+            thread_status,
+            FailureType.NO_ACTIVE_PROJECT,
+            "run carries no active project: its stored metadata names no "
+            "workspace_root, so a follow-up cannot be sited. Start a new run.",
         )
 
-    # -- Dispatch construction & send ------------------------------------
+    lifetime_deadline_at = run_lifetime_deadline(created_at)
+    if not replaying and lifetime_deadline_at <= _now():
+        # The run has no lifetime left to run another turn in, so a reservation
+        # here would be accepted work the promotion bound is already committed
+        # to refusing. Say so now rather than take it and reject it later. A
+        # replay reserves nothing, so the bound does not apply to one.
+        await db.rollback()
+        return _refused(
+            options["thread_id"],
+            thread_status,
+            FailureType.TERMINAL,
+            "The run's total lifetime is spent, so it can take no further "
+            "turn. Start a new run naming this one as its predecessor.",
+        )
+
+    # -- The accepted envelope the promoted turn is rebuilt from ----------
+    # Complete and frozen at admission: the turn was offered against this
+    # program and must run under this one, including its recursion budget,
+    # which comes from the run's own accepted graph definition rather than
+    # from a service-wide default read at some later moment.
     dispatch = DispatchRequest(
         action=to_dispatch_action(ControlActionType.INGEST),
         thread_id=options["thread_id"],
         agent_id=options["agent_id"],
         content=options["content"],
-        team_preset=team_preset,
+        team_preset=graph_definition.team_id,
         graph_definition=graph_definition,
         workspace_root=workspace_root,
-        recursion_limit=options["recursion_limit"],
+        recursion_limit=graph_definition.recursion_limit,
         model_assignment=execution_authority.model_assignment,
     )
 
-    # -- Durable reservation and dispatch election -----------------------
-    resolved_idempotency_key = options["idempotency_key"] or default_message_key(
-        options["thread_id"], options["agent_id"], options["content"]
-    )
-    claim = await prepare_control_action_claim(
+    # -- Durable reservation, with no receipt, writer or dispatch ---------
+    reserved = await reserve_queued_continuation(
         db,
-        request=ControlActionClaimRequest(
+        QueuedContinuationRequest(
             thread_id=options["thread_id"],
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            idempotency_key=resolved_idempotency_key,
+            idempotency_key=options["idempotency_key"],
             payload=freeze_accepted_input(
                 dispatch,
                 intent={"content": options["content"], "agent_id": options["agent_id"]},
             ),
             dispatch_id=dispatch.dispatch_id,
-            write_expectation=write_expectation,
-            recovery_timeout_seconds=graph_definition.run_timeout_seconds,
+            lifetime_deadline_at=lifetime_deadline_at,
+            limits=served_continuation_queue_limits(),
         ),
     )
-    claim_failure = _claim_message_failure(claim, options["thread_id"], thread_status)
-    if claim_failure is not None:
-        return claim_failure
-
-    dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
-    await mark_message_followup_requested(db, options["thread_id"])
-    await finalize_control_action_acceptance(db, claim)
-
+    refusal = _REFUSALS.get(reserved.disposition)
+    if refusal is not None:
+        await db.rollback()
+        failure_type, detail = refusal
+        return _refused(
+            options["thread_id"],
+            thread_status,
+            failure_type,
+            detail,
+            reserved.action_id,
+        )
+    await db.commit()
     logger.info(
-        "Dispatching message dispatch_id=%s for thread %s",
-        dispatch.dispatch_id,
+        "%s a continuation for thread %s at position %s",
+        "Replayed" if reserved.disposition is _REPLAYED else "Queued",
         options["thread_id"],
+        reserved.position,
         extra={
             "thread_id": options["thread_id"],
-            "dispatch_id": dispatch.dispatch_id,
-            "action": dispatch.action,
-            "agent_id": options["agent_id"],
+            "dispatch_id": reserved.dispatch_id,
+            "queue_position": reserved.position,
+            "action": (
+                "continuation_replayed"
+                if reserved.disposition is _REPLAYED
+                else "continuation_queued"
+            ),
         },
     )
-
-    dispatch = await bind_graph_action_receipt(db, dispatch)
-    outcome = await safe_dispatch(
-        options["worker_client"],
-        dispatch,
-        options["circuit_breaker"],
-        options["worker_spawner"],
-        trace_headers=options["trace_headers"],
+    return MessageResult(
+        action_id=reserved.action_id,
+        thread_id=options["thread_id"],
+        thread_status=thread_status,
+        queued=True,
+        queue_position=reserved.position,
+        action_status=reserved.result_status,
     )
-
-    if not outcome.success:
-        result = await _settle_failed_message_dispatch(
-            db, claim, outcome, options["thread_id"], thread_status
-        )
-    else:
-        # Worker acknowledgement proves scheduling only. The exact internal
-        # ``dispatch_applied`` receipt settles the journal action and repair state.
-        result = MessageResult(
-            action_id=claim.action_id,
-            thread_id=options["thread_id"],
-            thread_status=thread_status,
-            dispatched=True,
-        )
-    return result

@@ -34,3 +34,20 @@ def test_evaluate_pairs_classification_with_the_typed_failure(
     policy, typed_failure = evaluate_dispatch_failure(failure.value)
     assert policy == classify_dispatch_failure(failure.value)
     assert typed_failure is failure
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        FailureType.CIRCUIT_OPEN,
+        FailureType.AT_CAPACITY,
+        FailureType.UNREACHABLE,
+    ],
+)
+def test_a_condition_that_passes_never_fails_the_run(failure: FailureType) -> None:
+    """Accepted work outlives a shut circuit, a full worker and an absent one.
+
+    All three are retried on a schedule the dispatch never sees, so failing the
+    run here would discard work that is still going to be delivered.
+    """
+    assert classify_dispatch_failure(failure.value).should_mark_failed is False

@@ -207,7 +207,7 @@ async def commit_proven_application(
     )
     from ..thread.enums import TERMINAL_STATUS_VALUES, ControlActionType
     from .dispatch_receipts import validate_current_graph_receipt
-    from .repair_transitions import mark_message_followup_applied
+    from .repair_transitions import mark_ingest_applied, mark_message_followup_applied
 
     # ``proven_application_receipt`` ends its read transaction before the
     # checkpoint proof, so this settlement owns the whole re-read and write.
@@ -233,6 +233,11 @@ async def commit_proven_application(
         or action.applied_at is not None
         or validate_current_graph_receipt(thread, action) != stored_receipt
     ):
+        return None
+    if action.action_type == ControlActionType.INGEST.value:
+        await mark_control_action_applied(db, action.id)
+        await mark_ingest_applied(db, thread_id)
+        await db.commit()
         return None
     if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
         await mark_control_action_applied(db, action.id)

@@ -51,6 +51,43 @@ def _record_config_home(path: str) -> None:
         json.dump(payload, fh)
 
 
+# The permission modes a session advertises, copied from the pinned adapter's
+# own session result (claude-agent-acp, SessionModeManager.buildAvailableModes)
+# rather than invented: the ids, names and descriptions are what a real lane
+# reports, and "default" is current because that is where a session with no
+# ambient settings sources lands. A client pins an unattended run to a mode and
+# verifies it against this list, so a simulator that reports nothing here is a
+# lane whose permission posture cannot be established at all.
+#
+# This is the catalog of a session that has DECLINED the permission bypass
+# capability, which is every session this project opens. A session that keeps
+# it also reports "bypassPermissions"; none here does. The adapter withdrew
+# "dontAsk" from the catalog while still accepting the spelling in its parser,
+# so a simulator that advertised it would offer a mode no real lane will set.
+_AVAILABLE_MODES: list[dict[str, str]] = [
+    {
+        "id": "default",
+        "name": "Manual",
+        "description": "Always ask before making changes",
+    },
+    {
+        "id": "acceptEdits",
+        "name": "Accept edits",
+        "description": "Automatically accept all file edits",
+    },
+    {
+        "id": "plan",
+        "name": "Plan",
+        "description": "Create a plan before making changes",
+    },
+    {
+        "id": "auto",
+        "name": "Auto",
+        "description": "Claude handles permission decisions",
+    },
+]
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ACP Protocol Simulator")
     parser.add_argument(
@@ -76,6 +113,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "be reached through the gateway at all: with no catalog entry there is "
         "no selection to name, and run creation is refused before admission. "
         "Omitted by default, so every existing caller is unaffected.",
+    )
+    parser.add_argument(
+        "--omit-modes",
+        action="store_true",
+        help="Answer session/new with no modes block. The pinned adapter always "
+        "advertises its permission modes, so this is the shape of another agent "
+        "speaking the same protocol - a lane whose permission posture an "
+        "unattended run cannot pin or verify.",
     )
     parser.add_argument(
         "--error", help="If set, return this error message for session/prompt"
@@ -150,6 +195,11 @@ def _session_new_response(
         with open(args.record_session_new, "w", encoding="utf-8") as fh:
             json.dump(req.get("params", {}), fh)
     session_result: dict[str, object] = {"sessionId": args.session_id}
+    if not args.omit_modes:
+        session_result["modes"] = {
+            "currentModeId": "default",
+            "availableModes": [dict(mode) for mode in _AVAILABLE_MODES],
+        }
     if args.advertise_model:
         # The real adapter's shape: one select whose category is "model",
         # carrying the ids it will accept. The catalog reads its entries

@@ -28,6 +28,7 @@ from ._acp_types import (
 )
 from ._claude_tool_policy import (
     AUTONOMOUS_PERMISSION_MODE,
+    BYPASS_CAPABILITY_OPTION,
     MODE_CONFIG_OPTION_ID,
     claude_disallowed_tools,
 )
@@ -99,8 +100,24 @@ def claude_session_options(config: AcpModelConfig) -> JsonObject:
     ``disallowedTools`` carries the persona's capability declaration into the
     only place the CLI's own built-ins respect. The adapter appends its entries
     to ours rather than replacing them, so what is denied here stays denied.
+
+    ``allowDangerouslySkipPermissions`` is declined, which is a statement about
+    the CHILD's capability rather than about the mode it starts in. The adapter
+    decides for itself whether a session may bypass permissions - it is allowed
+    whenever the adapter process is not root, or is root with ``IS_SANDBOX``
+    set - and when it decides yes it both advertises ``bypassPermissions`` in
+    the mode catalog and hands the CLI the skip-permissions flag. Neither is
+    this project's posture: the permission rung is the decision (see
+    ``AUTONOMOUS_PERMISSION_MODE``), so the capability to step around it is
+    refused at the only place a client can refuse it. Declining it also keeps
+    the lane launchable as root, where the CLI rejects the flag the adapter
+    would otherwise arm and the session dies before it is created.
     """
-    options: JsonObject = {"strictMcpConfig": True, "settingSources": []}
+    options: JsonObject = {
+        "strictMcpConfig": True,
+        "settingSources": [],
+        BYPASS_CAPABILITY_OPTION: False,
+    }
     if pre_approved := statically_approvable_tool_names(config.allowed_tools):
         options["allowedTools"] = list[JsonValue](pre_approved)
     if disallowed := claude_disallowed_tools(config.agent_config):
@@ -114,10 +131,11 @@ def session_surface_mcp_servers(config: AcpModelConfig) -> list[JsonValue]:
     Two normalizations, both load-bearing:
 
     - Every stdio spec carries an explicit ``env`` list (empty when it has no
-      environment). The ACP schema models ``env`` as a required field of the
-      stdio server shape, and the migrated adapter's validator silently DROPS a
-      spec without it - the mechanism previously misread as a registration-scope
-      gate on session injection.
+      environment). The pinned adapter reads a session server by SHAPE: a spec
+      carrying no ``type`` key is the stdio one, and its ``env`` is read as a
+      name/value list. Emitting the list unconditionally is what gives the
+      placeholder rewrite below one field to act on, rather than a field that
+      exists on some specs and not others.
     - On the strict claude lane, env VALUES are replaced with ``${NAME}``
       placeholder references and the declared-surface allowlist is enforced
       (:func:`require_declared_surface`). The adapter forwards the session set
@@ -637,19 +655,20 @@ async def _pin_autonomous_permission_mode(
         return config_options, agent_modes
     available = _available_mode_ids(agent_modes)
     if not available:
-        # A session that advertises no modes offers nothing to pin: the pinned
-        # adapter always advertises them, so this is another agent speaking the
-        # same family, and its posture is its own. Said out loud rather than
-        # passed over, because an unattended run is then bounded only by the
-        # allowlist and the permission rung.
-        logger.warning(
-            "ACP session advertises no permission modes; an unattended run is "
-            "bounded only by its allowlist and the permission rung",
-            extra=runtime_log_extra(
-                config, process=ctx.process, handshake_step="session/new"
-            ),
+        # A session that advertises no modes offers nothing to pin, and an
+        # unattended run that cannot pin its mode is running under whatever
+        # posture the agent chose for itself - which is the ambient default
+        # this pin exists to replace. The pinned adapter always advertises its
+        # modes, so reaching here means another agent is speaking the same
+        # protocol; refusing it is the same answer this function already gives
+        # a lane that advertises modes but not the one an unattended run needs.
+        raise AcpSessionError(
+            "ACP session cannot run unattended: it advertises no permission "
+            "modes, so the mode an unattended run requires can be neither set "
+            "nor verified",
+            code=AcpErrorCode.INVALID_PARAMS,
+            condition=ProviderCondition.INVALID_REQUEST,
         )
-        return config_options, agent_modes
     if AUTONOMOUS_PERMISSION_MODE not in available:
         raise AcpSessionError(
             "ACP session cannot run unattended: it does not offer the "

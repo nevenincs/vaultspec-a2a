@@ -62,6 +62,15 @@ def normalize_schema_expression(expression: str, *, dialect: str = "sqlite") -> 
             "",
             result,
         ).replace("btrim(", "trim(")
+        # PostgreSQL renders a reflected ``trim(x)`` as ``TRIM(BOTH FROM x)``,
+        # which the whitespace strip above leaves as ``trim(bothfrom``. Without
+        # this fold the receipt-id predicate never matches its own definition,
+        # and the migration guard then refuses every revision after the one
+        # that introduced write authority - on PostgreSQL only, and only for a
+        # store that already carries it, so a fresh database still reaches head
+        # and an existing one can never leave it. ``LEADING`` and ``TRAILING``
+        # are different predicates and are deliberately not folded in.
+        result = result.replace("trim(bothfrom", "trim(")
         result = result.replace("=any", "in")
         result = result.replace("[", "").replace("]", "")
         result = result.replace("(", "").replace(")", "")

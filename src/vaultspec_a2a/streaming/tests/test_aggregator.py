@@ -43,8 +43,12 @@ from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
 from ..aggregator import EventAggregator
 from ..ingest import _next_event_or_cancel, summarize_ingest_exception
-from ..types import SequencedEvent, StreamableGraph
-from ._error_injecting_graph import ERROR_INJECTION_NODE, build_error_injecting_graph
+from ..types import SequencedEvent, StreamableGraph, StreamOptions
+from ._error_injecting_graph import (
+    ERROR_INJECTION_NODE,
+    InjectedSignal,
+    build_error_injecting_graph,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -866,7 +870,7 @@ class TestLangGraphStreamProcessing:
             tool_call_id="call_SEARCH",
         )
 
-        events = []
+        events: list[DomainEvent] = []
         while not queue.empty():
             events.append(queue.get_nowait().event)
         identities = {
@@ -907,7 +911,7 @@ class TestLangGraphStreamProcessing:
             RuntimeError("disk is full"), run_id=run_id, tool_call_id="call_WRITE"
         )
 
-        events = []
+        events: list[DomainEvent] = []
         while not queue.empty():
             events.append(queue.get_nowait().event)
         updates = [event for event in events if isinstance(event, ToolCallUpdate)]
@@ -1117,7 +1121,7 @@ class TestLangGraphStreamProcessing:
             agent_id="agent-1",
         )
 
-        events = []
+        events: list[DomainEvent] = []
         while not queue.empty():
             events.append(queue.get_nowait().event)
         plans = [event for event in events if isinstance(event, PlanUpdate)]
@@ -1164,7 +1168,7 @@ class TestLangGraphStreamProcessing:
                 (), "custom", payload, thread_id="thread-1", agent_id="agent-1"
             )
 
-        relayed = []
+        relayed: list[DomainEvent] = []
         while not queue.empty():
             relayed.append(queue.get_nowait().event)
         assert [
@@ -1950,12 +1954,7 @@ class TestEmitInterruptEvents:
                 self,
                 graph_input: object,
                 config: object,
-                *,
-                stream_mode: list[str],
-                subgraphs: bool = False,
-                context: object | None = None,
-                control: object | None = None,
-                durability: str | None = None,
+                **options: Unpack[StreamOptions],
             ):
                 from langgraph.types import Interrupt
 
@@ -2112,6 +2111,33 @@ async def test_provider_cancelled_prompt_settles_as_cancelled(
     cancelled = [event for event in events if isinstance(event, AgentStatus)]
     assert cancelled[-1].state is AgentLifecycleState.CANCELLED
     assert cancelled[-1].detail == "Provider cancelled the turn"
+
+
+@pytest.mark.asyncio
+async def test_a_signal_raised_by_a_node_is_reported_and_still_propagates(
+    aggregator: EventAggregator,
+) -> None:
+    """A ``BaseException`` outside ``Exception`` is not swallowed as a failure.
+
+    The run is still reported failed to its viewers, because it did not finish,
+    but the signal reaches whoever is running the ingest: absorbing it into a
+    settled outcome would let a request to stop look like a run that ended.
+    """
+    queue = aggregator.add_subscriber("signal-client")
+    aggregator.subscribe("signal-client", ["signal-thread"])
+    with pytest.raises(InjectedSignal):
+        await _ingest(
+            aggregator,
+            thread_id="signal-thread",
+            agent_id="supervisor",
+            graph=build_error_injecting_graph(),
+            graph_input={"raise_signal": "stop"},
+            config={"configurable": {"thread_id": "signal-thread"}},
+        )
+    events = [queue.get_nowait().event for _ in range(queue.qsize())]
+    errors = [event for event in events if isinstance(event, ErrorOccurred)]
+    assert errors
+    assert "InjectedSignal" in errors[-1].message
 
 
 class TestIngestExceptionCauseChain:

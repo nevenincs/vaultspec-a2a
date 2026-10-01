@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast, override
 
-from langgraph.runtime import RunControl
 from langgraph.types import Command
 
 from ..control.permission_dispatch import answered_permission_request
@@ -40,17 +40,27 @@ from ._dispatch_contract import (
     CAPACITY_FULL,
     CAPACITY_THREAD_ACTIVE,
     DispatchCapacityReservation,
+    _GuardWording,
 )
-from ._dispatch_receipts import DispatchReceiptReporter
-from ._dispatch_settlement import SettlementMixin, TerminalArbitration
-from ._executor_state import CheckpointAccess, DispatchCapacityState, RunResources
+from ._dispatch_settlement import SettlementMixin
+from ._executor_state import (
+    CheckpointAccess,
+    DispatchCapacityState,
+    RunControlRegistry,
+    RunResources,
+)
 from .graph_lifecycle import (
     GraphCompilationError,
     GraphCompilationKey,
     GraphLifecycleManager,
     RegisteredCompiledGraph,
 )
-from .state_projection import ResumeAdmission, ResumeRefusal, StateProjector
+from .state_projection import (
+    PreflightDecision,
+    ResumeAdmission,
+    ResumeRefusal,
+    StateProjector,
+)
 
 if TYPE_CHECKING:
     from contextvars import ContextVar
@@ -61,6 +71,9 @@ if TYPE_CHECKING:
     from ..ipc.schemas import DispatchRequest
     from ..streaming.aggregator import EventAggregator
     from ..streaming.types import SequencedEvent, StreamableGraph
+    from ..thread.action_receipts import GraphActionReceipt
+    from ._dispatch_receipts import DispatchReceiptReporter
+    from ._dispatch_settlement import TerminalArbitration
     from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
     from .token_store import RunTokenStore
@@ -146,6 +159,76 @@ def _run_context(req: DispatchRequest, *, action: str) -> RunContext:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _AdmittedRun:
+    """A dispatch that got past admission, and everything executing it needs.
+
+    The compiled graph, the config it runs under, and the wording of the mode
+    it runs in are decided together at admission and consumed together by
+    execution, so they travel as one value rather than as three arguments
+    threaded through every arm.
+    """
+
+    graph: RegisteredCompiledGraph
+    config: dict[str, Any]
+    guards: _GuardWording
+
+
+def _ingest_graph_input(
+    req: DispatchRequest,
+    graph: RegisteredCompiledGraph,
+    receipt: GraphActionReceipt,
+    preflight: PreflightDecision,
+) -> dict[str, Any] | None:
+    """The state one ingest delivers, or nothing when it continues part-way.
+
+    A run whose own input is already committed to the checkpoint resumes from
+    it with no input at all, so the message is not delivered twice and
+    finished nodes do not re-run.
+    """
+    if preflight.resume_from_checkpoint:
+        return None
+    graph_input = GraphLifecycleManager.build_graph_input(
+        req, is_first_ingest=preflight.is_first_ingest
+    )
+    graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
+    graph_input["graph_action_receipts"] = {
+        req.dispatch_id: receipt.model_dump(mode="json")
+    }
+    graph_input["active_graph_action_receipt"] = receipt.model_dump(mode="json")
+    return graph_input
+
+
+def _resume_command(
+    req: DispatchRequest,
+    receipt: GraphActionReceipt,
+    graph: RegisteredCompiledGraph,
+    admission: ResumeAdmission,
+) -> Command[Any]:
+    """The answer one resume re-enters on, with the keys bound atomically to it.
+
+    Every key here is bound atomically with the answer, which is what lets a
+    run parked before checkpoint evidence existed acquire its digests without
+    a separate state update that would invalidate the interrupt it is parked
+    on. LangGraph holds a resume's input writes against that checkpoint and
+    accumulates them until a superstep consumes them, so a turn needing a
+    second approval, and a resume redelivered after its turn died, each write
+    these keys twice in one step. Every one of them therefore reduces rather
+    than holding a single value.
+    """
+    return Command(
+        resume=_addressed_resume(req.option_id, admission),
+        update={
+            "graph_action_receipts": {req.dispatch_id: receipt.model_dump(mode="json")},
+            "active_graph_action_receipt": receipt.model_dump(mode="json"),
+            "agent_descriptors": node_metadata_from_graph(graph),
+            "graph_definition_digest": req.require_graph_definition().digest(),
+            "model_assignment_digest": model_assignment_digest(req.model_assignment),
+            **_answered_permission_update(req.option_id),
+        },
+    )
+
+
 class Executor(SettlementMixin):
     """Orchestrate graph runs, projections, events, and dispatch capacity."""
 
@@ -166,24 +249,9 @@ class Executor(SettlementMixin):
         )
         self._bridge = bridge
         self._resources = RunResources()
-        # One drain handle per run executing here, and a signal for when none
-        # are left, so a shutdown can stop every run at a superstep boundary
-        # and know when they have all stopped.
-        self._run_controls: dict[str, RunControl] = {}
-        self._runs_idle = asyncio.Event()
-        self._runs_idle.set()
-        # The reason a drain was requested, kept for the whole remaining life
-        # of this executor. A drain is one-way: the worker asking for it is on
-        # its way out, so every run that starts afterwards starts drained and
-        # no further dispatch is admitted. Without this the drain reached only
-        # the runs that happened to hold a control at the moment it was asked
-        # for, and a dispatch admitted a moment earlier ran to completion
-        # through a shutdown.
-        self._drain_reason: str | None = None
-        # One incorporation report per dispatch, whichever of the run's two
-        # chances to prove it - its first committed checkpoint, or its settle
-        # - gets there first.
-        self._receipts = DispatchReceiptReporter()
+        # One drain handle per run executing here, so a shutdown can stop
+        # every run at a superstep boundary and know when they have stopped.
+        self._run_controls = RunControlRegistry()
 
         # Worker-scoped holder of per-run actor tokens. Registered when a
         # run's active window opens and dropped when it closes, so tokens live
@@ -220,7 +288,6 @@ class Executor(SettlementMixin):
         self._aggregator.add_broadcast_hook(_relay_event)
 
         self._capacity = DispatchCapacityState()
-        self._terminal_arbitrations: dict[str, TerminalArbitration] = {}
 
     @property
     def _checkpointer(self) -> Checkpointer:
@@ -242,6 +309,20 @@ class Executor(SettlementMixin):
     @property
     def _catalog_store(self) -> RunCatalogStore:
         return self._resources.catalog_store
+
+    @property
+    def _receipts(self) -> DispatchReceiptReporter:
+        """One incorporation report per dispatch.
+
+        Whichever of a run's two chances to prove incorporation - its first
+        committed checkpoint, or its settle - gets there first.
+        """
+        return self._resources.receipts
+
+    @property
+    @override
+    def _terminal_arbitrations(self) -> dict[str, TerminalArbitration]:
+        return self._capacity.terminal_arbitrations
 
     @property
     @override
@@ -355,7 +436,7 @@ class Executor(SettlementMixin):
     ) -> tuple[DispatchCapacityReservation | None, str]:
         """Return the bounded reason for one atomic capacity decision."""
         async with self._terminal_arbitration(thread_id), self._ingest_lock:
-            if self._drain_reason is not None:
+            if self._run_controls.draining:
                 return None, CAPACITY_DRAINING
             if thread_id in self._active_ingests:
                 return None, CAPACITY_THREAD_ACTIVE
@@ -577,51 +658,13 @@ class Executor(SettlementMixin):
             # or part-way. It also grounds is_first_ingest in checkpoint truth
             # rather than the stale in-memory cache.
             preflight = await self._state_projector.pre_flight_checkpoint(
-                req.thread_id,
                 receipt,
                 timeout_seconds=max(
                     0.0,
                     checkpoint_deadline - asyncio.get_running_loop().time(),
                 ),
             )
-            pre_flight_outcome = preflight.outcome
-            if preflight.refusal is not None:
-                span.set_attribute("pre_flight", "refused")
-                await self._reject_with_condition(req, preflight.refusal)
-                return
-            if pre_flight_outcome == ThreadStatus.COMPLETED:
-                await self._settle_completed_preflight(req, span)
-                return
-            if pre_flight_outcome == ThreadStatus.FAILED:
-                logger.warning(
-                    "Thread %s checkpoint shows error before crash"
-                    " — emitting failed without re-running",
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="checkpoint_preflight_terminal",
-                        outcome=ThreadStatus.FAILED,
-                    ),
-                )
-                span.set_attribute("pre_flight", "failed")
-                await self._reject_with_condition(
-                    req,
-                    "The run's checkpoint records an unhandled error from an "
-                    "earlier attempt; it was not re-run",
-                )
-                return
-            if pre_flight_outcome == "interrupted":
-                logger.info(
-                    "Thread %s checkpoint is paused at interrupt"
-                    " — skipping ingest; awaiting resume dispatch",
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action="checkpoint_preflight_interrupted",
-                        outcome="interrupted",
-                    ),
-                )
-                span.set_attribute("pre_flight", "interrupted")
+            if await self._preflight_settled_ingest(req, span, preflight):
                 return
 
             span.set_attribute("is_first_ingest", preflight.is_first_ingest)
@@ -629,85 +672,164 @@ class Executor(SettlementMixin):
                 "resume_from_checkpoint", preflight.resume_from_checkpoint
             )
 
-            try:
-                graph = await self._graph_lifecycle.get_or_compile_graph(
-                    req, checkpoint_deadline=checkpoint_deadline
-                )
-            except GraphCompilationError as exc:
-                await self._reject_compile_failure(req, span, exc, _INGEST_GUARDS)
+            run = await self._admit_run(req, span, checkpoint_deadline, _INGEST_GUARDS)
+            if run is None:
                 return
 
-            if graph is None:
-                await self._reject_missing_graph(req, span, _INGEST_GUARDS)
-                return
-
-            config = _invocation_config(req, action="ingest")
             self._bridge.track_thread(req.thread_id)
             # Hold the run's per-role tokens for this active window only.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
-            graph_input: dict[str, Any] | None = None
-            if not preflight.resume_from_checkpoint:
-                graph_input = GraphLifecycleManager.build_graph_input(
-                    req, is_first_ingest=preflight.is_first_ingest
-                )
-                graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
-                graph_input["graph_action_receipts"] = {
-                    req.dispatch_id: receipt.model_dump(mode="json")
-                }
-                graph_input["active_graph_action_receipt"] = receipt.model_dump(
-                    mode="json"
-                )
+            await self._execute_run(
+                req,
+                span,
+                run,
+                _ingest_graph_input(req, run.graph, receipt, preflight),
+            )
 
-            agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
+    async def _preflight_settled_ingest(
+        self,
+        req: DispatchRequest,
+        span: Span,
+        preflight: PreflightDecision,
+    ) -> bool:
+        """Whether the checkpoint already settled this ingest's fate.
 
-            # Stays None unless the catch-all below fires, so a run that settles
-            # normally offers no fallback and keeps whatever ingest classified.
-            execution_failure_reason: str | None = None
-            # Pre-bound so `finally` always has a value to settle with, including
-            # for a BaseException that bypasses the `except Exception` clause
-            # below (e.g. cancellation) before `ingest` assigns its own outcome.
-            outcome: str = ThreadStatus.FAILED
+        A redelivered ingest whose action the checkpoint already finished,
+        failed or parked on must not run again; one whose checkpoint cannot
+        say what running it would do must not run at all. Each of those is
+        answered here, and ``True`` means the dispatch is done with.
+        """
+        if preflight.refusal is not None:
+            span.set_attribute("pre_flight", "refused")
+            await self._reject_with_condition(req, preflight.refusal)
+            return True
+        outcome = preflight.outcome
+        if outcome == ThreadStatus.COMPLETED:
+            await self._settle_completed_preflight(req, span)
+            return True
+        if outcome == ThreadStatus.FAILED:
+            logger.warning(
+                "Thread %s checkpoint shows error before crash"
+                " — emitting failed without re-running",
+                req.thread_id,
+                extra=self._dispatch_log_extra(
+                    req,
+                    action="checkpoint_preflight_terminal",
+                    outcome=ThreadStatus.FAILED,
+                ),
+            )
+            span.set_attribute("pre_flight", "failed")
+            await self._reject_with_condition(
+                req,
+                "The run's checkpoint records an unhandled error from an "
+                "earlier attempt; it was not re-run",
+            )
+            return True
+        if outcome == "interrupted":
+            logger.info(
+                "Thread %s checkpoint is paused at interrupt"
+                " — skipping ingest; awaiting resume dispatch",
+                req.thread_id,
+                extra=self._dispatch_log_extra(
+                    req,
+                    action="checkpoint_preflight_interrupted",
+                    outcome="interrupted",
+                ),
+            )
+            span.set_attribute("pre_flight", "interrupted")
+            return True
+        return False
 
+    async def _admit_run(
+        self,
+        req: DispatchRequest,
+        span: Span,
+        checkpoint_deadline: float,
+        guards: _GuardWording,
+    ) -> _AdmittedRun | None:
+        """Compile the run's graph and bind the config it will run under.
+
+        ``None`` means the dispatch was already rejected on the client's
+        channel - the graph refused to compile, or there is no graph to run -
+        so the caller has nothing left to do for it.
+        """
+        try:
+            graph = await self._graph_lifecycle.get_or_compile_graph(
+                req, checkpoint_deadline=checkpoint_deadline
+            )
+        except GraphCompilationError as exc:
+            await self._reject_compile_failure(req, span, exc, guards)
+            return None
+        if graph is None:
+            await self._reject_missing_graph(req, span, guards)
+            return None
+        return _AdmittedRun(
+            graph=graph,
+            config=_invocation_config(req, action=guards.runtime_mode),
+            guards=guards,
+        )
+
+    async def _execute_run(
+        self,
+        req: DispatchRequest,
+        span: Span,
+        run: _AdmittedRun,
+        graph_input: dict[str, Any] | Command[Any] | None,
+    ) -> None:
+        """Stream one admitted dispatch through its graph and settle it.
+
+        Ingest and resume reach the graph with different input and part under
+        different wording, but the window around the stream is one behaviour:
+        every exit - a returned outcome, a drain, a fault, or a cancellation
+        that bypasses ``except Exception`` entirely - settles the run exactly
+        once and then closes its drain handle.
+        """
+        action = run.guards.runtime_mode
+        # Stays None unless the catch-all below fires, so a run that settles
+        # normally offers no fallback and keeps whatever ingest classified.
+        execution_failure_reason: str | None = None
+        # Pre-bound so `finally` always has a value to settle with, including
+        # for a BaseException that bypasses the `except Exception` clause
+        # below (e.g. cancellation) before `ingest` assigns its own outcome.
+        outcome: str = ThreadStatus.FAILED
+        try:
+            span.add_event(f"{action}_graph_execution_started")
+            outcome = await self._aggregator.ingest(
+                req.thread_id,
+                req.agent_id or DEFAULT_SUPERVISOR_ID,
+                run.graph,
+                graph_input,
+                run.config,
+                on_graph_started=lambda: self._emit_dispatch_application_receipt(req),
+                context=_run_context(req, action=action),
+                control=self._run_controls.open(req.thread_id),
+            )
+            span.set_attribute("outcome", outcome)
+        except asyncio.CancelledError:
+            outcome = INGEST_DRAINED
+            span.set_attribute("outcome", outcome)
+            raise
+        except Exception:
+            outcome = ThreadStatus.FAILED
+            execution_failure_reason = run.guards.execution_failure_detail
+            logger.exception(
+                run.guards.execution_failure,
+                req.thread_id,
+                extra=self._dispatch_log_extra(
+                    req,
+                    action=run.guards.execution_failure_action,
+                    runtime_mode=action,
+                ),
+            )
+            span.record_exception(Exception(f"Graph {action} failed"))
+        finally:
             try:
-                span.add_event("starting_graph_execution")
-                outcome = await self._aggregator.ingest(
-                    req.thread_id,
-                    agent_id,
-                    graph,
-                    graph_input,
-                    config,
-                    on_graph_started=lambda: self._emit_dispatch_application_receipt(
-                        req
-                    ),
-                    context=_run_context(req, action="ingest"),
-                    control=self._open_run_control(req.thread_id),
+                await self._settle_run(
+                    req, run.graph, run.config, outcome, execution_failure_reason
                 )
-                span.set_attribute("outcome", outcome)
-            except asyncio.CancelledError:
-                outcome = INGEST_DRAINED
-                span.set_attribute("outcome", outcome)
-                raise
-            except Exception:
-                outcome = ThreadStatus.FAILED
-                execution_failure_reason = _INGEST_GUARDS.execution_failure_detail
-                logger.exception(
-                    _INGEST_GUARDS.execution_failure,
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action=_INGEST_GUARDS.execution_failure_action,
-                        runtime_mode=_INGEST_GUARDS.runtime_mode,
-                    ),
-                )
-                span.record_exception(Exception("Graph execution failed"))
             finally:
-                try:
-                    await self._settle_run(
-                        req, graph, config, outcome, execution_failure_reason
-                    )
-                finally:
-                    self._close_run_control(req.thread_id)
+                self._close_run_control(req.thread_id)
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
@@ -724,24 +846,14 @@ class Executor(SettlementMixin):
             # Record resume option (cast to str for span attribute)
             val = str(req.option_id) if req.option_id else "none"
             span.set_attribute("option_id", val)
-            try:
-                graph = await self._graph_lifecycle.get_or_compile_graph(
-                    req, checkpoint_deadline=checkpoint_deadline
-                )
-            except GraphCompilationError as exc:
-                await self._reject_compile_failure(req, span, exc, _RESUME_GUARDS)
-                return
 
-            if graph is None:
-                await self._reject_missing_graph(req, span, _RESUME_GUARDS)
+            run = await self._admit_run(req, span, checkpoint_deadline, _RESUME_GUARDS)
+            if run is None:
                 return
-
-            config = _invocation_config(req, action="resume")
 
             admission = await self._state_projector.pre_flight_resume(
-                req.thread_id,
-                graph,
-                config,
+                run.graph,
+                run.config,
                 receipt,
                 resume_value=req.option_id,
                 timeout_seconds=max(
@@ -749,100 +861,25 @@ class Executor(SettlementMixin):
                 ),
             )
             if isinstance(admission, ResumeRefusal):
-                await self._refuse_resume(req, span, graph, config, admission)
+                await self._refuse_resume(req, span, run, admission)
                 return
 
             self._bridge.track_thread(req.thread_id)
             # A resumed turn re-provisions the run's tokens for its window.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
-            agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
-
-            # Stays None unless the catch-all below fires, so a resume that
-            # settles normally keeps whatever ingest classified.
-            execution_failure_reason: str | None = None
-            # Pre-bound so `finally` always has a value to settle with, including
-            # for a BaseException that bypasses the `except Exception` clause
-            # below (e.g. cancellation) before `ingest` assigns its own outcome.
-            outcome: str = ThreadStatus.FAILED
-
-            try:
-                span.add_event("resuming_graph_execution")
-                # Command(resume=...) is accepted by astream_events in place of
-                # a dict graph_input -- LangGraph handles the type internally.
-                outcome = await self._aggregator.ingest(
-                    req.thread_id,
-                    agent_id,
-                    graph,
-                    Command(
-                        resume=_addressed_resume(req.option_id, admission),
-                        # Every key here is bound atomically with the answer,
-                        # which is what lets a run parked before checkpoint
-                        # evidence existed acquire its digests without a
-                        # separate state update that would invalidate the
-                        # interrupt it is parked on. LangGraph holds a
-                        # resume's input writes against that checkpoint and
-                        # accumulates them until a superstep consumes them, so
-                        # a turn needing a second approval, and a resume
-                        # redelivered after its turn died, each write these
-                        # keys twice in one step. Every one of them therefore
-                        # reduces rather than holding a single value.
-                        update={
-                            "graph_action_receipts": {
-                                req.dispatch_id: receipt.model_dump(mode="json")
-                            },
-                            "active_graph_action_receipt": receipt.model_dump(
-                                mode="json"
-                            ),
-                            "agent_descriptors": node_metadata_from_graph(graph),
-                            "graph_definition_digest": (
-                                req.require_graph_definition().digest()
-                            ),
-                            "model_assignment_digest": model_assignment_digest(
-                                req.model_assignment
-                            ),
-                            **_answered_permission_update(req.option_id),
-                        },
-                    ),
-                    config,
-                    on_graph_started=lambda: self._emit_dispatch_application_receipt(
-                        req
-                    ),
-                    context=_run_context(req, action="resume"),
-                    control=self._open_run_control(req.thread_id),
-                )
-                span.set_attribute("outcome", outcome)
-            except asyncio.CancelledError:
-                outcome = INGEST_DRAINED
-                span.set_attribute("outcome", outcome)
-                raise
-            except Exception:
-                outcome = ThreadStatus.FAILED
-                execution_failure_reason = _RESUME_GUARDS.execution_failure_detail
-                logger.exception(
-                    _RESUME_GUARDS.execution_failure,
-                    req.thread_id,
-                    extra=self._dispatch_log_extra(
-                        req,
-                        action=_RESUME_GUARDS.execution_failure_action,
-                        runtime_mode=_RESUME_GUARDS.runtime_mode,
-                    ),
-                )
-                span.record_exception(Exception("Graph resume failed"))
-            finally:
-                try:
-                    await self._settle_run(
-                        req, graph, config, outcome, execution_failure_reason
-                    )
-                finally:
-                    self._close_run_control(req.thread_id)
+            await self._execute_run(
+                req,
+                span,
+                run,
+                _resume_command(req, receipt, run.graph, admission),
+            )
 
     async def _refuse_resume(
         self,
         req: DispatchRequest,
         span: Span,
-        graph: RegisteredCompiledGraph,
-        config: dict[str, Any],
+        run: _AdmittedRun,
         refusal: ResumeRefusal,
     ) -> None:
         """Turn an answer away without settling the run it was meant for.
@@ -875,47 +912,28 @@ class Executor(SettlementMixin):
             recoverable=True,
         )
         await self._state_projector.emit_execution_state_projection(
-            req.thread_id, graph, config
+            req.thread_id, run.graph, run.config
         )
 
-    def _open_run_control(self, thread_id: str) -> RunControl:
-        control = RunControl()
-        # A run whose control opens after a drain was asked for starts
-        # drained, so it stops before its first node instead of running a
-        # whole turn through a shutdown the worker already began.
-        if self._drain_reason is not None:
-            control.request_drain(self._drain_reason)
-        self._run_controls[thread_id] = control
-        self._runs_idle.clear()
-        return control
-
     def _close_run_control(self, thread_id: str) -> None:
-        self._run_controls.pop(thread_id, None)
+        self._run_controls.close(thread_id)
         self._receipts.forget(thread_id)
-        if not self._run_controls:
-            self._runs_idle.set()
 
     @property
     def draining(self) -> bool:
         """Whether a drain has been requested of this executor."""
-        return self._drain_reason is not None
+        return self._run_controls.draining
 
     async def drain(self, reason: str) -> None:
         """Stop every run executing here at its next superstep boundary.
 
-        Returns once none is left running. A node already mid-turn finishes
-        first, so a caller bounds this with its own deadline and cancels what
-        remains; a run that did drain left a resumable checkpoint and no
-        terminal status, so its open action is delivered again after restart.
+        Returns once none is left running.
 
         The request sticks: it holds for runs opened after this call as well
         as the ones already executing, and refuses any further dispatch, so
         returning here means no run is executing *and* none can start.
         """
-        self._drain_reason = reason
-        for control in list(self._run_controls.values()):
-            control.request_drain(reason)
-        await self._runs_idle.wait()
+        await self._run_controls.drain(reason)
 
     async def shutdown(self) -> None:
         """Release held resources (aggregator debounce tasks, etc.)."""

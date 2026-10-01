@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, override
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -29,6 +29,7 @@ class _Capture(logging.Handler):
         self.records: list[logging.LogRecord] = []
         self.addFilter(LogContextFilter())
 
+    @override
     def emit(self, record: logging.LogRecord) -> None:
         self.records.append(record)
 

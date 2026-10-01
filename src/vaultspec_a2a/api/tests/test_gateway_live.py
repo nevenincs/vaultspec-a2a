@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -32,10 +33,7 @@ import uvicorn
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
-from ...control.health import (
-    SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS,
-    SERVICE_HEALTH_DEADLINE_SECONDS,
-)
+from ...control.health import SERVICE_HEALTH_DEADLINE_SECONDS
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...database import (
     create_control_action,
@@ -49,7 +47,6 @@ from ...team.team_config import load_team_config
 from ...testing.tests._support.catalog_selection import in_process_selection
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
-from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..routes.gateway import admission_gate
@@ -389,28 +386,31 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
         assert replay.json()["run_id"] == run_id
         assert worker.dispatches == [], "a replay must not dispatch a new turn"
 
-        # The follow-up verb refuses while the first turn is still in flight,
-        # and the refusal reaches no further than the gateway.
+        # The follow-up verb queues the turn while the first is still in
+        # flight, and the acceptance reaches no further than the gateway.
         follow = await client.post(
             f"/v1/runs/{run_id}/messages",
             json={"content": "second turn"},
+            headers={"Idempotency-Key": "gwlive-second-turn"},
         )
-        assert follow.status_code == 409, follow.text
-        detail = follow.json()["detail"]
-        assert detail["code"] == FailureType.RUN_BUSY.value
-        assert detail["message"]
-        assert worker.dispatches == [], "a refused follow-up must not dispatch"
+        assert follow.status_code == 202, follow.text
+        queued = follow.json()
+        assert queued["action_status"] == "queued"
+        assert queued["queue_position"] == 1
+        assert worker.dispatches == [], "a queued follow-up must not dispatch"
 
         async with session_factory() as db:
             after = await get_thread(db, run_id)
         assert after is not None
         assert after.last_requested_action != (
             ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value
-        ), "a refused follow-up must not become the run's requested action"
+        ), "a waiting follow-up must not become the run's requested action"
 
         # An unknown run is a not-found rather than a silent accept.
         missing = await client.post(
-            "/v1/runs/no-such-run/messages", json={"content": "hello"}
+            "/v1/runs/no-such-run/messages",
+            json={"content": "hello"},
+            headers={"Idempotency-Key": "gwlive-missing-run"},
         )
         assert missing.status_code == 404
 
@@ -1152,8 +1152,6 @@ async def test_service_state_deadline_returns_degraded_for_locked_real_checkpoin
         body,
         baseline_s,
     )
-    # The deadline is only correct relative to the budget it protects.
-    assert SERVICE_HEALTH_DEADLINE_SECONDS < SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1338,7 +1336,7 @@ async def test_presets_list_is_truthful_and_resilient(
         raw = resp.text
         for secret_value in (
             settings.zai_auth_token,
-            settings.claude_code_oauth_token,
+            os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
             settings.openai_api_key,
             settings.zhipu_api_key,
         ):

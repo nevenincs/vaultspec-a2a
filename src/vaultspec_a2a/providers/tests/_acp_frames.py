@@ -1,9 +1,10 @@
-"""Shared ACP stdout frame reader for live provider subprocess tests.
+"""Shared ACP stdout frame pieces for live provider subprocess tests.
 
 Both live subprocess tests (the authoring-bridge connection proof and the
 migration handshake-surface regression) drive the raw ACP JSON-RPC stream and
 need to pull the response frame for a specific request id off the agent's
-stdout. This is that one reader, shared rather than duplicated per file.
+stdout. This is that one reader, shared rather than duplicated per file, beside
+the mode surface every session result has to carry.
 """
 
 from __future__ import annotations
@@ -15,7 +16,25 @@ from pydantic import TypeAdapter, ValidationError
 
 from .._json_contract import JsonObject
 
-__all__ = ["read_acp_frame"]
+__all__ = ["SESSION_MODES", "read_acp_frame"]
+
+# What a lane reports about the permission modes it can run in, in the pinned
+# adapter's own session-result shape. An unattended session is pinned to a mode
+# and verifies it against this list, and a lane that advertises none is refused,
+# so a responder that opens a session has to say it - the real one always does.
+#
+# The ids are the catalog a session reports when it has declined the permission
+# bypass capability, which is every session this project opens. A session that
+# keeps the capability also reports `bypassPermissions`; no lane here does.
+SESSION_MODES: JsonObject = {
+    "currentModeId": "default",
+    "availableModes": [
+        {"id": "default", "name": "Manual"},
+        {"id": "acceptEdits", "name": "Accept edits"},
+        {"id": "plan", "name": "Plan"},
+        {"id": "auto", "name": "Auto"},
+    ],
+}
 
 _JSON_OBJECT = TypeAdapter[JsonObject](JsonObject)
 

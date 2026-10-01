@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-07-20'
-body_hash: 'sha256:5236eb2458040d5803c3707d08c00ec7d612a66660aa8112e09acdee39b31220'
+modified: '2026-10-01'
+body_hash: 'sha256:0e5aefad99cf5da8d0045ea93da668776be60b3562f0cfad1f951e6785d4fe24'
 related: []
 ---
 
@@ -727,6 +727,58 @@ exact path only to this worktree's local `.git/info/exclude`. Refreshed local
 and origin refs contain zero runtime-path objects, so no history rewrite or
 force-push is warranted. The local exclusion is immediate containment, not a
 published replacement for the upstream contract.
+
+### w07-complexity-gate-was-red | low | the complexity gate reported four offenders when the wave began
+
+Recorded from W07 (2026-10-01). The wave's brief took `lint complexity` as green at `f72a99a`; complexipy reported four functions over 15. S31 and S34 cleared `IngestManager.ingest` and `_permission_callback_for`; `_stream_thread_events` (`api/thread_stream.py`, 44) and `open_checkpointer` (`database/checkpoints.py`, 16) remain for S32 and S48.
+
+### w07-residual-structural-findings | medium | the structural gates still report findings outside the closed Steps
+
+Open, owned by W07.P13.S32, W07.P13.S33 and W07.P14.S48. After S29-S31 and S34-S36: cyclomatic 5 over, module length 3 over, function length 2 over, parameter count 9 over, ruff limits 23, pylint size 11. The worst is `_stream_thread_events` (`api/thread_stream.py`), over on five gates at once; the rest sit in `api/`, `control/`, `worker/`, `thread/`, `database/`, `streaming/` subscriber and replay-writer code, `providers/_codex_auth.py`, `testing/children.py` and two test helpers.
+
+### ingest-queue-map-never-written | low | the ingest manager keeps a per-thread queue map nothing fills
+
+Fixed in W07.P14.S48 (390543e): the map is removed. Original finding: the map held in `_ThreadState.ingest_queues` (`streaming/ingest.py`) is created and popped but never written; it was grouped rather than deleted to stay out of the concurrent dead-code work, and belongs to S48.
+
+### lifecycle-pairing-test-fails-under-load | low | a lifecycle pairing test fails in a large parallel batch
+
+Open; observed by the W07 executor. `lifecycle/tests/test_manager.py::test_serve_up_records_and_injects_the_worker_gateway_pairing` failed under `-n 3 --dist=loadgroup` in a mixed batch and passed alone. A failure under load is a timing assumption in the test or the code, not noise; it needs its root cause.
+
+### strict-types-private-langgraph-snapshot | medium | the retention guard depends on a private langgraph type
+
+Fixed in W06.P12.S47 (cca8367) without a stub or a probe change: LangGraph's loop keeps `counters_since_delta_snapshot` in the checkpoint metadata whenever any delta channel has written since its last snapshot and removes it only when every delta channel snapshotted, and a snapshot holds the whole value, so the private-type branch only ever refused a safe prune; a real snapshot-every-step graph proves the value survives, and the guard reads the metadata alone. Original finding: `database/checkpoint_retention.py` had to recognise `langgraph.checkpoint.serde.types._DeltaSnapshot`, because a delta channel rebuilds its value from the nearest snapshot and pruning past a non-snapshot head empties it. langgraph exposes no public alias (its own `channels.delta` and Postgres saver import the private name). Options: a local stub that falsely publishes the name (a suppression in another spelling), carrying the finding until upstream adds an alias, or a public probe (`get_delta_channel_history`) that changes what the guard tests and needs its own evidence. It is the last strict diagnostic on the branch the Step produced.
+
+### strict-types-merge-residue | low | the strict pass and the decomposition met at private helper names
+
+Fixed in W06.P12.S47 (c26cf06): the helpers are public where they now live and declared in each module's exports; `type-strict` reads zero. Original finding: merging the strict pass over W07 left 22 diagnostics, mostly `reportPrivateUsage` and `reportUnusedFunction` where helpers moved into new graph modules kept their private names while imported across modules.
+
+### compiled-test-graph-is-any | low | a compiled test graph is untyped at the test boundary
+
+Recorded from W06.P12.S28. `graph/tests/_state_graph_helpers.compile_test_graph` returns `Any` by design, so graph reads in every suite routed through it are unchecked; a concrete compiled-graph protocol (the one in `thread/tests/_graph_helpers.py` is a model) would restore checking across the test tree.
+
+### broadcast-complexity-over-ceiling | low | the subscriber broadcast crossed the cognitive-complexity ceiling
+
+Open, owned by W07.P14.S48. `SubscriberManager.broadcast` (`streaming/subscribers.py`) reads complexipy 16 against 15 after the stream-resumption repairs added the retainable-frame check to the fan-out chokepoint; it was 14 before.
+
+### stream-route-parameters-are-the-openapi-surface | info | the run stream route's six parameters are FastAPI declarations
+
+Recorded from W07.P13.S32. `run_stream_endpoint` (`api/routes/_gateway_read_endpoints.py`) takes six parameters, one over the shape ceiling, and each is a `Depends`, `Header` or `Query` declaration; folding them into a parameter object changes the generated OpenAPI document, so the decision belongs with the routes, not with a decomposition.
+
+### load-sensitive-wall-clock-budgets | low | several tests assert a wall-clock budget inside the parallel unit lane
+
+Open; reported by the W07.P14.S48 and run-continuation P04 executors and under root-cause by the flaky-test executor. `test_repeated_cold_compiles_keep_serving_under_five_slot_cpu_load` (0.5 s loop gap, five CPU slots on four cores), `test_active_discovery_stays_indexed_and_bounded_at_large_history` (p95 250 ms) and `lifecycle/tests/test_discovery.py::test_single_resident_true_only_when_fresh_live_and_healthy` failed under host load and passed alone. A budget is only evidence if it is derived from the host or measured in isolation; one fixed literal asserted under arbitrary concurrency will keep failing.
+
+### checkpointer-bridge-restart-waited-on-a-stale-event | low | a restarted Postgres checkpointer bridge did not wait for its new loop
+
+Fixed in W07.P14.S48 (03a9590). `_SelectorThreadPostgresCheckpointer` kept one readiness event for its lifetime, so a bridge started again after close read the old loop's set event and proceeded before its new selector loop existed; the event is now created per start. No test exercises a restart.
+
+### worktree-provisioning-skips-node | info | an executor worktree lacks the vendored Node adapter until npm ci runs
+
+Recorded from W07.P14.S48. A fresh worktree carries no `node_modules`, so thirteen provider tests report the Claude ACP adapter missing until `npm ci` runs beside `uv sync`.
+
+### graduation-2026-10-01 | info | five gates joined the blocking aggregate at zero
+
+Recorded from W08.P15. `type-strict`, `nesting`, `reachability`, `symbols` and `exports` read zero and joined `lint all` (14bfd86, 8a5cea1, facbd89); a probe unused export made the aggregate fail and was reverted. The pre-promotion duplication review found one production clone - migration 0009's downgrade reproducing 0008's upgrade, which Alembic immutability requires - and none of the graduated gates measures shape or duplication. Still burning down outside the aggregate: complexity, cyclomatic, shape, limits and size.
 
 ## Recommendations
 

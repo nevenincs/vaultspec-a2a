@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import (
 from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
+from ...control.event_handlers import CheckpointPruneRegistry
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import create_thread
 from ...providers.factory import ProviderCatalogRegistration, ProviderFactory
@@ -369,6 +370,9 @@ def make_app(
     # Store singletons in app.state so WebSocket handlers can read them
     app.state.aggregator = aggregator
     app.state.checkpointer = checkpointer
+    # The gateway lifespan seats one beside the store it prunes through, and a
+    # relayed terminal schedules nothing without it.
+    app.state.checkpoint_prunes = CheckpointPruneRegistry()
 
     # In-process worker client — real ASGI, no mock
     app.state.worker_client = worker.client

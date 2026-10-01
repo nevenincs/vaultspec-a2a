@@ -17,25 +17,16 @@ read on more than one connection rather than queueing behind one saver's lock.
 from __future__ import annotations
 
 import asyncio
-import os
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 
 from ...control.thread_listing import (
     _bulk_read_checkpoints,
     _CheckpointProbe,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
-    from ...conftest import ExternalPrerequisiteRule
-
-_POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
 
 
 class _Checkpointer:
@@ -129,26 +120,6 @@ def test_concurrency_is_capped() -> None:
 def test_an_empty_thread_list_reads_nothing() -> None:
     """No threads, no reads, no error."""
     assert _read(_Checkpointer({}), []) == {}
-
-
-@pytest_asyncio.fixture
-async def pooled_postgres_saver(
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> AsyncIterator[Any]:
-    """The production pooled Postgres saver against the live server."""
-    external_prerequisite("postgres")
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-    from ...database.checkpoints import _postgres_checkpoint_pool
-
-    pool = _postgres_checkpoint_pool(os.environ[_POSTGRES_URL_ENV])
-    await pool.open(wait=True)
-    try:
-        saver = AsyncPostgresSaver(conn=pool)
-        await saver.setup()
-        yield saver
-    finally:
-        await pool.close()
 
 
 @pytest.mark.asyncio

@@ -41,6 +41,10 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.40",
   "starlette>=0.52.1",
   "uvicorn>=0.41.0",
+  # The framework this service serves. Its readers and checks are called rather
+  # than copied, so the runtime refuses exactly what the framework refuses. No
+  # upper bound: the framework moves and this service moves with it.
+  "vaultspec-core>=0.3.2",
   "websockets>=16.0",
   "alembic>=1.15.1",
   "click>=8.1",
@@ -115,6 +119,10 @@ tooling = [
   # Docstring coverage over the public surface. Advisory.
   "interrogate>=1.7.0",
   "jsonschema>=4.26.0",
+  # A CommonMark parser as the reader of a rendered prompt: a test that asks
+  # whether a body forged a heading has to read the prompt the way markdown
+  # does, not by a rule of its own that could share the renderer's blind spot.
+  "markdown-it-py>=4.0",
   "nodeenv>=1.0.0",
   "packaging>=25.0",
   "prek>=0.3.2",
@@ -152,19 +160,18 @@ tooling = [
   # without these its calls type as Unknown.
   "types-jsonschema>=4.26",
   "ty>=0.0.15",
-  "vaultspec-core>=0.3.2,<0.4",
   # Dead-code detection. Advisory: it infers reachability it cannot always see,
   # so a finding is a lead to confirm rather than a verdict.
   "vulture>=2.16",
   "websockets>=16.0",
   "zstandard>=0.25.0",
 ]
-# The frozen-binary build closure: PyInstaller itself plus vaultspec-core,
-# which the binary dispatches via its run-module verb (never a static import,
-# so the spec collects it explicitly). Installed by scripts/build_binary.py's
-# caller (the dashboard release pipeline), not by ordinary development.
+# The frozen-binary build closure: PyInstaller. vaultspec-core, which the binary
+# also dispatches via its run-module verb, is a runtime dependency and so is
+# already present. Installed by scripts/build_binary.py's caller (the dashboard
+# release pipeline), not by ordinary development.
 all = [{ include-group = "docs" }, { include-group = "tooling" }]
-freeze = ["pyinstaller>=6.11", "vaultspec-core>=0.3.2,<0.4"]
+freeze = ["pyinstaller>=6.11"]
 
 [tool.uv]
 default-groups = []
@@ -406,7 +413,6 @@ known_first_party = ["vaultspec_a2a"]
     "pytest-timeout",
     "pytest-cov",
     "deptry",
-    "vaultspec-core",
     # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
     # "sqlite+aiosqlite://..." — never imported directly.
     "aiosqlite",
@@ -428,6 +434,7 @@ known_first_party = ["vaultspec_a2a"]
   # construction rather than an exception being carved out.
   DEP004 = [
     "jsonschema",
+    "markdown_it",
     "packaging",
     "pytest",
     "pytest_asyncio",
@@ -436,11 +443,6 @@ known_first_party = ["vaultspec_a2a"]
     "sphinx",
     "tenacity",
     "tomlkit",
-    # The grounding-parity test drives the real vaultspec-core CLI, which the
-    # `freeze` group owns because the frozen binary dispatches it. Importing it
-    # from a test is the same construction as every entry above: the wheel packs
-    # only `src/vaultspec_a2a`, so nothing shipped depends on it.
-    "vaultspec_core",
   ]
 
 [tool.ty.environment]
@@ -484,9 +486,13 @@ reportPrivateLocalImportUsage = "error"
 executionEnvironments = [
   # extraPaths keeps the repo root on this environment's import path: declaring
   # an executionEnvironment resets resolution for that directory, and `dev.*` is
-  # imported as a top-level package from the repo root.
+  # imported as a top-level package from the repo root. `src` is on it for the
+  # same reason: without it `vaultspec_a2a` resolves through the editable
+  # install instead of the tree this configuration already checks, and the
+  # same modules then read as an unstubbed third-party library.
   { root = "dev/tests", extraPaths = [
     ".",
+    "src",
   ], reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/api/tests", reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/authoring/tests", reportPrivateUsage = false },

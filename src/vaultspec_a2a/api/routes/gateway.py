@@ -95,6 +95,7 @@ __all__ = [
     "_bool_field",
     "_canonical_replay_body",
     "_catalog_records_within_budget",
+    "_int_field",
     "_load_preset_or_refuse",
     "_modern_frozen_disclosure",
     "_optional_enum",

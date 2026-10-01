@@ -491,13 +491,16 @@ class TestOneWorkspaceOneGraphEntry:
         digest = model_assignment_digest({})
         definition_digest = _definition(workspace).digest()
         assert graph_cache_key(
-            "preset", str(workspace), False, digest, definition_digest, thread_id="r"
+            ("preset", str(workspace), False, digest, definition_digest),
+            thread_id="r",
         ) == graph_cache_key(
-            "preset",
-            _uncanonical_spelling(workspace),
-            False,
-            digest,
-            definition_digest,
+            (
+                "preset",
+                _uncanonical_spelling(workspace),
+                False,
+                digest,
+                definition_digest,
+            ),
             thread_id="r",
         )
 
@@ -506,7 +509,7 @@ class TestOneWorkspaceOneGraphEntry:
         digest = model_assignment_digest({})
         definition_digest = _test_graph_definition_digest("preset")
         assert graph_cache_key(
-            "preset", None, True, digest, definition_digest, thread_id="r"
+            ("preset", None, True, digest, definition_digest), thread_id="r"
         ) == ("preset", None, True, digest, definition_digest, "r")
 
     def test_model_assignment_identity_partitions_the_graph_cache(self) -> None:
@@ -516,23 +519,23 @@ class TestOneWorkspaceOneGraphEntry:
         definition_digest = _test_graph_definition_digest("preset")
 
         assert graph_cache_key(
-            "preset", None, False, first, definition_digest, thread_id="r"
+            ("preset", None, False, first, definition_digest), thread_id="r"
         ) == graph_cache_key(
-            "preset", None, False, same, definition_digest, thread_id="r"
+            ("preset", None, False, same, definition_digest), thread_id="r"
         )
         assert graph_cache_key(
-            "preset", None, False, first, definition_digest, thread_id="r"
+            ("preset", None, False, first, definition_digest), thread_id="r"
         ) != graph_cache_key(
-            "preset", None, False, other, definition_digest, thread_id="r"
+            ("preset", None, False, other, definition_digest), thread_id="r"
         )
 
     def test_two_runs_never_share_a_graph_entry(self) -> None:
         digest = model_assignment_digest({})
         definition_digest = _test_graph_definition_digest("preset")
         assert graph_cache_key(
-            "preset", None, False, digest, definition_digest, thread_id="run-1"
+            ("preset", None, False, digest, definition_digest), thread_id="run-1"
         ) != graph_cache_key(
-            "preset", None, False, digest, definition_digest, thread_id="run-2"
+            ("preset", None, False, digest, definition_digest), thread_id="run-2"
         )
 
     def test_two_runs_on_one_workspace_hold_their_own_entries(

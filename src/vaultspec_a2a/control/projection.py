@@ -12,6 +12,7 @@ from ..database import (
     get_thread_execution_state,
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
+from .repositories.continuation_queue import count_queued_continuations
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -543,6 +544,13 @@ async def enrich_snapshot_from_durable_state(
     snapshot.execution_readiness = thread.execution_readiness
     snapshot.approval_status = thread.approval_status
     snapshot.approval_request_id = thread.approval_request_id
+    # Read before the terminal branch below returns, so a settled run reports
+    # the truth rather than inheriting the default: a run that ends with
+    # something still queued on it would be a defect, and this is where it
+    # would be visible.
+    snapshot.queued_messages = await count_queued_continuations(
+        session, thread_id=thread.id
+    )
     is_terminal_thread = thread.status in TERMINAL_STATUS_VALUES
 
     durable_permissions = await get_pending_permission_requests(

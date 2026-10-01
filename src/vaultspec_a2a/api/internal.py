@@ -16,7 +16,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, cast
+from functools import partial
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import (
     APIRouter,
@@ -36,8 +37,12 @@ from ..control.event_handlers import (
     relay_event,
 )
 from ..graph.enums import ServerEventType
-from ..thread.snapshots import normalize_wire_event_type
+from ..thread.snapshots import is_terminal_event, normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer
+from ._replay_writer_seat import seated_replay_writer
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = ["internal_router"]
 
@@ -168,7 +173,29 @@ class _RelayContext:
     session_factory: Any
     checkpointer: Any
     drain_gate: Any
+    prune_registry: Any
     transport: str = "http"
+    # The seated replay recorder, resolved once per ingest rather than per
+    # event: seating it is also what binds the run-sequence authority, so an
+    # ingest that reaches the aggregator has either both or neither.
+    replay: Any = None
+
+    @classmethod
+    def of(
+        cls, app: Any, agg: Any, transport: str = "http", *, replay: Any = None
+    ) -> _RelayContext:
+        """Read one app's relay collaborators off the state it seated them on."""
+        return cls(
+            agg,
+            _app_session_factory(app),
+            getattr(app.state, "checkpointer", None),
+            # Read, never get-or-created: a gate or a prune registry that was
+            # never seated has admitted and started nothing.
+            getattr(app.state, "drain_gate", None),
+            getattr(app.state, "checkpoint_prunes", None),
+            transport,
+            replay,
+        )
 
 
 async def _relay_single_event(
@@ -182,6 +209,14 @@ async def _relay_single_event(
     *drain_gate* is the process-wide run-admission gate seated on ``app.state``;
     it travels to the terminal handler, which releases the run from it, exactly
     as *agg* and *session_factory* travel to their handlers.
+
+    One frame is relayed differently. A terminal says the RUN ended, and only
+    the control plane knows whether it did: a run with a continuation waiting
+    takes the next turn instead of settling, and this relay reaches the
+    aggregator first, so it used to show that run a terminal it then kept
+    running past. The terminal is therefore handed to the control plane as a
+    publisher rather than fanned out here, and released on the far side of the
+    decision. Every other frame crosses as it always has.
     """
     payload = normalize_wire_event_type(payload)
     if payload.get("type") == "execution_state_projection":
@@ -199,11 +234,25 @@ async def _relay_single_event(
             session_factory=context.session_factory,
             checkpointer=context.checkpointer,
             drain_gate=context.drain_gate,
+            prune_registry=context.prune_registry,
         )
         return
 
+    publish_terminal: Callable[[], None] | None = None
     if context.agg is not None:
-        context.agg.relay_payload(thread_id, payload)
+        # Establishes the run's durable numbering before the synchronous
+        # chokepoint needs it; a no-op once seeded, and on a gateway that
+        # numbers nothing.
+        await context.agg.prepare_run(thread_id)
+        if is_terminal_event(payload):
+            publish_terminal = partial(context.agg.relay_payload, thread_id, payload)
+        else:
+            context.agg.relay_payload(thread_id, payload)
+        # Left in front of the decision even for a held terminal. This is the
+        # aggregator's own per-run counter, which no client reads and no frame
+        # carries - the number a subscriber sees is taken in ``relay_payload``
+        # above - and the settled run's recorded cursor is read off it, so
+        # moving it would change what a settlement records.
         context.agg.sync_worker_event(thread_id, payload)
     else:
         logger.warning(
@@ -223,6 +272,8 @@ async def _relay_single_event(
         session_factory=context.session_factory,
         checkpointer=context.checkpointer,
         drain_gate=context.drain_gate,
+        prune_registry=context.prune_registry,
+        publish_terminal=publish_terminal,
     )
 
 
@@ -247,17 +298,21 @@ async def _relay_worker_event(
         return
     thread_id = cast("str", thread_id_raw)
     payload = cast("dict[str, Any]", payload_raw)
-    session_factory = _app_session_factory(websocket.app)
     agg = getattr(websocket.app.state, "aggregator", None)
-    # Read the seated gate rather than get-or-creating it: a gate that has never
-    # been seated has admitted nothing, so there is nothing to release.
-    drain_gate = getattr(websocket.app.state, "drain_gate", None)
-    checkpointer = getattr(websocket.app.state, "checkpointer", None)
-    await _relay_single_event(
-        thread_id,
-        payload,
-        _RelayContext(agg, session_factory, checkpointer, drain_gate, "ws"),
+    context = _RelayContext.of(
+        websocket.app,
+        agg,
+        "ws",
+        replay=seated_replay_writer(websocket.app, _app_session_factory(websocket.app)),
     )
+    await _relay_single_event(thread_id, payload, context)
+    # Behind the fan-out, once per ingested frame: a WebSocket frame carries
+    # one event, so this is the same per-batch cadence the HTTP routes use
+    # rather than a second policy. Leaving it to the writer's ticker instead
+    # would widen the window in which a terminal purges a run's numbering
+    # before its own frames are durable.
+    if context.replay is not None:
+        await context.replay.flush()
 
 
 @internal_router.websocket("/ws")
@@ -377,16 +432,12 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
             detail="No relay target available -- gateway not ready",
         )
 
+    replay = seated_replay_writer(request.app, _app_session_factory(request.app))
     await _relay_single_event(
-        thread_id,
-        payload,
-        _RelayContext(
-            agg,
-            _app_session_factory(request.app),
-            getattr(request.app.state, "checkpointer", None),
-            getattr(request.app.state, "drain_gate", None),
-        ),
+        thread_id, payload, _RelayContext.of(request.app, agg, replay=replay)
     )
+    if replay is not None:
+        await replay.flush()
     return {"status": "ok"}
 
 
@@ -430,9 +481,8 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
             detail="No relay target available -- gateway not ready",
         )
 
-    session_factory = _app_session_factory(request.app)
-    drain_gate = getattr(request.app.state, "drain_gate", None)
-    checkpointer = getattr(request.app.state, "checkpointer", None)
+    replay = seated_replay_writer(request.app, _app_session_factory(request.app))
+    context = _RelayContext.of(request.app, agg, replay=replay)
 
     for idx, evt in enumerate(events):
         thread_id = evt.get("thread_id", "")
@@ -447,11 +497,13 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     for evt in events:
         thread_id = evt.get("thread_id", "")
         payload = evt.get("payload", {})
-        await _relay_single_event(
-            thread_id,
-            payload,
-            _RelayContext(agg, session_factory, checkpointer, drain_gate),
-        )
+        await _relay_single_event(thread_id, payload, context)
+
+    # Behind the fan-out, once per ingested batch: every frame above already
+    # reached its subscribers, and this is the round trip that makes them
+    # durable. A failure here is logged and leaves the frames in the ring.
+    if replay is not None:
+        await replay.flush()
 
     return {"status": "ok"}
 

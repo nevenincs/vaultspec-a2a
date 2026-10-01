@@ -143,7 +143,7 @@ class TestConformanceGuard:
             _latest_document(_state(body), _WRITER, _SENTINEL)
         notes = excinfo.value.revision_notes
         assert any("[[2026-07-15-sse-reconnection-adr]]" in note for note in notes)
-        assert any("wiki-link in body" in note for note in notes)
+        assert any("Wiki-link in body text" in note for note in notes)
 
     def test_leading_preamble_is_stripped_and_the_document_passes(self) -> None:
         # A writer that prefixes orientation narration before the frontmatter
@@ -412,7 +412,7 @@ Body.
 
     def test_legacy_status_section_is_refused_for_adr(self) -> None:
         notes = _conformance_notes(self._ADR_LEGACY, "adr")
-        assert any("legacy `## Status`" in n for n in notes)
+        assert any("legacy '## Status' section" in n for n in notes)
 
     def test_canonical_h1_status_token_passes(self) -> None:
         assert _conformance_notes(self._ADR_CANONICAL, "adr") == []

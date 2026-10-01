@@ -43,14 +43,22 @@ async def finish_before[T](
     *,
     phase: str,
     reserve: float = 0.0,
+    minimum: float = 0.0,
 ) -> tuple[bool, T | None]:
     """Run one cleanup phase inside the remaining shared budget.
 
     ``reserve`` leaves time for a later forced escalation. A phase that overruns
     is cancelled and reported; the caller continues to the next owner while the
     same absolute clock keeps running.
+
+    ``minimum`` is a floor for a phase that must still be given a chance when
+    the shared budget is already spent. Skipping such a phase does not save the
+    shutdown any time: work it was waiting on keeps running, and outlives the
+    resource the next owner closes under it. The floor extends past the shared
+    deadline by design, so it belongs only to a phase whose own duration is
+    bounded.
     """
-    budget = deadline.remaining(reserve=reserve)
+    budget = max(deadline.remaining(reserve=reserve), minimum)
     if budget <= 0:
         if asyncio.isfuture(operation):
             operation.cancel()

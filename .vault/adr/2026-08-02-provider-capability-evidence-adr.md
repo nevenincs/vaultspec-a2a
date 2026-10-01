@@ -3,11 +3,12 @@ tags:
   - '#adr'
   - '#provider-capability-evidence'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-10-01'
 body_schema: 'body-v1'
-body_hash: 'sha256:b82bf90a01b5c6b2ddae812bc62f06b98cf8a79ded6d043fec97085a41ce0eb6'
+body_hash: 'sha256:1cf66b8a90f79570dd00fe3a56d3908fa5917e1abdbc6308d87977aaf9cebfb3'
 related:
   - "[[2026-08-02-provider-capability-evidence-research]]"
+  - '[[2026-10-01-provider-binary-policy-adr]]'
 ---
 # `provider-capability-evidence` adr: `execution-mode capability evidence matrix` | (**status:** `accepted`)
 
@@ -54,3 +55,12 @@ The evidence matrix preserves the existing decisionsÃ¢â‚¬â„¢ ownership
 - A provider can become selectable for ordinary turns while capability-required roles remain blocked until their own proof exists.
 - Every new provider or execution mode must receive complete, explicit matrix entries.
 - The implementation must maintain evidence citations and invalidation when runtime identity changes.
+
+## Amendment - provider-binary-policy (2026-10-01)
+
+Sharpening of the Consequences sentence "the implementation must maintain evidence
+citations and invalidation when runtime identity changes": runtime identity includes the
+resolved provider binary and its version. A proof is valid only inside the version range it
+declares; a resolved binary outside that range invalidates the proof and the record derives
+`supported`, never `proven`. Without this clause the matrix could report `PROVEN` for a
+binary that never completed a turn. Grounding: `2026-10-01-provider-binary-policy-adr`.

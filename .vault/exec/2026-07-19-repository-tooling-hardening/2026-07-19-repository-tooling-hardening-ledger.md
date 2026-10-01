@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-09-03'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:2f8ab942c8b35a940b05eb2fb82330cbabcaaa2f25fdc9646da8cdcc9ac06487'
+body_hash: 'sha256:a49661d0efa1f7e746767ff47f46c9c66b0ed8d421f24e7a946f0d723596a8c4'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -75,3 +75,212 @@ related:
 - `S25` `T` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
 - `S25` `T` `src/vaultspec_a2a/cli/tests/test_desktop_serve.py`
 - `S25` `T` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`
+- `S30` `A` `src/vaultspec_a2a/providers/_acp_native_commands.py`
+- `S30` `A` `src/vaultspec_a2a/providers/_acp_session_admin.py`
+- `S30` `A` `src/vaultspec_a2a/providers/_acp_stderr.py`
+- `S30` `A` `src/vaultspec_a2a/providers/_acp_teardown.py`
+- `S30` `A` `src/vaultspec_a2a/providers/_acp_turn_failures.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_harness_mcp_registry.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_mcp_contract.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_native_read_tools.py`
+- `S30` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S30` `M` `src/vaultspec_a2a/providers/tests/test_acp_session_ownership.py`
+- `S30` `verify:` `python -m dev lint all` -> `pass`
+- `S30` `verify:` `pytest src/vaultspec_a2a/providers` -> `pass`
+- `S30` `by:` `vaultspec-high-executor`
+- `S31` `M` `src/vaultspec_a2a/streaming/aggregator.py`
+- `S31` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S31` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S31` `verify:` `python -m dev lint all` -> `pass`
+- `S31` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/api` -> `pass`
+- `S31` `by:` `vaultspec-high-executor`
+- `S34` `A` `src/vaultspec_a2a/graph/_compiler_models.py`
+- `S34` `A` `src/vaultspec_a2a/graph/_compiler_prompts.py`
+- `S34` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S34` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S34` `A` `src/vaultspec_a2a/graph/nodes/_worker_permissions.py`
+- `S34` `A` `src/vaultspec_a2a/graph/nodes/_worker_tool_calls.py`
+- `S34` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S34` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S34` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker.py`
+- `S34` `verify:` `python -m dev lint all` -> `pass`
+- `S34` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/worker src/vaultspec_a2a/team` -> `pass`
+- `S34` `by:` `vaultspec-high-executor`
+- `S29` `verify:` `python -m dev lint cyclomatic` -> `pass`
+- `S29` `verify:` `python -m dev lint shape` -> `pass`
+- `S29` `by:` `vaultspec-high-executor`
+- `S35` `verify:` `python -m dev lint cyclomatic` -> `pass`
+- `S35` `verify:` `python -m dev lint shape` -> `pass`
+- `S35` `by:` `vaultspec-high-executor`
+- `S36` `verify:` `python -m dev lint cyclomatic` -> `pass`
+- `S36` `verify:` `python -m dev lint shape` -> `pass`
+- `S36` `by:` `vaultspec-high-executor`
+- `S26` `M` `src/vaultspec_a2a/conftest.py`
+- `S26` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S26` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention_guards.py`
+- `S26` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_launcher_confinement.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_withheld_harness_tools.py`
+- `S26` `verify:` `python -m dev lint all` -> `pass`
+- `S26` `verify:` `pytest database graph providers` -> `pass`
+- `S26` `by:` `vaultspec-high-executor`
+- `S27` `verify:` `basedpyright src/vaultspec_a2a/lifecycle` -> `pass`
+- `S27` `by:` `vaultspec-high-executor`
+- `S28` `M` `src/vaultspec_a2a/authoring/tests/test_core_document_checks.py`
+- `S28` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S28` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S28` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S28` `M` `src/vaultspec_a2a/graph/run_context.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/_state_graph_helpers.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/nodes/test_config_contract.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_message_time.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_mounted_context_persistence.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_research_branch_models.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_research_permission_rung.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_run_context.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S28` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S28` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/_run_callbacks.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/custom_writes.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/run_event_writer.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/subscribers.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/_error_injecting_graph.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_ingest_durability.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_ingest_node_timeout.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_public_stream_ingest.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_stream_identity.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_transformer_nostream.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/transformer.py`
+- `S28` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S28` `M` `src/vaultspec_a2a/worker/tests/test_executor_log_context.py`
+- `S28` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S28` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `S28` `verify:` `python -m dev lint all` -> `pass`
+- `S28` `verify:` `pytest graph authoring worker streaming providers` -> `pass`
+- `S28` `by:` `vaultspec-high-executor`
+- `S47` `M` `pyproject.toml`
+- `S47` `M` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S47` `M` `src/vaultspec_a2a/api/tests/test_followup_idempotency_key.py`
+- `S47` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_replay.py`
+- `S47` `M` `src/vaultspec_a2a/context/rules.py`
+- `S47` `M` `src/vaultspec_a2a/control/settings_base.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_checkpoint_history_depth.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_deployment_names.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_dispatch_refusal_classification.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
+- `S47` `M` `src/vaultspec_a2a/database/checkpoint_retention.py`
+- `S47` `M` `src/vaultspec_a2a/database/run_event_repository.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/_backends.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/_checkpoint_history.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention_guards.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_strict_serde.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_run_event_retention.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S47` `M` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
+- `S47` `M` `src/vaultspec_a2a/providers/_codex_auth.py`
+- `S47` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S47` `M` `src/vaultspec_a2a/thread/tests/test_checkpoint_projection_stages.py`
+- `S47` `M` `src/vaultspec_a2a/utils/file_lock.py`
+- `S47` `M` `src/vaultspec_a2a/utils/logging.py`
+- `S47` `A` `typings/langgraph/channels/__init__.pyi`
+- `S47` `verify:` `python -m dev lint all` -> `pass`
+- `S47` `verify:` `python -m dev lint type-strict` -> `fail`
+- `S47` `by:` `vaultspec-high-executor`
+- `S47` `M` `src/vaultspec_a2a/control/tests/_continuation.py`
+- `S47` `M` `src/vaultspec_a2a/graph/_compiler_models.py`
+- `S47` `M` `src/vaultspec_a2a/graph/_compiler_prompts.py`
+- `S47` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S47` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S47` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S47` `M` `src/vaultspec_a2a/graph/nodes/_worker_permissions.py`
+- `S47` `M` `src/vaultspec_a2a/graph/nodes/_worker_tool_calls.py`
+- `S47` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S47` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S47` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S47` `M` `src/vaultspec_a2a/graph/tests/test_persona_web_composition.py`
+- `S47` `M` `src/vaultspec_a2a/streaming/subscribers.py`
+- `S47` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S47` `verify:` `python -m dev lint type-strict` -> `pass`
+- `S47` `verify:` `python -m dev lint all` -> `pass`
+- `S47` `verify:` `pytest graph streaming control worker database -n 4 --require-prerequisite=postgres` -> `pass`
+- `S32` `A` `src/vaultspec_a2a/api/_stream_replay.py`
+- `S32` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_attachment_order.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_connection_limit.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_quota_entry_points.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_gap.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_replay.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_stream_slot_release.py`
+- `S32` `M` `src/vaultspec_a2a/api/thread_stream.py`
+- `S32` `verify:` `python -m dev lint all` -> `pass`
+- `S32` `verify:` `pytest src/vaultspec_a2a/api src/vaultspec_a2a/streaming -n 4 --require-prerequisite=postgres` -> `pass`
+- `S32` `by:` `vaultspec-high-executor`
+- `S48` `M` `src/vaultspec_a2a/control/config.py`
+- `S48` `M` `src/vaultspec_a2a/control/state_layout.py`
+- `S48` `M` `src/vaultspec_a2a/control/tests/test_active_project_identity.py`
+- `S48` `M` `src/vaultspec_a2a/database/checkpoint_retention.py`
+- `S48` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S48` `M` `src/vaultspec_a2a/providers/_codex_auth.py`
+- `S48` `M` `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py`
+- `S48` `M` `src/vaultspec_a2a/streaming/_run_callbacks.py`
+- `S48` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S48` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S48` `M` `src/vaultspec_a2a/streaming/types.py`
+- `S48` `M` `src/vaultspec_a2a/testing/children.py`
+- `S48` `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `S48` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S48` `M` `src/vaultspec_a2a/thread/state.py`
+- `S48` `M` `src/vaultspec_a2a/worker/_dispatch_settlement.py`
+- `S48` `M` `src/vaultspec_a2a/worker/_executor_state.py`
+- `S48` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S48` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S48` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S48` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S48` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `S48` `verify:` `python -m dev lint all` -> `pass`
+- `S48` `verify:` `pytest worker thread database control streaming testing api graph -n 3 --require-prerequisite=postgres` -> `pass`
+- `S48` `by:` `vaultspec-high-executor`
+- `S49` `verify:` `python -m dev audit duplication` -> `pass`
+- `S49` `by:` `vaultspec-standard-executor`
+- `S37` `verify:` `python -m dev lint type-platforms` -> `pass`
+- `S37` `by:` `vaultspec-standard-executor`
+- `S38` `M` `.github/workflows/test.yml`
+- `S38` `M` `dev/tests/test_ci_contract.py`
+- `S38` `M` `dev/toolchain.py`
+- `S38` `verify:` `python -m dev lint all` -> `pass`
+- `S38` `verify:` `pytest dev/tests` -> `pass`
+- `S38` `by:` `vaultspec-standard-executor`
+- `S43` `M` `.github/workflows/test.yml`
+- `S43` `M` `dev/tests/test_ci_contract.py`
+- `S43` `M` `dev/toolchain.py`
+- `S43` `verify:` `python -m dev lint all` -> `pass`
+- `S43` `verify:` `pytest dev/tests` -> `pass`
+- `S43` `by:` `vaultspec-standard-executor`
+
+## Notes
+
+- `S30` Scope correction: also moved the MCP and native-tool composition an ACP session advertises `(_harness_mcp_registry.py,` `_mcp_contract.py,` `_native_read_tools.py);` the operator-home deletion invariant now reads the whole ACP lane module set.
+- `S31` Merged over architecture-review P06.S49: the signal path sets the same unwinding flag the cancellation path does, carried into the new `_IngestProgress` value.
+- `S34` Scope correction: `graph/_compiler_research.py` moved with the compiler split.
+- `S29` Measured green at f72a99a: zero cyclomatic, shape, limits, size, complexity and nesting findings in the Step paths; their hotspots were resolved before this wave, so no change was made.
+- `S35` Measured green at f72a99a: zero cyclomatic, shape, limits, size, complexity and nesting findings in the Step paths; their hotspots were resolved before this wave, so no change was made.
+- `S36` Measured green at f72a99a: zero cyclomatic, shape, limits, size, complexity and nesting findings in the Step paths; their hotspots were resolved before this wave, so no change was made.
+- `S27` Measured clean at f72a99a: zero strict diagnostics across the 27 lifecycle modules, so no change was made.
+- `S28` Defects found while typing: a research-rung test passed an ignored field to a fake model and so tested the stub answer; a dead supervisor fallback; two identical branches in the custom-text transformer.
+- `S47` Partial: 120 to 1 on the branch; the residual is a private langgraph snapshot type the retention guard must recognise, which needs a decision. Merged over the W07 decomposition, the tree reads 23, mostly helpers moved across modules under private names; owned by the same Step.
+- `S47` Closed by the orchestrator: merge residue made public where the helpers now live; the private langgraph snapshot import retired on evidence that the metadata counter already marks every delta dependency (a snapshot-every-step graph prunes with its value intact). type-strict reads zero.
+- `S32` Partial: the stream hotspot is decomposed (radon 24 to 0, complexipy 43 to 0, limits 23 to 18 tree-wide); release() now also runs on the two refusal exits, proven harmless by a new test. `run_stream_endpoint` keeps six FastAPI parameters, because folding Depends/Header/Query declarations would change the served OpenAPI surface; api/schemas/gateway.py module length remains. Step stays open for those.
+- `S48` Partial: every finding outside the concurrently edited files is cleared, the never-written ingest queue map is gone, and three dead exports are unpublished. A Postgres checkpointer bridge restarted after close now waits for its new selector loop. Remaining findings sit in control event handling, the gateway schemas, recovery authority, the continuation queue, the subscriber manager and the replay writer.
+- `S49` One production clone, 41 lines: migration 0009 downgrade reproduces 0008 upgrade verbatim, as Alembic immutability requires. None of the graduated gates measures shape or duplication, so none reached zero through it.
+- `S37` Already chained in lint all and the workflow; no change.
+- `S43` Also graduated in facbd89 under the aggregate rule: reachability, symbols and exports, each at zero; a probe unused export failed lint all and was reverted.

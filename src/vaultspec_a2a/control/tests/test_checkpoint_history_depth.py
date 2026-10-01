@@ -25,12 +25,13 @@ from langgraph.graph import END, START, StateGraph
 
 from ...control.snapshot import checkpoint_history_depth
 from ...database.checkpoint_retention import prune_settled_checkpoints
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
     from pathlib import Path
 
-    from langgraph.graph.state import CompiledStateGraph
+    from langchain_core.runnables import RunnableConfig
 
 
 class _Log(TypedDict):
@@ -49,26 +50,26 @@ def _append(entry: str) -> Any:
     return node
 
 
-def _flat_graph(saver: Any) -> CompiledStateGraph[Any, Any, Any, Any]:
+def _flat_graph(saver: Any) -> Any:
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
-    builder.add_node("step", _append("flat"))
+    add_test_node(builder, "step", _append("flat"))
     builder.add_edge(START, "step")
     builder.add_edge("step", END)
-    return builder.compile(checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
-def _nested_graph(saver: Any) -> CompiledStateGraph[Any, Any, Any, Any]:
+def _nested_graph(saver: Any) -> Any:
     """A graph with a subgraph, so the thread spans several namespaces."""
     inner: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
-    inner.add_node("inner_step", _append("inner"))
+    add_test_node(inner, "inner_step", _append("inner"))
     inner.add_edge(START, "inner_step")
     inner.add_edge("inner_step", END)
 
     outer: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
-    outer.add_node("nested", inner.compile())
+    add_test_node(outer, "nested", compile_test_graph(inner))
     outer.add_edge(START, "nested")
     outer.add_edge("nested", END)
-    return outer.compile(checkpointer=saver)
+    return compile_test_graph(outer, checkpointer=saver)
 
 
 async def _rows(saver: Any, thread_id: str) -> int:
@@ -78,9 +79,27 @@ async def _rows(saver: Any, thread_id: str) -> int:
     return count
 
 
+def _checkpoint_namespace(config: RunnableConfig) -> str:
+    """The namespace a checkpoint's own config names."""
+    return _configurable(config)["checkpoint_ns"]
+
+
+def _configurable(config: RunnableConfig) -> Mapping[str, str]:
+    """The config's ``configurable`` block, read as the mapping it is.
+
+    ``configurable`` is not a required key of ``RunnableConfig``, so indexing
+    it directly is a possible ``KeyError`` the checker refuses to wave
+    through. Reading the config as a plain mapping keeps the same access and
+    the same failure where a checkpoint really does arrive without one.
+    """
+    return cast("Mapping[str, Mapping[str, str]]", config)["configurable"]
+
+
 def _recorded_parent(checkpoint_tuple: Any) -> str | None:
-    parent = checkpoint_tuple.parent_config or {}
-    return parent.get("configurable", {}).get("checkpoint_id")
+    parent = cast(
+        "Mapping[str, Mapping[str, str]] | None", checkpoint_tuple.parent_config
+    )
+    return parent.get("configurable", {}).get("checkpoint_id") if parent else None
 
 
 @pytest_asyncio.fixture
@@ -181,12 +200,12 @@ async def test_the_depth_describes_one_checkpoint_not_the_thread_s_rows(
 
     namespaces: set[str] = set()
     async for item in saver.alist(cast("Any", _config(thread_id))):
-        namespaces.add(item.config["configurable"]["checkpoint_ns"])
+        namespaces.add(_checkpoint_namespace(item.config))
     assert len(namespaces) > 1, "the thread must span namespaces for this to matter"
 
     latest = await saver.aget_tuple(cast("Any", _config(thread_id)))
     assert latest is not None
-    assert latest.config["configurable"]["checkpoint_ns"] == ""
+    assert _checkpoint_namespace(latest.config) == ""
 
     depth = checkpoint_history_depth(latest)
     expected = 2 if _recorded_parent(latest) is not None else 1
@@ -206,7 +225,7 @@ async def test_the_first_checkpoint_of_a_thread_reports_no_ancestry(
 
     oldest = None
     async for item in saver.alist(cast("Any", _config(thread_id))):
-        if item.config["configurable"]["checkpoint_ns"] == "":
+        if _checkpoint_namespace(item.config) == "":
             oldest = item
     assert oldest is not None
     assert _recorded_parent(oldest) is None

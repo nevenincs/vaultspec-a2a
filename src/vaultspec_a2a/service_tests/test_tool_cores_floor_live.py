@@ -684,7 +684,7 @@ def test_floor_case_names_the_target_adr_in_its_prompt() -> None:
     assert case.expected_doc_kinds == ()
 
     sample_adr = (
-        "# tool-cores adr\nThe pin @agentclientprotocol/claude-agent-acp@0.59.0 "
+        "# tool-cores adr\nThe pin @agentclientprotocol/claude-agent-acp@0.84.0 "
         "supersedes @zed-industries/claude-agent-acp@0.23.1; the registry "
         "_KNOWN_MCP_SERVERS is the single source; SDK 0.2.83 is behind.\n"
     )

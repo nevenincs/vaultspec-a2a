@@ -45,6 +45,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from pathlib import Path
 
+    from ...worker._dispatch_contract import DispatchCapacityReservation
+
 _TEST_INTERNAL_TOKEN = "dispatch-refusal-test-token"
 
 
@@ -192,6 +194,82 @@ async def test_a_worker_already_running_the_thread_refuses_it_as_busy(
 
 
 @pytest.mark.asyncio
+async def test_refusals_for_one_run_never_shut_the_other_runs_out(
+    tmp_path: Path,
+) -> None:
+    """The breaker is shared, so what counts against it decides who is served.
+
+    Both refusals are driven past the gateway's own configured failure
+    threshold, against the configured breaker rather than a lenient test one,
+    because the threshold is what turns "counted" into "everyone is refused".
+    A breaker fed by backpressure opens on a busy run or a full worker and then
+    rejects every OTHER run's control traffic for the whole recovery window -
+    a run's permission answer refused because a different run was executing.
+
+    The proof is the admitted dispatch at the end: the worker has room again,
+    and the run that never refused anything is served rather than meeting a
+    circuit the other runs opened.
+    """
+    threshold = settings.cb_failure_threshold
+    async with _real_worker(tmp_path / "shared.db") as (client, executor):
+        breaker = WorkerCircuitBreaker(
+            failure_threshold=threshold,
+            recovery_timeout=settings.cb_recovery_timeout_seconds,
+        )
+        held: list[DispatchCapacityReservation] = []
+        reservation, _reason = await executor.reserve_dispatch_capacity("busy-run")
+        assert reservation is not None
+        held.append(reservation)
+
+        busy = [
+            await safe_dispatch(
+                client,
+                _ingest(tmp_path, "busy-run", f"busy-{attempt}", with_receipt=True),
+                breaker,
+                _spawner(),
+            )
+            for attempt in range(threshold + 1)
+        ]
+
+        # Fill the rest of the worker so the same breaker now meets capacity.
+        for index in range(domain_config.max_concurrent_threads - 1):
+            reservation, _reason = await executor.reserve_dispatch_capacity(
+                f"held-{index}"
+            )
+            assert reservation is not None
+            held.append(reservation)
+
+        full = [
+            await safe_dispatch(
+                client,
+                _ingest(tmp_path, "other-run", f"full-{attempt}", with_receipt=True),
+                breaker,
+                _spawner(),
+            )
+            for attempt in range(threshold + 1)
+        ]
+
+        for reservation in held:
+            assert await executor.release_dispatch_capacity(reservation)
+
+        admitted = await safe_dispatch(
+            client,
+            _ingest(tmp_path, "other-run", "other-admitted", with_receipt=True),
+            breaker,
+            _spawner(),
+        )
+
+    assert [outcome.failure_type for outcome in busy] == [
+        FailureType.RUN_BUSY.value
+    ] * (threshold + 1)
+    assert [outcome.failure_type for outcome in full] == [
+        FailureType.AT_CAPACITY.value
+    ] * (threshold + 1)
+    assert admitted.success
+    assert breaker.state == "closed"
+
+
+@pytest.mark.asyncio
 async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
     tmp_path: Path,
 ) -> None:
@@ -212,7 +290,7 @@ async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
 
     assert outcome.failure_type == FailureType.INCOMPATIBLE_STATE.value
     assert breaker.state == "closed"
-    assert breaker.pre_dispatch() is True
+    assert breaker.pre_dispatch() is not None
 
 
 @pytest.mark.asyncio
@@ -289,7 +367,8 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
 
         # Take the single probe without settling it, exactly as an in-flight
         # dispatch holds it, and prove the next caller is refused.
-        assert breaker.pre_dispatch() is True
+        probe = breaker.pre_dispatch()
+        assert probe is not None
         blocked = await safe_dispatch(
             client,
             _ingest(tmp_path, "probe-thread", "probe-blocked", with_receipt=True),
@@ -298,7 +377,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
         )
         assert blocked.failure_type == FailureType.CIRCUIT_OPEN.value
 
-        breaker.release_probe()
+        breaker.release_probe(probe)
         admitted = await safe_dispatch(
             client,
             _ingest(tmp_path, "probe-thread", "probe-admitted", with_receipt=True),

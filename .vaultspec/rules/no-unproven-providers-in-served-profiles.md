@@ -8,7 +8,9 @@ name: no-unproven-providers-in-served-profiles
   live-service test has COMPLETED A REAL TURN on that lane: a real prompt through the
   real transport producing real model output. Construction-only coverage, config-parse
   coverage, and live pre-auth HANDSHAKE coverage do not qualify — a handshake proves
-  spawn, not work.
+  spawn, not work. A lane proof binds to the binary identity that completed the turn:
+  the served eligibility encodes the admitted version range, and a resolved binary
+  outside it is ineligible exactly as an unproven lane is.
 - **Enforcement is served, not conventional.** The proven/unproven status of a lane is
   encoded where profiles are served (the eligibility service consumed by `presets-list`
   and launch), never left as a comment or a review habit. Credential readiness is
@@ -20,4 +22,5 @@ name: no-unproven-providers-in-served-profiles
 - **Provenance:** codifies `2026-08-01-a2a-agent-flow-adr` D3/D8 (dashboard repo,
   agent-panel campaign), per the mutual-reference discipline of
   `2026-07-14-a2a-orchestration-edge-adr`. The rule exists because a served kimi
-  profile once violated D3 when handshake-only coverage was mistaken for proof.
+  profile once violated D3 when handshake-only coverage was mistaken for proof. The
+  binary-identity clause codifies `2026-10-01-provider-binary-policy-adr` D2.

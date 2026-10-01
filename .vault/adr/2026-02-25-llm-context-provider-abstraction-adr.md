@@ -3,14 +3,15 @@ tags:
 - '#adr'
 - '#llm-context-provider-abstraction'
 date: 2026-02-25
-modified: '2026-09-06'
-body_hash: 'sha256:9dcc7c2d35ea043657e95d9dd2a1ac430c34ab64be07cd1e61777dbe2d3a9a29'
+modified: '2026-10-01'
+body_hash: 'sha256:576f0fcb7f9e33adf25435b7a18ea30b2b69d03550ef388e9c8d775d5442835a'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-07-14-orchestration-capabilities-research]]'
   - '[[2026-07-14-orchestration-capabilities-audit]]'
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-acp-initialize-negotiation-research]]'
+  - '[[2026-10-01-provider-binary-policy-adr]]'
 ---
 
 # `llm-context-provider-abstraction` adr: `subscription-first provider harness over ACP` | (**status:** `accepted`)
@@ -94,3 +95,18 @@ not accept `models.availableModels` or another old response as a fallback. A
 future Gemini lane requires a new current decision, explicit registration, and
 exact-mode evidence. Retired identifiers and configurations fail closed and are
 never translated into another active provider.
+
+## Amendment - provider-binary-policy (2026-10-01)
+
+The Auth bullet states that "the 1-year headless Claude token (`claude setup-token`,
+validated in the original record) remains the Claude method of choice". This is already
+false in force: the 2026-08-02 amendment to `2026-07-15-agent-harness-provisioning-adr`
+made subscription login the default. Superseded clause: "the 1-year headless Claude token
+(`claude setup-token`, validated in the original record) remains the Claude method of
+choice". Replacement: the one-year headless token from `claude setup-token` is the Claude
+method of choice for headless profiles, selected by an explicit authentication channel;
+attended profiles default to the operator's own subscription login.
+
+Addition to the Agent resolution bullet: resolution yields an absolute path and a recorded
+runtime authority for every launched component, including the provider CLI the adapter
+drives. Grounding: `2026-10-01-provider-binary-policy-adr`.

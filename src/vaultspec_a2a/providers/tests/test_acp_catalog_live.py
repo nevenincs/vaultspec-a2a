@@ -12,9 +12,11 @@ import pytest
 from ...control.config import settings
 from ...graph.enums import Provider
 from ...workspace.environment import resolve_env_vars
+from .._claude_tool_policy import claude_bypass_declined_meta
 from .._factory_commands import _CLAUDE_ACP_JS, _classify_acp_command
 from ..acp_catalog import discover_acp_catalog
 from ..cli_resolution import resolve_provider_cli_executable
+from ..factory import _discover_claude_catalog
 from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,
@@ -34,10 +36,9 @@ def _real_adapter_inputs() -> tuple[
         )
     command, metadata = _classify_acp_command(settings.acp_backend)
     workspace = Path.cwd()
+    # An exported CLAUDE_CODE_OAUTH_TOKEN passes through the workspace scrub,
+    # exactly as it reaches the CLI in a served run.
     environment = resolve_env_vars(workspace)
-    token = settings.claude_code_oauth_token
-    if token:
-        environment["CLAUDE_CODE_OAUTH_TOKEN"] = token
     environment.pop("ANTHROPIC_API_KEY", None)
     if claude := resolve_provider_cli_executable(Provider.CLAUDE):
         environment["CLAUDE_CODE_EXECUTABLE"] = claude
@@ -58,6 +59,7 @@ async def test_real_adapter_catalog_discovery_reaps_without_prompt() -> None:
         cwd=str(workspace),
         key=ProviderCatalogKey("claude", "acp"),
         metadata=metadata,
+        session_meta=claude_bypass_declined_meta(),
     )
 
     assert discovery.authentication is AuthenticationState.AUTHENTICATED
@@ -76,6 +78,34 @@ async def test_real_adapter_catalog_discovery_reaps_without_prompt() -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
+async def test_the_production_claude_probe_opens_a_session_on_this_host() -> None:
+    """The factory's own probe reaches a session, composing its own posture.
+
+    The test above supplies the session meta itself, which proves the adapter
+    accepts it but not that production sends it. This drives the production
+    assembly end to end instead: whatever posture ``_discover_claude_catalog``
+    composes is the posture the real adapter is handed, and a probe that cannot
+    open a session reports the lane unavailable - indistinguishable, from the
+    gateway, from a lane that is genuinely missing.
+    """
+    if settings.acp_backend != "binary" and not _CLAUDE_ACP_JS.exists():
+        pytest.fail(
+            "ACP adapter is not installed; run 'npm install' per the ACP runbook"
+        )
+    key = ProviderCatalogKey(
+        Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
+    )
+
+    discovery = await _discover_claude_catalog(key, Path.cwd())
+
+    assert discovery.catalog.state.status is CatalogStatus.AVAILABLE, (
+        discovery.catalog.state.reason
+    )
+    assert discovery.catalog.models
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
 async def test_real_adapter_catalog_discovery_reaps_when_cancelled() -> None:
     command, environment, metadata = _real_adapter_inputs()
     workspace = Path.cwd()
@@ -88,6 +118,7 @@ async def test_real_adapter_catalog_discovery_reaps_when_cancelled() -> None:
             cwd=str(workspace),
             key=ProviderCatalogKey("claude", "acp"),
             metadata=metadata,
+            session_meta=claude_bypass_declined_meta(),
         )
     )
     deadline = asyncio.get_running_loop().time() + 10.0

@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#langgraph-conformance'
 date: '2026-09-30'
-modified: '2026-09-30'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:1beb705541dfdc0e7d09852b249b80104d673eaeecc66540daff21647a6f916d'
+body_hash: 'sha256:e4a034d6353cbe7b4e15020c07440f5175970b6d9d59e92fbfac3f5637d0f5ae'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -463,6 +463,49 @@ related:
 - `S28` `M` `.vault/research/2026-09-24-architecture-review-research.md`
 - `S28` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S28` `by:` `vaultspec-adr-researcher`
+- `S38` `A` `src/vaultspec_a2a/authoring/_prose.py`
+- `S38` `M` `src/vaultspec_a2a/authoring/submitter.py`
+- `S38` `A` `src/vaultspec_a2a/authoring/tests/test_prose_parity.py`
+- `S38` `A` `.vault/adr/2026-10-01-langgraph-conformance-core-reader-parity-adr.md`
+- `S38` `verify:` `pytest src/vaultspec_a2a/authoring` -> `pass`
+- `S38` `verify:` `ruff check+format, ty check src/vaultspec_a2a/authoring` -> `pass`
+- `S46` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S46` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S46` `M` `src/vaultspec_a2a/streaming/tests/_error_injecting_graph.py`
+- `S46` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
+- `S46` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/worker` -> `pass`
+- `S46` `verify:` `ruff check+format, ty check src/vaultspec_a2a/streaming` -> `pass`
+- `S28` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
+- `S28` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S28` `M` `docs/operations.rst`
+- `S28` `D` `.vaultspec/triggers/example-audit-on-create.yaml`
+- `S47` `M` `pyproject.toml`
+- `S47` `M` `uv.lock`
+- `S47` `M` `scripts/build_binary.py`
+- `S47` `verify:` `deptry src` -> `pass`
+- `S47` `verify:` `uv export --no-default-groups lists vaultspec-core` -> `pass`
+- `S47` `verify:` `pytest src/vaultspec_a2a/control/tests/test_sync_url_derivation.py` -> `pass`
+- `S48` `M` `src/vaultspec_a2a/authoring/submitter.py`
+- `S48` `D` `src/vaultspec_a2a/authoring/_prose.py`
+- `S48` `D` `src/vaultspec_a2a/authoring/tests/test_prose_parity.py`
+- `S48` `A` `src/vaultspec_a2a/authoring/tests/test_core_body_links.py`
+- `S48` `M` `src/vaultspec_a2a/authoring/tests/test_core_grounding_parity.py`
+- `S48` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_content.py`
+- `S48` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_web_disclosure.py`
+- `S48` `M` `pyproject.toml`
+- `S48` `verify:` `pytest src/vaultspec_a2a/authoring` -> `pass`
+- `S48` `verify:` `ruff, ty check src/vaultspec_a2a/authoring, deptry src` -> `pass`
+- `S49` `M` `src/vaultspec_a2a/context/rules.py`
+- `S49` `M` `src/vaultspec_a2a/context/tests/test_rules.py`
+- `S49` `verify:` `pytest src/vaultspec_a2a/context` -> `pass`
+- `S49` `verify:` `ruff, ty check src/vaultspec_a2a/context` -> `pass`
+- `S50` `M` `src/vaultspec_a2a/authoring/submitter.py`
+- `S50` `A` `src/vaultspec_a2a/authoring/tests/test_core_document_checks.py`
+- `S50` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_content.py`
+- `S50` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_web_disclosure.py`
+- `S50` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
+- `S50` `verify:` `pytest src/vaultspec_a2a/authoring` -> `pass`
+- `S50` `verify:` `pytest graph control worker acceptance team` -> `pass`
 
 ## Notes
 
@@ -507,3 +550,6 @@ related:
 - `S18` Correction from the plan-close review: the aggregator's projection seams had no production caller.
 - `S34` Correction from the re-review: an unavailable checkpoint read was logged as a receipt not yet due.
 - `S28` User approved the drafted amendments as recommended on 2026-09-30. team-composition-topology and orchestration-topology-pipeline accepted; event-aggregation amended but left proposed pending the user's accept-or-deprecate choice.
+- `S38` Unblocked on 2026-10-01: the user chose a port held to core by a parity test; recorded in the core-reader-parity ADR, accepted under the user's blanket approval.
+- `S28` User decisions of 2026-10-01: event-aggregation accepted; the research fan-out stays on Send; no served star preset yet; the terminal fan-out keeps its one-heartbeat bound; the rag hosted-ranking rule is an operator rule; no repository override of the builtin hosted-search guidance; the retired example trigger deleted.
+- `S50` An ADR proposal whose H1 carries no parseable or canonical status is now refused, as core reports it; two web-disclosure tests used a research-shaped body as an ADR and now use an ADR H1.

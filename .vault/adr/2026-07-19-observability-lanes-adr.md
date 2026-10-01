@@ -3,10 +3,11 @@ tags:
   - '#adr'
   - '#observability-lanes'
 date: '2026-07-19'
-modified: '2026-07-19'
-body_hash: 'sha256:0355e6f4889297a5d815c0b90711e26467939bd3647f80f9586f1f43134d350f'
+modified: '2026-10-01'
+body_hash: 'sha256:96cbaffe7cb08184cabe633cd7068e1b34753d84063ef2dee5cc0a52f721acbe'
 related:
   - "[[2026-07-19-observability-lanes-research]]"
+  - '[[2026-10-01-stream-resumption-adr]]'
 ---
 
 # `observability-lanes` adr: `output lane orchestration` | (**status:** `accepted`)
@@ -74,6 +75,13 @@ lanes well orchestrated on every surface.
   working discipline.
 - Existing loop-containment semantics (heartbeat ladder cadence, watchdog
   transition-only logs) must not change observable behavior.
+
+## Amendment - stream-resumption (2026-10-01)
+
+Addition to Constraints. The durable per-run event log of `2026-10-01-stream-resumption-adr`
+is a database lane, not one of the four process-kind log lanes. It is not routed through
+`configure_logging`, writes to no file, and is bounded by its own row and age retention
+rather than by rotation and the reaper.
 
 ## Implementation
 

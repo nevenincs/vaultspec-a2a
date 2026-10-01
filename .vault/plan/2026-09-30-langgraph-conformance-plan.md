@@ -14,9 +14,12 @@ related:
   - '[[2026-03-10-postgres-dual-backend-adr]]'
   - '[[2026-08-02-control-action-leases-adr]]'
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
-modified: '2026-09-30'
+  - '[[2026-10-01-langgraph-conformance-core-reader-parity-adr]]'
+  - '[[2026-10-01-langgraph-conformance-core-runtime-dependency-adr]]'
+  - '[[2026-03-31-universal-rule-propagation-adr]]'
+modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:21144789c11820ea0a494847d6615beb07e44b59e905084848e7dd900b33f2fc'
+body_hash: 'sha256:b24f5413effab41f577792d394944a980f2ab9c4824677d64d77e3df426199d5'
 ---
 
 # `langgraph-conformance` plan
@@ -111,7 +114,7 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S35` - Disclose only the unanswered fan-out interrupts on run-status and in the resume preflight; `src/vaultspec_a2a/worker/state_projection.py, src/vaultspec_a2a/thread/snapshots.py`.
 - [x] `P07.S36` - Clear star and pipeline validation errors when their owner returns, bound the finish-block budget by the recursion limit, and keep the blocked-FINISH reason through a plan-approval reroute; `src/vaultspec_a2a/graph/nodes/supervisor.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P07.S37` - Close the rag daemon egress and client-daemon skew gaps and drop torch from the rag extra; `src/vaultspec_a2a/providers/_harness_mcp_registry.py, src/vaultspec_a2a/providers/_mcp_contract.py, pyproject.toml`.
-- [ ] `P07.S38` - Strip body links with core's reader instead of mirrored regexes; `src/vaultspec_a2a/authoring/submitter.py`.
+- [x] `P07.S38` - Strip body links with a port of core's prose reader held to core by a parity test; `src/vaultspec_a2a/authoring/submitter.py`.
 - [x] `P07.S39` - Retire the unreachable checkpoint-history degradations, tie the retention schema pin to the saver version, and refuse closing a borrowed saver; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/database/checkpoint_retention.py, src/vaultspec_a2a/database/checkpoints.py`.
 - [x] `P07.S40` - Attribute custom stream writes to their node and replace the aggregator's hand-written graph stubs with one error-injecting graph; `src/vaultspec_a2a/streaming/`.
 - [x] `P07.S41` - Make the provider tests name the adapter prerequisite they lack; `src/vaultspec_a2a/providers/tests/`.
@@ -119,6 +122,11 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S43` - Declare the execution-state degradation reasons, retire the producerless unknown reason, and widen the vocabulary guards to constructor literals and every member; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `P07.S44` - Correct the compiler comment that says strict msgpack refuses an unknown type; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P07.S45` - Settle an answer a failed turn consumed without moving the finished run back to running; `src/vaultspec_a2a/control/_event_application.py`.
+- [x] `P07.S46` - Re-raise a non-Exception BaseException a node raises instead of reporting it as a provider failure; `src/vaultspec_a2a/streaming/ingest.py`.
+- [x] `P07.S47` - Declare vaultspec-core a runtime project dependency; `pyproject.toml, uv.lock`.
+- [x] `P07.S48` - Refuse body links with core's own check and split frontmatter with core's split, deleting the port; `src/vaultspec_a2a/authoring/submitter.py, src/vaultspec_a2a/authoring/_prose.py`.
+- [x] `P07.S49` - Read rule frontmatter with core's parser; `src/vaultspec_a2a/context/rules.py`.
+- [x] `P07.S50` - Refuse leftover placeholders, annotations and legacy status sections with core's own checks; `src/vaultspec_a2a/authoring/submitter.py`.
 
 ## Parallelization
 

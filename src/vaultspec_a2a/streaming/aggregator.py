@@ -26,8 +26,8 @@ from ..providers import ProviderCondition
 from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
-from .ingest import IngestManager, IngestRequest
-from .subscribers import SubscriberManager
+from .ingest import GraphInvocation, IngestManager, IngestRequest
+from .subscribers import AllocationSink, RunSequenceAllocator, SubscriberManager
 from .transformer import project_run_progress
 from .types import SequencedEvent, StreamableGraph
 
@@ -189,6 +189,15 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         self._ingest.clear_thread_state(thread_id)
         self._emitters.clear_thread_state(thread_id)
 
+    def discard_run_replay(self, thread_id: str) -> None:
+        """Drop the retained frames a DELETED run's recorder still holds.
+
+        Called by the delete path only, and separately from
+        :meth:`clear_thread_state`, which a terminal also calls while the
+        frames it holds are still waiting to be written.
+        """
+        self._subscribers_mgr.discard_run_replay(thread_id)
+
     def relay_payload(self, thread_id: str, payload: object) -> None:
         """Fan out a pre-serialized payload to all subscribers of ``thread_id``.
 
@@ -197,8 +206,29 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         prompts, document and artifact bodies, edit diffs, and raw provider
         payloads are dropped at the relay seam - a first enforcement the encode
         boundary independently repeats.
+
+        Call :meth:`prepare_run` for the run first: this path is synchronous and
+        cannot establish a number it has never read.
         """
         self._subscribers_mgr.enqueue_payload(thread_id, project_run_progress(payload))
+
+    async def prepare_run(self, thread_id: str) -> None:
+        """Establish *thread_id*'s event numbering before relaying its frames."""
+        await self._subscribers_mgr.prepare_run(thread_id)
+
+    def bind_sequence_allocator(
+        self,
+        allocator: RunSequenceAllocator | None,
+        *,
+        sink: AllocationSink | None = None,
+    ) -> None:
+        """Seat the authority that numbers this process's outgoing frames."""
+        self._subscribers_mgr.bind_sequence_allocator(allocator, sink=sink)
+
+    @property
+    def sequence_allocator(self) -> RunSequenceAllocator | None:
+        """The seated numbering authority, or ``None`` where none is bound."""
+        return self._subscribers_mgr.sequence_allocator
 
     def register_graph(self, thread_id: str, graph: StreamableGraph) -> None:
         self._subscribers_mgr.register_graph(thread_id, graph)
@@ -452,11 +482,13 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
                 thread_id,
                 agent_id,
                 graph,
-                graph_input,
-                config,
+                GraphInvocation(
+                    graph_input,
+                    config,
+                    options.get("context"),
+                    options.get("control"),
+                ),
                 options.get("on_graph_started"),
-                options.get("context"),
-                options.get("control"),
             )
         )
 
@@ -466,5 +498,6 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         """Cancel all tasks and clear state."""
         await self._buffering.shutdown()
         await self._ingest.shutdown()
+        await self._subscribers_mgr.shutdown_allocation_sink()
         self._subscribers_mgr.clear()
         self._emitters.clear()

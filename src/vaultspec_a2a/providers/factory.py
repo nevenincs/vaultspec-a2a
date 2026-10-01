@@ -27,6 +27,7 @@ from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ..workspace.environment import resolve_env_vars
+from ._claude_tool_policy import claude_bypass_declined_meta
 from ._factory_commands import (
     _build_kimi_env,
     _build_zai_env,
@@ -224,6 +225,12 @@ async def _discover_claude_catalog(
         key=key,
         use_exec=use_exec,
         metadata={"provider": Provider.CLAUDE.value, **metadata},
+        # The probe opens a real session, so it opens it under the same
+        # permission posture a served turn gets. Leaving the bypass capability
+        # granted here would qualify a lane nobody runs - and where the CLI
+        # refuses the flag the capability arms, it would report the lane
+        # unavailable for a reason that is this probe's own doing.
+        session_meta=claude_bypass_declined_meta(),
     )
     normalized = ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
     return replace(normalized, transport=_transport_evidence(normalized))

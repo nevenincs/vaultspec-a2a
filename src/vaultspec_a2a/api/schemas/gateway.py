@@ -80,6 +80,7 @@ __all__ = [
     "RunMessageRefusalCode",
     "RunMessageRefusalDetail",
     "RunMessageRefusalResponse",
+    "RunPermissionRefusalResponse",
     "RunPrepareResponse",
     "RunReleaseResponse",
     "RunStage",
@@ -500,6 +501,25 @@ class RunStatusResponse(BaseModel):
     approval_request_id: str | None = None
     checkpoint_id: str | None = None
     last_sequence: int = 0
+    # Whether this run's progress stream can be RESUMED from the id its frames
+    # carry, as opposed to merely re-attached. The two postures are otherwise
+    # indistinguishable without probing: a stream that serves no replay emits
+    # no id at all, so a client would have to attach, wait for a frame, and
+    # find no id on it to learn what this field says outright. False whenever
+    # retention is switched off for the service or nothing is retained for
+    # this run - a settled run whose window has expired, or one that has yet
+    # to emit a frame. Additive, and never a statement about run state: a
+    # resumable stream and an authoritative one are different things, and this
+    # response remains the authority either way.
+    stream_resumable: bool = False
+    # How many follow-up turns this run is holding behind the one it is
+    # running. Read from the control-action journal, which is the authority a
+    # reloading client has to recover from: the progress stream says nothing
+    # about a turn that has not started, and the quiet boundary between two
+    # turns is indistinguishable from a run that has gone idle. Bounded by the
+    # configured per-run continuation depth, so it is a small count and never
+    # a list. Zero for every run that holds nothing, which is most of them.
+    queued_messages: int = Field(default=0, ge=0)
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     # Left as bare strings pending the narrowing, NOT because this list lacks an
@@ -697,11 +717,23 @@ class RunMessageRequest(BaseModel):
 
 
 class RunMessageResponse(BaseModel):
-    """Acknowledge a follow-up turn as accepted for dispatch.
+    """Acknowledge a follow-up turn as queued behind the run's current turn.
 
-    Acceptance is not completion: the turn is handed to the worker and the run
-    continues asynchronously, so a caller reconciles progress from the stream or
-    run-status rather than from this body.
+    Acceptance is not execution and it is not even dispatch: the turn is
+    reserved in the run's journal with a place in its queue, and it reaches
+    the worker only once the turn now running has proven its terminal
+    checkpoint. A caller reconciles progress from the stream or run-status,
+    never from this body.
+
+    ``queue_position`` is where this turn sits, counting from one, and it is
+    stable across a replay of the same key: a caller that lost this response
+    and retried reads the same place rather than a new one. ``None`` only for
+    a response that reserved nothing.
+
+    ``idempotency_key`` is the caller's own key echoed back, never a derived
+    one, because this verb has no default to derive: it is required on the
+    request, so an accepted turn always has a key and it is always the one the
+    caller chose.
     """
 
     api_version: Literal["v1"] = _API_VERSION
@@ -710,15 +742,20 @@ class RunMessageResponse(BaseModel):
     applied: bool = False
     action_status: str
     action_id: str | None = None
-    idempotency_key: str | None = None
+    idempotency_key: str
+    queue_position: int | None = Field(default=None, ge=1)
 
 
 class RunMessageRefusalCode(StrEnum):
-    """The conditions a follow-up turn can be refused for.
+    """The conditions a run action can be refused for.
 
     A closed subset of the dispatch failure vocabulary, so the published
     contract names only what this refusal can carry rather than every failure
     the gateway knows. Each value is spelled as its failure-type counterpart.
+
+    Shared by every verb that reaches the worker through a run dispatch, not
+    only the follow-up turn: the same worker refusal must mean the same thing
+    whichever verb met it.
     """
 
     INPUT_REQUIRED = FailureType.INPUT_REQUIRED.value
@@ -726,6 +763,10 @@ class RunMessageRefusalCode(StrEnum):
     CONFLICT = FailureType.CONFLICT.value
     INCOMPATIBLE_STATE = FailureType.INCOMPATIBLE_STATE.value
     RUN_BUSY = FailureType.RUN_BUSY.value
+    # A run that would have taken the turn and has nowhere to put it: its own
+    # continuation queue, or the service-wide one, is already spent. Distinct
+    # from RUN_BUSY, which says the run admits no continuation at all.
+    QUEUE_FULL = FailureType.QUEUE_FULL.value
 
 
 class RunMessageRefusalDetail(BaseModel):
@@ -747,6 +788,23 @@ class RunMessageRefusalResponse(BaseModel):
     """The body served for a refused follow-up turn."""
 
     detail: RunMessageRefusalDetail
+
+
+class RunPermissionRefusalResponse(BaseModel):
+    """The body served when a permission answer is refused with a conflict.
+
+    Two shapes, deliberately stated as one union rather than as one shape the
+    verb does not always serve. A worker that refused the dispatch is reported
+    with the typed refusal every run action shares, because the condition is
+    the dispatch outcome and a consumer must be able to tell a busy run from a
+    request it should never send again. The guards this verb applies before
+    anything is dispatched - an answer to a request that is no longer pending,
+    an option the request never offered, a key already bound to a different
+    answer - carry a plain sentence, because they are conditions of this
+    request rather than of reaching the worker.
+    """
+
+    detail: RunMessageRefusalDetail | str
 
 
 class RunPermissionRespondRequest(BaseModel):

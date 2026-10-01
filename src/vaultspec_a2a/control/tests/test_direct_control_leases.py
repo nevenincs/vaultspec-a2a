@@ -23,6 +23,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -51,7 +52,7 @@ from ...database import (
     get_thread,
     record_permission_request,
 )
-from ...database.models import Base, ThreadModel
+from ...database.models import Base, RecoveryAttemptModel, ThreadModel
 from ...database.session import begin_write_transaction, configure_sqlite_engine
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
@@ -339,26 +340,143 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
     assert action.applied_at is None
 
 
-@pytest.mark.parametrize(
-    "status",
-    [ThreadStatus.SUBMITTED, ThreadStatus.RUNNING, ThreadStatus.CANCELLING],
-)
+async def _parked_permission(
+    sessions: async_sessionmaker[AsyncSession], thread_id: str
+) -> str:
+    """Seed a run parked on a permission question and return its request id."""
+    request_id = f"{thread_id}:permission"
+    async with sessions() as db:
+        await _create_current_thread(
+            db,
+            thread_id=thread_id,
+            status=ThreadStatus.INPUT_REQUIRED,
+        )
+        await record_permission_request(
+            db,
+            request_id=request_id,
+            thread_id=thread_id,
+            pause_reason_type="bash",
+            description="Allow the command?",
+            allowed_options=[
+                {
+                    "option_id": "allow_once",
+                    "name": "Allow once",
+                    "kind": "allow_once",
+                }
+            ],
+            tool_call="bash",
+        )
+        await db.commit()
+    return request_id
+
+
 @pytest.mark.asyncio
-async def test_a_followup_reserves_nothing_while_the_run_owns_a_turn(
+async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Ownership is given back only for a delivery proven not to have happened.
+
+    Neither arm needs a worker to pretend anything. The first meets a circuit
+    the breaker really has shut, so the resume never left the gateway and the
+    claim is certainly free to take again. The second meets a port with nothing
+    behind it, which proves only that the acknowledgement was lost - the worker
+    may have scheduled the resume - so the claim is held until reconciliation
+    or expiry. Both record the condition they met, which is what the retry is
+    scheduled against.
+    """
+    definite_thread = "definite-resume-thread"
+    ambiguous_thread = "ambiguous-resume-thread"
+    definite_request = await _parked_permission(session_factory, definite_thread)
+    ambiguous_request = await _parked_permission(session_factory, ambiguous_thread)
+
+    shut = _circuit_breaker()
+    shut.force_open()
+    async with (
+        httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as no_worker,
+        session_factory() as db,
+    ):
+        definite = await respond_to_permission(
+            db,
+            response=PermissionInput(definite_request, "allow_once", "definite-retry"),
+            runtime=PermissionRuntime(
+                shut, _spawner("http://127.0.0.1:1"), no_worker, 25, None
+            ),
+        )
+    assert definite.failure_type is FailureType.CIRCUIT_OPEN
+
+    async with (
+        httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as unreachable,
+        session_factory() as db,
+    ):
+        ambiguous = await respond_to_permission(
+            db,
+            response=PermissionInput(
+                ambiguous_request, "allow_once", "ambiguous-retry"
+            ),
+            runtime=PermissionRuntime(
+                _circuit_breaker(),
+                _spawner("http://127.0.0.1:1"),
+                unreachable,
+                25,
+                None,
+            ),
+        )
+    assert ambiguous.failure_type is FailureType.UNREACHABLE
+
+    async with session_factory() as db:
+        definite_action = await get_control_action_by_idempotency_key(
+            db,
+            thread_id=definite_thread,
+            idempotency_key=permission_response_action_key(definite_request),
+        )
+        ambiguous_action = await get_control_action_by_idempotency_key(
+            db,
+            thread_id=ambiguous_thread,
+            idempotency_key=permission_response_action_key(ambiguous_request),
+        )
+        attempts = (
+            (
+                await db.execute(
+                    select(RecoveryAttemptModel).where(
+                        RecoveryAttemptModel.thread_id.in_(
+                            {definite_thread, ambiguous_thread}
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert definite_action is not None
+    assert definite_action.claim_token is None
+    assert definite_action.claim_expires_at is None
+    assert ambiguous_action is not None
+    assert ambiguous_action.claim_token is not None
+    assert ambiguous_action.claim_expires_at is not None
+    # Identity survives both dispositions: only ownership differs.
+    assert definite_action.applied_at is None
+    assert ambiguous_action.applied_at is None
+    assert {attempt.thread_id: attempt.condition for attempt in attempts} == {
+        definite_thread: "circuit_open",
+        ambiguous_thread: "unreachable",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
-    status: ThreadStatus,
 ) -> None:
-    """Occupancy is decided before the lease, so the refusal writes nothing.
+    """A run that is leaving refuses before the lease, so nothing is written.
 
-    A follow-up admitted onto an occupied run took that run's write authority
-    from the turn already executing, and the executing turn's own completion was
-    then refused as superseded evidence, quarantining the run. The refusal has
-    to precede the reservation for that to be fixed rather than moved, so this
-    reads the durable side afterwards: no journal action under the key, no
-    writer transition, and no dispatch id admitted by a REAL worker that is
-    running and would have taken one.
+    The two states that still own an unfinished turn now admit a continuation
+    behind it; a cancelling run does not, because it will never promote one.
+    Its refusal has to precede the reservation, so this reads the durable side
+    afterwards: no journal action under the key, no writer transition, and no
+    dispatch id admitted by a REAL worker that is running and would have taken
+    one.
     """
+    status = ThreadStatus.CANCELLING
     thread_id = f"busy-{status.value}-thread"
     async with session_factory() as db:
         await _create_current_thread(db, thread_id=thread_id, status=status)
@@ -370,7 +488,7 @@ async def test_a_followup_reserves_nothing_while_the_run_owns_a_turn(
         requested_before = before.last_requested_action
 
     async with _worker_runtime(tmp_path / f"busy-{status.value}.db") as (
-        worker_client,
+        _worker_client,
         worker_app,
         _bridge,
         _checkpointer,
@@ -382,13 +500,8 @@ async def test_a_followup_reserves_nothing_while_the_run_owns_a_turn(
                 content="second turn",
                 agent_id="vaultspec-supervisor",
                 idempotency_key="busy-refusal-key",
-                circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner(),
-                worker_client=worker_client,
-                recursion_limit=25,
-                trace_headers=None,
             )
-        assert result.dispatched is False
+        assert result.queued is False
         assert result.failure_type is FailureType.RUN_BUSY
         assert result.action_id == ""
         assert len(worker_app.state.dispatch_ids) == 0

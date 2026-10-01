@@ -45,24 +45,74 @@ if TYPE_CHECKING:
 __all__ = [
     "render_prompt_blocks",
     "render_prompt_text",
-    "rendered_prompt_sections",
     "speaker_label",
 ]
+
+# The words a heading would have to carry to read as one of the labels below:
+# the roles this layer writes, plus the ones a model would take for one. Shared
+# by both forgery patterns, so the two spellings of the same heading cannot come
+# to disagree about what reads as a role.
+_ROLE_WORDS = "system|developer|user|human|assistant|ai|tool|function|chat"
 
 # A content line that reads as one of the section headings below: the heading
 # depth this layer writes, any case, a role word it writes or a model would take
 # for one. Deeper headings are left alone, because mounted documents use them for
-# their own structure and are shown to the model as written.
+# their own structure and are shown to the model as written. Markdown also
+# starts a line after a lone carriage return, which "^" alone does not see.
 _FORGED_ROLE_HEADING = re.compile(
-    r"^([ \t]{0,3})(#(?!#)[ \t]*(?:system|developer|user|human|assistant|ai|tool|"
-    r"function|chat)\b)",
+    rf"(?:^|(?<=\r))([ \t]{{0,3}})(#(?!#)[ \t]*(?:{_ROLE_WORDS})\b)",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# The same heading written the other way round: a line of "=" under text is the
+# setext spelling of the depth-one heading this layer writes, so it opens a
+# section exactly as the hash form does and has to be refused by the same rule.
+# The UNDERLINE is escaped rather than the words, so the text still reaches the
+# model as written.
+#
+# A setext heading's text is the WHOLE paragraph above the underline, not the
+# one line next to it, so the guard reads every line since the last blank one:
+# an underline is escaped when any of them could open a role heading. That also
+# covers a paragraph a block such as a hash heading interrupted, whose own text
+# starts mid-run, and an underline already escaped, which leaves the paragraph
+# open for the next underline to promote.
+#
+# A line may carry a hash of its own, because escaping one turns that line into
+# a paragraph - and an underline beneath a paragraph promotes it straight back
+# into a depth-one heading, which is why this pass runs before the hash pass.
+#
+# A "-" underline is deliberately NOT matched: it spells a depth-TWO heading,
+# which this layer never writes and a mounted document's own sections do.
+_ROLE_PARAGRAPH_LINE = re.compile(
+    rf"^[ \t]{{0,3}}(?:\\?#[ \t]*)?(?:{_ROLE_WORDS})\b", re.IGNORECASE
+)
+_SETEXT_UNDERLINE = re.compile(r"^([ \t]{0,3})(=+[ \t]*)$")
+
+# Markdown ends a line at a carriage return as well as a newline, so a tool's
+# Windows-style output underlines its headings exactly as a Unix one does.
+_LINE_ENDING = re.compile(r"(\r\n|\r|\n)")
+
+
+def _defused_underlines(text: str) -> str:
+    """Escape each "=" underline beneath a paragraph that could name a role."""
+    pieces = _LINE_ENDING.split(text)
+    role_paragraph = False
+    for index in range(0, len(pieces), 2):
+        line = pieces[index]
+        if not line.strip():
+            role_paragraph = False
+            continue
+        underline = _SETEXT_UNDERLINE.match(line)
+        if underline is not None and role_paragraph:
+            pieces[index] = f"{underline[1]}\\{underline[2]}"
+        elif _ROLE_PARAGRAPH_LINE.match(line):
+            role_paragraph = True
+    return "".join(pieces)
 
 
 def _defused(text: str) -> str:
     """Escape every line of *text* that would read as a section heading."""
-    return _FORGED_ROLE_HEADING.sub(r"\1\\\2", text)
+    return _FORGED_ROLE_HEADING.sub(r"\1\\\2", _defused_underlines(text))
 
 
 def speaker_label(message: BaseMessage) -> str | None:

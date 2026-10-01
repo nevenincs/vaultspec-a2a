@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#tool-cores'
 date: '2026-07-17'
-modified: '2026-08-03'
-body_hash: 'sha256:f2001fcef1b83da0ca4fe056bdbb49ccd34ae0ef5ee528e0f5135b70b3fbdbf5'
+modified: '2026-10-01'
+body_hash: 'sha256:550d0f0543d0a4fa641114a3a7b503d0c7342667d45185dadffd31d64f39f740'
 related:
   - '[[2026-07-17-tool-cores-research]]'
   - '[[2026-08-01-tool-cores-web-grounding-research]]'
@@ -13,6 +13,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
   - '[[2026-07-15-graph-agent-framework-harness-plan]]'
+  - '[[2026-10-01-tool-permission-model-adr]]'
 ---
 
 # `tool-cores` adr: `read-only grounding tools for graph document agents` | (**status:** `accepted`)
@@ -332,3 +333,11 @@ document roles and the permission rung, named as a residual risk, dissolvable by
 future upstream MCP-only pin variable. The `check` declaration is safe only under the
 read-only launch's fix-less registration; absent the exact-surface assertion it is
 dropped to the conservative three.
+
+## Amendment - tool-permission-model (2026-10-01)
+
+The Implementation floor paragraph's only stated permission work is to "permit the read
+built-ins in autonomous mode". The floor's rules are now emitted by the run's compiled tool
+policy rather than composed at the call site, and a floor tool whose rule grammar takes no
+path stays withheld rather than permitted by bare name. The emitted anchor form is gated on
+a live probe of the pinned CLI's rule grammar; see `2026-10-01-tool-permission-model-adr`.

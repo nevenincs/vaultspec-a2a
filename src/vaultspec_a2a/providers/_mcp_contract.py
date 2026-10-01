@@ -50,6 +50,7 @@ import asyncio
 import io
 import tempfile
 import unicodedata
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, TextIO, TypedDict, Unpack
 
 from mcp import ClientSession
@@ -176,11 +177,6 @@ def _stderr_tail(captured: TextIO) -> str:
     return f" Server stderr: {text}"
 
 
-def _launch_description(command: str, args: Sequence[str]) -> str:
-    """Return the probed launch command as a single readable string."""
-    return " ".join([command, *args])
-
-
 def _launch_args(spec: Mapping[str, JsonValue], *, name: str) -> list[str]:
     """Read an optional JSON array of string launch arguments or refuse it."""
     value = spec.get("args")
@@ -207,11 +203,36 @@ def _result_text(result: CallToolResult) -> str:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _StdioLaunch:
+    """The three facts that decide which server a probe actually launches.
+
+    They travel together everywhere: the identity the memo key is built from,
+    the description a refusal quotes, and the parameters handed to the stdio
+    client. Carried as one value so a probe cannot be described by one spelling
+    of the launch and then performed with another.
+    """
+
+    command: str
+    args: Sequence[str]
+    env: Mapping[str, str] | None = None
+
+    def description(self) -> str:
+        """Return the probed launch command as a single readable string."""
+        return " ".join([self.command, *self.args])
+
+    def parameters(self) -> StdioServerParameters:
+        """Return the stdio client parameters for this launch."""
+        return StdioServerParameters(
+            command=self.command,
+            args=list(self.args),
+            env=dict(self.env) if self.env is not None else None,
+        )
+
+
 async def _served_tool_names(
+    launch: _StdioLaunch,
     *,
-    command: str,
-    args: Sequence[str],
-    env: Mapping[str, str] | None,
     timeout: float,
     captured_stderr: TextIO,
     readiness_tool: str | None,
@@ -225,11 +246,7 @@ async def _served_tool_names(
     this module classifies, and an absent readiness tool or one the server does
     not serve leaves the daemon side unobserved rather than refused.
     """
-    params = StdioServerParameters(
-        command=command,
-        args=list(args),
-        env=dict(env) if env is not None else None,
-    )
+    params = launch.parameters()
     async with asyncio.timeout(timeout):
         async with (
             stdio_client(params, errlog=captured_stderr) as (read, write),
@@ -347,9 +364,9 @@ async def verify_declared_tool_contract(
     declared = options["declared"]
     exact_surface = options.get("exact_surface", False)
     withheld = options.get("withheld", ())
-    env = options.get("env")
     timeout = options.get("timeout", CONTRACT_PROBE_TIMEOUT_SECONDS)
     readiness_tool = options.get("readiness_tool")
+    stdio_launch = _StdioLaunch(command=command, args=args, env=options.get("env"))
     key = (command, tuple(args), tuple(declared), tuple(withheld), exact_surface)
     if key in _verified:
         return
@@ -362,7 +379,7 @@ async def verify_declared_tool_contract(
         # description for any caller whose output does not leave the process. No
         # bound is applied to this string anywhere, so unlike the stderr tail
         # there is no cut for the mask to have to precede.
-        launch = redact_secrets(_launch_description(command, args))
+        launch = redact_secrets(stdio_launch.description())
         # A real on-disk temporary file, text-wrapped: the stdio client hands the
         # handle to the OS as the child's stderr, so it needs a true file
         # descriptor - an in-memory buffer cannot serve as one.
@@ -373,9 +390,7 @@ async def verify_declared_tool_contract(
         ) as captured_stderr:
             try:
                 served, readiness_diagnostic = await _served_tool_names(
-                    command=command,
-                    args=args,
-                    env=env,
+                    stdio_launch,
                     timeout=timeout,
                     captured_stderr=captured_stderr,
                     readiness_tool=readiness_tool,

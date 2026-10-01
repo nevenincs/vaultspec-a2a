@@ -16,7 +16,6 @@ Architecture:
 
 import asyncio
 import logging
-import sys
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, Never, override
 
@@ -34,7 +33,6 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..team.team_config import AgentConfig
-from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import runtime_log_extra
 from ._acp_authoring import (
@@ -47,14 +45,15 @@ from ._acp_model_state import (
     AcpModelState,
     AcpSessionBusyError,
     NativeCommandRequest,
-    NativeCommandUnavailableError,
     model_state_or_none,
     model_state_path,
     read_model_state,
     write_model_state,
 )
-from ._acp_prompt_outcomes import (
-    is_executable_native_command_name as _is_executable_native_command_name,
+from ._acp_native_commands import (
+    native_command_error_result,
+    native_command_prompt_blocks,
+    validate_native_command,
 )
 from ._acp_prompt_outcomes import (
     raise_for_prompt_stop_reason as _raise_for_prompt_stop_reason,
@@ -62,11 +61,7 @@ from ._acp_prompt_outcomes import (
 from ._acp_prompt_outcomes import (
     raise_prompt_error as _raise_prompt_error,
 )
-from ._acp_prompt_outcomes import (
-    required_session_id as _required_session_id,
-)
 from ._acp_protocol import process_stdout_loop
-from ._acp_request import await_response, issue_request
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
     on_fs_write_text_file,
@@ -78,41 +73,35 @@ from ._acp_rpc_handlers import (
     on_terminal_wait_for_exit,
 )
 from ._acp_session import initialize_session, setup_prompt, setup_session
+from ._acp_session_admin import fork_session as _fork_session
+from ._acp_session_admin import list_sessions as _list_sessions
+from ._acp_session_admin import session_rpc
+from ._acp_session_admin import set_mode as _set_mode
+from ._acp_stderr import read_stderr_loop
+from ._acp_teardown import cleanup_session
+from ._acp_turn_failures import abnormal_exit_error, enforce_turn_deadline
 from ._acp_types import (
     AcpModelConfig,
     AcpResponseFuture,
-    AcpResponseFutures,
     AcpSessionContext,
-    NativeCommandDisposition,
     NativeCommandOutcome,
     NativeCommandResult,
     PermissionCallback,
     RpcHandlerMap,
     require_workspace_root,
 )
-from ._cleanup import CleanupStep, cancel_owned_tasks, run_independent_cleanups
-from ._json_contract import (
-    JsonObject,
-    lenient_json_object,
-    lenient_json_object_list,
-)
+from ._cleanup import CleanupStep, run_independent_cleanups
+from ._json_contract import JsonObject
 from ._mcp_contract import verify_harness_mcp_contract
 from ._prompt_render import render_prompt_blocks
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
-from .acp_exceptions import (
-    AcpError,
-    AcpErrorCode,
-    AcpPromptCancelledError,
-    AcpPromptError,
-)
+from .acp_exceptions import AcpError
 from .cli_resolution import pin_claude_executable
 
 __all__ = ["AcpChatModel"]
 
 logger = logging.getLogger(__name__)
-_COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS = 5.0
-_MAX_NATIVE_COMMAND_ARGUMENT_LENGTH = 8192
 
 
 class AcpChatModel(BaseChatModel):
@@ -438,41 +427,6 @@ class AcpChatModel(BaseChatModel):
             ),
         )
 
-    async def _native_prompt_blocks(
-        self,
-        ctx: AcpSessionContext,
-        native_command: NativeCommandRequest | None,
-        prompt_blocks: list[JsonObject],
-        session_id: str,
-    ) -> list[JsonObject]:
-        if native_command is not None:
-            catalog = ctx.native_commands_for(session_id)
-            if not catalog.received:
-                try:
-                    await asyncio.wait_for(
-                        catalog.updated.wait(),
-                        timeout=_COMMAND_ADVERTISEMENT_TIMEOUT_SECONDS,
-                    )
-                except TimeoutError:
-                    raise NativeCommandUnavailableError(
-                        native_command.name,
-                        NativeCommandDisposition.BLOCKED,
-                        ("the provider did not advertise commands before the deadline"),
-                    ) from None
-            availability = catalog.resolve(native_command.name)
-            if availability.disposition is not NativeCommandDisposition.SUPPORTED:
-                raise NativeCommandUnavailableError(
-                    native_command.name,
-                    availability.disposition,
-                    availability.reason or "native command is unavailable",
-                )
-            text = f"/{native_command.name}"
-            if native_command.arguments:
-                text = f"{text} {native_command.arguments}"
-            prompt_blocks = [{"type": "text", "text": text}]
-            ctx.effects_may_have_occurred = True
-        return prompt_blocks
-
     async def _astream_session(
         self,
         messages: list[BaseMessage],
@@ -584,7 +538,7 @@ class AcpChatModel(BaseChatModel):
             self._state.transport.stdin = ctx.stdin
             self._state.transport.stdin_lock = ctx.stdin_lock
             self._state.session.response_futures = ctx.response_futures
-            prompt_blocks = await self._native_prompt_blocks(
+            prompt_blocks = await native_command_prompt_blocks(
                 ctx, native_command, prompt_blocks, result.session_id
             )
             prompt_future = await setup_prompt(
@@ -627,13 +581,7 @@ class AcpChatModel(BaseChatModel):
         self, name: str, arguments: str | None = None
     ) -> NativeCommandResult:
         """Execute one exactly advertised command through ACP prompt syntax."""
-        if not _is_executable_native_command_name(name):
-            raise ValueError("native command name is not an executable exact identity")
-        if arguments is not None and (
-            len(arguments) > _MAX_NATIVE_COMMAND_ARGUMENT_LENGTH
-            or not arguments.isprintable()
-        ):
-            raise ValueError("native command arguments are invalid")
+        validate_native_command(name, arguments)
 
         output: list[str] = []
         try:
@@ -647,7 +595,7 @@ class AcpChatModel(BaseChatModel):
                 if isinstance(content, str):
                     output.append(content)
         except Exception as exc:
-            return self._native_command_error_result(name, exc)
+            return native_command_error_result(name, exc)
         return NativeCommandResult(
             name=name,
             outcome=NativeCommandOutcome.COMPLETED,
@@ -655,73 +603,12 @@ class AcpChatModel(BaseChatModel):
             effects_may_have_occurred=True,
         )
 
-    @staticmethod
-    def _native_command_error_result(name: str, exc: Exception) -> NativeCommandResult:
-        if isinstance(exc, AcpSessionBusyError):
-            return NativeCommandResult(
-                name=name, outcome=NativeCommandOutcome.BUSY, reason=str(exc)
-            )
-        if isinstance(exc, NativeCommandUnavailableError):
-            outcome = (
-                NativeCommandOutcome.UNSUPPORTED
-                if exc.disposition is NativeCommandDisposition.UNSUPPORTED
-                else NativeCommandOutcome.BLOCKED
-            )
-            return NativeCommandResult(name=name, outcome=outcome, reason=str(exc))
-        if isinstance(exc, AcpPromptCancelledError):
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.CANCELLED,
-                reason=str(exc),
-                effects_may_have_occurred=exc.effects_may_have_occurred,
-            )
-        if isinstance(exc, AcpError):
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.FAILED,
-                reason=str(exc),
-                effects_may_have_occurred=exc.effects_may_have_occurred,
-            )
-        logger.error("ACP native command failed", exc_info=exc)
-        return NativeCommandResult(
-            name=name,
-            outcome=NativeCommandOutcome.FAILED,
-            reason=f"provider command failed ({type(exc).__name__})",
-            effects_may_have_occurred=True,
-        )
-
     def _enforce_turn_deadline(self, ctx: AcpSessionContext) -> None:
-        """Fail the turn once the subprocess has gone silent for too long.
-
-        The queue poll below only ends on a sentinel or on ``prompt_done``, both
-        of which require the subprocess to say something. An agent that stays
-        alive but stops emitting frames - a wedged tool call, a lost upstream
-        connection - therefore parks the caller forever. Bound that by silence
-        rather than by total turn length, so a genuinely long run is never cut
-        off: every frame resets the clock.
-        """
-        idle_limit = settings.acp_turn_idle_timeout_seconds
-        if idle_limit <= 0:
-            return
-        idle_seconds = ctx.seconds_since_activity()
-        if idle_seconds < idle_limit:
-            return
-        logger.error(
-            "ACP turn exceeded the idle deadline",
-            extra=runtime_log_extra(
-                self._state.config,
-                process=ctx.process,
-                handshake_step="session/prompt",
-                timeout_seconds=idle_limit,
-                session_id=self._state.session.active_session_id,
-                stderr_event_count=ctx.stderr_event_count,
-            ),
-        )
-        raise AcpPromptError(
-            f"ACP turn produced no protocol activity for {idle_seconds:.0f}s "
-            f"(deadline {idle_limit:.0f}s); treating the session as hung.",
-            code=AcpErrorCode.INTERNAL_ERROR,
-            data={"acp_outcome": "turn_idle_deadline_expired"},
+        """Fail the turn once the subprocess has gone silent for too long."""
+        enforce_turn_deadline(
+            ctx,
+            self._state.config,
+            session_id=self._state.session.active_session_id,
         )
 
     async def _yield_chunks(
@@ -768,33 +655,12 @@ class AcpChatModel(BaseChatModel):
     def _abnormal_exit_error(
         self, ctx: AcpSessionContext, cause: BaseException | None = None
     ) -> AcpError:
-        """Describe a child that left mid-turn, in its own redacted words.
-
-        The lines were written at DEBUG under an INFO default and the failure
-        carried a line COUNT, so the one account of what happened was discarded
-        exactly when it was needed. Reported at WARNING and carried on the error,
-        because the reader of the log and the caller of the turn are different
-        people with the same question.
-        """
-        tail = ctx.rendered_stderr_tail() or "<empty>"
-        detail = f" ({cause})" if cause is not None else ""
-        logger.warning(
-            "ACP subprocess exited before end_turn%s; redacted stderr tail:\n%s",
-            detail,
-            tail,
-            extra=runtime_log_extra(
-                self._state.config,
-                process=ctx.process,
-                handshake_step="session/prompt",
-                session_id=self._state.session.active_session_id,
-                stderr_event_count=ctx.stderr_event_count,
-                exit_code=ctx.process.returncode,
-            ),
-        )
-        return AcpError(
-            f"ACP subprocess exited before end_turn{detail}; "
-            f"redacted stderr tail:\n{tail}",
-            effects_may_have_occurred=ctx.effects_may_have_occurred,
+        """Describe a child that left mid-turn, in its own redacted words."""
+        return abnormal_exit_error(
+            ctx,
+            self._state.config,
+            session_id=self._state.session.active_session_id,
+            cause=cause,
         )
 
     def _raise_if_prompt_future_error(
@@ -820,85 +686,8 @@ class AcpChatModel(BaseChatModel):
         stdout_task: asyncio.Task[None] | None,
         stderr_task: asyncio.Task[None] | None,
     ) -> None:
-        """Terminate the subprocess and its tasks independently, aggregating errors.
-
-        Cancel the session while its reader can still acknowledge the request,
-        stop admission and join handlers, then reap every terminal they owned.
-        Every independent release runs even after failure or caller cancellation.
-        """
-
-        async def _reap_terminals() -> None:
-            # Each terminal is independent of the others.
-            await run_independent_cleanups(
-                *(
-                    (
-                        f"acp-terminal-{terminal_id}",
-                        lambda terminal_id=terminal_id: on_terminal_release(
-                            0, {"terminalId": terminal_id}, ctx, self._state.config
-                        ),
-                    )
-                    for terminal_id in tuple(ctx.terminals)
-                )
-            )
-
-        async def _cancel_session() -> None:
-            if not (
-                self._state.session.active_session_id and not ctx.prompt_done.is_set()
-            ):
-                return
-            # session/cancel must be a proper JSON-RPC (with id) and awaited with a
-            # 3-second timeout so the subprocess flushes its state before the kill.
-            rpc_id = AcpRequestId.SESSION_CANCEL
-            async with asyncio.timeout(3.0):
-                future = await issue_request(
-                    ctx.response_futures,
-                    stdin=ctx.stdin,
-                    stdin_lock=ctx.stdin_lock,
-                    rpc_id=rpc_id,
-                    method="session/cancel",
-                    params={"sessionId": self._state.session.active_session_id},
-                )
-                await await_response(future, timeout=3.0)
-
-        async def _cancel_background_tasks() -> None:
-            await cancel_owned_tasks(ctx.background_tasks)
-
-        async def _cancel_reader_tasks() -> None:
-            ctx.closing = True
-            await cancel_owned_tasks(
-                task for task in (stdout_task, stderr_task) if task is not None
-            )
-
-        async def _kill_process() -> None:
-            await _kill_process_tree(
-                ctx.process,
-                metadata=runtime_log_extra(
-                    self._state.config,
-                    process=ctx.process,
-                    handshake_step="cleanup",
-                    stderr_event_count=ctx.stderr_event_count,
-                    kill_strategy="taskkill_tree"
-                    if sys.platform == "win32"
-                    else "sigterm_then_sigkill",
-                ),
-            )
-
-        try:
-            await run_independent_cleanups(
-                ("acp-session-cancel", _cancel_session),
-                ("acp-reader-tasks", _cancel_reader_tasks),
-                ("acp-background-tasks", _cancel_background_tasks),
-                ("acp-terminals", _reap_terminals),
-                ("acp-process-tree", _kill_process),
-            )
-        finally:
-            self._state.transport.process = None
-            self._state.transport.stdin = None
-            self._state.session.response_futures = None
-            self._state.session.active_session_id = None
-            ctx.tool_calls = {}
-            ctx.agent_modes = {}
-            ctx.last_auth_url = None
+        """Terminate the subprocess and its tasks independently."""
+        await cleanup_session(ctx, self._state, stdout_task, stderr_task)
 
     @override
     async def _agenerate(
@@ -932,125 +721,18 @@ class AcpChatModel(BaseChatModel):
     def _identifying_params(self) -> Mapping[str, object]:
         return {"command": self.command}
 
-    def _require_session(self) -> str:
-        if (
-            self._state.transport.process is None
-            or self._state.session.active_session_id is None
-        ):
-            raise RuntimeError("No active session.")
-        return self._state.session.active_session_id
-
-    def _require_stdin(self) -> asyncio.StreamWriter:
-        if self._state.transport.stdin is None:
-            raise RuntimeError("No active session stdin.")
-        return self._state.transport.stdin
-
-    def _require_response_futures(self) -> AcpResponseFutures:
-        if self._state.session.response_futures is None:
-            raise RuntimeError("No active session response futures.")
-        return self._state.session.response_futures
-
     async def _read_stderr_loop(self, ctx: AcpSessionContext) -> None:
-        if ctx.process.stderr is None:
-            return
-        while line := await ctx.process.stderr.readline():
-            text = line.decode("utf-8", errors="replace").rstrip()
-            if text:
-                self._capture_auth_progress(text, ctx)
-                ctx.stderr_event_count += 1
-                ctx.retain_stderr_line(text)
-                # Diagnostics are proof of life too. The turn deadline exists to
-                # catch a silent hang, and the expensive mistake is felling an
-                # agent that is genuinely working, so any sign of life resets it.
-                # An agent wedged in a chatty retry loop survives longer as a
-                # result - the deliberate trade, since that one is at least
-                # visible in the log while a silent hang is not.
-                ctx.mark_activity()
-                logger.debug(
-                    "ACP STDERR: %s",
-                    text,
-                    extra=runtime_log_extra(
-                        self._state.config,
-                        process=ctx.process,
-                        stderr_event_count=ctx.stderr_event_count,
-                    ),
-                )
-
-    def _capture_auth_progress(self, text: str, ctx: AcpSessionContext) -> None:
-        """Capture browser-auth progress from ACP stderr lines."""
-        if "Please visit the following URL to authorize the application" in text:
-            ctx.auth_prompt_active = True
-            logger.info(
-                "ACP browser authentication prompt detected",
-                extra=runtime_log_extra(
-                    self._state.config,
-                    process=ctx.process,
-                    handshake_step="authenticate",
-                    stderr_event_count=ctx.stderr_event_count,
-                ),
-            )
-            return
-        if ctx.auth_prompt_active and text.startswith(("http://", "https://")):
-            ctx.auth_url = text
-            ctx.auth_prompt_active = False
-            ctx.last_auth_url = text
-            logger.info(
-                "ACP browser authentication URL captured",
-                extra=runtime_log_extra(
-                    self._state.config,
-                    process=ctx.process,
-                    handshake_step="authenticate",
-                    stderr_event_count=ctx.stderr_event_count,
-                ),
-            )
+        """Drain the child's standard error for the lifetime of the session."""
+        await read_stderr_loop(ctx, self._state.config)
 
     async def fork_session(self) -> str:
         """Fork the current session."""
-        sid = self._require_session()
-        rpc_id = AcpRequestId.SESSION_FORK
-        future = await issue_request(
-            self._require_response_futures(),
-            stdin=self._require_stdin(),
-            stdin_lock=self._state.transport.stdin_lock,
-            rpc_id=rpc_id,
-            method="session/fork",
-            params={"sessionId": sid},
-        )
-        resp = await await_response(
-            future, timeout=settings.acp_startup_timeout_seconds
-        )
-        return _required_session_id(
-            lenient_json_object(resp.get("result")), operation="fork"
-        )
+        return await _fork_session(session_rpc(self._state))
 
     async def list_sessions(self) -> list[JsonObject]:
         """List all sessions."""
-        self._require_session()
-        rpc_id = AcpRequestId.SESSION_LIST
-        future = await issue_request(
-            self._require_response_futures(),
-            stdin=self._require_stdin(),
-            stdin_lock=self._state.transport.stdin_lock,
-            rpc_id=rpc_id,
-            method="session/list",
-            params={},
-        )
-        resp = await await_response(future, timeout=settings.acp_rpc_timeout_seconds)
-        return lenient_json_object_list(
-            lenient_json_object(resp.get("result")).get("sessions")
-        )
+        return await _list_sessions(session_rpc(self._state))
 
     async def set_mode(self, mode_id: str) -> JsonObject:
         """Set agent mode."""
-        sid = self._require_session()
-        rpc_id = AcpRequestId.SESSION_SET_MODE
-        future = await issue_request(
-            self._require_response_futures(),
-            stdin=self._require_stdin(),
-            stdin_lock=self._state.transport.stdin_lock,
-            rpc_id=rpc_id,
-            method="session/set_mode",
-            params={"sessionId": sid, "modeId": mode_id},
-        )
-        resp = await await_response(future, timeout=settings.acp_rpc_timeout_seconds)
-        return lenient_json_object(resp.get("result"))
+        return await _set_mode(session_rpc(self._state), mode_id)

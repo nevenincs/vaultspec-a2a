@@ -38,6 +38,22 @@ _STDERR_CHATTY_AGENT = (
     "    sys.stderr.write('working\\n'); sys.stderr.flush(); time.sleep(0.1)\n"
 )
 
+# A credential-shaped line, because a child reports its configuration when
+# things go wrong and configuration is where the tokens are.
+_SECRET_STDERR_LINE = "ANTHROPIC_AUTH_TOKEN=sk-turn-idle-secret"
+_LAST_STDERR_LINE = "waiting for the upstream tool call to answer"
+
+# Says what it is doing on stderr, then goes quiet on both channels: the shape
+# of a wedged tool call, and the only shape where the child's log is the sole
+# account of what the turn was doing when it stopped.
+_STDERR_THEN_SILENT_AGENT = (
+    "import sys, time\n"
+    f"sys.stderr.write({_SECRET_STDERR_LINE!r} + '\\n')\n"
+    f"sys.stderr.write({_LAST_STDERR_LINE!r} + '\\n')\n"
+    "sys.stderr.flush()\n"
+    "time.sleep(600)\n"
+)
+
 # Drives the real model against that agent and reports how the turn ended.
 # `outcome` is the whole point of the probe: "deadline" only when the production
 # guard raised with its own marker, "still_waiting" when the turn was still
@@ -81,12 +97,14 @@ _TURN_PROBE_SCRIPT = textwrap.dedent(
                 pass
 
         started = asyncio.get_running_loop().time()
+        message = None
         try:
             await asyncio.wait_for(drain(), timeout=OBSERVE_SECONDS)
             outcome, detail = "completed", None
         except AcpPromptError as exc:
             data = exc.data if isinstance(exc.data, dict) else {}
             outcome, detail = "deadline", data.get("acp_outcome")
+            message = str(exc)
         except TimeoutError:
             outcome, detail = "still_waiting", None
         finally:
@@ -99,6 +117,7 @@ _TURN_PROBE_SCRIPT = textwrap.dedent(
         return {
             "outcome": outcome,
             "detail": detail,
+            "message": message,
             "elapsed": elapsed,
             "configured_idle_limit": settings.acp_turn_idle_timeout_seconds,
         }
@@ -174,6 +193,25 @@ def test_stderr_diagnostics_keep_the_turn_alive(tmp_path: Path) -> None:
 
     assert report["configured_idle_limit"] == _IDLE_LIMIT_SECONDS
     assert report["outcome"] == "still_waiting"
+
+
+def test_the_idle_failure_carries_what_the_child_last_said(tmp_path: Path) -> None:
+    """The deadline error names the child's own account of the hang, redacted.
+
+    Nothing arrived over the protocol by definition, so a line COUNT left the
+    caller with no way to tell a wedged tool call from a lost connection. The
+    lines themselves are the only evidence, and they are the same redacted tail
+    the early-exit failure already carries.
+    """
+    report = _run_turn_probe(
+        tmp_path, str(_IDLE_LIMIT_SECONDS), agent=_STDERR_THEN_SILENT_AGENT
+    )
+
+    assert report["outcome"] == "deadline"
+    message = report["message"]
+    assert _LAST_STDERR_LINE in message
+    assert "sk-turn-idle-secret" not in message
+    assert "<redacted>" in message
 
 
 def test_the_deadline_can_be_disabled(tmp_path: Path) -> None:

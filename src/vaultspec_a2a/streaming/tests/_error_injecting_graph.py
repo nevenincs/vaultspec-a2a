@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ERROR_INJECTION_NODE",
-    "InjectableGraphInput",
+    "InjectedSignal",
     "build_error_injecting_graph",
 ]
 
@@ -44,6 +44,15 @@ __all__ = [
 #: fixture produces (an unresolved interrupt, a normal completion) name it
 #: directly, so a caller asserting on task or agent identity asserts on this.
 ERROR_INJECTION_NODE = "inject"
+
+
+class InjectedSignal(BaseException):
+    """A ``BaseException`` that is not an ``Exception``: a signal, not a failure.
+
+    Python reserves that branch of the hierarchy for exceptions a handler of
+    ordinary errors must let through, so this stands for any such signal a
+    node's dependencies might raise.
+    """
 
 
 class InjectableGraphInput(TypedDict, total=False):
@@ -76,6 +85,9 @@ class InjectableGraphInput(TypedDict, total=False):
     """Push this text through :func:`emit_custom_node_write`, stamped with
     this node's own identity, before acting on any other field."""
 
+    raise_signal: str
+    """Raise :class:`InjectedSignal` carrying this text."""
+
 
 async def _inject(
     state: InjectableGraphInput,
@@ -84,6 +96,9 @@ async def _inject(
     custom_write = state.get("custom_write")
     if custom_write:
         emit_custom_node_write(custom_write, config=config)
+    signal = state.get("raise_signal")
+    if signal is not None:
+        raise InjectedSignal(signal)
     if state.get("raise_cancelled"):
         raise AcpPromptCancelledError(
             state.get("raise_message", "ACP prompt was cancelled by the agent"),
@@ -127,8 +142,9 @@ def build_error_injecting_graph() -> Any:
     )
     add_test_node(builder, ERROR_INJECTION_NODE, _inject)
     builder.set_entry_point(ERROR_INJECTION_NODE)
-    builder.add_conditional_edges(
-        ERROR_INJECTION_NODE,
-        lambda state: ERROR_INJECTION_NODE if state.get("loop") else END,
-    )
+
+    def _loop_or_end(state: InjectableGraphInput) -> str:
+        return ERROR_INJECTION_NODE if state.get("loop") else END
+
+    builder.add_conditional_edges(ERROR_INJECTION_NODE, _loop_or_end)
     return compile_test_graph(builder, checkpointer=InMemorySaver())

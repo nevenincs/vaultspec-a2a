@@ -16,6 +16,7 @@ from langgraph.types import TimeoutPolicy
 
 from ...graph.compiler import _add_node
 from ...graph.events import ErrorOccurred
+from ...graph.tests._state_graph_helpers import compile_test_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ def _graph_with_node_budget(run_timeout: float) -> StreamableGraph:
     )
     builder.add_edge(START, "slow_author")
     builder.add_edge("slow_author", END)
-    return cast("StreamableGraph", builder.compile())
+    return cast("StreamableGraph", compile_test_graph(builder))
 
 
 @pytest.mark.asyncio

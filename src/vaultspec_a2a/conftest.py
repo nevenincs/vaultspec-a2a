@@ -12,9 +12,10 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
+import pytest_asyncio
 
 from .service_tests._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
@@ -22,9 +23,12 @@ from .service_tests._provider_catalog_live import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator, Callable
 
     from .authoring.discovery import EngineEndpoint
+
+#: Where a suite reads the live PostgreSQL server it was given.
+POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
 
 
 # ---------------------------------------------------------------------------
@@ -172,10 +176,10 @@ def _cli_reports_logged_in(
 
 
 def _claude_credentialed() -> bool:
-    """The injected OAuth token, or the Claude CLI's own subscription login."""
-    from .control.config import settings
-
-    if (settings.claude_code_oauth_token or "").strip():
+    """An exported OAuth token, or the Claude CLI's own subscription login."""
+    # The CLI reads a token from the environment it inherits, which is the
+    # only place the product's Claude lane can take one from.
+    if (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip():
         return True
     # `claude auth status` emits JSON carrying "loggedIn", which answers the
     # expiry question a file on disk cannot. Only its silence falls back.
@@ -288,10 +292,10 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         "postgres",
         what="a reachable PostgreSQL server for the checkpoint backend",
         supply=(
-            "start PostgreSQL and export VAULTSPEC_A2A_TEST_POSTGRES_URL as a "
+            "start PostgreSQL and export " + POSTGRES_URL_ENV + " as a "
             "postgresql:// connection string to a database the tests may write"
         ),
-        probe=_env_set("VAULTSPEC_A2A_TEST_POSTGRES_URL"),
+        probe=_env_set(POSTGRES_URL_ENV),
     ),
     ExternalPrerequisite(
         "dashboard-engine",
@@ -500,6 +504,32 @@ def live_engine(external_prerequisite: ExternalPrerequisiteRule) -> EngineEndpoi
             "loopback-stack", "no discovery record resolved to a healthy engine"
         )
     return endpoint
+
+
+@pytest_asyncio.fixture
+async def pooled_postgres_saver(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> AsyncIterator[Any]:
+    """The production pooled PostgreSQL saver against the live server.
+
+    One home for the whole repository: every suite that proves something about
+    the PostgreSQL checkpoint backend opens it the way production does, over
+    the pool production builds, rather than each keeping its own copy of the
+    same eight lines.
+    """
+    external_prerequisite("postgres")
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+    from .database.checkpoints import postgres_checkpoint_pool
+
+    pool = postgres_checkpoint_pool(os.environ[POSTGRES_URL_ENV])
+    await pool.open(wait=True)
+    try:
+        saver = AsyncPostgresSaver(conn=pool)
+        await saver.setup()
+        yield saver
+    finally:
+        await pool.close()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

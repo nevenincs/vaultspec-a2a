@@ -11,9 +11,9 @@ Usage::
 
     uv run --group freeze python scripts/build_binary.py [--dist DIR]
 
-Requires the ``freeze`` dependency group (PyInstaller plus vaultspec-core,
-which the binary dispatches through its run-module verb and must therefore be
-present in the build environment for collection).
+Requires the ``freeze`` dependency group (PyInstaller). vaultspec-core, which
+the binary dispatches through its run-module verb and must therefore be present
+in the build environment for collection, is a runtime dependency.
 """
 
 from __future__ import annotations

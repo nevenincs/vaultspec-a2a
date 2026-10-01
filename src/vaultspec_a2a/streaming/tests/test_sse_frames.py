@@ -351,3 +351,79 @@ def test_streaming_does_not_republish_the_phase_vocabulary() -> None:
     assert not hasattr(sse_frames, "semantic_phase_for_node")
     assert "encode_sse_frame" in sse_frames.__all__
     assert "enforce_progress_allowlist" in sse_frames.__all__
+
+
+def _id_lines(frame: bytes) -> list[str]:
+    """Return the ``id`` field lines of one encoded frame, in order."""
+    return [
+        line
+        for line in frame.decode("utf-8").splitlines()
+        if line.startswith("id:") or line == "id"
+    ]
+
+
+def test_a_served_sequence_becomes_the_frame_id() -> None:
+    """The id is the run and its durable number, in the published spelling."""
+    frame = encode_sse_frame(
+        {"type": "agent_status", "state": "working"},
+        event="agent_status",
+        thread_id="run-7",
+        sequence=42,
+    )
+    assert _id_lines(frame) == ["id: run-7:42"]
+
+
+def test_the_frame_id_leads_its_event_and_data() -> None:
+    """One id line, ahead of the rest, in the conventional field order."""
+    lines = (
+        encode_sse_frame(
+            {"type": "agent_status", "state": "working"},
+            event="agent_status",
+            thread_id="run-7",
+            sequence=1,
+        )
+        .decode("utf-8")
+        .splitlines()
+    )
+    assert lines[0] == "id: run-7:1"
+    assert lines[1] == "event: agent_status"
+    assert lines[2].startswith("data: ")
+
+
+def test_a_frame_whose_replay_is_not_served_carries_no_id() -> None:
+    """No number offered, no cursor written - the invariant, not an omission."""
+    frame = encode_sse_frame(
+        {"type": "agent_status", "state": "working"},
+        event="agent_status",
+        thread_id="run-7",
+    )
+    assert _id_lines(frame) == []
+
+
+def test_a_sequence_without_a_run_carries_no_id() -> None:
+    """An id names the run it can be resumed against, or it is not written."""
+    frame = encode_sse_frame({"type": "heartbeat"}, event="heartbeat", sequence=9)
+    assert _id_lines(frame) == []
+
+
+def test_the_oversized_frame_sentinel_keeps_its_position() -> None:
+    """The row behind the number was retained whether or not the frame fitted.
+
+    Dropping the id here would make a client resume from the frame BEFORE the
+    oversized one and be handed that one again - the single frame already known
+    not to fit - instead of continuing past the event it was told it missed.
+    """
+    frame = encode_sse_frame(
+        {
+            "type": "message_chunk",
+            # An identity key, which the catalog passes verbatim: the only way
+            # past the byte cap now that every catalogued text field truncates.
+            "message_id": "x" * (MAX_SSE_FRAME_BYTES + 1024),
+            "content": "hello",
+        },
+        event="message_chunk",
+        thread_id="run-7",
+        sequence=13,
+    )
+    assert _id_lines(frame) == ["id: run-7:13"]
+    assert _data_payload(frame)["reason"] == "frame_exceeds_cap"

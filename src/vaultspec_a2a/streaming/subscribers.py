@@ -528,7 +528,7 @@ class SubscriberManager:
         retained either, so it takes no number at all rather than leaving a
         hole in the run's sequence space.
         """
-        if isinstance(payload, Mapping) and self._retainable(payload):
+        if self._retainable(payload) and isinstance(payload, Mapping):
             allocation = self._allocate(thread_id)
             if allocation is not None:
                 payload = {**payload, "sequence": allocation.sequence}

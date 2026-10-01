@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:7fcb72c2f22077b17b76371f64fbaeb85eaefc1f9abc9ab05e692f848a20bc07'
+body_hash: 'sha256:5806cc7b298f4e3a3875f8563c0ec96de4e63f23dec9a2c0d7694ca046c41e59'
 related:
   - "[[2026-10-01-tool-permission-model-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -18,6 +18,7 @@ related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-17-kimi-provider-adr]]"
   - "[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]"
+  - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 ---
 
 # `tool-permission-model` adr: `one compiled policy, one durable grant store, one attributed decision log` | (**status:** `accepted`)
@@ -343,3 +344,9 @@ stop at thread scope - a `project` grant is bound to the canonical project root
 project grant are both 24 hours. The `default` posture over `dontAsk` stands as drafted.
 
 Accepted 2026-10-01 under the user's blanket approval of that date.
+
+## Amendment - provider-binary-policy (2026-10-01)
+
+The vendored adapter release this lane moves to no longer offers `dontAsk`: its advertised modes are `default` (shown as "Manual"), `acceptEdits`, `plan`, a new `auto`, and `bypassPermissions` only where bypass is allowed, and it still parses a `dontAsk` setting it never advertises (`2026-10-01-provider-binary-policy-acp-adapter-upgrade-research`). The reconsideration condition above, "move to `dontAsk` when the hook carries the policy", is therefore withdrawn as a target: the unattended posture stays `default`, verified on the session, with refusal supplied by this record's single decision function.
+
+The new `auto` mode hands permission decisions to the provider's own classifier. That is outside this record's commitment that every decision is made by the one compiled policy and logged as one attributed decision, so an unattended session never runs in `auto`; a session reporting it is refused exactly as a session reporting any mode other than the pinned one. A future adapter mode that denies an uncovered call through the client's permission request, rather than deciding it, would reopen the question under this record.

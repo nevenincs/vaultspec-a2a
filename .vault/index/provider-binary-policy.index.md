@@ -6,8 +6,9 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:787fd844155e9473d7e2cce3242b14a67c272cfd4086b5daf2185340710e7133'
+body_hash: 'sha256:61c0cda4aa0c59fc6769be0df181048d85289f21080ae8c1e7b820b5ce9f1afc'
 related:
+  - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
   - '[[2026-10-01-provider-binary-policy-adr]]'
   - '[[2026-10-01-provider-binary-policy-plan]]'
   - '[[2026-10-01-provider-binary-policy-research]]'
@@ -29,4 +30,5 @@ Auto-generated index of all documents tagged with `#provider-binary-policy`.
 
 ### research
 
+- `2026-10-01-provider-binary-policy-acp-adapter-upgrade-research` - `provider-binary-policy` research: `acp adapter upgrade`
 - `2026-10-01-provider-binary-policy-research` - `provider-binary-policy` research: `which provider binary a served turn runs, how its identity is proved, and whether provider sessions are reused`

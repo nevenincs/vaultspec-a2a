@@ -9,9 +9,10 @@ related:
   - '[[2026-07-15-agent-harness-provisioning-adr]]'
   - '[[2026-08-02-provider-capability-evidence-adr]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
+  - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:3c3eda0662744fcd1e5c26d3780099cb13142705b33872f50d63d01cb3a89ec7'
+body_hash: 'sha256:6aaa1a680614da0bc8c0318caa4cc22f9e2bc714016315b365556cab91146b43'
 ---
 
 # `provider-binary-policy` plan
@@ -78,6 +79,12 @@ A new channel setting decides whether the worker injects the headless OAuth toke
 The session/load branch and the session id option no production path can reach leave the code, and per-call sessions stay the only shape.
 
 - [ ] `P05.S16` - Remove the unreachable session/load branch and the session id option, and prove no production caller sets a provider session id; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
+
+### Phase `P06` - adapter release enrolment
+
+Take up what the newer vendored adapter offers this lane, as the upgrade research found it, without a new decision.
+
+- [ ] `P06.S18` - Carry the per-model token usage the adapter now reports on each prompt result into the turn's usage metadata; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_types.py`.
 
 ## Parallelization
 

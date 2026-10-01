@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:d24f88cdba61da08989f6ad499fe0efe1393285f5327a0d0a3fa5722c8f42f5f'
+body_hash: 'sha256:0293fdee2fade332b5c4255c3a36ee98991ffb6a0438a29467539ea5c32dc007'
 related:
   - "[[2026-10-01-stream-resumption-plan]]"
 ---
@@ -92,6 +92,29 @@ related:
 - `S11` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S10` `M` `.env.example`
 - `S10` `verify:` `pytest src/vaultspec_a2a/control/tests/test_env_example_coverage.py` -> `pass`
+- `S03` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_id.py`
+- `S03` `M` `src/vaultspec_a2a/streaming/run_event_writer.py`
+- `S03` `M` `src/vaultspec_a2a/streaming/tests/test_run_sequence_allocation.py`
+- `S03` `verify:` `pytest-streaming-database-api-postgres` -> `pass`
+- `S03` `verify:` `python-dev-lint-all` -> `pass`
+- `S04` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S04` `A` `src/vaultspec_a2a/api/tests/test_replay_write_path.py`
+- `S04` `M` `src/vaultspec_a2a/api/tests/test_stream_sequence_restart.py`
+- `S04` `M` `src/vaultspec_a2a/database/run_event_repository.py`
+- `S04` `M` `src/vaultspec_a2a/streaming/run_event_writer.py`
+- `S04` `M` `src/vaultspec_a2a/streaming/tests/test_run_event_writer.py`
+- `S04` `verify:` `pytest-streaming-database-api-postgres` -> `pass`
+- `S04` `verify:` `python-dev-lint-all` -> `pass`
+- `S07` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_gap.py`
+- `S07` `verify:` `pytest-streaming-database-api-postgres` -> `pass`
+- `S07` `verify:` `python-dev-lint-all` -> `pass`
+- `S08` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_gap.py`
+- `S08` `verify:` `pytest-streaming-database-api-postgres` -> `pass`
+- `S08` `verify:` `python-dev-lint-all` -> `pass`
+- `S09` `M` `src/vaultspec_a2a/api/tests/test_run_status_stream_resumable.py`
+- `S09` `M` `src/vaultspec_a2a/database/run_event_repository.py`
+- `S09` `verify:` `pytest-streaming-database-api-postgres` -> `pass`
+- `S09` `verify:` `python-dev-lint-all` -> `pass`
 
 ## Notes
 
@@ -99,3 +122,8 @@ related:
 - `S04` Path correction: the restart-continuity proof lives in api/tests, inside the covering gate, not in the Docker-gated service tier; `api/_replay_writer_seat.py` keeps the edit to the conflict-prone relay module to a few lines. The relay context was merged by hand with the prune-registry change of architecture-review P06.S42.
 - `S06` An unparseable cursor is refused as `resume_cursor_foreign_run` rather than ignored, because ignoring would serve a live-only stream to a client that believes it resumed.
 - `S10` Plan-close review correction: the retention bound S10 added had no operator line; the env-example coverage gate failed on the integrated tree.
+- `S03` Plan-close repair: a forgotten run keeps its floor, a concurrent seed is serialized, an unstampable frame takes no number.
+- `S04` Plan-close repair: a refused flush is scoped to the run that caused it, a deleted run's ring is discarded, the websocket relay flushes per ingested frame, and the restart test closes its reader.
+- `S07` Plan-close repair, shared commit with S08: the live de-dup floor is clamped to what the stream emitted.
+- `S08` Plan-close repair: a cursor past the run's mark is answered with one `replay_unavailable` notice.
+- `S09` Plan-close correction: run-status probes the replay mark on its own request session.

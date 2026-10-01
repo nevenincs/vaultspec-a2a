@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:5df2aa95fe4788aff7ca051253b89a3b2ed34da3f36e0379caa9a141dda7c785'
+body_hash: 'sha256:309269c6daaf5637cfbc028f86583a6ca96e49f067a855d3171ba7fe43f08e91'
 related:
   - "[[2026-10-01-stream-resumption-adr]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
@@ -43,4 +43,4 @@ At most one `progress_dropped` frame per resume, sent after the snapshot and bef
 
 ### What a consumer must not assume
 
-A consumer must not treat a frame id as a run-wide count of events: positions are allocated per run at the gateway's fan-out and survive a gateway restart, but frames dropped by backpressure leave gaps, which the gap reasons above disclose on resume. A consumer must not resume one run's stream with another run's cursor; the refusal is deliberate so that a reused client never silently starts over.
+A consumer must not treat a frame id as a run-wide count of events: positions are allocated per run at the gateway's fan-out and survive a gateway restart. Two mechanisms are distinct: a frame a slow subscriber's queue drops is still retained and replayed on resume, and is disclosed live by the existing `progress_dropped` reason `backpressure`; the resume reasons above describe a retained window that was trimmed or is unavailable. A consumer must not resume one run's stream with another run's cursor; the refusal is deliberate so that a reused client never silently starts over.

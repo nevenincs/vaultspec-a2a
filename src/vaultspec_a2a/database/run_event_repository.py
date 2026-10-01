@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-__all__ = ["RunEventRecord", "RunEventStore"]
+__all__ = ["RunEventRecord", "RunEventStore", "retained_high_water_mark"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +111,26 @@ def _trim_statement(thread_id: str, window: int) -> Delete:
         RunEventModel.thread_id == thread_id,
         RunEventModel.sequence < floor,
     )
+
+
+async def retained_high_water_mark(session: AsyncSession, thread_id: str) -> int | None:
+    """Return the greatest sequence retained for *thread_id* on *session*.
+
+    Takes a caller's session rather than opening one, which is the opposite
+    of this module's usual shape and is deliberate for one caller: a request
+    handler that already holds a request-scoped session. Opening a second
+    pooled connection beside one the request is holding halves that
+    endpoint's concurrency, and the reason the store owns its own sessions -
+    that a stream must not pin a connection for the life of a response - does
+    not apply to a read that finishes inside the request.
+    """
+    return (
+        await session.execute(
+            select(func.max(RunEventModel.sequence)).where(
+                RunEventModel.thread_id == thread_id
+            )
+        )
+    ).scalar_one()
 
 
 def _dialect_of(session: AsyncSession) -> str:
@@ -194,13 +214,24 @@ class RunEventStore:
         to resume from, and the caller decides what to do about that.
         """
         async with self.session_factory() as session:
+            return await retained_high_water_mark(session, thread_id)
+
+    async def run_exists(self, thread_id: str) -> bool:
+        """Whether a thread row this log can reference still exists.
+
+        Distinct from :meth:`settled_sequence`, which answers ``None`` both
+        for an absent run and for a present one that never settled. A writer
+        asks THIS after a refused append, because the two refusals it can get
+        are opposites: a store that is temporarily unavailable must be
+        retried, and a foreign-key violation against a deleted run must never
+        be, since every later attempt carries the same doomed rows.
+        """
+        async with self.session_factory() as session:
             return (
                 await session.execute(
-                    select(func.max(RunEventModel.sequence)).where(
-                        RunEventModel.thread_id == thread_id
-                    )
+                    select(ThreadModel.id).where(ThreadModel.id == thread_id)
                 )
-            ).scalar_one()
+            ).scalar_one_or_none() is not None
 
     async def settled_sequence(self, thread_id: str) -> int | None:
         """Return the cursor captured on *thread_id* when it settled.

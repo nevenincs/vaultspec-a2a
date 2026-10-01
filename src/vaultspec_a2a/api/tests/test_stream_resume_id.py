@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
+from sqlalchemy import text
 
+from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
 from ...testing import settings_override
 from ...thread.enums import ThreadStatus
@@ -126,6 +128,49 @@ async def test_no_frame_carries_an_id_while_replay_is_switched_off(
             await post_relay_batch(client, _RUN, 2)
 
             frames = [await reader.next_frame() for _ in range(2)]
+
+    assert [frame.event_id for frame in frames] == [None, None]
+    assert [frame.data["sequence"] for frame in frames] == [1, 2]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_an_unnumbered_run_carries_no_id_although_replay_is_switched_on(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """The other half of the invariant: on, but this run has no number.
+
+    The switch being on is not what entitles a frame to an id - the run
+    having a durable number is. A run the gateway could not establish a
+    number for is left unnumbered for the life of the process rather than
+    restarted at one, and the id has to be withheld from it exactly as it is
+    when the whole feature is off. The frames below carry the WORKER's
+    sequence in their bodies, which is the number that must never be offered
+    back as a cursor.
+
+    The store is made genuinely unreadable rather than described as such:
+    the replay table is gone from the database the gateway seeds from, which
+    is what an unreadable mark looks like from the allocator's side.
+    """
+    aggregator = EventAggregator()
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
+    await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
+    async with session_factory() as session:
+        await session.execute(text("DROP TABLE run_events"))
+        await session.commit()
+
+    assert settings.stream_replay_enabled, "this proof is about the switch being ON"
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+        client.stream("GET", f"/v1/runs/{_RUN}/stream") as response,
+    ):
+        assert response.status_code == 200
+        reader = SseReader(response.aiter_bytes())
+        assert (await reader.next_frame()).type == "stream_snapshot"
+
+        await post_relay_batch(client, _RUN, 2)
+
+        frames = [await reader.next_frame() for _ in range(2)]
 
     assert [frame.event_id for frame in frames] == [None, None]
     assert [frame.data["sequence"] for frame in frames] == [1, 2]

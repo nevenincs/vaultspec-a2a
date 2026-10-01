@@ -15,29 +15,31 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...database.migrate import run_migrations
-from ...database.models import Base
+from ...database.models import Base, ThreadModel
 from ...database.run_event_repository import RunEventStore
 from ...database.session import configure_sqlite_engine
+from ...database.tests._backends import BACKENDS, migrated_session_factory
 from ...database.thread_repository import create_thread
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..aggregator import EventAggregator
 from ..run_event_writer import RunEventWriter
-from ..subscribers import RunSequenceAllocator
+from ..subscribers import RunSequenceAllocator, SequenceAllocation
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
-    from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 _RUN = "replay-writer-proof"
 _ARTIFACT_BODY = "# Decision record\n\nEvery word of the document body.\n"
@@ -325,3 +327,101 @@ async def test_an_authoring_shaped_run_stores_no_body_diff_prompt_or_token(
     assert rows[0]["event_type"] == "artifact_update"
     assert rows[1]["payload"]["tool_call_id"] == "call-1"
     assert rows[2]["payload"]["agent_id"] == "doc-editor"
+
+
+_HEALTHY = "replay-writer-healthy-run"
+_DELETED = "replay-writer-deleted-run"
+
+
+def _hold(writer: RunEventWriter, thread_id: str, sequence: int) -> None:
+    """Put one allocation in a run's ring through the writer's front door."""
+    writer.record(
+        SequenceAllocation(
+            thread_id=thread_id, sequence=sequence, allocated_at=datetime.now(UTC)
+        ),
+        {
+            "type": "agent_status",
+            "event_type": "agent_status",
+            "thread_id": thread_id,
+            "sequence": sequence,
+        },
+    )
+
+
+async def _seed_runs(factory: async_sessionmaker[AsyncSession], *runs: str) -> None:
+    async with factory() as session:
+        for thread_id in runs:
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id=thread_id,
+                status=ThreadStatus.RUNNING,
+            )
+        await session.commit()
+
+
+async def _delete_run(
+    factory: async_sessionmaker[AsyncSession], thread_id: str
+) -> None:
+    """Remove the run's thread row, exactly as the deletion saga leaves it."""
+    async with factory() as session:
+        await session.execute(delete(ThreadModel).where(ThreadModel.id == thread_id))
+        await session.commit()
+
+
+async def _retained_sequences(store: RunEventStore, thread_id: str) -> list[int]:
+    return [
+        record.sequence
+        for record in await store.read_after(
+            thread_id=thread_id, after_sequence=0, limit=1000
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend_name", BACKENDS)
+async def test_a_deleted_run_cannot_stop_the_replay_log_of_every_other_run(
+    backend_name: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One run's doomed rows must not be another run's permanent outage.
+
+    Proved on both backends because the refusal arrives differently on each -
+    a SQLite foreign-key failure and a PostgreSQL integrity error are not the
+    same exception from the same driver - while the consequence to guard
+    against is identical: a run deleted with frames still held can never take
+    those rows, and a flush that batched every run together therefore failed
+    for every run, for as long as the gateway lived.
+
+    The delete here is the real one: the thread row goes, and the schema's
+    cascade takes its retained rows with it, which is the state the deletion
+    saga leaves behind.
+    """
+    async with migrated_session_factory(backend_name, tmp_path) as (_target, factory):
+        store = RunEventStore(factory)
+        await _seed_runs(factory, _HEALTHY, _DELETED)
+        writer = RunEventWriter(store, window=100, flush_interval_seconds=_IDLE_CADENCE)
+        _hold(writer, _HEALTHY, 1)
+        _hold(writer, _DELETED, 1)
+        await _delete_run(factory, _DELETED)
+
+        with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.streaming"):
+            written = await writer.flush()
+
+        assert written == 1, "the healthy run's frame did not reach the table"
+        assert await _retained_sequences(store, _HEALTHY) == [1]
+        abandoned = [
+            record
+            for record in caplog.records
+            if getattr(record, "action", None) == "run_event_flush_abandoned"
+        ]
+        assert [getattr(record, "thread_id", None) for record in abandoned] == [
+            _DELETED
+        ]
+        # Dropped rather than retried forever: nothing of the deleted run is
+        # held, so no later flush carries it and no resume is offered it.
+        assert writer.pending(_DELETED) == []
+
+        _hold(writer, _HEALTHY, 2)
+        assert await writer.flush() == 1
+        assert await _retained_sequences(store, _HEALTHY) == [1, 2]
+        await writer.aclose()

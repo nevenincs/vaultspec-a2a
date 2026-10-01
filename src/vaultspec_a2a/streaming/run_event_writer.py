@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from ..database.run_event_repository import RunEventRecord
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable
 
     from ..database.run_event_repository import RunEventStore
     from .subscribers import SequenceAllocation
@@ -105,6 +105,17 @@ class RunEventWriter:
     # In front of the fan-out: in-memory only
     # ------------------------------------------------------------------
 
+    def retains(self, frame: object) -> bool:
+        """Whether this writer would keep *frame*, were it numbered.
+
+        Asked in front of :meth:`record` so the chokepoint can withhold a
+        number from a frame that would leave no row. It costs a second
+        projection of the frame, which is the price of keeping the run's
+        sequence space contiguous: a numbered frame with no row is a hole,
+        and the replay reader discards every retained frame older than one.
+        """
+        return not self._closed and self._project(frame) is not None
+
     def record(self, allocation: SequenceAllocation, frame: object) -> None:
         """Hold one numbered frame for the next batch.
 
@@ -143,36 +154,36 @@ class RunEventWriter:
     # ------------------------------------------------------------------
 
     async def flush(self) -> int:
-        """Write every held allocation the table does not have, as one batch.
+        """Write every held allocation the table does not have, run by run.
 
-        Returns the number of records written. A failure is logged with its
-        count and changes nothing else: the records stay in their rings, above
-        the flushed mark, so the next flush offers them again and a resume
-        taken in between still reads them.
+        Returns the number of records written. One batch per run rather than
+        one across all of them, because a refusal is a property of the run
+        that caused it: a single statement carrying every tracked run made one
+        run's bad rows fail the write for every other run on the gateway, and
+        a run deleted with frames still held made that permanent. Batching per
+        run keeps the ordering the decision fixes - allocate, ring, fan out,
+        flush - and narrows a failure to its own run.
+
+        A transient failure is logged with its count and changes nothing else:
+        the records stay in their ring, above the flushed mark, so the next
+        flush offers them again and a resume taken in between still reads
+        them.
         """
         async with self._flush_lock:
-            batch = list(self._unflushed())
-            if not batch:
-                return 0
-            try:
-                await self._store.append(batch, window=self._window)
-            except Exception:
-                logger.warning(
-                    "Could not write %d progress frame(s) to the replay log; "
-                    "they remain in memory and replay is degraded to the ring",
-                    len(batch),
-                    exc_info=True,
-                    extra={
-                        "action": "run_event_flush_failed",
-                        "pending": len(batch),
-                    },
-                )
-                return 0
-            for record in batch:
-                self._flushed_through[record.thread_id] = max(
-                    self._flushed_through.get(record.thread_id, 0), record.sequence
-                )
-            return len(batch)
+            written = 0
+            for thread_id in list(self._rings):
+                written += await self._flush_run(thread_id)
+            return written
+
+    def discard(self, thread_id: str) -> None:
+        """Drop everything held for a run, with nothing left to retry.
+
+        For a run whose durable home is gone: its rows reference a thread that
+        no longer exists, so no later flush can place them, and holding them
+        would offer a deleted run's frames to a resume as well.
+        """
+        self._rings.pop(thread_id, None)
+        self._flushed_through.pop(thread_id, None)
 
     async def aclose(self) -> None:
         """Stop the cadence and make one last attempt to write what is held."""
@@ -218,10 +229,66 @@ class RunEventWriter:
                 )
         return ring
 
-    def _unflushed(self) -> Iterable[RunEventRecord]:
-        for thread_id, ring in self._rings.items():
-            mark = self._flushed_through.get(thread_id, 0)
-            yield from (record for record in ring if record.sequence > mark)
+    async def _flush_run(self, thread_id: str) -> int:
+        """Write one run's unflushed records, and classify a refusal if any."""
+        ring = self._rings.get(thread_id)
+        if ring is None:
+            return 0
+        mark = self._flushed_through.get(thread_id, 0)
+        batch = [record for record in ring if record.sequence > mark]
+        if not batch:
+            return 0
+        try:
+            await self._store.append(batch, window=self._window)
+        except Exception:
+            await self._report_refusal(thread_id, len(batch))
+            return 0
+        self._flushed_through[thread_id] = max(record.sequence for record in batch)
+        return len(batch)
+
+    async def _report_refusal(self, thread_id: str, held: int) -> None:
+        """Log a refused flush, and drop the ring when it can never succeed.
+
+        The permanence test is the run's own existence rather than the shape
+        of the error, so it reads the same on both backends: a foreign-key
+        violation and a connection drop arrive as different exceptions from
+        different drivers, but a run whose thread is gone can never take a
+        row again under either. A store too unwell to answer the question is
+        treated as transient, which is the safe direction - the records stay
+        where a resume can read them.
+        """
+        if await self._run_is_gone(thread_id):
+            self.discard(thread_id)
+            logger.warning(
+                "Dropping %d held progress frame(s) of run %s: the run is gone, "
+                "so no row of it can ever be written",
+                held,
+                thread_id,
+                extra={
+                    "thread_id": thread_id,
+                    "action": "run_event_flush_abandoned",
+                    "pending": held,
+                },
+            )
+            return
+        logger.warning(
+            "Could not write %d progress frame(s) to the replay log; "
+            "they remain in memory and replay is degraded to the ring",
+            held,
+            exc_info=True,
+            extra={
+                "thread_id": thread_id,
+                "action": "run_event_flush_failed",
+                "pending": held,
+            },
+        )
+
+    async def _run_is_gone(self, thread_id: str) -> bool:
+        """Whether this run's thread no longer exists, making the write final."""
+        try:
+            return not await self._store.run_exists(thread_id)
+        except Exception:
+            return False
 
     def _warn_on_unflushed_eviction(
         self, thread_id: str, ring: deque[RunEventRecord]

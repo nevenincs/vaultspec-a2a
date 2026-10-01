@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:89dc1a3c3ff8a35799b189930961aef30ae7d9c157728699423c57e82bed3eae'
+body_hash: 'sha256:ba6128cbce69c5956b88d7a50216dff3e1a3c0da93d0acfddcf109f76615af16'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -410,6 +410,28 @@ related:
 - `S38` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
 - `S38` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/thread` -> `pass`
 - `S38` `by:` `vaultspec-high-executor`
+- `S36` `M` `src/vaultspec_a2a/providers/_project_scope.py`
+- `S36` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S36` `M` `src/vaultspec_a2a/providers/tests/test_kimi_permission.py`
+- `S36` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S36` `M` `src/vaultspec_a2a/providers/tests/test_acp_permission_option_ids.py`
+- `S36` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
+- `S36` `by:` `vaultspec-high-executor`
+- `S40` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S40` `M` `src/vaultspec_a2a/providers/tests/test_acp_turn_deadline.py`
+- `S40` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
+- `S40` `by:` `vaultspec-high-executor`
+- `S41` `M` `src/vaultspec_a2a/graph/tests/acp_simulator.py`
+- `S41` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/_acp_frames.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_acp_stderr_tail.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S41` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
+- `S41` `by:` `vaultspec-high-executor`
+- `S43` `M` `src/vaultspec_a2a/providers/_prompt_render.py`
+- `S43` `M` `src/vaultspec_a2a/providers/tests/test_prompt_render.py`
+- `S43` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/graph src/vaultspec_a2a/streaming` -> `pass`
+- `S43` `by:` `vaultspec-high-executor`
 
 ## Notes
 

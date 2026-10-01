@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:f492f456799f62d78a1cb9a3d14ab2e35fc2bce49ffbaabeb04f3c6d7a052996'
+body_hash: 'sha256:1aed93d87727ec9f62418a3ccf9a729d0e6951011cc5e2142064c821765c9462'
 ---
 
 # `architecture-review` plan
@@ -106,14 +106,14 @@ Close the decision-free findings the plan-close review and its re-review left op
 - [x] `P06.S33` - Retain accepted work on capacity and transport-unreachable refusals instead of marking the dispatch failed; `src/vaultspec_a2a/thread/dispatch_policy.py, src/vaultspec_a2a/control/direct_control_recovery.py`.
 - [ ] `P06.S34` - Make the worker event client outlast the gateway's worst-case terminal confirmation; `src/vaultspec_a2a/worker/ipc.py`.
 - [x] `P06.S35` - Give each parallel research branch its own model instance so no two branches share one provider session; `src/vaultspec_a2a/graph/_compiler_research.py`.
-- [ ] `P06.S36` - Approve a native floor tool at the autonomous rung only when its path arguments lie inside the bound project; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_kimi_permission.py`.
+- [x] `P06.S36` - Approve a native floor tool at the autonomous rung only when its path arguments lie inside the bound project; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_kimi_permission.py`.
 - [x] `P06.S37` - Scope the breaker's half-open probe to the dispatch that reserved it; `src/vaultspec_a2a/control/circuit_breaker.py`.
 - [x] `P06.S38` - State and test the recovery lease rule for a busy worker and re-cover the definite-versus-ambiguous release rule on a surviving verb; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/tests/test_direct_control_leases.py`.
 - [ ] `P06.S39` - Continue a redelivered first ingest that stopped at the input checkpoint instead of refusing it; `src/vaultspec_a2a/worker/state_projection.py`.
-- [ ] `P06.S40` - Attach the stderr tail to the turn-idle deadline error; `src/vaultspec_a2a/providers/acp_chat_model.py`.
-- [ ] `P06.S41` - Advertise modes from the ACP simulator and refuse an autonomous session whose lane advertises none; `src/vaultspec_a2a/graph/tests/acp_simulator.py, src/vaultspec_a2a/providers/_acp_session.py`.
+- [x] `P06.S40` - Attach the stderr tail to the turn-idle deadline error; `src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [x] `P06.S41` - Advertise modes from the ACP simulator and refuse an autonomous session whose lane advertises none; `src/vaultspec_a2a/graph/tests/acp_simulator.py, src/vaultspec_a2a/providers/_acp_session.py`.
 - [ ] `P06.S42` - Reserve shutdown budget for the prune wait and key pending prunes to the app that waits on them; `src/vaultspec_a2a/lifecycle/shutdown.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/api/app.py`.
-- [ ] `P06.S43` - Escape setext-style role headings in rendered message content; `src/vaultspec_a2a/providers/_prompt_render.py`.
+- [x] `P06.S43` - Escape setext-style role headings in rendered message content; `src/vaultspec_a2a/providers/_prompt_render.py`.
 - [x] `P06.S44` - Probe the container's own hostname in the Compose healthchecks; `service/docker/`.
 - [x] `P06.S45` - Reconcile finding statuses that later Steps closed; `.vault/audit/2026-09-24-architecture-review-audit.md, .vault/audit/2026-09-30-langgraph-conformance-audit.md`.
 - [ ] `P06.S46` - Write absolute Claude permission rule paths with the CLI's absolute anchor so deny and scope rules match the paths they name; `src/vaultspec_a2a/providers/_claude_tool_policy.py`.

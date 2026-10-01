@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:a865d94e925e1b3c1a81878730401fb91698c5efc15ebdc066ca28d2097e5893'
+body_hash: 'sha256:20e71b33ddf908b9a4b6c90ad5fc55baceada0c21fe47c083325026c03b587ef'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -483,11 +483,11 @@ Status: accepted deviation from P04.S22, for the user. The pinned CLI maps `dont
 
 ### acp-turn-idle-error-lacks-stderr | low | the turn-idle deadline error carries only a stderr line count
 
-Status: open from P04.S28. The ACP early-exit error carries the child's stderr tail; the turn-idle deadline error still reports only how many lines it saw.
+Status: fixed in P06.S40: one redacted tail reader serves both errors (`src/vaultspec_a2a/providers/acp_chat_model.py`, `_redacted_stderr_tail`). Original finding: the ACP early-exit error carried the child's stderr tail; the turn-idle deadline error still reports only how many lines it saw.
 
 ### acp-simulator-advertises-no-modes | low | an autonomous session warns rather than refuses when a lane advertises no modes
 
-Status: open from P04.S22. The pinned adapter always advertises modes, but the in-repo simulator (`src/vaultspec_a2a/graph/tests/acp_simulator.py`) does not, so tightening the warning to a refusal needs a `modes` block in the simulator first.
+Status: fixed in P06.S41: the simulator advertises the pinned adapter's modes and takes `--omit-modes`, and an unattended session against a modeless lane is refused (`src/vaultspec_a2a/providers/_acp_session.py`, `_pin_autonomous_permission_mode`). Original finding: the pinned adapter always advertises modes, but the in-repo simulator (`src/vaultspec_a2a/graph/tests/acp_simulator.py`) does not, so tightening the warning to a refusal needs a `modes` block in the simulator first.
 
 ### fix-re-review | low | the re-review of the plan-close fixes passes
 
@@ -499,11 +499,11 @@ Status: fixed; raised as low by the re-review and elevated here. A batch the cad
 
 ### forged-heading-escape-rewrites-mounted-vault-headings | medium | the heading escape rewrote legitimate headings in mounted documents
 
-Status: fixed. Only a depth-one heading naming a role is escaped now (`src/vaultspec_a2a/providers/_prompt_render.py`, `_FORGED_ROLE_HEADING`), so an audit entry or a transcript section in a mounted document reaches the model as written; `test_a_mounted_document_keeps_its_own_deeper_headings` fails on the prior pattern. Residual: a setext-style heading (a role word underlined with `=`) is not escaped; fencing each message body would make the boundary structural rather than lexical.
+Status: fixed. Only a depth-one heading naming a role is escaped now (`src/vaultspec_a2a/providers/_prompt_render.py`, `_FORGED_ROLE_HEADING`), so an audit entry or a transcript section in a mounted document reaches the model as written; `test_a_mounted_document_keeps_its_own_deeper_headings` fails on the prior pattern. Residual: a setext-style heading (a role word underlined with `=`) is not escaped; fencing each message body would make the boundary structural rather than lexical. Residual fixed in P06.S43: the `=` underline under a role line is escaped, and that pass runs first because escaping a hash would otherwise leave a paragraph its underline promotes back to a heading (`src/vaultspec_a2a/providers/_prompt_render.py`, `_FORGED_SETEXT_ROLE_HEADING`).
 
 ### kimi-rung-approves-bare-grep-host-wide | medium | the autonomous rung still approves a native read floor tool by bare name
 
-Status: open, latent. The rung unions the lane's native floor into its approvals (`src/vaultspec_a2a/providers/_acp_rpc_handlers.py`, `_autonomous_option_id`), and a kimi title reduces to exactly `Grep`, so an autonomous kimi Grep of any host path is approved; `foreign_project_argument` scans only project-root keys, not `path`. Kimi is not a proven turn lane, so no served profile reaches it today. The Claude floor has the same shape and is inert only because the pinned adapter titles its calls in prose. Recommendation: approve a floor tool at the rung only when the call's own path arguments lie inside the bound project, and re-point `src/vaultspec_a2a/providers/tests/test_kimi_permission.py` at the refusal, before any kimi lane is admitted.
+Status: fixed in P06.S36: a floor tool is approved at the rung only when its path arguments, read from `rawInput` and `locations`, all lie inside the bound project (`src/vaultspec_a2a/providers/_project_scope.py`, `path_arguments_in_project`), on both lanes; `test_kimi_permission.py` refuses host, `..` and pathless calls. Original finding: the rung unioned the lane's native floor into its approvals (`src/vaultspec_a2a/providers/_acp_rpc_handlers.py`, `_autonomous_option_id`), and a kimi title reduces to exactly `Grep`, so an autonomous kimi Grep of any host path is approved; `foreign_project_argument` scans only project-root keys, not `path`. Kimi is not a proven turn lane, so no served profile reaches it today. The Claude floor has the same shape and is inert only because the pinned adapter titles its calls in prose. Recommendation: approve a floor tool at the rung only when the call's own path arguments lie inside the bound project, and re-point `src/vaultspec_a2a/providers/tests/test_kimi_permission.py` at the refusal, before any kimi lane is admitted.
 
 ### stale-comment-says-grep-composes-bare | low | a comment still described the removed Grep composition
 
@@ -532,3 +532,15 @@ Status: open, owned by P06.S47; raised by the P06.S33 executor. A worker `run_bu
 ### dispatch-failure-policy-mostly-discarded | info | six of seven callers discard the failure policy pair
 
 Recorded from P06.S33. After the capacity fix the permission service is the only consumer of the `FailureAction` that `evaluate_dispatch_failure` returns; the other call sites bind it as `_policy`. Simplifying the return is optional cleanup with no behavioural effect.
+
+### mcp-tool-path-argument-unscoped | medium | an allowlisted MCP tool's path argument is not measured against the bound project
+
+Status: open, owned by P02.S04 of `2026-10-01-tool-permission-model-plan` (widen the project scan to path-valued arguments); raised by the P06.S36 executor. The rung's project scan reads only project-root keys, and the new path scan runs only on the native-floor branch, so an allowlisted MCP tool called with an absolute out-of-project `path` and no project root is approved. A blanket path check would refuse legitimate calls, because `path` on an MCP tool is not always a filesystem path, so the scan needs the tool's declared argument semantics.
+
+### claude-path-rule-tools-include-unconsulted-names | low | the path-rule tool set names tools whose path rules the CLI no longer consults
+
+Status: open, owned by P07.S21 of `2026-10-01-tool-permission-model-plan`. Per the current Claude Code permissions reference, path rules for `Write`, `NotebookEdit` and `MultiEdit` are accepted but never consulted, with `Edit(...)` the replacement, and a `Glob` path rule is consulted only from the `--allowedTools` flag; `CLAUDE_PATH_RULE_TOOLS` still lists `Write`, `NotebookEdit` and `Cd`, and the floor composes `Glob(<ws>/**)` through the adapter's options namespace, whose routing is unverified. Latent: no caller renders a write tool into a rule today.
+
+### acp-simulator-has-no-config-option-verb | low | the simulator cannot exercise the permission-mode pin round trip
+
+Recorded from P06.S41. The simulator advertises modes but does not implement `session/set_config_option`, so it simulates only a lane already in the unattended mode; the pin round trip stays covered by the echo-context tests in `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`.

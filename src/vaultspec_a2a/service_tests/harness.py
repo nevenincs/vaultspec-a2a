@@ -862,20 +862,17 @@ class ServiceStack:
         thread_id: str,
         *,
         content: str,
+        idempotency_key: str,
         agent_id: str | None = None,
-        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"content": content}
         if agent_id is not None:
             body["agent_id"] = agent_id
-        headers: dict[str, str] = {}
-        if idempotency_key is not None:
-            headers["Idempotency-Key"] = idempotency_key
         with self._client(timeout=30.0) as client:
             resp = client.post(
                 f"/v1/runs/{thread_id}/messages",
                 json=body,
-                headers=headers or None,
+                headers={"Idempotency-Key": idempotency_key},
             )
             resp.raise_for_status()
             payload = resp.json()

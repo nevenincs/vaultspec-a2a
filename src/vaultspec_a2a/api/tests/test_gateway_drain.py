@@ -435,6 +435,7 @@ async def test_a_refused_followup_keeps_the_live_run_admitted(
             followup = await client.post(
                 f"/v1/runs/{run_id}/messages",
                 json={"content": "keep going"},
+                headers={"Idempotency-Key": "drain-followup"},
             )
             assert followup.status_code == 409, followup.text
             assert followup.json()["detail"]["code"] == FailureType.RUN_BUSY.value

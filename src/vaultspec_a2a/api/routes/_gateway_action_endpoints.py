@@ -64,6 +64,7 @@ from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     ThreadStatus,
 )
+from ...thread.idempotency import IDEMPOTENCY_KEY_MAX_LENGTH
 from ...utils.coercion import coerce_object_mapping
 from .._utils import trace_headers
 from ..dependencies import (
@@ -147,6 +148,47 @@ def _get_action_endpoint_context(
 ) -> _ActionEndpointContext:
     """Collect request-scoped action inputs while retaining their route metadata."""
     return _ActionEndpointContext(
+        request=request,
+        dependencies=dependencies,
+        idempotency_key=idempotency_key,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _MessageEndpointContext:
+    """Request context for a follow-up turn, whose key the client must supply."""
+
+    request: Request
+    dependencies: _ActionEndpointDependencies
+    idempotency_key: str
+
+
+def _get_message_endpoint_context(
+    request: Request,
+    dependencies: _ActionEndpointDependencies = Depends(
+        _get_action_endpoint_dependencies
+    ),
+    idempotency_key: str = Header(
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
+        description=(
+            "Opaque client-chosen key identifying this turn. Required: the "
+            "gateway derives no default for this verb, because two deliberate "
+            "identical continuations are two turns and a derived key would "
+            "answer the second as a replay of the first."
+        ),
+    ),
+) -> _MessageEndpointContext:
+    """Collect follow-up inputs, refusing a request that names no key.
+
+    The key is a parameter of THIS verb rather than of the shared action
+    context: the other run actions address a durable thing that already exists
+    - one permission request, one answer - and can derive a key from it, while
+    a follow-up turn is only distinguishable from its own repeat by what the
+    caller says.
+    """
+    return _MessageEndpointContext(
         request=request,
         dependencies=dependencies,
         idempotency_key=idempotency_key,
@@ -292,7 +334,7 @@ def _refused_permission_response(result: PermissionResult) -> HTTPException:
 async def run_message_endpoint(
     run_id: PathSafeRunId,
     body: RunMessageRequest,
-    context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
+    context: _MessageEndpointContext = Depends(_get_message_endpoint_context),
 ) -> RunMessageResponse:
     """Send a follow-up turn into an existing run.
 
@@ -318,6 +360,13 @@ async def run_message_endpoint(
 
     A parked run is likewise refused: a pause is answered through its own typed
     respond verb, and a message here would start a new turn and orphan the pause.
+
+    The caller names the turn. ``Idempotency-Key`` is required here and has no
+    server-derived default, because a default can only be derived from what the
+    request already says - the run, the agent, the text - and two deliberate
+    identical continuations are two turns, not one sent twice. Under a derived
+    key the second was answered as a replay of the first and never ran. A
+    request that names no key is refused before anything is read.
 
     Accepted is not applied: an accepted turn is handed to the worker and
     execution continues asynchronously, so a caller reconciles from the stream or

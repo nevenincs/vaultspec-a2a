@@ -659,7 +659,7 @@
     "/v1/runs/{run_id}/messages": {
       "post": {
         "summary": "Run Message Endpoint",
-        "description": "Send a follow-up turn into an existing run.\n\nNo run state admits a follow-up today, so every request that names a run is\nrefused with the typed 409: a run with a turn in flight is busy, a parked run\nanswers through its own respond verb, and a settled run is over. Taking a\nturn needs a continuation model this surface does not have yet, and the 202\nshape below is what that model will answer with. The verb is published now\nso a caller learns the refusal from its code rather than from a missing\nroute.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nA run whose current turn has not finished refuses with a typed 409 rather\nthan taking the turn. Admitting it would hand the run's write authority to\nthe new turn while the old one is still executing, after which the executing\nturn's own completion is refused as superseded and the run quarantines. The\nrefusal reserves nothing and dispatches nothing, so the caller loses no\nstate by meeting it; a queued continuation is a separate capability.\n\nA parked run is likewise refused: a pause is answered through its own typed\nrespond verb, and a message here would start a new turn and orphan the pause.\n\nAccepted is not applied: an accepted turn is handed to the worker and\nexecution continues asynchronously, so a caller reconciles from the stream or\nrun-status rather than from this response.",
+        "description": "Send a follow-up turn into an existing run.\n\nNo run state admits a follow-up today, so every request that names a run is\nrefused with the typed 409: a run with a turn in flight is busy, a parked run\nanswers through its own respond verb, and a settled run is over. Taking a\nturn needs a continuation model this surface does not have yet, and the 202\nshape below is what that model will answer with. The verb is published now\nso a caller learns the refusal from its code rather than from a missing\nroute.\n\nRun-start cannot carry this. A repeat run identifier there is a REPLAY - it\nanswers with the original run and never adopts the new body - so without\nthis verb the versioned surface can start a run and watch it, but never say\nanything further to it.\n\nA run whose current turn has not finished refuses with a typed 409 rather\nthan taking the turn. Admitting it would hand the run's write authority to\nthe new turn while the old one is still executing, after which the executing\nturn's own completion is refused as superseded and the run quarantines. The\nrefusal reserves nothing and dispatches nothing, so the caller loses no\nstate by meeting it; a queued continuation is a separate capability.\n\nA parked run is likewise refused: a pause is answered through its own typed\nrespond verb, and a message here would start a new turn and orphan the pause.\n\nThe caller names the turn. ``Idempotency-Key`` is required here and has no\nserver-derived default, because a default can only be derived from what the\nrequest already says - the run, the agent, the text - and two deliberate\nidentical continuations are two turns, not one sent twice. Under a derived\nkey the second was answered as a replay of the first and never ran. A\nrequest that names no key is refused before anything is read.\n\nAccepted is not applied: an accepted turn is handed to the worker and\nexecution continues asynchronously, so a caller reconciles from the stream or\nrun-status rather than from this response.",
         "operationId": "run_message_endpoint_v1_runs__run_id__messages_post",
         "security": [
           {
@@ -682,18 +682,15 @@
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "description": "Opaque client-chosen key identifying this turn. Required: the gateway derives no default for this verb, because two deliberate identical continuations are two turns and a derived key would answer the second as a replay of the first.",
               "title": "Idempotency-Key"
-            }
+            },
+            "description": "Opaque client-chosen key identifying this turn. Required: the gateway derives no default for this verb, because two deliberate identical continuations are two turns and a derived key would answer the second as a replay of the first."
           }
         ],
         "requestBody": {
@@ -3554,24 +3551,18 @@
             "title": "Action Id"
           },
           "idempotency_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Idempotency Key"
           }
         },
         "type": "object",
         "required": [
           "run_id",
-          "action_status"
+          "action_status",
+          "idempotency_key"
         ],
         "title": "RunMessageResponse",
-        "description": "Acknowledge a follow-up turn as accepted for dispatch.\n\nAcceptance is not completion: the turn is handed to the worker and the run\ncontinues asynchronously, so a caller reconciles progress from the stream or\nrun-status rather than from this body."
+        "description": "Acknowledge a follow-up turn as accepted for dispatch.\n\nAcceptance is not completion: the turn is handed to the worker and the run\ncontinues asynchronously, so a caller reconciles progress from the stream or\nrun-status rather than from this body.\n\n``idempotency_key`` is the caller's own key echoed back, never a derived\none, because this verb has no default to derive: it is required on the\nrequest, so an accepted turn always has a key and it is always the one the\ncaller chose."
       },
       "RunPendingPermission": {
         "properties": {

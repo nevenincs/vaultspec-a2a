@@ -703,6 +703,11 @@ class RunMessageResponse(BaseModel):
     Acceptance is not completion: the turn is handed to the worker and the run
     continues asynchronously, so a caller reconciles progress from the stream or
     run-status rather than from this body.
+
+    ``idempotency_key`` is the caller's own key echoed back, never a derived
+    one, because this verb has no default to derive: it is required on the
+    request, so an accepted turn always has a key and it is always the one the
+    caller chose.
     """
 
     api_version: Literal["v1"] = _API_VERSION
@@ -711,7 +716,7 @@ class RunMessageResponse(BaseModel):
     applied: bool = False
     action_status: str
     action_id: str | None = None
-    idempotency_key: str | None = None
+    idempotency_key: str
 
 
 class RunMessageRefusalCode(StrEnum):

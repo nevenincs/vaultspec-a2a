@@ -1411,6 +1411,7 @@ class TestSendMessage:
             resp = client.post(
                 "/v1/runs/nonexistent/messages",
                 json={"content": "Hello"},
+                headers={"Idempotency-Key": "endpoints-unknown-run"},
             )
         assert resp.status_code == 404
 
@@ -1457,6 +1458,7 @@ class TestSendMessage:
             resp = client.post(
                 f"/v1/runs/{thread_id}/messages",
                 json={"content": "Follow-up message"},
+                headers={"Idempotency-Key": "endpoints-busy-run"},
             )
 
         assert resp.status_code == 409
@@ -1488,6 +1490,7 @@ class TestSendMessage:
             resp = client.post(
                 f"/v1/runs/{thread_id}/messages",
                 json={"content": oversized},
+                headers={"Idempotency-Key": "endpoints-oversized"},
             )
         assert resp.status_code == 422
 
@@ -1515,6 +1518,7 @@ class TestSendMessage:
             resp = client.post(
                 "/v1/runs/thread-message-repair-needed/messages",
                 json={"content": "retry work"},
+                headers={"Idempotency-Key": "endpoints-repair-needed"},
             )
 
         assert resp.status_code == 409
@@ -1549,6 +1553,7 @@ class TestSendMessage:
             resp = client.post(
                 "/v1/runs/thread-message-reconciling/messages",
                 json={"content": "retry work"},
+                headers={"Idempotency-Key": "endpoints-reconciling"},
             )
 
         assert resp.status_code == 409

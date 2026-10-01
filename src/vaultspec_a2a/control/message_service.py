@@ -34,7 +34,6 @@ from ..database import (
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import ControlActionType
-from ..thread.idempotency import default_message_key
 from ..thread.message_policy import can_send_followup
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
@@ -136,7 +135,10 @@ class _FollowupMessageArgs(TypedDict):
     thread_id: str
     content: str
     agent_id: str
-    idempotency_key: str | None
+    # No default is derived for this verb. Two deliberate identical
+    # continuations are two turns, and a key derived from the content folds the
+    # second into the first and answers it as an already-accepted replay.
+    idempotency_key: str
     circuit_breaker: WorkerCircuitBreaker
     worker_spawner: LazyWorkerSpawner
     worker_client: httpx.AsyncClient
@@ -255,15 +257,12 @@ async def send_followup_message(
     )
 
     # -- Durable reservation and dispatch election -----------------------
-    resolved_idempotency_key = options["idempotency_key"] or default_message_key(
-        options["thread_id"], options["agent_id"], options["content"]
-    )
     claim = await prepare_control_action_claim(
         db,
         request=ControlActionClaimRequest(
             thread_id=options["thread_id"],
             action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            idempotency_key=resolved_idempotency_key,
+            idempotency_key=options["idempotency_key"],
             payload=freeze_accepted_input(
                 dispatch,
                 intent={"content": options["content"], "agent_id": options["agent_id"]},

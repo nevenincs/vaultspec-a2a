@@ -234,6 +234,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         rejected = client.post(
             f"/v1/runs/{thread_id}/messages",
             json={"content": "Continue the same thread with a follow-up request."},
+            headers={"Idempotency-Key": f"{thread_id}:follow-up-1"},
         )
 
     assert rejected.status_code == 409

@@ -394,6 +394,7 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
         follow = await client.post(
             f"/v1/runs/{run_id}/messages",
             json={"content": "second turn"},
+            headers={"Idempotency-Key": "gwlive-second-turn"},
         )
         assert follow.status_code == 409, follow.text
         detail = follow.json()["detail"]
@@ -410,7 +411,9 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
 
         # An unknown run is a not-found rather than a silent accept.
         missing = await client.post(
-            "/v1/runs/no-such-run/messages", json={"content": "hello"}
+            "/v1/runs/no-such-run/messages",
+            json={"content": "hello"},
+            headers={"Idempotency-Key": "gwlive-missing-run"},
         )
         assert missing.status_code == 404
 

@@ -61,6 +61,7 @@ from ...thread.constants import (
     MAX_WORKSPACE_ROOT_LENGTH,
 )
 from ...thread.dispatch_policy import FailureType
+from ...thread.enums import ControlActionResultStatus
 from ...thread.idempotency import IDEMPOTENCY_KEY_MAX_LENGTH
 from ...utils.coercion import coerce_object_mapping
 from .._utils import trace_headers
@@ -230,10 +231,10 @@ _RUN_REFUSALS: frozenset[FailureType] = frozenset(
     FailureType(code.value) for code in RunMessageRefusalCode
 )
 
-#: What an admitted follow-up turn is: reserved, placed, and not yet running.
-#: Spelled once here because it is the served value of a published field and
-#: the only ``action_status`` this verb now answers with.
-_QUEUED_ACTION_STATUS = "queued"
+#: The served ``action_status`` of a turn whose work the run has finished.
+#: A fresh admission never reports it; only a replay of a key whose turn has
+#: already run does, which is what makes ``applied`` true on this verb.
+_APPLIED_ACTION_STATUS = ControlActionResultStatus.APPLIED.value
 
 # The dispatch outcomes that mean the gateway is temporarily unable to deliver,
 # rather than that the request was wrong or the far side broken.
@@ -376,7 +377,8 @@ async def run_message_endpoint(
 
     return RunMessageResponse(
         run_id=result.thread_id,
-        action_status=_QUEUED_ACTION_STATUS,
+        action_status=result.action_status,
+        applied=result.action_status == _APPLIED_ACTION_STATUS,
         action_id=result.action_id,
         idempotency_key=context.idempotency_key,
         queue_position=result.queue_position,

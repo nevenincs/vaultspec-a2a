@@ -40,6 +40,7 @@ from .dispatch_receipts import (
 )
 from .repair_transitions import mark_message_followup_requested
 from .repositories.continuation_queue import (
+    lock_run_for_continuation_decision,
     open_promoted_continuation,
     promoted_turn_deadline,
     promotion_dispatch_pending,
@@ -305,6 +306,13 @@ async def _reconcile_completed_checkpoint(
     # reads first cannot upgrade to a write once another connection has
     # committed in between: SQLite refuses it outright instead of waiting.
     await begin_write_transaction(db)
+    # The run's own row is locked before the queue is read, against the same
+    # lock an admission takes. Without it a settlement can read an empty queue
+    # while an uncommitted admission reads a live run, and both commit: the
+    # waiting turn is then stranded on a settled run.
+    locked = await lock_run_for_continuation_decision(db, thread_id=decision.thread_id)
+    if locked is not None:
+        thread = locked
     promoted = await _promote_queued_continuation(db, thread, action_id, decision)
     if promoted is not None:
         return promoted

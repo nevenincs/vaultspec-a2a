@@ -21,10 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from ..database import (
-    begin_write_transaction,
-    get_thread,
-)
+from ..database import begin_write_transaction
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import ControlActionType
@@ -36,6 +33,8 @@ from .graph_definition import read_accepted_graph_definition
 from .repositories.continuation_queue import (
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
+    continuation_already_admitted,
+    lock_run_for_continuation_decision,
     reserve_queued_continuation,
     run_lifetime_deadline,
     served_continuation_queue_limits,
@@ -47,6 +46,8 @@ if TYPE_CHECKING:
 __all__ = ["MessageResult", "send_followup_message"]
 
 logger = logging.getLogger(__name__)
+
+_REPLAYED = QueuedContinuationDisposition.REPLAYED
 
 #: What each queue disposition means to a caller of this verb. Spelled as a
 #: mapping rather than a chain of branches so a disposition added to the queue
@@ -68,9 +69,11 @@ _REFUSALS: dict[QueuedContinuationDisposition, tuple[FailureType, str]] = {
 class MessageResult:
     """What one follow-up offer did to a run's continuation queue.
 
-    ``queued`` says a turn is now waiting; ``queue_position`` is the place it
-    was given, counting from one, and it is the same place a replay of the
-    same key reports. A refusal carries neither and reserved nothing.
+    ``queued`` says a turn was taken; ``queue_position`` is the place it was
+    given, counting from one, and it is the same place a replay of the same
+    key reports. ``action_status`` is the journal row's own status, so a
+    replay says what became of the turn rather than restating that it was
+    once queued. A refusal carries none of the three and reserved nothing.
     """
 
     action_id: str
@@ -78,6 +81,7 @@ class MessageResult:
     thread_status: str
     queued: bool
     queue_position: int | None = None
+    action_status: str = ""
     error_detail: str | None = None
     failure_type: FailureType | None = None
 
@@ -125,16 +129,19 @@ async def send_followup_message(
     into an appropriate HTTP response.  Commits the session before returning.
     """
     # -- Thread lookup & guard -------------------------------------------
-    # The guard reads the run before the reservation writes it, so the whole
-    # admission takes the write lock up front. That lock is what serializes
-    # admission against terminal settlement: a continuation either queues
-    # before the settlement transaction and defers it, or meets a settled run
-    # and is refused by the eligibility check below. There is no third
-    # outcome, and that is what keeps a terminal state from being reopened.
+    # The run's row is locked before its status is read, and held until this
+    # transaction ends. That lock is the single ordering point between this
+    # admission and a terminal settlement: a continuation either queues ahead
+    # of the settlement transaction, which then promotes or refuses it, or it
+    # waits and reads the settled status and is refused here. There is no
+    # third outcome, and that is what keeps a waiting turn from being left on
+    # a run that has ended.
     await begin_write_transaction(db)
     # Every refusal before the reservation wrote nothing; each releases the
-    # write lock before it returns.
-    thread = await get_thread(db, options["thread_id"])
+    # lock before it returns.
+    thread = await lock_run_for_continuation_decision(
+        db, thread_id=options["thread_id"]
+    )
     if thread is None:
         await db.rollback()
         return _refused(
@@ -144,8 +151,16 @@ async def send_followup_message(
     # Read before any rollback below expires the loaded row.
     thread_status = thread.status
     created_at = thread.created_at
+    # A repeat of an accepted key is not a new offer, so the run's current
+    # state is not an answer to it: the caller is asking what became of a turn
+    # it already sent. Eligibility decides new work only.
+    replaying = await continuation_already_admitted(
+        db,
+        thread_id=options["thread_id"],
+        idempotency_key=options["idempotency_key"],
+    )
     eligibility = can_send_followup(thread_status)
-    if not eligibility.allowed:
+    if not replaying and not eligibility.allowed:
         # Nothing has been reserved at this point, so the refusal leaves the run
         # exactly as it was: no journal action, no writer, no dispatch. The
         # refusal is typed by the policy that decided it rather than re-derived
@@ -203,10 +218,11 @@ async def send_followup_message(
         )
 
     lifetime_deadline_at = run_lifetime_deadline(created_at)
-    if lifetime_deadline_at <= _now():
+    if not replaying and lifetime_deadline_at <= _now():
         # The run has no lifetime left to run another turn in, so a reservation
         # here would be accepted work the promotion bound is already committed
-        # to refusing. Say so now rather than take it and reject it later.
+        # to refusing. Say so now rather than take it and reject it later. A
+        # replay reserves nothing, so the bound does not apply to one.
         await db.rollback()
         return _refused(
             options["thread_id"],
@@ -261,14 +277,19 @@ async def send_followup_message(
         )
     await db.commit()
     logger.info(
-        "Queued a continuation for thread %s at position %s",
+        "%s a continuation for thread %s at position %s",
+        "Replayed" if reserved.disposition is _REPLAYED else "Queued",
         options["thread_id"],
         reserved.position,
         extra={
             "thread_id": options["thread_id"],
             "dispatch_id": reserved.dispatch_id,
             "queue_position": reserved.position,
-            "action": "continuation_queued",
+            "action": (
+                "continuation_replayed"
+                if reserved.disposition is _REPLAYED
+                else "continuation_queued"
+            ),
         },
     )
     return MessageResult(
@@ -277,4 +298,5 @@ async def send_followup_message(
         thread_status=thread_status,
         queued=True,
         queue_position=reserved.position,
+        action_status=reserved.result_status,
     )

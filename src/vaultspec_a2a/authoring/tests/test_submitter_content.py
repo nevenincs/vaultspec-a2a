@@ -143,7 +143,7 @@ class TestConformanceGuard:
             _latest_document(_state(body), _WRITER, _SENTINEL)
         notes = excinfo.value.revision_notes
         assert any("[[2026-07-15-sse-reconnection-adr]]" in note for note in notes)
-        assert any("wiki-link in body" in note for note in notes)
+        assert any("Wiki-link in body text" in note for note in notes)
 
     def test_leading_preamble_is_stripped_and_the_document_passes(self) -> None:
         # A writer that prefixes orientation narration before the frontmatter

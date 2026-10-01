@@ -24,25 +24,22 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 from ..submitter import _CORE_ADR_GROUNDING
 
 _CHECKS_MODULE = Path("vaultspec_core") / "vaultcore" / "checks" / "references.py"
 
 
 def _core_references_source() -> str:
-    """Return core's reference-check source, or skip naming what is missing."""
+    """Return core's reference-check source from the installed runtime dependency."""
     import vaultspec_core
 
     package_root = Path(vaultspec_core.__file__).resolve().parent.parent
     candidate = package_root / _CHECKS_MODULE
-    if not candidate.is_file():
-        pytest.skip(
-            "vaultspec-core's reference checks are not readable at "
-            f"{_CHECKS_MODULE.as_posix()}; the installed layout changed and this "
-            "parity check needs repointing rather than deleting"
-        )
+    assert candidate.is_file(), (
+        "vaultspec-core's reference checks are not readable at "
+        f"{_CHECKS_MODULE.as_posix()}; the installed layout changed and this "
+        "parity check needs repointing rather than deleting"
+    )
     return candidate.read_text(encoding="utf-8")
 
 

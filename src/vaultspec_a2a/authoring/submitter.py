@@ -34,7 +34,11 @@ from __future__ import annotations
 import datetime
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+from vaultspec_core.vaultcore.checks import check_body_links
+from vaultspec_core.vaultcore.parser import parse_vault_metadata, split_frontmatter
 
 from ..graph.enums import PipelinePhase
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
@@ -44,7 +48,6 @@ from ..thread.state import read_untrusted_state_value
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
 from ._ids import derive_idempotency_key
-from ._prose import strip_non_prose
 from .client import AuthoringClient
 from .discovery import resolve_engine
 from .session import AuthoringSession
@@ -88,18 +91,11 @@ _TEMPLATE_ANNOTATION = "<!--"
 #: preamble and is stripped so the submitted body begins at the frontmatter.
 _FRONTMATTER_OPEN_RE = re.compile(r"---\r?\n(?=[A-Za-z_][\w-]*[ \t]*:)")
 
-#: The leading frontmatter block (both fences), for splitting a whole document into
-#: ``(frontmatter, body)`` so body conformance checks scan only the prose.
-_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*\r?\n?", re.DOTALL)
-
-# Body-link detection MIRRORS vaultspec-core's ``body-links`` check
-# (``vaultcore/checks/body_links.py``) so the submit-node guard refuses exactly
-# what ``vault set-body --check`` would refuse at materialization: wiki-links and
-# non-URL markdown links belong in ``related:`` frontmatter or a backtick span,
-# never in body prose. The scan reads only prose as core's reader defines it, so a
-# legitimately-quoted ``[[x]]`` in code or a comment is not flagged.
-_WIKI_LINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
-_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((?!https?://|#|mailto:)([^)]+)\)")
+#: Where the one-document snapshot handed to core's ``body-links`` check places
+#: the proposal. Core reports a finding relative to the root and reads nothing
+#: from disk when it is not repairing, so the location need only sit under it.
+_PROPOSAL_ROOT = Path(".")
+_PROPOSAL_PATH = Path(".vault") / "proposal.md"
 
 # A legacy ``## Status`` section — the canonical ADR template carries the status in
 # the H1 token ``# {feature} adr: {title} | (**status:** `accepted`)``, never a
@@ -438,19 +434,6 @@ def _strip_leading_preamble(body: str) -> str:
     return body[match.start() :]
 
 
-def _split_frontmatter_body(text: str) -> tuple[str, str]:
-    """Split a whole document into ``(frontmatter_block, body)``.
-
-    The frontmatter block retains both ``---`` fences; a document with no leading
-    frontmatter yields ``("", text)``. Mirrors vaultspec-core's own split so the
-    body-link scan sees exactly the prose the engine's ``body-links`` check does.
-    """
-    match = _FRONTMATTER_BLOCK_RE.match(text)
-    if match is None:
-        return "", text
-    return text[: match.end()], text[match.end() :]
-
-
 def _web_url_from_locator(locator: object) -> str | None:
     if not isinstance(locator, dict):
         return None
@@ -496,19 +479,19 @@ def _web_locator_urls(state: TeamState) -> list[str]:
     return urls
 
 
-def _body_link_notes(prose: str) -> list[str]:
-    notes: list[str] = []
-    for match in _WIKI_LINK_RE.finditer(prose):
-        notes.append(
-            f"wiki-link in body text: [[{match.group(1)}]] - move to related: "
-            "frontmatter or use a backtick code span"
-        )
-    for match in _MD_LINK_RE.finditer(prose):
-        notes.append(
-            f"markdown link in body text: [{match.group(1)}]({match.group(2)}) - "
-            "use a backtick code span for file references"
-        )
-    return notes
+def _body_link_notes(document: str) -> list[str]:
+    """Core's own ``body-links`` diagnostics for *document*, as revision notes.
+
+    The proposal is checked as core checks a vault: parsed by core, then handed
+    to core's check as a one-document snapshot. A wiki-link or a path link in
+    body prose belongs in ``related:`` frontmatter or a code span, and the
+    writer is told so in core's words.
+    """
+    metadata, body = parse_vault_metadata(document)
+    result = check_body_links(
+        _PROPOSAL_ROOT, snapshot={_PROPOSAL_PATH: (metadata, body)}
+    )
+    return [diagnostic.message for diagnostic in result.diagnostics]
 
 
 def _undisclosed_web_source_notes(
@@ -547,14 +530,15 @@ def _conformance_notes(
     human phase gate.
     """
     notes: list[str] = []
-    frontmatter, prose_region = _split_frontmatter_body(body)
+    split = split_frontmatter(body)
+    prose_region = split.body
     if doc_type == "adr" and _LEGACY_STATUS_HEADING_RE.search(prose_region):
         notes.append(
             "ADR status is in a legacy `## Status` section; move it into the H1 as "
             "`# `{feature}` adr: `{title}` | (**status:** `accepted`)` and remove the "
             "`## Status` heading"
         )
-    if not frontmatter:
+    if split.yaml_block is None:
         notes.append(
             "document must begin with a `---` frontmatter fence; the body carries "
             "no frontmatter block (remove any preamble before the document)"
@@ -570,9 +554,7 @@ def _conformance_notes(
             f"unfilled template placeholder(s) {present} remain; fill every section "
             "with authored content"
         )
-    # Body-links: scan ONLY the prose after the frontmatter (wiki-links are legal
-    # in `related:` frontmatter), with code/comments stripped, exactly like core.
-    notes.extend(_body_link_notes(strip_non_prose(prose_region)))
+    notes.extend(_body_link_notes(body))
     # Web-source disclosure, RESEARCH ONLY. The vault's document boundary gives
     # each fact one home: the research document grounds, and every later document
     # cites it by stem without restating its evidence. A URL is evidence, so its

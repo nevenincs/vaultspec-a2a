@@ -351,7 +351,7 @@ class TestDocumentTypeScope:
             "See [[2026-08-01-web-grounding-adr]] for the decision.",
         )
         notes = _conformance_notes(body, "plan", [_URL_A])
-        assert any("wiki-link in body" in note for note in notes)
+        assert any("Wiki-link in body text" in note for note in notes)
         assert not any("undisclosed web source" in note for note in notes)
 
 
@@ -364,7 +364,7 @@ class TestConformanceNoteComposition:
             "See [[2026-08-01-web-grounding-adr]] for the decision.",
         )
         notes = _conformance_notes(body, "research", [_URL_A])
-        assert any("wiki-link in body" in note for note in notes)
+        assert any("Wiki-link in body text" in note for note in notes)
         assert any("undisclosed web source" in note for note in notes)
 
     def test_no_web_urls_leaves_a_clean_document_clean(self) -> None:

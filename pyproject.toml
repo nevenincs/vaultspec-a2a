@@ -409,7 +409,6 @@ known_first_party = ["vaultspec_a2a"]
     "pytest-timeout",
     "pytest-cov",
     "deptry",
-    "vaultspec-core",
     # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
     # "sqlite+aiosqlite://..." — never imported directly.
     "aiosqlite",

@@ -485,6 +485,16 @@ related:
 - `S47` `verify:` `deptry src` -> `pass`
 - `S47` `verify:` `uv export --no-default-groups lists vaultspec-core` -> `pass`
 - `S47` `verify:` `pytest src/vaultspec_a2a/control/tests/test_sync_url_derivation.py` -> `pass`
+- `S48` `M` `src/vaultspec_a2a/authoring/submitter.py`
+- `S48` `D` `src/vaultspec_a2a/authoring/_prose.py`
+- `S48` `D` `src/vaultspec_a2a/authoring/tests/test_prose_parity.py`
+- `S48` `A` `src/vaultspec_a2a/authoring/tests/test_core_body_links.py`
+- `S48` `M` `src/vaultspec_a2a/authoring/tests/test_core_grounding_parity.py`
+- `S48` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_content.py`
+- `S48` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_web_disclosure.py`
+- `S48` `M` `pyproject.toml`
+- `S48` `verify:` `pytest src/vaultspec_a2a/authoring` -> `pass`
+- `S48` `verify:` `ruff, ty check src/vaultspec_a2a/authoring, deptry src` -> `pass`
 
 ## Notes
 

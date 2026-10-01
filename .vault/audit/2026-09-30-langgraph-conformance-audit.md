@@ -227,7 +227,7 @@ Open. `pyproject.toml` declares `rag = ["torch>=2.4", "vaultspec-rag[mcp]>=0.5.3
 
 ### submitter-link-stripping-drift | low | the authoring submitter mirrors core's body-link stripping with regexes core has replaced
 
-Fixed in P07.S38 under `2026-10-01-langgraph-conformance-core-reader-parity-adr`: the submitter reads prose with a port of core's reader, held to the installed core by `src/vaultspec_a2a/authoring/tests/test_prose_parity.py`. Original finding: `src/vaultspec_a2a/authoring/submitter.py:94-106` reproduced core's link stripping, which 0.3.2 performs with a CommonMark-aware reader (`vaultspec_core/vaultcore/links.py`); edge-case documents may now be judged differently on each side.
+Fixed in P07.S38 with a port of core's reader, then replaced in P07.S48 under `2026-10-01-langgraph-conformance-core-runtime-dependency-adr`: vaultspec-core is a runtime dependency and the submitter runs core's own `check_body_links` over the proposal, so its notes are core's diagnostics word for word (`src/vaultspec_a2a/authoring/tests/test_core_body_links.py` checks a real on-disk vault with core's graph). Original finding: `src/vaultspec_a2a/authoring/submitter.py:94-106` reproduced core's link stripping, which 0.3.2 performs with a CommonMark-aware reader (`vaultspec_core/vaultcore/links.py`); edge-case documents may now be judged differently on each side.
 
 ### framework-advertises-hosted-search | low | the upgraded framework guidance tells agents to use hosted search this project withholds
 

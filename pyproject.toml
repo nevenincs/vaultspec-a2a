@@ -100,7 +100,7 @@ dependencies = [
 dev = [{ include-group = "tooling" }]
 docs = ["sphinx>=8.2"]
 tooling = [
-  "actionlint-py==1.7.12.24",
+  "actionlint-py==1.7.12.25",
   # Security posture over production code. Advisory: it reports this project's
   # deliberate subprocess and dynamic-import design alongside anything real.
   "bandit>=1.9.4",

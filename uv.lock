@@ -10,9 +10,9 @@ resolution-markers = [
 
 [[package]]
 name = "actionlint-py"
-version = "1.7.12.24"
+version = "1.7.12.25"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6f/0b/3f29683dfbe94208fb5c3806806a6ef419972892e25c3c4f95198f68c978/actionlint_py-1.7.12.24.tar.gz", hash = "sha256:7571b0724fde79b2572b98b2b53792c470249d4db29951b57fc49b9cd3eaf11e", size = 12071, upload-time = "2026-03-31T06:21:35.015Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/75/36ee89db39bb3620d1e46fe1f6ec77d6000d30ff45345699e51b4c850e83/actionlint_py-1.7.12.25.tar.gz", hash = "sha256:83f83be4cd317c79b15cbb7022787513a6994f00bfb2dd8da02fa4e62b4f640d", size = 12438, upload-time = "2026-09-22T16:24:42.477Z" }
 
 [[package]]
 name = "aiosqlite"
@@ -1331,7 +1331,7 @@ name = "macholib"
 version = "1.16.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "altgraph", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+    { name = "altgraph" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/10/2f/97589876ea967487978071c9042518d28b958d87b17dceb7cdc1d881f963/macholib-1.16.4.tar.gz", hash = "sha256:f408c93ab2e995cd2c46e34fe328b130404be143469e41bc366c807448979362", size = 59427, upload-time = "2025-11-22T08:28:38.373Z" }
 wheels = [
@@ -1865,7 +1865,7 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "networkx", marker = "python_full_version < '3.14'" },
+    { name = "networkx" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/14/f4/ab90e7d22b38cc1bad5a72683f8739137fa42f9e2336c92b82dee4cea87e/phart-1.1.4.tar.gz", hash = "sha256:2691e31152a938f48d51d5236715811ede80142a5c8b59d24568435f11ba9f2c", size = 264815, upload-time = "2025-01-25T12:59:36.687Z" }
 wheels = [
@@ -1881,7 +1881,7 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "networkx", marker = "python_full_version >= '3.14'" },
+    { name = "networkx" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a8/85/8861d0d7f7cc298c973b2cbf9f52dc9d0ebd11c767aacbd7462a548714a3/phart-2.1.0.tar.gz", hash = "sha256:b7d8676bc79945e1cab61a3f9a788b395806d63e6c458143183de89f6bf7c763", size = 645976, upload-time = "2026-08-02T10:06:02.406Z" }
 wheels = [
@@ -3464,7 +3464,7 @@ provides-extras = ["server", "rag"]
 
 [package.metadata.requires-dev]
 all = [
-    { name = "actionlint-py", specifier = "==1.7.12.24" },
+    { name = "actionlint-py", specifier = "==1.7.12.25" },
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "basedpyright", specifier = ">=1.39" },
     { name = "complexipy", specifier = ">=6.2" },
@@ -3495,7 +3495,7 @@ all = [
     { name = "zstandard", specifier = ">=0.25.0" },
 ]
 dev = [
-    { name = "actionlint-py", specifier = "==1.7.12.24" },
+    { name = "actionlint-py", specifier = "==1.7.12.25" },
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "basedpyright", specifier = ">=1.39" },
     { name = "complexipy", specifier = ">=6.2" },
@@ -3527,7 +3527,7 @@ dev = [
 docs = [{ name = "sphinx", specifier = ">=8.2" }]
 freeze = [{ name = "pyinstaller", specifier = ">=6.11" }]
 tooling = [
-    { name = "actionlint-py", specifier = "==1.7.12.24" },
+    { name = "actionlint-py", specifier = "==1.7.12.25" },
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "basedpyright", specifier = ">=1.39" },
     { name = "complexipy", specifier = ">=6.2" },

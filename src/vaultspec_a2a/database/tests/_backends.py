@@ -38,15 +38,13 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+#: Only what a suite actually reaches for. The backend ids, the environment
+#: name and the target record below are this module's own vocabulary; naming
+#: them here would publish a surface nothing consumes.
 __all__ = [
     "BACKENDS",
-    "POSTGRES",
-    "POSTGRES_URL_ENV",
-    "SQLITE",
-    "Backend",
     "backend",
     "downgrade",
-    "migrated_database",
     "migrated_engine",
     "migrated_session_factory",
     "synchronous_url",
@@ -149,14 +147,6 @@ def backend(name: str, directory: Path) -> Iterator[Backend]:
         return
     with _postgres_scratch_database() as url:
         yield Backend(POSTGRES, url)
-
-
-@contextmanager
-def migrated_database(name: str, directory: Path) -> Iterator[Backend]:
-    """Yield a database on the *name* backend already upgraded to head."""
-    with backend(name, directory) as target:
-        upgrade(target.url)
-        yield target
 
 
 @asynccontextmanager

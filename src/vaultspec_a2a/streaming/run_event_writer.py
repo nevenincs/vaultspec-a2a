@@ -30,14 +30,10 @@ if TYPE_CHECKING:
     from ..database.run_event_repository import RunEventStore
     from .subscribers import SequenceAllocation
 
-__all__ = [
-    "DEFAULT_FLUSH_INTERVAL_SECONDS",
-    "DEFAULT_RING_CAPACITY",
-    "DEFAULT_TRACKED_RUNS",
-    "FrameProjector",
-    "RunEventWriter",
-    "projected_mappings_only",
-]
+#: The three bounds below and the default projector are this writer's own
+#: tuning, reachable as keyword defaults rather than as a published surface;
+#: naming them here would advertise knobs no caller turns.
+__all__ = ["FrameProjector", "RunEventWriter"]
 
 logger = logging.getLogger(__name__)
 

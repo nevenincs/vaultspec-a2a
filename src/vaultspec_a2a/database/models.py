@@ -38,7 +38,13 @@ from ..thread.enums import (
     TaskQueueStatus,
     ThreadStatus,
 )
-from .control_action_schema import CONTROL_ACTION_SQL_VALUES, RECOVERY_ACTION_SQL_VALUES
+from .control_action_schema import (
+    CONTROL_ACTION_SQL_VALUES,
+    QUEUE_POSITION_BOUNDED_PREDICATE,
+    QUEUED_RESERVATION_PREDICATE,
+    QUEUED_ROW_PREDICATE,
+    RECOVERY_ACTION_SQL_VALUES,
+)
 from .write_authority_schema import WRITE_ACTION_SQL_VALUES
 
 __all__ = [
@@ -592,9 +598,28 @@ class ControlActionModel(Base):
             "AND recovery_deadline_at IS NULL)",
             name="ck_control_actions_recovery_deadline_required",
         ),
+        CheckConstraint(
+            QUEUE_POSITION_BOUNDED_PREDICATE,
+            name="ck_control_actions_queue_position_bounded",
+        ),
+        CheckConstraint(
+            QUEUED_RESERVATION_PREDICATE,
+            name="ck_control_actions_queued_reservation",
+        ),
         Index("ix_control_actions_thread_id", "thread_id"),
         Index("ix_control_actions_request_id", "request_id"),
         Index("ux_control_actions_dispatch_id", "dispatch_id", unique=True),
+        # Partial on purpose: a promoted action keeps the position it was
+        # admitted at as a durable fact, so uniqueness may only bind the rows
+        # still waiting, or the next admission could never reuse position one.
+        Index(
+            "ux_control_actions_queued_position",
+            "thread_id",
+            "queue_position",
+            unique=True,
+            sqlite_where=text(QUEUED_ROW_PREDICATE),
+            postgresql_where=text(QUEUED_ROW_PREDICATE),
+        ),
         UniqueConstraint(
             "thread_id",
             "idempotency_key",
@@ -628,6 +653,10 @@ class ControlActionModel(Base):
     recovery_deadline_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime(), default=None
     )
+    # Set when a continuation is admitted behind a busy run and never cleared,
+    # so the position a caller was told survives promotion and stays readable
+    # as the reason this action owns the run.
+    queue_position: Mapped[int | None] = mapped_column(default=None)
 
     thread: Mapped["ThreadModel"] = relationship(
         back_populates="control_actions", lazy="raise"

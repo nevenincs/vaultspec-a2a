@@ -28,7 +28,7 @@ from .._replay_writer_seat import replay_writer_seat
 from ..thread_stream import _replay_window, _ResumePosition
 from ._sse_reader import SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
-from .test_stream_resume_replay import _progress_event, _relay
+from .test_stream_resume_replay import _progress_event, _relay, _terminal_event
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -181,6 +181,59 @@ async def test_a_run_with_nothing_retained_cannot_serve_a_cursor(
 
     assert notice.type == "progress_dropped"
     assert notice.data["reason"] == "replay_unavailable"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """A position the run never reached is refused, not silently accepted.
+
+    The cursor below names sequence 5000 on a run that has produced three
+    frames. Nothing is retained after it and nothing ever will be, so the
+    window is empty for a reason the other empty case does not share: this
+    client is not at the head of the window, it is past the end of the run.
+    Reported as complete, it reads to the consumer as a successful resume.
+
+    Worse than the silence is what the claim used to buy. The stream seeded
+    its de-duplication mark from the cursor, so every live frame at or below
+    5000 - which is every frame this run will ever send, including its
+    terminal - was dropped as a repeat, and the viewer heartbeated over a
+    run it could see nothing of. The mark is now clamped to what the run has
+    actually produced, so the stream goes live immediately after the notice
+    and closes on the terminal like any other.
+    """
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        await _relay(client, [_progress_event(_RUN, index) for index in (1, 2, 3)])
+        async with client.stream(
+            "GET",
+            f"/v1/runs/{_RUN}/stream",
+            headers={"Last-Event-ID": f"{_RUN}:5000"},
+        ) as response:
+            assert response.status_code == 200
+            reader = SseReader(response.aiter_bytes())
+            assert (await reader.next_frame()).type == "stream_snapshot"
+            notice = await reader.next_frame()
+
+            await _relay(client, [_progress_event(_RUN, 4)])
+            live = await reader.next_frame()
+            await _relay(client, [_terminal_event(_RUN, 5)])
+            closing = await reader.next_frame()
+
+    assert notice.type == "progress_dropped"
+    assert notice.data["reason"] == "replay_unavailable"
+    # Nothing was lost and no position can be named, so the notice names none.
+    assert "first_sequence" not in notice.data
+    assert live.type == "agent_status"
+    assert live.sequence == 4, "a live frame was dropped against the client's cursor"
+    assert closing.type == "thread_terminal"
+    assert closing.sequence == 5
 
 
 @pytest.mark.asyncio(loop_scope="function")

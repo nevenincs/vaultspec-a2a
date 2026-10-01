@@ -403,6 +403,12 @@ class _ReplayWindow:
     #: one reason this resume is short, emitted once before the frames.
     gap_reason: str | None = None
     first_sequence: int | None = None
+    #: The highest sequence this stream may treat as already delivered before
+    #: it emits anything. Never above a position the run has actually
+    #: produced, which is what keeps a client's own claim from silencing the
+    #: live stream: a cursor is a request, not evidence that the run ever
+    #: reached it.
+    dedup_floor: int = 0
 
 
 def _contiguous_tail(frames: list[_ReplayFrame]) -> list[_ReplayFrame]:
@@ -438,9 +444,10 @@ async def _replay_window(
     A window that starts later than the cursor asked for - because retention
     trimmed the rest, or because a frame was delivered but never written -
     carries ``replay_window_exceeded`` and the first sequence it can serve. A
-    replay that cannot be read at all, because the feature is off or the store
-    refused, carries ``replay_unavailable``: the consumer learns that the
-    stream from here is live-only rather than being left to assume it resumed.
+    replay that cannot be read at all, because the feature is off, the store
+    refused, or the cursor names a position this run has never reached,
+    carries ``replay_unavailable``: the consumer learns that the stream from
+    here is live-only rather than being left to assume it resumed.
     """
     if not settings.stream_replay_enabled:
         return _ReplayWindow([], _REPLAY_UNAVAILABLE)
@@ -463,7 +470,10 @@ async def _replay_window(
 
     if not frames:
         return await _empty_replay_window(
-            session_factory=session_factory, writer=writer, thread_id=thread_id
+            session_factory=session_factory,
+            writer=writer,
+            thread_id=thread_id,
+            resume=resume,
         )
 
     served = _contiguous_tail(frames)
@@ -476,9 +486,14 @@ async def _replay_window(
         if resume.from_window_start
         else served[0].sequence == resume.after_sequence + 1
     )
+    # Frames exist after the cursor, so the run has passed it and the client's
+    # claim to hold everything up to it is one the window just corroborated.
+    floor = resume.after_sequence
     if complete:
-        return _ReplayWindow(served)
-    return _ReplayWindow(served, _REPLAY_WINDOW_EXCEEDED, served[0].sequence)
+        return _ReplayWindow(served, dedup_floor=floor)
+    return _ReplayWindow(
+        served, _REPLAY_WINDOW_EXCEEDED, served[0].sequence, dedup_floor=floor
+    )
 
 
 async def _empty_replay_window(
@@ -486,15 +501,32 @@ async def _empty_replay_window(
     session_factory: async_sessionmaker[AsyncSession],
     writer: RunEventWriter | None,
     thread_id: str,
+    resume: _ResumePosition,
 ) -> _ReplayWindow:
     """Classify a resume with nothing after its cursor.
 
-    Two cases wear the same empty answer and must not be reported the same
+    Three cases wear the same empty answer and must not be reported the same
     way. A client at the head of the window has missed nothing, and telling it
     otherwise would send a resynchronization notice on every ordinary
     reconnect. A run with nothing retained at all cannot serve a resume from
     any position, and saying nothing there would present a live-only stream as
-    a resumed one.
+    a resumed one. A cursor ABOVE the run's high-water mark is the third: it
+    names a position this run has never produced, so there is nothing between
+    it and the live stream either to serve or to resume from.
+
+    That third case takes ``replay_unavailable`` rather than
+    ``replay_window_exceeded``, and the choice is the vocabulary's own.
+    ``replay_window_exceeded`` says "frames you asked for are gone, the
+    replay restarts HERE" and carries the first sequence it serves; neither
+    half is true when no frame was ever lost and none can be named. What the
+    consumer actually has to learn is that its position cannot be honoured
+    and the stream from here is live-only, which is exactly what
+    ``replay_unavailable`` says.
+
+    The de-duplication floor is clamped to the mark in every case. A stream
+    that trusted the cursor instead dropped every live frame at or below a
+    number the client invented, and a cursor far above the run silenced the
+    stream completely.
     """
     store = RunEventStore(session_factory)
     try:
@@ -507,8 +539,28 @@ async def _empty_replay_window(
             extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
         )
         return _ReplayWindow([], _REPLAY_UNAVAILABLE)
-    held = retained is not None or bool(writer and writer.pending(thread_id))
-    return _ReplayWindow([]) if held else _ReplayWindow([], _REPLAY_UNAVAILABLE)
+    # The ring holds what the table does not have yet, so the run's mark is
+    # the higher of the two rather than the durable one alone.
+    held = [record.sequence for record in writer.pending(thread_id)] if writer else []
+    if retained is not None:
+        held.append(retained)
+    if not held:
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
+    mark = max(held)
+    if resume.after_sequence > mark:
+        logger.info(
+            "Resume of run %s names position %d, past its highest produced %d",
+            thread_id,
+            resume.after_sequence,
+            mark,
+            extra={
+                "thread_id": thread_id,
+                "action": "stream_resume_ahead_of_run",
+                "sequence": resume.after_sequence,
+            },
+        )
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE, dedup_floor=mark)
+    return _ReplayWindow([], dedup_floor=min(resume.after_sequence, mark))
 
 
 def _replay_frame_bytes(thread_id: str, frame: _ReplayFrame) -> bytes:
@@ -620,12 +672,17 @@ async def _stream_thread_events(
 
         yield _snapshot_frame(thread_id, state.status)
 
-        # The highest sequence this connection has delivered. It starts at the
-        # client's own cursor, because everything at or below that it already
-        # holds, and it is what makes the subscription attached above safe: the
-        # queue was collecting frames while the replay below read them, so the
-        # same sequence can arrive twice and only the first delivery counts.
-        highest_emitted = resume.after_sequence if resume is not None else 0
+        # The highest sequence this connection may treat as already held. It
+        # is what makes the subscription attached above safe: the queue was
+        # collecting frames while the replay below read them, so the same
+        # sequence can arrive twice and only the first delivery counts.
+        #
+        # It starts at zero and is raised only by the replay, which clamps the
+        # client's cursor to a position the run has actually produced. Taking
+        # the cursor on trust instead let a client silence its own stream: a
+        # resume at a number the run had never reached dropped every live
+        # frame at or below it, which is every frame the run would ever send.
+        highest_emitted = 0
 
         if resume is not None:
             window = await _replay_window(
@@ -634,6 +691,7 @@ async def _stream_thread_events(
                 thread_id=thread_id,
                 resume=resume,
             )
+            highest_emitted = window.dedup_floor
             if window.gap_reason is not None:
                 # Exactly one notice, ahead of the frames it qualifies, so
                 # everything after it is contiguous. A short replay is never
@@ -722,10 +780,14 @@ async def _stream_thread_events(
             )
             if sequence is not None:
                 if sequence <= highest_emitted:
-                    # Already delivered - by the replay above, or by this
-                    # connection. A terminal can never be dropped here: the
-                    # mark only passes a sequence this stream has emitted, and
-                    # emitting a terminal returns.
+                    # Already delivered: by the replay above, by this
+                    # connection, or - up to the clamped resume floor - by
+                    # the connection this one continues, whose position the
+                    # replay confirmed against what the run had produced. The
+                    # mark therefore never names a sequence the run has not
+                    # reached, so a live frame is dropped only when it is
+                    # genuinely a repeat, and the terminal - the newest frame
+                    # a run ever sends - is never one.
                     continue
                 highest_emitted = sequence
             yield encode_sse_frame(

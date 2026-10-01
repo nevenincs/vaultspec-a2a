@@ -49,6 +49,7 @@ from .models import CostTrackingModel as CostTrackingModel
 from .models import PermissionLogModel as PermissionLogModel
 from .models import PermissionRequestModel as PermissionRequestModel
 from .models import RecoveryAttemptModel as RecoveryAttemptModel
+from .models import RunEventModel as RunEventModel
 from .models import TaskQueueEntryModel as TaskQueueEntryModel
 from .models import ThreadDeletionSagaModel as ThreadDeletionSagaModel
 from .models import ThreadExecutionStateModel as ThreadExecutionStateModel
@@ -189,6 +190,7 @@ __all__ = [
     "PermissionLogModel",
     "PermissionRequestModel",
     "RecoveryAttemptModel",
+    "RunEventModel",
     "SchemaCompatibilityError",
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",

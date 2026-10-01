@@ -53,6 +53,7 @@ __all__ = [
     "PermissionLogModel",
     "PermissionRequestModel",
     "RecoveryAttemptModel",
+    "RunEventModel",
     "RunWriteAuthority",
     "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
@@ -816,6 +817,57 @@ class AuthoringEventCursorModel(Base):
         return (
             f"AuthoringEventCursorModel(subscriber_id={self.subscriber_id!r}, "
             f"last_seq={self.last_seq!r})"
+        )
+
+
+class RunEventModel(Base):
+    """One already-projected progress frame of a run's bounded replay log.
+
+    Append-only, and never a source of run state: the row holds the frame a
+    subscriber was already handed, so a reconnecting consumer can be served the
+    window it missed. Nothing is reconstructed from these rows and they expire
+    by their own retention.
+
+    ``(thread_id, sequence)`` is both the replay index and the uniqueness guard
+    that makes a retried write idempotent rather than a duplicated frame.
+    """
+
+    __tablename__ = "run_events"
+
+    __table_args__ = (
+        CheckConstraint("sequence >= 1", name="ck_run_events_sequence_positive"),
+        Index("ix_run_events_created_at", "created_at"),
+    )
+
+    # ON DELETE CASCADE at the database rather than an ORM relationship, and
+    # deliberately: a thread carries up to its whole retention window of these
+    # rows, and an ORM cascade would load every one of them into the session to
+    # delete a single thread. Both backends enforce it natively (SQLite under
+    # the ``PRAGMA foreign_keys=ON`` the session layer sets on every connection).
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("threads.id", ondelete="CASCADE"), primary_key=True
+    )
+    sequence: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    event_type: Mapped[str] = mapped_column(Text)
+    payload_json: Mapped[str] = mapped_column(Text)
+    # Stamped when the sequence was ALLOCATED, not when the row was flushed, so
+    # the age bound measures the frame's production time. No column default: a
+    # row the writer did not stamp must fail loudly rather than acquire a write
+    # time that silently misdates the sweep.
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    # W3C trace context as the exporters spell it: 32 and 16 lowercase hex
+    # characters. Nullable because a frame produced outside a sampled span
+    # genuinely carries none, and inventing one would assert a correlation
+    # nothing recorded.
+    trace_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    span_id: Mapped[str | None] = mapped_column(String(16), default=None)
+
+    @override
+    def __repr__(self) -> str:
+        """Return developer-friendly representation."""
+        return (
+            f"RunEventModel(thread_id={self.thread_id!r}, "
+            f"sequence={self.sequence!r}, event_type={self.event_type!r})"
         )
 
 

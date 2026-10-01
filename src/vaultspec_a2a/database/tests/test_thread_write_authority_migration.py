@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from ...thread.enums import ControlActionType
-from ..migrate import run_migrations
+from ..migrate import build_migration_config, run_migrations
 from ..models import RunWriteAuthority
 from ..permission_repository import create_control_action
 from ..thread_repository import create_thread
@@ -35,6 +36,21 @@ def _config(path: Path) -> Config:
     config = Config(str(_ALEMBIC_INI))
     config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{path}")
     return config
+
+
+def _head_revision() -> str:
+    """Return the chain's single head, so a new revision needs no edit here.
+
+    This file pins the revisions whose BEHAVIOUR it asserts (0007, 0016, 0017)
+    by number. Head is a moving target by definition, and spelling it as a
+    literal turned every later migration into an unrelated failure in this
+    module.
+    """
+    heads = ScriptDirectory.from_config(
+        build_migration_config("sqlite+aiosqlite:///:memory:")
+    ).get_heads()
+    assert len(heads) == 1, f"expected one head, found {sorted(heads)}"
+    return heads[0]
 
 
 def _version(path: Path) -> str:
@@ -231,7 +247,7 @@ async def test_runtime_runner_accepts_populated_valid_current_schema(
     await engine.dispose()
 
     await run_migrations(url)
-    assert _version(db) == "0022"
+    assert _version(db) == _head_revision()
 
 
 def test_populated_current_store_cannot_erase_authority(runtime_dir: Path) -> None:

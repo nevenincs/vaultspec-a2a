@@ -478,10 +478,7 @@ LINT = Verb(
             # were written green over this tree and both answer a question
             # nothing else here asks - whether a TYPE_CHECKING-only name is
             # evaluated at runtime, and whether every shipped module actually
-            # imports. The reachability trio (`reachability`, `symbols`,
-            # `exports`) is NOT chained: it opened at 8, 53 and 155 findings,
-            # which is a burndown, and lives in `strict` and `audit` until it
-            # reaches zero.
+            # imports.
             #
             # `type-strict` and `nesting` GRADUATED on 2026-10-01: the
             # basedpyright strict pass and the PLR1702 nesting-depth sweep each
@@ -489,6 +486,12 @@ LINT = Verb(
             # threshold, with no new exclusion, suppression, baseline, or
             # duplication behind either number, which is the same bar
             # `imports` set.
+            #
+            # The reachability trio (`reachability`, `symbols`, `exports`)
+            # GRADUATED the same day. It opened at 8, 53 and 155 findings,
+            # which is a burndown, and lived in `strict` and `audit` until it
+            # reached zero; all three now hold that line without a baseline or
+            # exclusion behind any of the three numbers.
             tuple(
                 Ref(name)
                 for name in (
@@ -500,6 +503,9 @@ LINT = Verb(
                     "nesting",
                     "imports",
                     "imports-load",
+                    "reachability",
+                    "symbols",
+                    "exports",
                     "dependencies",
                     "toml",
                     "workflow",

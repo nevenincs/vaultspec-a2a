@@ -204,7 +204,7 @@ def _resume_command(
     receipt: GraphActionReceipt,
     graph: RegisteredCompiledGraph,
     admission: ResumeAdmission,
-) -> Command:
+) -> Command[Any]:
     """The answer one resume re-enters on, with the keys bound atomically to it.
 
     Every key here is bound atomically with the answer, which is what lets a
@@ -775,7 +775,7 @@ class Executor(SettlementMixin):
         req: DispatchRequest,
         span: Span,
         run: _AdmittedRun,
-        graph_input: dict[str, Any] | Command | None,
+        graph_input: dict[str, Any] | Command[Any] | None,
     ) -> None:
         """Stream one admitted dispatch through its graph and settle it.
 

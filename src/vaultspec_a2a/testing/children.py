@@ -41,7 +41,7 @@ from .progress import ProgressDeadline, ProgressStalledError
 from .session_root import session_scratch_dir
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
+    from collections.abc import Callable, Generator, Mapping
     from pathlib import Path
 
 __all__ = [
@@ -221,7 +221,7 @@ def file_size_fingerprint(*paths: os.PathLike[str] | str) -> Callable[[], object
 
 
 @contextlib.contextmanager
-def _capture_dir() -> Iterator[Path]:
+def _capture_dir() -> Generator[Path]:
     """A scratch seat for one child's captured output, removed afterwards."""
     capture = session_scratch_dir("child-output-")
     try:

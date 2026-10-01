@@ -388,16 +388,39 @@ async def test_an_uncovered_claude_call_is_refused_not_blanket_approved(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool", ["Read", "Grep", "Glob"])
-async def test_the_claude_native_read_floor_stays_reachable(
+async def test_the_claude_native_read_floor_reaches_its_own_project(
     two_projects: tuple[Path, Path],
     acp_session_context: AcpSessionContext,
     tool: str,
 ) -> None:
-    """The lane's own read tools remain approved when named exactly."""
+    """The lane's own read tools remain approved for the project they are in."""
     bound, _ = two_projects
     config = _config(workspace_root=str(bound))
 
-    assert await _decide(tool, {}, config, acp_session_context) == "allow"
+    assert await _decide(tool, {"path": "src"}, config, acp_session_context) == "allow"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["Read", "Grep", "Glob"])
+@pytest.mark.parametrize("named", ["another_project", "nowhere"])
+async def test_the_claude_native_read_floor_stops_at_the_project_boundary(
+    two_projects: tuple[Path, Path],
+    acp_session_context: AcpSessionContext,
+    tool: str,
+    named: str,
+) -> None:
+    """The floor is approved by bare name, so the name alone cannot be the grant.
+
+    The same check the Kimi floor runs, on the lane whose own titles happen to
+    be prose today: a floor tool that names another project, and one that names
+    nowhere at all, are both refused rather than approved on the strength of
+    being read-only.
+    """
+    bound, other = two_projects
+    config = _config(workspace_root=str(bound))
+    raw_input: JsonObject = {"path": str(other)} if named == "another_project" else {}
+
+    assert await _decide(tool, raw_input, config, acp_session_context) == "reject"
 
 
 @pytest.mark.asyncio
@@ -417,13 +440,21 @@ async def test_the_kimi_lane_keeps_its_proven_behaviour(
 
     assert (
         await _decide(
-            "ReadFile: src/a.py", {}, config, acp_session_context, kimi_options
+            "ReadFile: src/a.py",
+            {"path": "src/a.py"},
+            config,
+            acp_session_context,
+            kimi_options,
         )
         == "approve"
     )
     assert (
         await _decide(
-            "WriteFile: src/a.py", {}, config, acp_session_context, kimi_options
+            "WriteFile: src/a.py",
+            {"path": "src/a.py"},
+            config,
+            acp_session_context,
+            kimi_options,
         )
         == "reject"
     )

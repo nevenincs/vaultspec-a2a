@@ -50,6 +50,7 @@ from ...database import (
 )
 from ...database.models import ControlActionModel, RunWriteAuthority, ThreadModel
 from ...database.session import configure_sqlite_transactions
+from ...database.tests._backends import BACKENDS, migrated_session_factory
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
@@ -88,7 +89,22 @@ async def _seed_unapplied_leased_action(
         workspace_root=Path.cwd(),
     )
     intent: dict[str, object]
-    if spec.action_type is ControlActionType.MESSAGE_FOLLOWUP_REQUESTED:
+    if spec.action_type is ControlActionType.INGEST:
+        dispatch = DispatchRequest(
+            dispatch_id=dispatch_id,
+            action="ingest",
+            thread_id=thread_id,
+            content="original message",
+            workspace_root=str(Path.cwd()),
+            team_preset="mock-success-single",
+            graph_definition=graph_definition,
+            recursion_limit=25,
+        )
+        intent = {
+            "content": "original message",
+            "agent_id": dispatch.agent_id,
+        }
+    elif spec.action_type is ControlActionType.MESSAGE_FOLLOWUP_REQUESTED:
         dispatch = DispatchRequest(
             dispatch_id=dispatch_id,
             action="ingest",
@@ -252,6 +268,63 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
     assert other_row.claim_token is not None
     assert stored_thread is not None
     assert stored_thread.last_applied_action == "message_followup_applied"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend_name", BACKENDS)
+async def test_dispatch_application_receipt_settles_ingest_action(
+    backend_name: str,
+    tmp_path: Path,
+    checkpointer: InMemorySaver,
+) -> None:
+    """A proven ingest settles its own journal row without waiting on terminal.
+
+    An ingest's first incorporated checkpoint proves it exactly as a
+    follow-up's does, so the same settlement must mark it applied and record
+    it as the thread's last applied action - not leave it to whatever later
+    reconciles the run's eventual completion.
+    """
+    async with migrated_session_factory(backend_name, tmp_path) as (_target, factory):
+        async with factory() as session:
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="ingest-receipt-thread",
+                status="running",
+            )
+            action, receipt, checkpoint_id = await _seed_unapplied_leased_action(
+                session,
+                checkpointer,
+                thread_id=thread.id,
+                spec=_SeedActionSpec(
+                    action_type=ControlActionType.INGEST,
+                    idempotency_key=f"thread-create:{thread.id}",
+                ),
+            )
+            await session.commit()
+
+        await _handle_progress_event(
+            thread.id,
+            {
+                "type": "dispatch_applied",
+                "dispatch_id": action.dispatch_id,
+                "action": "ingest",
+                "graph_action_receipt": receipt.model_dump(mode="json"),
+                "checkpoint_id": checkpoint_id,
+            },
+            session_factory=factory,
+            checkpointer=checkpointer,
+        )
+
+        async with factory() as session:
+            stored_action = await session.get(ControlActionModel, action.id)
+            stored_thread = await session.get(ThreadModel, thread.id)
+
+        assert stored_action is not None
+        assert stored_action.applied_at is not None
+        assert stored_action.claim_token is None
+        assert stored_thread is not None
+        assert stored_thread.last_applied_action == ControlActionType.INGEST.value
 
 
 @pytest.mark.asyncio

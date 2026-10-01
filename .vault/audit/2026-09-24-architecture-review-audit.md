@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:6dd61fd9c60b726242e1c95f3174d3fae305893715f9302f138f16dec14ad4d4'
+body_hash: 'sha256:170dbb59dab4bc2aeaa8533ee2f775d56a1496d3edcbf40af1795cc9b02c4d96'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -354,7 +354,7 @@ Recorded 2026-10-01. The service never reads `CLAUDE_CODE_OAUTH_TOKEN`; the reci
 
 ### ingest-action-never-marked-applied | medium | a proven ingest dispatch leaves its control action unapplied
 
-Open, owned by P06.S51; found by the P06.S50 executor through the unused `mark_ingest_applied`. `commit_proven_application` (`src/vaultspec_a2a/control/_event_application.py:193-259`) settles a proven follow-up and a proven permission response, but has no branch for `ControlActionType.INGEST`, although the same module's wire-verb validation treats the two alike (`:124`). An ingest's journal row therefore never gains `applied_at` and the thread never records it as its last applied action; the repair transition is the same in both states, so the visible effect is on the journal and on anything that reads an unapplied action as owed work.
+Fixed in P06.S51 (e4e6956): the proven-application settlement now marks an ingest's action applied and records it as the thread's last applied action, proven on both backends. The consequence was worse than an untidy journal: an ingest's recovery deadline is the run's whole timeout, so a healthy run still executing past it was elected into RECONCILING with operator intervention required, and recovery seeded redrive attempts for proven work throughout. Original finding: found by the P06.S50 executor through the unused `mark_ingest_applied`. `commit_proven_application` (`src/vaultspec_a2a/control/_event_application.py:193-259`) settles a proven follow-up and a proven permission response, but has no branch for `ControlActionType.INGEST`, although the same module's wire-verb validation treats the two alike (`:124`). An ingest's journal row therefore never gains `applied_at` and the thread never records it as its last applied action; the repair transition is the same in both states, so the visible effect is on the journal and on anything that reads an unapplied action as owed work.
 
 ### armed-readiness-database-probe-unbounded | low | the armed desktop readiness path probes the database without a deadline
 

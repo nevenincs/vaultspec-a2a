@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:bce1b934b5493966fcb5d2a5fca06a7c2ec9e15ca5b5915eea892fc14b2f554a'
+body_hash: 'sha256:7570ba7f86534710beda4e54775fc1b585f8e0e68caca77e2fd36029a9ee8124'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -518,6 +518,11 @@ related:
 - `S50` `verify:` `python -m dev lint symbols` -> `fail`
 - `S50` `verify:` `python -m dev lint exports` -> `fail`
 - `S50` `by:` `vaultspec-standard-executor`
+- `S51` `M` `src/vaultspec_a2a/control/_event_application.py`
+- `S51` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S51` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/database src/vaultspec_a2a/worker -n 3 --require-prerequisite=postgres` -> `pass`
+- `S51` `verify:` `python -m dev lint symbols` -> `pass`
+- `S51` `by:` `vaultspec-standard-executor`
 
 ## Notes
 

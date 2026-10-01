@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:8dc2edbb7b8b7792cdc4287569f9d0a653032c8cd3fb6e3fa50fb2f0cbdd7509'
+body_hash: 'sha256:4340beec0e66b9602571a4faf631df6bf41bfabcc583cc96b690dcdb970358e0'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -387,6 +387,10 @@ related:
 - `S44` `M` `src/vaultspec_a2a/control/tests/test_deployment_names.py`
 - `S44` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
 - `S44` `verify:` `pytest src/vaultspec_a2a/control/tests/test_deployment_names.py` -> `pass`
+- `S45` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S45` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
+- `S45` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S45` `by:` `vaultspec-docs-curator`
 
 ## Notes
 
@@ -420,3 +424,4 @@ related:
 - `S23` Correction from the fix re-review (stale-comment-says-grep-composes-bare).
 - `S14` Correction from the fix re-review (refusal-code-import-guard-cannot-fail).
 - `S44` just test-service was not run: Docker is unavailable here, so the probes are proven by syntax, by a hostname round-trip on this host and by the Compose test only.
+- `S45` Each fixed or partially fixed status was verified against current code, not taken from a plan row; 27 original findings stay open without a Step in this plan, several owned by other open plans.

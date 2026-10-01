@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:a227117e38b6a1d211789a87819390b08f46b24191c591461e2cb8f612e762cf'
+body_hash: 'sha256:fa82f5a430c208bbb7a10827f87d366ce19b0a68ff707946e07fab1fb7f23948'
 ---
 
 # `architecture-review` plan
@@ -115,7 +115,7 @@ Close the decision-free findings the plan-close review and its re-review left op
 - [ ] `P06.S42` - Reserve shutdown budget for the prune wait and key pending prunes to the app that waits on them; `src/vaultspec_a2a/lifecycle/shutdown.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/api/app.py`.
 - [ ] `P06.S43` - Escape setext-style role headings in rendered message content; `src/vaultspec_a2a/providers/_prompt_render.py`.
 - [x] `P06.S44` - Probe the container's own hostname in the Compose healthchecks; `service/docker/`.
-- [ ] `P06.S45` - Reconcile finding statuses that later Steps closed; `.vault/audit/2026-09-24-architecture-review-audit.md, .vault/audit/2026-09-30-langgraph-conformance-audit.md`.
+- [x] `P06.S45` - Reconcile finding statuses that later Steps closed; `.vault/audit/2026-09-24-architecture-review-audit.md, .vault/audit/2026-09-30-langgraph-conformance-audit.md`.
 - [ ] `P06.S46` - Write absolute Claude permission rule paths with the CLI's absolute anchor so deny and scope rules match the paths they name; `src/vaultspec_a2a/providers/_claude_tool_policy.py`.
 
 ## Parallelization

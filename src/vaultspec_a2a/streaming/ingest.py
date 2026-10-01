@@ -529,9 +529,9 @@ class IngestManager:
         cancel_event = self._get_cancel_event(thread_id)
         _outcome = ThreadStatus.COMPLETED
         stall_timeout = _effective_stall_timeout(graph)
-        # Set only on the path that re-raises, so the closing work below knows
+        # Set only on the paths that re-raise, so the closing work below knows
         # not to await anything more on a run whose caller is unwinding.
-        task_cancelled = False
+        unwinding = False
         # Set the moment the stream says the run parked, so the outcome never
         # depends on a state read taken after the stream ended.
         stream_interrupted = False
@@ -596,7 +596,7 @@ class IngestManager:
                 # Swallowing it is also what let an outer timeout around
                 # ingest return a settled-looking outcome, so it is re-raised
                 # for whoever asked for the cancellation to observe.
-                task_cancelled = True
+                unwinding = True
                 logger.info("Ingest cancelled for thread %s", thread_id)
                 span.set_attribute("cancelled", True)
                 span.set_attribute("cancelled.by", "task")
@@ -608,16 +608,19 @@ class IngestManager:
                 if not isinstance(exc, Exception):
                     # Outside Exception is a signal to whoever runs the ingest,
                     # not a failure of the run: viewers are told the run did
-                    # not finish, and the signal still reaches its owner.
+                    # not finish, and the signal reaches its owner without
+                    # first waiting on the work that settles a served run.
+                    unwinding = True
                     raise
             finally:
                 self._clear_cancel_event(thread_id)
                 self._buffering.prune_tool_debounce(thread_id)
-                # Neither the buffer flush nor the state read can be awaited
-                # on the cancelled path: under a cancel scope every await
-                # raises at once, and a state read taken while the run is
-                # being torn down describes nothing the outcome may rest on.
-                if not task_cancelled:
+                # Neither the buffer flush nor the state read is awaited on a
+                # path that re-raises: under a cancel scope every await raises
+                # at once, a signal must not wait behind a bounded read, and a
+                # state read taken while the run is being torn down describes
+                # nothing the outcome may rest on.
+                if not unwinding:
                     await self._buffering.flush_chunk_buffer(thread_id)
                     _outcome = await self._finalize_interrupt(
                         _FinalizeInterrupt(

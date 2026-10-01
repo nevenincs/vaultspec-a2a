@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:63988c516a8fd4fe93ed4b33d29c64eb2e1cbdde0a41ff7287afac35514fd3e7'
+body_hash: 'sha256:559359738897fb770765a14c06e0afa886ebb4c0fcac21c32b96c12a73ab62b1'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -474,6 +474,15 @@ related:
 - `S47` `M` `openapi.json`
 - `S47` `verify:` `pytest control api thread` -> `pass`
 - `S47` `by:` `vaultspec-high-executor`
+- `S49` `M` `src/vaultspec_a2a/providers/_prompt_render.py`
+- `S49` `M` `src/vaultspec_a2a/providers/tests/test_prompt_render.py`
+- `S49` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S49` `A` `src/vaultspec_a2a/streaming/tests/_parked_signal_graph.py`
+- `S49` `A` `src/vaultspec_a2a/streaming/tests/test_ingest_signal.py`
+- `S49` `M` `pyproject.toml`
+- `S49` `M` `uv.lock`
+- `S49` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming -n 4` -> `pass`
+- `S49` `verify:` `python -m dev lint all` -> `pass`
 
 ## Notes
 
@@ -513,3 +522,4 @@ related:
 - `S46` The executor's commit was refused twice by the permission system; the user approved committing it on 2026-10-01 and the orchestrator applied, re-verified and committed the change.
 - `S39` Scope correction: the evidence reader lives in `thread/checkpoint_evidence.py,` shared by the worker preflight and gateway recovery; no change to `state_projection.py` was needed.
 - `S47` Dashboard contract event: permission respond answers a worker `run_busy` with a typed 409 (was 500), capacity with 503 (was 502), `incompatible_state` with a typed 409 (was 502); openapi documents 409/502/503 on that route and 502/503 on the messages route.
+- `S49` markdown-it-py joins the tooling group as the CommonMark reader the forgery tests read a rendered prompt with; it was already locked through rich.

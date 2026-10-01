@@ -119,6 +119,10 @@ tooling = [
   # Docstring coverage over the public surface. Advisory.
   "interrogate>=1.7.0",
   "jsonschema>=4.26.0",
+  # A CommonMark parser as the reader of a rendered prompt: a test that asks
+  # whether a body forged a heading has to read the prompt the way markdown
+  # does, not by a rule of its own that could share the renderer's blind spot.
+  "markdown-it-py>=4.0",
   "nodeenv>=1.0.0",
   "packaging>=25.0",
   "prek>=0.3.2",
@@ -430,6 +434,7 @@ known_first_party = ["vaultspec_a2a"]
   # construction rather than an exception being carved out.
   DEP004 = [
     "jsonschema",
+    "markdown_it",
     "packaging",
     "pytest",
     "pytest_asyncio",

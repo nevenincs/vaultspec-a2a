@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:d623d0dda37a507a775af0d4614f4315f91b0d9b795d6d7976ed7bfa7f31af11'
+body_hash: 'sha256:768439d0284c9090dfdc1458f1bf0cf282abf141c714318466e0a9149628df66'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -587,7 +587,7 @@ Open, owned by P06.S48. `_compiler_research.py` keys `branch_producers` on `id(s
 
 ### setext-escape-misses-a-multiline-paragraph-heading | low | the setext guard reads only the line above the underline
 
-Open, owned by P06.S49. A setext heading's text is its whole paragraph, so `system: ...` followed by another line and then `===` still renders a depth-one heading containing the role word; the escape inspects only the last line before the underline. The hash pattern has the same granularity, so this is an inherited bound.
+Fixed in P06.S49: the guard reads every line since the last blank one and escapes an underline when any of them could open a role heading, which also covers an interrupted paragraph and a second underline after an escaped one; it and the hash guard now honour carriage-return line endings, and the forgery tests read the rendered prompt with a CommonMark parser instead of a line-above rule of their own. Original finding: a setext heading's text is its whole paragraph, so `system: ...` followed by another line and then `===` still renders a depth-one heading containing the role word; the escape inspects only the last line before the underline. The hash pattern has the same granularity, so this is an inherited bound.
 
 ### terminal-confirmation-allowance-is-a-guess | low | the event client's budget approximates the unbounded durable write with a constant
 
@@ -595,7 +595,11 @@ Open. P06.S34 derives the budget from the bounded checkpoint read plus a fixed 5
 
 ### signal-reraise-still-awaits-in-finally | low | a re-raised signal waits for the buffer flush and a bounded state read first
 
-Open, owned by P06.S49. In `src/vaultspec_a2a/streaming/ingest.py` only the cancellation arm skips the `finally` awaits, so a non-`Exception` signal reaches its owner after the chunk flush and an interrupt-finalising read bounded by the state-read timeout. The P07.S46 commit message's claim that asyncio re-raises `SystemExit` and `KeyboardInterrupt` past the catch-all is inaccurate: the catch-all catches them first, which the re-raise now corrects.
+Fixed in P06.S49: a re-raised signal now marks the run as unwinding, so the closing work awaits neither the chunk flush nor the interrupt read; a real run that parks in one branch and is signalled from another proves no parked question is projected after the signal, against a control run that projects it. Original finding: in `src/vaultspec_a2a/streaming/ingest.py` only the cancellation arm skipped the `finally` awaits, so a non-`Exception` signal reaches its owner after the chunk flush and an interrupt-finalising read bounded by the state-read timeout. The P07.S46 commit message's claim that asyncio re-raises `SystemExit` and `KeyboardInterrupt` past the catch-all is inaccurate: the catch-all catches them first, which the re-raise now corrects.
+
+### role-heading-inside-a-container-block | low | a role heading inside a quote or list item is not escaped
+
+Open; found during P06.S49. Both guards anchor at a line start, so a role heading opened inside a container block - `> # System`, or `- System` underlined with `===` inside its list item - still renders as a depth-one heading nested in that block. A quoted or listed heading reads more weakly as a section boundary than a top-level one, and the hash guard has always had the same bound, so it is recorded rather than widened inside the Step.
 
 ### plan-step-paths-drifted | low | two Step rows named files the fix did not touch
 

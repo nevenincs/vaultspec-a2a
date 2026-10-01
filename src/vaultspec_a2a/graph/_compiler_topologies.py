@@ -16,10 +16,12 @@ if TYPE_CHECKING:
     # provider factory, which imports the model stack at construction time.
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
+    from langgraph.runtime import Runtime
 
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.worker import WorkerNode
     from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
+    from .run_context import RunContext
 
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
@@ -44,6 +46,7 @@ from .compiler import (
 )
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
+from .nodes.phase_gate import review_requests_revision
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import create_mount_node
 
@@ -142,7 +145,7 @@ class _TopologyOptions(_TopologyOptional):
 
 
 def _compile_star(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     supervisor_agent_config: Any | None,
@@ -214,9 +217,7 @@ def _compile_star(
         )
         builder.add_edge(agent_cfg.id, "supervisor")
         # Insert mount node between supervisor routing and worker invocation.
-        mount_fn = create_mount_node(
-            options.get("workspace_root"), options.get("task_queue_port")
-        )
+        mount_fn = create_mount_node(options.get("workspace_root"))
         _add_node(builder, f"mount_{agent_cfg.id}", mount_fn)
         builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
         compiled_worker_ids.append(agent_cfg.id)
@@ -247,18 +248,23 @@ def _compile_star(
     route_map: dict[str, str] = {wid: f"mount_{wid}" for wid in compiled_worker_ids}
     route_map["FINISH"] = GRAPH_COMPLETION_NODE
 
-    supervisor_route_map = {**route_map, "plan_approval": "plan_approval"}
+    supervisor_route_map = {
+        **route_map,
+        "plan_approval": "plan_approval",
+        "supervisor": "supervisor",
+    }
     builder.add_conditional_edges(
         "supervisor",
         _route_from_supervisor,
         cast("dict[Hashable, str]", supervisor_route_map),
     )
 
-    # Approved -> exec worker's mount; rejected -> revision worker's mount.
+    # Approved -> exec worker's mount; rejected -> revision worker's mount, or
+    # back to the supervisor when no worker of the plan phase can revise it.
     builder.add_conditional_edges(
         "plan_approval",
         _route_from_plan_approval,
-        cast("dict[Hashable, str]", route_map),
+        cast("dict[Hashable, str]", {**route_map, "supervisor": "supervisor"}),
     )
 
 
@@ -288,7 +294,7 @@ def _validated_pipeline_order(team_config: Any) -> list[str]:
 
 
 def _compile_pipeline(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     **options: Unpack[_TopologyOptions],
@@ -334,9 +340,7 @@ def _compile_pipeline(
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         # Insert mount node between pipeline stages.
-        mount_fn = create_mount_node(
-            options.get("workspace_root"), options.get("task_queue_port")
-        )
+        mount_fn = create_mount_node(options.get("workspace_root"))
         mount_id = f"mount_{agent_cfg.id}"
         _add_node(builder, mount_id, mount_fn)
         _add_node(
@@ -427,9 +431,10 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
     async def _loop_node_with_counter(
         state: TeamState,
         config: RunnableConfig | None = None,
+        runtime: Runtime[RunContext] | None = None,
         _inner: WorkerNode = worker_node,
     ) -> dict[str, Any] | Command[Any]:
-        result = await _inner(state, config=config)
+        result = await _inner(state, config=config, runtime=runtime)
         if isinstance(result, Command):
             # Routing nodes never wrap the loop counter: only plain state
             # updates need it incremented before ``_loop_router`` reads it.
@@ -441,7 +446,7 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
 
 
 def _compile_pipeline_loop(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     _supervisor_agent_config: Any | None,
@@ -491,9 +496,7 @@ def _compile_pipeline_loop(
 
         # Insert mount node before each worker.
         mount_id = f"mount_{agent_cfg.id}"
-        mount_fn = create_mount_node(
-            options.get("workspace_root"), options.get("task_queue_port")
-        )
+        mount_fn = create_mount_node(options.get("workspace_root"))
         _add_node(builder, mount_id, mount_fn)
         _add_node(
             builder,
@@ -519,7 +522,7 @@ def _compile_pipeline_loop(
 
     def _loop_router(state: TeamState) -> str:
         return _loop_route(
-            next_value=state.get("next"),
+            revision_requested=review_requests_revision(state.get("messages") or []),
             loop_count=state.get("loop_count", 0),
             max_loops=max_loops,
         )

@@ -153,8 +153,15 @@ async def test_deterministic_permission_pause_resumes_generic_callback() -> None
         "deny_once",
     }
 
+    # Named and recorded as a dispatched permission response is: an answer
+    # that names no request belongs to no call and is refused.
     resumed = await ainvoke_test_graph(
-        graph, Command(resume={"option_id": "allow_once"}), config
+        graph,
+        Command(
+            resume={"option_id": "allow_once", "request_id": pause["request_id"]},
+            update={"permission_answers": {pause["request_id"]: "allow_once"}},
+        ),
+        config,
     )
 
     assert resumed["messages"][-1].content == (

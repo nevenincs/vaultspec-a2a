@@ -110,6 +110,7 @@ def _entry(**overrides: JsonValue) -> JsonObject:
         # answered by a refusal from another.
         "root_pin": "CANDIDATE_ROOT",
         "exact_surface": False,
+        "per_call_project": False,
     }
     entry.update(overrides)
     for key, value in list(entry.items()):
@@ -247,7 +248,10 @@ class TestSpawnCompositionRefusesUndeclaredNativeTools:
             self._model(), autonomous=True, role="researcher"
         )
         assert isinstance(wired, AcpChatModel)
-        assert wired.allowed_tools == list(NATIVE_READ_TOOL_NAMES)
+        # Each floor name carries the workspace it may read, in the rule syntax
+        # the tool's own permission grammar admits; the SDK gives Grep no path
+        # pattern at all, so it is withheld rather than approved everywhere.
+        assert wired.allowed_tools == ["Read(/tmp/ws/**)", "Glob(/tmp/ws/**)"]
         assert all(NATIVE_TOOL_EGRESS[name] is False for name in NATIVE_READ_TOOL_NAMES)
 
 
@@ -477,7 +481,12 @@ class TestEgressingBuiltinsMustStateTheirBounds:
             extra_tool_names=("WebSearch", "WebFetch"),
         )
         assert isinstance(wired, AcpChatModel)
-        assert wired.allowed_tools == [*NATIVE_READ_TOOL_NAMES, "WebSearch", "WebFetch"]
+        assert wired.allowed_tools == [
+            "Read(/tmp/ws/**)",
+            "Glob(/tmp/ws/**)",
+            "WebSearch",
+            "WebFetch",
+        ]
 
 
 class TestHarnessRegistryRefusesRuntimeDeclaration:

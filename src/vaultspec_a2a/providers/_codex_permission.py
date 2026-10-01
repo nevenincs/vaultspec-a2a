@@ -31,7 +31,9 @@ from typing import Final
 from langgraph.errors import GraphBubbleUp
 
 from ._acp_types import PermissionCallback
+from ._harness_mcp_registry import harness_tool_is_withheld
 from ._json_contract import JsonObject, lenient_json_object
+from ._project_scope import ProjectScope, foreign_project_argument
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +115,11 @@ class CodexPermissionRung:
         *,
         allowed_tools: frozenset[tuple[str, str]],
         permission_callback: PermissionCallback | None = None,
+        project_scope: ProjectScope | None = None,
     ) -> None:
         self._allowed_tools = allowed_tools
         self._permission_callback = permission_callback
+        self._project_scope = project_scope
         # Latest announced call per (threadId, turnId, server). The elicitation
         # carries no call id to join on, so the join is the narrowest identity
         # both frames DO share. ``turnId`` is part of the key rather than
@@ -177,8 +181,9 @@ class CodexPermissionRung:
 
         Every path that cannot establish an approval on the run's own terms
         returns a decline: an elicitation that is not a tool-call approval, one
-        whose tool cannot be named, and one naming a tool outside the composed
-        surface. A decline is a refused tool call, never a stalled turn.
+        whose tool cannot be named, one whose arguments name another project,
+        and one naming a tool outside the composed surface. A decline is a
+        refused tool call, never a stalled turn.
         """
         meta = lenient_json_object(params.get("_meta"))
         kind = meta.get("codex_approval_kind")
@@ -203,6 +208,35 @@ class CodexPermissionRung:
                 params.get("threadId"),
                 params.get("turnId"),
                 params.get("serverName"),
+            )
+            return DECLINE_ACTION
+
+        # Scope enforcement precedes BOTH rungs, as it does on the ACP lane: a
+        # call naming another project is outside what the run was admitted to
+        # do, so neither an allowlist nor a human at the prompt is the authority
+        # that could permit it. The refused ARGUMENT is not logged - a
+        # caller-chosen path is agent-supplied payload - only the fact and the
+        # run's own bound project.
+        # Refused ahead of both rungs for the same reason as the ACP lane: the
+        # tool is served but never callable, and nobody at a prompt can see that
+        # it would send vault text off the host.
+        if harness_tool_is_withheld(f"mcp__{call.server}__{call.tool}"):
+            logger.warning(
+                "Declining a withheld harness tool call: server=%s tool=%s",
+                call.server,
+                call.tool,
+            )
+            return DECLINE_ACTION
+
+        if self._project_scope is not None and (
+            foreign_project_argument(call.arguments, self._project_scope) is not None
+        ):
+            logger.warning(
+                "Declining a cross-project Codex MCP tool call: server=%s tool=%s "
+                "named a project outside the run's bound project (bound=%s)",
+                call.server,
+                call.tool,
+                self._project_scope.bound_project_root(),
             )
             return DECLINE_ACTION
 

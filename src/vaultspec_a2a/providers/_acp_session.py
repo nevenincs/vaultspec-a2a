@@ -16,7 +16,7 @@ from ._acp_auth import (
     runtime_log_extra,
 )
 from ._acp_authoring import AUTHORING_MCP_SERVER_NAME
-from ._acp_mcp import require_declared_surface
+from ._acp_mcp import require_declared_surface, statically_approvable_tool_names
 from ._acp_request import await_response, issue_request
 from ._acp_types import (
     AcpModelConfig,
@@ -25,6 +25,11 @@ from ._acp_types import (
     InitializeResult,
     SessionSetupResult,
     require_workspace_root,
+)
+from ._claude_tool_policy import (
+    AUTONOMOUS_PERMISSION_MODE,
+    MODE_CONFIG_OPTION_ID,
+    claude_disallowed_tools,
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpErrorCode, AcpSessionError
@@ -75,11 +80,31 @@ def claude_session_options(config: AcpModelConfig) -> JsonObject:
     run), enforced by the CLI itself rather than by config-home or workspace
     file manipulation, while the child still runs as the operator's own
     identity. ``allowedTools`` rides the same block for headless runs so the
-    composed tool names are auto-permitted without a local prompt.
+    composed tool names are auto-permitted without a local prompt - all of them
+    except the ones whose project is chosen by the CALL. Those stay in the run's
+    composed surface and are decided at the permission rung instead, because a
+    static approval is taken with the arguments unknown and would put the one
+    boundary that can see a foreign project out of reach.
+
+    ``settingSources`` is the same statement for the CLI's SETTINGS scopes, and
+    for the same reason. The adapter defaults it to user, project, and local, so
+    the lane would otherwise adopt the operator's own ``permissions`` block and
+    the allow rules and hooks of whichever repository the run was pointed at -
+    ambient authority that decides tool permissions before this project's rung
+    is ever consulted. An empty list is honoured as "no sources" by the SDK
+    (only an absent value falls back to the default), and it is the caller's
+    value that survives: the adapter spreads the caller's option block over its
+    own defaults.
+
+    ``disallowedTools`` carries the persona's capability declaration into the
+    only place the CLI's own built-ins respect. The adapter appends its entries
+    to ours rather than replacing them, so what is denied here stays denied.
     """
-    options: JsonObject = {"strictMcpConfig": True}
-    if config.allowed_tools:
-        options["allowedTools"] = list[JsonValue](config.allowed_tools)
+    options: JsonObject = {"strictMcpConfig": True, "settingSources": []}
+    if pre_approved := statically_approvable_tool_names(config.allowed_tools):
+        options["allowedTools"] = list[JsonValue](pre_approved)
+    if disallowed := claude_disallowed_tools(config.agent_config):
+        options["disallowedTools"] = list[JsonValue](disallowed)
     return options
 
 
@@ -468,9 +493,11 @@ def _validated_initialize_result(
             "loadSession support",
             code=AcpErrorCode.INVALID_PARAMS,
         )
+    agent_info = result.get("agentInfo")
     return InitializeResult(
         agent_capabilities=capabilities,
         auth_methods=_validated_auth_methods(result),
+        agent_info=agent_info if isinstance(agent_info, dict) else {},
     )
 
 
@@ -552,6 +579,102 @@ async def _session_setup_response(
             ),
         )
         raise _session_wire_error(f"ACP {method} failed: {err_msg}", err)
+
+
+def is_autonomous_session(config: AcpModelConfig) -> bool:
+    """Whether this session runs with no human permission rung behind it.
+
+    The absence of a permission callback is what "autonomous" MEANS on this
+    lane: the worker leaves it unset for a headless run and wires it for a
+    supervised one, and the permission handler already decides by the same fact.
+    Reading it here keeps one definition rather than a second flag that could
+    disagree with the rung actually installed.
+    """
+    return config.permission_callback is None
+
+
+def _available_mode_ids(agent_modes: JsonObject) -> tuple[str, ...]:
+    """Return the permission-mode ids the session reported it can run in."""
+    available = agent_modes.get("availableModes")
+    if not isinstance(available, list):
+        return ()
+    mode_ids: list[str] = []
+    for mode in available:
+        if not isinstance(mode, dict):
+            continue
+        mode_id = mode.get("id")
+        if isinstance(mode_id, str) and mode_id:
+            mode_ids.append(mode_id)
+    return tuple(mode_ids)
+
+
+async def _pin_autonomous_permission_mode(
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+    session_id: str,
+    config_options: list[JsonObject],
+    agent_modes: JsonObject,
+) -> tuple[list[JsonObject], JsonObject]:
+    """Put an unattended claude session in the deny-unless-pre-approved mode.
+
+    The mode is NOT ours to set through the session options block: the adapter
+    resolves it from the operator's and the workspace's settings files and
+    assigns it after the caller's options are merged, so an ambient
+    ``acceptEdits`` or ``bypassPermissions`` default would auto-approve tools
+    before this project's own rung is consulted. What the adapter does accept
+    after the session exists is a configuration change, and that exchange
+    answers with the option list it now holds - so the mode is set and verified
+    in one call, and a session that reports anything else fails the run rather
+    than proceeding under a posture nobody chose.
+
+    A supervised session keeps the negotiated mode: there is a human at the
+    prompt, which is exactly what this mode exists to replace.
+    """
+    if not (is_strict_claude_session(config) and is_autonomous_session(config)):
+        return config_options, agent_modes
+    reported = agent_modes.get("currentModeId")
+    if reported == AUTONOMOUS_PERMISSION_MODE:
+        return config_options, agent_modes
+    available = _available_mode_ids(agent_modes)
+    if not available:
+        # A session that advertises no modes offers nothing to pin: the pinned
+        # adapter always advertises them, so this is another agent speaking the
+        # same family, and its posture is its own. Said out loud rather than
+        # passed over, because an unattended run is then bounded only by the
+        # allowlist and the permission rung.
+        logger.warning(
+            "ACP session advertises no permission modes; an unattended run is "
+            "bounded only by its allowlist and the permission rung",
+            extra=runtime_log_extra(
+                config, process=ctx.process, handshake_step="session/new"
+            ),
+        )
+        return config_options, agent_modes
+    if AUTONOMOUS_PERMISSION_MODE not in available:
+        raise AcpSessionError(
+            "ACP session cannot run unattended: it does not offer the "
+            f"{AUTONOMOUS_PERMISSION_MODE!r} permission mode "
+            f"(offered: {', '.join(available) or 'none'})",
+            code=AcpErrorCode.INVALID_PARAMS,
+            condition=ProviderCondition.INVALID_REQUEST,
+        )
+    confirmed = await _select_config_option(
+        ctx,
+        session_id,
+        config_options,
+        config_id=MODE_CONFIG_OPTION_ID,
+        desired_value=AUTONOMOUS_PERMISSION_MODE,
+        label="permission mode",
+    )
+    logger.info(
+        "ACP session pinned to the unattended permission mode",
+        extra=runtime_log_extra(
+            config,
+            process=ctx.process,
+            handshake_step="session/set_config_option",
+        ),
+    )
+    return confirmed, {**agent_modes, "currentModeId": AUTONOMOUS_PERMISSION_MODE}
 
 
 def _session_modes(result: JsonObject) -> JsonObject:
@@ -642,7 +765,9 @@ async def setup_session(
     config_options = await _select_desired_config_options(
         ctx, config, session_id, config_options
     )
-    agent_modes = _session_modes(result)
+    config_options, agent_modes = await _pin_autonomous_permission_mode(
+        ctx, config, session_id, config_options, _session_modes(result)
+    )
     ctx.tool_calls = {}
     ctx.agent_modes = agent_modes
     ctx.config_options = config_options

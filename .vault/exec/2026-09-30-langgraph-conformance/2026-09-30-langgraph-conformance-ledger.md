@@ -1,0 +1,509 @@
+---
+tags:
+  - '#exec'
+  - '#langgraph-conformance'
+date: '2026-09-30'
+modified: '2026-09-30'
+body_schema: 'body-v2'
+body_hash: 'sha256:1beb705541dfdc0e7d09852b249b80104d673eaeecc66540daff21647a6f916d'
+related:
+  - "[[2026-09-30-langgraph-conformance-plan]]"
+---
+
+# `langgraph-conformance` ledger
+
+## Changes
+
+- `S29` `M` `.agents/agents/vaultspec-adr-researcher.md`
+- `S29` `M` `.agents/agents/vaultspec-code-reviewer.md`
+- `S29` `M` `.agents/agents/vaultspec-docs-curator.md`
+- `S29` `M` `.agents/agents/vaultspec-high-executor.md`
+- `S29` `M` `.agents/agents/vaultspec-low-executor.md`
+- `S29` `M` `.agents/agents/vaultspec-project-coordinator.md`
+- `S29` `M` `.agents/agents/vaultspec-reference-auditor.md`
+- `S29` `M` `.agents/agents/vaultspec-standard-executor.md`
+- `S29` `M` `.agents/rules/vaultspec-cli.builtin.md`
+- `S29` `M` `.agents/rules/vaultspec-discovery.builtin.md`
+- `S29` `M` `.agents/rules/vaultspec.builtin.md`
+- `S29` `M` `.agents/skills/vaultspec-adr/SKILL.md`
+- `S29` `M` `.agents/skills/vaultspec-code-research/SKILL.md`
+- `S29` `M` `.agents/skills/vaultspec-code-review/SKILL.md`
+- `S29` `M` `.agents/skills/vaultspec-curate/SKILL.md`
+- `S29` `M` `.agents/skills/vaultspec-curate/references/adr-status-taxonomy.md`
+- `S29` `M` `.agents/skills/vaultspec-curate/references/reconciliation-playbook.md`
+- `S29` `M` `.agents/skills/vaultspec-execute/SKILL.md`
+- `S29` `M` `.agents/skills/vaultspec-projectmanager/SKILL.md`
+- `S29` `M` `.agents/skills/vaultspec-research/SKILL.md`
+- `S29` `M` `.agents/skills/vaultspec-team/SKILL.md`
+- `S29` `M` `.claude/agents/vaultspec-adr-researcher.md`
+- `S29` `M` `.claude/agents/vaultspec-code-reviewer.md`
+- `S29` `M` `.claude/agents/vaultspec-docs-curator.md`
+- `S29` `M` `.claude/agents/vaultspec-high-executor.md`
+- `S29` `M` `.claude/agents/vaultspec-low-executor.md`
+- `S29` `M` `.claude/agents/vaultspec-project-coordinator.md`
+- `S29` `M` `.claude/agents/vaultspec-reference-auditor.md`
+- `S29` `M` `.claude/agents/vaultspec-standard-executor.md`
+- `S29` `M` `.claude/rules/vaultspec-cli.builtin.md`
+- `S29` `M` `.claude/rules/vaultspec-discovery.builtin.md`
+- `S29` `M` `.claude/rules/vaultspec-system.builtin.md`
+- `S29` `M` `.claude/rules/vaultspec.builtin.md`
+- `S29` `M` `.claude/skills/vaultspec-adr/SKILL.md`
+- `S29` `M` `.claude/skills/vaultspec-code-research/SKILL.md`
+- `S29` `M` `.claude/skills/vaultspec-code-review/SKILL.md`
+- `S29` `M` `.claude/skills/vaultspec-curate/SKILL.md`
+- `S29` `M` `.claude/skills/vaultspec-curate/references/adr-status-taxonomy.md`
+- `S29` `M` `.claude/skills/vaultspec-curate/references/reconciliation-playbook.md`
+- `S29` `M` `.claude/skills/vaultspec-execute/SKILL.md`
+- `S29` `M` `.claude/skills/vaultspec-projectmanager/SKILL.md`
+- `S29` `M` `.claude/skills/vaultspec-research/SKILL.md`
+- `S29` `M` `.claude/skills/vaultspec-team/SKILL.md`
+- `S29` `M` `.codex/config.toml`
+- `S29` `M` `.codex/rules/vaultspec-cli.builtin.md`
+- `S29` `M` `.codex/rules/vaultspec-discovery.builtin.md`
+- `S29` `M` `.codex/rules/vaultspec-system.builtin.md`
+- `S29` `M` `.codex/rules/vaultspec.builtin.md`
+- `S29` `M` `.gemini/SYSTEM.md`
+- `S29` `M` `.gemini/agents/vaultspec-adr-researcher.md`
+- `S29` `M` `.gemini/agents/vaultspec-code-reviewer.md`
+- `S29` `M` `.gemini/agents/vaultspec-docs-curator.md`
+- `S29` `M` `.gemini/agents/vaultspec-high-executor.md`
+- `S29` `M` `.gemini/agents/vaultspec-low-executor.md`
+- `S29` `M` `.gemini/agents/vaultspec-project-coordinator.md`
+- `S29` `M` `.gemini/agents/vaultspec-reference-auditor.md`
+- `S29` `M` `.gemini/agents/vaultspec-standard-executor.md`
+- `S29` `M` `.gemini/rules/vaultspec-cli.builtin.md`
+- `S29` `M` `.gemini/rules/vaultspec-discovery.builtin.md`
+- `S29` `M` `.gemini/rules/vaultspec.builtin.md`
+- `S29` `M` `.gitignore`
+- `S29` `M` `.vault/exec/2026-09-21-open-issue-remediation/2026-09-21-open-issue-remediation-ledger.md`
+- `S29` `M` `.vaultspec/agents/vaultspec-adr-researcher.md`
+- `S29` `M` `.vaultspec/agents/vaultspec-code-reviewer.md`
+- `S29` `M` `.vaultspec/agents/vaultspec-docs-curator.md`
+- `S29` `M` `.vaultspec/agents/vaultspec-high-executor.md`
+- `S29` `M` `.vaultspec/agents/vaultspec-low-executor.md`
+- `S29` `M` `.vaultspec/agents/vaultspec-project-coordinator.md`
+- `S29` `M` `.vaultspec/agents/vaultspec-reference-auditor.md`
+- `S29` `M` `.vaultspec/agents/vaultspec-standard-executor.md`
+- `S29` `D` `.vaultspec/hooks/example-audit-on-create.yaml`
+- `S29` `M` `.vaultspec/reference/cli.md`
+- `S29` `M` `.vaultspec/reference/published-surface.json`
+- `S29` `M` `.vaultspec/rules/vaultspec-cli.builtin.md`
+- `S29` `M` `.vaultspec/rules/vaultspec-discovery.builtin.md`
+- `S29` `M` `.vaultspec/rules/vaultspec.builtin.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-adr/SKILL.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-code-research/SKILL.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-code-review/SKILL.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-curate/SKILL.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-curate/references/adr-status-taxonomy.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-curate/references/reconciliation-playbook.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-execute/SKILL.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-projectmanager/SKILL.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-research/SKILL.md`
+- `S29` `M` `.vaultspec/skills/vaultspec-team/SKILL.md`
+- `S29` `M` `.vaultspec/system/01-core.md`
+- `S29` `M` `.vaultspec/system/02-operations.md`
+- `S29` `M` `.vaultspec/system/03-vaultspec.md`
+- `S29` `M` `.vaultspec/templates/adr.md`
+- `S29` `M` `.vaultspec/templates/plan.md`
+- `S29` `A` `.vaultspec/triggers/example-audit-on-create.yaml`
+- `S29` `M` `GEMINI.md`
+- `S29` `M` `Justfile`
+- `S29` `M` `dev/tests/test_prek_config.py`
+- `S29` `M` `prek.toml`
+- `S29` `M` `pyproject.toml`
+- `S29` `M` `uv.lock`
+- `S29` `verify:` `dev tests (105) + providers team context suites on the 0.3.2 lock (1406) + vault check all + both plan checks + real MCP contract launches` -> `pass`
+- `S29` `by:` `orchestrator`
+- `S30` `M` `src/vaultspec_a2a/providers/_harness_mcp_registry.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_mcp_contract.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `S30` `M` `src/vaultspec_a2a/providers/_codex_permission.py`
+- `S30` `A` `src/vaultspec_a2a/providers/tests/test_withheld_harness_tools.py`
+- `S30` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S30` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S30` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S30` `M` `src/vaultspec_a2a/service_tests/test_core_grounding_live.py`
+- `S30` `verify:` `providers team context dev suites on the 0.3.2 lock (1406) + withheld-tool tests failing on the previous handlers + real vaultspec-core-mcp and rag --read-only launches through verify_harness_mcp_contract` -> `pass`
+- `S30` `by:` `orchestrator`
+- `S31` `M` `pyproject.toml`
+- `S31` `M` `uv.lock`
+- `S31` `verify:` `graph streaming factory prompt-render suites on the relocked environment (661); the full suite on these versions passed in the version review (4830)` -> `pass`
+- `S31` `by:` `orchestrator`
+- `S16` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S16` `M` `src/vaultspec_a2a/worker/_dispatch_contract.py`
+- `S16` `M` `src/vaultspec_a2a/worker/app.py`
+- `S16` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S16` `M` `src/vaultspec_a2a/worker/tests/test_executor_drain.py`
+- `S16` `verify:` `streaming worker suites (383) + stream, clarification, graph, refusal suites (401) + ruff + ty` -> `pass`
+- `S16` `by:` `worker-a3417956`
+- `S17` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S17` `A` `src/vaultspec_a2a/streaming/tests/test_ingest_durability.py`
+- `S17` `M` `src/vaultspec_a2a/streaming/types.py`
+- `S17` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
+- `S17` `verify:` `streaming worker team graph and stream-attachment suites (948) + ruff + ty` -> `pass`
+- `S17` `by:` `worker-a3417956`
+- `S18` `A` `src/vaultspec_a2a/streaming/_run_callbacks.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/aggregator.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S18` `A` `src/vaultspec_a2a/streaming/tests/test_public_stream_ingest.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/tests/test_transformer_characterization.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/transformer.py`
+- `S18` `A` `src/vaultspec_a2a/streaming/translation.py`
+- `S18` `M` `src/vaultspec_a2a/streaming/types.py`
+- `S18` `M` `src/vaultspec_a2a/worker/_dispatch_receipts.py`
+- `S18` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S18` `A` `src/vaultspec_a2a/worker/tests/test_dispatch_receipt_timing.py`
+- `S18` `M` `src/vaultspec_a2a/worker/tests/test_state_projection_timeout_knob.py`
+- `S18` `verify:` `streaming worker team graph api stream and clarification suites (967) + openapi artifact unchanged + ruff + ty` -> `pass`
+- `S18` `by:` `worker-a3417956`
+- `S19` `M` `src/vaultspec_a2a/streaming/_run_callbacks.py`
+- `S19` `A` `src/vaultspec_a2a/streaming/tests/test_stream_identity.py`
+- `S19` `verify:` `streaming worker team graph api stream clarification and refusal suites (973) + ruff + ty=pass; orchestrator re-ran the merged tree on the 0.3.2 lock (979)` -> `pass`
+- `S19` `by:` `worker-a3417956`
+- `S01` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S01` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S01` `M` `src/vaultspec_a2a/graph/tests/test_research_adr.py`
+- `S01` `verify:` `test_research_adr (13) + reviewer research probe: synthesis input now carries every branch claim` -> `pass`
+- `S01` `by:` `worker-afec6969`
+- `S02` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S02` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S02` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S02` `M` `src/vaultspec_a2a/graph/tests/conftest.py`
+- `S02` `A` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
+- `S02` `verify:` `test_checkpointed_value_types (2) + real SQLite park, reopen and resume under LANGGRAPH_STRICT_MSGPACK=true on research and star presets` -> `pass`
+- `S02` `by:` `worker-afec6969`
+- `S03` `M` `src/vaultspec_a2a/api/tests/test_cancel_settled_run_status.py`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_recovery_authority.py`
+- `S03` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S03` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S03` `M` `typings/langgraph/graph/__init__.pyi`
+- `S03` `M` `typings/langgraph/graph/message.pyi`
+- `S03` `verify:` `test_compiler (71) + ty over src and typings` -> `pass`
+- `S03` `by:` `worker-afec6969`
+- `S04` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S04` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S04` `M` `src/vaultspec_a2a/graph/tests/nodes/test_phase_gate.py`
+- `S04` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S04` `M` `src/vaultspec_a2a/thread/__init__.py`
+- `S04` `M` `src/vaultspec_a2a/thread/errors.py`
+- `S04` `M` `src/vaultspec_a2a/thread/tests/test_errors.py`
+- `S04` `verify:` `test_review_budget (9) + refuse probe: 16 attempts and GraphRecursionError became 5 and DocumentConformanceError` -> `pass`
+- `S04` `by:` `worker-afec6969`
+- `S05` `M` `src/vaultspec_a2a/domain_config.py`
+- `S05` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S05` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S05` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S05` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S05` `M` `src/vaultspec_a2a/thread/state.py`
+- `S05` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
+- `S05` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S05` `verify:` `graph and thread suites (632) + research probe: later phases no longer see a settled gate's notes` -> `pass`
+- `S05` `by:` `worker-afec6969`
+- `S07` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S07` `M` `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+- `S07` `M` `src/vaultspec_a2a/graph/tests/conftest.py`
+- `S07` `A` `src/vaultspec_a2a/graph/tests/test_vault_index_refresh.py`
+- `S07` `verify:` `graph and context suites (571) + stale probe: exec no longer refused after the planner writes` -> `pass`
+- `S07` `by:` `worker-afec6969`
+- `S08` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S08` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S08` `verify:` `graph suites (407)` -> `pass`
+- `S08` `by:` `worker-afec6969`
+- `S09` `M` `src/vaultspec_a2a/thread/state.py`
+- `S09` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S09` `M` `src/vaultspec_a2a/worker/tests/test_executor.py`
+- `S09` `verify:` `worker thread graph suites (810)` -> `pass`
+- `S09` `by:` `worker-afec6969`
+- `S10` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S10` `M` `src/vaultspec_a2a/graph/_compiler_retry.py`
+- `S10` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S10` `A` `src/vaultspec_a2a/graph/tests/nodes/test_config_contract.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S10` `verify:` `graph worker suites (579) + topo probe: 60 s budget now backs a 213.5 s step timeout` -> `pass`
+- `S10` `by:` `worker-afec6969`
+- `S06` `M` `.env.example`
+- `S06` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S06` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber.py`
+- `S06` `M` `src/vaultspec_a2a/control/verdict_subscriber.py`
+- `S06` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S06` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S06` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S06` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/nodes/test_phase_gate.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/test_research_adr.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/test_review_budget.py`
+- `S06` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S06` `verify:` `control graph thread worker suites (1372) + gateway plan-approval tests after the merge's payload update` -> `pass`
+- `S06` `by:` `worker-afec6969`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/phase_gate.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_phase_gate.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `S13` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S13` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `S13` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/worker` -> `pass`
+- `S13` `by:` `orchestrator`
+- `S11` `M` `src/vaultspec_a2a/thread/action_receipts.py`
+- `S11` `M` `src/vaultspec_a2a/thread/state.py`
+- `S11` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S11` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S11` `A` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S11` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S11` `by:` `worker-a35ac993`
+- `S12` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S12` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S12` `A` `src/vaultspec_a2a/worker/tests/test_executor_resume_preflight.py`
+- `S12` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S12` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S12` `by:` `worker-a35ac993`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/clarification.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_clarification.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S13` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S13` `by:` `worker-a35ac993`
+- `S14` `M` `src/vaultspec_a2a/control/permission_dispatch.py`
+- `S14` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S14` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker.py`
+- `S14` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S14` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S14` `M` `src/vaultspec_a2a/providers/tests/test_deterministic_scripts.py`
+- `S14` `M` `src/vaultspec_a2a/thread/state.py`
+- `S14` `M` `src/vaultspec_a2a/thread/tests/test_state.py`
+- `S14` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S14` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_preflight.py`
+- `S14` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S14` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S14` `by:` `worker-a35ac993`
+- `S15` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S15` `M` `src/vaultspec_a2a/control/permission_service.py`
+- `S15` `M` `src/vaultspec_a2a/control/tests/test_permission_rejection_journal.py`
+- `S15` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S15` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S15` `A` `src/vaultspec_a2a/worker/tests/test_executor_parallel_interrupts.py`
+- `S15` `verify:` `pytest -m not service (full unit gate on the P02 integration, 4884 passed)` -> `pass`
+- `S15` `by:` `worker-a35ac993`
+- `S20` `M` `src/vaultspec_a2a/control/tests/test_thread_list_bulk_checkpoints.py`
+- `S20` `M` `src/vaultspec_a2a/control/thread_listing.py`
+- `S20` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S20` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_pool.py`
+- `S20` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S20` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S20` `by:` `worker-adefe507`
+- `S21` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S21` `A` `src/vaultspec_a2a/database/tests/test_checkpoint_setup_race.py`
+- `S21` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S21` `by:` `worker-adefe507`
+- `S22` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S22` `A` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S22` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S22` `by:` `worker-adefe507`
+- `S23` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S23` `A` `src/vaultspec_a2a/database/tests/test_armed_checkpoint_setup.py`
+- `S23` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S23` `by:` `worker-adefe507`
+- `S24` `M` `src/vaultspec_a2a/database/checkpoint_retention.py`
+- `S24` `M` `src/vaultspec_a2a/database/checkpoint_schema.py`
+- `S24` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S24` `M` `src/vaultspec_a2a/database/migrations/__init__.py`
+- `S24` `A` `src/vaultspec_a2a/database/tests/test_checkpoint_retention_guards.py`
+- `S24` `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `S24` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S24` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S24` `by:` `worker-adefe507`
+- `S25` `M` `openapi.json`
+- `S25` `M` `src/vaultspec_a2a/api/schemas/snapshots.py`
+- `S25` `M` `src/vaultspec_a2a/control/snapshot.py`
+- `S25` `A` `src/vaultspec_a2a/control/tests/test_checkpoint_history_depth.py`
+- `S25` `M` `src/vaultspec_a2a/control/thread_state_service.py`
+- `S25` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S25` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S25` `by:` `worker-adefe507`
+- `S27` `M` `src/vaultspec_a2a/api/app.py`
+- `S27` `M` `src/vaultspec_a2a/database/migrations/__init__.py`
+- `S27` `A` `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py`
+- `S27` `verify:` `pytest database control thread worker api -m not service with Postgres after the P04 merge (2042 passed)` -> `pass`
+- `S27` `by:` `worker-adefe507`
+- `S33` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S33` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S33` `M` `src/vaultspec_a2a/graph/tests/conftest.py`
+- `S33` `A` `src/vaultspec_a2a/graph/tests/test_research_permission_rung.py`
+- `S33` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S33` `by:` `worker-a0387a8c`
+- `S36` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S36` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S36` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S36` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S36` `verify:` `pytest src/vaultspec_a2a/graph src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S36` `by:` `worker-a0387a8c`
+- `S42` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S42` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
+- `S42` `by:` `orchestrator`
+- `S27` `M` `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py`
+- `S27` `verify:` `pytest src/vaultspec_a2a/api src/vaultspec_a2a/control src/vaultspec_a2a/database with Postgres required` -> `pass`
+- `S27` `by:` `orchestrator`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_gateway_drain.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_internal.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_run_history_transcript_availability.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_team_status_descriptor.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_thread_deletion_saga.py`
+- `S32` `M` `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_authoring_completion_check.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_terminal_sequence_capture.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_thread_deletion_saga.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber.py`
+- `S32` `M` `src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_armed_checkpoint_setup.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_pool.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_state_migration.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_compatibility.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_reconciliation.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_reconciliation_epoch_reboot.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_repair_journal_retention.py`
+- `S32` `M` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S32` `M` `src/vaultspec_a2a/desktop/tests/test_migration.py`
+- `S32` `A` `src/vaultspec_a2a/tests/_checkpoint_seeding.py`
+- `S32` `verify:` `pytest api control database desktop with Postgres required after the merge` -> `pass`
+- `S32` `by:` `worker-a534b80e`
+- `S37` `M` `pyproject.toml`
+- `S37` `M` `src/vaultspec_a2a/providers/_harness_mcp_registry.py`
+- `S37` `M` `src/vaultspec_a2a/providers/_mcp_contract.py`
+- `S37` `M` `src/vaultspec_a2a/providers/tests/test_mcp_contract.py`
+- `S37` `M` `uv.lock`
+- `S37` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S37` `by:` `worker-a7344905`
+- `S40` `M` `src/vaultspec_a2a/streaming/__init__.py`
+- `S40` `A` `src/vaultspec_a2a/streaming/custom_writes.py`
+- `S40` `A` `src/vaultspec_a2a/streaming/tests/_error_injecting_graph.py`
+- `S40` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S40` `M` `src/vaultspec_a2a/streaming/transformer.py`
+- `S40` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S40` `by:` `worker-a7344905`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/conftest.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S41` `M` `src/vaultspec_a2a/providers/tests/test_launcher_confinement.py`
+- `S41` `verify:` `pytest src/vaultspec_a2a/providers src/vaultspec_a2a/streaming src/vaultspec_a2a/worker src/vaultspec_a2a/team after the merge` -> `pass`
+- `S41` `by:` `worker-a7344905`
+- `S26` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S26` `A` `src/vaultspec_a2a/database/tests/test_checkpoint_strict_serde.py`
+- `S26` `M` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S26` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
+- `S26` `by:` `worker-a287e053`
+- `S34` `M` `src/vaultspec_a2a/thread/checkpoint_evidence.py`
+- `S34` `A` `src/vaultspec_a2a/thread/tests/test_checkpoint_evidence.py`
+- `S34` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
+- `S34` `by:` `worker-a287e053`
+- `S35` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S35` `M` `src/vaultspec_a2a/thread/tests/test_checkpoint_projection_stages.py`
+- `S35` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S35` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `S35` `M` `src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`
+- `S35` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
+- `S35` `by:` `worker-a287e053`
+- `S39` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S39` `A` `src/vaultspec_a2a/database/tests/_checkpoint_history.py`
+- `S39` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py`
+- `S39` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention_guards.py`
+- `S39` `M` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S39` `M` `src/vaultspec_a2a/thread/enums.py`
+- `S39` `A` `src/vaultspec_a2a/thread/tests/test_degraded_reasons.py`
+- `S39` `verify:` `pytest -m not service --require-prerequisite=postgres full gate after the merge (4958 passed)` -> `pass`
+- `S39` `by:` `worker-a287e053`
+- `S43` `M` `src/vaultspec_a2a/thread/enums.py`
+- `S43` `M` `src/vaultspec_a2a/worker/state_projection.py`
+- `S43` `M` `src/vaultspec_a2a/control/projection.py`
+- `S43` `M` `src/vaultspec_a2a/thread/tests/test_degraded_reasons.py`
+- `S43` `M` `src/vaultspec_a2a/api/tests/test_served_vocabulary_containment.py`
+- `S43` `verify:` `pytest control thread worker api graph and the package structural tests with Postgres required` -> `pass`
+- `S43` `by:` `orchestrator`
+- `S44` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S44` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
+- `S44` `by:` `orchestrator`
+- `S02` `M` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
+- `S02` `verify:` `pytest src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py dev/tests/test_storage_anchors.py` -> `pass`
+- `S02` `by:` `orchestrator`
+- `S34` `M` `src/vaultspec_a2a/worker/_dispatch_receipts.py`
+- `S34` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S34` `verify:` `pytest src/vaultspec_a2a/worker src/vaultspec_a2a/streaming src/vaultspec_a2a/graph src/vaultspec_a2a/control with Postgres required` -> `pass`
+- `S34` `by:` `orchestrator`
+- `S13` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
+- `S13` `by:` `orchestrator`
+- `S18` `verify:` `pytest src/vaultspec_a2a/streaming src/vaultspec_a2a/worker` -> `pass`
+- `S18` `by:` `orchestrator`
+- `S37` `verify:` `pytest src/vaultspec_a2a/providers/tests/test_mcp_contract.py` -> `pass`
+- `S37` `by:` `orchestrator`
+- `S34` `verify:` `pytest src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py` -> `pass`
+- `S45` `M` `src/vaultspec_a2a/control/_event_application.py`
+- `S45` `M` `src/vaultspec_a2a/control/tests/test_event_handlers.py`
+- `S45` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/worker src/vaultspec_a2a/api src/vaultspec_a2a/graph with Postgres required` -> `pass`
+- `S45` `by:` `orchestrator`
+- `S28` `M` `.vault/adr/2026-02-26-event-aggregation-server-side-replay-adr.md`
+- `S28` `M` `.vault/adr/2026-02-26-orchestration-topology-pipeline-adr.md`
+- `S28` `M` `.vault/adr/2026-02-27-team-composition-topology-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-blackboard-content-mounting-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-contextual-anchoring-graph-lifecycle-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-persistent-task-queue-schema-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-phase-artifact-gates-adr.md`
+- `S28` `M` `.vault/adr/2026-03-03-plan-approval-interrupt-adr.md`
+- `S28` `M` `.vault/adr/2026-03-04-worker-process-architecture-adr.md`
+- `S28` `M` `.vault/adr/2026-03-10-postgres-dual-backend-adr.md`
+- `S28` `M` `.vault/adr/2026-07-14-adr-authoring-orchestration-adr.md`
+- `S28` `M` `.vault/research/2026-09-24-architecture-review-research.md`
+- `S28` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S28` `by:` `vaultspec-adr-researcher`
+
+## Notes
+
+- `S29` The framework's 28 builtins, provider projections and hook migration were applied by vaultspec-core install --upgrade and migrations run; the repository's annotations hook was moved out of the managed block the migration re-rendered.
+- `S30` Core's search and crossref are withheld, not declared, per the user's choice on 2026-09-30 (serve but never permit): they send vault text to a hosted API when a key resolves and 0.3.2 has no launch flag to drop them.
+- `S16` Scope extended to `worker/_dispatch_contract.py` and worker/app.py so a draining worker refuses dispatch with its own token and a 503.
+- `S17` Sync durability is requested only when the graph has a real checkpointer: LangGraph 1.2.12 crashes a sync-durability run without one.
+- `S18` Tool lifecycle and model-turn close come from a callback handler in config callbacks; `message_id` now matches the stored message id the snapshot reports.
+- `S19` Four of five clauses were subsumed by S18 and proven against the pre-S18 code; the residual was a model-announced tool call registered twice.
+- `S01` The join is a declared node property `(joins_research_findings),` so no other worker receives another stage's evidence.
+- `S03` Two direct `_compile_graph` callers in api and control tests needed the new required name.
+- `S04` Ends in a typed DocumentConformanceError instead of parking: a conformance refusal precedes any proposal, and a gate parked on no proposal could never be answered by a verdict.
+- `S05` Adds `supervisor_finish_blocks` and `VAULTSPEC_A2A_SUPERVISOR_FINISH_BLOCK_LIMIT` (default 3), counted apart from re-asks.
+- `S07` Research topology deliberately not refreshed: its documents are unapplied engine proposals and no gate there reads `vault_index.`
+- `S10` The config-contract tests pin existing behaviour; proven non-tautological by neutering the stamp.
+- `S06` Restores the one-time plan approval that ADR-020 still specifies; plan and document gate payloads disclose a `request_id` and refuse a verdict naming another request. The orchestrator updated four gateway plan-approval payload tests at merge.
+- `S13` Integration correction: both approval gates ask again on an unbound verdict; the projection counts parked tasks as next nodes.
+- `S11` The channels a resume rebinds now reduce; dropping the digests from the resume was rejected because a run parked before checkpoint evidence acquires them from it.
+- `S12` A refused resume leaves the run untouched and projects its execution state. At merge the orchestrator moved the preflight test's resume to a restarted executor, since a draining executor now refuses dispatch.
+- `S14` The bare-option resolver lost its last caller and was removed with the tests that only exercised it.
+- `S20` Concurrency is a saver per caller over the shared pool; one AsyncPostgresSaver holds one lock around every statement, so a pool alone never made it concurrent.
+- `S21` Setup is serialized by a session-scoped advisory lock with a polling loser; a blocking waiter would be a transaction the winner's CREATE INDEX CONCURRENTLY waits on.
+- `S22` Also fixes the high deadlock the Step's probe found: the bridge's put and `put_writes` waited on the loop that had to run them.
+- `S25` The served schema now says a parent id names the recorded parent, which may be pruned; openapi.json regenerated.
+- `S27` Retired rather than run on both backends: the backfill repaired nothing observable, and the desktop profile's repair belongs to the staged-generation migration entrypoint.
+- `S33` A fan-out branch reads on through its own resume values instead of parking on the first unusable one, because its Send payload never carries later answers; the one-interrupt-per-execution rule still holds for ordinary workers.
+- `S36` The required recursion limit measures `3*limit+1,` not the audit's estimate; the compile check applies only to teams with an exec or audit worker, since others never spend the budget. One budget test moved to the review-artifact gate because exec returns now clear validation errors.
+- `S42` Unreachable under the shipped gate table, so no behavioural test can fail before it without widening the supervisor API to inject a table; the order is now correct by construction and the existing graph suite passes.
+- `S27` Correction: the boot proof leaked the process-wide engine seat and failed when API tests ran first in the same process.
+- `S32` Seeds from a real graph run on a private InMemorySaver so whole-store scans and exact history counts see no seed rows; hand-set `channel_versions` now come from the target saver's `get_next_version.` The first attempt ran on the wrong base and was replayed.
+- `S37` Skew is refused through the rag client's own `get_index_status` verdict on the contract handshake. Hosted-ranking egress is not observable from the read-only MCP surface (only the daemon's own health endpoint reports it), so it stays an open operator-configuration finding. The worktree started on main and was rebased; commit messages were rewritten at merge for style and attribution.
+- `S40` Custom writes carry their node through a stamp read from the writer's own config metadata; one documented stream-versus-state stub remains because a real graph cannot disagree with itself. The team and worker stubs the audit counted are a Protocol and one justified latency stub.
+- `S41` Absent the adapter the ten tests fail in fixture setup with one message naming the path and npm install; never skipped.
+- `S26` An explicit strict JsonPlusSerializer on every saver rather than the process-wide env var; the compile-time schema allowlist that only the env var triggers adds nothing checkpointed for this graph.
+- `S34` Receipt channels are read from pending writes as well as channel values.
+- `S35` Scope extended to thread/snapshots.py, where run-status disclosure folds pending writes; answered is keyed on the fixed per-task write slots so a task that failed mid-node still reads as waiting. A follow-up commit makes the live clarification proof wait for the run's position rather than only its answers.
+- `S39` The borrowed-close refusal exists only on the selector bridge; the pooled Postgres sibling has no close. The schema pin cannot fail before its change because the guard is the deliverable; proven by bumping the pin. Also consolidates the retention test helpers the structural gate flagged.
+- `S43` The producer guard is widened from the history family to every member; the helper-literal producers moved to members so the guard can see them.
+- `S02` Correction: the proofs used the system temp directory, which the storage-anchor gate refuses; surfaced by just ci.
+- `S34` Reopened by the plan-close review: the pending-write fold was unreachable because the worker never emitted a receipt for a resume that only asks again.
+- `S13` Correction from the plan-close review: the no-proposal fail-closed branch was unreachable through the resume preflight.
+- `S18` Correction from the plan-close review: the aggregator's projection seams had no production caller.
+- `S34` Correction from the re-review: an unavailable checkpoint read was logged as a receipt not yet due.
+- `S28` User approved the drafted amendments as recommended on 2026-09-30. team-composition-topology and orchestration-topology-pipeline accepted; event-aggregation amended but left proposed pending the user's accept-or-deprecate choice.

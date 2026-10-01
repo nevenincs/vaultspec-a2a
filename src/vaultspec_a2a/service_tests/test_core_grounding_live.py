@@ -2,7 +2,8 @@
 
 The registry admits `vaultspec-core` on the strength of an upstream restricted
 launch, and the contract check proves the launched server serves exactly the
-declared four. Neither proves a MODEL ever reaches them. The served-profile rule
+declared four plus the two it withholds. Neither proves a MODEL ever reaches
+them. The served-profile rule
 is explicit that a capability counts only when a live test has completed a real
 turn using it - construction coverage, config-parse coverage and handshake
 coverage do not qualify - so this drives a real turn that answers only if the

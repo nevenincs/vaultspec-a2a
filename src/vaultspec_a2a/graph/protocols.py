@@ -97,6 +97,10 @@ class UsageRecordArgs(TypedDict):
     model: str | None
     input_tokens: int
     output_tokens: int
+    # None when the lane did not report the breakdown.
+    cache_read_tokens: int | None
+    cache_write_tokens: int | None
+    reasoning_tokens: int | None
 
 
 @runtime_checkable

@@ -56,6 +56,7 @@ to drift from the wire-side one.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Protocol, cast, get_args
 
 from annotated_types import MaxLen
@@ -80,6 +81,7 @@ from ...thread.clarification import (
     render_clarification_answers,
     strip_control_characters,
 )
+from ...thread.snapshots import stamp_message_created_at
 
 if TYPE_CHECKING:
     from ...thread.state import TeamState
@@ -91,6 +93,8 @@ __all__ = [
     "create_clarification_gate_node",
     "create_clarification_request_node",
 ]
+
+_logger = logging.getLogger(__name__)
 
 
 class ClarificationQuestionProducer(Protocol):
@@ -327,6 +331,15 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
     An unreadable or absent committed request routes on rather than parking: a
     run must not be stranded at an interrupt whose question nobody can render.
 
+    An answer the request refuses parks the run again on the same question
+    instead of raising. ``interrupt()`` records its resume value against the
+    running task before the node can judge it, so a node that raises leaves
+    that value in place and every later answer replays the refused one and
+    fails the same way - one bad answer would end the run's ability to be
+    answered at all. Asking again takes the next answer at the next position
+    instead, and the question set stays committed, so a status read still
+    discloses the questionnaire the run is waiting on.
+
     Args:
         proceed_target: The stage the run continues to once answered.
 
@@ -349,11 +362,22 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
                 },
             )
 
-        resume_value = interrupt(request.as_interrupt_payload())
-        resolution = parse_clarification_resolution(
-            resume_value,
-            request_id=request.request_id,
-        )
+        payload = request.as_interrupt_payload()
+        while True:
+            try:
+                resolution = parse_clarification_resolution(
+                    interrupt(payload),
+                    request_id=request.request_id,
+                )
+            except ValueError as exc:
+                _logger.warning(
+                    "Clarification answer for request %s was refused (%s); "
+                    "asking again",
+                    request.request_id,
+                    exc,
+                )
+                continue
+            break
 
         update: dict[str, Any] = {
             "next": proceed_target,
@@ -375,15 +399,23 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
             # effectively answered (all-optional questionnaire, empty map).
             rendered = render_clarification_answers(request, declared)
             if rendered is not None:
-                update["messages"] = [HumanMessage(content=rendered)]
+                update["messages"] = [
+                    stamp_message_created_at(HumanMessage(content=rendered))
+                ]
         elif isinstance(resolution, ClarificationDecline):
             # A decline's whole downstream trace is this one fixed marker: the
             # transcript is the only state model turns read, and without it a
             # declined questionnaire is indistinguishable from one never asked.
             # No answer entry is recorded - refusal is not an answer.
-            update["messages"] = [HumanMessage(content=CLARIFICATION_DECLINE_MARKER)]
+            update["messages"] = [
+                stamp_message_created_at(
+                    HumanMessage(content=CLARIFICATION_DECLINE_MARKER)
+                )
+            ]
         else:
-            update["messages"] = [HumanMessage(content=resolution.prompt)]
+            update["messages"] = [
+                stamp_message_created_at(HumanMessage(content=resolution.prompt))
+            ]
         return Command(goto=proceed_target, update=update)
 
     clarification_gate_node.__name__ = "clarification_gate"

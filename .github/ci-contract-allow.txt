@@ -25,6 +25,17 @@ merge-gate.yml:Judge the required checks
 # no local meaning.
 release-please.yml:Refresh the release branch lockfile
 
+# The release cut. Each of these reads or writes GitHub's own state - a pull
+# request's head, its merge commit's tree, a tag's target, a manifest blob at a
+# commit - through `gh`, and reaches it through a shell conditional because the
+# decision each makes is "refuse" or "continue". None of them has a local
+# meaning: there is no pull request, no merge commit and no tag on a developer's
+# machine for a recipe to act on.
+release-please.yml:Find the release pull request and the commit to prove
+release-please.yml:Merge the proven release pull request
+release-please.yml:Name a release this token cannot tag
+release-please.yml:Require the tag on the proven commit
+
 # --- pending ----------------------------------------------------------------
 # Installs the Codex CLI the prerequisite gates spawn, UNPINNED and globally:
 # `npm install -g @openai/codex`. An unpinned global install decides what a

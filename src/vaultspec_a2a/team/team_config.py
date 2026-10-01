@@ -460,6 +460,9 @@ class TopologyConfig(BaseModel):
     # and compiles to a single default branch; declare specs for real N-way
     # parallel research.
     research_threads: list[ResearchThreadSpec] = Field(default_factory=list)
+    # research_adr inner review: how many revisions a phase's reviewer may send
+    # back to its writer before the phase advances to its human gate anyway.
+    max_review_revisions: int = Field(default=3, ge=0, le=20)
 
     @model_validator(mode="after")
     def validate_topology(self) -> "TopologyConfig":

@@ -33,7 +33,7 @@ from ..database import (
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import ControlActionType
 from ..thread.idempotency import default_message_key
 from ..thread.message_policy import can_send_followup
 from ._thread_metadata import dispatchable_workspace_root
@@ -176,7 +176,10 @@ async def send_followup_message(
     refused_status = thread.status
     eligibility = can_send_followup(refused_status)
     if not eligibility.allowed:
-        # Distinguish INPUT_REQUIRED from generic terminal-state rejection
+        # Nothing has been reserved at this point, so the refusal leaves the run
+        # exactly as it was: no journal action, no writer, no dispatch. The
+        # refusal is typed by the policy that decided it rather than re-derived
+        # from the status here, so one status cannot mean two things.
         await db.rollback()
         return MessageResult(
             action_id="",
@@ -184,11 +187,7 @@ async def send_followup_message(
             thread_status=refused_status,
             dispatched=False,
             error_detail=eligibility.reason,
-            failure_type=(
-                FailureType.INPUT_REQUIRED
-                if refused_status == ThreadStatus.INPUT_REQUIRED.value
-                else FailureType.TERMINAL
-            ),
+            failure_type=eligibility.failure_type,
         )
 
     logger.info(

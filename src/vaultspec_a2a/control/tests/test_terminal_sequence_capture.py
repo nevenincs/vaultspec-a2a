@@ -32,7 +32,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -47,6 +46,7 @@ from ...database.models import ThreadModel
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.enums import ThreadStatus
@@ -58,6 +58,8 @@ from ..thread_state_service import capture_thread_state
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from langchain_core.runnables import RunnableConfig
 
 
 @pytest_asyncio.fixture
@@ -130,7 +132,10 @@ async def _seed_completed_authority(
     )
     assert receipt is not None
     await session.commit()
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread.id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{thread.id}"
     checkpoint["channel_values"] = {
         "active_graph_action_receipt": receipt.model_dump(mode="json"),
@@ -144,12 +149,12 @@ async def _seed_completed_authority(
         },
     }
     checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": 1,
-        "graph_action_receipts": 1,
-        "graph_completion_receipts": 1,
+        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
+        "graph_action_receipts": checkpointer.get_next_version(None, None),
+        "graph_completion_receipts": checkpointer.get_next_version(None, None),
     }
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread.id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         checkpoint["channel_versions"],

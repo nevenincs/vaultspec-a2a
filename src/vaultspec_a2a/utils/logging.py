@@ -19,11 +19,18 @@ piped-output-corruption into one impossible-by-construction state.
 
 from __future__ import annotations
 
+import contextvars
+import itertools
 import json
 import logging
+import re
 import sys
+from contextlib import contextmanager
+from datetime import UTC, date, datetime
+from enum import Enum
 from logging.handlers import RotatingFileHandler
-from types import TracebackType
+from pathlib import PurePath
+from types import MappingProxyType, TracebackType
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, override
 
 from opentelemetry import trace
@@ -32,6 +39,7 @@ from opentelemetry.trace.span import format_span_id, format_trace_id
 from ..control.state_layout import seal_state_home, state_layout
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
     from pathlib import Path
 
 #: The populated shape of ``LogRecord.exc_info``; see ``JSONFormatter``, which
@@ -39,12 +47,18 @@ if TYPE_CHECKING:
 type _ExcInfo = tuple[type[BaseException], BaseException, TracebackType | None]
 
 __all__ = [
+    "LOG_SCHEMA",
     "JSONFormatter",
     "LivenessPollFilter",
+    "LogContextFilter",
     "OTelCorrelationFilter",
     "configure_logging",
+    "log_context",
     "reconfigure_console_utf8",
 ]
+
+#: Names the shape of one JSON log line; bumped when a field changes meaning.
+LOG_SCHEMA = "vaultspec-a2a.log/1"
 
 ProcessKind = Literal["service", "cli", "protocol", "library"]
 
@@ -181,35 +195,171 @@ class OTelCorrelationFilter(logging.Filter):
         return True
 
 
+_log_context: contextvars.ContextVar[Mapping[str, str]] = contextvars.ContextVar(
+    "vaultspec_a2a_log_context", default=MappingProxyType({})
+)
+
+
+@contextmanager
+def log_context(**fields: str | None) -> Iterator[None]:
+    """Attach correlation fields to every record logged within this scope.
+
+    Held in a context variable, so the fields follow the asyncio tasks started
+    inside the scope - a run's provider and streaming logs as well as its own -
+    and end when the scope does. Scopes nest, the inner field winning; a field
+    a call site passes itself wins over both.
+    """
+    bound = {
+        **_log_context.get(),
+        **{key: value for key, value in fields.items() if value is not None},
+    }
+    token = _log_context.set(MappingProxyType(bound))
+    try:
+        yield
+    finally:
+        _log_context.reset(token)
+
+
+class LogContextFilter(logging.Filter):
+    """Copy the current :func:`log_context` fields onto each record."""
+
+    @override
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Add the scope's fields without overwriting caller-provided values."""
+        for key, value in _log_context.get().items():
+            if key not in record.__dict__:
+                setattr(record, key, value)
+        return True
+
+
+# Key segments that name a credential. Matched per segment, and only against a
+# string value, so ``input_tokens`` counts and a ``token_usage`` mapping pass.
+_SENSITIVE_KEY_SEGMENTS: frozenset[str] = frozenset(
+    {
+        "apikey",
+        "authorization",
+        "bearer",
+        "cookie",
+        "credential",
+        "credentials",
+        "passwd",
+        "password",
+        "secret",
+        "token",
+    }
+)
+# Credential shapes a value can carry wherever it appears, message text included.
+_SECRET_VALUE = re.compile(
+    r"(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}"
+    r"|\bsk-[a-z0-9_-]{16,}"
+    r"|\b(?:ghp|gho|ghs|ghu|github_pat)_[a-z0-9_]{16,}"
+    r"|\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"
+)
+_REDACTED = "[redacted]"
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = key.lower()
+    segments = set(re.split(r"[^a-z0-9]+", normalized))
+    return bool(segments & _SENSITIVE_KEY_SEGMENTS) or any(
+        marker in normalized for marker in ("api_key", "private_key")
+    )
+
+
+def _redacted(value: object) -> object:
+    """Return *value* with credential-shaped content replaced, recursively."""
+    if isinstance(value, str):
+        return _SECRET_VALUE.sub(_REDACTED, value)
+    if isinstance(value, dict):
+        return {
+            key: (
+                _REDACTED
+                if isinstance(key, str)
+                and _is_sensitive_key(key)
+                and isinstance(item, str)
+                else _redacted(item)
+            )
+            for key, item in cast("dict[object, object]", value).items()
+        }
+    if isinstance(value, list | tuple):
+        return [_redacted(item) for item in cast("list[object]", value)]
+    return value
+
+
+def _json_default(value: object) -> object:
+    """Render a value ``json`` cannot, so a record is never lost to its extras."""
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, PurePath):
+        return str(value)
+    if isinstance(value, set | frozenset):
+        return [_json_default_item(item) for item in cast("set[object]", value)]
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return repr(value)
+
+
+def _json_default_item(item: object) -> object:
+    return (
+        item
+        if isinstance(item, str | int | float | bool) or item is None
+        else _json_default(item)
+    )
+
+
 class JSONFormatter(logging.Formatter):
-    """Formatter that outputs JSON strings for structured logging.
+    """Formatter that outputs one versioned JSON object per record.
 
     Any extra fields added via ``logging.getLogger(__name__).info(...,
-    extra={"thread_id": "...", "agent_id": "..."})`` are automatically
-    included in the JSON output, enabling structured correlation context.
+    extra={"thread_id": "...", "agent_id": "..."})`` are included, as are the
+    fields of an enclosing :func:`log_context`. Every line carries the schema,
+    a UTC timestamp, the process id, the service, and a sequence number; values
+    ``json`` cannot encode are rendered rather than dropping the record, and
+    credential-shaped keys and values are redacted.
     """
+
+    def __init__(self, *, service: str | None = None) -> None:
+        """Bind the service name every line carries."""
+        super().__init__()
+        self._service = service
+        self._sequence = itertools.count(1)
 
     @override
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record as a single-line JSON string."""
         log_data: dict[str, Any] = {
-            "timestamp": self.formatTime(record, self.datefmt),
+            "schema": LOG_SCHEMA,
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(
+                timespec="milliseconds"
+            ),
+            "seq": next(self._sequence),
+            "pid": record.process,
             "level": record.levelname,
             "name": record.name,
-            "message": record.getMessage(),
+            "message": _redacted(record.getMessage()),
         }
+        if self._service is not None:
+            log_data["service"] = self._service
 
-        # Include any structured extra fields (e.g. thread_id, agent_id, client_id)
-        # that callers pass via logger.info(..., extra={"thread_id": "..."}).
+        # Structured extras (thread_id, agent_id, ...). One that collides with a
+        # line field is kept under a prefixed key rather than overwriting it.
         for key, value in record.__dict__.items():
-            if key not in _STANDARD_LOG_ATTRS and not key.startswith("_"):
-                log_data[key] = value
+            if key in _STANDARD_LOG_ATTRS or key.startswith("_"):
+                continue
+            safe = (
+                _REDACTED
+                if _is_sensitive_key(key) and isinstance(value, str)
+                else _redacted(value)
+            )
+            log_data[f"extra_{key}" if key in log_data else key] = safe
 
         exception = self._exception_text(record.exc_info)
         if exception is not None:
             log_data["exception"] = exception
 
-        return json.dumps(log_data)
+        return json.dumps(log_data, default=_json_default)
 
     def _exception_text(self, exc_info: object) -> str | None:
         """Render whatever ``record.exc_info`` holds, or ``None`` if it holds nothing.
@@ -311,10 +461,13 @@ def _reattach_uvicorn(handlers: list[logging.Handler], level: int) -> None:
         lib_logger.propagate = False
 
 
-def _stderr_json_handler(level: int) -> logging.StreamHandler[Any]:
+def _stderr_json_handler(
+    level: int, *, service: str | None = None
+) -> logging.StreamHandler[Any]:
     handler: logging.StreamHandler[Any] = logging.StreamHandler(sys.stderr)
     handler.setLevel(level)
-    handler.setFormatter(JSONFormatter())
+    handler.setFormatter(JSONFormatter(service=service))
+    handler.addFilter(LogContextFilter())
     handler.addFilter(OTelCorrelationFilter())
     return handler
 
@@ -377,7 +530,9 @@ def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
     root = _reset_root()
     root.setLevel(level)
 
-    handlers: list[logging.Handler] = [_stderr_json_handler(level)]
+    handlers: list[logging.Handler] = [
+        _stderr_json_handler(level, service=service_name)
+    ]
 
     runtime_dir = state_layout(settings.a2a_home).logs_dir
     try:
@@ -390,7 +545,8 @@ def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
             encoding="utf-8",
         )
         file_handler.setLevel(level)
-        file_handler.setFormatter(JSONFormatter())
+        file_handler.setFormatter(JSONFormatter(service=service_name))
+        file_handler.addFilter(LogContextFilter())
         file_handler.addFilter(OTelCorrelationFilter())
         handlers.append(file_handler)
     except OSError:

@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#team-composition-topology'
 date: 2026-02-27
-modified: '2026-07-15'
-body_hash: 'sha256:5adb8d0bde0bcca9be1dfbf2d87352e62e17b1f43033aa234fe215d9ec25ec0d'
+modified: '2026-09-30'
+body_hash: 'sha256:f575bd3adec6ae5e98d5d72228f8ab007dbe0121756a8671c5c7eca3c6926d3f'
 related:
   - '[[2026-03-31-docs-vault-migration-research]]'
   - '[[2026-02-26-orchestration-topology-pipeline-adr]]'
@@ -14,7 +14,7 @@ related:
   - '[[2026-07-15-model-profiles-adr]]'
 ---
 
-# `team-composition-topology` adr: `adr-11` | (**status:** `proposed`)
+# `team-composition-topology` adr: `adr-11` | (**status:** `accepted`)
 
 ## Migration Note
 
@@ -611,3 +611,13 @@ src/vaultspec_a2a/core/
 - ADR-011 — Frontend-Backend Wire Contract
 - ADR-009 — Approved Module Hierarchy
 - ADR-008 — Orchestration Topology & Pipeline
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+This amendment corrects three entries in the `[team.graph]` and `[team.topology]` tables of section 2.2.
+
+A null `step_timeout_seconds` does not mean "no timeout". Compilation requires an explicit positive step budget and refuses the run otherwise (`src/vaultspec_a2a/graph/compiler.py`). The field stays nullable in the preset schema only because the accepted dispatch may supply it instead. The budget caps each node attempt. The graph's superstep backstop is sized above the whole retry loop, not equal to one attempt.
+
+`recursion_limit` is not passed to `compile()`. The accepted dispatch request supplies the run's recursion budget, and the preset value serves only as the ceiling it is clamped to (`src/vaultspec_a2a/worker/executor.py`, `src/vaultspec_a2a/ipc/schemas.py`). The frozen-executable-graph authority in `2026-08-02-control-action-leases-adr` owns that rule, and this record defers to it. A star preset whose recursion limit cannot cover its blocked-FINISH budget is refused at compile time; `2026-03-03-contextual-anchoring-graph-lifecycle-adr` owns that budget.
+
+`team.topology.type` admits a fourth value, `research_adr`, whose structure and gates are owned by `2026-07-14-adr-authoring-orchestration-adr` (`src/vaultspec_a2a/team/team_config.py`). This record continues to own the config mechanics for all four. Grounding: `2026-09-30-langgraph-conformance-audit`.

@@ -25,7 +25,6 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi.testclient import TestClient
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.repositories import (
@@ -39,6 +38,7 @@ from ...database import (
     get_thread,
 )
 from ...database.models import ThreadDeletionSagaModel
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import CleanupKind
 from .conftest import SessionFactory, make_app
@@ -278,10 +278,13 @@ class TestDeletionSagaEndpoint:
 
         async def _seed() -> None:
             await checkpointer.setup()
-            checkpoint = empty_checkpoint()
+            config: RunnableConfig = {
+                "configurable": {"thread_id": "t-resume", "checkpoint_ns": ""}
+            }
+            checkpoint = await real_checkpoint()
             checkpoint["id"] = "cp-resume"
             await checkpointer.aput(
-                {"configurable": {"thread_id": "t-resume", "checkpoint_ns": ""}},
+                config,
                 checkpoint,
                 {"source": "loop", "step": 1, "parents": {}},
                 {},

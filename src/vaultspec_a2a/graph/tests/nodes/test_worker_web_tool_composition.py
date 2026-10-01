@@ -67,6 +67,7 @@ from ....providers.lane_admission import (
 )
 from ...enums import Provider
 from ...nodes.worker import create_worker_node
+from ._native_read_floor import scoped_read_floor
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -245,7 +246,7 @@ async def test_a_proven_lane_permits_the_web_builtins_for_every_document_role(
         composed, role=role, record_file=record_file
     )
 
-    assert allowed == [*NATIVE_READ_TOOL_NAMES, *WEB_TOOL_NAMES]
+    assert allowed == [*scoped_read_floor(tmp_path), *WEB_TOOL_NAMES]
 
 
 @pytest.mark.asyncio
@@ -277,8 +278,14 @@ async def test_the_permitted_names_carry_the_decided_domain_posture(
         assert NATIVE_WEB_TOOL_BOUNDS[name].domain_posture is (
             NativeToolDomainPosture.BLOCKLIST
         )
-    # No entry is a scoped permission rule, and none is a wildcard.
-    assert not [entry for entry in allowed if "(" in entry or "*" in entry]
+    # No WEB entry is a scoped permission rule, and none is a wildcard: the
+    # read floor is deliberately scoped to the workspace, while a scoped web
+    # rule would invert the decided blocklist posture to an allowlist.
+    assert not [
+        entry
+        for entry in allowed
+        if entry.partition("(")[0] in WEB_TOOL_NAMES and ("(" in entry or "*" in entry)
+    ]
 
 
 @pytest.mark.asyncio
@@ -367,7 +374,7 @@ async def test_the_production_derivation_stays_dark_for_an_unproven_lane(
     )
 
     assert web_tool_names_for(unproven) == ()
-    assert allowed == list(NATIVE_READ_TOOL_NAMES)
+    assert allowed == scoped_read_floor(tmp_path)
 
 
 @pytest.mark.asyncio
@@ -403,4 +410,4 @@ async def test_the_production_derivation_lights_a_proven_lane(
         record_file=record_file,
     )
 
-    assert allowed == [*NATIVE_READ_TOOL_NAMES, *earned]
+    assert allowed == [*scoped_read_floor(tmp_path), *earned]

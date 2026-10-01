@@ -44,6 +44,11 @@ class _RuntimeLogOptions(TypedDict, total=False):
     stderr_event_count: int | None
     exit_code: int | None
     kill_strategy: str | None
+    # What actually ran this turn: the adapter as it named itself in the
+    # handshake, and the CLI the lane pinned for it. Bounded strings, no payload.
+    agent_name: str | None
+    agent_version: str | None
+    cli_executable: str | None
 
 
 def runtime_log_extra(
@@ -83,6 +88,9 @@ def runtime_log_extra(
         stderr_event_count=stderr_event_count,
         exit_code=exit_code,
         kill_strategy=kill_strategy,
+        agent_name=options.get("agent_name"),
+        agent_version=options.get("agent_version"),
+        cli_executable=options.get("cli_executable"),
     )
     return {key: value for key, value in extra.items() if value is not None}
 

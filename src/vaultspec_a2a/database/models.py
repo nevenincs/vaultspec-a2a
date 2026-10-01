@@ -838,6 +838,11 @@ class CostTrackingModel(Base):
     model: Mapped[str | None] = mapped_column(default=None)
     input_tokens: Mapped[int] = mapped_column(default=0)
     output_tokens: Mapped[int] = mapped_column(default=0)
+    # NULL when the lane did not report the breakdown - a row recorded before
+    # these columns existed included - rather than a zero it never measured.
+    cache_read_tokens: Mapped[int | None] = mapped_column(default=None)
+    cache_write_tokens: Mapped[int | None] = mapped_column(default=None)
+    reasoning_tokens: Mapped[int | None] = mapped_column(default=None)
     estimated_cost: Mapped[Decimal] = mapped_column(MoneyAmount(), default=Decimal(0))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 

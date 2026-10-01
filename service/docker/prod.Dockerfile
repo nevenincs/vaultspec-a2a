@@ -84,13 +84,23 @@ ENTRYPOINT ["/app/.venv/bin/python", "/app/service_entrypoint.py"]
 # ── Stage 2b: Gateway (control surface) ─────────────────────────────────────
 FROM python-base AS gateway
 
-# Worker runs as a separate container — never auto-spawn inside Docker.
+# Worker runs as a separate container — never auto-spawn inside Docker. The
+# gateway's own default binds loopback, which is right on a developer's machine
+# and unreachable through the published port and from the worker container.
 ENV VAULTSPEC_A2A_WORKER_URL=http://worker:18001 \
     VAULTSPEC_A2A_INSTALL_ROOT=/app \
-    VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false
+    VAULTSPEC_A2A_AUTO_SPAWN_WORKER=false \
+    VAULTSPEC_A2A_HOST=0.0.0.0
 
 EXPOSE 18000
-CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "18000"]
+# The product's own serve verb, not `uvicorn --factory`. Invoking uvicorn
+# directly builds the app but skips the entry point that owns the server: the
+# graceful-shutdown timeout and the bounded total shutdown budget are configured
+# there, so a container started this way ignored both and was SIGKILLed with
+# streams still open, before the lifespan could drain admission, close the
+# database and flush telemetry. Host and port come from the settings this entry
+# reads: the port defaults to the exposed one, the host is set above.
+CMD ["/app/.venv/bin/vaultspec-a2a", "serve"]
 
 # ── Stage 2c: Worker (agent executor) ───────────────────────────────────────
 FROM node:22-slim AS gemini-cli
@@ -125,8 +135,14 @@ COPY --from=gemini-cli /usr/local/lib/node_modules/@google /usr/local/lib/node_m
 
 # PROV-O02: VAULTSPEC_A2A_INSTALL_ROOT prevents path traversal resolving into
 # site-packages in non-editable installs (factory.py _PROJECT_ROOT).
+# The worker's own default binds loopback, which is right on a developer's
+# machine and wrong in a container the gateway reaches over the compose network.
 ENV VAULTSPEC_A2A_GATEWAY_URL=http://gateway:18000 \
-    VAULTSPEC_A2A_INSTALL_ROOT=/app
+    VAULTSPEC_A2A_INSTALL_ROOT=/app \
+    VAULTSPEC_A2A_WORKER_HOST=0.0.0.0
 
 EXPOSE 18001
-CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.worker.app:create_worker_app", "--factory", "--host", "0.0.0.0", "--port", "18001"]
+# The worker's own module entry, for the same reason the gateway uses its serve
+# verb: that entry owns the server and its bounded shutdown, and `uvicorn
+# --factory` silently replaces it with uvicorn's defaults.
+CMD ["/app/.venv/bin/python", "-m", "vaultspec_a2a.worker"]

@@ -26,7 +26,11 @@ _SIMULATOR = (
     Path(__file__).parent.parent.parent / "graph" / "tests" / "acp_simulator.py"
 )
 
-_ALLOWED = ["mcp__vaultspec-rag__search_vault"]
+# A composed tool whose project is fixed at its server's launch, so it is one
+# the CLI may be told about ahead of the call. The search server's tools take
+# the project per call and are deliberately NOT pre-approved; that exclusion has
+# its own coverage in test_project_confinement.
+_ALLOWED = ["mcp__vaultspec-core__find"]
 
 
 async def _drive_and_record(

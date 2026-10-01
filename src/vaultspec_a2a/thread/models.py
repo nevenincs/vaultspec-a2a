@@ -38,14 +38,31 @@ class TokenUsageEntry:
     input_tokens: int = 0
     output_tokens: int = 0
     total: int = 0
+    # The breakdown a lane may or may not report. ``None`` means the lane did
+    # not say, which is a different fact from a measured zero.
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
 
     def to_dict(self) -> dict[str, int]:
-        """Return the inner counters dict (no agent_id — keyed externally)."""
-        return {
+        """Return the inner counters dict (no agent_id — keyed externally).
+
+        A breakdown the lane did not report is left out rather than written as
+        zero, so the additive reducer never manufactures a count for it.
+        """
+        counters = {
             "input": self.input_tokens,
             "output": self.output_tokens,
             "total": self.total,
         }
+        for key, value in (
+            ("cache_read", self.cache_read_tokens),
+            ("cache_write", self.cache_write_tokens),
+            ("reasoning", self.reasoning_tokens),
+        ):
+            if value is not None:
+                counters[key] = value
+        return counters
 
     @classmethod
     def from_dict(cls, agent_id: str, data: dict[str, int]) -> "TokenUsageEntry":
@@ -55,6 +72,9 @@ class TokenUsageEntry:
             input_tokens=data.get("input", 0),
             output_tokens=data.get("output", 0),
             total=data.get("total", 0),
+            cache_read_tokens=data.get("cache_read"),
+            cache_write_tokens=data.get("cache_write"),
+            reasoning_tokens=data.get("reasoning"),
         )
 
 

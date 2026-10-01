@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from ..graph.enums import AgentLifecycleState
+from ..streaming.ingest import INGEST_DRAINED
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ThreadStatus
@@ -371,6 +372,14 @@ class SettlementMixin(_SettlementHost):
         # drained on every settle, not only on a failure, so a completed run
         # cannot inherit a condition stranded by an earlier one on this key.
         failure_condition = self._aggregator.take_failure_condition(req.thread_id)
+        if outcome == INGEST_DRAINED:
+            # Stopped at a superstep boundary by this worker's own shutdown: the
+            # checkpoint resumes and the run is not over, so no terminal status
+            # is sent; its open action is delivered again after restart. The
+            # stashes above were still drained, so the redelivered run does not
+            # settle with a reason left by this one.
+            await self._mark_ingest_done(req.thread_id, outcome)
+            return
         if failure_reason is None and fallback_reason is not None:
             # No stashed reason on a failure means ingest never classified it:
             # the exception escaped around its own reporting rather than through

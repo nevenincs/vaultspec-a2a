@@ -32,9 +32,6 @@ from ..thread.snapshots import (
 )
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
-
-    from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import EventAggregator
 
 
@@ -290,14 +287,28 @@ class MinimalState:
         self.config = cfg
 
 
-async def load_checkpoint_history_depth(
-    checkpointer: Checkpointer,
-    config: RunnableConfig,
-    *,
-    limit: int = 2,
-) -> int | None:
-    """Return recent checkpoint history depth when the saver supports listing."""
-    count = 0
-    async for _item in checkpointer.alist(config, limit=limit):
-        count += 1
-    return count
+def checkpoint_history_depth(checkpoint_tuple: Any) -> int | None:
+    """Return how deep the read checkpoint's recorded ancestry goes.
+
+    ``2`` when the checkpoint names a parent, ``1`` when it is the first of its
+    thread, ``None`` when no checkpoint was read to say either.
+
+    Taken from the tuple already in hand. The saver hands back the parent in
+    the tuple's ``parent_config``, so listing the thread again only paid a
+    second round trip to rediscover it - and counted rows across every
+    namespace of the thread while it was there, so a thread with subgraphs
+    reported a depth its root namespace did not have.
+
+    This is the ancestry the checkpoint RECORDS, not what is still stored:
+    settled-history retention removes the parent row and leaves the reference,
+    which the served field says.
+    """
+    if checkpoint_tuple is None:
+        return None
+    parent = getattr(checkpoint_tuple, "parent_config", None)
+    if not isinstance(parent, dict):
+        return 1
+    configurable = cast("dict[str, Any]", parent).get("configurable")
+    if not isinstance(configurable, dict):
+        return 1
+    return 2 if cast("dict[str, Any]", configurable).get("checkpoint_id") else 1

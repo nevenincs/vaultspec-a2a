@@ -12,13 +12,13 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...database.checkpoint_schema import (
     CHECKPOINT_SCHEMA_DIGEST,
     CHECKPOINT_SCHEMA_VERSION,
 )
+from ...tests._checkpoint_seeding import real_checkpoint
 from ..migration import (
     MigrationStage,
     StoreName,
@@ -122,11 +122,11 @@ class TestMigrateStores:
         home = tmp_path / "app"
         state = derive_state_paths(home)
         state.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        legacy = empty_checkpoint()
-        legacy["channel_values"] = {"messages": []}
         config: RunnableConfig = {
             "configurable": {"thread_id": "legacy-thread", "checkpoint_ns": ""}
         }
+        legacy = await real_checkpoint()
+        legacy["channel_values"] = {"messages": []}
         async with AsyncSqliteSaver.from_conn_string(
             str(state.checkpoint_path)
         ) as checkpointer:

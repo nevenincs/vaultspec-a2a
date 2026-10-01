@@ -88,7 +88,7 @@ if TYPE_CHECKING:
 
     from ...database.models import ThreadModel
     from ...worker.graph_lifecycle import (
-        GraphCacheKey,
+        GraphCompilationKey,
         GraphStateSnapshot,
         RegisteredCompiledGraph,
     )
@@ -102,7 +102,7 @@ type SessionFactory = async_sessionmaker[AsyncSession]
 
 async def _cache_key_for_thread(
     session_factory: SessionFactory, thread_id: str
-) -> GraphCacheKey:
+) -> GraphCompilationKey:
     """Bind the registered real graph to the run's exact durable authority."""
     async with session_factory() as db:
         metadata_json = await get_thread_metadata(db, thread_id)
@@ -127,11 +127,16 @@ async def _worker_test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 async def _wait_for_answered_clarification(
     graph: RegisteredCompiledGraph, config: RunnableConfig
 ) -> GraphStateSnapshot:
-    """Wait until the real graph records answers for the parked request."""
+    """Wait until the real graph records answers AND runs on to its end.
+
+    The answers commit a superstep before the run finishes, so waiting on
+    them alone returns a snapshot still positioned at the node that follows,
+    and every assertion about where the run ended up races it.
+    """
     with anyio.fail_after(15.0):
         while True:
             snap = await graph.aget_state(config)
-            if snap.values.get("clarification_answers"):
+            if snap.values.get("clarification_answers") and snap.next == ():
                 return snap
             await anyio.sleep(0.05)
 
@@ -156,7 +161,7 @@ class _ParkedRun:
     """Gateway and checkpoint values for one parked clarification graph."""
 
     thread_id: str
-    cache_key: GraphCacheKey
+    cache_key: GraphCompilationKey
     parked: ParkedClarification
     config: RunnableConfig
 

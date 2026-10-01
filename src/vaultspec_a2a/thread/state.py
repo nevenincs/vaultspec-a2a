@@ -12,6 +12,7 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from .action_receipts import (
+    merge_active_graph_action_receipt,
     merge_graph_action_receipts,
     merge_graph_completion_receipts,
 )
@@ -21,6 +22,8 @@ __all__ = [
     "append_artifacts",
     "append_research_findings",
     "append_validation_errors",
+    "keep_last_resume_binding",
+    "merge_permission_answers",
     "merge_token_usage",
     "merge_unique_strs",
     "merge_vault_index",
@@ -59,10 +62,10 @@ def merge_token_usage(
     merged = {k: dict(v) for k, v in existing.items()}
     for agent_id, counters in new.items():
         if agent_id in merged:
-            for key in ("input", "output", "total"):
-                merged[agent_id][key] = merged[agent_id].get(key, 0) + counters.get(
-                    key, 0
-                )
+            # Every counter the delta carries - the cache and reasoning
+            # breakdown too - accumulates; one it does not carry is untouched.
+            for key, value in counters.items():
+                merged[agent_id][key] = merged[agent_id].get(key, 0) + value
         else:
             merged[agent_id] = dict(counters)
     return merged
@@ -105,6 +108,24 @@ def append_validation_errors(
     return existing + new
 
 
+def keep_last_resume_binding[T](existing: T, new: T) -> T:
+    """Keep the value written last for a channel a resume rebinds.
+
+    These channels carry what a dispatch binds its run to rather than work a
+    node produced, and only the executor writes them. Holding a single value
+    per step would be the stricter contract, but a resume's input writes are
+    held against the checkpoint the run is parked on and accumulate there
+    until a superstep consumes them: a turn needing a second approval, and a
+    resume redelivered after its turn died, both write these keys twice in one
+    step. Refusing the second write fails the run and leaves the thread
+    unreadable, and the two values are the same binding restated, so the last
+    one stands. No node writes these channels, so this reduction cannot hide
+    concurrent writers disagreeing.
+    """
+    del existing
+    return new
+
+
 def merge_unique_strs(
     existing: list[str],
     new: list[str],
@@ -117,6 +138,23 @@ def merge_unique_strs(
             merged.append(item)
             seen.add(item)
     return merged
+
+
+def merge_permission_answers(
+    existing: dict[str, str],
+    new: dict[str, str],
+) -> dict[str, str]:
+    """Merge answered tool-permission requests, keyed by the request answered.
+
+    Keyed rather than positional because a worker turn replays in full on
+    every resume and the provider may reach its tool calls in a different
+    order; an answer found by its request id reaches the call the human was
+    shown whatever the replay does. Answers accumulate because one turn can
+    need several, and each stays valid for the rest of the turn that asked it.
+    A repeat of the same request id overwrites, which is the correct reading
+    of a re-answered request.
+    """
+    return {**existing, **new}
 
 
 def _merge_clarification_answers(
@@ -147,6 +185,14 @@ def _merge_clarification_resolution_receipts(
     control-action leasing is responsible for ensuring competing resolutions do
     not both reach the graph.
     """
+    return {**existing, **new}
+
+
+def _merge_review_revisions(
+    existing: dict[str, int],
+    new: dict[str, int],
+) -> dict[str, int]:
+    """Merge per-phase review revision counts; a phase's latest count wins."""
     return {**existing, **new}
 
 
@@ -207,24 +253,33 @@ class TeamState(TypedDict):
 
     # --- pipeline_loop iteration guard ---
     # Plain last-write-wins int, incremented by the _loop_node_with_counter wrapper
-    # on each pass.  The _loop_router conditional edge enforces the max_loops cap:
-    # when loop_count >= max_loops it returns "FINISH" regardless of state["next"].
-    # Workers signal early loop exit by returning next="FINISH"; otherwise the loop
-    # continues ("revise" is the default).
+    # on each pass. The _loop_router conditional edge enforces the max_loops cap:
+    # at loop_count >= max_loops it returns "FINISH" whatever the loop node said.
+    # Below the cap the loop goes round again ONLY when the loop node's own
+    # verdict asks for a revision; anything else finishes. It does not read
+    # next="FINISH" for the early exit, which is what an earlier reading of this
+    # field described and no worker ever wrote, so every loop ran to its ceiling.
+    # The per-turn graph input resets it to 0: the ceiling is a budget for one
+    # turn, and a follow-up turn that inherited the count got fewer passes than
+    # its preset grants.
     # NotRequired because non-pipeline_loop teams never set this key.
     # M6: type is int (>= 0); negative values are prevented at write time by the
     # _loop_node_with_counter wrapper which only increments, never decrements.
     loop_count: NotRequired[int]
 
     # --- existing fields ---
-    agent_descriptors: NotRequired[dict[str, dict[str, str]]]
+    agent_descriptors: NotRequired[
+        Annotated[dict[str, dict[str, str]], keep_last_resume_binding]
+    ]
     messages: Annotated[list[BaseMessage], add_messages]
-    model_assignment_digest: NotRequired[str]
-    graph_definition_digest: NotRequired[str]
+    model_assignment_digest: NotRequired[Annotated[str, keep_last_resume_binding]]
+    graph_definition_digest: NotRequired[Annotated[str, keep_last_resume_binding]]
     graph_action_receipts: NotRequired[
         Annotated[dict[str, dict[str, object]], merge_graph_action_receipts]
     ]
-    active_graph_action_receipt: NotRequired[dict[str, object]]
+    active_graph_action_receipt: NotRequired[
+        Annotated[dict[str, object], merge_active_graph_action_receipt]
+    ]
     graph_completion_receipts: NotRequired[
         Annotated[dict[str, dict[str, object]], merge_graph_completion_receipts]
     ]
@@ -240,13 +295,6 @@ class TeamState(TypedDict):
     pipeline_phase: NotRequired[str | None]
     vault_index: NotRequired[Annotated[dict[str, list[str]], merge_vault_index]]
     validation_errors: NotRequired[Annotated[list[str], append_validation_errors]]
-
-    # --- transient: mounted .vault/ document content ---
-    # Populated by mount_node before worker invocation;
-    # cleared by worker_node after reading.
-    # None when active_feature is unset, vault_index is
-    # empty, or workspace_root is None.
-    mounted_context: NotRequired[str | None]
 
     # --- task queue pointer ---
     # ID of the task currently assigned to the worker. None when no feature is active
@@ -271,6 +319,13 @@ class TeamState(TypedDict):
     approval_status: NotRequired[str | None]
     approval_request_id: NotRequired[str | None]
 
+    # --- tool permission gate ---
+    # Every tool-permission request a human has answered this run, as
+    # ``request id -> chosen option id``. The worker's permission callback
+    # reads it before asking, so a replayed turn takes its earlier answers
+    # from here instead of from the order its interrupts happened to fall in.
+    permission_answers: NotRequired[Annotated[dict[str, str], merge_permission_answers]]
+
     # --- document phase machine ---
     # research_findings: per-thread findings accumulated by the Send-based
     # diverge stage. Each item is a ``{"claim", "locators", "source_thread"}``
@@ -287,6 +342,11 @@ class TeamState(TypedDict):
     # routing can branch on it. Mirrors the ``approval_status`` /
     # ``approval_request_id`` pair the plan-approval gate uses; last-write-wins.
     gate_phase: NotRequired[str | None]
+    # Revisions a document phase's reviewer has requested since the phase last
+    # reached its gate, keyed by phase. Once a phase spends its preset's budget
+    # the review router advances to the gate, leaving the human as the backstop;
+    # the submit node resets the phase to 0 each time it reaches the gate.
+    review_revisions: NotRequired[Annotated[dict[str, int], _merge_review_revisions]]
     gate_verdict: NotRequired[str | None]
     # --- mid-run clarification ---
     # clarification_request: the bounded question set the clarification request
@@ -328,6 +388,17 @@ class TeamState(TypedDict):
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str | None]
+    # Consecutive supervisor decisions refused this turn (no parseable route, or
+    # a route a HARD phase gate blocked). Non-zero sends the run back to the
+    # supervisor; an accepted decision resets it and every new turn starts at 0.
+    supervisor_reasks: NotRequired[int]
+    # Consecutive FINISH decisions this turn that a completion gate blocked and
+    # rerouted to a worker. Counted apart from supervisor_reasks because the two
+    # have different outcomes: a re-ask returns to the supervisor, while a
+    # blocked FINISH runs the worker that can satisfy the gate. A gate the
+    # worker never clears would otherwise reroute until the recursion limit.
+    # An accepted decision resets it and every new turn starts at 0.
+    supervisor_finish_blocks: NotRequired[int]
 
     # --- routing / identification ---
     thread_id: str

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
@@ -37,10 +38,14 @@ __all__ = [
     "_registry_entry",
     "_require_root_pin",
     "declared_harness_tools",
+    "harness_server_addresses_projects_per_call",
     "harness_server_egresses",
     "harness_server_exact_surface",
+    "harness_tool_is_withheld",
+    "interpreter_pin_args",
     "is_known_harness_server",
     "registry_launch_divergence",
+    "withheld_harness_tools",
 ]
 
 
@@ -94,21 +99,23 @@ class HarnessMcpResolution:
 # also the LOAD-BEARING contract: the declared names are what a run advertises and
 # auto-permits, so a server that does not serve them is refused at the spawn seam
 # rather than handed to an agent whose grounding tools would silently be absent.
-# The registry's trust root is THREE independent axes, not one marker.
+# The registry's trust root is FOUR independent axes, not one marker.
 # ``read_only`` asserts an entry does not WRITE LOCALLY; ``network_egress``
 # asserts whether it REACHES OUTWARD; ``root_pin`` asserts whether the run can
-# BIND IT TO ONE PROJECT. None implies another: a fetch/search tool satisfies
-# read-only completely while still able to carry workspace content outward in a
-# URL, so a server that egresses can never ride a read-only-only assertion, and a
-# server that is both read-only and local still hands an agent another project's
-# content when the project is chosen per call rather than per launch. The first
-# two axes are booleans; the third names the ENVIRONMENT VARIABLE through which a
-# launching host pins the server to the run's project, or is explicitly null to
-# declare the entry unpinnable. It is a channel rather than a flag because the
-# advertised stdio shape carries no working directory, so naming the channel is
-# the only way a declaration of pinnability can be acted on rather than believed.
-# All three default unsafe-by-omission (a missing declaration fails), never
-# silently permissive.
+# BIND IT TO ONE PROJECT; ``per_call_project`` asserts whether a CALL can name a
+# project of its own, which is what decides whether the entry's tools may be
+# approved before the call that chooses one exists. None implies another: a
+# fetch/search tool satisfies read-only completely while still able to carry
+# workspace content outward in a URL, so a server that egresses can never ride a
+# read-only-only assertion, and a server that is both read-only and local still
+# hands an agent another project's content when the project is chosen per call
+# rather than per launch. Three of the axes are booleans; the root pin names the
+# ENVIRONMENT VARIABLE through which a launching host pins the server to the
+# run's project, or is explicitly null to declare the entry unpinnable. It is a
+# channel rather than a flag because the advertised stdio shape carries no
+# working directory, so naming the channel is the only way a declaration of
+# pinnability can be acted on rather than believed. All of them default
+# unsafe-by-omission (a missing declaration fails), never silently permissive.
 #
 # :func:`_declare_registry` is the ONLY construction seam, and it both validates
 # and FREEZES: the returned mapping and every entry inside it are read-only views
@@ -145,15 +152,37 @@ _ENV_FIELD = "env"
 _TRUST_AXES = ("read_only", "network_egress")
 _ROOT_PIN_AXIS = "root_pin"
 _EXACT_SURFACE_AXIS = "exact_surface"
+_PER_CALL_PROJECT_AXIS = "per_call_project"
+_WITHHELD_TOOLS_FIELD = "withheld_tools"
 RAG_MCP_REQUIREMENT = "vaultspec-rag[mcp]"
-# The restricted launch is served from 0.1.56 onward. NO version constraint,
-# per the registry's standing policy (asserted by its own test): the boundary
-# is the SERVED SURFACE, checked before every launch. An older resolution
-# rejects `--read-only` and is refused at the contract seam rather than
-# surfaced wide. Operationally that means a stale `uvx` cache fails the lane
-# loudly and repeatedly until it refreshes - accepted as fail-loud, and the
-# reason a2a's own dependency floor names 0.1.56.
+# The server executable is ``vaultspec-core-mcp`` from 0.2.4 onward. NO
+# version constraint, per the registry's standing policy (asserted by its own
+# test): the boundary is the SERVED SURFACE, checked before every launch. An
+# older resolution lacks the executable or serves another surface and is
+# refused at the contract seam rather than surfaced wide. Operationally that
+# means a stale `uvx` cache fails the lane loudly and repeatedly until it
+# refreshes - accepted as fail-loud.
 CORE_MCP_REQUIREMENT = "vaultspec-core"
+
+
+_INTERPRETER_PINNED_COMMANDS: frozenset[str] = frozenset({"uv", "uvx"})
+
+
+def interpreter_pin_args(command: str) -> tuple[str, ...]:
+    """Return the interpreter pin *command* needs, or an empty tuple.
+
+    A package runner that is handed no interpreter takes the HOST's default one,
+    so a host whose default Python is older than the floor a harness server
+    declares cannot resolve that server at all - and the failure arrives as a bare
+    resolution error at launch, on a lane whose grounding then simply is not
+    there. The pin is the running interpreter's own minor version: this service
+    runs on the project's pinned Python, so "the interpreter serving this run" is
+    both present on the host and new enough by construction, without this module
+    having to know which floor each server declares.
+    """
+    if command not in _INTERPRETER_PINNED_COMMANDS:
+        return ()
+    return ("--python", f"{sys.version_info.major}.{sys.version_info.minor}")
 
 
 def _validate_registry_entry(name: str, value: JsonValue) -> None:
@@ -193,6 +222,35 @@ def _validate_registry_entry(name: str, value: JsonValue) -> None:
             "launch rather than a silently widened surface - omission is never "
             "read as permission"
         )
+    if not isinstance(value.get(_PER_CALL_PROJECT_AXIS), bool):
+        raise ConfigError(
+            f"harness registry entry {name!r} does not declare "
+            f"{_PER_CALL_PROJECT_AXIS!r}; state whether a CALL to this server "
+            "can address a project of its own choosing, because a server whose "
+            "project is chosen per call may not be approved ahead of the call "
+            "that chooses it - omission is never read as permission"
+        )
+    withheld = value.get(_WITHHELD_TOOLS_FIELD)
+    if withheld is not None:
+        declared = value.get("tools")
+        if not isinstance(withheld, list) or not all(
+            isinstance(tool, str) and tool for tool in withheld
+        ):
+            raise ConfigError(
+                f"harness registry entry {name!r} declares "
+                f"{_WITHHELD_TOOLS_FIELD!r} as {withheld!r}; state the served "
+                "tools no run may call as a list of tool names"
+            )
+        overlap = sorted(
+            tool
+            for tool in withheld
+            if isinstance(tool, str) and isinstance(declared, list) and tool in declared
+        )
+        if overlap:
+            raise ConfigError(
+                f"harness registry entry {name!r} both permits and withholds "
+                f"{overlap!r}; a tool is one or the other"
+            )
     if _ENV_FIELD in value:
         raise ConfigError(
             f"harness registry entry {name!r} declares {_ENV_FIELD!r}; the "
@@ -258,27 +316,49 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
         "vaultspec-rag": {
             "name": "vaultspec-rag",
             "command": "uvx",
-            "args": ["--from", RAG_MCP_REQUIREMENT, "vaultspec-search-mcp"],
+            # ``--read-only`` withdraws every tool not annotated read-only, so
+            # the reindex and clean verbs the server otherwise serves never
+            # reach a session at all rather than resting on the permission rung.
+            "args": [
+                "--from",
+                RAG_MCP_REQUIREMENT,
+                "vaultspec-search-mcp",
+                "--read-only",
+            ],
             "tools": ["search_vault", "search_codebase", "get_code_file"],
             "read_only": True,
-            # Indexes and serves the local vault/codebase over stdio; no outbound
-            # request leaves the agent host on its behalf.
+            # Serves the local vault/codebase over stdio; the LAUNCHED PROCESS
+            # never speaks to anything but the loopback background daemon it
+            # defers every real call to. That daemon is started independently
+            # of this launch spec, so a daemon an operator starts holding a
+            # hosted-ranking credential (upstream, VAULTSPEC_RAG_TYPESAFE_API_KEY)
+            # sends search candidates to a hosted API for this axis's
+            # declaration to stay true - a fact no launch argument here, the
+            # contract probe, or the served stdio tools expose, so it cannot be
+            # detected and refused the way a version mismatch below can. A
+            # daemon serving this project's root MUST run without that
+            # credential; this is recorded rather than enforced because nothing
+            # reachable from this process can observe it.
             "network_egress": False,
             # The stdio server resolves the project a call addresses from the
-            # call's explicit root, then this variable, then its own working
-            # directory. Naming the variable here is what lets a run REPLACE the
-            # working-directory fallback - undeclared inheritance through a
-            # third-party CLI, correct as far as anyone has checked and verified
-            # for nothing - with a stated per-run pin. The pin sets the project a
-            # call addresses when it names none; a call that names another project
-            # is a separate boundary, refused at the permission layer until the
-            # server locks its stdio session to its launch root.
+            # call's explicit root, then this variable, then the core pin
+            # variable, then its own working directory. Naming the variable here
+            # is what lets a run REPLACE the inherited fallbacks - undeclared
+            # inheritance through a third-party CLI - with a stated per-run pin.
+            # The pin sets the project a call addresses when it names none; a
+            # call that names another project is a separate boundary, refused at
+            # the permission layer until the server locks its stdio session to
+            # its launch root.
             "root_pin": "VAULTSPEC_RAG_ROOT",
-            # The served surface legitimately exceeds this declaration: the search
-            # server also mounts index-rebuild and index-clean verbs. That is
-            # tolerable because those mutate a recoverable index under the search
-            # storage root, never the vault, so the declaration is an allowlist
-            # rather than the safety case.
+            # Every tool this server serves takes the project as an ARGUMENT,
+            # with the pin above only supplying the default. A call may
+            # therefore name a project the run is not bound to, which is a
+            # decision about the CALL - so its tools are never approved before
+            # the call exists, on either transport.
+            "per_call_project": True,
+            # The read-only launch serves more read tools than a run declares
+            # (combined and document search, index status), so the declaration
+            # is an allowlist rather than the safety case.
             "exact_surface": False,
             "runtime_acquisition": True,
             "desktop_available": False,
@@ -293,16 +373,27 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
             # vault behind every deny that guards the filesystem path. The
             # restricted launch registers only non-mutating handlers, so no
             # write-capable tool exists in the process to be handed or approved.
-            "args": ["--from", CORE_MCP_REQUIREMENT, "vaultspec-mcp", "--read-only"],
-            # Exactly what the restricted launch registers. ``check`` is safe to
-            # declare ONLY here: unrestricted it takes a repair argument that a
-            # tool-name allowlist cannot see, while the read-only launch registers
-            # a validation-only signature and rejects a smuggled repair argument
+            "args": [
+                "--from",
+                CORE_MCP_REQUIREMENT,
+                "vaultspec-core-mcp",
+                "--read-only",
+            ],
+            # The read tools a run may call. ``check`` is safe to declare ONLY
+            # here: unrestricted it takes a repair argument that a tool-name
+            # allowlist cannot see, while the read-only launch registers a
+            # validation-only signature and rejects a smuggled repair argument
             # server-side.
             "tools": ["status", "find", "check", "discover"],
+            # Served by the restricted launch, which has no flag to drop them,
+            # and never callable: both send vault text to a hosted API whenever
+            # the host has a key for it. Withholding them on every lane, before
+            # any human is asked, is what keeps the no-egress claim below true
+            # of everything a run can reach.
+            "withheld_tools": ["search", "crossref"],
             "read_only": True,
-            # Local stdio server over the pinned project's own records; no
-            # outbound request leaves the agent host on its behalf.
+            # Local stdio server over the pinned project's own records; nothing
+            # a run can call sends a request off the agent host on its behalf.
             "network_egress": False,
             # Bound ONCE at launch: the entrypoint takes no target argument, so
             # this variable is the whole channel, and the tool surface carries no
@@ -310,10 +401,16 @@ _KNOWN_MCP_SERVERS: FrozenJsonObject = _declare_registry(
             # than a per-call default - there is no argument through which a run
             # could address another project.
             "root_pin": "VAULTSPEC_TARGET_DIR",
+            # Bound once at launch and nowhere else: no tool this server serves
+            # takes a project argument, so there is no per-call choice for a
+            # permission rung to examine and a static approval says everything
+            # there is to say.
+            "per_call_project": False,
             # The restriction IS the safety case, so serving more than is declared
-            # means the restriction is gone. Asserting equality turns a lost
-            # ``--read-only`` into a refused launch instead of a silently restored
-            # write surface that still passes a subset check.
+            # (permitted or withheld) means the restriction is gone. Asserting
+            # equality turns a lost ``--read-only`` into a refused launch instead
+            # of a silently restored write surface that still passes a subset
+            # check.
             "exact_surface": True,
             "runtime_acquisition": True,
             "desktop_available": False,
@@ -485,10 +582,15 @@ def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:
             malformed command or argument vector.
     """
     _require_root_pin(name, entry)
+    command = _frozen_string(entry, "command")
+    # The interpreter pin is added at this one renderer, so both transports and
+    # the divergence guard that compares them see the same command. It is the one
+    # part of a launch that cannot be a registry literal: it states a fact about
+    # the host serving the run, not about the server being launched.
     spec: JsonObject = {
         "name": name,
-        "command": _frozen_string(entry, "command"),
-        "args": list(_frozen_strings(entry, "args")),
+        "command": command,
+        "args": [*interpreter_pin_args(command), *_frozen_strings(entry, "args")],
     }
     return spec
 
@@ -579,6 +681,52 @@ def declared_harness_tools(name: str) -> tuple[str, ...]:
         ConfigError: If *name* is not a known harness server.
     """
     return _frozen_strings(_registry_entry(name), "tools")
+
+
+def withheld_harness_tools(name: str) -> tuple[str, ...]:
+    """Return the tools *name* serves that no run may call.
+
+    Raises:
+        ConfigError: If *name* is not a known harness server.
+    """
+    return _frozen_strings(_registry_entry(name), _WITHHELD_TOOLS_FIELD)
+
+
+def harness_tool_is_withheld(tool_name: str) -> bool:
+    """Return whether a permission request names a withheld harness tool.
+
+    A qualified ``mcp__<server>__<tool>`` name is matched against that server
+    alone. A bare name - the spelling a lane that drops the server prefix
+    carries - is matched against every server's withheld set, because such a
+    lane gives no way to tell which server it came from and a refusal is the
+    direction a doubt must fail in.
+    """
+    if tool_name.startswith("mcp__"):
+        parts = tool_name.split("__", 2)
+        if len(parts) != 3 or not is_known_harness_server(parts[1]):
+            return False
+        return parts[2] in withheld_harness_tools(parts[1])
+    return any(
+        tool_name in withheld_harness_tools(server) for server in _KNOWN_MCP_SERVERS
+    )
+
+
+def harness_server_addresses_projects_per_call(name: str) -> bool:
+    """Return whether a CALL to *name* can choose the project it addresses.
+
+    The typed reader of the ``per_call_project`` axis, and the axis that decides
+    whether a tool may be approved statically at all. A server whose project is
+    fixed at launch is fully described before the call exists, so naming it in a
+    lane's pre-approved set says everything there is to say. A server that takes
+    the project as an argument is not: the same declared, read-only tool returns
+    another project's content when the argument names one, and that difference
+    lives in the call. Approving such a tool up front removes the only boundary
+    that can see the argument.
+
+    Raises:
+        ConfigError: If *name* is not a known harness server.
+    """
+    return _registry_entry(name).get(_PER_CALL_PROJECT_AXIS) is True
 
 
 def harness_server_egresses(name: str) -> bool:

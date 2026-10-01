@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -25,9 +24,12 @@ from ...database.models import (
 )
 from ...graph.events import PermissionRequest
 from ...streaming.aggregator import EventAggregator
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
     from ...thread.snapshots import ThreadStateData
 
 
@@ -291,15 +293,16 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-corrupt-state",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-corrupt-state"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-corrupt-state",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -367,15 +370,16 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-stale-state",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-fresh-state"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-stale-state",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -450,15 +454,16 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-corrupt-permission",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-corrupt-permission"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-corrupt-permission",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -524,15 +529,16 @@ async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-corrupt-plan-approval",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-corrupt-plan-approval"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-corrupt-plan-approval",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -597,15 +603,16 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-stale-plan-approval",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-stale-plan-approval"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-stale-plan-approval",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -671,15 +678,16 @@ async def test_missing_plan_approval_request_clears_stale_thread_pending_approva
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-stale-pending-approval",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-no-plan-approval"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-stale-pending-approval",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -732,15 +740,16 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-plan-no-tool-call",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-plan-no-tool-call"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-plan-no-tool-call",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -803,15 +812,16 @@ async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approva
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-rejected-stale-live-plan",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-rejected-stale-live-plan"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-rejected-stale-live-plan",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -874,15 +884,16 @@ async def test_rejected_thread_approval_residue_does_not_surface_without_live_pl
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-rejected-residue",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-rejected-residue"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-rejected-residue",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -935,15 +946,16 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-terminal-permission-residue",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-terminal-permission-residue"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-terminal-permission-residue",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -1010,15 +1022,16 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-answered-pending-apply",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-answered-pending-apply"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-answered-pending-apply",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -1089,15 +1102,16 @@ async def test_aggregator_only_pending_permission_does_not_surface_in_thread_sta
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-aggregator-only-permission",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-aggregator-only-permission"
         await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-aggregator-only-permission",
-                    "checkpoint_ns": "",
-                }
-            },
+            config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},
@@ -1163,15 +1177,16 @@ async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_sta
     checkpoints_file = case_dir / "checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         await checkpointer.setup()
-        checkpoint = empty_checkpoint()
+        seed_config: RunnableConfig = {
+            "configurable": {
+                "thread_id": "thread-checkpoint-only-permission",
+                "checkpoint_ns": "",
+            }
+        }
+        checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-checkpoint-only-permission"
         config = await checkpointer.aput(
-            {
-                "configurable": {
-                    "thread_id": "thread-checkpoint-only-permission",
-                    "checkpoint_ns": "",
-                }
-            },
+            seed_config,
             checkpoint,
             {"source": "loop", "step": 1, "parents": {}},
             {},

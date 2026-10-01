@@ -17,7 +17,7 @@ from ...nodes.supervisor import (
     _build_supervisor_messages,
     _evaluate_supervisor_response,
     _phase_for_route,
-    _select_revision_worker,
+    _worker_owning_phase,
     create_plan_approval_node,
     create_supervisor_node,
 )
@@ -195,18 +195,26 @@ def test_supervisor_routing_finish() -> None:
     assert result.next_route == "FINISH"
 
 
-def test_supervisor_routing_unparseable_defaults_to_finish() -> None:
+def test_supervisor_refuses_an_unparseable_reply_instead_of_finishing() -> None:
     result = _decision("I have no idea what to do next!", workers=["planner", "coder"])
-    assert result.next_route == "FINISH"
+    assert result.refused is True
+    assert result.next_route is None
     assert result.routing_error is not None
 
 
 def test_supervisor_sets_routing_error_on_parse_failure() -> None:
     gibberish = "xyzzy forty-two blorp"
     result = _decision(gibberish, workers=["planner", "coder"])
-    assert result.next_route == "FINISH"
     assert result.routing_error is not None
     assert gibberish in result.routing_error
+    # The refusal tells the model what an admissible answer looks like.
+    assert "planner, coder, FINISH" in result.routing_error
+
+
+def test_supervisor_bounds_the_reply_it_carries_back() -> None:
+    result = _decision("x" * 5000, workers=["planner", "coder"])
+    assert result.routing_error is not None
+    assert len(result.routing_error) < 400
 
 
 def test_supervisor_no_routing_error_on_clean_finish() -> None:
@@ -290,9 +298,24 @@ def test_phase_gate_hard_blocks_exec_without_plan() -> None:
         state=_make_state_for_phase_gate(vault_index={}),
         worker_phase_map={"coder": "exec", "planner": "plan"},
     )
-    assert result.inferred_phase == "exec"
+    assert result.refused is True
+    # The intent is kept, but the run has not moved into the blocked phase.
+    assert result.next_route == "coder"
+    assert result.inferred_phase != "exec"
     assert result.routing_error is not None
     assert "plan" in result.routing_error
+
+
+def test_phase_gate_soft_warns_without_refusing() -> None:
+    result = _decision(
+        "adr-writer",
+        workers=["adr-writer"],
+        state=_make_state_for_phase_gate(vault_index={}),
+        worker_phase_map={"adr-writer": "adr"},
+    )
+    assert result.refused is False
+    assert result.next_route == "adr-writer"
+    assert result.routing_error is not None
 
 
 def test_phase_gate_passes_when_prerequisite_satisfied() -> None:
@@ -358,7 +381,8 @@ def test_plan_approval_interrupt_fires_for_non_approved_status() -> None:
 
 
 def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
-    worker = _select_revision_worker(
+    worker = _worker_owning_phase(
+        "plan",
         ["vaultspec-doc-reviewer", "vaultspec-plan-author", "vaultspec-coder"],
         {
             "vaultspec-doc-reviewer": "audit",
@@ -369,8 +393,16 @@ def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
     assert worker == "vaultspec-plan-author"
 
 
-def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> None:
-    worker = _select_revision_worker(
+def test_a_team_with_no_plan_phase_worker_names_none_for_revision() -> None:
+    """Nobody is the honest answer when no worker owns the plan phase.
+
+    The fallback this replaces named ``workers[0]``, so a rejected plan on a
+    team with no planner was handed to whichever worker happened to be listed
+    first - on the shipped human-in-loop preset, the coder the rejection was
+    meant to keep out of execution.
+    """
+    worker = _worker_owning_phase(
+        "plan",
         ["vaultspec-researcher", "vaultspec-doc-reviewer", "vaultspec-coder"],
         {
             "vaultspec-researcher": "research",
@@ -378,7 +410,7 @@ def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> N
             "vaultspec-coder": "exec",
         },
     )
-    assert worker == "vaultspec-researcher"
+    assert worker is None
 
 
 def test_supervisor_prefers_worker_phase_over_vault_inference() -> None:
@@ -479,10 +511,11 @@ async def test_supervisor_parse_failure_clears_stale_approval_state() -> None:
 
     result = await node(state)
 
-    assert result["next"] == "FINISH"
-    assert result["current_plan"] == [
-        {"content": "Complete task", "status": "completed"}
-    ]
+    # Nothing was routed: no route is recorded and the plan summary stands.
+    assert "next" not in result
+    assert "current_plan" not in result
+    assert result["supervisor_reasks"] == 1
+    assert result["active_agent"] == ""
     assert "approval_status" in result
     assert result["approval_status"] is None
     assert "approval_request_id" in result
@@ -517,19 +550,63 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
 
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
+    request_id = first["__interrupt__"][0].value["request_id"]
 
     resumed = await graph.ainvoke(
-        Command(resume={"verdict": "approved"}), config=config
+        Command(resume={"verdict": "approved", "request_id": request_id}),
+        config=config,
     )
     assert resumed["next"] == "vaultspec-coder"
     assert resumed["current_plan"] == [
         {"content": "Route to vaultspec-coder", "status": "in_progress"}
     ]
     assert resumed["approval_status"] == "approved"
-    assert "approval_request_id" in resumed
-    assert resumed["approval_request_id"] is None
+    # The granted approval keeps its linkage: it is durable thread state, not
+    # a per-turn flag, so the request it was granted under stays readable.
+    assert resumed["approval_request_id"] == request_id
     assert "routing_error" in resumed
     assert resumed["routing_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_plan_verdict_for_another_request_asks_again() -> None:
+    """A verdict that is not about this plan neither approves nor rejects it.
+
+    Sending the plan back for revision on an answer nobody gave about it would
+    cost the team a planning pass; the gate asks again and the verdict naming
+    this plan's request is the one that decides.
+    """
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+    graph = _build_approval_graph(
+        node, ["vaultspec-coder"], {"vaultspec-coder": "exec"}
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "plan-verdict-rebind"}}
+    state = _make_state_for_plan_approval(vault_index={"plan": [".vault/plan/p.md"]})
+
+    first = await graph.ainvoke(state, config=config)
+    request_id = first["__interrupt__"][0].value["request_id"]
+
+    for stray in (
+        {"verdict": "rejected", "request_id": "another-plan"},
+        {"approved": False},
+    ):
+        again = await graph.ainvoke(Command(resume=stray), config=config)
+        assert again["__interrupt__"][0].value["request_id"] == request_id
+        assert again.get("approval_status") != "rejected"
+
+    resumed = await graph.ainvoke(
+        Command(resume={"verdict": "approved", "request_id": request_id}),
+        config=config,
+    )
+    assert resumed["next"] == "vaultspec-coder"
+    assert resumed["approval_status"] == "approved"
 
 
 @pytest.mark.asyncio
@@ -558,14 +635,17 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
 
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
+    request_id = first["__interrupt__"][0].value["request_id"]
 
     resumed = await graph.ainvoke(
-        Command(resume={"verdict": "rejected"}), config=config
+        Command(resume={"verdict": "rejected", "request_id": request_id}),
+        config=config,
     )
     assert resumed["next"] == "vaultspec-plan-author"
     assert resumed["approval_status"] == "rejected"
-    assert "approval_request_id" in resumed
-    assert resumed["approval_request_id"] is None
+    # The rejection names the request it answered; the next worker turn is
+    # what clears the consumed outcome.
+    assert resumed["approval_request_id"] == request_id
 
 
 @pytest.mark.asyncio
@@ -621,7 +701,13 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
     assert "__interrupt__" in first
 
     resumed = await graph.ainvoke(
-        Command(resume={"verdict": "rejected"}), config=config
+        Command(
+            resume={
+                "verdict": "rejected",
+                "request_id": first["__interrupt__"][0].value["request_id"],
+            }
+        ),
+        config=config,
     )
     assert resumed["next"] == "vaultspec-plan-author"
     assert resumed["active_agent"] == "vaultspec-plan-author"
@@ -635,9 +721,9 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
 async def test_plan_approval_node_no_longer_accepts_retired_approved_boolean() -> None:
     """The plan gate speaks the verdict vocabulary now (D6) — the legacy
     ``{"approved": bool}`` resume shape is retired, not bridged. A resume in
-    that shape carries no ``"verdict"`` key, so it parses to ``(None, None)``
-    and fails closed to revision exactly like any other unrecognised payload,
-    rather than being read as an approval.
+    that shape carries no ``"verdict"`` and names no request, so it answers
+    nothing: the gate parks again on the same request rather than reading it
+    as an approval or spending a revision on it.
     """
     model = _StaticSupervisorModel("vaultspec-coder")
     node = create_supervisor_node(
@@ -663,8 +749,14 @@ async def test_plan_approval_node_no_longer_accepts_retired_approved_boolean() -
 
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
+    request_id = first["__interrupt__"][0].value["request_id"]
 
     # The retired shape used to mean "approved". It must not any more.
     resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
-    assert resumed["next"] == "vaultspec-plan-author"
-    assert resumed["approval_status"] == "rejected"
+    assert "__interrupt__" in resumed
+    assert resumed["__interrupt__"][0].value["request_id"] == request_id
+    assert resumed.get("approval_status") != "approved"
+    snapshot = await graph.aget_state(config)
+    assert [task.name for task in snapshot.tasks if task.interrupts] == [
+        "plan_approval"
+    ]

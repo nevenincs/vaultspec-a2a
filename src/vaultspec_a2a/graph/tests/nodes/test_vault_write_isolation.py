@@ -9,7 +9,7 @@ duration and must observe none — not a no-write-path argument.
 
 import threading
 import time
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,17 +26,12 @@ from sqlalchemy.ext.asyncio import (
 from ....conftest import materialize_schema
 from ....database import create_thread, seed_task_queue
 from ....tests._write_authority import make_test_write_authority
-from ....thread.state import TeamState
+from ....thread.state import TeamState, merge_vault_index
 from ....worker.task_queue_port import SqlTaskQueuePort
-from ...nodes.vault_reader import create_mount_node
+from ...nodes.vault_reader import create_context_mounter, create_mount_node
 from ...tools.task_queue import create_mark_task_complete_tool
 
 _FEATURE = "queue-isolation"
-
-# create_mount_node's factory return is declared as a bare Callable in
-# production; this alias pins the concrete signature for the test call sites
-# below without widening the production API.
-MountNode = Callable[[TeamState], Coroutine[Any, Any, dict[str, Any]]]
 
 
 class _VaultWriteWatcher:
@@ -168,15 +163,26 @@ async def test_db_queue_functions_with_zero_vault_writes(
         thread_id = thread.id
 
     port = SqlTaskQueuePort(session_factory)
-    mount = cast("MountNode", create_mount_node(workspace, port))
+    refresh_index = create_mount_node(workspace)
+    mounter = create_context_mounter(workspace, port)
+
+    async def mount(state: TeamState) -> str | None:
+        update = await refresh_index(state)
+        merged: TeamState = {
+            **state,
+            "vault_index": merge_vault_index(
+                state.get("vault_index") or {}, update.get("vault_index", {})
+            ),
+        }
+        return await mounter(merged)
+
     tool = create_mark_task_complete_tool(port, thread_id)
 
     watcher = _VaultWriteWatcher(vault_dir)
     watcher.start()
     try:
         # 1. Mount reads the .vault ADR and injects the DB-sourced queue view.
-        mounted = await mount(_exec_state(thread_id, "Q-1"))
-        context = mounted["mounted_context"]
+        context = await mount(_exec_state(thread_id, "Q-1"))
         assert context is not None
         assert "Binding decision text." in context  # .vault read succeeded
         assert "## Task Queue -- queue-isolation" in context  # queue came from the DB
@@ -203,8 +209,7 @@ async def test_db_queue_functions_with_zero_vault_writes(
         )
 
         # 3. Re-mounting reflects the advanced cursor, still DB-sourced.
-        remounted = await mount(_exec_state(thread_id, "Q-2"))
-        remounted_context = remounted["mounted_context"]
+        remounted_context = await mount(_exec_state(thread_id, "Q-2"))
         assert remounted_context is not None
         assert "| Q-2 | in_progress | Second |" not in remounted_context
         assert "| Q-2 | pending | Second |" in remounted_context

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Final, cast
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.constants import START
 
 __all__ = [
     "CheckpointStateMigrationError",
@@ -67,7 +68,7 @@ def _needs_sdd_backfill(checkpoint: dict[str, object]) -> bool:
     # LangGraph persists one input-staging checkpoint whose sole channel is
     # ``__start__`` before TeamState exists. It is not a legacy TeamState row and
     # cannot carry top-level SDD channels; later execution checkpoints do.
-    if set(channel_values) == {"__start__"}:
+    if set(channel_values) == {START}:
         return False
     return any(key not in channel_values for key in _SDD_DEFAULTS)
 
@@ -78,6 +79,14 @@ def backfill_teamstate_sdd_fields(db_path: Path | str) -> int:
     Fresh stores with no checkpoint table are left untouched. Existing rows are
     decoded and re-encoded through LangGraph's production serializer; unreadable
     or structurally foreign rows fail loud instead of being labelled compatible.
+
+    Called by the desktop staged-generation migration entrypoint, which owns
+    every schema mutation for the armed profile and must leave no pending row
+    behind: ordinary armed boot refuses to start while one exists. It is NOT a
+    boot step for any other profile. A checkpoint missing these channels
+    resumes and reads exactly as one carrying their defaults - every reader
+    treats them as optional - so running it on every boot rewrote the whole
+    store to change nothing observable.
     """
     path = Path(db_path)
     if not path.is_file():

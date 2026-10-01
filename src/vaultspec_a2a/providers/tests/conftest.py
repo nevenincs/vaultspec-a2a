@@ -11,8 +11,27 @@ import pytest_asyncio
 
 from ...testing import forfeits_purity
 from .._acp_types import AcpSessionContext
+from .._factory_commands import _CLAUDE_ACP_JS
 
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
+
+# ``_CLAUDE_ACP_JS`` is install_root/node_modules/@agentclientprotocol/
+# claude-agent-acp/dist/index.js; the package root one level above ``dist`` is
+# what ``npm install`` places, and everything the Node ACP lane reads - the
+# entry point itself, the adapter's own bundled source, its SDK dependency's
+# type declarations - lives under it or beside it in the same install.
+_ACP_ADAPTER_PACKAGE_ROOT = _CLAUDE_ACP_JS.parents[1]
+_ACP_ADAPTER_INSTALL_ROOT = _CLAUDE_ACP_JS.parents[4]
+
+# Echoes each stdin line straight back on stdout, so a frame written to the
+# child's stdin is readable from the same context's stdout.
+_ECHO_CHILD = (
+    "import sys\n"
+    "for line in sys.stdin.buffer:\n"
+    "    sys.stdout.buffer.write(line)\n"
+    "    sys.stdout.buffer.flush()\n"
+)
+
 
 # Files that spawn a real ACP subprocess / network I/O declare their own
 # ``service`` marker and must NOT receive the pure ``unit``/``middleware`` marks.
@@ -42,15 +61,22 @@ _IMPURE_FILES = frozenset(
     {
         # Real child processes.
         "test_acp_mcp.py",
+        "test_acp_stderr_tail.py",
+        "test_harness_interpreter_pin.py",
         "test_acp_model_selection.py",
         "test_acp_turn_deadline.py",
         "test_acp_vault_deny.py",
         "test_capsule_acp_resolution.py",
+        "test_claude_binary_identity.py",
         "test_catalog_registration_live.py",
         "test_codex_config_home.py",
+        "test_codex_credential_writeback.py",
         "test_codex_stderr_drain.py",
         "test_codex_turn_idle_timeout.py",
+        "test_claude_permission_posture.py",
+        "test_launcher_confinement.py",
         "test_model_stack_warmup.py",
+        "test_prompt_render.py",
         "test_resource_lifetimes.py",
         # Real async engine and session maker.
         "test_deterministic_scripts.py",
@@ -76,6 +102,28 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         item.add_marker(pytest.mark.middleware)
         if item.path.name not in _IMPURE_FILES and not forfeits_purity(item):
             item.add_marker(pytest.mark.unit)
+
+
+@pytest.fixture
+def installed_acp_adapter() -> Path:
+    """Fail up front, naming the missing package, when the Node lane isn't installed.
+
+    A checkout that has never run ``npm install`` fails every test exercising the
+    Node ACP adapter anyway - ``_classify_acp_command`` raises its own
+    ``ConfigError`` a few frames into command resolution, and a test reading the
+    adapter's shipped source directly hits a bare ``FileNotFoundError`` - but
+    each lands at a different depth with a different shape. Requesting this
+    fixture states the one shared cause before either point is reached, so a
+    bare worktree's result reads as a missing prerequisite rather than a
+    regression.
+    """
+    if not _ACP_ADAPTER_PACKAGE_ROOT.is_dir():
+        pytest.fail(
+            "missing prerequisite: @agentclientprotocol/claude-agent-acp is not "
+            f"installed at {_ACP_ADAPTER_PACKAGE_ROOT}; run 'npm install' in "
+            f"{_ACP_ADAPTER_INSTALL_ROOT} to install it"
+        )
+    return _ACP_ADAPTER_PACKAGE_ROOT
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,3 +193,44 @@ async def acp_session_context(
     function-scoped and loop-local.
     """
     yield _fresh_acp_session_context(_acp_child_streams)
+
+
+@pytest_asyncio.fixture
+async def echo_context() -> AsyncIterator[AcpSessionContext]:
+    """Yield a production context bound to a real echoing child process.
+
+    The child writes every line it reads on stdin straight back on stdout, so a
+    frame a production seam wrote is readable from the same context - a real pipe
+    round-trip through a real process, and the seam under test is the production
+    one. Shared here because both the session-configuration tests and the
+    permission-posture tests drive session setup this way.
+    """
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _ECHO_CHILD,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    context = AcpSessionContext(
+        process=process,
+        stdin=process.stdin,
+        stdout=process.stdout,
+        response_futures={},
+        chunk_queue=asyncio.Queue(),
+        prompt_done=asyncio.Event(),
+        prompt_id_ref=[],
+        interrupt_exc=[],
+    )
+    try:
+        yield context
+    finally:
+        process.stdin.close()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            process.kill()
+            await process.wait()

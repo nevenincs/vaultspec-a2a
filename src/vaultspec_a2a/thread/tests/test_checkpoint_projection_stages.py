@@ -11,10 +11,15 @@ suite - no stand-ins for the type under projection.
 
 from __future__ import annotations
 
+import operator
 from datetime import UTC, datetime
+from typing import Annotated, Any, TypedDict, cast
 
+import pytest
 from langgraph.checkpoint.base import CheckpointTuple, PendingWrite
-from langgraph.types import Interrupt
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, Interrupt, interrupt
 
 from ..snapshots import (
     extract_checkpoint_fields,
@@ -108,6 +113,81 @@ def test_folding_flags_an_untyped_interrupt_payload() -> None:
 
     assert "interrupt_payload_untyped" in projection.degraded_reasons
     assert projection.pending_interrupts == []
+
+
+class _FanOutState(TypedDict, total=False):
+    answers: Annotated[list[str], operator.add]
+
+
+def _fan_out_graph(saver: InMemorySaver) -> Any:
+    """Two branches that each stop to ask their own question."""
+
+    def gate(request_id: str) -> Any:
+        def node(state: _FanOutState) -> _FanOutState:
+            del state
+            answer = interrupt(
+                {"type": "plan_approval_request", "request_id": request_id}
+            )
+            return {"answers": [f"{request_id}:{answer}"]}
+
+        return node
+
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _FanOutState))
+    builder.add_node("alpha", gate("request-alpha"))
+    builder.add_node("beta", gate("request-beta"))
+    builder.add_edge(START, "alpha")
+    builder.add_edge(START, "beta")
+    builder.add_edge("alpha", END)
+    builder.add_edge("beta", END)
+    return builder.compile(checkpointer=saver)
+
+
+@pytest.mark.asyncio
+async def test_an_answered_branch_is_no_longer_a_question_the_run_discloses() -> None:
+    """A reload must re-render the open questions, not the answered ones.
+
+    This projection is what a client reads the run's pending permissions and
+    parked clarification from. With work fanned out, the superstep holding
+    both questions cannot commit while one branch is still parked, so the
+    answered branch's interrupt write stays in the checkpoint and was
+    disclosed alongside the live one on every reload.
+
+    A real fan-out over a real saver, because the thing being read is exactly
+    what LangGraph leaves in the store and a hand-built write set would only
+    restate the assumption under test.
+    """
+    saver = InMemorySaver()
+    graph = _fan_out_graph(saver)
+    config: Any = {"configurable": {"thread_id": "fan-out-projection"}}
+
+    await graph.ainvoke({"answers": []}, config)
+    both = project_checkpoint_tuple(
+        await saver.aget_tuple(config), thread_id="fan-out-projection"
+    )
+    assert {parked.interrupt_id for parked in both.pending_interrupts} == {
+        "request-alpha",
+        "request-beta",
+    }
+
+    answered = next(
+        parked
+        for parked in (await graph.aget_state(config)).interrupts
+        if parked.value["request_id"] == "request-alpha"
+    )
+    await graph.ainvoke(Command(resume={answered.id: "approved"}), config)
+
+    stored = await saver.aget_tuple(config)
+    assert stored is not None
+    remaining = project_checkpoint_tuple(stored, thread_id="fan-out-projection")
+
+    assert [parked.interrupt_id for parked in remaining.pending_interrupts] == [
+        "request-beta"
+    ]
+    assert remaining.pause_cause == "plan_approval_request"
+    # The held writes themselves are still reported whole: they describe the
+    # checkpoint, and only the questions were narrowed.
+    assert remaining.pending_write_count == len(stored.pending_writes or [])
+    assert "__interrupt__" in remaining.pending_write_channels
 
 
 def test_the_composed_function_equals_the_two_stages_run_in_order() -> None:

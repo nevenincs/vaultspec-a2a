@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#phase-artifact-gates'
 date: 2026-03-03
-modified: '2026-07-15'
-body_hash: 'sha256:4f8958aa5f6070ca9e11247d6cf576a297cf35a93325aa30e42b2e1216616c5a'
+modified: '2026-09-30'
+body_hash: 'sha256:912c77fe9ef07a8e3d13a4387dafcca432db0d90a2831d6e8f1b3237fcd9be02'
 related:
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
 - '[[2026-03-03-contextual-anchoring-graph-lifecycle-adr]]'
@@ -293,3 +293,15 @@ see unapplied proposals (dashboard D4). This aligns with the queue-by-
 reference model (W02.S13) and the run-local generalized document gate (W03).
 See `2026-07-14-a2a-edge-conformance-adr` (R12) and
 `2026-07-14-a2a-edge-conformance-reference`.
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+The 2026-07-15 amendment's proposal-based gate is in force for the document-authoring topology only. The star and pipeline topologies still gate on the filesystem-derived vault index (`src/vaultspec_a2a/graph/nodes/supervisor.py`). That is the intended scope, not an unfinished rollout. Those topologies write to the workspace directly rather than proposing to the engine, so an index scan is the artifact test available to them. The proposal test binds wherever a topology authors through the engine (`src/vaultspec_a2a/graph/nodes/phase_gate.py`).
+
+The index gate has three consequences:
+
+- It must read the vault as it is at the moment of the decision, not as the last mount pass left it.
+- A blocked FINISH is a route like any other, so it passes through this gate and through plan approval before it reaches a worker.
+- A route this gate only warns about still reaches plan approval; the warning travels with the approval request rather than replacing it.
+
+Reconsider the scope split if a star or pipeline preset is ever given an authoring submitter. Grounding: `2026-09-30-langgraph-conformance-audit`.

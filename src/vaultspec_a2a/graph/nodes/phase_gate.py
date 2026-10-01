@@ -37,6 +37,7 @@ to ``validation_errors`` so the writer has a concrete revise signal.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langgraph.types import Command, interrupt
@@ -46,21 +47,47 @@ from ...thread.enums import (
     VERDICT_REJECTED,
     VERDICT_REQUEST_CHANGES,
 )
+from ...thread.errors import DocumentConformanceError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ...thread.state import TeamState
     from .worker import RoutingNode
 
 # The verdict vocabulary is imported to ROUTE ON, not to offer a second way in:
 # thread.enums holds it precisely because this module and the authoring lifecycle
 # cannot import each other, and a consumer taking it from either would undo that.
+_logger = logging.getLogger(__name__)
+
 __all__ = [
+    "REVIEW_REVISION_SENTINEL",
     "DocumentProposalSubmitter",
     "ProposalRevisionRequiredError",
     "create_phase_gate_node",
     "create_phase_submit_node",
     "parse_verdict",
+    "review_requests_revision",
+    "verdict_answers_request",
 ]
+
+#: The standalone verdict line a reviewer persona emits to send work back.
+REVIEW_REVISION_SENTINEL = "REVISION REQUIRED"
+
+
+def review_requests_revision(messages: Sequence[object]) -> bool:
+    """Whether the latest message is a reviewer verdict asking for revision.
+
+    An anchored whole-line match, not a substring, so reviewer prose such as
+    "no revision required" never reads as a request. Anything else - the
+    ``PASS`` verdict, or no verdict at all - is not a request.
+    """
+    if not messages:
+        return False
+    content = str(getattr(messages[-1], "content", ""))
+    return REVIEW_REVISION_SENTINEL in {
+        line.strip().upper() for line in content.splitlines()
+    }
 
 
 _REVISION_VERDICTS = frozenset({VERDICT_REJECTED, VERDICT_REQUEST_CHANGES})
@@ -117,12 +144,32 @@ def parse_verdict(resume_value: object) -> tuple[str | None, str | None]:
     return verdict_str, notes_str
 
 
+def verdict_answers_request(resume_value: object, request_id: str | None) -> bool:
+    """Whether a verdict payload names the request the gate is parked on.
+
+    A resume value is handed to whichever ``interrupt()`` asks for one next,
+    which is not necessarily the one it was written for: a verdict delivered to
+    a checkpoint that has moved on, or that never parked, would otherwise be
+    consumed as the answer to a question no human was asked. Binding the
+    verdict to a request is what lets the gate tell those apart.
+
+    A payload naming NO request is refused rather than trusted. An unbound
+    answer is exactly the one the run cannot attribute, and accepting it is
+    how an approval arrives with no human behind it.
+    """
+    if not request_id or not isinstance(resume_value, dict):
+        return False
+    named = cast("dict[str, object]", resume_value).get("request_id")
+    return isinstance(named, str) and named == request_id
+
+
 def create_phase_submit_node(
     phase: str,
     submitter: DocumentProposalSubmitter,
     *,
     gate_target: str,
     revision_target: str,
+    max_revisions: int,
 ) -> RoutingNode:
     """Create the deterministic pre-interrupt propose-and-submit node.
 
@@ -145,6 +192,16 @@ def create_phase_submit_node(
     ``revision_notes`` attribute (a duck-typed contract), so the gate module stays
     decoupled from the authoring package.
 
+    That second chance is BUDGETED, on the same per-phase counter the inner
+    review loop spends: both are revisions of this phase's document by the same
+    writer, and a refusal that cost nothing looped writer -> review -> submit
+    until the recursion limit killed the run. A spent budget raises
+    :class:`...thread.errors.DocumentConformanceError` rather than parking at
+    the human gate, because a refusal happens BEFORE any proposal exists: the
+    gate's payload would name no proposal and the out-of-run verdict subscriber
+    correlates a verdict by exactly that id, so a park here is a pause nothing
+    could end.
+
     Args:
         phase:           The document phase this gate guards (e.g. ``research``,
                          ``adr``); recorded in ``gate_phase`` and carried to the gate.
@@ -154,12 +211,18 @@ def create_phase_submit_node(
         revision_target: The phase's writer, routed to when the submitter refuses a
                          non-conformant body (the SAME target the gate uses on
                          ``request_changes``).
+        max_revisions:   The phase's revision budget, shared with the inner review
+                         loop's router so the two cannot each spend it in full.
 
     Returns:
         An async node that proposes+submits and routes via ``Command.goto`` into
         the gate, committing ``authoring_proposal_ids`` / ``gate_phase`` /
-        ``gate_pending_proposal_id`` - or, on a conformance refusal, routes to the
-        writer with the specific check notes.
+        ``gate_pending_proposal_id`` - or, on a conformance refusal within budget,
+        routes to the writer with the specific check notes.
+
+    Raises:
+        DocumentConformanceError: The submitter refused and the phase has no
+            revision left to spend.
     """
 
     async def phase_submit_node(state: TeamState) -> Command[Any]:
@@ -167,6 +230,11 @@ def create_phase_submit_node(
         try:
             proposal_id = await submitter(state, phase)
         except ProposalRevisionRequiredError as exc:
+            spent = (state.get("review_revisions") or {}).get(phase, 0)
+            if spent > max_revisions:
+                raise DocumentConformanceError(
+                    phase, exc.revision_notes, attempts=spent
+                ) from exc
             return Command(
                 goto=revision_target,
                 update={
@@ -174,6 +242,7 @@ def create_phase_submit_node(
                     "gate_phase": phase,
                     "gate_verdict": VERDICT_REQUEST_CHANGES,
                     "validation_errors": list(exc.revision_notes),
+                    "review_revisions": {phase: spent + 1},
                 },
             )
         return Command(
@@ -184,6 +253,8 @@ def create_phase_submit_node(
                 "gate_pending_proposal_id": proposal_id,
                 "authoring_proposal_ids": [proposal_id],
                 "routing_error": None,
+                # A revision the human asks for at the gate gets a fresh budget.
+                "review_revisions": {phase: 0},
             },
         )
 
@@ -220,15 +291,43 @@ def create_phase_gate_node(
     async def phase_gate_node(state: TeamState) -> Command[Any]:
         """Pause for the committed proposal's verdict, then route."""
         proposal_id = state.get("gate_pending_proposal_id")
-        resume_value = interrupt(
-            {
-                "type": "document_approval_request",
-                "phase": phase,
-                "proposal_id": proposal_id,
-                "feature": state.get("active_feature"),
-            }
-        )
-        verdict, notes = parse_verdict(resume_value)
+        payload = {
+            "type": "document_approval_request",
+            "phase": phase,
+            "proposal_id": proposal_id,
+            "feature": state.get("active_feature"),
+            # The proposal this gate parked on IS its request identity: it is
+            # committed to the checkpoint before the park and it is what the
+            # out-of-run verdict subscriber correlates a decision by.
+            "request_id": proposal_id,
+        }
+        if not proposal_id:
+            # With no committed proposal the gate has no request id to put in
+            # its payload, and a verdict counts here only when it names this
+            # gate's request, so a park could only ever end in a rejection.
+            # The gate takes that rejection now and the writer resubmits,
+            # rather than pausing the run for an answer that cannot count.
+            verdict, notes = (
+                VERDICT_REJECTED,
+                f"Document phase {phase!r} reached its gate with no committed "
+                "proposal; resubmit it before a decision can be asked for.",
+            )
+        else:
+            resume_value = interrupt(payload)
+            # An answer bound to another request, or to none, is not this
+            # gate's decision, so the gate asks again rather than spending a
+            # revision on it. The decision stays the human's, and the phase's
+            # revision budget is spent only by a verdict a human gave on this
+            # document.
+            while not verdict_answers_request(resume_value, proposal_id):
+                _logger.warning(
+                    "Verdict for document phase %r did not name proposal %r; "
+                    "asking again",
+                    phase,
+                    proposal_id,
+                )
+                resume_value = interrupt(payload)
+            verdict, notes = parse_verdict(resume_value)
 
         if verdict == VERDICT_APPROVED:
             return Command(
@@ -238,6 +337,13 @@ def create_phase_gate_node(
                     "gate_phase": phase,
                     "gate_verdict": VERDICT_APPROVED,
                     "routing_error": None,
+                    # The phase advances, so its revision notes stop being
+                    # active errors. Nothing else clears them, and anchoring
+                    # shows every active error to every later worker: an ADR
+                    # author was still being told to "fix sources" about a
+                    # research document the human had since approved. The empty
+                    # list is the channel's own clear signal.
+                    "validation_errors": [],
                 },
             )
 

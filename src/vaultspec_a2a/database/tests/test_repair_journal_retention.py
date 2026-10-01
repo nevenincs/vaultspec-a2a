@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
@@ -32,8 +32,12 @@ from ...database.permission_repository import (
     prune_repair_journal,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionResultStatus, ControlActionType
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 _REPAIR_TYPES = (
     ControlActionType.REPAIR_STARTED.value,
@@ -49,10 +53,11 @@ _PERMISSION_KEY = "permission-response:req-perm-1"
 
 async def _put_checkpoint(checkpointer: AsyncSqliteSaver, tid: str) -> None:
     await checkpointer.setup()
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {"configurable": {"thread_id": tid, "checkpoint_ns": ""}}
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{tid}"
     await checkpointer.aput(
-        {"configurable": {"thread_id": tid, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},

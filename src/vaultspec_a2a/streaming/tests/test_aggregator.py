@@ -43,7 +43,7 @@ from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
 from ..aggregator import EventAggregator
 from ..ingest import _next_event_or_cancel, summarize_ingest_exception
-from ..types import SequencedEvent, StreamableGraph
+from ..types import SequencedEvent, StreamableGraph, StreamOptions
 from ._error_injecting_graph import (
     ERROR_INJECTION_NODE,
     InjectedSignal,
@@ -1954,12 +1954,7 @@ class TestEmitInterruptEvents:
                 self,
                 graph_input: object,
                 config: object,
-                *,
-                stream_mode: list[str],
-                subgraphs: bool = False,
-                context: object | None = None,
-                control: object | None = None,
-                durability: str | None = None,
+                **options: Unpack[StreamOptions],
             ):
                 from langgraph.types import Interrupt
 

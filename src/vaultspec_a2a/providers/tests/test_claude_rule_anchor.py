@@ -222,16 +222,14 @@ def _child_environment(home: Path, base_url: str) -> dict[str, str]:
 
 
 def _read_under_rules(
+    paths: _ProbePaths,
     *,
     cli: str,
-    workspace: Path,
-    home: Path,
-    target: Path,
     allowed: str,
     denied: str | None = None,
 ) -> JsonObject:
     """Return the tool result the real CLI produced for one Read under *allowed*."""
-    with _scripted_endpoint(target) as (base_url, turn):
+    with _scripted_endpoint(paths.target) as (base_url, turn):
         command = [
             cli,
             "--print",
@@ -249,8 +247,8 @@ def _read_under_rules(
         command += ["--model", "claude-rule-probe"]
         completed = subprocess.run(
             [*command, "read the file"],
-            cwd=str(workspace),
-            env=_child_environment(home, base_url),
+            cwd=str(paths.workspace),
+            env=_child_environment(paths.home, base_url),
             capture_output=True,
             text=True,
             timeout=_CLI_TIMEOUT_SECONDS,
@@ -278,8 +276,17 @@ def claude_cli(external_prerequisite: ExternalPrerequisiteRule) -> str:
     return executable
 
 
+@dataclass(frozen=True, slots=True)
+class _ProbePaths:
+    """The three real locations one rule probe runs against."""
+
+    workspace: Path
+    home: Path
+    target: Path
+
+
 @pytest.fixture
-def probe_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
+def probe_paths(tmp_path: Path) -> _ProbePaths:
     """A workspace, an isolated home, and one real file outside the workspace."""
     workspace = tmp_path / "project"
     home = tmp_path / "home"
@@ -288,21 +295,17 @@ def probe_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
         directory.mkdir()
     target = elsewhere / "target.txt"
     target.write_text(f"{_SECRET}\n", encoding="utf-8")
-    return workspace, home, target
+    return _ProbePaths(workspace=workspace, home=home, target=target)
 
 
 def test_the_scope_rule_this_lane_writes_admits_the_path_it_names(
-    claude_cli: str, probe_paths: tuple[Path, Path, Path]
+    claude_cli: str, probe_paths: _ProbePaths
 ) -> None:
     """The rendered workspace scope is a grant the CLI actually resolves."""
-    workspace, home, target = probe_paths
-
     granted = _read_under_rules(
+        probe_paths,
         cli=claude_cli,
-        workspace=workspace,
-        home=home,
-        target=target,
-        allowed=workspace_scoped_tool_rule("Read", str(target.parent)),
+        allowed=workspace_scoped_tool_rule("Read", str(probe_paths.target.parent)),
     )
 
     assert _SECRET in _answered(granted)
@@ -310,7 +313,7 @@ def test_the_scope_rule_this_lane_writes_admits_the_path_it_names(
 
 
 def test_a_single_slash_scope_rule_admits_nothing_at_the_path_it_names(
-    claude_cli: str, probe_paths: tuple[Path, Path, Path]
+    claude_cli: str, probe_paths: _ProbePaths
 ) -> None:
     """The spelling this lane used to write grants nothing, and says so silently.
 
@@ -318,14 +321,10 @@ def test_a_single_slash_scope_rule_admits_nothing_at_the_path_it_names(
     refused, and nothing anywhere reports that the grant named a directory
     under the workspace instead of the one in the rule.
     """
-    workspace, home, target = probe_paths
-
     refused = _read_under_rules(
+        probe_paths,
         cli=claude_cli,
-        workspace=workspace,
-        home=home,
-        target=target,
-        allowed=f"Read({target.parent.as_posix()}/**)",
+        allowed=f"Read({probe_paths.target.parent.as_posix()}/**)",
     )
 
     assert _SECRET not in _answered(refused)
@@ -333,7 +332,7 @@ def test_a_single_slash_scope_rule_admits_nothing_at_the_path_it_names(
 
 
 def test_the_deny_spelling_this_lane_writes_blocks_a_granted_read(
-    claude_cli: str, probe_paths: tuple[Path, Path, Path]
+    claude_cli: str, probe_paths: _ProbePaths
 ) -> None:
     """A deny rendered by the lane beats an allow over the same absolute path.
 
@@ -341,17 +340,13 @@ def test_the_deny_spelling_this_lane_writes_blocks_a_granted_read(
     the refusal can only be the deny: a run where the allow silently matched
     nothing would refuse the read too, and would look identical.
     """
-    workspace, home, target = probe_paths
+    target = probe_paths.target
     scope = workspace_scoped_tool_rule("Read", str(target.parent))
 
-    granted = _read_under_rules(
-        cli=claude_cli, workspace=workspace, home=home, target=target, allowed=scope
-    )
+    granted = _read_under_rules(probe_paths, cli=claude_cli, allowed=scope)
     blocked = _read_under_rules(
+        probe_paths,
         cli=claude_cli,
-        workspace=workspace,
-        home=home,
-        target=target,
         allowed=scope,
         denied=f"Read({claude_rule_path(str(target))})",
     )
@@ -362,7 +357,7 @@ def test_the_deny_spelling_this_lane_writes_blocks_a_granted_read(
 
 
 def test_a_single_slash_deny_rule_blocks_nothing_at_the_path_it_names(
-    claude_cli: str, probe_paths: tuple[Path, Path, Path]
+    claude_cli: str, probe_paths: _ProbePaths
 ) -> None:
     """The spelling the deny list used to carry is a deny that never fires.
 
@@ -370,13 +365,11 @@ def test_a_single_slash_deny_rule_blocks_nothing_at_the_path_it_names(
     in, which is why they are rendered through one anchor with the scope rule:
     a deny that misses reads exactly like a deny that holds.
     """
-    workspace, home, target = probe_paths
+    target = probe_paths.target
 
     not_blocked = _read_under_rules(
+        probe_paths,
         cli=claude_cli,
-        workspace=workspace,
-        home=home,
-        target=target,
         allowed=workspace_scoped_tool_rule("Read", str(target.parent)),
         denied=f"Read({target.as_posix()})",
     )

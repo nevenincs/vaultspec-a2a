@@ -36,7 +36,7 @@ from .transformer import (
     frame_reports_interrupt,
     process_stream_frame,
 )
-from .types import StreamableGraph
+from .types import StreamableGraph, StreamOptions
 
 #: One frame of a graph stream: the namespace it came from, the mode that
 #: produced it, and that mode's payload.
@@ -400,16 +400,12 @@ class _IngestProgress:
 class _ThreadState:
     """Per-thread bookkeeping one ingest manager keeps between calls.
 
-    Five maps on the same key, purged together. Held as one value so the purge
+    Four maps on the same key, purged together. Held as one value so the purge
     is one method: a map added beside these without a line in :meth:`clear` is
     exactly the per-thread leak this grouping exists to make visible.
     """
 
     cancel_events: dict[str, asyncio.Event] = field(default_factory=dict)
-    # Per-thread ingest queues for backpressure.
-    ingest_queues: dict[str, asyncio.Queue[dict[str, Any] | None]] = field(
-        default_factory=dict
-    )
     # Per-thread fan-out tasks.
     fanout_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
     # The capped, single-line reason the most recent FAILED ingest for a thread
@@ -436,7 +432,6 @@ class _ThreadState:
     def clear(self, thread_id: str) -> None:
         """Purge every map scoped to *thread_id*."""
         self.cancel_events.pop(thread_id, None)
-        self.ingest_queues.pop(thread_id, None)
         self.failure_reasons.pop(thread_id, None)
         self.failure_conditions.pop(thread_id, None)
         task = self.fanout_tasks.pop(thread_id, None)
@@ -645,17 +640,20 @@ class IngestManager:
         thread_id = request.thread_id
         agent_id = request.agent_id
         cancel_event = progress.cancel_event
+        stream_options: StreamOptions = {
+            "stream_mode": list(STREAM_MODES),
+            "subgraphs": True,
+            "context": request.invocation.context,
+            "control": request.invocation.control,
+            "durability": _run_durability(request.graph),
+        }
         event_stream = request.graph.astream(
             request.invocation.graph_input,
             _config_with_run_callbacks(
                 request.invocation.config,
                 self.run_lifecycle_callbacks(thread_id, agent_id),
             ),
-            stream_mode=list(STREAM_MODES),
-            subgraphs=True,
-            context=request.invocation.context,
-            control=request.invocation.control,
-            durability=_run_durability(request.graph),
+            **stream_options,
         ).__aiter__()
         while True:
             raw_event, cancelled, exhausted = await self._next_ingest_event(

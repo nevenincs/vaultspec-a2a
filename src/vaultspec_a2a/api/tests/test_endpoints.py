@@ -35,7 +35,6 @@ from ...database import (
     create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
-    get_latest_control_action,
     get_thread,
     record_permission_request,
     record_permission_response_submission,
@@ -1415,30 +1414,24 @@ class TestSendMessage:
             )
         assert resp.status_code == 404
 
-    def test_refuses_a_follow_up_while_the_run_is_busy(
+    def test_queues_a_follow_up_while_the_run_is_busy(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """A run whose turn has not finished refuses, reserving nothing.
+        """A run whose turn has not finished queues the next one behind it.
 
-        The refusal is the whole behaviour: admitting the turn used to make the
-        follow-up the run's writer, after which the executing turn's own
-        completion was refused as superseded and the run quarantined. So this
-        asserts the negative side too - no journal action, no writer transition,
-        no dispatch - because a refusal that still wrote would be the same bug
-        wearing a 409.
+        The negative side is the whole point: the turn is admitted and still
+        dispatches nothing and installs no writer. Making the follow-up the
+        run's writer now is what used to refuse the executing turn's own
+        completion as superseded and quarantine the run, so an admission that
+        dispatched would be the same bug wearing a 202.
         """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _thread_state() -> tuple[str, str | None, str | None]:
+        async def _thread_state() -> tuple[str, str | None]:
             async with session_factory() as session:
                 thread = await get_thread(session, "endpoints-run-07")
                 assert thread is not None
-                latest = await get_latest_control_action(session, thread_id=thread.id)
-                return (
-                    thread.status,
-                    thread.last_requested_action,
-                    latest.id if latest is not None else None,
-                )
+                return (thread.status, thread.last_requested_action)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -1461,12 +1454,14 @@ class TestSendMessage:
                 headers={"Idempotency-Key": "endpoints-busy-run"},
             )
 
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["code"] == FailureType.RUN_BUSY.value
-        assert "in flight" in detail["message"] or "dispatched" in detail["message"]
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["action_status"] == "queued"
+        assert body["queue_position"] == 1
+        assert body["applied"] is False
 
         assert worker.dispatches == []
+        # The run is untouched: the waiting turn owns no authority over it.
         assert asyncio.run(_thread_state()) == before
 
     def test_content_length_limit(

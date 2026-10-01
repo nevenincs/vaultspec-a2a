@@ -47,7 +47,6 @@ from ...team.team_config import load_team_config
 from ...testing.tests._support.catalog_selection import in_process_selection
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
-from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..routes.gateway import admission_gate
@@ -387,25 +386,25 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
         assert replay.json()["run_id"] == run_id
         assert worker.dispatches == [], "a replay must not dispatch a new turn"
 
-        # The follow-up verb refuses while the first turn is still in flight,
-        # and the refusal reaches no further than the gateway.
+        # The follow-up verb queues the turn while the first is still in
+        # flight, and the acceptance reaches no further than the gateway.
         follow = await client.post(
             f"/v1/runs/{run_id}/messages",
             json={"content": "second turn"},
             headers={"Idempotency-Key": "gwlive-second-turn"},
         )
-        assert follow.status_code == 409, follow.text
-        detail = follow.json()["detail"]
-        assert detail["code"] == FailureType.RUN_BUSY.value
-        assert detail["message"]
-        assert worker.dispatches == [], "a refused follow-up must not dispatch"
+        assert follow.status_code == 202, follow.text
+        queued = follow.json()
+        assert queued["action_status"] == "queued"
+        assert queued["queue_position"] == 1
+        assert worker.dispatches == [], "a queued follow-up must not dispatch"
 
         async with session_factory() as db:
             after = await get_thread(db, run_id)
         assert after is not None
         assert after.last_requested_action != (
             ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value
-        ), "a refused follow-up must not become the run's requested action"
+        ), "a waiting follow-up must not become the run's requested action"
 
         # An unknown run is a not-found rather than a silent accept.
         missing = await client.post(

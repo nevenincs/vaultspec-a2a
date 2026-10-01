@@ -36,7 +36,7 @@ from ...control.health import (
     build_full_health,
     probe_engine_discovery_freshness,
 )
-from ...control.message_service import MessageResult, send_followup_message
+from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
 from ...control.run_start_policy import (
     required_role_ids,
@@ -61,9 +61,7 @@ from ...thread.constants import (
     MAX_WORKSPACE_ROOT_LENGTH,
 )
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import (
-    ThreadStatus,
-)
+from ...thread.enums import ControlActionResultStatus
 from ...thread.idempotency import IDEMPOTENCY_KEY_MAX_LENGTH
 from ...utils.coercion import coerce_object_mapping
 from .._utils import trace_headers
@@ -233,6 +231,11 @@ _RUN_REFUSALS: frozenset[FailureType] = frozenset(
     FailureType(code.value) for code in RunMessageRefusalCode
 )
 
+#: The served ``action_status`` of a turn whose work the run has finished.
+#: A fresh admission never reports it; only a replay of a key whose turn has
+#: already run does, which is what makes ``applied`` true on this verb.
+_APPLIED_ACTION_STATUS = ControlActionResultStatus.APPLIED.value
+
 # The dispatch outcomes that mean the gateway is temporarily unable to deliver,
 # rather than that the request was wrong or the far side broken.
 _RUN_UNAVAILABLE: frozenset[FailureType] = frozenset(
@@ -265,20 +268,6 @@ def _refused_dispatch(failure_type: FailureType, detail: str | None) -> HTTPExce
     return HTTPException(status_code=502, detail=detail)
 
 
-async def _raise_for_message_dispatch_failure(
-    request: Request, result: MessageResult
-) -> None:
-    failure_type = result.failure_type
-    if failure_type is None:
-        return
-    # A failed follow-up can settle without a terminal worker event.
-    if result.thread_status == ThreadStatus.FAILED.value:
-        drain_gate = getattr(request.app.state, "drain_gate", None)
-        if drain_gate is not None:
-            await drain_gate.release(result.thread_id)
-    raise _refused_dispatch(failure_type, result.error_detail)
-
-
 def _refused_permission_response(result: PermissionResult) -> HTTPException:
     """Serve a refused permission answer, dispatch outcomes through one mapping.
 
@@ -302,8 +291,11 @@ def _refused_permission_response(result: PermissionResult) -> HTTPException:
     responses={
         202: {
             "description": (
-                "Reserved for a follow-up turn the run can take. No run state "
-                "admits one yet, so this response is not currently served."
+                "The follow-up turn is queued behind the one the run is "
+                "executing. It holds a place in the run's queue and no write "
+                "authority; it reaches the worker when the current turn's "
+                "terminal checkpoint is proven. ``queue_position`` says where "
+                "it sits."
             ),
         },
         409: {
@@ -314,20 +306,10 @@ def _refused_permission_response(result: PermissionResult) -> HTTPException:
                 "condition refused it."
             ),
         },
-        502: {
-            "description": (
-                "The turn was accepted and retained but the worker could not "
-                "be reached or failed inside itself. Reconcile from run-status."
-            ),
-        },
         # Restates the router's token refusal because naming a response here
         # replaces the router-wide description for this route.
         503: {
-            "description": (
-                "Gateway service token is not configured, or the worker is "
-                "saturated or shut out by the failure breaker and the turn "
-                "was retained for retry."
-            ),
+            "description": "Gateway service token is not configured.",
         },
     },
 )
@@ -336,30 +318,34 @@ async def run_message_endpoint(
     body: RunMessageRequest,
     context: _MessageEndpointContext = Depends(_get_message_endpoint_context),
 ) -> RunMessageResponse:
-    """Send a follow-up turn into an existing run.
+    """Queue a follow-up turn behind the one an existing run is executing.
 
-    No run state admits a follow-up today, so every request that names a run is
-    refused with the typed 409: a run with a turn in flight is busy, a parked run
-    answers through its own respond verb, and a settled run is over. Taking a
-    turn needs a continuation model this surface does not have yet, and the 202
-    shape below is what that model will answer with. The verb is published now
-    so a caller learns the refusal from its code rather than from a missing
-    route.
+    A run that is still executing a turn (SUBMITTED, RUNNING) takes the
+    follow-up and answers 202 with ``action_status`` ``queued`` and the place
+    it was given. The turn is reserved in the run's journal and NOTHING else:
+    it binds no graph receipt, installs no writer and is not dispatched, which
+    is what keeps the executing turn's own terminal from being refused as
+    superseded. It becomes a dispatch only once that turn's terminal
+    checkpoint is proven, and the run stays RUNNING across the boundary.
+
+    A consumer must therefore not read a quiet turn boundary as completion: a
+    run holding a queued continuation emits no terminal frame at the end of
+    its first turn, and one at the end of its last.
+
+    One continuation waits per run, and the service bounds the total. A second
+    offer while one waits refuses ``queue_full``; nothing was reserved, and
+    the caller may offer again once the waiting turn has run.
+
+    Every other state still refuses, each for its own reason. A cancelling run
+    is leaving, so a turn queued behind it would wait for a promotion that can
+    never come. A parked run answers through its own typed respond verb, and a
+    message here would start a turn that orphans the pause. A settled run is
+    over; continuing it is a new run that names it as its predecessor.
 
     Run-start cannot carry this. A repeat run identifier there is a REPLAY - it
     answers with the original run and never adopts the new body - so without
     this verb the versioned surface can start a run and watch it, but never say
     anything further to it.
-
-    A run whose current turn has not finished refuses with a typed 409 rather
-    than taking the turn. Admitting it would hand the run's write authority to
-    the new turn while the old one is still executing, after which the executing
-    turn's own completion is refused as superseded and the run quarantines. The
-    refusal reserves nothing and dispatches nothing, so the caller loses no
-    state by meeting it; a queued continuation is a separate capability.
-
-    A parked run is likewise refused: a pause is answered through its own typed
-    respond verb, and a message here would start a new turn and orphan the pause.
 
     The caller names the turn. ``Idempotency-Key`` is required here and has no
     server-derived default, because a default can only be derived from what the
@@ -368,9 +354,8 @@ async def run_message_endpoint(
     key the second was answered as a replay of the first and never ran. A
     request that names no key is refused before anything is read.
 
-    Accepted is not applied: an accepted turn is handed to the worker and
-    execution continues asynchronously, so a caller reconciles from the stream or
-    run-status rather than from this response.
+    Queued is not applied: the turn has not started, so a caller reconciles
+    from the stream or run-status rather than from this response.
     """
     dependencies = context.dependencies
     result = await send_followup_message(
@@ -379,11 +364,6 @@ async def run_message_endpoint(
         content=body.content,
         agent_id=body.agent_id or DEFAULT_SUPERVISOR_ID,
         idempotency_key=context.idempotency_key,
-        circuit_breaker=dependencies.circuit_breaker,
-        worker_spawner=dependencies.worker_spawner,
-        worker_client=dependencies.worker_client,
-        recursion_limit=domain_config.graph_recursion_limit,
-        trace_headers=trace_headers(),
     )
 
     if result.failure_type == FailureType.NOT_FOUND:
@@ -392,21 +372,16 @@ async def run_message_endpoint(
         # Same status the run-creation seam returns for the same missing
         # invariant, so one rule reads identically at both entry points.
         raise HTTPException(status_code=422, detail=result.error_detail)
-    if result.failure_type is not None and result.failure_type in _RUN_REFUSALS:
+    if result.failure_type is not None:
         raise _refused_dispatch(result.failure_type, result.error_detail)
-
-    if result.dispatched:
-        worker_liveness(context.request.app.state).record_contact()
-
-    await _raise_for_message_dispatch_failure(context.request, result)
 
     return RunMessageResponse(
         run_id=result.thread_id,
-        action_status=(
-            "accepted_not_applied" if result.dispatched else result.thread_status
-        ),
+        action_status=result.action_status,
+        applied=result.action_status == _APPLIED_ACTION_STATUS,
         action_id=result.action_id,
         idempotency_key=context.idempotency_key,
+        queue_position=result.queue_position,
     )
 
 

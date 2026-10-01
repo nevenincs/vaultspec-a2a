@@ -12,7 +12,7 @@ related:
   - '[[2026-08-02-clarification-continuation-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:c2f085c7983dae96ee795131888e93153d9e87cb88cba96fdd329ff694d4988c'
+body_hash: 'sha256:52d8d4f498e5e0bdc84b4b979b4e98616014b9d019f918cf39a897855ef5535a'
 ---
 
 # `run-continuation` plan
@@ -68,17 +68,17 @@ A proven terminal checkpoint promotes a queued continuation inside the same run 
 - [x] `P03.S07` - Make promotion a durable recovery attempt under the existing lease machinery so a gateway killed between settlement and dispatch promotes the same queued action exactly once on restart; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/recovery_authority.py`.
 - [x] `P03.S08` - Treat a run holding a queued continuation as owned by the promotion dispatcher until that action lease expires, so the abandoned-transition reconciler never settles it or drops the queued turn; `src/vaultspec_a2a/control/recovery_authority.py, src/vaultspec_a2a/database/reconciliation.py`.
 - [x] `P03.S09` - Bound the total lifetime of a run across promotions, refusing to promote past the configured maximum and settling the run with its own terminal instead; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/domain_config.py`.
-- [ ] `P03.S18` - Refuse every queued continuation in the settlement transaction of a run whose turn settles FAILED or CANCELLED, so a continuation is never left waiting on a settled run nor promoted past a failed turn; `src/vaultspec_a2a/control/recovery_authority.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/control/tests/`.
+- [x] `P03.S18` - Refuse every queued continuation in the settlement transaction of a run whose turn settles FAILED or CANCELLED, so a continuation is never left waiting on a settled run nor promoted past a failed turn; `src/vaultspec_a2a/control/recovery_authority.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/control/tests/`.
 - [x] `P03.S19` - Withhold the client-visible terminal frame and replay record of a turn whose run promotes a queued continuation, gating the relay on the control plane's settlement disposition so a viewer sees one terminal at the last turn's end; `src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/streaming/, src/vaultspec_a2a/api/tests/`.
 
 ### Phase `P04` - Admission: queue one continuation on a busy run
 
 A busy run admits at most one continuation as a reserved journal action answered 202 queued, a parked run refuses by naming its own respond verb, and run-status discloses the queue depth.
 
-- [ ] `P04.S10` - Admit SUBMITTED and RUNNING for a follow-up and reserve it as a queued journal action with no receipt, no writer and no dispatch, answering 202 with action_status queued, its position and the queue_full refusal when the per-run depth or the service-wide cap is spent; CANCELLING stays run_busy; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py, src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/thread/tests/test_message_policy.py, openapi.json`.
-- [ ] `P04.S11` - Replay the queued action and its position for a repeat idempotency key and refuse a changed payload under that key with conflict; `src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/control/action_lease.py, src/vaultspec_a2a/control/repositories/continuation_queue.py`.
-- [ ] `P04.S12` - Narrow the parked refusal to name the typed respond verb for the pause the run actually holds, reading the pending request rather than guessing from status alone; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/database/permission_repository.py, src/vaultspec_a2a/thread/tests/test_message_policy.py`.
-- [ ] `P04.S13` - Disclose a bounded queued_messages count on run-status so a client reloading without a stream reads the queue depth from authoritative state; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/control/snapshot.py, openapi.json`.
+- [x] `P04.S10` - Admit SUBMITTED and RUNNING for a follow-up and reserve it as a queued journal action with no receipt, no writer and no dispatch, answering 202 with action_status queued, its position and the queue_full refusal when the per-run depth or the service-wide cap is spent; CANCELLING stays run_busy; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py, src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/thread/tests/test_message_policy.py, openapi.json`.
+- [x] `P04.S11` - Replay the queued action and its position for a repeat idempotency key and refuse a changed payload under that key with conflict; `src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/control/action_lease.py, src/vaultspec_a2a/control/repositories/continuation_queue.py`.
+- [x] `P04.S12` - Narrow the parked refusal to name the typed respond verb for the pause the run actually holds, reading the pending request rather than guessing from status alone; `src/vaultspec_a2a/thread/message_policy.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/database/permission_repository.py, src/vaultspec_a2a/thread/tests/test_message_policy.py`.
+- [x] `P04.S13` - Disclose a bounded queued_messages count on run-status so a client reloading without a stream reads the queue depth from authoritative state; `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/control/snapshot.py, openapi.json`.
 
 ### Phase `P05` - Settled runs continue as a new run that names its predecessor
 

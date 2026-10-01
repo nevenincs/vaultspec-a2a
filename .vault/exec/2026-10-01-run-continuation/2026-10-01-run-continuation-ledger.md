@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:498908ba083886832b7aa01b451a73debc8b9a4a461b1d92e7f88c40dfb83525'
+body_hash: 'sha256:d311a4af7d368ea985461613b6ed5a204402f3005fde57e623bee22992fd4e5d'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -81,6 +81,52 @@ related:
 - `S19` `verify:` `pytest control database api streaming worker -n 4 --require-prerequisite=postgres` -> `pass`
 - `S19` `verify:` `python -m dev lint all` -> `pass`
 - `S19` `by:` `vaultspec-high-executor`
+- `S18` `M` `src/vaultspec_a2a/control/dispatch.py`
+- `S18` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S18` `M` `src/vaultspec_a2a/control/tests/_continuation.py`
+- `S18` `A` `src/vaultspec_a2a/control/tests/test_continuation_settlement_refusal.py`
+- `S18` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S18` `by:` `vaultspec-high-executor`
+- `S10` `M` `openapi.json`
+- `S10` `M` `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`
+- `S10` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_followup_idempotency_key.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_gateway_drain.py`
+- `S10` `M` `src/vaultspec_a2a/api/tests/test_gateway_live.py`
+- `S10` `A` `src/vaultspec_a2a/api/tests/test_run_continuation_admission.py`
+- `S10` `M` `src/vaultspec_a2a/control/message_service.py`
+- `S10` `M` `src/vaultspec_a2a/control/tests/test_direct_control_leases.py`
+- `S10` `M` `src/vaultspec_a2a/thread/dispatch_policy.py`
+- `S10` `M` `src/vaultspec_a2a/thread/message_policy.py`
+- `S10` `M` `src/vaultspec_a2a/thread/tests/test_message_policy.py`
+- `S10` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S10` `by:` `vaultspec-high-executor`
+- `S11` `M` `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`
+- `S11` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S11` `M` `src/vaultspec_a2a/control/message_service.py`
+- `S11` `M` `src/vaultspec_a2a/control/recovery_authority.py`
+- `S11` `M` `src/vaultspec_a2a/control/repositories/continuation_queue.py`
+- `S11` `A` `src/vaultspec_a2a/control/tests/test_continuation_admission_race.py`
+- `S11` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S11` `by:` `vaultspec-high-executor`
+- `S12` `M` `src/vaultspec_a2a/api/tests/test_run_continuation_admission.py`
+- `S12` `M` `src/vaultspec_a2a/control/message_service.py`
+- `S12` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S12` `M` `src/vaultspec_a2a/database/permission_repository.py`
+- `S12` `M` `src/vaultspec_a2a/thread/message_policy.py`
+- `S12` `M` `src/vaultspec_a2a/thread/tests/test_message_policy.py`
+- `S12` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S12` `by:` `vaultspec-high-executor`
+- `S13` `M` `openapi.json`
+- `S13` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S13` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S13` `M` `src/vaultspec_a2a/api/schemas/snapshots.py`
+- `S13` `M` `src/vaultspec_a2a/api/tests/test_run_continuation_admission.py`
+- `S13` `M` `src/vaultspec_a2a/control/projection.py`
+- `S13` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S13` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
+- `S13` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -93,3 +139,7 @@ related:
 - `S07` Scope correction: `direct_control_recovery.py` needed no change. The settlement transaction now opens with a write transaction, because a SQLite read-first transaction cannot upgrade once another connection commits; this surfaced as database is locked in the real-gateway restart suite.
 - `S09` Scope correction: the bound is enforced in `recovery_authority.py` at promotion; `event_handlers.py` and `domain_config.py` were changed in S06 and S05.
 - `S19` The terminal is handed to the settlement as a publisher and dropped on promotion, never deferred; releasing it after settlement exposed a settled run whose terminal reached the wire without an id, fixed by `is_numbered` answering for a forgotten run whose floor is remembered. `recovery_authority.py` needed no change.
+- `S18` Scope correction: control/dispatch.py too, because the reconciling sweep's two per-run refusals are terminal settlements that could strand a queued turn.
+- `S10` The follow-up verb no longer dispatches: its claim, receipt and dispatch path became unreachable once both admitting states answer queued, so it and the route's 502 and worker-saturation 503 are removed. The recursion budget is frozen from the run's accepted graph definition.
+- `S11` Admission and every settlement path now take one run lock, closing a PostgreSQL race that left a queued row on a settled run; replay is decided before eligibility and serves the journal row's own status.
+- `S13` Scope correction: `queued_messages` joins the snapshot in control/projection.py, where durable state reaches it, not control/snapshot.py; it is declared on both snapshot types the parity guard holds equal.

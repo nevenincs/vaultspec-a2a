@@ -512,6 +512,12 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
     # survives, so this is the only channel their account has, and a client that
     # rendered it as a failure would report a death that did not happen.
     repair_reason: str | None = None
+    # How many follow-up turns this run is holding behind the one it is
+    # running. Counted from the durable journal, never from a stream: a client
+    # that reloaded without one has no other way to learn that a turn it sent
+    # is still waiting, and the quiet boundary between two turns looks exactly
+    # like a run that has gone idle. Bounded by the configured per-run depth.
+    queued_messages: int = 0
 
 
 # ---------------------------------------------------------------------------

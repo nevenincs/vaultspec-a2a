@@ -12,6 +12,13 @@ has committed.
 Both limits are enforced inside the caller's write transaction, against rows
 read under the lock that transaction already holds, so two admissions racing
 for the last place cannot both find room.
+
+That lock is named here rather than assumed. One admission and one terminal
+settlement are two transactions deciding opposite things about the same run,
+and the only thing that orders them is a lock they both take on the run's own
+row before they read it. Without it a settlement can read an empty queue while
+an uncommitted admission reads a live run, and both commit - leaving a waiting
+turn on a settled run, the one outcome the queue rules say cannot exist.
 """
 
 from __future__ import annotations
@@ -28,6 +35,7 @@ from sqlalchemy import func, select
 
 from ...database import (
     ControlActionModel,
+    ThreadModel,
     acquire_control_action_lease,
     reserve_control_action,
 )
@@ -45,8 +53,10 @@ __all__ = [
     "QueuedContinuation",
     "QueuedContinuationDisposition",
     "QueuedContinuationRequest",
+    "continuation_already_admitted",
     "count_queued_continuations",
     "count_service_queued_continuations",
+    "lock_run_for_continuation_decision",
     "next_queue_position",
     "open_promoted_continuation",
     "promoted_turn_deadline",
@@ -102,13 +112,21 @@ class QueuedContinuationDisposition(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class QueuedContinuation:
-    """The outcome of one admission attempt and the place it was given."""
+    """The outcome of one admission attempt and the place it was given.
+
+    *result_status* is the journal row's own current status, which a replay
+    has to carry: a turn admitted a moment ago is still waiting, one admitted
+    before the predecessor ended has been promoted, and one whose turn has run
+    is applied. Reporting every replay as "waiting" would tell a caller
+    retrying after a lost response that its turn had not started yet.
+    """
 
     disposition: QueuedContinuationDisposition
     action_id: str
     dispatch_id: str
     position: int | None
     claim_token: str | None
+    result_status: str = _QUEUED
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +148,52 @@ class QueuedContinuationRequest:
     limits: ContinuationQueueLimits
     now: datetime | None = None
     lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL
+
+
+async def lock_run_for_continuation_decision(
+    session: AsyncSession, *, thread_id: str
+) -> ThreadModel | None:
+    """Return a run's row with its write lock held until this transaction ends.
+
+    The single ordering point between admitting a continuation and settling
+    the run. Both sides read the run through this, so whichever arrives second
+    waits and then reads what the first committed: an admission that loses the
+    race sees the settled status and refuses, and a settlement that loses it
+    sees the waiting turn and promotes or refuses it. The row is re-read rather
+    than reused from the identity map, because a stale copy is exactly what the
+    lock exists to prevent.
+
+    SQLite takes no row lock and needs none: its write transaction already
+    excludes a second writer for the whole transaction.
+    """
+    return await session.scalar(
+        select(ThreadModel)
+        .where(ThreadModel.id == thread_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
+async def continuation_already_admitted(
+    session: AsyncSession, *, thread_id: str, idempotency_key: str
+) -> bool:
+    """Whether this run already holds an action admitted under *idempotency_key*.
+
+    Asked before eligibility, because a repeat of an accepted key is not a new
+    offer and the run's current state is not an answer to it. A caller that
+    lost the first response and retried must learn what became of the turn it
+    already sent, not that the run has since ended.
+    """
+    return (
+        await session.scalar(
+            select(ControlActionModel.id)
+            .where(
+                ControlActionModel.thread_id == thread_id,
+                ControlActionModel.idempotency_key == idempotency_key,
+            )
+            .limit(1)
+        )
+    ) is not None
 
 
 async def count_queued_continuations(session: AsyncSession, *, thread_id: str) -> int:
@@ -351,8 +415,6 @@ async def reserve_queued_continuation(
     with everything else it owes.
     """
     instant = request.now or datetime.now(UTC)
-    if request.lifetime_deadline_at <= instant:
-        raise ValueError("a waiting continuation needs a lifetime still to run")
     # Locked before the limits are read: a replay must replay even when the
     # queue is full, and a competing admission must wait for this decision
     # rather than counting the same free place twice.
@@ -365,6 +427,11 @@ async def reserve_queued_continuation(
         .with_for_update()
     )
     if held is None:
+        # Asked only where a row is about to be created. A replay reserves
+        # nothing, so a run whose lifetime has since run out still answers for
+        # the turn it already took rather than refusing to recognise it.
+        if request.lifetime_deadline_at <= instant:
+            raise ValueError("a waiting continuation needs a lifetime still to run")
         refusal = await _queue_refusal(session, request)
         if refusal is not None:
             return refusal
@@ -392,6 +459,7 @@ async def reserve_queued_continuation(
             action.dispatch_id,
             action.queue_position,
             None,
+            action.result_status,
         )
     if not reservation.created:
         return QueuedContinuation(
@@ -400,6 +468,7 @@ async def reserve_queued_continuation(
             action.dispatch_id,
             action.queue_position,
             None,
+            action.result_status,
         )
     claim_token = uuid4().hex
     acquired = await acquire_control_action_lease(

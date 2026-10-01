@@ -152,7 +152,6 @@ async def _persist_proven_cancellation(
         elect_thread_status,
         expire_pending_permission_requests,
         get_control_action_by_dispatch_id,
-        get_thread,
         mark_control_action_applied,
         set_thread_approval_state,
         set_thread_repair_state,
@@ -160,10 +159,17 @@ async def _persist_proven_cancellation(
         thread_write_expectation,
     )
     from ..thread.enums import ControlActionResultStatus, ControlActionType
+    from .repositories.continuation_queue import (
+        lock_run_for_continuation_decision,
+        refuse_queued_continuations,
+    )
 
     async with factory() as db:
         await begin_write_transaction(db)
-        thread = await get_thread(db, thread_id)
+        # Locked against the same row an admission locks, so a continuation
+        # offered while this settles either lands before it and is refused
+        # below, or reads the cancelled status and is refused there.
+        thread = await lock_run_for_continuation_decision(db, thread_id=thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.dispatch_id
         )
@@ -196,6 +202,12 @@ async def _persist_proven_cancellation(
             return False
         if last_sequence is not None:
             thread.last_sequence = last_sequence
+        await refuse_queued_continuations(
+            db,
+            thread_id=thread_id,
+            refused_at=_time_now_utc(),
+            reason="the run was cancelled",
+        )
         await expire_pending_permission_requests(db, thread_id=thread_id)
         await set_thread_approval_state(
             db,
@@ -245,7 +257,6 @@ async def _persist_proven_failure(
         elect_thread_status,
         expire_pending_permission_requests,
         get_control_action_by_dispatch_id,
-        get_thread,
         mark_control_action_applied,
         set_thread_approval_state,
         set_thread_repair_state,
@@ -254,10 +265,17 @@ async def _persist_proven_failure(
     )
     from ..thread.enums import NON_ACTIVE_STATUSES
     from .dispatch_receipts import validate_current_graph_receipt
+    from .repositories.continuation_queue import (
+        lock_run_for_continuation_decision,
+        refuse_queued_continuations,
+    )
 
     async with factory() as db:
         await begin_write_transaction(db)
-        thread = await get_thread(db, thread_id)
+        # Locked against the same row an admission locks, so a continuation
+        # offered while this settles either lands before it and is refused
+        # below, or reads the failed status and is refused there.
+        thread = await lock_run_for_continuation_decision(db, thread_id=thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.action.dispatch_id
         )
@@ -289,6 +307,12 @@ async def _persist_proven_failure(
         if last_sequence is not None:
             thread.last_sequence = last_sequence
         await mark_control_action_applied(db, action.id)
+        await refuse_queued_continuations(
+            db,
+            thread_id=thread_id,
+            refused_at=_time_now_utc(),
+            reason="the run's turn failed",
+        )
         await expire_pending_permission_requests(db, thread_id=thread_id)
         await set_thread_approval_state(
             db,

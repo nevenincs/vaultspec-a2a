@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:9d673326ed976aa6de9f273023d87dd91715b0aa7fcac4ce753d69bb7c1ee147'
+body_hash: 'sha256:c44059b7a60bf4afc773b9391c9c92cc9b1b2cb21bfcbf340681ac6430fc90bc'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -36,7 +36,7 @@ Recorded from P01.S03. The httpapi Idempotency-Key draft says a server SHOULD an
 
 ### dispatch-result-circuit-flags-unused | low | the result objects' circuit-open flags have no consumer
 
-Recorded from architecture-review P06.S47. The route now maps a refusal from its failure type, so `MessageResult.circuit_open` and `PermissionResult.circuit_open` are read by nothing.
+Fixed for the message verb in P04.S10 (8eedbfa), which removed `MessageResult.circuit_open` with the dispatch path it described; the permission result's flag remains. Original finding: the route now maps a refusal from its failure type, so `MessageResult.circuit_open` and `PermissionResult.circuit_open` are read by nothing.
 
 ### undocumented-403-and-404 | low | the follow-up and permission routes serve undocumented 403 and 404
 
@@ -48,7 +48,7 @@ Fixed in P03.S19 (d379515): the relay hands the terminal to the settlement as a 
 
 ### queued-continuation-survives-a-failed-or-cancelled-run | high | a continuation queued on a run that fails or is cancelled waits forever
 
-Open; raised by the P02-P03 executor, owned by P03.S18; the ADR amendment of 2026-10-01 rules the outcome. Promotion runs only on the COMPLETED path, so a run settling FAILED or CANCELLED leaves its queued row at `queued` on a terminal run, promoted by nothing and reported to no one. `refuse_queued_continuations` (P03.S09) is the needed verb and is not called from the failed or cancelled confirmation. Reachable once P04 admits continuations.
+Fixed in P03.S18 (687bb66): the proven-failure, proven-cancellation and both reconciling-sweep refusals call `refuse_queued_continuations` in their own transaction, bound to the won election; proven on both backends. Original finding (owned by P03.S18; the ADR amendment of 2026-10-01 rules the outcome): Promotion runs only on the COMPLETED path, so a run settling FAILED or CANCELLED leaves its queued row at `queued` on a terminal run, promoted by nothing and reported to no one. `refuse_queued_continuations` (P03.S09) is the needed verb and is not called from the failed or cancelled confirmation. Reachable once P04 admits continuations.
 
 ### promotion-refusal-stalls-rather-than-settles | medium | a refused promotion leaves the run unsettled until its predecessor's deadline
 
@@ -85,6 +85,26 @@ Fixed in P03.S19 (d379515). The purge that forgets a run's counter runs in the s
 ### a-failed-terminal-fan-out-loses-the-frame | low | a fan-out that throws costs the live terminal rather than the relay
 
 Accepted in P03.S19. `_publish_terminal` logs instead of raising, because the settlement is already durable and raising would strand the run's admission slot; reachable only if `enqueue_payload` itself throws, which its bounded delivery is written not to do.
+
+### followup-admission-was-unserialized-on-postgresql | high | admission and settlement could both commit on PostgreSQL
+
+Fixed in P04.S11 (e3d2c21). Admission read the run with a plain SELECT and settlement locked the thread row only at its election update, so on PostgreSQL a settlement could read an empty queue while an uncommitted admission read a live run, and both committed - the queued row on a settled run that the decision forbids. Two concurrent admissions could likewise take the one free place. SQLite's `BEGIN IMMEDIATE` hid it. Admission and all three settlement paths now take `lock_run_for_continuation_decision`, proven by `control/tests/test_continuation_admission_race.py` on real PostgreSQL.
+
+### replay-after-settlement-reported-the-run-not-the-turn | medium | a retried admission on a settled run read as a turn that never ran
+
+Fixed in P04.S11. A repeat of an accepted key answered `terminal` once the run settled, so a caller retrying after a lost 202 could not learn its turn was accepted and ran, and would send the work twice; replay is now decided before eligibility and serves the journal row's own status.
+
+### followup-contract-narrowed | info | the follow-up route no longer documents 502 or the worker-saturation 503
+
+Recorded from P04.S10 for the P06.S16 contract event. Both answers are unreachable now that the verb never dispatches; the narrowing of a published contract belongs in R6 beside the reachable 202, `queue_full` and `queued_messages`.
+
+### promotion-is-the-only-dispatcher-for-a-follow-up | info | a follow-up reaches a worker only through promotion
+
+Recorded from P04.S10. A gateway that never runs its recovery pass accepts turns and never runs them; P06.S17's live proof is where that becomes observable, and the contract event should say it.
+
+### queue-full-is-not-in-the-dispatch-failure-policy-table | low | the admission refusal has no row in the dispatch failure policy
+
+Recorded from P04.S10. `FailureType.QUEUE_FULL` is not keyed in `thread/dispatch_policy.py`; it is an admission refusal and unreachable from a dispatch outcome, an invariant to keep if the two vocabularies merge.
 
 ## Recommendations
 

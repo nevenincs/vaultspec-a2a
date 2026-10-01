@@ -512,6 +512,14 @@ class RunStatusResponse(BaseModel):
     # resumable stream and an authoritative one are different things, and this
     # response remains the authority either way.
     stream_resumable: bool = False
+    # How many follow-up turns this run is holding behind the one it is
+    # running. Read from the control-action journal, which is the authority a
+    # reloading client has to recover from: the progress stream says nothing
+    # about a turn that has not started, and the quiet boundary between two
+    # turns is indistinguishable from a run that has gone idle. Bounded by the
+    # configured per-run continuation depth, so it is a small count and never
+    # a list. Zero for every run that holds nothing, which is most of them.
+    queued_messages: int = Field(default=0, ge=0)
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     # Left as bare strings pending the narrowing, NOT because this list lacks an

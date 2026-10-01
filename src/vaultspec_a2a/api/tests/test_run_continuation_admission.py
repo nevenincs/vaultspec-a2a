@@ -262,3 +262,39 @@ async def test_a_clarification_pause_refuses_by_naming_the_other_verb(
     assert "run-status" in detail["message"]
     assert "permissions" not in detail["message"]
     assert worker.dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_run_status_discloses_the_queue_depth_a_client_cannot_see(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """A reloading client reads the waiting turn from authoritative state.
+
+    Nothing else tells it: a queued turn has not started, so the progress
+    stream carries no frame for it, and a run whose turn ended with one
+    waiting is RUNNING with a quiet stream - indistinguishable from idle.
+    Read before and after so the number is this run's queue and not a
+    constant that happens to match.
+    """
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    run_id = "queue-depth-06"
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
+    ) as client:
+        await _start_run(client, run_id)
+        worker.clear()
+
+        before = await client.get(f"/v1/runs/{run_id}")
+        assert before.status_code == 200, before.text
+        assert before.json()["queued_messages"] == 0
+
+        queued = await _followup(client, run_id, key="depth-06", content="second turn")
+        assert queued.status_code == 202, queued.text
+
+        after = await client.get(f"/v1/runs/{run_id}")
+
+    assert after.status_code == 200, after.text
+    body = after.json()
+    assert body["queued_messages"] == 1
+    # The run has not changed state, which is exactly why the count is needed.
+    assert body["status"] == before.json()["status"]

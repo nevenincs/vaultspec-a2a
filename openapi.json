@@ -4235,6 +4235,12 @@
             "title": "Stream Resumable",
             "default": false
           },
+          "queued_messages": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Queued Messages",
+            "default": 0
+          },
           "repair_status": {
             "anyOf": [
               {
@@ -5165,6 +5171,11 @@
               }
             ],
             "title": "Repair Reason"
+          },
+          "queued_messages": {
+            "type": "integer",
+            "title": "Queued Messages",
+            "default": 0
           }
         },
         "type": "object",

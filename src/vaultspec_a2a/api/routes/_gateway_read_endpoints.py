@@ -378,6 +378,11 @@ async def run_status_endpoint(
         # run's numbering stood, and this says whether that number is one the
         # stream will honour as a resumption point.
         stream_resumable=await _stream_is_resumable(request.app, run_id),
+        # From the same capture as everything else, so a queue depth is never
+        # reported against a moment the run has already left. A run whose turn
+        # ended with a continuation waiting is RUNNING with a quiet stream,
+        # and this is the only field that distinguishes that from idle.
+        queued_messages=snapshot.queued_messages,
         repair_status=_optional_enum(RepairStatus, snapshot.repair_status),
         execution_readiness=_optional_enum(RepairStatus, snapshot.execution_readiness),
         degraded_reasons=snapshot.degraded_reasons,

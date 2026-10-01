@@ -216,3 +216,9 @@ class ThreadStateSnapshot(BaseModel):
     # above; the paths that write it decline to write a failure reason precisely
     # because the run survives, so this is the only channel their account has.
     repair_reason: str | None = None
+    # How many follow-up turns this run holds behind the one it is running.
+    # Named here for the same silent-drop reason: the seam validates over the
+    # domain dataclass, and a count this model does not declare would read as
+    # a run holding nothing, which is the one thing a reloading client cannot
+    # check any other way.
+    queued_messages: int = 0

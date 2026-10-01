@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import anyio
 import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -37,8 +40,12 @@ from ...thread.enums import (
     ThreadStatus,
 )
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
+from ...worker.app import create_worker_app
+from ...worker.executor import Executor
+from ...worker.ipc import WorkerBridge
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
+from ..config import settings
 from ..direct_control_recovery import (
     DirectControlRecoverySummary,
     redrive_direct_control_actions,
@@ -50,7 +57,9 @@ from ..worker_management import LazyWorkerSpawner
 from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator, AsyncIterator
+
+_TEST_INTERNAL_TOKEN = "direct-control-recovery-test-token"
 
 
 @pytest_asyncio.fixture
@@ -645,3 +654,96 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
             )
         )
     assert attempt is not None and attempt.settled_at is not None
+
+
+@pytest.fixture
+def _dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give both sides of real worker dispatch the current IPC credential."""
+    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
+
+
+@asynccontextmanager
+async def _worker_already_running(
+    checkpoint_path: Path, thread_id: str
+) -> AsyncGenerator[httpx.AsyncClient]:
+    """Serve the production worker app with one run's slot genuinely taken.
+
+    The slot is taken through the executor's own reservation verb, so the 409
+    the recovery pass meets is the refusal the worker composes for a run it is
+    already executing rather than a status written here.
+    """
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
+        await saver.setup()
+        bridge = WorkerBridge("http://control", "direct-control-recovery-test")
+        executor = Executor(saver, bridge)
+        reservation, _reason = await executor.reserve_dispatch_capacity(thread_id)
+        assert reservation is not None
+        app = create_worker_app()
+        app.state.executor = executor
+        async with anyio.create_task_group() as tasks:
+            app.state.task_group = tasks
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://worker",
+                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
+            ) as client:
+                yield client
+            tasks.cancel_scope.cancel()
+        await executor.shutdown()
+        await bridge.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_dispatch_auth")
+async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
+    tmp_path: Path,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """A worker executing this run is reporting work in flight, not refusing it.
+
+    Ownership is given back only for a delivery proven not to have happened.
+    The worker here holds this exact run's slot, which is evidence that the
+    accepted action reached it: releasing the claim would let the next
+    dispatcher redeliver the very work being executed, so the claim is held
+    until the application receipt settles it or the lease expires. The retry is
+    still scheduled, under the condition the worker actually served.
+    """
+    case = _accepted_cases(tmp_path)[0]
+    async with sessions() as db:
+        await _persist_case(db, case)
+        await db.commit()
+
+    async with _worker_already_running(
+        tmp_path / "busy-worker.db", case.thread_id
+    ) as client:
+        summary = await redrive_direct_control_actions(
+            sessions,
+            worker_client=client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30
+            ),
+            worker_spawner=LazyWorkerSpawner(
+                worker_url="http://worker", worker_port=8001, auto_spawn=False
+            ),
+            trace_headers=None,
+        )
+
+    assert summary.deferred == 1
+    async with sessions() as db:
+        action = await get_control_action_by_dispatch_id(
+            db,
+            thread_id=case.thread_id,
+            dispatch_id=case.dispatch.dispatch_id,
+        )
+        attempt = await db.scalar(
+            select(RecoveryAttemptModel).where(
+                RecoveryAttemptModel.thread_id == case.thread_id
+            )
+        )
+    assert action is not None
+    assert action.applied_at is None
+    assert action.claim_token is not None
+    assert action.claim_expires_at is not None
+    assert attempt is not None
+    assert attempt.condition == RecoveryCondition.RUN_BUSY.value
+    assert attempt.settled_at is None

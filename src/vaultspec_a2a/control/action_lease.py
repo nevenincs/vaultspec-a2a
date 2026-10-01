@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CONTROL_ACTION_LEASE_TTL",
+    "DEFINITE_NON_DELIVERY",
     "ControlActionClaim",
     "ControlActionClaimRequest",
     "DispatchFailureDisposition",
@@ -45,9 +46,17 @@ __all__ = [
 CONTROL_ACTION_LEASE_TTL = timedelta(seconds=90)
 """Fresh ownership window before an unapplied dispatch may be redriven."""
 
-_DEFINITE_NON_DELIVERY = frozenset(
+DEFINITE_NON_DELIVERY = frozenset(
     {FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY, FailureType.REJECTED}
 )
+"""The failures that prove the dispatch did not arrive, so ownership is given back.
+
+Every other failure is ambiguous and keeps its claim until reconciliation or
+expiry. A worker busy with this very run is the clearest case: it is reporting
+work in flight, so releasing the claim would invite a second dispatcher to
+redeliver what the worker is already executing. Live dispatch and recovery read
+this one set, because the rule is one rule and two copies of it drift.
+"""
 
 
 _MISSING_FIELD = object()
@@ -586,7 +595,7 @@ async def record_dispatch_failure(
         return authority
 
     disposition = DispatchFailureDisposition.AMBIGUOUS_DELIVERY
-    if failure_type in _DEFINITE_NON_DELIVERY:
+    if failure_type in DEFINITE_NON_DELIVERY:
         if not await release_control_action_lease(
             db,
             claim.action_id,

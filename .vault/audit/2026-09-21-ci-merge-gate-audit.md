@@ -5,7 +5,7 @@ tags:
 date: '2026-09-21'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:fb8f83248a979c1a52ac70f195c2f73d0dd554ba396a8494f4166b0c92facef3'
+body_hash: 'sha256:5a9dc20fc1731e64c2ed152232a7d67f2529cde4e69152799c470ac39ca673c3'
 related:
   - "[[2026-09-21-ci-merge-gate-plan]]"
 ---
@@ -124,11 +124,9 @@ Type: CI authorization and required-check correctness. Status: fixed during 2026
 
 Type: merge integration. Status: fixed and verified. The stale admission-timeout branch conflicted with main's release cut and required verdict permissions. The resolution retains main's release tests, trust checks and scoped permissions while preserving the branch's execution budgets and verdict class. Review of the resulting diff against main found only the intended timeout configuration. Twelve CI, release and trust tests and actionlint pass.
 
-
 ### pr80-main-reconciliation | high | required verdict skip regression prevented
 
 Type: merge integration and authorization. Status: fixed and verified. Automatic merging retained the stale fork condition on the required verdict, which could make a skipped required check count as passed. The resolution restores main's always-running verdict and current timeout, permissions, release cut, runner policy and release tests while retaining admission budgets and the verdict resource class. Twelve focused CI, release and trust tests and actionlint pass. No unresolved merge-specific finding remains.
-
 
 ### main-consolidation-settings | high | configuration and provider contracts reconciled
 
@@ -141,3 +139,7 @@ Type: test portability. Status: fixed and verified. The trusted-search test assu
 ### main-consolidation-history | low | duplicate merge metadata avoided
 
 Type: history and record integrity. Status: fixed. The release branch had already been ported into main; merging its history attempted to duplicate ledger frontmatter and regress the required verdict timeout. Retained current metadata and controls, preserving the release branch as an ancestor. The admission audit entries from both branches are retained. Local framework edits were compared with main; 91 files match and the remaining dependency and hook changes are superseded by main's current configuration. The disabled untracked example trigger is preserved on main.
+
+### main-consolidation-final-review | high | all branch histories integrated with checks retained
+
+Type: merge integration. Status: fixed and verified. The env-parity auto-merge reintroduced a conditional required verdict without a textual conflict; the integrated trust test detected it and the final tree restores always(). The release-action update required its immutable pin assertion to move with the workflow. The actionlint and release-version merges now include regenerated lock data. All 17 CI, release and trust tests, actionlint, 120 settings/provider integration tests, Ruff, Ty and configured commit checks pass. Core regenerated the feature indexes without drift. Every retained branch tip is included in main's ancestry; local-only framework edits are accounted for by current files or preserved as the disabled example trigger. Worktree-local environment and runtime files will be archived before redundant worktrees are retired. No unresolved consolidation finding remains; full remote CI is still separate verification.

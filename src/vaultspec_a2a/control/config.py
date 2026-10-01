@@ -116,9 +116,9 @@ class Settings(DomainSettingsConfig, InfraConfig):
         and therefore needs it absolute first.
         """
         root = self.project_root
-        self.a2a_home = resolve_against(root, self.a2a_home)
-        self.install_root = resolve_against(root, self.install_root)
         for field in (
+            "a2a_home",
+            "install_root",
             "desktop_app_home",
             "capsule_assets_root",
             "workspace_root",
@@ -166,30 +166,26 @@ class Settings(DomainSettingsConfig, InfraConfig):
             f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
         )
 
-        explicit = self._configured_fields
-        if "a2a_home" in explicit:
-            _warn_seating_discard("VAULTSPEC_A2A_HOME", self.a2a_home, state.app_home)
-        if "workspace_root" in explicit:
-            _warn_seating_discard(
+        # One rule, stated once, over the four fields the application home
+        # seats: each carries the variable an operator would have set it with,
+        # so a displaced value is reported in the operator's own vocabulary.
+        seated: dict[str, tuple[str, object]] = {
+            "a2a_home": ("VAULTSPEC_A2A_HOME", state.app_home),
+            "workspace_root": (
                 "VAULTSPEC_A2A_WORKSPACE_ROOT",
-                self.workspace_root,
                 state.workspaces_root,
-            )
-        if "database_url" in explicit:
-            _warn_seating_discard(
-                "VAULTSPEC_A2A_DATABASE_URL", self.database_url, derived_database_url
-            )
-        if "checkpoint_database_url" in explicit:
-            _warn_seating_discard(
+            ),
+            "database_url": ("VAULTSPEC_A2A_DATABASE_URL", derived_database_url),
+            "checkpoint_database_url": (
                 "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
-                self.checkpoint_database_url,
                 derived_checkpoint_url,
-            )
-
-        self.a2a_home = state.app_home
-        self.workspace_root = state.workspaces_root
-        self.database_url = derived_database_url
-        self.checkpoint_database_url = derived_checkpoint_url
+            ),
+        }
+        explicit = self._configured_fields
+        for field, (variable, derived) in seated.items():
+            if field in explicit:
+                _warn_seating_discard(variable, getattr(self, field), derived)
+            setattr(self, field, derived)
         return self
 
     @model_validator(mode="after")

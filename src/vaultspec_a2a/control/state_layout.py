@@ -83,13 +83,7 @@ def _holds_only_a2a_state(home: Path) -> bool:
     before homes were sealed, or by a concurrent writer that won the race.
     """
     layout = state_layout(home)
-    owned = {
-        path.relative_to(layout.home).parts[0]
-        for path in (
-            getattr(layout, field) for field in StateLayout.__dataclass_fields__
-        )
-        if path != layout.home
-    }
+    owned = {path.relative_to(layout.home).parts[0] for path in layout.paths}
     owned.add(SEAL_FILE)
     # The atomic writer stages the discovery record and its credential beside
     # themselves, so their temporary siblings carry the same prefix.
@@ -149,37 +143,95 @@ def seal_state_home(home: Path) -> None:
 
 @dataclass(frozen=True, slots=True)
 class StateLayout:
-    """Every mutable path a2a writes, derived from one state home."""
+    """Every mutable path a2a writes, derived from one state home.
+
+    The home is the only thing the layout holds, because the home is the only
+    thing it is: every path below is a pure function of it, named once here so
+    no caller spells a location of a2a's state for itself.
+    """
 
     home: Path
-    database_path: Path
-    checkpoint_path: Path
-    logs_dir: Path
-    discovery_path: Path
-    handoff_credential_path: Path
-    procs_dir: Path
-    workspaces_root: Path
-    credentials_dir: Path
-    receipts_dir: Path
-    temp_homes_dir: Path
-    snapshots_dir: Path
+
+    @property
+    def _stores(self) -> Path:
+        return self.home / "state"
+
+    @property
+    def database_path(self) -> Path:
+        """The application database."""
+        return self._stores / "vaultspec.db"
+
+    @property
+    def checkpoint_path(self) -> Path:
+        """The graph checkpoint store."""
+        return self._stores / "checkpoints.db"
+
+    @property
+    def logs_dir(self) -> Path:
+        """Process logs and runtime locks."""
+        return self.home / "runtime"
+
+    @property
+    def discovery_path(self) -> Path:
+        """The gateway discovery record, at the root of the home."""
+        return self.home / DISCOVERY_RECORD
+
+    @property
+    def handoff_credential_path(self) -> Path:
+        """The bearer handoff credential, beside the discovery record."""
+        return self.home / HANDOFF_CREDENTIAL
+
+    @property
+    def procs_dir(self) -> Path:
+        """The development process registry, port reservations and leases."""
+        return self.home / "procs"
+
+    @property
+    def workspaces_root(self) -> Path:
+        """The workspace tree runs are checked out into."""
+        return self.home / "workspaces"
+
+    @property
+    def credentials_dir(self) -> Path:
+        """Copies of provider logins seated for this home."""
+        return self.home / "credentials"
+
+    @property
+    def receipts_dir(self) -> Path:
+        """Durable receipts kept beyond a single run."""
+        return self.home / "receipts"
+
+    @property
+    def temp_homes_dir(self) -> Path:
+        """Per-run provider configuration homes."""
+        return self.home / "tmp" / "homes"
+
+    @property
+    def snapshots_dir(self) -> Path:
+        """Consistency-group snapshots of the state home."""
+        return self.home / "snapshots"
+
+    @property
+    def paths(self) -> tuple[Path, ...]:
+        """Every path beneath the home that a2a itself writes.
+
+        The home is not among them: it is what the others are relative to.
+        """
+        return (
+            self.database_path,
+            self.checkpoint_path,
+            self.logs_dir,
+            self.discovery_path,
+            self.handoff_credential_path,
+            self.procs_dir,
+            self.workspaces_root,
+            self.credentials_dir,
+            self.receipts_dir,
+            self.temp_homes_dir,
+            self.snapshots_dir,
+        )
 
 
 def state_layout(home: Path) -> StateLayout:
     """Derive the state layout beneath an absolute state home."""
-    root = Path(os.path.normpath(home))
-    state = root / "state"
-    return StateLayout(
-        home=root,
-        database_path=state / "vaultspec.db",
-        checkpoint_path=state / "checkpoints.db",
-        logs_dir=root / "runtime",
-        discovery_path=root / DISCOVERY_RECORD,
-        handoff_credential_path=root / HANDOFF_CREDENTIAL,
-        procs_dir=root / "procs",
-        workspaces_root=root / "workspaces",
-        credentials_dir=root / "credentials",
-        receipts_dir=root / "receipts",
-        temp_homes_dir=root / "tmp" / "homes",
-        snapshots_dir=root / "snapshots",
-    )
+    return StateLayout(home=Path(os.path.normpath(home)))

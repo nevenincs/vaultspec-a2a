@@ -62,14 +62,19 @@ class FailureAction:
 
 
 _POLICY: dict[str, FailureAction] = {
+    # An open circuit, a saturated worker and an unreachable one are all
+    # conditions that pass. The accepted work stays alive for the retry the
+    # recovery coordinator already scheduled, so none of them may move the run
+    # to a failed status: doing so quarantines a run that nothing is wrong with
+    # and strands work that was going to be delivered.
     FailureType.CIRCUIT_OPEN: FailureAction(
         should_mark_failed=False, is_circuit_open=True
     ),
     FailureType.AT_CAPACITY: FailureAction(
-        should_mark_failed=True, is_circuit_open=False
+        should_mark_failed=False, is_circuit_open=False
     ),
     FailureType.UNREACHABLE: FailureAction(
-        should_mark_failed=True, is_circuit_open=False
+        should_mark_failed=False, is_circuit_open=False
     ),
     FailureType.REJECTED: FailureAction(should_mark_failed=True, is_circuit_open=False),
     # The worker already holds this run's slot, so the dispatch was a duplicate

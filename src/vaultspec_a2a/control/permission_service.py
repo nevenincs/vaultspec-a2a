@@ -909,8 +909,7 @@ async def _failed_permission_dispatch(
 
     error_detail, error_status_code = _permission_dispatch_error(
         outcome,
-        is_circuit_open=policy.is_circuit_open,
-        should_mark_failed=policy.should_mark_failed,
+        failure_type=typed_failure,
     )
 
     await db.commit()

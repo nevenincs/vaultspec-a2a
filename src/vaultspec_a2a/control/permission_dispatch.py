@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from ..thread.dispatch_policy import FailureType
 from ..thread.enums import ApprovalStatus
 from ..thread.snapshots import LOCALLY_RESPONDABLE_PAUSE_CAUSES
 
@@ -18,18 +19,27 @@ __all__ = [
 
 
 def permission_dispatch_error(
-    outcome: DispatchOutcome, *, is_circuit_open: bool, should_mark_failed: bool
+    outcome: DispatchOutcome, *, failure_type: FailureType
 ) -> tuple[str, int | None]:
-    """Translate a failed worker dispatch into the permission response error."""
+    """Translate a failed worker dispatch into the permission response error.
+
+    The served status answers "where did the answer get to", which is not the
+    same question as whether the run may be moved to a failed status: a
+    saturated or unreachable worker keeps the accepted answer alive for retry
+    and still owes the caller a gateway error. Reading the typed failure
+    directly keeps the two from drifting into each other.
+    """
     detail = outcome.detail or "Worker dispatch failed"
-    if is_circuit_open:
+    if failure_type is FailureType.CIRCUIT_OPEN:
         return outcome.detail or "Circuit breaker open", 503
-    if should_mark_failed:
-        http_code = getattr(outcome.exception, "status_code", 0)
-        if http_code:
-            detail = f"Worker dispatch failed (HTTP {http_code})"
-        return detail, 502
-    return detail, None
+    if failure_type is FailureType.RUN_BUSY:
+        # The worker holds this run's slot, so the answer met the turn it was
+        # meant for rather than a broken seam.
+        return detail, None
+    http_code = getattr(outcome.exception, "status_code", 0)
+    if http_code:
+        detail = f"Worker dispatch failed (HTTP {http_code})"
+    return detail, 502
 
 
 def permission_resume_value(

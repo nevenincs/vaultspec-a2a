@@ -12,7 +12,7 @@ related:
   - '[[2026-08-02-clarification-continuation-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:e830c1fb0043400d476b50280ef067eb14eaeb8a632c10bd60eca58f07fe4af9'
+body_hash: 'sha256:a6670303e7b527d6b9fd7723832776f4e58b8b817ddfe3e9c25df804e47b417c'
 ---
 
 # `run-continuation` plan
@@ -50,7 +50,7 @@ Open points an executor must raise rather than settle alone. The decision enumer
 A semantic refusal about one run stops opening the shared breaker, the run_busy lease rule is stated and tested, and this verb requires a client-supplied idempotency key.
 
 - [ ] `P01.S01` - Count only transport failure against the shared breaker so a worker run_busy 409 and a capacity 429 leave it closed while still refusing the dispatch; `src/vaultspec_a2a/control/dispatch.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/control/tests/test_dispatch_refusal_classification.py`.
-- [ ] `P01.S02` - State and test that a worker run_busy 409 retains the action lease and discards no accepted work, keeping it out of the recovery release set; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/tests/test_direct_control_leases.py`.
+- [x] `P01.S02` - State and test that a worker run_busy 409 retains the action lease and discards no accepted work, keeping it out of the recovery release set; `src/vaultspec_a2a/control/direct_control_recovery.py, src/vaultspec_a2a/control/tests/test_direct_control_leases.py`.
 - [ ] `P01.S03` - Require a client-supplied Idempotency-Key on the follow-up verb, answer 422 when it is absent, and retire the content-derived default key for this verb only; `src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/thread/idempotency.py, openapi.json`.
 
 ### Phase `P02` - Journal and configuration foundation for a queued continuation

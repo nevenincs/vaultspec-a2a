@@ -30,7 +30,10 @@ if TYPE_CHECKING:
     from ...providers._acp_types import PermissionCallback
     from ...thread.state import TeamState
 
-__all__ = ["recorded_permission_answers"]
+__all__ = [
+    "permission_callback_for",
+    "recorded_permission_answers",
+]
 
 _logger = logging.getLogger(__name__)
 
@@ -198,7 +201,7 @@ def _read_permission_answer(
     return _AnswerReading(option=option_id)
 
 
-def _permission_callback_for(
+def permission_callback_for(
     answers: Mapping[str, str], *, answers_reach_the_node: bool = True
 ) -> PermissionCallback:
     """Bind one worker turn's recorded permission answers to its callback.

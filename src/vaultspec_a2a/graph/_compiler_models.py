@@ -30,7 +30,11 @@ if TYPE_CHECKING:
 
     from .protocols import ProviderFactoryProtocol
 
-__all__: list[str] = []
+__all__ = [
+    "parse_catalog_preferences",
+    "resolve_supervisor_model",
+    "validate_frozen_assignment_inventory",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +65,7 @@ def resolve_model_for_worker(
         )
     candidates = [frozen, *_catalog_fallbacks(frozen)]
     parsed_candidates = [
-        _parse_catalog_preferences(candidate) for candidate in candidates
+        parse_catalog_preferences(candidate) for candidate in candidates
     ]
     for provider, _model, execution_mode, _controls in parsed_candidates:
         validate_current_execution_lane(provider, execution_mode)
@@ -179,7 +183,7 @@ def _parse_native_controls(raw_controls_value: object) -> dict[str, str]:
     return controls
 
 
-def _parse_catalog_preferences(
+def parse_catalog_preferences(
     frozen: dict[str, Any],
 ) -> tuple[Provider, str, str, dict[str, str]]:
     """Parse one exact schema-v1 lane without consulting current catalogs."""
@@ -210,21 +214,21 @@ def _parse_catalog_preferences(
     return provider, model_name, execution_mode, controls
 
 
-def _validate_frozen_assignment_inventory(
+def validate_frozen_assignment_inventory(
     frozen_assignment: dict[str, dict[str, Any]] | None,
 ) -> None:
     """Validate every frozen lane before compilation constructs any provider."""
     for frozen in (frozen_assignment or {}).values():
         candidates = [frozen, *_catalog_fallbacks(frozen)]
         for candidate in candidates:
-            provider, _model, execution_mode, _controls = _parse_catalog_preferences(
+            provider, _model, execution_mode, _controls = parse_catalog_preferences(
                 candidate
             )
             validate_current_execution_lane(provider, execution_mode)
             validate_current_native_controls(provider, _controls)
 
 
-def _resolve_supervisor_model(
+def resolve_supervisor_model(
     workspace_root: Path | None = None,
     *,
     provider_factory: ProviderFactoryProtocol,
@@ -235,7 +239,7 @@ def _resolve_supervisor_model(
     frozen = (frozen_assignment or {}).get("__supervisor__")
     if frozen is None:
         raise ValueError("Supervisor has no exact catalog-frozen selection")
-    provider, model_name, execution_mode, native_controls = _parse_catalog_preferences(
+    provider, model_name, execution_mode, native_controls = parse_catalog_preferences(
         frozen
     )
     validate_current_execution_lane(provider, execution_mode)

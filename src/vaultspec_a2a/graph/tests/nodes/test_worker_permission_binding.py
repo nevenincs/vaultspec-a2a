@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from ....thread.state import merge_permission_answers
-from ...nodes.worker import _permission_callback_for, recorded_permission_answers
+from ...nodes.worker import permission_callback_for, recorded_permission_answers
 from .._state_graph_helpers import add_test_node, compile_test_graph
 
 _OPTIONS = [
@@ -44,7 +44,7 @@ class _Turn(TypedDict):
 
 def _bound_callback(state: _Turn) -> Any:
     """The callback the worker node binds, over this state's recorded answers."""
-    return _permission_callback_for(recorded_permission_answers(cast("Any", state)))
+    return permission_callback_for(recorded_permission_answers(cast("Any", state)))
 
 
 def _graph(calls: list[tuple[str, dict[str, Any]]], granted: list[str]) -> Any:

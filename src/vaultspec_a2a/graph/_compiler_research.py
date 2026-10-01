@@ -33,9 +33,9 @@ from ._compiler_retry import _NODE_RETRY_POLICY, _SUBMIT_RETRY_POLICY
 from .compiler import (
     _add_node,
     _agent_node_metadata,
-    _compose_persona_prompt,
-    _lane_web_demonstrated,
     _wire_diverge_stage,
+    compose_persona_prompt,
+    lane_web_demonstrated,
     resolve_model_for_worker,
 )
 from .enums import PipelinePhase
@@ -800,10 +800,10 @@ def _composed_role_prompt(
     invocation. Two roles on two lanes therefore receive two different prompts in
     the same run, which is the point: web reach is proven per lane, not per team.
     """
-    return _compose_persona_prompt(
+    return compose_persona_prompt(
         _agent_system_prompt(team_config, agent_configs, role),
         role=role,
-        demonstrated=_lane_web_demonstrated(model),
+        demonstrated=lane_web_demonstrated(model),
     )
 
 

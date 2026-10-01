@@ -19,10 +19,17 @@ if TYPE_CHECKING:
     # the provider factory already built.
     from langchain_core.language_models import BaseChatModel
 
-__all__: list[str] = []
+__all__ = [
+    "WEB_GROUNDING_MARKER",
+    "build_supervisor_prompt",
+    "compose_persona_prompt",
+    "composed_worker_prompt",
+    "lane_web_demonstrated",
+    "web_grounding_text",
+]
 
 
-def _build_supervisor_prompt(
+def build_supervisor_prompt(
     resolved_agents: list[Any],
     base_prompt: str,
     directive: str | None = None,
@@ -60,7 +67,7 @@ def _build_supervisor_prompt(
 #: compiler owns the WORDS. A persona is authored once and read on every lane, so
 #: it is the wrong place to say anything that varies by run - which is exactly how
 #: a persona came to name one lane's tools as though they were universal.
-_WEB_GROUNDING_MARKER = "{{WEB_GROUNDING}}"
+WEB_GROUNDING_MARKER = "{{WEB_GROUNDING}}"
 
 #: The obligations that attach to any retrieval, on every lane. Unconditional,
 #: because reaching the web is a baseline faculty of an authoring agent rather than
@@ -102,7 +109,7 @@ _WEB_RETRIEVAL_UNDEMONSTRATED = (
 )
 
 
-def _web_grounding_text(*, demonstrated: bool) -> str:
+def web_grounding_text(*, demonstrated: bool) -> str:
     """The web-grounding paragraph, in the one respect that legitimately varies.
 
     Deliberately names NO tool. Which tool performs a retrieval differs by lane -
@@ -130,7 +137,7 @@ neither can answer.
 {_WEB_GROUNDING_OBLIGATIONS}"""
 
 
-def _lane_web_demonstrated(model: BaseChatModel) -> bool:
+def lane_web_demonstrated(model: BaseChatModel) -> bool:
     """Whether *model*'s lane carries a watched, completed retrieval.
 
     The persona side's single reader of the lane declaration, so what a prompt
@@ -149,7 +156,7 @@ def _lane_web_demonstrated(model: BaseChatModel) -> bool:
     return is_web_lane_proven(getattr(model, "provider", None))
 
 
-def _compose_persona_prompt(
+def compose_persona_prompt(
     base_prompt: str,
     *,
     role: str | None,
@@ -158,7 +165,7 @@ def _compose_persona_prompt(
     """Resolve a persona's web-grounding text against what its run may assert.
 
     The verdict arrives as a parameter rather than being re-derived here: the
-    declaration has one reader (:func:`_lane_web_demonstrated`), and a second one
+    declaration has one reader (:func:`lane_web_demonstrated`), and a second one
     inside this function could disagree with it. It also keeps this function
     drivable in both states while the shipped declaration is legitimately empty, so
     the composition ships having run each branch rather than only the dark one.
@@ -174,18 +181,18 @@ def _compose_persona_prompt(
       has web reach - the capability is universal - but the citation obligations are
       about vault documents it does not author, so nothing here applies to it.
     """
-    section = _web_grounding_text(demonstrated=demonstrated)
-    if _WEB_GROUNDING_MARKER in base_prompt:
-        return base_prompt.replace(_WEB_GROUNDING_MARKER, section)
+    section = web_grounding_text(demonstrated=demonstrated)
+    if WEB_GROUNDING_MARKER in base_prompt:
+        return base_prompt.replace(WEB_GROUNDING_MARKER, section)
     if is_document_authoring_role(role):
         return f"{base_prompt.rstrip()}\n\n{section}"
     return base_prompt
 
 
-def _composed_worker_prompt(agent_config: Any, model: BaseChatModel) -> str:
+def composed_worker_prompt(agent_config: Any, model: BaseChatModel) -> str:
     """Compose one worker's persona against what its resolved lane may assert."""
-    return _compose_persona_prompt(
+    return compose_persona_prompt(
         agent_config.persona.system_prompt,
         role=agent_config.role,
-        demonstrated=_lane_web_demonstrated(model),
+        demonstrated=lane_web_demonstrated(model),
     )

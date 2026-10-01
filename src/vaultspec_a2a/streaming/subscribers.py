@@ -528,19 +528,21 @@ class SubscriberManager:
         retained either, so it takes no number at all rather than leaving a
         hole in the run's sequence space.
         """
+        delivered = payload
         if self._retainable(payload) and isinstance(payload, Mapping):
             allocation = self._allocate(thread_id)
             if allocation is not None:
-                payload = {
+                stamped: dict[str, object] = {
                     **cast("Mapping[str, object]", payload),
                     "sequence": allocation.sequence,
                 }
-                self._record(allocation, payload)
+                self._record(allocation, stamped)
+                delivered = stamped
         for client_id, queue in list(self._subscribers.items()):
             client_subs = self._subscriptions.get(client_id, set())
             if thread_id not in client_subs:
                 continue
-            outcome = deliver_bounded(queue, payload, client_id=client_id)
+            outcome = deliver_bounded(queue, delivered, client_id=client_id)
             if outcome.dropped:
                 self._dropped[client_id] += outcome.dropped
 

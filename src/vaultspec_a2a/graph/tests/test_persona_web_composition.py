@@ -50,10 +50,10 @@ from ...team.team_config import (
     load_team_config,
 )
 from ..compiler import (
-    _WEB_GROUNDING_MARKER,
-    _compose_persona_prompt,
-    _web_grounding_text,
+    WEB_GROUNDING_MARKER,
     compile_team_graph,
+    compose_persona_prompt,
+    web_grounding_text,
 )
 from .conftest import deterministic_model_assignment
 
@@ -102,7 +102,7 @@ def _expected_section(provider: str | None) -> str:
     to it. The day a lane earns its proof this demands the demonstrated stance with
     no edit here.
     """
-    return _web_grounding_text(demonstrated=is_web_lane_proven(provider))
+    return web_grounding_text(demonstrated=is_web_lane_proven(provider))
 
 
 def _expected_persona(persona: str, provider: str | None, role: str) -> str:
@@ -116,7 +116,7 @@ def _expected_persona(persona: str, provider: str | None, role: str) -> str:
     from this one, so the check fails loudly rather than quietly agreeing with
     itself.
     """
-    return _compose_persona_prompt(
+    return compose_persona_prompt(
         persona, role=role, demonstrated=is_web_lane_proven(provider)
     )
 
@@ -212,7 +212,7 @@ def test_the_research_presets_mark_the_spot_and_name_no_tool(agent_id: str) -> N
     is what must never come back.
     """
     persona = load_agent_config(agent_id).persona.system_prompt
-    assert _WEB_GROUNDING_MARKER in persona
+    assert WEB_GROUNDING_MARKER in persona
 
     for token in PER_LANE_TOOL_TOKENS:
         assert token not in persona, (
@@ -342,9 +342,9 @@ async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
         assert _normalise(expected) in prompt, (
             f"{agent_id!r} did not receive the persona its lane composes"
         )
-        assert _WEB_GROUNDING_MARKER not in prompt
+        assert WEB_GROUNDING_MARKER not in prompt
 
-        if _WEB_GROUNDING_MARKER in persona:
+        if WEB_GROUNDING_MARKER in persona:
             # A marked persona is the one that proves resolution HAPPENED: the raw
             # preset and the composed one differ, so the assertion above is not
             # satisfiable by a compiler that passed the preset straight through.
@@ -384,7 +384,7 @@ def test_both_stances_grant_the_capability_and_carry_the_obligations(
     regression to "you have no online access" fails on the branch that used to
     contain it.
     """
-    section = _normalise(_web_grounding_text(demonstrated=demonstrated))
+    section = _normalise(web_grounding_text(demonstrated=demonstrated))
 
     assert "You can search and fetch the live web" in section
     assert "no online access" not in section
@@ -402,8 +402,8 @@ def test_the_two_stances_differ_only_in_what_may_be_asserted() -> None:
     failure worth catching is the two branches collapsing into one - a composition
     that ignored its verdict would pass any per-branch assertion.
     """
-    shown = _normalise(_web_grounding_text(demonstrated=True))
-    unshown = _normalise(_web_grounding_text(demonstrated=False))
+    shown = _normalise(web_grounding_text(demonstrated=True))
+    unshown = _normalise(web_grounding_text(demonstrated=False))
     assert shown != unshown
 
     assert "has been demonstrated end to end on this lane" in shown
@@ -423,17 +423,17 @@ def test_every_document_role_receives_the_paragraph(
     The scope the record widened: any role that puts document content into the
     world carries the disclosure contract, whether or not its preset marked a spot.
     """
-    marked = _compose_persona_prompt(
-        f"Persona body.\n\n{_WEB_GROUNDING_MARKER}\n\nTail.",
+    marked = compose_persona_prompt(
+        f"Persona body.\n\n{WEB_GROUNDING_MARKER}\n\nTail.",
         role=role,
         demonstrated=demonstrated,
     )
-    assert _WEB_GROUNDING_MARKER not in marked
+    assert WEB_GROUNDING_MARKER not in marked
     assert "## Web grounding" in marked
     assert marked.startswith("Persona body.")
     assert marked.endswith("Tail.")
 
-    appended = _compose_persona_prompt(
+    appended = compose_persona_prompt(
         "Persona body.", role=role, demonstrated=demonstrated
     )
     assert appended.startswith("Persona body.")
@@ -450,7 +450,7 @@ def test_an_unmarked_non_document_persona_is_byte_identical(
     statement that it cannot search - it can - only that the citation obligations
     are about documents it does not author, so there is nothing to say to it here.
     """
-    composed = _compose_persona_prompt(
+    composed = compose_persona_prompt(
         "Body.", role=NON_DOCUMENT_ROLE, demonstrated=demonstrated
     )
     assert composed == "Body."
@@ -466,12 +466,12 @@ def test_a_marked_non_document_persona_still_resolves_its_marker(
     synthetically: the next marked persona outside the document set arrives
     already governed.
     """
-    composed = _compose_persona_prompt(
-        f"Body.\n{_WEB_GROUNDING_MARKER}",
+    composed = compose_persona_prompt(
+        f"Body.\n{WEB_GROUNDING_MARKER}",
         role=NON_DOCUMENT_ROLE,
         demonstrated=demonstrated,
     )
-    assert _WEB_GROUNDING_MARKER not in composed
+    assert WEB_GROUNDING_MARKER not in composed
     assert "## Web grounding" in composed
 
 
@@ -488,7 +488,7 @@ def test_no_shipped_persona_ships_a_literal_placeholder(
     placeholder, which a different seam resolves later in the same compile.
     """
     agent = load_agent_config(agent_id)
-    composed = _compose_persona_prompt(
+    composed = compose_persona_prompt(
         agent.persona.system_prompt, role=agent.role, demonstrated=demonstrated
     )
-    assert _WEB_GROUNDING_MARKER not in composed
+    assert WEB_GROUNDING_MARKER not in composed

@@ -22,7 +22,7 @@ from ...api.tests.clarification_harness import new_state_graph
 from ...control.accepted_input import freeze_accepted_input
 from ...control.permission_dispatch import permission_resume_value
 from ...graph.nodes.worker import (
-    _permission_callback_for,
+    permission_callback_for,
     recorded_permission_answers,
 )
 from ...providers.team_selection import model_assignment_digest
@@ -57,7 +57,7 @@ def _bound_permission_callback(state: Any) -> Any:
     exercise is the real request-id lookup rather than a callback that never
     sees the answers the executor recorded.
     """
-    return _permission_callback_for(recorded_permission_answers(state))
+    return permission_callback_for(recorded_permission_answers(state))
 
 
 def _install_two_permission_graph(

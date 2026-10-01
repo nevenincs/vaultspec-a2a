@@ -45,18 +45,18 @@ from ..thread.errors import (
 )
 from ..thread.state import TeamState
 from ._compiler_models import (
-    _parse_catalog_preferences,
-    _resolve_supervisor_model,
-    _validate_frozen_assignment_inventory,
+    parse_catalog_preferences,
     resolve_model_for_worker,
+    resolve_supervisor_model,
+    validate_frozen_assignment_inventory,
 )
 from ._compiler_prompts import (
-    _WEB_GROUNDING_MARKER,
-    _build_supervisor_prompt,
-    _compose_persona_prompt,
-    _composed_worker_prompt,
-    _lane_web_demonstrated,
-    _web_grounding_text,
+    WEB_GROUNDING_MARKER,
+    build_supervisor_prompt,
+    compose_persona_prompt,
+    composed_worker_prompt,
+    lane_web_demonstrated,
+    web_grounding_text,
 )
 from ._compiler_retry import _NODE_RETRY_POLICY, node_occupancy_ceiling
 from .enums import PipelinePhase, Provider
@@ -74,24 +74,24 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "STEP_BACKSTOP_GRACE_SECONDS",
+    "WEB_GROUNDING_MARKER",
     "_ROLE_TO_PHASE",
-    "_WEB_GROUNDING_MARKER",
     "CompiledTeamGraph",
     "_add_node",
     "_agent_node_metadata",
-    "_build_supervisor_prompt",
     "_compile_worker_node",
-    "_compose_persona_prompt",
-    "_lane_web_demonstrated",
     "_loop_route",
-    "_parse_catalog_preferences",
-    "_resolve_supervisor_model",
     "_route_from_supervisor",
-    "_web_grounding_text",
     "_wire_diverge_stage",
+    "build_supervisor_prompt",
     "compile_team_graph",
+    "compose_persona_prompt",
+    "lane_web_demonstrated",
+    "parse_catalog_preferences",
     "required_recursion_limit_for_finish_blocks",
     "resolve_model_for_worker",
+    "resolve_supervisor_model",
+    "web_grounding_text",
 ]
 
 
@@ -382,7 +382,7 @@ def _compile_worker_node(
     harness = team_config.effective_harness()
     worker_node = create_worker_node(
         model,
-        _composed_worker_prompt(agent_cfg, model),
+        composed_worker_prompt(agent_cfg, model),
         name=agent_cfg.id,
         autonomous=options["autonomous"],
         workspace_root=workspace_root,
@@ -717,7 +717,7 @@ def compile_team_graph(
             "compiled execution requires an explicit positive step timeout"
         )
 
-    _validate_frozen_assignment_inventory(model_assignment)
+    validate_frozen_assignment_inventory(model_assignment)
 
     builder: StateGraph[Any, RunContext, Any, Any] = StateGraph(
         cast("Any", TeamState), context_schema=RunContext

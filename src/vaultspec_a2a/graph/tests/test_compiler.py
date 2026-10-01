@@ -53,11 +53,11 @@ from .._compiler_retry import (
 )
 from ..compiler import (
     STEP_BACKSTOP_GRACE_SECONDS,
-    _build_supervisor_prompt,
     _loop_route,
-    _parse_catalog_preferences,
     _route_from_supervisor,
+    build_supervisor_prompt,
     compile_team_graph,
+    parse_catalog_preferences,
     resolve_model_for_worker,
 )
 from ._state_graph_helpers import add_test_node, compile_test_graph
@@ -889,20 +889,20 @@ def _node_run_timeouts(graph: Any) -> set[float | None]:
 
 
 def test_build_supervisor_prompt_injects_directive() -> None:
-    """_build_supervisor_prompt appends team directive after roster when set."""
+    """build_supervisor_prompt appends team directive after roster when set."""
     from ...team.team_config import AgentConfig
 
     agents: list[AgentConfig] = []
     base = "You are a supervisor."
-    result = _build_supervisor_prompt(agents, base, directive="Always plan first.")
+    result = build_supervisor_prompt(agents, base, directive="Always plan first.")
     assert "## Team Directive" in result
     assert "Always plan first." in result
 
 
 def test_build_supervisor_prompt_no_directive() -> None:
-    """_build_supervisor_prompt omits directive section when directive is None."""
+    """build_supervisor_prompt omits directive section when directive is None."""
     base = "You are a supervisor."
-    result = _build_supervisor_prompt([], base, directive=None)
+    result = build_supervisor_prompt([], base, directive=None)
     assert "## Team Directive" not in result
 
 
@@ -981,7 +981,7 @@ async def test_compile_team_graph_does_not_set_recursion_limit(
 def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
     from ...graph.enums import Provider
 
-    provider, model_name, execution_mode, controls = _parse_catalog_preferences(
+    provider, model_name, execution_mode, controls = parse_catalog_preferences(
         {
             "schema_version": 1,
             "provider": "codex",

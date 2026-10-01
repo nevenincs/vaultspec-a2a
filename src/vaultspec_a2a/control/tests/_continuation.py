@@ -46,7 +46,7 @@ from ..repositories import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
@@ -97,7 +97,7 @@ def envelope(content: str, workspace: Path) -> dict[str, object]:
 @asynccontextmanager
 async def busy_run_state(
     tmp_path: Path, *, created_at: datetime | None = None
-) -> AsyncIterator[BusyRun]:
+) -> AsyncGenerator[BusyRun]:
     """Open a real application database holding one run mid-first-turn.
 
     *created_at* backdates the run's own creation, which is the only way to

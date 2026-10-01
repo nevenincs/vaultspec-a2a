@@ -36,13 +36,13 @@ from ._compiler_retry import _NODE_RETRY_POLICY
 from .compiler import (
     _ROLE_TO_PHASE,
     _add_node,
-    _build_supervisor_prompt,
     _compile_worker_node,
-    _compose_persona_prompt,
-    _lane_web_demonstrated,
     _loop_route,
-    _resolve_supervisor_model,
     _route_from_supervisor,
+    build_supervisor_prompt,
+    compose_persona_prompt,
+    lane_web_demonstrated,
+    resolve_supervisor_model,
 )
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
@@ -66,12 +66,12 @@ def _star_supervisor_presentation(
         # Routed through the same composition as a worker so a supervisor persona
         # marking the spot cannot ship a literal placeholder to a model; the role
         # authors no document, so what it resolves to is always the disclaimer.
-        supervisor_prompt = _build_supervisor_prompt(
+        supervisor_prompt = build_supervisor_prompt(
             resolved_agents,
-            _compose_persona_prompt(
+            compose_persona_prompt(
                 supervisor_agent_config.persona.system_prompt,
                 role="supervisor",
-                demonstrated=_lane_web_demonstrated(supervisor_model),
+                demonstrated=lane_web_demonstrated(supervisor_model),
             ),
             directive=team_config.persona.directive,
         )
@@ -93,7 +93,7 @@ def _star_supervisor_presentation(
             "and decide who should act next to progress the goal. "
             "When the goal is fully achieved, respond with FINISH."
         )
-        supervisor_prompt = _build_supervisor_prompt(
+        supervisor_prompt = build_supervisor_prompt(
             resolved_agents,
             _fallback_base,
             directive=team_config.persona.directive,
@@ -156,7 +156,7 @@ def _compile_star(
         team_config, agent_configs
     )
 
-    supervisor_model, sv_provider, sv_model_name = _resolve_supervisor_model(
+    supervisor_model, sv_provider, sv_model_name = resolve_supervisor_model(
         options.get("workspace_root"),
         provider_factory=options["provider_factory"],
         supervisor_agent_config=supervisor_agent_config,

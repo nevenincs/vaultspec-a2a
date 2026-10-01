@@ -36,10 +36,10 @@ from ..run_context import RunContext, run_thread_id
 from ..tools.task_queue import create_mark_task_complete_tool
 from ._config_contract import accepting_runnable_config
 from ._worker_permissions import (
-    _permission_callback_for,
+    permission_callback_for,
     recorded_permission_answers,
 )
-from ._worker_tool_calls import _resolve_worker_tool_calls
+from ._worker_tool_calls import resolve_worker_tool_calls
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -65,6 +65,7 @@ _logger = logging.getLogger(__name__)
 
 __all__ = [
     "create_worker_node",
+    "permission_callback_for",
     "recorded_permission_answers",
     "render_research_findings",
     "resolve_effective_worker_model",
@@ -314,13 +315,13 @@ def resolve_effective_worker_model(
 
     *answers_reach_the_node* is False for a node whose input is fixed when it is
     dispatched rather than read from the run's channels; see
-    :func:`_permission_callback_for`.
+    :func:`permission_callback_for`.
     """
     if autonomous or not hasattr(model, "permission_callback"):
         return model
     return model.model_copy(
         update={
-            "permission_callback": _permission_callback_for(
+            "permission_callback": permission_callback_for(
                 answers, answers_reach_the_node=answers_reach_the_node
             )
         }
@@ -922,7 +923,7 @@ def create_worker_node(
         attempt_config = _config_with_relay_watch(config, relay_watch)
         try:
             response = await effective_model.ainvoke(messages, config=attempt_config)
-            response, state_updates = await _resolve_worker_tool_calls(
+            response, state_updates = await resolve_worker_tool_calls(
                 messages=messages,
                 response=response,
                 queue_tool=queue_tool,

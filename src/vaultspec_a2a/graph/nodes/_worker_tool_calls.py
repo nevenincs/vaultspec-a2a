@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.types import Command
 
-from ._worker_permissions import _permission_callback_for
+from ._worker_permissions import permission_callback_for
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -28,7 +28,9 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import BaseTool
 
-__all__: list[str] = []
+__all__ = [
+    "resolve_worker_tool_calls",
+]
 
 
 async def _collect_queue_tool_results(
@@ -120,7 +122,7 @@ async def _collect_mock_permission_result(
         if tool_call.get("name") != "session_request_permission":
             continue
         tool_input, options = _parse_mock_permission_call(tool_call)
-        selected_option = await _permission_callback_for(answers)(
+        selected_option = await permission_callback_for(answers)(
             "session_request_permission",
             tool_input,
             options,
@@ -173,7 +175,7 @@ class _WorkerToolCallOptions(TypedDict):
     permission_answers: Mapping[str, str]
 
 
-async def _resolve_worker_tool_calls(
+async def resolve_worker_tool_calls(
     **options: Unpack[_WorkerToolCallOptions],
 ) -> tuple[BaseMessage, dict[str, Any]]:
     """Resolve every node-owned tool call in one response, in one follow-up turn.

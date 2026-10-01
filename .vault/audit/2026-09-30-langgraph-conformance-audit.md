@@ -490,3 +490,7 @@ Citations name files and symbols rather than line numbers, because the drafted l
 - Replace the private runtime seat by moving ingest to the documented `astream` stream modes, which also removes the interrupt, receipt, node-identity, nostream and custom-writer gaps.
 - Choose `durability="sync"` for ingest and resume; it realises the checkpoint-first recovery the embedded-runtime decision already requires.
 - The design-record drift needs amendments to accepted decisions; they are proposed for approval rather than applied.
+
+### rule-frontmatter-misread-with-a-byte-order-mark | low | a rule file saved with a byte-order mark lost its roles and leaked its frontmatter
+
+Fixed in P07.S49. The rules loader read rule frontmatter with its own line scanner, which required the first line to be exactly `---`; a rule saved as UTF-8 with a byte-order mark, as Windows editors commonly write it, was read as having no frontmatter, so a role-scoped turn dropped it and an unscoped compile put its YAML into the prompt as text. `src/vaultspec_a2a/context/rules.py` now reads rule frontmatter with core's `parse_frontmatter` and `split_frontmatter`; `test_a_rule_saved_with_a_byte_order_mark_keeps_its_frontmatter` fails on the prior scanner.

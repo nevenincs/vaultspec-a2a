@@ -464,6 +464,27 @@ class TestRoleScoping:
         assert "DOC ONLY" in out
         assert "CODER ONLY" not in out
 
+    def test_a_rule_saved_with_a_byte_order_mark_keeps_its_frontmatter(
+        self, tmp_path: Path
+    ) -> None:
+        """Rule frontmatter is read as vaultspec-core reads it.
+
+        Editors on Windows commonly save UTF-8 with a byte-order mark. Core skips
+        it before looking for the fence, so a rule it treats as opted in to a
+        role must reach that role here too, and its frontmatter must never be
+        compiled into the prompt as text.
+        """
+        d = _rules_dir(tmp_path)
+        (d / "doc.md").write_text(
+            "\ufeff---\nroles:\n  - researcher\n---\n\nDOC ONLY\n", encoding="utf-8"
+        )
+        rm = RuleManager(tmp_path)
+        assert [p.name for p in rm.discover("researcher")] == ["doc.md"]
+        out = rm.compile()
+        assert out is not None
+        assert "DOC ONLY" in out
+        assert "roles:" not in out
+
     def test_compile_none_for_role_with_no_opted_in_files(self, tmp_path: Path) -> None:
         d = _rules_dir(tmp_path)
         _write_rule(d, "doc.md", ["researcher"])

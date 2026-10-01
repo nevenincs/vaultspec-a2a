@@ -495,6 +495,10 @@ related:
 - `S48` `M` `pyproject.toml`
 - `S48` `verify:` `pytest src/vaultspec_a2a/authoring` -> `pass`
 - `S48` `verify:` `ruff, ty check src/vaultspec_a2a/authoring, deptry src` -> `pass`
+- `S49` `M` `src/vaultspec_a2a/context/rules.py`
+- `S49` `M` `src/vaultspec_a2a/context/tests/test_rules.py`
+- `S49` `verify:` `pytest src/vaultspec_a2a/context` -> `pass`
+- `S49` `verify:` `ruff, ty check src/vaultspec_a2a/context` -> `pass`
 
 ## Notes
 

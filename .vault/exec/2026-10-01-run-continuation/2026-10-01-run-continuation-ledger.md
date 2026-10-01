@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:63bd69658a0c9acd3ceded87b47568ccd74f3f6b08a3f7ca782407338d664433'
+body_hash: 'sha256:498908ba083886832b7aa01b451a73debc8b9a4a461b1d92e7f88c40dfb83525'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -72,6 +72,15 @@ related:
 - `S09` `A` `src/vaultspec_a2a/control/tests/test_continuation_lifetime.py`
 - `S09` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
 - `S09` `by:` `vaultspec-high-executor`
+- `S19` `M` `src/vaultspec_a2a/api/internal.py`
+- `S19` `A` `src/vaultspec_a2a/api/tests/test_promoted_turn_terminal.py`
+- `S19` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S19` `M` `src/vaultspec_a2a/control/tests/_continuation.py`
+- `S19` `M` `src/vaultspec_a2a/streaming/subscribers.py`
+- `S19` `M` `src/vaultspec_a2a/streaming/tests/test_run_sequence_allocation.py`
+- `S19` `verify:` `pytest control database api streaming worker -n 4 --require-prerequisite=postgres` -> `pass`
+- `S19` `verify:` `python -m dev lint all` -> `pass`
+- `S19` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -83,3 +92,4 @@ related:
 - `S06` Scope correction: COMPLETED settlement lives in `control/recovery_authority.py,` not `event_handlers.py;` dispatch the ingest is realised as hand the promoted turn to the durable recovery dispatcher, a revisable hypothesis the ADR names. The client-visible terminal frame is still relayed before the control plane decides; owned by a new P03 Step.
 - `S07` Scope correction: `direct_control_recovery.py` needed no change. The settlement transaction now opens with a write transaction, because a SQLite read-first transaction cannot upgrade once another connection commits; this surfaced as database is locked in the real-gateway restart suite.
 - `S09` Scope correction: the bound is enforced in `recovery_authority.py` at promotion; `event_handlers.py` and `domain_config.py` were changed in S06 and S05.
+- `S19` The terminal is handed to the settlement as a publisher and dropped on promotion, never deferred; releasing it after settlement exposed a settled run whose terminal reached the wire without an id, fixed by `is_numbered` answering for a forgotten run whose floor is remembered. `recovery_authority.py` needed no change.

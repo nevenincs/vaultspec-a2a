@@ -12,7 +12,7 @@ related:
   - '[[2026-08-02-clarification-continuation-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:3c27153019d3884567887c69873c82f5d05a170e9d9f12fea48a200a87658856'
+body_hash: 'sha256:c2f085c7983dae96ee795131888e93153d9e87cb88cba96fdd329ff694d4988c'
 ---
 
 # `run-continuation` plan
@@ -69,7 +69,7 @@ A proven terminal checkpoint promotes a queued continuation inside the same run 
 - [x] `P03.S08` - Treat a run holding a queued continuation as owned by the promotion dispatcher until that action lease expires, so the abandoned-transition reconciler never settles it or drops the queued turn; `src/vaultspec_a2a/control/recovery_authority.py, src/vaultspec_a2a/database/reconciliation.py`.
 - [x] `P03.S09` - Bound the total lifetime of a run across promotions, refusing to promote past the configured maximum and settling the run with its own terminal instead; `src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/domain_config.py`.
 - [ ] `P03.S18` - Refuse every queued continuation in the settlement transaction of a run whose turn settles FAILED or CANCELLED, so a continuation is never left waiting on a settled run nor promoted past a failed turn; `src/vaultspec_a2a/control/recovery_authority.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/repositories/continuation_queue.py, src/vaultspec_a2a/control/tests/`.
-- [ ] `P03.S19` - Withhold the client-visible terminal frame and replay record of a turn whose run promotes a queued continuation, gating the relay on the control plane's settlement disposition so a viewer sees one terminal at the last turn's end; `src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/streaming/, src/vaultspec_a2a/api/tests/`.
+- [x] `P03.S19` - Withhold the client-visible terminal frame and replay record of a turn whose run promotes a queued continuation, gating the relay on the control plane's settlement disposition so a viewer sees one terminal at the last turn's end; `src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/streaming/, src/vaultspec_a2a/api/tests/`.
 
 ### Phase `P04` - Admission: queue one continuation on a busy run
 

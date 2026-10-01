@@ -308,7 +308,12 @@ async def test_a_forgotten_run_reseeds_from_the_durable_mark(
     aggregator.clear_thread_state(_RUN)
     allocator = aggregator.sequence_allocator
     assert allocator is not None
-    assert allocator.is_numbered(_RUN) is False
+    # The counter itself is gone, so nothing may be numbered until the run is
+    # seeded again. What the purge does NOT withdraw is the numbers already
+    # stamped on the frames above, which is why the run still reads as a
+    # numbered one.
+    assert allocator.allocate(_RUN) is None
+    assert allocator.is_numbered(_RUN) is True
 
     await aggregator.prepare_run(_RUN)
     assert allocator.allocate(_RUN) == 3

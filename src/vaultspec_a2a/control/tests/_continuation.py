@@ -94,47 +94,59 @@ def envelope(content: str, workspace: Path) -> dict[str, object]:
     )
 
 
-@asynccontextmanager
-async def busy_run_state(
-    tmp_path: Path, *, created_at: datetime | None = None
-) -> AsyncGenerator[BusyRun]:
-    """Open a real application database holding one run mid-first-turn.
+async def seed_busy_run(
+    db: AsyncSession, workspace: Path, *, created_at: datetime | None = None
+) -> GraphActionReceipt:
+    """Write one run mid-first-turn into an already-open application database.
+
+    Separate from :func:`busy_run_state` so a suite that owns its own stores -
+    a live gateway's database and checkpointer - reaches the same run through
+    the same production verbs rather than through a second description of it.
 
     *created_at* backdates the run's own creation, which is the only way to
     reach the total-lifetime bound without waiting a day for it.
     """
+    thread = await create_thread(
+        db,
+        thread_id=RUN,
+        status=ThreadStatus.RUNNING,
+        team_preset=PRESET,
+        write_authority=RunWriteAuthority(
+            0, 1, ControlActionType.INGEST, FIRST_RECEIPT
+        ),
+    )
+    if created_at is not None:
+        thread.created_at = created_at
+    await create_control_action(
+        db,
+        thread_id=RUN,
+        action_type=ControlActionType.INGEST,
+        idempotency_key=f"thread-create:{RUN}",
+        dispatch_id=FIRST_RECEIPT,
+        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
+        payload=envelope("first turn", workspace),
+    )
+    receipt = await prepare_graph_action_receipt(
+        db, thread_id=RUN, dispatch_id=FIRST_RECEIPT
+    )
+    if receipt is None:
+        raise RuntimeError("the seeded first turn could not take a receipt")
+    await db.commit()
+    return receipt
+
+
+@asynccontextmanager
+async def busy_run_state(
+    tmp_path: Path, *, created_at: datetime | None = None
+) -> AsyncGenerator[BusyRun]:
+    """Open a real application database holding one run mid-first-turn."""
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}")
     configure_sqlite_transactions(engine)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as db:
-        thread = await create_thread(
-            db,
-            thread_id=RUN,
-            status=ThreadStatus.RUNNING,
-            team_preset=PRESET,
-            write_authority=RunWriteAuthority(
-                0, 1, ControlActionType.INGEST, FIRST_RECEIPT
-            ),
-        )
-        if created_at is not None:
-            thread.created_at = created_at
-        await create_control_action(
-            db,
-            thread_id=RUN,
-            action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{RUN}",
-            dispatch_id=FIRST_RECEIPT,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
-            payload=envelope("first turn", tmp_path),
-        )
-        receipt = await prepare_graph_action_receipt(
-            db, thread_id=RUN, dispatch_id=FIRST_RECEIPT
-        )
-        if receipt is None:
-            raise RuntimeError("the seeded first turn could not take a receipt")
-        await db.commit()
+        receipt = await seed_busy_run(db, tmp_path, created_at=created_at)
     async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "graph.db")) as saver:
         yield BusyRun(sessions, saver, receipt, tmp_path)
     await engine.dispose()

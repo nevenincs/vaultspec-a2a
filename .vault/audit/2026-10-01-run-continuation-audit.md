@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:831bb25e1588bb71d1b9688235f3ee531671e8b036fa8edfcb92582baf70f062'
+body_hash: 'sha256:9d673326ed976aa6de9f273023d87dd91715b0aa7fcac4ce753d69bb7c1ee147'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -44,7 +44,7 @@ Open. Both routes can answer 403 and 404 that `openapi.json` does not list.
 
 ### terminal-frame-still-relayed-on-a-promoted-turn | high | a promoted run still shows viewers a terminal frame at the first turn's end
 
-Open; raised by the P02-P03 executor, owned by P03.S19. The control plane now promotes instead of settling, but the client-visible `thread_terminal` frame is broadcast by `_relay_single_event` in `src/vaultspec_a2a/api/internal.py` through the aggregator before `relay_event` reaches any control-plane decision, so the ADR's "no terminal event is published" does not yet hold and P06.S17 cannot pass. The replay log records that frame too, so a resumed stream would also replay it.
+Fixed in P03.S19 (d379515): the relay hands the terminal to the settlement as a publisher; a promoting settlement drops it, so it takes no sequence and leaves no replay row, and every other outcome publishes it at the old point. Real-gateway tests on the HTTP and websocket relays prove one terminal at the second turn's end with contiguous numbering. Original finding: the control plane promoted instead of settling, but the client-visible `thread_terminal` frame is broadcast by `_relay_single_event` in `src/vaultspec_a2a/api/internal.py` through the aggregator before `relay_event` reaches any control-plane decision, so the ADR's "no terminal event is published" does not yet hold and P06.S17 cannot pass. The replay log records that frame too, so a resumed stream would also replay it.
 
 ### queued-continuation-survives-a-failed-or-cancelled-run | high | a continuation queued on a run that fails or is cancelled waits forever
 
@@ -69,6 +69,22 @@ Recorded from P03.S07. `create_worker_app()` answers a misconfigured 500 in an u
 ### settlement-transaction-read-first-lock-upgrade | info | a read-first SQLite settlement transaction could not upgrade to a write
 
 Fixed in P03.S07. Reading the queue made a SELECT the first statement of the settlement transaction, and a deferred SQLite transaction that reads first cannot upgrade once another connection has committed; the real-gateway restart suite failed with `database is locked`. The settlement transaction now opens as a write transaction.
+
+### terminal-shown-when-a-continuation-cannot-be-promoted | medium | a refused promotion publishes a terminal on a run that has not ended
+
+Open; raised by the P03.S19 executor. `_promote_queued_continuation` can refuse (unreadable envelope, lost election, refused receipt) and `_confirm_completed_terminal` folds that into `_TerminalDisposition.REFUSED`, which publishes; the run stays RUNNING with an accepted continuation waiting, so viewers see a terminal on a run that neither settled nor ended. It needs a disposition of its own, and it compounds `promotion-refusal-stalls-rather-than-settles`.
+
+### settled-cursor-and-stream-ids-are-different-number-spaces | medium | a run's recorded cursor and its stream ids come from different counters
+
+Open; raised by the P03.S19 executor. `thread.last_sequence` is written from the emitters' per-thread counter, while every client-visible id comes from the run sequence allocator; the replay store reads `last_sequence` as a reseed floor and the snapshot publishes it for gap detection against ids the other counter issued. It is safe today only because the retained high-water mark is preferred when present, and each promotion now advances the emitters' counter for a frame nobody saw, over-counting by one per promotion (the safe direction). The two should be one number.
+
+### a-settled-run-s-terminal-could-reach-the-wire-without-an-id | medium | a settled run's terminal could lose its resumable id
+
+Fixed in P03.S19 (d379515). The purge that forgets a run's counter runs in the same step as the terminal's release, and the stream asked `is_numbered` whether to stamp an id, so the settled terminal could reach the wire with none; it was scheduling-dependent before and deterministic after the release moved. `is_numbered` now answers for a forgotten run whose floor is remembered and stays false for a run known unseedable.
+
+### a-failed-terminal-fan-out-loses-the-frame | low | a fan-out that throws costs the live terminal rather than the relay
+
+Accepted in P03.S19. `_publish_terminal` logs instead of raising, because the settlement is already durable and raising would strand the run's admission slot; reachable only if `enqueue_payload` itself throws, which its bounded delivery is written not to do.
 
 ## Recommendations
 

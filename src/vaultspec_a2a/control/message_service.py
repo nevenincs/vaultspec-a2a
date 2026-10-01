@@ -21,11 +21,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from ..database import begin_write_transaction
+from ..database import begin_write_transaction, outstanding_permission_pause
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType
-from ..thread.enums import ControlActionType
-from ..thread.message_policy import can_send_followup
+from ..thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
+from ..thread.message_policy import (
+    ParkedPause,
+    PauseAnswerability,
+    can_send_followup,
+)
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
@@ -89,6 +93,34 @@ class MessageResult:
 def _now() -> datetime:
     """Return the instant the run's remaining lifetime is measured against."""
     return datetime.now(UTC)
+
+
+async def _parked_pause(
+    db: AsyncSession, thread_id: str, status: str
+) -> ParkedPause | None:
+    """Read which pause a parked run holds, so the refusal can name its verb.
+
+    Asked of the journal rather than guessed from the status, because
+    INPUT_REQUIRED is one status over two unrelated pauses with two unrelated
+    respond verbs. An absent permission row is itself the answer: a parked run
+    with none is parked at a clarification interrupt, which lives in the
+    checkpoint and is disclosed on run-status.
+    """
+    if status != ThreadStatus.INPUT_REQUIRED.value:
+        return None
+    outstanding = await outstanding_permission_pause(db, thread_id=thread_id)
+    if outstanding is None:
+        return ParkedPause(run_id=thread_id)
+    request_id, request_status = outstanding
+    return ParkedPause(
+        run_id=thread_id,
+        permission_request_id=request_id,
+        answerability=(
+            PauseAnswerability.AWAITING_ANSWER
+            if request_status == PermissionRequestStatus.PENDING.value
+            else PauseAnswerability.APPLYING_ANSWER
+        ),
+    )
 
 
 def _refused(
@@ -159,7 +191,10 @@ async def send_followup_message(
         thread_id=options["thread_id"],
         idempotency_key=options["idempotency_key"],
     )
-    eligibility = can_send_followup(thread_status)
+    eligibility = can_send_followup(
+        thread_status,
+        parked_on=await _parked_pause(db, options["thread_id"], thread_status),
+    )
     if not replaying and not eligibility.allowed:
         # Nothing has been reserved at this point, so the refusal leaves the run
         # exactly as it was: no journal action, no writer, no dispatch. The

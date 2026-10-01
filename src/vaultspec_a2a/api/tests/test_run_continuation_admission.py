@@ -7,6 +7,11 @@ writer, no dispatch. Installing any of those now would hand the run's write
 authority to a turn that has not started, after which the turn that IS
 running has its own terminal refused as superseded and the run quarantines.
 
+A parked run still refuses, and the refusal is read off the durable journal
+rather than guessed: INPUT_REQUIRED is one status over two unrelated pauses
+with two unrelated respond verbs, and the wrong guess is this route, which
+would start a turn and orphan the pause.
+
 Every claim below is read off the real gateway over real HTTP and then off
 the durable journal, because the response alone cannot distinguish a turn
 that was queued from one that was queued AND dispatched.
@@ -20,10 +25,11 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from ...database import get_thread
+from ...database import create_thread, get_thread, record_permission_request
 from ...database.models import ControlActionModel
+from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import ControlActionResultStatus, ControlActionType
+from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from .conftest import async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
@@ -180,3 +186,79 @@ async def test_a_cancelling_run_still_refuses_as_busy(
     assert refused.status_code == 409, refused.text
     assert refused.json()["detail"]["code"] == FailureType.RUN_BUSY.value
     assert await _waiting_rows(session_factory, run_id) == []
+
+
+async def _park_run(
+    sessions: SessionFactory, run_id: str, *, request_id: str | None
+) -> None:
+    """Seed a run parked for input, with or without a permission request.
+
+    The two shapes of one status: a run waiting on a permission request the
+    journal holds, and a run waiting at a clarification interrupt it does not.
+    """
+    async with sessions() as db:
+        await create_thread(
+            db,
+            write_authority=make_test_write_authority(),
+            thread_id=run_id,
+            status=ThreadStatus.INPUT_REQUIRED,
+            team_preset=_PRESET,
+        )
+        if request_id is not None:
+            await record_permission_request(
+                db,
+                request_id=request_id,
+                thread_id=run_id,
+                pause_reason_type="tool_permission",
+                description="May I write the file?",
+                allowed_options=[
+                    {"option_id": "allow", "name": "Allow", "kind": "allow_once"}
+                ],
+                tool_call="write_file",
+            )
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_permission_pause_refuses_by_naming_its_own_respond_verb(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """The served refusal carries the exact address of the waiting request."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    run_id = "parked-permission-04"
+    await _park_run(session_factory, run_id, request_id="perm-req-1")
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
+    ) as client:
+        refused = await _followup(client, run_id, key="parked-04", content="go on")
+
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert detail["code"] == FailureType.INPUT_REQUIRED.value
+    assert f"POST /v1/runs/{run_id}/permissions/perm-req-1/respond" in detail["message"]
+    assert worker.dispatches == []
+    assert await _waiting_rows(session_factory, run_id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_clarification_pause_refuses_by_naming_the_other_verb(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """No permission row in the journal is itself the answer about the pause."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    run_id = "parked-clarification-05"
+    await _park_run(session_factory, run_id, request_id=None)
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
+    ) as client:
+        refused = await _followup(client, run_id, key="parked-05", content="go on")
+
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert detail["code"] == FailureType.INPUT_REQUIRED.value
+    assert f"/v1/runs/{run_id}/clarifications/" in detail["message"]
+    assert "run-status" in detail["message"]
+    assert "permissions" not in detail["message"]
+    assert worker.dispatches == []

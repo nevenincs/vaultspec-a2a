@@ -2,7 +2,11 @@ import pytest
 
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
-from ...thread.message_policy import can_send_followup
+from ...thread.message_policy import (
+    ParkedPause,
+    PauseAnswerability,
+    can_send_followup,
+)
 
 
 def test_repair_needed_threads_are_not_message_eligible() -> None:
@@ -63,6 +67,64 @@ def test_a_parked_run_refuses_as_input_required_rather_than_busy() -> None:
 
     assert result.allowed is False
     assert result.failure_type is FailureType.INPUT_REQUIRED
+    # Without the pause read, the ruling still points at the authority that
+    # knows which request is waiting.
+    assert result.reason is not None
+    assert "run-status" in result.reason
+
+
+def test_a_permission_pause_names_the_permission_respond_verb() -> None:
+    """The exact address, with this run and this request already in it.
+
+    A client told only "paused for input" has two verbs to choose between and
+    no way to tell which. The wrong choice is the messages route itself, which
+    would start a turn and orphan the pause.
+    """
+    result = can_send_followup(
+        ThreadStatus.INPUT_REQUIRED.value,
+        parked_on=ParkedPause(run_id="run-7", permission_request_id="req-9"),
+    )
+
+    assert result.allowed is False
+    assert result.failure_type is FailureType.INPUT_REQUIRED
+    assert result.reason is not None
+    assert "POST /v1/runs/run-7/permissions/req-9/respond" in result.reason
+    assert "clarification" not in result.reason
+
+
+def test_a_clarification_pause_names_the_clarification_respond_verb() -> None:
+    """No permission row means the pause is an interrupt, answered elsewhere.
+
+    The request id lives in the run's checkpoint and is disclosed on
+    run-status, so the refusal names the verb and sends the caller to the
+    authoritative disclosure for the id rather than inventing one.
+    """
+    result = can_send_followup(
+        ThreadStatus.INPUT_REQUIRED.value, parked_on=ParkedPause(run_id="run-7")
+    )
+
+    assert result.allowed is False
+    assert result.reason is not None
+    assert "/v1/runs/run-7/clarifications/" in result.reason
+    assert "run-status" in result.reason
+    assert "permissions" not in result.reason
+
+
+def test_an_answered_pause_being_applied_asks_for_nothing() -> None:
+    """A pause that already has its answer must not be answered twice."""
+    result = can_send_followup(
+        ThreadStatus.INPUT_REQUIRED.value,
+        parked_on=ParkedPause(
+            run_id="run-7",
+            permission_request_id="req-9",
+            answerability=PauseAnswerability.APPLYING_ANSWER,
+        ),
+    )
+
+    assert result.allowed is False
+    assert result.reason is not None
+    assert "req-9" in result.reason
+    assert "respond" not in result.reason
 
 
 @pytest.mark.parametrize(

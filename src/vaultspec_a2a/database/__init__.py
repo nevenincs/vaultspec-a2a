@@ -93,6 +93,9 @@ from .permission_repository import (
     mark_permission_request_applied as mark_permission_request_applied,
 )
 from .permission_repository import (
+    outstanding_permission_pause as outstanding_permission_pause,
+)
+from .permission_repository import (
     record_permission_request as record_permission_request,
 )
 from .permission_repository import (
@@ -250,6 +253,7 @@ __all__ = [
     "mark_task_complete",
     "migration_script_location",
     "normalize_workspace_identity",
+    "outstanding_permission_pause",
     "path_safe_run_id_clause",
     "record_permission_request",
     "record_permission_response_submission",

@@ -497,7 +497,9 @@ def _stamp_semantic_phase(payload: Mapping[str, object]) -> Mapping[str, object]
     return {**payload, "semantic_phase": phase}
 
 
-def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
+def _encode(
+    payload: Mapping[str, object], event: str | None, event_id: str | None = None
+) -> bytes:
     """Serialize one payload as a wire SSE frame.
 
     ``ensure_ascii=True`` is load-bearing and must not be traded away for the
@@ -510,15 +512,18 @@ def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
     buys the guarantee that the serialized payload holds no character
     ``splitlines`` can break on.
 
-    No frame carries an SSE ``id``. The only number a frame could offer is the
-    run's event sequence, which the worker keeps in memory and restarts from zero
-    when it does, and the gateway keeps no buffer a ``Last-Event-ID`` could
-    resume from. An id would therefore promise a resumption that does not exist,
-    and a consumer that deduplicated by it would discard a restarted worker's
-    events as ones it already held. The sequence stays in the body, where it
-    orders a run's frames without claiming to identify them across restarts.
+    *event_id* is written only when the caller has one, and a caller has one
+    only for a frame whose replay it can serve. That is the invariant, not a
+    convenience: a consumer stores the last id it saw and offers it back on
+    reconnect, so an id on a frame nothing can replay promises a resumption the
+    stream would then have to refuse. A frame without the field leaves the
+    consumer's stored id exactly where the last resumable frame put it, which is
+    why an unnumbered snapshot or keepalive between numbered frames costs a
+    resuming client nothing.
     """
     lines: list[str] = []
+    if event_id:
+        lines.append(f"id: {event_id}")
     if event:
         lines.append(f"event: {event}")
     data = json.dumps(payload, separators=(",", ":"))
@@ -526,11 +531,24 @@ def _encode(payload: Mapping[str, object], event: str | None) -> bytes:
     return ("\n".join(lines) + "\n\n").encode("utf-8")
 
 
+def _resume_event_id(thread_id: str, sequence: int) -> str:
+    """Return the SSE id identifying *sequence* of *thread_id*.
+
+    Run-qualified rather than bare, so a cursor offered back on reconnect names
+    the run it was taken against and cannot replay another run's history. Both
+    halves are single-line and NUL-free by construction - a run id is
+    path-safe and the sequence is decimal - which is the whole of what the SSE
+    grammar asks of an id.
+    """
+    return f"{thread_id}:{sequence}"
+
+
 def encode_sse_frame(
     payload: Mapping[str, object],
     *,
     event: str | None = None,
     thread_id: str | None = None,
+    sequence: int | None = None,
 ) -> bytes:
     """Encode *payload* as a versioned, bounded SSE frame.
 
@@ -538,6 +556,13 @@ def encode_sse_frame(
     :data:`MAX_SSE_FRAME_BYTES`. A frame over the cap is replaced by a small
     ``progress_dropped`` sentinel naming the dropped event type so the consumer
     knows to reconcile from ``run-status`` rather than silently missing an event.
+
+    *sequence* is the run's durable event number, supplied only by a caller
+    serving that number's replay; with *thread_id* it becomes the frame's SSE
+    id. The oversized-frame sentinel keeps the id, because the row behind the
+    number was retained whether or not the frame fitted: a client resuming from
+    it continues after the event it was told it missed, rather than asking for
+    it again.
     """
     versioned = (
         payload
@@ -552,7 +577,12 @@ def encode_sse_frame(
     # deliberately shared authority rather than a per-layer copy, so this layer
     # backstops a missing call, not a gap in the catalog.
     versioned = enforce_progress_allowlist(versioned)
-    encoded = _encode(versioned, event)
+    event_id = (
+        _resume_event_id(thread_id, sequence)
+        if thread_id is not None and sequence is not None
+        else None
+    )
+    encoded = _encode(versioned, event, event_id)
     if len(encoded) <= MAX_SSE_FRAME_BYTES:
         return encoded
 
@@ -565,4 +595,4 @@ def encode_sse_frame(
     }
     if thread_id is not None:
         sentinel["thread_id"] = thread_id
-    return _encode(sentinel, "progress_dropped")
+    return _encode(sentinel, "progress_dropped", event_id)

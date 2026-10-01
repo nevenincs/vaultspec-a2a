@@ -101,6 +101,31 @@ def _queue_progress_payload(item: object) -> dict[str, object] | None:
     return None
 
 
+def _replay_is_served(aggregator: EventAggregator, thread_id: str) -> bool:
+    """Whether this run's outgoing frames can be replayed to a reconnect.
+
+    Two conditions, and both are about this gateway rather than this stream.
+    The feature switch governs the whole mechanism. The run being NUMBERED is
+    what says the switch was on when its frames crossed the fan-out: numbering
+    and retention are bound together at the seat, so a numbered run is a
+    retained one, and an unnumbered run's body still carries the worker's own
+    counter - a number that restarts with its process and must never be offered
+    back as a cursor.
+    """
+    if not settings.stream_replay_enabled:
+        return False
+    allocator = aggregator.sequence_allocator
+    return allocator is not None and allocator.is_numbered(thread_id)
+
+
+def _retained_sequence(payload: dict[str, object]) -> int | None:
+    """Return the durable number a served frame carries, if it carries one."""
+    sequence = payload.get("sequence")
+    if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > 0:
+        return sequence
+    return None
+
+
 def _snapshot_frame(thread_id: str, status: str) -> bytes:
     """The first frame of every stream: where the run stood at attachment."""
     return encode_sse_frame(
@@ -305,10 +330,19 @@ async def _stream_thread_events(
                 continue
 
             event_type = payload.get("type")
+            # Read per frame rather than once at attachment: a run reaches its
+            # numbering on its first relayed batch, which can land after a
+            # viewer has already subscribed and been handed its snapshot.
+            sequence = (
+                _retained_sequence(payload)
+                if _replay_is_served(aggregator, thread_id)
+                else None
+            )
             yield encode_sse_frame(
                 payload,
                 event=str(event_type) if isinstance(event_type, str) else None,
                 thread_id=thread_id,
+                sequence=sequence,
             )
             if event_type == "thread_terminal":
                 return

@@ -5,7 +5,7 @@ tags:
 date: '2026-07-19'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:413ae2a325a1feb3f742985e19d3d94f1b097eb0357b6a976018fcdbaabf7382'
+body_hash: 'sha256:a49661d0efa1f7e746767ff47f46c9c66b0ed8d421f24e7a946f0d723596a8c4'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -250,6 +250,22 @@ related:
 - `S48` `verify:` `python -m dev lint all` -> `pass`
 - `S48` `verify:` `pytest worker thread database control streaming testing api graph -n 3 --require-prerequisite=postgres` -> `pass`
 - `S48` `by:` `vaultspec-high-executor`
+- `S49` `verify:` `python -m dev audit duplication` -> `pass`
+- `S49` `by:` `vaultspec-standard-executor`
+- `S37` `verify:` `python -m dev lint type-platforms` -> `pass`
+- `S37` `by:` `vaultspec-standard-executor`
+- `S38` `M` `.github/workflows/test.yml`
+- `S38` `M` `dev/tests/test_ci_contract.py`
+- `S38` `M` `dev/toolchain.py`
+- `S38` `verify:` `python -m dev lint all` -> `pass`
+- `S38` `verify:` `pytest dev/tests` -> `pass`
+- `S38` `by:` `vaultspec-standard-executor`
+- `S43` `M` `.github/workflows/test.yml`
+- `S43` `M` `dev/tests/test_ci_contract.py`
+- `S43` `M` `dev/toolchain.py`
+- `S43` `verify:` `python -m dev lint all` -> `pass`
+- `S43` `verify:` `pytest dev/tests` -> `pass`
+- `S43` `by:` `vaultspec-standard-executor`
 
 ## Notes
 
@@ -265,3 +281,6 @@ related:
 - `S47` Closed by the orchestrator: merge residue made public where the helpers now live; the private langgraph snapshot import retired on evidence that the metadata counter already marks every delta dependency (a snapshot-every-step graph prunes with its value intact). type-strict reads zero.
 - `S32` Partial: the stream hotspot is decomposed (radon 24 to 0, complexipy 43 to 0, limits 23 to 18 tree-wide); release() now also runs on the two refusal exits, proven harmless by a new test. `run_stream_endpoint` keeps six FastAPI parameters, because folding Depends/Header/Query declarations would change the served OpenAPI surface; api/schemas/gateway.py module length remains. Step stays open for those.
 - `S48` Partial: every finding outside the concurrently edited files is cleared, the never-written ingest queue map is gone, and three dead exports are unpublished. A Postgres checkpointer bridge restarted after close now waits for its new selector loop. Remaining findings sit in control event handling, the gateway schemas, recovery authority, the continuation queue, the subscriber manager and the replay writer.
+- `S49` One production clone, 41 lines: migration 0009 downgrade reproduces 0008 upgrade verbatim, as Alembic immutability requires. None of the graduated gates measures shape or duplication, so none reached zero through it.
+- `S37` Already chained in lint all and the workflow; no change.
+- `S43` Also graduated in facbd89 under the aggregate rule: reachability, symbols and exports, each at zero; a probe unused export failed lint all and was reverted.

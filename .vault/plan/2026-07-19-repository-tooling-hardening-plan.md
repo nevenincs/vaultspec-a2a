@@ -9,7 +9,7 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
 modified: '2026-10-01'
-body_hash: 'sha256:ada62efae24fd67ca6e4e1e06acede2b62809707701631788441d077ece66728'
+body_hash: 'sha256:92524fed916d26d176ba11b44f3912d224457328e642813317454e030d3246ea'
 ---
 
 # `repository-tooling-hardening` plan
@@ -172,14 +172,14 @@ Promote only verified zero-debt sentinels atomically and complete the required r
 
 Independently prove and atomically promote each deterministic strict sentinel only after two clean locked runs at unchanged scope and threshold on one clean candidate commit, no new exclusion, suppression, baseline, or duplication, a passing just ci, applicable runtime evidence, and a passing anti-drift guard.
 
-- [ ] `W08.P15.S49` - Review and classify production JSCPD findings before promotion to prove no deterministic sentinel reaches zero through duplicated code.; `.vault/audit, .vault/exec`.
-- [ ] `W08.P15.S37` - Prove cross-platform Ty is zero and atomically promote type-platforms into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
-- [ ] `W08.P15.S38` - Prove Basedpyright strict is zero and atomically promote type-strict into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [x] `W08.P15.S49` - Review and classify production JSCPD findings before promotion to prove no deterministic sentinel reaches zero through duplicated code.; `.vault/audit, .vault/exec`.
+- [x] `W08.P15.S37` - Prove cross-platform Ty is zero and atomically promote type-platforms into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [x] `W08.P15.S38` - Prove Basedpyright strict is zero and atomically promote type-strict into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S39` - Prove cognitive complexity is zero on the corrected production scope and atomically promote complexity.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S40` - Prove cyclomatic complexity is zero and atomically promote cyclomatic.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S41` - Prove module and function shape is zero and atomically promote shape.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S42` - Prove function limits are zero and atomically promote limits.; `dev/toolchain.py, .github/workflows/test.yml`.
-- [ ] `W08.P15.S43` - Prove nesting is zero and atomically promote nesting.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [x] `W08.P15.S43` - Prove nesting is zero and atomically promote nesting.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S44` - Prove size and design limits are zero and atomically promote size.; `dev/toolchain.py, .github/workflows/test.yml`.
 
 ### Phase `W08.P16` - closure and audit

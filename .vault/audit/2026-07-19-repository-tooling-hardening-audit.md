@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-10-01'
-body_hash: 'sha256:cb360fcf59fe71fbac5e27a692002487759e816632b045bcdad51af9d0d29784'
+body_hash: 'sha256:0e5aefad99cf5da8d0045ea93da668776be60b3562f0cfad1f951e6785d4fe24'
 related: []
 ---
 
@@ -775,6 +775,10 @@ Fixed in W07.P14.S48 (03a9590). `_SelectorThreadPostgresCheckpointer` kept one r
 ### worktree-provisioning-skips-node | info | an executor worktree lacks the vendored Node adapter until npm ci runs
 
 Recorded from W07.P14.S48. A fresh worktree carries no `node_modules`, so thirteen provider tests report the Claude ACP adapter missing until `npm ci` runs beside `uv sync`.
+
+### graduation-2026-10-01 | info | five gates joined the blocking aggregate at zero
+
+Recorded from W08.P15. `type-strict`, `nesting`, `reachability`, `symbols` and `exports` read zero and joined `lint all` (14bfd86, 8a5cea1, facbd89); a probe unused export made the aggregate fail and was reverted. The pre-promotion duplication review found one production clone - migration 0009's downgrade reproducing 0008's upgrade, which Alembic immutability requires - and none of the graduated gates measures shape or duplication. Still burning down outside the aggregate: complexity, cyclomatic, shape, limits and size.
 
 ## Recommendations
 

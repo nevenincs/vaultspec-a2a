@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:1197db3cd1afc666ba44d56cad9f49a90158ca907edc09ed6323f400aa6cbf90'
+body_hash: 'sha256:f8033ea36a0004a399e0ef302682b0b0030ccdb6972c1ca404e5b1c9df0a3f60'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -369,7 +369,7 @@ Findings raised while executing `2026-09-24-architecture-review-plan` and by its
 
 ### compose-gateway-binds-loopback | critical | the gateway container bound 127.0.0.1 after P03.S20 moved it to the serve entry
 
-Status: fixed in the P03.S20 reopen. The serve entry binds `settings.host`, whose default is loopback (`src/vaultspec_a2a/control/infra_config.py`, `host`), and only the worker stage set its bind host, so every Compose variant published a dead port and refused the worker's relay while the in-container healthcheck passed. The gateway stage now sets `VAULTSPEC_A2A_HOST=0.0.0.0` (`service/docker/prod.Dockerfile`), and `src/vaultspec_a2a/control/tests/test_deployment_names.py` holds every served stage (with inherited ENV) and every Compose file to a non-loopback bind; the new test fails on the prior Dockerfile. Residual: the Compose healthchecks still probe `localhost` from inside the container, so they would not catch a regression on their own; probing the container's own hostname would.
+Status: fixed in the P03.S20 reopen. The serve entry binds `settings.host`, whose default is loopback (`src/vaultspec_a2a/control/infra_config.py`, `host`), and only the worker stage set its bind host, so every Compose variant published a dead port and refused the worker's relay while the in-container healthcheck passed. The gateway stage now sets `VAULTSPEC_A2A_HOST=0.0.0.0` (`service/docker/prod.Dockerfile`), and `src/vaultspec_a2a/control/tests/test_deployment_names.py` holds every served stage (with inherited ENV) and every Compose file to a non-loopback bind; the new test fails on the prior Dockerfile. Residual: the Compose healthchecks still probe `localhost` from inside the container, so they would not catch a regression on their own; probing the container's own hostname would. Residual fixed in P06.S44: every gateway and worker healthcheck in `service/docker-compose.dev.yml`, `service/docker-compose.integration.yml` and `service/docker-compose.prod.yml` probes `socket.gethostname()`, held by `test_every_served_healthcheck_probes_the_container_by_its_own_hostname`; not yet run under Docker in this environment.
 
 ### grep-pre-approved-host-wide | high | P04.S23 left Grep pre-approved by bare name, readable anywhere on the host
 

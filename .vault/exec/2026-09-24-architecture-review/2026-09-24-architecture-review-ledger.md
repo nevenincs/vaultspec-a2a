@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:02d053c96c4d41a790b93af9bd0304a6babbfd654435ded679898f9c464a83c2'
+body_hash: 'sha256:8dc2edbb7b8b7792cdc4287569f9d0a653032c8cd3fb6e3fa50fb2f0cbdd7509'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -381,6 +381,12 @@ related:
 - `S35` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
 - `S35` `verify:` `pytest src/vaultspec_a2a/graph` -> `pass`
 - `S35` `verify:` `ruff check+format, ty check src/vaultspec_a2a/graph` -> `pass`
+- `S44` `M` `service/docker-compose.dev.yml`
+- `S44` `M` `service/docker-compose.integration.yml`
+- `S44` `M` `service/docker-compose.prod.yml`
+- `S44` `M` `src/vaultspec_a2a/control/tests/test_deployment_names.py`
+- `S44` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S44` `verify:` `pytest src/vaultspec_a2a/control/tests/test_deployment_names.py` -> `pass`
 
 ## Notes
 
@@ -413,3 +419,4 @@ related:
 - `S27` Correction from the fix re-review (forged-heading-escape-rewrites-mounted-vault-headings).
 - `S23` Correction from the fix re-review (stale-comment-says-grep-composes-bare).
 - `S14` Correction from the fix re-review (refusal-code-import-guard-cannot-fail).
+- `S44` just test-service was not run: Docker is unavailable here, so the probes are proven by syntax, by a hostname round-trip on this host and by the Compose test only.

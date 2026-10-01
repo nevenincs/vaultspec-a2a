@@ -21,7 +21,7 @@ related:
   - '[[2026-07-19-observability-lanes-adr]]'
 modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:0ec0ba4e21278d9dcfa27485601e84ece5160b7b7ae06e422e86d3330b6ad8bc'
+body_hash: 'sha256:05c132cd2c12914e140356ee836e70f7c86213387a08eabd04160822292e3c4b'
 ---
 
 # `architecture-review` plan
@@ -114,7 +114,7 @@ Close the decision-free findings the plan-close review and its re-review left op
 - [ ] `P06.S41` - Advertise modes from the ACP simulator and refuse an autonomous session whose lane advertises none; `src/vaultspec_a2a/graph/tests/acp_simulator.py, src/vaultspec_a2a/providers/_acp_session.py`.
 - [ ] `P06.S42` - Reserve shutdown budget for the prune wait and key pending prunes to the app that waits on them; `src/vaultspec_a2a/lifecycle/shutdown.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/api/app.py`.
 - [ ] `P06.S43` - Escape setext-style role headings in rendered message content; `src/vaultspec_a2a/providers/_prompt_render.py`.
-- [ ] `P06.S44` - Probe the container's own hostname in the Compose healthchecks; `service/docker/`.
+- [x] `P06.S44` - Probe the container's own hostname in the Compose healthchecks; `service/docker/`.
 - [ ] `P06.S45` - Reconcile finding statuses that later Steps closed; `.vault/audit/2026-09-24-architecture-review-audit.md, .vault/audit/2026-09-30-langgraph-conformance-audit.md`.
 
 ## Parallelization

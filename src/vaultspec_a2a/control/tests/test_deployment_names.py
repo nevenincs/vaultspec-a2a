@@ -238,3 +238,32 @@ def test_no_compose_file_pins_a_served_app_back_to_loopback() -> None:
     ]
 
     assert pinned == []
+
+
+def test_every_served_healthcheck_probes_the_container_by_its_own_hostname() -> None:
+    """A loopback probe passes a server that only loopback can reach.
+
+    Docker runs a healthcheck inside the container, where ``localhost`` reaches a
+    server no peer container can. A gateway that regressed to a loopback bind
+    therefore stayed healthy while it refused the worker's relay. The container's
+    own hostname resolves to the address its peers use, so the probe fails exactly
+    when they would.
+    """
+    import yaml
+
+    probes: list[tuple[str, str, str]] = []
+    for path in _compose_files():
+        composed = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for name in _SHUTDOWN_SERVICES:
+            service = composed.get("services", {}).get(name) or {}
+            check = service.get("healthcheck")
+            if check is None:
+                continue
+            probes.append((path.name, name, " ".join(map(str, check["test"]))))
+
+    assert len(probes) >= 2 * len(_SHUTDOWN_SERVICES), probes
+    loopback = [
+        probe for probe in probes if any(h in probe[2] for h in _LOOPBACK_HOSTS)
+    ]
+    assert loopback == []
+    assert all("socket.gethostname()" in probe[2] for probe in probes), probes

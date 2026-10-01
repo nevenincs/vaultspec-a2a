@@ -36,7 +36,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import urllib.request; urllib.request.urlopen('http://localhost:18000/internal/health')",
+          "import socket, urllib.request; urllib.request.urlopen('http://' + socket.gethostname() + ':18000/internal/health')",
         ]
       interval: 10s
       timeout: 5s
@@ -76,7 +76,7 @@ services:
           'CMD',
           'python',
           '-c',
-          "import os, urllib.request; tok = os.environ.get('VAULTSPEC_A2A_INTERNAL_TOKEN'); req = urllib.request.Request('http://localhost:18001/health', headers={'Authorization': 'Bearer ' + tok} if tok else {}); urllib.request.urlopen(req)",
+          "import os, socket, urllib.request; tok = os.environ.get('VAULTSPEC_A2A_INTERNAL_TOKEN'); req = urllib.request.Request('http://' + socket.gethostname() + ':18001/health', headers={'Authorization': 'Bearer ' + tok} if tok else {}); urllib.request.urlopen(req)",
         ]
       interval: 10s
       timeout: 5s

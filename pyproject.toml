@@ -486,9 +486,13 @@ reportPrivateLocalImportUsage = "error"
 executionEnvironments = [
   # extraPaths keeps the repo root on this environment's import path: declaring
   # an executionEnvironment resets resolution for that directory, and `dev.*` is
-  # imported as a top-level package from the repo root.
+  # imported as a top-level package from the repo root. `src` is on it for the
+  # same reason: without it `vaultspec_a2a` resolves through the editable
+  # install instead of the tree this configuration already checks, and the
+  # same modules then read as an unstubbed third-party library.
   { root = "dev/tests", extraPaths = [
     ".",
+    "src",
   ], reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/api/tests", reportPrivateUsage = false },
   { root = "src/vaultspec_a2a/authoring/tests", reportPrivateUsage = false },

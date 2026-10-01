@@ -18,6 +18,7 @@ from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_agent_config, load_team_config
 from ..compiler import _add_node, compile_team_graph
 from ..run_context import RunContext, run_thread_id
+from ._state_graph_helpers import compile_test_graph
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ async def test_ingest_delivers_the_run_context_to_graph_nodes() -> None:
     _add_node(builder, "record", record)
     builder.add_edge(START, "record")
     builder.add_edge("record", END)
-    graph = cast("StreamableGraph", builder.compile())
+    graph = cast("StreamableGraph", compile_test_graph(builder))
 
     aggregator = EventAggregator()
     ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)

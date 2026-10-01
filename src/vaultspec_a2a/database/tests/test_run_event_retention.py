@@ -25,6 +25,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import update
 
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..checkpoint_retention import prune_settled_checkpoints
@@ -38,7 +39,6 @@ from ._checkpoint_history import config_for, stored_history
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from langgraph.graph.state import CompiledStateGraph
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..checkpoints import Checkpointer
@@ -62,15 +62,15 @@ def _append(entry: str) -> Any:
     return node
 
 
-def _two_step_graph(saver: Checkpointer) -> CompiledStateGraph[Any, Any, Any, Any]:
+def _two_step_graph(saver: Checkpointer) -> Any:
     """A real graph whose run leaves more than one checkpoint behind."""
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
-    builder.add_node("first", _append("first"))
-    builder.add_node("second", _append("second"))
+    add_test_node(builder, "first", _append("first"))
+    add_test_node(builder, "second", _append("second"))
     builder.add_edge(START, "first")
     builder.add_edge("first", "second")
     builder.add_edge("second", END)
-    return builder.compile(checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 def _frame(thread_id: str, sequence: int, *, age_hours: float) -> RunEventRecord:

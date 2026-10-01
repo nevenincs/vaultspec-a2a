@@ -24,7 +24,7 @@ compiled graph over a real checkpointer driven through the real aggregator.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast, override
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -46,10 +46,11 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 
     from ...graph.events import DomainEvent
     from ..types import StreamableGraph
@@ -66,9 +67,11 @@ class _ToolStreamingModel(BaseChatModel):
     """A model that streams text and then a tool call with its own id."""
 
     @property
+    @override
     def _llm_type(self) -> str:
         return "identity-probe"
 
+    @override
     def _generate(
         self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> ChatResult:
@@ -77,9 +80,10 @@ class _ToolStreamingModel(BaseChatModel):
             generations=[ChatGeneration(message=AIMessage(content="not streamed"))]
         )
 
+    @override
     async def _astream(
         self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
-    ) -> Any:
+    ) -> AsyncIterator[ChatGenerationChunk]:
         del messages, stop, kwargs
         text = ChatGenerationChunk(message=AIMessageChunk(content="visible answer"))
         if run_manager:
@@ -111,12 +115,14 @@ def mark_done(task_id: str) -> str:
 
 async def _worker(state: _State) -> dict[str, Any]:
     del state
+
+    def _format(_: Mapping[str, object]) -> dict[str, list[dict[str, str]]]:
+        return {"current_plan": [{"content": "PLAN FROM A NESTED CHAIN"}]}
+
     # A nested runnable inside the node. It carries the node's name in its
     # metadata and returns a plan-shaped value, which is exactly the pair
     # that used to produce a phantom turn and a plan nobody wrote.
-    nested = RunnableLambda(
-        lambda _: {"current_plan": [{"content": "PLAN FROM A NESTED CHAIN"}]}
-    ).with_config(run_name="formatter")
+    nested = RunnableLambda(_format).with_config(run_name="formatter")
     await nested.ainvoke({"x": 1})
 
     get_stream_writer()("a bare string the node wrote")
@@ -148,20 +154,20 @@ def _subgraph() -> Any:
         return {"note": "inner"}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    builder.add_node("inner", inner)
+    add_test_node(builder, "inner", inner)
     builder.add_edge(START, "inner")
     builder.add_edge("inner", END)
-    return builder.compile()
+    return compile_test_graph(builder)
 
 
 def _identity_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    builder.add_node("worker", _worker)
-    builder.add_node("team", _subgraph())
+    add_test_node(builder, "worker", _worker)
+    add_test_node(builder, "team", _subgraph())
     builder.add_edge(START, "worker")
     builder.add_edge("worker", "team")
     builder.add_edge("team", END)
-    return cast("StreamableGraph", builder.compile(checkpointer=saver))
+    return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
 
 
 async def _run_identity_graph() -> list[DomainEvent]:

@@ -26,7 +26,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from ....thread.state import merge_permission_answers
-from ...nodes.worker import _permission_callback_for, _recorded_permission_answers
+from ...nodes.worker import _permission_callback_for, recorded_permission_answers
+from .._state_graph_helpers import add_test_node, compile_test_graph
 
 _OPTIONS = [
     {"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"},
@@ -43,7 +44,7 @@ class _Turn(TypedDict):
 
 def _bound_callback(state: _Turn) -> Any:
     """The callback the worker node binds, over this state's recorded answers."""
-    return _permission_callback_for(_recorded_permission_answers(cast("Any", state)))
+    return _permission_callback_for(recorded_permission_answers(cast("Any", state)))
 
 
 def _graph(calls: list[tuple[str, dict[str, Any]]], granted: list[str]) -> Any:
@@ -56,10 +57,10 @@ def _graph(calls: list[tuple[str, dict[str, Any]]], granted: list[str]) -> Any:
         return {"granted": [option]}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Turn))
-    builder.add_node("ask", ask)
+    add_test_node(builder, "ask", ask)
     builder.add_edge(START, "ask")
     builder.add_edge("ask", END)
-    return builder.compile(checkpointer=InMemorySaver())
+    return compile_test_graph(builder, checkpointer=InMemorySaver())
 
 
 def _parked(result: dict[str, Any]) -> dict[str, Any]:
@@ -168,10 +169,10 @@ async def test_a_turn_reordering_its_calls_still_gets_each_answer() -> None:
         return {"granted": granted}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Turn))
-    builder.add_node("ask", two_calls)
+    add_test_node(builder, "ask", two_calls)
     builder.add_edge(START, "ask")
     builder.add_edge("ask", END)
-    graph: Any = builder.compile(checkpointer=InMemorySaver())
+    graph: Any = compile_test_graph(builder, checkpointer=InMemorySaver())
 
     first = _parked(await graph.ainvoke({"granted": []}, _CONFIG))
     assert first["tool_name"] == "Edit"
@@ -203,10 +204,10 @@ async def test_a_remembered_approval_is_never_offered_or_accepted() -> None:
         return {"granted": [option]}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Turn))
-    builder.add_node("ask", ask)
+    add_test_node(builder, "ask", ask)
     builder.add_edge(START, "ask")
     builder.add_edge("ask", END)
-    graph: Any = builder.compile(checkpointer=InMemorySaver())
+    graph: Any = compile_test_graph(builder, checkpointer=InMemorySaver())
 
     parked = _parked(await graph.ainvoke({"granted": []}, _CONFIG))
     assert [o["optionId"] for o in parked["options"]] == ["allow_once", "reject_once"]
@@ -235,7 +236,7 @@ def test_recorded_answers_drop_entries_that_name_nothing() -> None:
             }
         },
     )
-    assert _recorded_permission_answers(state) == {"perm-good": "allow_once"}
+    assert recorded_permission_answers(state) == {"perm-good": "allow_once"}
 
 
 def test_recorded_answers_merge_under_their_request_ids() -> None:

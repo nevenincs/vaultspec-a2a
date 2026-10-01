@@ -33,7 +33,9 @@ from ..utils.atomic_write import atomic_write_text
 from ..utils.file_lock import held_exclusive_lock
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
+
+    from ._json_contract import JsonValue
 
 __all__ = [
     "CODEX_AUTH_FILENAME",
@@ -104,7 +106,7 @@ def codex_credential_store_mode(base_home: Path) -> str:
 def _last_refresh(payload: bytes) -> datetime | None:
     """Read the credential's own refresh stamp, or ``None`` when it has none."""
     try:
-        document = json.loads(payload)
+        document: JsonValue = json.loads(payload)
     except ValueError:
         return None
     if not isinstance(document, dict):
@@ -143,7 +145,9 @@ def _write_seed(run_home: Path, seed: CodexAuthSeed) -> None:
 
 def _read_seed(run_home: Path) -> CodexAuthSeed | None:
     try:
-        document = json.loads((run_home / _SEED_FILENAME).read_text(encoding="utf-8"))
+        document: JsonValue = json.loads(
+            (run_home / _SEED_FILENAME).read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         return None
     if not isinstance(document, dict):
@@ -205,7 +209,7 @@ def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None
 @contextlib.contextmanager
 def _credential_lock(
     source: Path, *, timeout_seconds: float = _LOCK_TIMEOUT_SECONDS
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold the write-back lock for one source login.
 
     The lock file is named next to the credential it guards, because that file -

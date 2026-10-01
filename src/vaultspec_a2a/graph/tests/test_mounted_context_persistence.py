@@ -11,7 +11,7 @@ carries it.
 from __future__ import annotations
 
 import sqlite3
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -45,6 +45,7 @@ class _PromptCapture(AsyncCallbackHandler):
     def __init__(self) -> None:
         self.prompts: list[str] = []
 
+    @override
     async def on_chat_model_start(
         self,
         serialized: dict[str, Any],

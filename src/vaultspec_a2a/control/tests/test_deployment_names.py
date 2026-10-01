@@ -11,10 +11,14 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+from typing import TYPE_CHECKING, Any, cast
 
 from ...control.config import Settings
 from ...control.infra_config import InfraConfig
 from ...control.settings_base import field_env_names
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _SERVICE = pathlib.Path(__file__).resolve().parents[3].parent / "service"
 _NAME = re.compile(r"\b(VAULTSPEC_[A-Z0-9_]+)\b")
@@ -253,9 +257,12 @@ def test_every_served_healthcheck_probes_the_container_by_its_own_hostname() -> 
 
     probes: list[tuple[str, str, str]] = []
     for path in _compose_files():
-        composed = yaml.safe_load(path.read_text(encoding="utf-8"))
+        composed = cast(
+            "Mapping[str, Mapping[str, Mapping[str, Any]]]",
+            yaml.safe_load(path.read_text(encoding="utf-8")),
+        )
         for name in _SHUTDOWN_SERVICES:
-            service = composed.get("services", {}).get(name) or {}
+            service: Mapping[str, Any] = composed.get("services", {}).get(name) or {}
             check = service.get("healthcheck")
             if check is None:
                 continue

@@ -15,24 +15,23 @@ from __future__ import annotations
 import operator
 import os
 import sqlite3
-from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast, override
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from langgraph.channels.delta import DeltaChannel
+from langgraph.channels import DeltaChannel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ..checkpoint_retention import prune_settled_checkpoints
 from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from pathlib import Path
-
-    from langgraph.graph.state import CompiledStateGraph
 
     from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
@@ -54,9 +53,7 @@ class _DeltaLog(TypedDict):
     log: Annotated[list[str], DeltaChannel(_accumulate, list, snapshot_frequency=1000)]
 
 
-def _one_step_graph(
-    saver: Checkpointer, state_schema: type[Any]
-) -> CompiledStateGraph[Any, Any, Any, Any]:
+def _one_step_graph(saver: Checkpointer, state_schema: type[Any]) -> Any:
     """One node appending a turn to *state_schema*'s log, compiled over *saver*.
 
     The two schemas differ only in the channel behind that log - one plain,
@@ -70,10 +67,10 @@ def _one_step_graph(
         return {"log": ["step"]}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", state_schema))
-    builder.add_node("step", step)
+    add_test_node(builder, "step", step)
     builder.add_edge(START, "step")
     builder.add_edge("step", END)
-    return builder.compile(checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 @pytest_asyncio.fixture
@@ -172,6 +169,7 @@ async def test_a_saver_that_prunes_itself_is_asked_to(
     calls: list[tuple[list[str], str]] = []
 
     class _PruningSaver(AsyncSqliteSaver):
+        @override
         async def aprune(
             self, thread_ids: Any, *, strategy: str = "keep_latest"
         ) -> None:
@@ -192,7 +190,7 @@ async def test_a_saver_that_prunes_itself_is_asked_to(
     # The saver was asked, and the direct statements did not also run.
     assert calls == [([thread_id], "keep_latest")]
     assert await stored_history(saver, thread_id) == before
-    assert type(saver).aprune is not BaseCheckpointSaver.aprune
+    assert type(saver).aprune is not cast("object", BaseCheckpointSaver.aprune)
 
 
 def test_the_pinned_schema_version_is_the_one_the_installed_saver_reaches() -> None:
@@ -227,9 +225,9 @@ async def postgres_saver(
     external_prerequisite("postgres")
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-    from ..checkpoints import _postgres_checkpoint_pool, setup_postgres_checkpointer
+    from ..checkpoints import postgres_checkpoint_pool, setup_postgres_checkpointer
 
-    pool = _postgres_checkpoint_pool(os.environ[_POSTGRES_URL_ENV])
+    pool = postgres_checkpoint_pool(os.environ[_POSTGRES_URL_ENV])
     await pool.open(wait=True)
     try:
         saver = AsyncPostgresSaver(conn=pool)

@@ -32,7 +32,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from sqlalchemy.ext.asyncio import (
+        AsyncConnection,
+        AsyncEngine,
+        AsyncSession,
+        async_sessionmaker,
+    )
 
 __all__ = ["RunEventRecord", "RunEventStore", "retained_high_water_mark"]
 
@@ -135,7 +140,7 @@ async def retained_high_water_mark(session: AsyncSession, thread_id: str) -> int
 
 def _dialect_of(session: AsyncSession) -> str:
     """Return the dialect name the session's engine speaks."""
-    bind = session.bind
+    bind = cast("AsyncEngine | AsyncConnection | None", session.bind)
     if bind is None:
         msg = "a run-event session must be bound to an engine"
         raise RuntimeError(msg)

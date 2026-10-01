@@ -39,7 +39,7 @@ from opentelemetry.trace.span import format_span_id, format_trace_id
 from ..control.state_layout import seal_state_home, state_layout
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
     from pathlib import Path
 
 #: The populated shape of ``LogRecord.exc_info``; see ``JSONFormatter``, which
@@ -201,7 +201,7 @@ _log_context: contextvars.ContextVar[Mapping[str, str]] = contextvars.ContextVar
 
 
 @contextmanager
-def log_context(**fields: str | None) -> Iterator[None]:
+def log_context(**fields: str | None) -> Generator[None]:
     """Attach correlation fields to every record logged within this scope.
 
     Held in a context variable, so the fields follow the asyncio tasks started

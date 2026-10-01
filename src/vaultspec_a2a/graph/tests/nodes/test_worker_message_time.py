@@ -18,6 +18,7 @@ from langgraph.graph import END, START, StateGraph
 
 from ....control.snapshot import _checkpoint_messages
 from ...nodes.worker import _finalize_worker_response
+from .._state_graph_helpers import add_test_node, compile_test_graph
 
 
 class _Transcript(TypedDict):
@@ -35,10 +36,10 @@ async def test_a_worker_turn_keeps_its_production_time_through_the_checkpoint() 
         )
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Transcript))
-    builder.add_node("turn", turn)
+    add_test_node(builder, "turn", turn)
     builder.add_edge(START, "turn")
     builder.add_edge("turn", END)
-    graph: Any = builder.compile(checkpointer=InMemorySaver())
+    graph: Any = compile_test_graph(builder, checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "message-time"}}
 
     before = datetime.now(UTC)

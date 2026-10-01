@@ -350,18 +350,37 @@ class _FinalizeInterrupt:
     span: Any
 
 
-def _stream_frame(raw_event: RawStreamFrame) -> StreamFrame | None:
+def _frame_triple(raw_event: object) -> tuple[object, ...] | None:
+    """Return the frame when it is a three-element tuple, else ``None``.
+
+    Separate from its caller so the caller never narrows the raw frame: the
+    log line it writes reports the shape that actually arrived, and reading
+    that off a value a shape check already narrowed would report the shape
+    the check assumed.
+    """
+    if not isinstance(raw_event, tuple):
+        return None
+    frame = cast("tuple[object, ...]", raw_event)
+    return frame if len(frame) == 3 else None
+
+
+def _stream_frame(raw_event: object) -> StreamFrame | None:
     """Read one ``(namespace, mode, payload)`` frame off the graph stream.
 
     ``subgraphs=True`` with several stream modes is the only shape this ingest
     asks for, so every frame is that triple. A frame of any other shape is a
     contract break rather than a variant to interpret, and is dropped with a
     log instead of being guessed at.
+
+    The parameter is ``object`` rather than the triple the callers hold: what
+    arrives is whatever the graph yielded, and :func:`_frame_triple` is the
+    only thing that establishes it really is the triple.
     """
-    if not isinstance(raw_event, tuple) or len(raw_event) != 3:
+    frame = _frame_triple(raw_event)
+    if frame is None:
         logger.warning("Unrecognised graph stream frame shape: %r", type(raw_event))
         return None
-    namespace, mode, payload = raw_event
+    namespace, mode, payload = frame
     if not isinstance(mode, str):
         logger.warning("Graph stream frame carried no mode: %r", type(mode))
         return None

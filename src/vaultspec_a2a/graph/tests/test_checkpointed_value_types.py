@@ -17,7 +17,7 @@ run still held in memory), and every reachable value is checked.
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
@@ -39,7 +39,7 @@ from ..compiler import compile_team_graph
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
     from pathlib import Path
 
 
@@ -53,12 +53,12 @@ def enum_members(value: object, path: str = "") -> Iterator[str]:
         yield f"{path or '<root>'} = {value!r}"
         return
     if isinstance(value, dict):
-        for key, item in value.items():
+        for key, item in cast("dict[object, object]", value).items():
             yield from enum_members(key, f"{path}.<key {key!r}>")
             yield from enum_members(item, f"{path}.{key}")
         return
     if isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
+        for index, item in enumerate(cast("Sequence[object]", value)):
             yield from enum_members(item, f"{path}[{index}]")
 
 

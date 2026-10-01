@@ -16,6 +16,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Interrupt, PregelTask, interrupt
 from pydantic import BaseModel, ConfigDict
 
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...providers import ProviderCondition
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
@@ -131,11 +132,11 @@ async def test_a_node_that_asks_again_is_still_the_next_node() -> None:
         return {"answer": answer}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _AskState))
-    builder.add_node("ask_until_settled", ask_until_settled)
+    add_test_node(builder, "ask_until_settled", ask_until_settled)
     builder.add_edge(START, "ask_until_settled")
     builder.add_edge("ask_until_settled", END)
     saver = InMemorySaver()
-    graph = builder.compile(checkpointer=saver)
+    graph = compile_test_graph(builder, checkpointer=saver)
     config: RunnableConfig = {"configurable": {"thread_id": "ask-again"}}
 
     await graph.ainvoke({}, config=config)
@@ -174,13 +175,13 @@ def _fan_out_graph(saver: InMemorySaver) -> Any:
         return node
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _FanOutState))
-    builder.add_node("alpha", gate("request-alpha"))
-    builder.add_node("beta", gate("request-beta"))
+    add_test_node(builder, "alpha", gate("request-alpha"))
+    add_test_node(builder, "beta", gate("request-beta"))
     builder.add_edge(START, "alpha")
     builder.add_edge(START, "beta")
     builder.add_edge("alpha", END)
     builder.add_edge("beta", END)
-    return builder.compile(checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 async def _answer(graph: Any, config: RunnableConfig, request_id: str) -> None:

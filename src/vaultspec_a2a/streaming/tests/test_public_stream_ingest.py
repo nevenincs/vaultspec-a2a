@@ -47,6 +47,7 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -88,10 +89,10 @@ async def _speaking_node(state: _State) -> dict[str, Any]:
 
 def _full_surface_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    builder.add_node("speaker", _speaking_node)
+    add_test_node(builder, "speaker", _speaking_node)
     builder.add_edge(START, "speaker")
     builder.add_edge("speaker", END)
-    return cast("StreamableGraph", builder.compile(checkpointer=saver))
+    return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
 
 
 async def _drain(queue: Any) -> list[SequencedEvent]:
@@ -166,10 +167,10 @@ def _parking_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
         return {"note": str(answer)}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    builder.add_node("gate", gate)
+    add_test_node(builder, "gate", gate)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", END)
-    return cast("StreamableGraph", builder.compile(checkpointer=saver))
+    return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
 
 
 @pytest.mark.asyncio

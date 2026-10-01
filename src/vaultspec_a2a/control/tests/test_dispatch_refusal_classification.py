@@ -45,6 +45,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from pathlib import Path
 
+    from ...worker._dispatch_contract import DispatchCapacityReservation
+
 _TEST_INTERNAL_TOKEN = "dispatch-refusal-test-token"
 
 
@@ -214,7 +216,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
             failure_threshold=threshold,
             recovery_timeout=settings.cb_recovery_timeout_seconds,
         )
-        held = []
+        held: list[DispatchCapacityReservation] = []
         reservation, _reason = await executor.reserve_dispatch_capacity("busy-run")
         assert reservation is not None
         held.append(reservation)

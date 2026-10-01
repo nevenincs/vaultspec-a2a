@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from langchain_core.callbacks import AsyncCallbackHandler
 from langgraph.constants import TAG_NOSTREAM
@@ -96,6 +96,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             emitters=self._emitters,
         )
 
+    @override
     async def on_tool_start(
         self,
         serialized: dict[str, Any],
@@ -143,6 +144,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             input_args=inputs,
         )
 
+    @override
     async def on_tool_end(
         self,
         output: Any,
@@ -163,6 +165,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             output,
         )
 
+    @override
     async def on_tool_error(
         self,
         error: BaseException,
@@ -192,6 +195,7 @@ class RunLifecycleCallbacks(AsyncCallbackHandler):
             content=truncated_tool_content(error_msg),
         )
 
+    @override
     async def on_llm_end(
         self,
         response: LLMResult,

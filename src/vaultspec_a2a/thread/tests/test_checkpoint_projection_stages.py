@@ -26,6 +26,7 @@ from ..snapshots import (
     fold_pending_writes,
     project_checkpoint_tuple,
 )
+from ._graph_helpers import add_node, compile_graph
 
 
 def _tuple(*, pending: list[PendingWrite] | None = None) -> CheckpointTuple:
@@ -133,13 +134,13 @@ def _fan_out_graph(saver: InMemorySaver) -> Any:
         return node
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _FanOutState))
-    builder.add_node("alpha", gate("request-alpha"))
-    builder.add_node("beta", gate("request-beta"))
+    add_node(builder, "alpha", gate("request-alpha"))
+    add_node(builder, "beta", gate("request-beta"))
     builder.add_edge(START, "alpha")
     builder.add_edge(START, "beta")
     builder.add_edge("alpha", END)
     builder.add_edge("beta", END)
-    return builder.compile(checkpointer=saver)
+    return compile_graph(builder, checkpointer=saver)
 
 
 @pytest.mark.asyncio

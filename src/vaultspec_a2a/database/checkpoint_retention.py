@@ -23,13 +23,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .checkpoint_schema import LANGGRAPH_TABLE_COLUMNS
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = ["prune_settled_checkpoints"]
 
@@ -101,14 +104,14 @@ WHERE b.thread_id = %s
 def scalar(row: Any) -> Any:
     """Return the single column of *row*, whatever row factory produced it."""
     if isinstance(row, dict):
-        return next(iter(row.values()))
+        return next(iter(cast("dict[str, Any]", row).values()))
     return row[0]
 
 
 def _saver_prunes_itself(checkpointer: object) -> bool:
     """Whether *checkpointer* implements pruning rather than inheriting a refusal."""
     own = getattr(type(checkpointer), "aprune", None)
-    return own is not None and own is not BaseCheckpointSaver.aprune
+    return own is not None and own is not cast("object", BaseCheckpointSaver.aprune)
 
 
 async def _thread_uses_a_delta_channel(checkpointer: Any, thread_id: str) -> bool:
@@ -122,10 +125,10 @@ async def _thread_uses_a_delta_channel(checkpointer: Any, thread_id: str) -> boo
     latest = await checkpointer.aget_tuple({"configurable": {"thread_id": thread_id}})
     if latest is None:
         return False
-    metadata = latest.metadata or {}
+    metadata: Mapping[str, object] = latest.metadata or {}
     if metadata.get(_DELTA_COUNTERS_KEY):
         return True
-    values = latest.checkpoint.get("channel_values") or {}
+    values: Mapping[str, object] = latest.checkpoint.get("channel_values") or {}
     return any(isinstance(value, _DeltaSnapshot) for value in values.values())
 
 
@@ -200,7 +203,8 @@ async def _postgres_schema_is_the_expected_one(saver: Any) -> bool:
     from psycopg_pool import AsyncConnectionPool
 
     if isinstance(saver.conn, AsyncConnectionPool):
-        async with saver.conn.connection() as connection:
+        pool = cast("AsyncConnectionPool[Any]", saver.conn)
+        async with pool.connection() as connection:
             version = await _postgres_schema_version(connection)
     else:
         async with saver.lock:
@@ -256,7 +260,8 @@ async def _prune_postgres(saver: Any, thread_id: str) -> None:
     from psycopg_pool import AsyncConnectionPool
 
     if isinstance(saver.conn, AsyncConnectionPool):
-        async with saver.conn.connection() as connection:
+        pool = cast("AsyncConnectionPool[Any]", saver.conn)
+        async with pool.connection() as connection:
             await _prune_postgres_connection(connection, thread_id)
         return
     async with saver.lock:

@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-10-01'
-body_hash: 'sha256:b8b6bc0ebecb2b30170734e127733bb6ec677bf759c10a3c7bed7424cd3040c6'
+body_hash: 'sha256:9a18800b0b1b99d9960f71c5a1fdfb7a50cb230bba69c528d7eaec96f39a18d9'
 related: []
 ---
 
@@ -743,6 +743,18 @@ Open; found by W07.P13.S31. The map now held in `_ThreadState.ingest_queues` (`s
 ### lifecycle-pairing-test-fails-under-load | low | a lifecycle pairing test fails in a large parallel batch
 
 Open; observed by the W07 executor. `lifecycle/tests/test_manager.py::test_serve_up_records_and_injects_the_worker_gateway_pairing` failed under `-n 3 --dist=loadgroup` in a mixed batch and passed alone. A failure under load is a timing assumption in the test or the code, not noise; it needs its root cause.
+
+### strict-types-private-langgraph-snapshot | medium | the retention guard depends on a private langgraph type
+
+Open, owned by W06.P12.S47; needs a decision. `database/checkpoint_retention.py` must recognise `langgraph.checkpoint.serde.types._DeltaSnapshot`, because a delta channel rebuilds its value from the nearest snapshot and pruning past a non-snapshot head empties it. langgraph exposes no public alias (its own `channels.delta` and Postgres saver import the private name). Options: a local stub that falsely publishes the name (a suppression in another spelling), carrying the finding until upstream adds an alias, or a public probe (`get_delta_channel_history`) that changes what the guard tests and needs its own evidence. It is the last strict diagnostic on the branch the Step produced.
+
+### strict-types-merge-residue | low | the strict pass and the decomposition met at private helper names
+
+Open, owned by W06.P12.S47. Merging the strict pass over W07 left 22 diagnostics, mostly `reportPrivateUsage` and `reportUnusedFunction` where helpers moved into new graph modules kept their private names while imported across modules.
+
+### compiled-test-graph-is-any | low | a compiled test graph is untyped at the test boundary
+
+Recorded from W06.P12.S28. `graph/tests/_state_graph_helpers.compile_test_graph` returns `Any` by design, so graph reads in every suite routed through it are unchecked; a concrete compiled-graph protocol (the one in `thread/tests/_graph_helpers.py` is a model) would restore checking across the test tree.
 
 ## Recommendations
 

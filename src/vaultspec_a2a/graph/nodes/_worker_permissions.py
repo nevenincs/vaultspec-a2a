@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from ...providers._acp_types import PermissionCallback
     from ...thread.state import TeamState
 
-__all__: list[str] = []
+__all__ = ["recorded_permission_answers"]
 
 _logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return once or options
 
 
-def _recorded_permission_answers(state: TeamState) -> Mapping[str, str]:
+def recorded_permission_answers(state: TeamState) -> Mapping[str, str]:
     """The run's answered tool-permission requests, narrowed at the boundary.
 
     Read through the untrusted-state boundary because the annotation on the

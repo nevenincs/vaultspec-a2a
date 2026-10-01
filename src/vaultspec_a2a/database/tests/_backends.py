@@ -33,7 +33,7 @@ from ..migrate import build_migration_config
 from ..session import configure_sqlite_engine
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncGenerator, Generator
     from pathlib import Path
 
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -115,7 +115,7 @@ def downgrade(url: str, revision: str) -> None:
 
 
 @contextmanager
-def _postgres_scratch_database() -> Iterator[str]:
+def _postgres_scratch_database() -> Generator[str]:
     """Create a uniquely named database on the configured server, then drop it."""
     import psycopg
     from psycopg import sql
@@ -135,7 +135,7 @@ def _postgres_scratch_database() -> Iterator[str]:
 
 
 @contextmanager
-def backend(name: str, directory: Path) -> Iterator[Backend]:
+def backend(name: str, directory: Path) -> Generator[Backend]:
     """Yield an empty, unmigrated database on the *name* backend.
 
     *directory* is used by the SQLite lane only and must be a test-owned
@@ -152,7 +152,7 @@ def backend(name: str, directory: Path) -> Iterator[Backend]:
 @asynccontextmanager
 async def migrated_engine(
     name: str, directory: Path
-) -> AsyncIterator[tuple[Backend, AsyncEngine]]:
+) -> AsyncGenerator[tuple[Backend, AsyncEngine]]:
     """Yield a migrated database on *name* and a pooled engine over it.
 
     The upgrade runs in a worker thread, exactly as the application's own
@@ -178,7 +178,7 @@ async def migrated_engine(
 @asynccontextmanager
 async def migrated_session_factory(
     name: str, directory: Path
-) -> AsyncIterator[tuple[Backend, async_sessionmaker[AsyncSession]]]:
+) -> AsyncGenerator[tuple[Backend, async_sessionmaker[AsyncSession]]]:
     """Yield a migrated database on *name* and a session factory over it."""
     async with migrated_engine(name, directory) as (target, engine):
         yield target, async_sessionmaker(engine, expire_on_commit=False)

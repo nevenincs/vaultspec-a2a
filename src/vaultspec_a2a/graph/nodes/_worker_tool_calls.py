@@ -101,7 +101,7 @@ async def _collect_mock_permission_result(
 
     This lane exists only for the mock chat model. A real ACP provider never
     reaches here: its permission callback is wired onto the model itself (see
-    :func:`_resolve_effective_worker_model`), so the callback raises the
+    :func:`resolve_effective_worker_model`), so the callback raises the
     interrupt from *inside* ``model.ainvoke`` and no response is produced at
     all. VidaiMock instead surfaces ``session_request_permission`` as an
     ordinary tool call, but the LangGraph interrupt must still be raised from a

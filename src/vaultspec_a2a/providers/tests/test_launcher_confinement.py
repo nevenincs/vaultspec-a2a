@@ -22,7 +22,7 @@ from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import _absolute_search_directories, resolve_service_executable
 
 if TYPE_CHECKING:
-    from .._json_contract import JsonObject
+    from .._json_contract import JsonObject, JsonValue
 
 _HIJACK_MARKER = "planted-launcher-executed"
 _HANDSHAKE_TIMEOUT_SECONDS = 60.0
@@ -60,7 +60,7 @@ async def _read_initialize_result(stdout: asyncio.StreamReader) -> JsonObject:
             f"the workspace-planted launcher executed instead of the adapter: {seen}"
         )
         try:
-            frame = json.loads(text)
+            frame: JsonValue = json.loads(text)
         except json.JSONDecodeError:
             continue
         if isinstance(frame, dict) and frame.get("id") == _INITIALIZE_ID:

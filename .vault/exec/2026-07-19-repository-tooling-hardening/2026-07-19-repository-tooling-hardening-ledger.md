@@ -5,7 +5,7 @@ tags:
 date: '2026-07-19'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:188cea99b8e76d7ac94576d208989360575880225dd524a00d835437733d05e8'
+body_hash: 'sha256:e5472fca50d67454bbb978ff76b5a73d8af247fd3996c3c5bbdde91021dd4c5f'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -115,6 +115,87 @@ related:
 - `S36` `verify:` `python -m dev lint cyclomatic` -> `pass`
 - `S36` `verify:` `python -m dev lint shape` -> `pass`
 - `S36` `by:` `vaultspec-high-executor`
+- `S26` `M` `src/vaultspec_a2a/conftest.py`
+- `S26` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S26` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention_guards.py`
+- `S26` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_launcher_confinement.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_withheld_harness_tools.py`
+- `S26` `verify:` `python -m dev lint all` -> `pass`
+- `S26` `verify:` `pytest database graph providers` -> `pass`
+- `S26` `by:` `vaultspec-high-executor`
+- `S27` `verify:` `basedpyright src/vaultspec_a2a/lifecycle` -> `pass`
+- `S27` `by:` `vaultspec-high-executor`
+- `S28` `M` `src/vaultspec_a2a/authoring/tests/test_core_document_checks.py`
+- `S28` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S28` `M` `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `S28` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S28` `M` `src/vaultspec_a2a/graph/run_context.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/_state_graph_helpers.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/nodes/test_config_contract.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_message_time.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_checkpointed_value_types.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_mounted_context_persistence.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_research_branch_models.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_research_permission_rung.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_run_context.py`
+- `S28` `M` `src/vaultspec_a2a/graph/tests/test_supervisor_reask.py`
+- `S28` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S28` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/_run_callbacks.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/custom_writes.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/run_event_writer.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/subscribers.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/_error_injecting_graph.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_ingest_durability.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_ingest_node_timeout.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_public_stream_ingest.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_stream_identity.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/tests/test_transformer_nostream.py`
+- `S28` `M` `src/vaultspec_a2a/streaming/transformer.py`
+- `S28` `M` `src/vaultspec_a2a/worker/ipc.py`
+- `S28` `M` `src/vaultspec_a2a/worker/tests/test_executor_log_context.py`
+- `S28` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S28` `M` `src/vaultspec_a2a/worker/tests/test_state_projection.py`
+- `S28` `verify:` `python -m dev lint all` -> `pass`
+- `S28` `verify:` `pytest graph authoring worker streaming providers` -> `pass`
+- `S28` `by:` `vaultspec-high-executor`
+- `S47` `M` `pyproject.toml`
+- `S47` `M` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S47` `M` `src/vaultspec_a2a/api/tests/test_followup_idempotency_key.py`
+- `S47` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_replay.py`
+- `S47` `M` `src/vaultspec_a2a/context/rules.py`
+- `S47` `M` `src/vaultspec_a2a/control/settings_base.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_checkpoint_history_depth.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_deployment_names.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_dispatch_refusal_classification.py`
+- `S47` `M` `src/vaultspec_a2a/control/tests/test_settled_history_pruning.py`
+- `S47` `M` `src/vaultspec_a2a/database/checkpoint_retention.py`
+- `S47` `M` `src/vaultspec_a2a/database/run_event_repository.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/_backends.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/_checkpoint_history.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_boot_leaves_checkpoints_alone.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_retention_guards.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_checkpoint_strict_serde.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_run_event_retention.py`
+- `S47` `M` `src/vaultspec_a2a/database/tests/test_selector_bridge.py`
+- `S47` `M` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
+- `S47` `M` `src/vaultspec_a2a/providers/_codex_auth.py`
+- `S47` `M` `src/vaultspec_a2a/thread/snapshots.py`
+- `S47` `M` `src/vaultspec_a2a/thread/tests/test_checkpoint_projection_stages.py`
+- `S47` `M` `src/vaultspec_a2a/utils/file_lock.py`
+- `S47` `M` `src/vaultspec_a2a/utils/logging.py`
+- `S47` `A` `typings/langgraph/channels/__init__.pyi`
+- `S47` `verify:` `python -m dev lint all` -> `pass`
+- `S47` `verify:` `python -m dev lint type-strict` -> `fail`
+- `S47` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -124,3 +205,6 @@ related:
 - `S29` Measured green at f72a99a: zero cyclomatic, shape, limits, size, complexity and nesting findings in the Step paths; their hotspots were resolved before this wave, so no change was made.
 - `S35` Measured green at f72a99a: zero cyclomatic, shape, limits, size, complexity and nesting findings in the Step paths; their hotspots were resolved before this wave, so no change was made.
 - `S36` Measured green at f72a99a: zero cyclomatic, shape, limits, size, complexity and nesting findings in the Step paths; their hotspots were resolved before this wave, so no change was made.
+- `S27` Measured clean at f72a99a: zero strict diagnostics across the 27 lifecycle modules, so no change was made.
+- `S28` Defects found while typing: a research-rung test passed an ignored field to a fake model and so tested the stub answer; a dead supervisor fallback; two identical branches in the custom-text transformer.
+- `S47` Partial: 120 to 1 on the branch; the residual is a private langgraph snapshot type the retention guard must recognise, which needs a decision. Merged over the W07 decomposition, the tree reads 23, mostly helpers moved across modules under private names; owned by the same Step.

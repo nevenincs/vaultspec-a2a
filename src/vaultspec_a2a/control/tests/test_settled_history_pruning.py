@@ -30,7 +30,7 @@ from ..event_handlers import CheckpointPruneRegistry, _handle_terminal_event
 from .test_terminal_sequence_capture import _seed_completed_authority
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
 
 
 @pytest_asyncio.fixture
@@ -75,7 +75,9 @@ async def _checkpoint_ids(checkpointer: AsyncSqliteSaver, thread_id: str) -> lis
     config = cast("Any", {"configurable": {"thread_id": thread_id}})
     return sorted(
         [
-            item.config["configurable"]["checkpoint_id"]
+            cast("Mapping[str, Mapping[str, str]]", item.config)["configurable"][
+                "checkpoint_id"
+            ]
             async for item in checkpointer.alist(config)
         ]
     )

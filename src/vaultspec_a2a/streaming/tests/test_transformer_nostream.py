@@ -19,6 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from ...graph.compiler import _add_node
 from ...graph.events import MessageChunk
+from ...graph.tests._state_graph_helpers import compile_test_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ async def test_a_nostream_model_call_is_not_relayed_to_clients() -> None:
     _add_node(builder, "supervisor", _route_then_answer)
     builder.add_edge(START, "supervisor")
     builder.add_edge("supervisor", END)
-    graph = cast("StreamableGraph", builder.compile())
+    graph = cast("StreamableGraph", compile_test_graph(builder))
 
     aggregator = EventAggregator()
     queue = aggregator.add_subscriber("client-nostream")

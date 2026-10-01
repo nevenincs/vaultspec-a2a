@@ -142,8 +142,9 @@ def build_error_injecting_graph() -> Any:
     )
     add_test_node(builder, ERROR_INJECTION_NODE, _inject)
     builder.set_entry_point(ERROR_INJECTION_NODE)
-    builder.add_conditional_edges(
-        ERROR_INJECTION_NODE,
-        lambda state: ERROR_INJECTION_NODE if state.get("loop") else END,
-    )
+
+    def _loop_or_end(state: InjectableGraphInput) -> str:
+        return ERROR_INJECTION_NODE if state.get("loop") else END
+
+    builder.add_conditional_edges(ERROR_INJECTION_NODE, _loop_or_end)
     return compile_test_graph(builder, checkpointer=InMemorySaver())

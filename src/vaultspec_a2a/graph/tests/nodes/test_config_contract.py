@@ -97,7 +97,9 @@ async def test_a_stamped_node_is_handed_the_run_config() -> None:
         "config was not injected into a stamped node; the annotation LangGraph "
         "accepts has changed and accepting_runnable_config no longer restores it"
     )
-    configurable = cast("dict[str, Any]", received).get("configurable") or {}
+    configurable: dict[str, Any] = (
+        cast("dict[str, Any]", received).get("configurable") or {}
+    )
     assert configurable.get("thread_id") == "config-contract"
 
 

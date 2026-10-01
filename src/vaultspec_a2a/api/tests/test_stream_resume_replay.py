@@ -108,6 +108,7 @@ async def test_a_reconnect_covers_every_sequence_to_the_terminal_exactly_once(
         )
 
         cursor = seen_first[-1].event_id
+        assert cursor is not None, "the retained frame carried no id to resume from"
         assert cursor == f"{_RUN}:3"
         async with client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": cursor}

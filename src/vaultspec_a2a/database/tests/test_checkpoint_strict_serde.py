@@ -33,6 +33,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from ...graph.compiler import compile_team_graph
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...graph.tests.conftest import deterministic_model_assignment
 from ...team.team_config import (
     ResearchThreadSpec,
@@ -53,11 +54,10 @@ from ..checkpoints import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Generator
     from pathlib import Path
 
     from langgraph.checkpoint.serde.event_hooks import SerdeEvent
-    from langgraph.graph.state import CompiledStateGraph
 
     from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
@@ -68,7 +68,7 @@ _PRESET = "vaultspec-adr-research-mock"
 
 
 @contextmanager
-def _recorded_serde_events() -> Iterator[list[SerdeEvent]]:
+def _recorded_serde_events() -> Generator[list[SerdeEvent]]:
     """Collect what the serializer reports about the types it reads back.
 
     The serializer's own listener hook, not a log scrape: its warnings are
@@ -222,12 +222,12 @@ async def _write_leak(state: _Leak) -> dict[str, Any]:
     return {"phase": _LeakedPhase.RESEARCH}
 
 
-def _leaking_graph(saver: Checkpointer) -> CompiledStateGraph[Any, Any, Any, Any]:
+def _leaking_graph(saver: Checkpointer) -> Any:
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Leak))
-    builder.add_node("leak", _write_leak)
+    add_test_node(builder, "leak", _write_leak)
     builder.add_edge(START, "leak")
     builder.add_edge("leak", END)
-    return builder.compile(checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 async def _prove_the_store_will_not_rebuild_an_unsafe_type(

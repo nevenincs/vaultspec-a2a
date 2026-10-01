@@ -35,6 +35,7 @@ __all__ = [
     "Checkpointer",
     "concurrent_checkpointer",
     "open_checkpointer",
+    "postgres_checkpoint_pool",
     "prune_settled_thread",
     "setup_postgres_checkpointer",
     "strict_checkpoint_serde",
@@ -115,7 +116,7 @@ def _postgres_checkpoint_pool_size() -> int:
     )
 
 
-def _postgres_checkpoint_pool(conninfo: str) -> Any:
+def postgres_checkpoint_pool(conninfo: str) -> Any:
     """Build the unopened checkpoint connection pool for the Postgres backend.
 
     The saver used to run on ONE connection opened from a connection string,
@@ -209,7 +210,7 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):  # pylint: 
         # very event loop this class exists to keep it off.
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-        self._pool = _postgres_checkpoint_pool(self._conn_string)
+        self._pool = postgres_checkpoint_pool(self._conn_string)
         await self._pool.open(wait=True)
         self._saver = AsyncPostgresSaver(
             conn=self._pool, serde=strict_checkpoint_serde()
@@ -655,7 +656,7 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
             yield checkpointer
         return
 
-    pool = _postgres_checkpoint_pool(settings.checkpoint_connection_string)
+    pool = postgres_checkpoint_pool(settings.checkpoint_connection_string)
     await pool.open(wait=True)
     try:
         checkpointer = AsyncPostgresSaver(conn=pool, serde=strict_checkpoint_serde())

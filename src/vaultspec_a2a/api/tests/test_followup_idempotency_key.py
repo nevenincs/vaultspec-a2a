@@ -15,7 +15,7 @@ answers would be different statuses, which is what shows the check runs first.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
@@ -51,11 +51,13 @@ async def _start_run(client: httpx.AsyncClient) -> str:
 def _names_the_header(body: object) -> bool:
     """Say whether a validation body blames the idempotency header."""
     assert isinstance(body, dict)
-    errors = body["detail"]
+    errors = cast("dict[str, object]", body)["detail"]
     assert isinstance(errors, list)
+    entries = cast("list[dict[str, object]]", errors)
     return any(
-        "idempotency-key" in "/".join(str(part) for part in error["loc"]).lower()
-        for error in errors
+        "idempotency-key"
+        in "/".join(str(part) for part in cast("list[object]", entry["loc"])).lower()
+        for entry in entries
     )
 
 

@@ -37,7 +37,7 @@ from ..tools.task_queue import create_mark_task_complete_tool
 from ._config_contract import accepting_runnable_config
 from ._worker_permissions import (
     _permission_callback_for,
-    _recorded_permission_answers,
+    recorded_permission_answers,
 )
 from ._worker_tool_calls import _resolve_worker_tool_calls
 
@@ -63,7 +63,12 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-__all__ = ["create_worker_node", "render_research_findings"]
+__all__ = [
+    "create_worker_node",
+    "recorded_permission_answers",
+    "render_research_findings",
+    "resolve_effective_worker_model",
+]
 
 # A lane name and a model id are bounded configuration values, not free text, and
 # they reach a client-visible failure reason. Anything longer than this is not an
@@ -294,7 +299,7 @@ def _build_worker_messages(
     return messages
 
 
-def _resolve_effective_worker_model(
+def resolve_effective_worker_model(
     *,
     model: BaseChatModel,
     autonomous: bool,
@@ -466,8 +471,8 @@ def _turn_token_usage(response: BaseMessage) -> TokenUsageEntry | None:
         return None
     input_tokens = int(usage.get("input_tokens", 0))
     output_tokens = int(usage.get("output_tokens", 0))
-    input_details = usage.get("input_token_details") or {}
-    output_details = usage.get("output_token_details") or {}
+    input_details: object = usage.get("input_token_details")
+    output_details: object = usage.get("output_token_details")
     return TokenUsageEntry(
         agent_id="",
         input_tokens=input_tokens,
@@ -823,7 +828,7 @@ def create_worker_node(
         # execution and bound onto both permission lanes. A replayed turn
         # finds its earlier approvals here rather than in the order its
         # interrupts happened to fall in.
-        permission_answers = _recorded_permission_answers(state)
+        permission_answers = recorded_permission_answers(state)
         # The task queue is thread-scoped, so build the mark-complete
         # tool per invocation using the thread_id carried in graph state — the
         # compiled graph is shared across threads and cannot close over it. The
@@ -862,7 +867,7 @@ def create_worker_node(
             )
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
-        effective_model = _resolve_effective_worker_model(
+        effective_model = resolve_effective_worker_model(
             model=model,
             autonomous=settings["autonomous"],
             answers=permission_answers,

@@ -202,6 +202,7 @@ class ProjectSettings(BaseSettings):
         return _PROJECT_DOTENV_MARKER
 
     @classmethod
+    @override
     def settings_customise_sources(
         cls,
         settings_cls: type[BaseSettings],

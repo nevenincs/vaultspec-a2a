@@ -14,9 +14,9 @@ related:
   - '[[2026-03-10-postgres-dual-backend-adr]]'
   - '[[2026-08-02-control-action-leases-adr]]'
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
-modified: '2026-09-30'
+modified: '2026-10-01'
 body_schema: body-v2
-body_hash: 'sha256:21144789c11820ea0a494847d6615beb07e44b59e905084848e7dd900b33f2fc'
+body_hash: 'sha256:a9c9c2e9f915fb04b4b1f7d60580ea2158379888ba5020f5e4a669ce70624ec0'
 ---
 
 # `langgraph-conformance` plan
@@ -119,6 +119,7 @@ Fix the findings the executors and reviews surfaced while this plan ran, which t
 - [x] `P07.S43` - Declare the execution-state degradation reasons, retire the producerless unknown reason, and widen the vocabulary guards to constructor literals and every member; `src/vaultspec_a2a/thread/enums.py, src/vaultspec_a2a/worker/state_projection.py`.
 - [x] `P07.S44` - Correct the compiler comment that says strict msgpack refuses an unknown type; `src/vaultspec_a2a/graph/compiler.py`.
 - [x] `P07.S45` - Settle an answer a failed turn consumed without moving the finished run back to running; `src/vaultspec_a2a/control/_event_application.py`.
+- [ ] `P07.S46` - Re-raise a non-Exception BaseException a node raises instead of reporting it as a provider failure; `src/vaultspec_a2a/streaming/ingest.py`.
 
 ## Parallelization
 

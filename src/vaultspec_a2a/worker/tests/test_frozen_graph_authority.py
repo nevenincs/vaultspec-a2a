@@ -70,7 +70,12 @@ async def test_worker_compiles_accepted_program_after_files_change(
         try:
             graph = await executor._graph_lifecycle.get_or_compile_graph(request)
             assert graph is not None
-            assert cast("Any", graph).step_timeout == 60
+            budgets = {
+                node.timeout.run_timeout
+                for name, node in cast("Any", graph).nodes.items()
+                if not name.startswith("__")
+            }
+            assert budgets == {60}
             changed = definition.model_dump(mode="json")
             changed["team"]["graph"]["step_timeout_seconds"] = 61
             replacement = FrozenGraphDefinition.model_validate(changed)

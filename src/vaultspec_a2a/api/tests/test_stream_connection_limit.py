@@ -21,7 +21,7 @@ from ...control.config import Settings
 from ...streaming.aggregator import EventAggregator
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 def _aggregator_with(subscribers: int) -> EventAggregator:
@@ -56,10 +56,11 @@ def test_the_subscriber_count_tracks_registration() -> None:
 async def test_a_stream_is_refused_at_capacity_without_touching_the_database() -> None:
     """At capacity the refusal happens first, so no session is required.
 
-    Passing a null database proves the ordering: if the lookup ran before the
-    limit, this would raise an attribute error rather than the
-    service-unavailable the caller should see. The cast is the honest shape - the
-    argument really is absent, and the test asserts it is never reached.
+    Passing a null database and a null session factory proves the ordering: if
+    either were reached before the limit, this would raise an attribute error
+    rather than the service-unavailable the caller should see. The casts are the
+    honest shape - the arguments really are absent, and the test asserts neither
+    is reached.
     """
     limit = Settings().max_stream_connections
     aggregator = _aggregator_with(limit)
@@ -67,6 +68,7 @@ async def test_a_stream_is_refused_at_capacity_without_touching_the_database() -
     with pytest.raises(HTTPException) as raised:
         await build_thread_stream_response(
             db=cast("AsyncSession", None),
+            session_factory=cast("async_sessionmaker[AsyncSession]", None),
             aggregator=aggregator,
             thread_id="any-thread",
         )

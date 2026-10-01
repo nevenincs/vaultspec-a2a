@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
@@ -11,11 +13,15 @@ if TYPE_CHECKING:
 
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
+    from langgraph.runtime import Runtime
 
     from ..authoring import FeedbackContextReader
+    from .nodes.worker import WorkerNode
     from .protocols import CostPort, ProviderFactoryProtocol
+    from .run_context import RunContext
 
 from langgraph.graph import START, StateGraph
+from langgraph.types import Command
 
 from ..authoring.contract import RESEARCH_ADR_ROLES
 from ..thread.clarification import MAX_REQUEST_ID_CHARS, ClarificationRequest
@@ -23,7 +29,7 @@ from ..thread.errors import ConfigError
 from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations
 )
-from ._compiler_retry import _NODE_RETRY_POLICY
+from ._compiler_retry import _NODE_RETRY_POLICY, _SUBMIT_RETRY_POLICY
 from .compiler import (
     _add_node,
     _agent_node_metadata,
@@ -33,6 +39,7 @@ from .compiler import (
     resolve_model_for_worker,
 )
 from .enums import PipelinePhase
+from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
 from .nodes.clarification import (
     ClarificationQuestionProducer,
@@ -47,8 +54,13 @@ from .nodes.phase_gate import (
     DocumentProposalSubmitter,
     create_phase_gate_node,
     create_phase_submit_node,
+    review_requests_revision,
 )
-from .nodes.worker import create_worker_node
+from .nodes.worker import (
+    _recorded_permission_answers,
+    _resolve_effective_worker_model,
+    create_worker_node,
+)
 from .web_locators import extract_web_locators
 
 __all__ = [
@@ -225,6 +237,14 @@ def _make_research_producer(
     that never routed through ``_build_worker_messages``, so a
     conventions-blind researcher would author findings the synthesist then
     folds into a non-conformant document.
+
+    A supervised branch gets the human permission rung a supervised worker
+    gets. Without it the provider decides the branch's tool calls with no
+    human at all, which is not the autonomous posture a preset opts into but
+    the absence of any posture. The branch is a fan-out task, so its state is
+    the payload its dispatch sent and never carries an answer recorded after
+    that; the callback is told so, and resolves the branch's earlier answers
+    from the task's own resume values, which do reach a replayed branch.
     """
 
     async def producer(
@@ -242,10 +262,13 @@ def _make_research_producer(
         messages: list[Any] = [SystemMessage(content=system_prompt)]
         effective_workspace_root = workspace_root or state.get("workspace_root")
         if effective_workspace_root:
-            rules = RuleManager(
-                Path(effective_workspace_root),
-                bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
-            ).compile("researcher")
+            rules = await asyncio.to_thread(
+                RuleManager(
+                    Path(effective_workspace_root),
+                    bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
+                ).compile,
+                "researcher",
+            )
             if rules:
                 messages.append(
                     SystemMessage(
@@ -262,7 +285,12 @@ def _make_research_producer(
             )
         )
         messages.extend(state.get("messages", []))
-        effective_model = model
+        effective_model = _resolve_effective_worker_model(
+            model=model,
+            autonomous=autonomous,
+            answers=_recorded_permission_answers(state),
+            answers_reach_the_node=False,
+        )
         if harness_mcp_servers:
             from ..providers._acp_mcp import (
                 compose_harness_mcp_servers,
@@ -293,7 +321,7 @@ def _make_research_producer(
             # a root - a default here would be that same inheritance, spelled
             # invisibly.
             effective_model = compose_harness_mcp_servers(
-                model,
+                effective_model,
                 harness_mcp_servers,
                 allowed_tools=harness_allowed,
                 project_root=(
@@ -317,31 +345,51 @@ def _make_research_producer(
     return producer
 
 
-#: Standalone verdict sentinels the vaultspec-doc-reviewer persona emits.
-_DOC_REVIEW_REVISION_SENTINEL = "REVISION REQUIRED"
-
-
-def _doc_review_router(*, writer_target: str, gate_target: str) -> Any:
+def _doc_review_router(
+    *, writer_target: str, gate_target: str, phase: str, max_revisions: int
+) -> Any:
     """Return the inner-quality-loop router for a document phase.
 
-    Reads the doc-reviewer's last message for the persona's standalone verdict
-    sentinel: a whole line equal to ``REVISION REQUIRED`` routes back to the phase
-    writer to revise; anything else (the ``PASS`` verdict) advances to the phase
-    gate. The match is an anchored whole-line check, not a substring, so reviewer
-    prose such as "no revision required" does not false-positive back to the
-    writer. Absent an explicit revision verdict the loop advances, so the human
-    gate remains the backstop rather than an inner loop that never exits.
+    A reviewer verdict asking for revision routes back to the phase writer while
+    the phase still has revisions left in its budget; anything else (the
+    ``PASS`` verdict, or no verdict) advances to the phase gate. Every revision
+    costs a writer turn and a review turn, and a reviewer that never passes
+    would otherwise loop until the recursion limit killed the run, so a spent
+    budget advances to the gate too: the human is the backstop, not the loop.
     """
 
     def router(state: TeamState) -> str:
-        messages = state.get("messages") or []
-        last_content = str(getattr(messages[-1], "content", "")) if messages else ""
-        lines = {line.strip().upper() for line in last_content.splitlines()}
-        if _DOC_REVIEW_REVISION_SENTINEL in lines:
-            return writer_target
-        return gate_target
+        if not review_requests_revision(state.get("messages") or []):
+            return gate_target
+        spent = (state.get("review_revisions") or {}).get(phase, 0)
+        return writer_target if spent <= max_revisions else gate_target
 
     return router
+
+
+def _count_review_revisions(review_node: WorkerNode, phase: str) -> WorkerNode:
+    """Wrap a document reviewer so each revision it requests is counted.
+
+    The router that reads the count is a pure function of state and cannot
+    write it, so the reviewer's own update carries it.
+    """
+
+    @functools.wraps(review_node)
+    async def _review_node_with_count(
+        state: TeamState,
+        config: RunnableConfig | None = None,
+        runtime: Runtime[RunContext] | None = None,
+        _inner: WorkerNode = review_node,
+    ) -> dict[str, Any] | Command[Any]:
+        result = await _inner(state, config=config, runtime=runtime)
+        if isinstance(result, Command) or not review_requests_revision(
+            result.get("messages") or []
+        ):
+            return result
+        spent = (state.get("review_revisions") or {}).get(phase, 0)
+        return {**result, "review_revisions": {phase: spent + 1}}
+
+    return accepting_runnable_config(_review_node_with_count)
 
 
 def _research_harness_servers(team_config: Any) -> list[str]:
@@ -350,7 +398,7 @@ def _research_harness_servers(team_config: Any) -> list[str]:
 
 
 def _compile_research_adr(
-    builder: StateGraph[Any, None, Any, Any],
+    builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
     agent_configs: dict[str, Any],
     **options: Unpack[_CompileResearchAdrOptions],
@@ -459,6 +507,10 @@ def _compile_research_adr(
             role="synthesist",
             harness_mcp_servers=harness_mcp_servers,
             cost_port=options.get("cost_port"),
+            # This node IS the fan-out's join point, so every branch's finding
+            # reaches its prompt. The branches write findings and nothing else,
+            # so without this the stage synthesises research it never saw.
+            joins_research_findings=True,
             # Feedback-loop grounding: the research-doc writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=options.get("feedback_reader"),
@@ -469,17 +521,20 @@ def _compile_research_adr(
     _add_node(
         builder,
         _RA_RESEARCH_REVIEW,
-        create_worker_node(
-            doc_reviewer_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+        _count_review_revisions(
+            create_worker_node(
+                doc_reviewer_model,
+                _composed_role_prompt(
+                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+                ),
+                name=_RA_RESEARCH_REVIEW,
+                autonomous=options.get("autonomous", False),
+                workspace_root=options.get("workspace_root"),
+                role="doc-reviewer",
+                harness_mcp_servers=harness_mcp_servers,
+                cost_port=options.get("cost_port"),
             ),
-            name=_RA_RESEARCH_REVIEW,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="doc-reviewer",
-            harness_mcp_servers=harness_mcp_servers,
-            cost_port=options.get("cost_port"),
+            PipelinePhase.RESEARCH.value,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -508,17 +563,20 @@ def _compile_research_adr(
     _add_node(
         builder,
         _RA_ADR_REVIEW,
-        create_worker_node(
-            doc_reviewer_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+        _count_review_revisions(
+            create_worker_node(
+                doc_reviewer_model,
+                _composed_role_prompt(
+                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+                ),
+                name=_RA_ADR_REVIEW,
+                autonomous=options.get("autonomous", False),
+                workspace_root=options.get("workspace_root"),
+                role="doc-reviewer",
+                harness_mcp_servers=harness_mcp_servers,
+                cost_port=options.get("cost_port"),
             ),
-            name=_RA_ADR_REVIEW,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="doc-reviewer",
-            harness_mcp_servers=harness_mcp_servers,
-            cost_port=options.get("cost_port"),
+            PipelinePhase.ADR.value,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -547,17 +605,20 @@ def _compile_research_adr(
     _add_node(
         builder,
         _RA_PLAN_REVIEW,
-        create_worker_node(
-            doc_reviewer_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+        _count_review_revisions(
+            create_worker_node(
+                doc_reviewer_model,
+                _composed_role_prompt(
+                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
+                ),
+                name=_RA_PLAN_REVIEW,
+                autonomous=options.get("autonomous", False),
+                workspace_root=options.get("workspace_root"),
+                role="doc-reviewer",
+                harness_mcp_servers=harness_mcp_servers,
+                cost_port=options.get("cost_port"),
             ),
-            name=_RA_PLAN_REVIEW,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="doc-reviewer",
-            harness_mcp_servers=harness_mcp_servers,
-            cost_port=options.get("cost_port"),
+            PipelinePhase.PLAN.value,
         ),
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -567,62 +628,79 @@ def _compile_research_adr(
     # out-of-run verdict subscriber can correlate a verdict to the parked run via
     # the committed ``authoring_proposal_ids``. The inner review loop
     # routes into the SUBMIT node; the submit node routes on into its gate.
+    #
+    # The submit nodes take the SAME per-phase budget as the review router below:
+    # a conformance refusal sends the writer round again, and a refusal that
+    # spent nothing looped the phase until the recursion limit.
+    max_revisions = team_config.topology.max_review_revisions
     _add_node(
         builder,
         _RA_RESEARCH_SUBMIT,
         create_phase_submit_node(
-            PipelinePhase.RESEARCH,
+            PipelinePhase.RESEARCH.value,
             options["proposal_submitter"],
             gate_target=_RA_RESEARCH_GATE,
             revision_target=_RA_SYNTHESIS,
+            max_revisions=max_revisions,
         ),
+        destinations=(_RA_RESEARCH_GATE, _RA_SYNTHESIS),
+        retry_policy=_SUBMIT_RETRY_POLICY,
     )
     _add_node(
         builder,
         _RA_RESEARCH_GATE,
         create_phase_gate_node(
-            PipelinePhase.RESEARCH,
+            PipelinePhase.RESEARCH.value,
             approved_target=_RA_ADR_AUTHOR,
             revision_target=_RA_SYNTHESIS,
         ),
+        destinations=(_RA_ADR_AUTHOR, _RA_SYNTHESIS),
     )
     _add_node(
         builder,
         _RA_ADR_SUBMIT,
         create_phase_submit_node(
-            PipelinePhase.ADR,
+            PipelinePhase.ADR.value,
             options["proposal_submitter"],
             gate_target=_RA_ADR_GATE,
             revision_target=_RA_ADR_AUTHOR,
+            max_revisions=max_revisions,
         ),
+        destinations=(_RA_ADR_GATE, _RA_ADR_AUTHOR),
+        retry_policy=_SUBMIT_RETRY_POLICY,
     )
     _add_node(
         builder,
         _RA_ADR_GATE,
         create_phase_gate_node(
-            PipelinePhase.ADR,
+            PipelinePhase.ADR.value,
             approved_target=_RA_PLAN_AUTHOR,
             revision_target=_RA_ADR_AUTHOR,
         ),
+        destinations=(_RA_PLAN_AUTHOR, _RA_ADR_AUTHOR),
     )
     _add_node(
         builder,
         _RA_PLAN_SUBMIT,
         create_phase_submit_node(
-            PipelinePhase.PLAN,
+            PipelinePhase.PLAN.value,
             options["proposal_submitter"],
             gate_target=_RA_PLAN_GATE,
             revision_target=_RA_PLAN_AUTHOR,
+            max_revisions=max_revisions,
         ),
+        destinations=(_RA_PLAN_GATE, _RA_PLAN_AUTHOR),
+        retry_policy=_SUBMIT_RETRY_POLICY,
     )
     _add_node(
         builder,
         _RA_PLAN_GATE,
         create_phase_gate_node(
-            PipelinePhase.PLAN,
+            PipelinePhase.PLAN.value,
             approved_target=GRAPH_COMPLETION_NODE,
             revision_target=_RA_PLAN_AUTHOR,
         ),
+        destinations=(GRAPH_COMPLETION_NODE, _RA_PLAN_AUTHOR),
     )
 
     clarification_producer = _declared_clarification_producer(team_config)
@@ -637,11 +715,13 @@ def _compile_research_adr(
                 gate_target=_RA_CLARIFY_GATE,
                 proceed_target=_RA_DISPATCH,
             ),
+            destinations=(_RA_CLARIFY_GATE, _RA_DISPATCH),
         )
         _add_node(
             builder,
             _RA_CLARIFY_GATE,
             create_clarification_gate_node(proceed_target=_RA_DISPATCH),
+            destinations=(_RA_DISPATCH,),
         )
         builder.add_edge(START, _RA_CLARIFY_REQUEST)
 
@@ -649,7 +729,10 @@ def _compile_research_adr(
     builder.add_conditional_edges(
         _RA_RESEARCH_REVIEW,
         _doc_review_router(
-            writer_target=_RA_SYNTHESIS, gate_target=_RA_RESEARCH_SUBMIT
+            writer_target=_RA_SYNTHESIS,
+            gate_target=_RA_RESEARCH_SUBMIT,
+            phase=PipelinePhase.RESEARCH.value,
+            max_revisions=max_revisions,
         ),
         cast(
             "dict[Hashable, str]",
@@ -659,7 +742,12 @@ def _compile_research_adr(
     builder.add_edge(_RA_ADR_AUTHOR, _RA_ADR_REVIEW)
     builder.add_conditional_edges(
         _RA_ADR_REVIEW,
-        _doc_review_router(writer_target=_RA_ADR_AUTHOR, gate_target=_RA_ADR_SUBMIT),
+        _doc_review_router(
+            writer_target=_RA_ADR_AUTHOR,
+            gate_target=_RA_ADR_SUBMIT,
+            phase=PipelinePhase.ADR.value,
+            max_revisions=max_revisions,
+        ),
         cast(
             "dict[Hashable, str]",
             {_RA_ADR_AUTHOR: _RA_ADR_AUTHOR, _RA_ADR_SUBMIT: _RA_ADR_SUBMIT},
@@ -668,7 +756,12 @@ def _compile_research_adr(
     builder.add_edge(_RA_PLAN_AUTHOR, _RA_PLAN_REVIEW)
     builder.add_conditional_edges(
         _RA_PLAN_REVIEW,
-        _doc_review_router(writer_target=_RA_PLAN_AUTHOR, gate_target=_RA_PLAN_SUBMIT),
+        _doc_review_router(
+            writer_target=_RA_PLAN_AUTHOR,
+            gate_target=_RA_PLAN_SUBMIT,
+            phase=PipelinePhase.PLAN.value,
+            max_revisions=max_revisions,
+        ),
         cast(
             "dict[Hashable, str]",
             {_RA_PLAN_AUTHOR: _RA_PLAN_AUTHOR, _RA_PLAN_SUBMIT: _RA_PLAN_SUBMIT},

@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#event-aggregation-server-side-replay'
 date: 2026-02-26
-modified: '2026-07-15'
-body_hash: 'sha256:c92fba4e09b52ea41da06d254b6fbd6c10456e6ef016f6d30999e1d2de4caf33'
+modified: '2026-09-30'
+body_hash: 'sha256:ffa0b180e40fdf9026a7ab51803befc2cd5703dd182ada298c4a6f38109cae58'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
@@ -134,3 +134,17 @@ engine's `/authoring/v1/events` outbox, not this repo's concern. The
 in-repo event dataclasses survive as the relay substrate. See
 `2026-07-14-a2a-edge-conformance-adr` and its supersession map in
 `2026-07-14-a2a-edge-conformance-reference`.
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+A run is consumed through LangGraph's public `astream` stream modes, not `astream_events`. Ingest opens one stream over `messages`, `updates`, `tasks`, `custom` and `checkpoints` with `subgraphs=True` (`src/vaultspec_a2a/streaming/transformer.py`, `src/vaultspec_a2a/streaming/ingest.py`). Three commitments follow from that choice and bind with it:
+
+- An interrupt is observed from the stream frame that reports it, not from a state read taken after the stream ended.
+- The dispatch application receipt fires on the first durable checkpoint frame, not on the first chain event.
+- A run's drain control is passed to the documented `control=` parameter, not seated under a private LangGraph config key.
+
+Tool-call lifecycle is not a graph superstep and appears in no stream mode. It reaches the emitters through a run-scoped callback handler seated in the run config (`src/vaultspec_a2a/streaming/_run_callbacks.py`), built in one place by the ingest manager. A tool frame and a node-status frame are therefore ordered by when they happen, not by one queue; each family stays internally ordered. Frames tagged `nostream` are dropped by the library, not by a filter this layer writes. A node's own custom stream write carries the writing node's identity in its payload, because LangGraph drops that node's segment from a custom write's namespace (`src/vaultspec_a2a/streaming/custom_writes.py`).
+
+A run that keeps checkpoints asks for `durability="sync"`, so every superstep is persisted before the next one starts (`src/vaultspec_a2a/streaming/ingest.py`). LangGraph's default, `"async"`, persists a superstep while the next one executes and may lose the most recent one to a crash, which the checkpoint-first recovery this service depends on cannot tolerate. A graph compiled without a checkpointer is left on the library default, because langgraph 1.2.12 kills such a run when durability is requested. That guard is an implementation hypothesis, not a commitment, and is removed when the upstream defect is fixed.
+
+Checkpoint sourcing is no longer SQLite-only; `2026-03-10-postgres-dual-backend-adr` chooses the backend. Grounding: `2026-09-30-langgraph-conformance-audit`.

@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#ci-merge-gate'
 date: '2026-09-21'
-modified: '2026-09-22'
+modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:912e9c90fd16caeba1d375c62148c29c5790539f55d9009547bb7ec47a2d45de'
+body_hash: 'sha256:3ba13d8b52fb3c2f33b6550e31a5d28acb85ea270ad27ace0fa0a89c0a958326'
 related:
   - "[[2026-09-21-ci-merge-gate-plan]]"
 ---
@@ -116,3 +116,11 @@ Type: release security claim. Status: fixed. The release now follows Core's non-
 ### binary-release-rereview | low | PASS with no critical or high findings
 
 Type: integrated workflow review. Status: verified. The stable chain is full tag-bound validation, native build and lifecycle execution, complete-cohort and checksum verification, isolated provenance, scoped attachment, verification of the attached bytes, and publication last. Actionlint, the repository workflow contract, focused formatting and type checks, and five real-artifact tests pass. Remaining release scripts listed in `.github/ci-contract-allow.txt` are visible migration debt rather than hidden workflow commands.
+### required-gate-merge-condition | high | fixed and verified
+
+Type: CI authorization and required-check correctness. Status: fixed during 2026-10-01 main merge. The local fork guard combined with upstream's always-running verdict job made the required Check: Merge gate (Linux) conditional; a skipped required check could count as passed. The gate now uses if: always() and judges fork identity and the basic job result in its script. The fleet trust-boundary test, CI contract test, and actionlint pass.
+
+### pr80-main-reconciliation | high | required verdict skip regression prevented
+
+Type: merge integration and authorization. Status: fixed and verified. Automatic merging retained the stale fork condition on the required verdict, which could make a skipped required check count as passed. The resolution restores main's always-running verdict and current timeout, permissions, release cut, runner policy and release tests while retaining admission budgets and the verdict resource class. Twelve focused CI, release and trust tests and actionlint pass. No unresolved merge-specific finding remains.
+

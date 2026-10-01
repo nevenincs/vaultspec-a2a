@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import httpx
@@ -13,7 +13,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
@@ -41,17 +40,20 @@ from ...database import (
     create_thread,
     elect_thread_status,
     get_permission_request,
+    get_thread,
     record_permission_request,
     record_permission_response_submission,
     set_thread_approval_state,
     successor_thread_write_authority,
     thread_write_expectation,
+    update_thread_status,
 )
 from ...database.models import ControlActionModel, RunWriteAuthority, ThreadModel
 from ...database.session import configure_sqlite_transactions
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
@@ -59,6 +61,9 @@ from ...thread.enums import ControlActionResultStatus, ControlActionType, Thread
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ...worker.ipc import WorkerBridge
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +146,10 @@ async def _seed_unapplied_leased_action(
         session, thread_id=thread_id, dispatch_id=dispatch_id
     )
     assert receipt is not None
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint_id = uuid4().hex
     checkpoint["id"] = checkpoint_id
     checkpoint["channel_values"] = {
@@ -158,13 +166,15 @@ async def _seed_unapplied_leased_action(
             receipt.dispatch_id: completion.model_dump(mode="json")
         }
     checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": 1,
-        "graph_action_receipts": 1,
+        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
+        "graph_action_receipts": checkpointer.get_next_version(None, None),
     }
     if spec.completed:
-        checkpoint["channel_versions"]["graph_completion_receipts"] = 1
+        checkpoint["channel_versions"]["graph_completion_receipts"] = (
+            checkpointer.get_next_version(None, None)
+        )
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         checkpoint["channel_versions"],
@@ -686,6 +696,88 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
             .all()
         )
         assert len(actions) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_failed(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: InMemorySaver,
+) -> None:
+    """The answer settles; the run is not marked running again after it ended.
+
+    A resume whose turn fails after the answer landed still reports the answer
+    as applied, and that report can reach the gateway after the run's FAILED
+    terminal. Settling the permission is right - the human's decision was
+    consumed - but moving a finished run back to RUNNING is an illegal
+    transition that would fail the relay.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title="Applied After Failure",
+            status="input_required",
+        )
+        request_id = f"{thread.id}:perm-1"
+        await record_permission_request(
+            session,
+            request_id=request_id,
+            thread_id=thread.id,
+            pause_reason_type="bash",
+            description="Allow action?",
+            allowed_options=[
+                {
+                    "option_id": "allow_once",
+                    "name": "Allow once",
+                    "kind": "allow_once",
+                }
+            ],
+            tool_call="bash",
+        )
+        await record_permission_response_submission(
+            session,
+            request_id=request_id,
+            option_id="allow_once",
+            idempotency_key="response-1",
+        )
+        (
+            submitted,
+            submitted_receipt,
+            submitted_checkpoint,
+        ) = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread.id,
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+                idempotency_key=permission_response_action_key(request_id),
+                request_id=request_id,
+            ),
+        )
+        await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
+        await update_thread_status(session, thread.id, ThreadStatus.FAILED)
+        await session.commit()
+
+    await _handle_progress_event(
+        thread.id,
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": submitted.dispatch_id,
+            "action": "resume",
+            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
+            "checkpoint_id": submitted_checkpoint,
+        },
+        session_factory=session_factory,
+        checkpointer=checkpointer,
+    )
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.request_status == "applied"
+        settled = await get_thread(session, thread.id)
+        assert settled is not None
+        assert settled.status == ThreadStatus.FAILED.value
 
 
 @pytest.mark.asyncio

@@ -194,6 +194,52 @@ class WorkerExecutionError(VaultspecError):
         self.relayed_output = relayed_output
 
 
+class SupervisorRoutingError(VaultspecError):
+    """Raised when the supervisor exhausts its re-asks without an admissible route.
+
+    Failing the run is the honest outcome: ending it as completed would report
+    work that was never routed, and routing anyway would run a worker the phase
+    gates refused.
+    """
+
+    __slots__ = ("attempts", "reason")
+
+    def __init__(self, reason: str, *, attempts: int) -> None:
+        """Record the last refusal and how many decisions were refused."""
+        super().__init__(
+            f"supervisor made {attempts} consecutive inadmissible routing "
+            f"decisions; last: {reason}"
+        )
+        self.reason = reason
+        self.attempts = attempts
+
+
+class DocumentConformanceError(VaultspecError):
+    """Raised when a phase spends its budget without a submittable document.
+
+    The submitter refuses a body that would fail vault conformance at
+    materialization, and the refusal routes back to the phase's writer for a
+    targeted second chance. Failing the run once that budget is spent is the
+    honest outcome: no proposal was ever created, so there is nothing for a
+    human gate to decide and no id an out-of-run verdict could correlate to -
+    parking would be a pause nothing can end. The unresolved checks travel on
+    the error so the failure names what the writer never fixed.
+    """
+
+    __slots__ = ("attempts", "phase", "revision_notes")
+
+    def __init__(self, phase: str, revision_notes: list[str], *, attempts: int) -> None:
+        """Record the phase, what it still fails, and how many tries it had."""
+        joined = "; ".join(revision_notes) or "no check was reported"
+        super().__init__(
+            f"document phase {phase!r} still fails vault conformance after "
+            f"{attempts} revision attempt(s): {joined}"
+        )
+        self.phase = phase
+        self.revision_notes = list(revision_notes)
+        self.attempts = attempts
+
+
 # ---------------------------------------------------------------------------
 # Protocol bridging
 # ---------------------------------------------------------------------------
@@ -333,12 +379,14 @@ __all__ = [
     "ConfigError",
     "ContextOverflowError",
     "DatabaseError",
+    "DocumentConformanceError",
     "EventAggregatorError",
     "HarnessToolContractError",
     "NicknameConflictError",
     "PermissionDeniedError",
     "ProtocolError",
     "ProviderSessionError",
+    "SupervisorRoutingError",
     "TeamConfigNotFoundError",
     "TokenBudgetExceededError",
     "VaultspecError",

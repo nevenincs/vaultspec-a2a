@@ -3,10 +3,24 @@ name: Merge Gate
 # The pull-request critical path is intentionally Linux-only and delegates its
 # complete contract to `just ci-merge`. Full artifact, desktop, provider, and
 # Compose certification runs after merge in test.yml.
+#
+# ONLY TRUSTED AUTHORS REACH THE FLEET. A pull request runs its jobs on the
+# self-hosted fleet only when its author is the owner or a collaborator, or once
+# a user - never a bot - has applied `ci:full` to it, which takes triage rights.
+# Everyone else, Dependabot included, runs nothing here until a collaborator has
+# read the change, and the gate refuses the commit until then. A fork's pull
+# request runs the fork's own copy of this file, so for forks these conditions
+# only back up the repository's requirement that an outside contributor's runs
+# be approved; for every other author they are the control itself.
+#
+# `Check: Merge gate (Linux)` is the sole required status check, and it is never
+# skipped: a required check whose job is skipped counts as PASSED. A label that
+# starts nothing therefore still reaches a verdict, by finding this check's own
+# earlier success on the same commit.
 on:
   pull_request:
     branches: [main]
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
   workflow_call:
     inputs:
       ref:
@@ -23,18 +37,21 @@ on:
 permissions:
   contents: read
 
+# One group per pull request AND per trigger. Adding an unrelated label must not
+# cancel a run in flight, and a new push must supersede the push before it. A
+# call or a dispatch never cancels: it is a release.
 concurrency:
-  group: merge-gate-${{ github.event.pull_request.number || inputs.ref || github.ref }}-${{ github.event_name }}
+  group: merge-gate-${{ github.event.pull_request.number || inputs.ref || github.ref }}-${{ github.event.label.name || github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   basic:
     name: "Check: Basic CI (Linux)"
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && ((github.event.action != 'labeled' && (github.event.pull_request.author_association == 'OWNER' || github.event.pull_request.author_association == 'COLLABORATOR')) || (github.event.action == 'labeled' && github.event.label.name == 'ci:full' && github.event.sender.type == 'User'))) }}
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 180
     env:
       CI_EXEC_BUDGET_MINUTES: 60
+    timeout-minutes: 180
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,18 +85,65 @@ jobs:
   gate:
     name: "Check: Merge gate (Linux)"
     needs: [basic]
-    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (always()) }}
+    if: always()
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 5
+    timeout-minutes: 66
+    permissions:
+      contents: read
+      checks: read
+      pull-requests: write
     env:
       CI_RESOURCE_CLASS: verdict
+      GH_TOKEN: ${{ github.token }}
+      EVENT: ${{ github.event_name }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      AUTHOR: ${{ github.event.pull_request.user.login }}
+      ASSOCIATION: ${{ github.event.pull_request.author_association }}
+      BASIC: ${{ needs.basic.result }}
     steps:
+      # The label asks for ONE full run, so it is released as soon as that run
+      # starts judging. A label another run already removed is not an error.
+      - name: Release the ci:full label
+        if: ${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'ci:full' }}
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${PR}/labels/ci:full" --silent || true
+
       - name: Judge the required checks
-        env:
-          BASIC: ${{ needs.basic.result }}
         run: |
-          if [ "$BASIC" != "success" ]; then
+          set -euo pipefail
+          # Fork pull requests are refused outright, whatever ran before.
+          if [ "$EVENT" = "pull_request" ] && [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::pull requests from forks are refused; re-open the change from a branch of $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          if [ "$BASIC" = "success" ]; then
+            echo "Every required Linux check passed"
+            exit 0
+          fi
+          if [ "$BASIC" != "skipped" ]; then
             echo "::error::Check: Basic CI (Linux) ended '$BASIC'"
             exit 1
           fi
-          echo "Every required Linux check passed"
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "::error::Check: Basic CI (Linux) was skipped outside a pull request"
+            exit 1
+          fi
+          # Nothing ran in this run, so the verdict must already exist on this
+          # commit - as it does when an unrelated label opened this run.
+          passed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?check_name=Check:%20Merge%20gate%20(Linux)&filter=all&per_page=100" \
+            --jq '[.check_runs[] | select(.conclusion == "success")] | length')
+          if [ "$passed" -gt 0 ]; then
+            echo "Check: Basic CI (Linux) already passed on $HEAD_SHA"
+            exit 0
+          fi
+          # An untrusted author's commit ran nothing, so no earlier verdict can
+          # exist unless a collaborator's ci:full proved it; refuse it by name.
+          case "$ASSOCIATION" in OWNER | COLLABORATOR) ;;
+            *)
+              echo "::error::pull requests by $AUTHOR ($ASSOCIATION) run nothing on the self-hosted fleet; a collaborator reviews the change and applies the ci:full label to run it"
+              exit 1
+              ;;
+          esac
+          echo "::error::Check: Basic CI (Linux) has not run on $HEAD_SHA"
+          exit 1

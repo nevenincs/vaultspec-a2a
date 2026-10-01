@@ -35,9 +35,12 @@ from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ThreadStatus
 from ..thread_stream import _stream_thread_events
+from .conftest import seed_run_with_status
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from .conftest import SessionFactory
 
 
 def _occupy(aggregator: EventAggregator, count: int, *, prefix: str) -> None:
@@ -53,7 +56,9 @@ async def _drain(frames: AsyncIterator[bytes]) -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_finished_stream_hands_its_slot_to_the_next_caller() -> None:
+async def test_a_finished_stream_hands_its_slot_to_the_next_caller(
+    session_factory: SessionFactory,
+) -> None:
     """A stream that ends normally must leave the registry able to admit again.
 
     Fills the registry to one slot short of the cap, lets a real stream take the
@@ -65,18 +70,20 @@ async def test_a_finished_stream_hands_its_slot_to_the_next_caller() -> None:
     aggregator = EventAggregator()
     limit = domain_config.max_stream_connections
     _occupy(aggregator, limit - 1, prefix="held")
+    await seed_run_with_status(session_factory, "run-finished", ThreadStatus.COMPLETED)
 
     frames = [
         frame
         async for frame in _stream_thread_events(
             aggregator=aggregator,
             thread_id="run-finished",
-            initial_status=ThreadStatus.COMPLETED.value,
+            session_factory=session_factory,
         )
     ]
 
-    assert len(frames) == 1
-    assert b"thread_terminal" in frames[0]
+    assert len(frames) == 2
+    assert b"stream_snapshot" in frames[0]
+    assert b"thread_terminal" in frames[1]
     assert aggregator.subscriber_count() == limit - 1
     assert aggregator.get_active_thread_ids() == []
 
@@ -85,9 +92,9 @@ async def test_a_finished_stream_hands_its_slot_to_the_next_caller() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_stream_abandoned_mid_flight_hands_its_slot_to_the_next_caller() -> (
-    None
-):
+async def test_a_stream_abandoned_mid_flight_hands_its_slot_to_the_next_caller(
+    session_factory: SessionFactory,
+) -> None:
     """Cancelling a live stream must release the slot, not strand it.
 
     This is the exit the gateway actually sees most: a client disconnects while
@@ -99,11 +106,12 @@ async def test_a_stream_abandoned_mid_flight_hands_its_slot_to_the_next_caller()
     aggregator = EventAggregator()
     limit = domain_config.max_stream_connections
     _occupy(aggregator, limit - 1, prefix="held")
+    await seed_run_with_status(session_factory, "run-abandoned", ThreadStatus.RUNNING)
 
     stream = _stream_thread_events(
         aggregator=aggregator,
         thread_id="run-abandoned",
-        initial_status=ThreadStatus.RUNNING.value,
+        session_factory=session_factory,
     )
     task = asyncio.create_task(_drain(stream))
 

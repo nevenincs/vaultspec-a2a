@@ -205,7 +205,7 @@ async def commit_proven_application(
         mark_control_action_applied,
         update_thread_status,
     )
-    from ..thread.enums import ControlActionType
+    from ..thread.enums import TERMINAL_STATUS_VALUES, ControlActionType
     from .dispatch_receipts import validate_current_graph_receipt
     from .repair_transitions import mark_message_followup_applied
 
@@ -246,7 +246,11 @@ async def commit_proven_application(
         await apply_permission_resolution(
             db, thread_id, {"request_id": action.request_id}
         )
-        await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
+        # A turn that consumed the answer and then failed reports the answer
+        # as applied too, and the report can arrive after the run's terminal.
+        # The decision was consumed, so it settles; the run stays finished.
+        if thread.status not in TERMINAL_STATUS_VALUES:
+            await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
         await db.commit()
         return action.request_id
     from .verdict_subscriber import settle_verdict_dispatch_receipt

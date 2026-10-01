@@ -831,3 +831,50 @@ class TestBoundClarificationQuestions:
         assert choice is not None
         assert choice.kind is ClarificationKind.CHOICE
         assert len(choice.options or []) == MAX_OPTIONS_PER_QUESTION
+
+
+@pytest.mark.asyncio
+async def test_a_refused_answer_re_parks_and_the_next_one_still_resolves() -> None:
+    """A bad answer must not end the run's ability to be answered.
+
+    ``interrupt()`` records its resume value against the running task before
+    the gate can judge it. A gate that raised on a bad answer left that value
+    recorded, so every later answer replayed the bad one and failed the same
+    way - the questionnaire became unanswerable for the life of the run.
+    """
+    graph = _clarify_graph(_CountingProducer(_request()))
+    config = {"configurable": {"thread_id": "clarify-refused"}}
+
+    await graph.ainvoke(_base_state(), config=config)
+
+    # An answer to a request this run never asked.
+    reparked = await graph.ainvoke(
+        Command(
+            resume={
+                "type": "clarification_response",
+                "request_id": "clarify-from-another-turn",
+                "answers": {"scope": "right"},
+            }
+        ),
+        config=config,
+    )
+    assert "__interrupt__" in reparked
+    assert reparked["__interrupt__"][0].value["request_id"] == "clarify-1"
+
+    state = await graph.aget_state(config)
+    assert state.values["clarification_request_id"] == "clarify-1"
+    assert not state.values.get("clarification_answers")
+
+    resolved = await graph.ainvoke(
+        Command(
+            resume={
+                "type": "clarification_response",
+                "request_id": "clarify-1",
+                "answers": {"scope": "right"},
+            }
+        ),
+        config=config,
+    )
+    assert "__interrupt__" not in resolved
+    assert resolved["clarification_answers"] == {"clarify-1": {"scope": "right"}}
+    assert resolved["clarification_request_id"] is None

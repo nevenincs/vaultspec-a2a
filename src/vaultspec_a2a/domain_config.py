@@ -117,6 +117,28 @@ class DomainConfig(ProjectSettings):
 
     # -- Context window sizing -----------------------------------------------
 
+    supervisor_reask_limit: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Supervisor: how many consecutive refused routing decisions one turn "
+            "may re-ask before the run fails. A decision is refused when its "
+            "output names no route or its route is blocked by a HARD phase gate; "
+            "each refusal returns to the supervisor with the reason in context."
+        ),
+    )
+    supervisor_finish_block_limit: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Supervisor: how many consecutive FINISH decisions the completion "
+            "gates may block and reroute before the run fails. Separate from "
+            "the re-ask budget because a blocked FINISH runs a worker that can "
+            "satisfy the gate rather than re-asking, so it costs a real worker "
+            "turn; when the worker never clears the gate the reroute would "
+            "otherwise repeat until the recursion limit."
+        ),
+    )
     context_limit_tokens: int = Field(
         default=120_000,
         description="Estimated token budget for the context window.",
@@ -173,7 +195,11 @@ class DomainConfig(ProjectSettings):
 
     graph_recursion_limit: int = Field(
         default=100,
-        description="LangGraph recursion limit passed to every graph invocation.",
+        description=(
+            "Operator ceiling on the LangGraph recursion limit of every graph "
+            "invocation. A run is held to the lower of this and the recursion "
+            "limit its team preset declares."
+        ),
     )
 
     # -- Worker executor -----------------------------------------------------

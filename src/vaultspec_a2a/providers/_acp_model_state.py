@@ -30,6 +30,11 @@ class AcpSessionState:
     auth_methods: list[JsonObject] = field(default_factory=list)
     session_config_options: list[JsonObject] = field(default_factory=list)
     session_busy: bool = False
+    # What actually ran, recorded per session rather than inferred: the CLI this
+    # lane pinned for the child, and the adapter that answered its handshake.
+    # A turn whose behaviour has to be explained later is explained by these two.
+    claude_executable: str | None = None
+    agent_info: JsonObject = field(default_factory=dict)
 
 
 @dataclass(slots=True)

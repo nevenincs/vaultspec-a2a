@@ -41,6 +41,7 @@ from ...database import (
     get_db,
     get_permission_logs_by_thread,
     get_thread_metadata,
+    resolve_session_factory,
 )
 from ...database.checkpoints import Checkpointer
 from ...domain_config import domain_config
@@ -376,7 +377,17 @@ async def run_status_endpoint(
 @router.get("/runs/{run_id}/stream")
 async def run_stream_endpoint(
     run_id: PathSafeRunId,
-    db: AsyncSession = Depends(get_db),
+    request: Request,
+    # Function-scoped, unlike every other read here, because this handler
+    # RETURNS a body that then runs for as long as the viewer stays attached. A
+    # request-scoped session is torn down after the response completes, so each
+    # attached viewer held a pooled connection and the read transaction the
+    # status lookup opened, for the whole life of its stream: fifteen viewers
+    # exhausted the pool and blocked every other database-using request, and the
+    # WAL could not be checkpointed while any of them watched. Function scope
+    # gives the connection back when this function returns, which is the last
+    # moment the stream needs it.
+    db: AsyncSession = Depends(get_db, scope="function"),
     aggregator: EventAggregator = Depends(get_aggregator),
 ) -> StreamingResponse:
     """Re-serve the run's bounded, versioned v1 SSE progress frames.
@@ -391,6 +402,7 @@ async def run_stream_endpoint(
     """
     return await build_thread_stream_response(
         db=db,
+        session_factory=resolve_session_factory(request.app.state),
         aggregator=aggregator,
         thread_id=run_id,
         not_found_detail="Run not found",

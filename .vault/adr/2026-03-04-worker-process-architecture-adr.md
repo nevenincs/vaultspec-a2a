@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#worker-process-architecture'
 date: 2026-03-04
-modified: '2026-07-15'
-body_hash: 'sha256:51538497cb5d9fd0091d382f6db74e3a76db636b24fb865995e61f8e1d2a5320'
+modified: '2026-09-30'
+body_hash: 'sha256:24a0a7f95ca2c7a9982537be44510573b87fc7595093a14f5b40974fee8f5465'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-observability-telemetry-integration-adr]]'
@@ -253,3 +253,22 @@ lib/
 - ADR-010 — OTel for worker spans
 - ADR-017 — Docker Compose multi-service deployment
 - ADR-021 — task queue integration with Executor
+
+## Amendment - langgraph-conformance (2026-09-30)
+
+Section 2.3's division of labour is corrected: the gateway is not a read-only holder of the checkpoint store, and both processes write to it. The gateway:
+
+- prunes a settled thread's superseded checkpoints (`src/vaultspec_a2a/api/app.py`, `src/vaultspec_a2a/control/event_handlers.py`);
+- deletes a thread's checkpoints when the deletion saga runs (`src/vaultspec_a2a/control/cleanup/executor.py`);
+- creates the schema when its boot opens the checkpointer.
+
+The WAL constraint and the same-host requirement are unchanged. Concurrent schema setup across the two processes is serialized by the owner named in `2026-03-10-postgres-dual-backend-adr`.
+
+Section 2.6 is corrected in two places.
+
+- The executor holds no `thread_id`-to-graph cache. A graph is compiled per run, against that run's frozen definition, and is given a checkpointer of its own over the shared pool (`src/vaultspec_a2a/worker/graph_lifecycle.py`).
+- The stream consumer loop is not the executor's. It belongs to the streaming package, which the executor calls for both ingest and resume (`src/vaultspec_a2a/streaming/ingest.py`, `src/vaultspec_a2a/worker/executor.py`).
+
+The section's naming of `graph.astream()` remains accurate and is the binding form.
+
+The module inventories in sections 2.5 and 6 are historical and are not maintained as a contract; the dependency-direction constraints in section 5 remain binding. Grounding: `2026-09-30-langgraph-conformance-audit`.

@@ -231,7 +231,7 @@ async def test_runtime_runner_accepts_populated_valid_current_schema(
     await engine.dispose()
 
     await run_migrations(url)
-    assert _version(db) == "0021"
+    assert _version(db) == "0022"
 
 
 def test_populated_current_store_cannot_erase_authority(runtime_dir: Path) -> None:

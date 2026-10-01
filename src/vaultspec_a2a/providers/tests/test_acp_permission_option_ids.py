@@ -49,6 +49,22 @@ def _config(
     )
 
 
+async def _outcome(
+    options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
+) -> JsonObject:
+    """Drive the production handler and return the outcome object it answered with."""
+    params: JsonObject = {
+        "toolCall": {"title": "Edit", "rawInput": {}},
+        "options": list[JsonValue](options),
+    }
+    response = await on_request_permission(1, params, ctx, config)
+    result = response.get("result")
+    assert isinstance(result, dict)
+    outcome = result.get("outcome")
+    assert isinstance(outcome, dict)
+    return outcome
+
+
 async def _decide(
     options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
 ) -> str:
@@ -79,20 +95,22 @@ def _returning(answer: str) -> PermissionCallback:
 async def test_an_empty_option_id_is_never_serialised_into_the_outcome(
     acp_session_context: AcpSessionContext,
 ) -> None:
-    """A callback answer outside the offered ids must be rejected, not echoed.
+    """A callback answer outside the offered ids refuses the call, never echoes it.
 
     The callback interface itself only permits strings. An empty string is still
     an invalid option id, and exercises the same runtime guard without breaking
-    the typed collaborator contract.
+    the typed collaborator contract. With nothing refusable on offer the answer
+    is the protocol's own cancelled outcome, which carries no option id at all -
+    the approval that IS on offer is not a fallback.
     """
     options: list[JsonObject] = [{"optionId": "approve"}, _MALFORMED]
 
-    decision = await _decide(
+    outcome = await _outcome(
         options, _config(permission_callback=_returning("")), acp_session_context
     )
 
-    assert decision == "approve"
-    assert decision is not None
+    assert outcome == {"outcome": "cancelled"}
+    assert "optionId" not in outcome
 
 
 @pytest.mark.asyncio
@@ -202,11 +220,12 @@ async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
 async def test_a_denial_never_slides_onto_an_approval_on_a_bad_last_option(
     acp_session_context: AcpSessionContext,
 ) -> None:
-    """Fail-closed means an unusable id, never the surviving APPROVE id.
+    """Fail-closed means the cancelled outcome, never the surviving APPROVE id.
 
     The conventional most-restrictive option is the last one. When it carries no
-    id and nothing else names a denial, answering with the literal ``deny`` makes
-    the agent decline; scanning back up the list would have answered ``approve``.
+    id and nothing else names a denial, the answer is the protocol's own
+    cancelled outcome, which the agent cannot read as a selection; scanning back
+    up the list would have answered ``approve``.
     """
     options: list[JsonObject] = [{"optionId": "approve"}, _MALFORMED]
 
@@ -215,11 +234,11 @@ async def test_a_denial_never_slides_onto_an_approval_on_a_bad_last_option(
     ) -> str:
         raise RuntimeError("the human hung up")
 
-    decision = await _decide(
+    outcome = await _outcome(
         options, _config(permission_callback=callback), acp_session_context
     )
 
-    assert decision == "deny"
+    assert outcome == {"outcome": "cancelled"}
 
 
 def test_the_kimi_autonomous_lane_reads_snake_case_options() -> None:
@@ -232,3 +251,110 @@ def test_the_kimi_autonomous_lane_reads_snake_case_options() -> None:
 
     assert _autonomous_option_id("ReadFile: a.py", config, options) == "approve"
     assert _autonomous_option_id("WriteFile: a.py", config, options) == "reject"
+
+
+@pytest.mark.asyncio
+async def test_a_remembered_approval_is_answered_as_a_single_use(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """An "always" answer reaches the CLI as the once-only option it offered.
+
+    The CLI persists a remembered approval as a permission rule in the
+    operator's own settings, where it widens later runs this one cannot see.
+    """
+    options: list[JsonObject] = [
+        {"optionId": "allow_always", "kind": "allow_always"},
+        {"optionId": "allow_once", "kind": "allow_once"},
+        {"optionId": "reject_once", "kind": "reject_once"},
+    ]
+
+    decision = await _decide(
+        options,
+        _config(permission_callback=_returning("allow_always")),
+        acp_session_context,
+    )
+
+    assert decision == "allow_once"
+
+
+@pytest.mark.asyncio
+async def test_a_single_use_approval_is_forwarded_unchanged(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """Narrowing touches only the answers that would outlive their own call."""
+    options: list[JsonObject] = [
+        {"optionId": "allow_always", "kind": "allow_always"},
+        {"optionId": "allow_once", "kind": "allow_once"},
+    ]
+
+    decision = await _decide(
+        options,
+        _config(permission_callback=_returning("allow_once")),
+        acp_session_context,
+    )
+
+    assert decision == "allow_once"
+
+
+@pytest.mark.asyncio
+async def test_an_unoffered_answer_refuses_where_a_refusal_is_offered(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """The adapter's own option list is answered with its reject option.
+
+    Options in the order the pinned adapter offers them: allow_always first. The
+    old fallback took the FIRST offered option, so a refusal whose id did not
+    match resolved to the broadest grant the request contained.
+    """
+    options: list[JsonObject] = [
+        {"optionId": "allow_always", "kind": "allow_always", "name": "Always Allow"},
+        {"optionId": "allow", "kind": "allow_once", "name": "Allow"},
+        {"optionId": "reject", "kind": "reject_once", "name": "Reject"},
+    ]
+
+    decision = await _decide(
+        options,
+        _config(permission_callback=_returning("no-such-option")),
+        acp_session_context,
+    )
+
+    assert decision == "reject"
+
+
+@pytest.mark.asyncio
+async def test_an_unoffered_answer_cancels_when_every_option_is_an_approval(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """With only approvals on offer the call is cancelled, not granted."""
+    options: list[JsonObject] = [
+        {"optionId": "allow_always", "kind": "allow_always"},
+        {"optionId": "allow", "kind": "allow_once"},
+    ]
+
+    outcome = await _outcome(
+        options,
+        _config(permission_callback=_returning("no-such-option")),
+        acp_session_context,
+    )
+
+    assert outcome == {"outcome": "cancelled"}
+
+
+@pytest.mark.asyncio
+async def test_an_uncovered_autonomous_call_is_never_granted_by_position(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """The autonomous refusal never lands on an approval either.
+
+    ``Edit`` is not a declared tool for this config, so the unsupervised rung
+    refuses it. Every option on offer is an approval, so the positional
+    "most restrictive is last" convention would have granted the call.
+    """
+    options: list[JsonObject] = [
+        {"optionId": "allow", "kind": "allow_once"},
+        {"optionId": "allow_always", "kind": "allow_always"},
+    ]
+
+    outcome = await _outcome(options, _config(), acp_session_context)
+
+    assert outcome == {"outcome": "cancelled"}

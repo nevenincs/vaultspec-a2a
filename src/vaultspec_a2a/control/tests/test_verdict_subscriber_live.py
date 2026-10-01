@@ -48,7 +48,6 @@ import httpx
 import pytest
 import pytest_asyncio
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -91,6 +90,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -103,6 +103,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
     from fastapi import FastAPI
+    from langchain_core.runnables import RunnableConfig
 
 
 _TEST_INTERNAL_TOKEN = "verdict-subscriber-live-test-token"
@@ -328,11 +329,14 @@ async def _seed_parked(
     proposal_id: str,
     changeset_id: str,
 ) -> None:
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["channel_values"]["authoring_proposal_ids"] = [proposal_id]
     checkpoint["channel_values"]["authoring_changeset_ids"] = [changeset_id]
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},
@@ -531,7 +535,10 @@ async def _seed_parked_gate(
         if seed.team_preset is not None
         else None
     )
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["channel_values"]["authoring_proposal_ids"] = [proposal_id]
     checkpoint["channel_values"]["authoring_changeset_ids"] = [changeset_id]
     checkpoint["channel_values"]["gate_pending_proposal_id"] = proposal_id
@@ -541,7 +548,7 @@ async def _seed_parked_gate(
         )
         checkpoint["channel_values"]["graph_definition_digest"] = definition.digest()
     await checkpointer.aput(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         {},

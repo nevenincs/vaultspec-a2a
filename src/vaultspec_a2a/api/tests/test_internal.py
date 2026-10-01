@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from langgraph.checkpoint.base import empty_checkpoint
 from sqlalchemy import select
 from starlette.testclient import TestClient
 
@@ -38,6 +37,7 @@ from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphCompletionReceipt
 from ...thread.executable_graph import freeze_graph_definition
@@ -46,6 +46,7 @@ from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
 
 if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,7 +108,10 @@ async def _seed_accepted_thread(
 async def _record_completed_checkpoint(
     checkpointer: AsyncSqliteSaver, receipt: GraphActionReceipt
 ) -> None:
-    checkpoint = empty_checkpoint()
+    config: RunnableConfig = {
+        "configurable": {"thread_id": receipt.thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
     checkpoint["id"] = f"cp-{receipt.thread_id}"
     checkpoint["channel_values"] = {
         "active_graph_action_receipt": receipt.model_dump(mode="json"),
@@ -121,12 +125,12 @@ async def _record_completed_checkpoint(
         },
     }
     checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": 1,
-        "graph_action_receipts": 1,
-        "graph_completion_receipts": 1,
+        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
+        "graph_action_receipts": checkpointer.get_next_version(None, None),
+        "graph_completion_receipts": checkpointer.get_next_version(None, None),
     }
     await checkpointer.aput(
-        {"configurable": {"thread_id": receipt.thread_id, "checkpoint_ns": ""}},
+        config,
         checkpoint,
         {"source": "loop", "step": 1, "parents": {}},
         checkpoint["channel_versions"],
@@ -651,6 +655,7 @@ class TestInternalEvents:
         assert worker.dispatches[0]["option_id"] == {
             "verdict": "approved",
             "notes": None,
+            "request_id": request_id,
         }
 
     @pytest.mark.asyncio(loop_scope="function")

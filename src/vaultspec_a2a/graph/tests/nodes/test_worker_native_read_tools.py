@@ -20,8 +20,8 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ....providers._acp_authoring import authoring_allowed_tool_names
-from ....providers._native_read_tools import NATIVE_READ_TOOL_NAMES
 from ...nodes.worker import create_worker_node
+from ._native_read_floor import scoped_read_floor
 from .test_worker_authoring_wiring import binding, stdio_provider
 
 if TYPE_CHECKING:
@@ -87,9 +87,12 @@ async def test_document_role_autonomous_permits_native_read_builtins(
     assert result["messages"][0].content == "researched"
 
     params = json.loads(record_file.read_text(encoding="utf-8"))
-    assert _allowed_tools(params) == list(NATIVE_READ_TOOL_NAMES)
-    # Exact names only — never a wildcard grant.
-    assert "*" not in "".join(_allowed_tools(params))
+    assert _allowed_tools(params) == scoped_read_floor(tmp_path)
+    # Exact names only — never a wildcard grant of the TOOL. The path
+    # pattern inside a scoped rule is the scope itself.
+    assert not [
+        entry for entry in _allowed_tools(params) if "*" in entry.partition("(")[0]
+    ]
 
 
 @pytest.mark.asyncio
@@ -115,7 +118,7 @@ async def test_native_read_tools_union_with_authoring_allowlist(
     allowed = _allowed_tools(params)
     assert allowed == [
         *authoring_allowed_tool_names(binding()),
-        *NATIVE_READ_TOOL_NAMES,
+        *scoped_read_floor(tmp_path),
     ]
 
 

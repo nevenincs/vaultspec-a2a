@@ -145,17 +145,29 @@ async def _bulk_read_checkpoints(
     caps how many run at once so a large page cannot open one connection per
     thread, and bounds the whole batch by a single wall-clock budget.
 
+    The cap is a pool of readers rather than a plain semaphore, because one
+    saver holds a lock around every statement it issues: N probes sharing one
+    would queue on that lock and use one connection between them. Each reader is
+    a saver over the same connection pool, so a probe waits for a free reader
+    rather than for the thread in front of it. Backends that cannot go wider
+    hand back the same saver, which keeps the bound and the behaviour they had.
+
     Every failure is a probe marked ``unverified`` rather than a raised error: a
     thread whose checkpoint could not be read within the budget is reported as
     uncertain, exactly as the sequential path reported a per-thread timeout,
     never as a thread with no checkpoint.
     """
-    semaphore = asyncio.Semaphore(max(1, concurrency))
+    from ..database.checkpoints import concurrent_checkpointer
+
+    readers: asyncio.Queue[Any] = asyncio.Queue()
+    for _ in range(max(1, min(concurrency, len(thread_ids)))):
+        readers.put_nowait(await concurrent_checkpointer(checkpointer))
 
     async def _one(thread_id: str) -> tuple[str, _CheckpointProbe]:
-        async with semaphore:
+        reader = await readers.get()
+        try:
             try:
-                checkpoint_tuple = await checkpointer.aget_tuple(
+                checkpoint_tuple = await reader.aget_tuple(
                     {"configurable": {"thread_id": thread_id}}
                 )
             except Exception:
@@ -164,6 +176,8 @@ async def _bulk_read_checkpoints(
                 )
                 return thread_id, _CheckpointProbe(unverified=True)
             return thread_id, _CheckpointProbe(tuple=checkpoint_tuple)
+        finally:
+            readers.put_nowait(reader)
 
     tasks = [asyncio.create_task(_one(tid)) for tid in thread_ids]
     try:

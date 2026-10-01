@@ -1,19 +1,29 @@
 name: Self-hosted runner policy
+#
+# ONLY TRUSTED AUTHORS REACH THE FLEET. This job checks out a pull request's own
+# tree on a self-hosted runner, so it runs for a pull request only when the
+# author is the owner or a collaborator, or once a user - never a bot - has
+# applied `ci:full`. `branches: ['**']` on the push trigger is what keeps a tag
+# push out: an unfiltered `push` matches tags too, and the release lane is
+# started by the cut's dispatch and by nothing else.
 on:
   push:
+    branches: ['**']
   pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
 permissions:
   contents: read
 jobs:
   runner-policy:
     name: 'Check: Self-hosted runners'
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && ((github.event.action != 'labeled' && (github.event.pull_request.author_association == 'OWNER' || github.event.pull_request.author_association == 'COLLABORATOR')) || (github.event.action == 'labeled' && github.event.label.name == 'ci:full' && github.event.sender.type == 'User'))) }}
     timeout-minutes: 130
     runs-on: [self-hosted, Linux, X64]
     env:
       CI_EXEC_BUDGET_MINUTES: 10
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Reject hosted runner placement

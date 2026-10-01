@@ -28,7 +28,7 @@ def _triggers(workflow: dict[Any, Any]) -> dict[str, Any]:
 
 
 def test_release_please_owns_reviewable_version_proposals() -> None:
-    """Keep release proposals reviewed and publication consumer-selected."""
+    """Keep release proposals reviewed and their version the one released."""
     config = json.loads((ROOT / "release-please-config.json").read_text("utf-8"))
     manifest = json.loads((ROOT / ".release-please-manifest.json").read_text("utf-8"))
     project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))
@@ -36,27 +36,45 @@ def test_release_please_owns_reviewable_version_proposals() -> None:
 
     assert package["release-type"] == "python"
     assert package["package-name"] == "vaultspec-a2a"
-    assert package["draft"] is True
     assert manifest["."] == project["project"]["version"]
 
-    workflow = _workflow("release-please.yml")
-    assert _triggers(workflow) == {"push": {"branches": ["main"]}}
-    assert workflow["permissions"] == {
-        "actions": "write",
-        "contents": "write",
-        "pull-requests": "write",
-    }
-    steps = workflow["jobs"]["release-please"]["steps"]
+    steps = _workflow("release-please.yml")["jobs"]["release-please"]["steps"]
     assert re.fullmatch(
         r"googleapis/release-please-action@[0-9a-f]{40}", steps[0]["uses"]
     )
-    # Only the proposal's own merge gate is dispatched; publication stays with
-    # the consumer that selects the release set.
-    source = (WORKFLOWS / "release-please.yml").read_text(encoding="utf-8")
-    assert re.findall(r"gh workflow run (\S+)", source) == ["merge-gate.yml"]
     for step in steps[1:]:
-        assert step["if"] == (
-            "steps.release.outputs.pr && !steps.release.outputs.release_created"
+        assert step["if"] == "steps.release.outputs.pr"
+
+
+def test_nothing_starts_itself_from_a_tag_or_a_release() -> None:
+    """No workflow may be started by a tag push or by a release event.
+
+    The tag and the draft release are created seconds apart by the cut, and the
+    cut then dispatches the one lane that fills the draft. A workflow listening
+    for either event would start a second copy of that lane for the same tag,
+    and the two would race to attach the same archive names to the same draft.
+    An unfiltered `push` is the quiet way in, because it matches tag refs too;
+    every push trigger therefore names the branches it wants.
+
+    Mutation proof: restoring `push: tags: ['v*.*.*']` to release.yml makes this
+    fail on that workflow's tag trigger; removing it again makes this pass.
+    """
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        triggers = _triggers(_workflow(path.name))
+        assert "release" not in triggers, (
+            f"{path.name} runs on the release event; the release cut starts "
+            f"every release lane by dispatch so the same tag cannot be built twice"
+        )
+        if "push" not in triggers:
+            continue
+        push: dict[str, Any] = cast("dict[str, Any] | None", triggers["push"]) or {}
+        assert "tags" not in push, (
+            f"{path.name} runs on a tag push; the release cut dispatches the "
+            f"release lane with the tag it has just proved"
+        )
+        assert push.get("branches"), (
+            f"{path.name} declares a `push` trigger without `branches`, which "
+            f"matches tag refs as well as branches"
         )
 
 
@@ -64,8 +82,7 @@ def test_release_proves_tag_and_publishes_complete_cohort_last() -> None:
     """Permit exact tag publication while refusing partial artifact sets."""
     workflow = _workflow("release.yml")
     triggers = _triggers(workflow)
-    assert set(triggers) == {"push", "workflow_dispatch"}
-    assert triggers["push"] == {"tags": ["v*.*.*"]}
+    assert set(triggers) == {"workflow_dispatch"}
     assert triggers["workflow_dispatch"]["inputs"] == {
         "tag": {
             "description": "Existing release tag to build and upload (e.g. v0.2.0)",

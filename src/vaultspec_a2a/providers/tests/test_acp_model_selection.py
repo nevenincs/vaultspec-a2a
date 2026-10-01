@@ -11,11 +11,8 @@ pair, so the request frame asserted here is the frame that left the process.
 """
 
 import asyncio
-import sys
-from collections.abc import AsyncIterator
 
 import pytest
-import pytest_asyncio
 
 from ...utils.enums import AcpRequestId
 from .._acp_session import (
@@ -43,46 +40,6 @@ _TIMEOUT = 10.0
 # Echoes each stdin line straight back on stdout, so a frame written to the
 # child's stdin is readable from the same context's stdout. A real pipe
 # round-trip through a real process, not an in-memory stand-in.
-_ECHO_CHILD = (
-    "import sys\n"
-    "for line in sys.stdin.buffer:\n"
-    "    sys.stdout.buffer.write(line)\n"
-    "    sys.stdout.buffer.flush()\n"
-)
-
-
-@pytest_asyncio.fixture
-async def echo_context() -> AsyncIterator[AcpSessionContext]:
-    """Yield a production context bound to a real echoing child process."""
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        _ECHO_CHILD,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    assert process.stdin is not None
-    assert process.stdout is not None
-    context = AcpSessionContext(
-        process=process,
-        stdin=process.stdin,
-        stdout=process.stdout,
-        response_futures={},
-        chunk_queue=asyncio.Queue(),
-        prompt_done=asyncio.Event(),
-        prompt_id_ref=[],
-        interrupt_exc=[],
-    )
-    try:
-        yield context
-    finally:
-        process.stdin.close()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
 
 
 def _config(

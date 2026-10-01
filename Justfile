@@ -864,6 +864,7 @@ vault-upgrade:
     uv lock --upgrade-package vaultspec-core
     uv sync --locked --no-default-groups --group tooling
     {{core}} --version
+    {{core}} install --upgrade
     {{safe_enroll}}
     uv lock --check
 

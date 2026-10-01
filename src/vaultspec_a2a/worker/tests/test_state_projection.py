@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import operator
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 
 import httpx
 import pytest
@@ -11,7 +12,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Interrupt, PregelTask
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, Interrupt, PregelTask, interrupt
 from pydantic import BaseModel, ConfigDict
 
 from ...providers import ProviderCondition
@@ -20,7 +22,19 @@ from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..ipc import WorkerBridge
-from ..state_projection import StateProjector
+from ..state_projection import (
+    ResumeAdmission,
+    ResumeRefusal,
+    ResumeRefusalCause,
+    StateProjector,
+)
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+
+
+class _AskState(TypedDict, total=False):
+    answer: str
 
 
 class _StateNormalizationFixture(BaseModel):
@@ -76,6 +90,200 @@ def test_normalize_execution_state_projects_interrupt_contract() -> None:
     assert not task.has_error
     assert not task.has_nested_state
     assert not task.has_result
+
+
+def _resume_receipt(thread_id: str) -> GraphActionReceipt:
+    """The journal identity a dispatched resume carries into the preflight."""
+    return GraphActionReceipt(
+        schema_version="graph-action-v1",
+        thread_id=thread_id,
+        action_id="answer-action",
+        action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+        payload_fingerprint=f"sha256:{'1' * 64}",
+        dispatch_id="answer-dispatch",
+        run_revision=1,
+        writer_generation=2,
+    )
+
+
+async def _held_writes(saver: InMemorySaver, config: RunnableConfig) -> tuple[Any, ...]:
+    """The writes the store holds against the thread's latest checkpoint."""
+    stored = await saver.aget_tuple(config)
+    assert stored is not None
+    return tuple(stored.pending_writes or ())
+
+
+@pytest.mark.asyncio
+async def test_a_node_that_asks_again_is_still_the_next_node() -> None:
+    """A node re-parked by an answer that did not settle it stays the position.
+
+    LangGraph drops such a task from ``next`` because it already holds a
+    resume write; the projection must still report the node the run is parked
+    at, or a gate awaiting a decision reads as merely running. The held writes
+    are what keep the two apart: a task that consumed an answer and asked
+    again produced no output, so it is still waiting.
+    """
+
+    def ask_until_settled(state: _AskState) -> _AskState:
+        answer = interrupt({"type": "approval", "request_id": "request-9"})
+        while answer != "settled":
+            answer = interrupt({"type": "approval", "request_id": "request-9"})
+        return {"answer": answer}
+
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _AskState))
+    builder.add_node("ask_until_settled", ask_until_settled)
+    builder.add_edge(START, "ask_until_settled")
+    builder.add_edge("ask_until_settled", END)
+    saver = InMemorySaver()
+    graph = builder.compile(checkpointer=saver)
+    config: RunnableConfig = {"configurable": {"thread_id": "ask-again"}}
+
+    await graph.ainvoke({}, config=config)
+    await graph.ainvoke(Command(resume="unrelated"), config=config)
+    state = await graph.aget_state(config)
+    assert state.next == ()
+
+    payload = StateProjector.normalize_execution_state(
+        state, await _held_writes(saver, config)
+    )
+
+    assert payload.next_nodes == ["ask_until_settled"]
+    assert payload.interrupt_types == ["approval"]
+    assert payload.interrupt_count == 1
+
+    await graph.ainvoke(Command(resume="settled"), config=config)
+    settled = StateProjector.normalize_execution_state(
+        await graph.aget_state(config), await _held_writes(saver, config)
+    )
+    assert settled.next_nodes == []
+
+
+class _FanOutState(TypedDict, total=False):
+    answers: Annotated[list[str], operator.add]
+
+
+def _fan_out_graph(saver: InMemorySaver) -> Any:
+    """Two branches that each stop to ask their own question."""
+
+    def gate(request_id: str) -> Any:
+        def node(state: _FanOutState) -> _FanOutState:
+            del state
+            answer = interrupt({"type": "approval", "request_id": request_id})
+            return {"answers": [f"{request_id}:{answer}"]}
+
+        return node
+
+    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _FanOutState))
+    builder.add_node("alpha", gate("request-alpha"))
+    builder.add_node("beta", gate("request-beta"))
+    builder.add_edge(START, "alpha")
+    builder.add_edge(START, "beta")
+    builder.add_edge("alpha", END)
+    builder.add_edge("beta", END)
+    return builder.compile(checkpointer=saver)
+
+
+async def _answer(graph: Any, config: RunnableConfig, request_id: str) -> None:
+    """Answer one of the pending questions, addressed to its own interrupt."""
+    state = await graph.aget_state(config)
+    target = next(
+        parked
+        for parked in state.interrupts
+        if parked.value["request_id"] == request_id
+    )
+    await graph.ainvoke(Command(resume={target.id: "approved"}), config=config)
+
+
+@pytest.mark.asyncio
+async def test_only_the_branch_still_asking_is_disclosed() -> None:
+    """An answered fan-out branch stops being one of the run's open questions.
+
+    LangGraph leaves the answered branch's interrupt in the checkpoint until
+    the superstep commits, and the superstep cannot commit while the other
+    branch is parked, so the snapshot lists both questions indefinitely. A
+    client reloading the run re-rendered one it had already answered.
+    """
+    saver = InMemorySaver()
+    graph = _fan_out_graph(saver)
+    config: RunnableConfig = {"configurable": {"thread_id": "fan-out-disclosure"}}
+
+    await graph.ainvoke({"answers": []}, config=config)
+    both = StateProjector.normalize_execution_state(
+        await graph.aget_state(config), await _held_writes(saver, config)
+    )
+    assert both.interrupt_count == 2
+
+    await _answer(graph, config, "request-alpha")
+    state = await graph.aget_state(config)
+    # The snapshot has not changed its mind: this is what the fix reads past.
+    assert len(state.interrupts) == 2
+
+    remaining = StateProjector.normalize_execution_state(
+        state, await _held_writes(saver, config)
+    )
+
+    assert remaining.interrupt_count == 1
+    asking = [task for task in remaining.tasks if task.interrupt_ids]
+    assert [task.name for task in asking] == ["beta"]
+    # The answered branch is still a pending task - its output has not been
+    # committed either - but it is no longer asking anything.
+    assert {task.name for task in remaining.tasks} == {"alpha", "beta"}
+    assert remaining.next_nodes == ["beta"]
+
+
+@pytest.mark.asyncio
+async def test_a_resume_naming_an_answered_branch_is_refused() -> None:
+    """The preflight admits an answer only against a question still open.
+
+    Admitting a redelivery of the answered request spends it on a task that
+    has already consumed one: the node replays its stored answer, finishes,
+    and the second answer is never read - so the client's action does nothing
+    and the run stays parked on the other branch.
+    """
+    saver = InMemorySaver()
+    graph = _fan_out_graph(saver)
+    thread_id = "fan-out-preflight"
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    projector = StateProjector(
+        checkpointer=saver,
+        bridge=WorkerBridge(api_url="http://control:8000", worker_id="preflight-test"),
+    )
+    receipt = _resume_receipt(thread_id)
+
+    await graph.ainvoke({"answers": []}, config=config)
+    await _answer(graph, config, "request-alpha")
+
+    answered_again = await projector.pre_flight_resume(
+        thread_id,
+        graph,
+        cast("dict[str, Any]", config),
+        receipt,
+        resume_value={"request_id": "request-alpha", "verdict": "approved"},
+        timeout_seconds=10.0,
+    )
+
+    assert isinstance(answered_again, ResumeRefusal)
+    assert answered_again.cause is ResumeRefusalCause.REQUEST_NOT_PENDING
+    assert answered_again.pending_request_ids == ("request-beta",)
+
+    still_open = await projector.pre_flight_resume(
+        thread_id,
+        graph,
+        cast("dict[str, Any]", config),
+        receipt,
+        resume_value={"request_id": "request-beta", "verdict": "approved"},
+        timeout_seconds=10.0,
+    )
+
+    # One question left, so the answer needs no address - and LangGraph takes
+    # a bare value here, which is the reading this admission has to match.
+    assert isinstance(still_open, ResumeAdmission)
+    assert still_open.interrupt_id is None
+    settled = await graph.ainvoke(Command(resume="approved"), config=config)
+    assert sorted(settled["answers"]) == [
+        "request-alpha:approved",
+        "request-beta:approved",
+    ]
 
 
 def test_normalize_state_keeps_missing_configurable_metadata_optional() -> None:

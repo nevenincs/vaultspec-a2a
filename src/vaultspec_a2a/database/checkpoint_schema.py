@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CHECKPOINT_SCHEMA_DIGEST",
     "CHECKPOINT_SCHEMA_VERSION",
+    "LANGGRAPH_TABLE_COLUMNS",
     "CheckpointSchemaError",
     "checkpoint_pragmas",
     "install_checkpoint_schema_identity",
@@ -95,6 +96,17 @@ _LANGGRAPH_TABLES: Final[dict[str, TableSignature]] = {
         ("value", "BLOB", False, None, 0),
     ),
 }
+LANGGRAPH_TABLE_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
+    table: tuple(column[0] for column in signature)
+    for table, signature in _LANGGRAPH_TABLES.items()
+}
+"""Column names, in order, of the SQLite tables LangGraph's saver owns.
+
+Published for the code that writes statements against those tables directly:
+the saver offers no pruning of its own, and a statement written for this layout
+must not run against another one.
+"""
+
 _MARKER_SIGNATURE: Final[TableSignature] = (
     ("singleton", "INTEGER", True, None, 1),
     ("schema_version", "TEXT", True, None, 0),

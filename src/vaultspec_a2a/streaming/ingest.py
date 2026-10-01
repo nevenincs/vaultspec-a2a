@@ -1,8 +1,8 @@
 """Graph ingest lifecycle for the streaming event bus.
 
-Manages graph consumption (``astream_events``), cancellation events, and
-outcome classification.  Extracted from the monolithic ``aggregator.py``
-during the aggregator decomposition.
+Manages graph consumption through LangGraph's public ``astream`` stream modes,
+cancellation events, and outcome classification. Extracted from the monolithic
+``aggregator.py`` during the aggregator decomposition.
 """
 
 import asyncio
@@ -10,8 +10,10 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphDrained, GraphRecursionError, NodeTimeoutError
 from langgraph.types import Command
 
 from ..domain_config import domain_config
@@ -22,24 +24,46 @@ from ..providers.acp_exceptions import AcpPromptCancelledError
 from ..providers.conditions import condition_is_retryable
 from ..thread.enums import ThreadStatus
 from ..thread.errors import describe_exception_chain
+from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .transformer import (
+    STREAM_MODES,
     EventProjectionServices,
-    GraphInterrupt,
-    GraphRecursionError,
+    StreamFrame,
+    durable_loop_checkpoint_id,
     emit_interrupt_events,
-    process_langgraph_event,
+    frame_reports_interrupt,
+    process_stream_frame,
 )
 from .types import StreamableGraph
 
-__all__ = ["IngestManager", "summarize_ingest_exception"]
+#: One frame of a graph stream: the namespace it came from, the mode that
+#: produced it, and that mode's payload.
+type RawStreamFrame = tuple[Any, Any, Any]
+
+__all__ = ["INGEST_DRAINED", "IngestManager", "summarize_ingest_exception"]
+
+#: The outcome of a run that stopped at a superstep boundary because its worker
+#: asked it to drain. Not terminal: the checkpoint is resumable and the run's
+#: action stays open for recovery to deliver again.
+INGEST_DRAINED = "drained"
+
+#: Persist each superstep before the next one starts, rather than while it
+#: runs. Recovery here is checkpoint-first: a redelivered action is judged
+#: against the last committed checkpoint, and both the dispatch pre-flight and
+#: the drain contract read that checkpoint as the record of what the run
+#: already did. LangGraph's default, ``"async"``, persists a superstep while
+#: the next one executes and so may lose the most recent one to a crash -
+#: which would have this service re-run work its checkpoint never recorded,
+#: or settle a run on a checkpoint that is one superstep behind the truth.
+_RUN_DURABILITY = "sync"
 
 logger = logging.getLogger(__name__)
 
 
 class IngestStallTimeoutError(TimeoutError):
-    """Raised when ``astream_events`` produces no new event within the stall budget.
+    """Raised when the graph stream produces no new frame within the stall budget.
 
     A run whose graph genuinely wedges mid-turn (observed live: the
     ground/clarification interrupt path, cause still under investigation)
@@ -67,10 +91,10 @@ class IngestStallTimeoutError(TimeoutError):
 
 
 async def _cancel_event_read(
-    event_read: "asyncio.Future[dict[str, Any]]",
-    event_stream: AsyncIterator[dict[str, Any]],
+    event_read: "asyncio.Future[RawStreamFrame]",
+    event_stream: AsyncIterator[RawStreamFrame],
 ) -> None:
-    """Cancel a blocked next-event read and close a generator when it supports it."""
+    """Cancel a blocked next-frame read and close a generator when it supports it."""
     if not event_read.done():
         event_read.cancel()
     await asyncio.gather(event_read, return_exceptions=True)
@@ -80,12 +104,12 @@ async def _cancel_event_read(
 
 
 async def _next_event_or_cancel(
-    event_stream: AsyncIterator[dict[str, Any]],
+    event_stream: AsyncIterator[RawStreamFrame],
     cancel_event: asyncio.Event,
     *,
     stall_timeout: float,
-) -> tuple[dict[str, Any] | None, bool]:
-    """Wait for one graph event, cancellation, or the independent stall bound."""
+) -> tuple[RawStreamFrame | None, bool]:
+    """Wait for one graph frame, cancellation, or the independent stall bound."""
     next_event = asyncio.ensure_future(event_stream.__anext__())
     cancellation = asyncio.create_task(cancel_event.wait())
     try:
@@ -104,8 +128,8 @@ async def _next_event_or_cancel(
             return next_event.result(), False
         await _cancel_event_read(next_event, event_stream)
         raise IngestStallTimeoutError(
-            "Ingest stalled: astream_events produced no new "
-            f"event for over {stall_timeout:.0f}s"
+            "Ingest stalled: the graph stream produced no new "
+            f"frame for over {stall_timeout:.0f}s"
         )
     finally:
         if not cancellation.done():
@@ -140,11 +164,12 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
     the run's own operator would recognise as a fault.
 
     ``graph.step_timeout`` is the compiled Pregel attribute the compiler sets
-    from the team TOML (``graph/compiler.py``); it is absent from the
-    ``StreamableGraph`` protocol (a test double, or a graph compiled without a
-    configured step_timeout, need not carry it), so it is read defensively
-    and the global default is kept whenever it is missing or not the wider
-    bound.
+    from the team TOML (``graph/compiler.py``) as a backstop a grace above the
+    per-node run budget, so this bound always sits outside both. It is absent
+    from the ``StreamableGraph`` protocol (a test double, or a graph compiled
+    without a configured step_timeout, need not carry it), so it is read
+    defensively and the global default is kept whenever it is missing or not
+    the wider bound.
     """
     global_default = domain_config.ingest_event_stall_timeout_seconds
     node_step_timeout = getattr(graph, "step_timeout", None)
@@ -153,6 +178,48 @@ def _effective_stall_timeout(graph: StreamableGraph) -> float:
     ):
         return float(node_step_timeout) + _STEP_TIMEOUT_STALL_MARGIN_SECONDS
     return global_default
+
+
+def _run_durability(graph: StreamableGraph) -> str | None:
+    """Ask for synchronous checkpoints only on a run that keeps any.
+
+    LangGraph documents ``durability`` as having no effect without a
+    checkpointer and warns when one is passed anyway, but 1.2's asynchronous
+    stream then waits on a checkpoint future a run without a checkpointer
+    never creates, so the run dies with an ``AttributeError`` instead of
+    executing. A graph compiled without a checkpointer is therefore left on
+    the library default, which is what the documented semantics say it would
+    have got in any case.
+
+    ``checkpointer`` is absent from the streamable-graph protocol - a graph
+    need not carry one - so it is read defensively, and only a real saver
+    counts: the attribute also takes ``False`` (checkpointing off) and ``True``
+    (a subgraph inheriting its parent's), neither of which is a saver this run
+    would be writing through.
+    """
+    checkpointer = getattr(graph, "checkpointer", None)
+    return _RUN_DURABILITY if isinstance(checkpointer, BaseCheckpointSaver) else None
+
+
+def _config_with_run_callbacks(
+    config: dict[str, Any], handler: RunLifecycleCallbacks
+) -> dict[str, Any]:
+    """Seat this run's tool-lifecycle handler beside any callbacks it was given.
+
+    A tool call is a LangChain run rather than a graph superstep, so its start,
+    end and failure never appear in a graph stream mode; the callback surface
+    is where the library publishes them, and the run's config is where the
+    library documents seating one. Callbacks the caller already supplied are
+    kept: this run adds an observer, it does not take the channel over.
+    """
+    existing: object = config.get("callbacks")
+    if existing is None:
+        callbacks: list[object] = []
+    elif isinstance(existing, list):
+        callbacks = list(cast("list[object]", existing))
+    else:
+        callbacks = [existing]
+    return {**config, "callbacks": [*callbacks, handler]}
 
 
 def summarize_ingest_exception(exc: BaseException) -> str:
@@ -181,16 +248,28 @@ def _pending_graph_started_signal(
     cancel_event: asyncio.Event,
     on_graph_started: Callable[[], Awaitable[None]] | None,
 ) -> bool:
-    """Whether this event is the one that should fire the started callback."""
+    """Whether this frame is the one that should fire the started callback."""
     return not cancelled and not cancel_event.is_set() and on_graph_started is not None
 
 
-def _finalized_outcome(outcome: str, interrupt_emitted: bool, span: Any) -> str:
-    """Fold a state-observed interrupt into the outcome that already completed."""
-    if outcome == ThreadStatus.COMPLETED and interrupt_emitted:
-        span.set_attribute("interrupted_via_state", True)
-        return "interrupted"
-    return outcome
+def _receipt_is_due(
+    frame: StreamFrame,
+    cancelled: bool,
+    cancel_event: asyncio.Event,
+    on_graph_started: Callable[[], Awaitable[None]] | None,
+) -> bool:
+    """Whether this frame is the first committed checkpoint of the run's loop.
+
+    The application receipt reports that a dispatch was incorporated, and it
+    proves it by reading the incorporation back off a committed checkpoint. It
+    used to be triggered by the run's first event, which by construction
+    precedes every checkpoint, so the read found nothing and returned silently
+    and the receipt never reached the gateway before settle. A checkpoint
+    frame of the run's own loop is the earliest moment the proof exists.
+    """
+    if not _pending_graph_started_signal(cancelled, cancel_event, on_graph_started):
+        return False
+    return durable_loop_checkpoint_id(frame) is not None
 
 
 def _resolve_provider_condition(exc: BaseException) -> ProviderCondition:
@@ -240,6 +319,47 @@ class IngestRequest:
     graph_input: dict[str, Any] | Command[Any] | None
     config: dict[str, Any]
     on_graph_started: Callable[[], Awaitable[None]] | None = None
+    # The graph's LangGraph Runtime context for this invocation.
+    context: object | None = None
+    # The RunControl its worker can ask to drain the run through.
+    control: object | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _FinalizeInterrupt:
+    """What settling an interrupted run's outcome needs to know."""
+
+    thread_id: str
+    agent_id: str
+    graph: StreamableGraph
+    config: dict[str, Any]
+    outcome: str
+    stream_interrupted: bool
+    span: Any
+
+
+def _stream_frame(raw_event: RawStreamFrame) -> StreamFrame | None:
+    """Read one ``(namespace, mode, payload)`` frame off the graph stream.
+
+    ``subgraphs=True`` with several stream modes is the only shape this ingest
+    asks for, so every frame is that triple. A frame of any other shape is a
+    contract break rather than a variant to interpret, and is dropped with a
+    log instead of being guessed at.
+    """
+    if not isinstance(raw_event, tuple) or len(raw_event) != 3:
+        logger.warning("Unrecognised graph stream frame shape: %r", type(raw_event))
+        return None
+    namespace, mode, payload = raw_event
+    if not isinstance(mode, str):
+        logger.warning("Graph stream frame carried no mode: %r", type(mode))
+        return None
+    return StreamFrame(
+        namespace=tuple(cast("tuple[str, ...]", namespace))
+        if isinstance(namespace, tuple)
+        else (),
+        mode=mode,
+        payload=payload,
+    )
 
 
 @dataclass(slots=True)
@@ -260,6 +380,7 @@ class IngestManager:
         self._emitters = emitters
         self._buffering = buffering
         self._telemetry = telemetry
+        self._projection = EventProjectionServices(emitters, buffering, telemetry)
 
         # Per-thread cancellation events for ingest loops.
         self._cancel_events: dict[str, asyncio.Event] = {}
@@ -285,6 +406,22 @@ class IngestManager:
     # ------------------------------------------------------------------
     # Thread cancellation
     # ------------------------------------------------------------------
+
+    def run_lifecycle_callbacks(
+        self, thread_id: str, agent_id: str
+    ) -> RunLifecycleCallbacks:
+        """The tool and model-completion handler a run seats in its config."""
+        return RunLifecycleCallbacks(
+            thread_id, agent_id, self._emitters, self._buffering
+        )
+
+    async def project_frame(
+        self, frame: StreamFrame, *, thread_id: str, agent_id: str
+    ) -> None:
+        """Project one graph stream frame onto the run's event channels."""
+        await process_stream_frame(
+            frame, thread_id=thread_id, agent_id=agent_id, services=self._projection
+        )
 
     def cancel_thread(self, thread_id: str) -> None:
         """Persist cancellation so a concurrently starting ingest observes it."""
@@ -336,11 +473,11 @@ class IngestManager:
 
     async def _next_ingest_event(
         self,
-        event_stream: AsyncIterator[dict[str, Any]],
+        event_stream: AsyncIterator[RawStreamFrame],
         cancel_event: asyncio.Event,
         stall_timeout: float,
-    ) -> tuple[dict[str, Any] | None, bool, bool]:
-        """Return ``(raw_event, cancelled, exhausted)`` for one loop iteration.
+    ) -> tuple[RawStreamFrame | None, bool, bool]:
+        """Return ``(raw_frame, cancelled, exhausted)`` for one loop iteration.
 
         ``exhausted`` is set only on a genuine end of stream (not a
         cancellation racing it), which is the caller's cue to end the ingest
@@ -358,7 +495,7 @@ class IngestManager:
 
     async def _handle_ingest_cancellation(
         self,
-        event_stream: AsyncIterator[dict[str, Any]],
+        event_stream: AsyncIterator[RawStreamFrame],
         thread_id: str,
         agent_id: str,
         span: Any,
@@ -377,9 +514,10 @@ class IngestManager:
         )
 
     async def ingest(self, request: IngestRequest) -> str:
-        """Start consuming ``astream_events`` from a compiled graph.
+        """Consume a compiled graph through LangGraph's public stream modes.
 
-        Returns one of ``"completed"``, ``"interrupted"``, or ``"failed"``.
+        Returns one of ``"completed"``, ``"interrupted"``, ``"cancelled"``,
+        ``"drained"`` or ``"failed"``.
         """
         thread_id = request.thread_id
         agent_id = request.agent_id
@@ -391,6 +529,12 @@ class IngestManager:
         cancel_event = self._get_cancel_event(thread_id)
         _outcome = ThreadStatus.COMPLETED
         stall_timeout = _effective_stall_timeout(graph)
+        # Set only on the path that re-raises, so the closing work below knows
+        # not to await anything more on a run whose caller is unwinding.
+        task_cancelled = False
+        # Set the moment the stream says the run parked, so the outcome never
+        # depends on a state read taken after the stream ended.
+        stream_interrupted = False
         with self._telemetry.start_span(
             "aggregator.ingest",
             thread_id=thread_id,
@@ -398,30 +542,27 @@ class IngestManager:
         ) as span:
             try:
                 # Bounded manual iteration, not `async for`: a plain `async for`
-                # trusts astream_events to eventually yield, raise, or exhaust on
-                # its own. Race every blocked next-event read against the local
+                # trusts the stream to eventually yield, raise, or exhaust on
+                # its own. Race every blocked next-frame read against the local
                 # cancellation event as well as the independent watchdog, so a
                 # cancellation never depends on the graph yielding another frame.
-                event_stream = graph.astream_events(
+                event_stream = graph.astream(
                     graph_input,
-                    config,
-                    version="v2",
+                    _config_with_run_callbacks(
+                        config, self.run_lifecycle_callbacks(thread_id, agent_id)
+                    ),
+                    stream_mode=list(STREAM_MODES),
+                    subgraphs=True,
+                    context=request.context,
+                    control=request.control,
+                    durability=_run_durability(graph),
                 ).__aiter__()
-                services = EventProjectionServices(
-                    self._emitters, self._buffering, self._telemetry
-                )
                 while True:
                     raw_event, cancelled, exhausted = await self._next_ingest_event(
                         event_stream, cancel_event, stall_timeout
                     )
                     if exhausted:
                         break
-                    if _pending_graph_started_signal(
-                        cancelled, cancel_event, on_graph_started
-                    ):
-                        assert on_graph_started is not None
-                        await on_graph_started()
-                        on_graph_started = None
                     if cancelled or cancel_event.is_set():
                         await self._handle_ingest_cancellation(
                             event_stream, thread_id, agent_id, span
@@ -429,31 +570,101 @@ class IngestManager:
                         _outcome = ThreadStatus.CANCELLED
                         break
                     if raw_event is None:
-                        raise RuntimeError("event read completed without an event")
-                    await process_langgraph_event(
-                        event_data=raw_event,
-                        thread_id=thread_id,
-                        agent_id=agent_id,
-                        services=services,
+                        raise RuntimeError("frame read completed without a frame")
+                    frame = _stream_frame(raw_event)
+                    if frame is None:
+                        continue
+                    stream_interrupted = stream_interrupted or frame_reports_interrupt(
+                        frame
                     )
+                    if _receipt_is_due(
+                        frame, cancelled, cancel_event, on_graph_started
+                    ):
+                        assert on_graph_started is not None
+                        await on_graph_started()
+                        on_graph_started = None
+                    await self.project_frame(
+                        frame, thread_id=thread_id, agent_id=agent_id
+                    )
+            except asyncio.CancelledError:
+                # A cancelled run is not a failed run. The worker's own
+                # lifespan cancels whatever is still mid-turn when the drain
+                # budget runs out, and the drain contract says that run's open
+                # action is delivered again; classifying the cancellation as a
+                # provider failure instead persisted a FAILED terminal for a
+                # run nothing had failed, and logged a provider error for it.
+                # Swallowing it is also what let an outer timeout around
+                # ingest return a settled-looking outcome, so it is re-raised
+                # for whoever asked for the cancellation to observe.
+                task_cancelled = True
+                logger.info("Ingest cancelled for thread %s", thread_id)
+                span.set_attribute("cancelled", True)
+                span.set_attribute("cancelled.by", "task")
+                raise
             except BaseException as exc:
                 _outcome = await self._handle_ingest_failure(
                     (thread_id, agent_id), exc, stall_timeout, span
                 )
             finally:
                 self._clear_cancel_event(thread_id)
-                await self._buffering.flush_chunk_buffer(thread_id)
                 self._buffering.prune_tool_debounce(thread_id)
-                interrupt_emitted = await emit_interrupt_events(
-                    thread_id, agent_id, graph, config, self._emitters
-                )
-                _outcome = _finalized_outcome(_outcome, interrupt_emitted, span)
+                # Neither the buffer flush nor the state read can be awaited
+                # on the cancelled path: under a cancel scope every await
+                # raises at once, and a state read taken while the run is
+                # being torn down describes nothing the outcome may rest on.
+                if not task_cancelled:
+                    await self._buffering.flush_chunk_buffer(thread_id)
+                    _outcome = await self._finalize_interrupt(
+                        _FinalizeInterrupt(
+                            thread_id=thread_id,
+                            agent_id=agent_id,
+                            graph=graph,
+                            config=config,
+                            outcome=_outcome,
+                            stream_interrupted=stream_interrupted,
+                            span=span,
+                        )
+                    )
                 self._telemetry.record_histogram(
                     "aggregator.ingest_duration_seconds",
                     time.monotonic() - start,
                     thread_id=thread_id,
                 )
         return _outcome
+
+    async def _finalize_interrupt(self, request: _FinalizeInterrupt) -> str:
+        """Settle an interrupted run's outcome and project what it asked for.
+
+        The stream is the authority on whether the run parked: it reports a
+        park as it happens, so a state read that times out can no longer turn
+        an interrupted run into a completed one. The read is still made, but
+        only to recover the interrupts' payloads for the permission and
+        clarification frames; when it fails, the run is still reported
+        interrupted and the client recovers the questions from run-status,
+        which projects them from the live checkpoint.
+        """
+        span = request.span
+        if not request.stream_interrupted:
+            return request.outcome
+        span.set_attribute("interrupted", True)
+        projected = await emit_interrupt_events(
+            request.thread_id,
+            request.agent_id,
+            request.graph,
+            request.config,
+            self._emitters,
+        )
+        if not projected:
+            logger.warning(
+                "Thread %s parked on an interrupt whose payload could not be "
+                "read back; the run is reported interrupted and its questions "
+                "are recoverable from run status",
+                request.thread_id,
+            )
+            span.set_attribute("interrupt.payload_projected", False)
+        if request.outcome == ThreadStatus.COMPLETED:
+            return "interrupted"
+        return request.outcome
 
     async def _report_ingest_error(
         self,
@@ -502,9 +713,7 @@ class IngestManager:
         span: Any,
     ) -> str | None:
         thread_id, _ = identity
-        if (
-            GraphRecursionError is not None and isinstance(exc, GraphRecursionError)
-        ) or (exc.__class__.__name__ == "GraphRecursionError"):
+        if isinstance(exc, GraphRecursionError):
             logger.warning("Graph recursion limit reached for thread %s", thread_id)
             return await self._report_ingest_error(
                 identity,
@@ -528,6 +737,27 @@ class IngestManager:
                 identity,
                 span,
                 (str(exc), "INGEST_STALL_TIMEOUT", True, "ingest_stall_timeout"),
+            )
+        if isinstance(exc, NodeTimeoutError):
+            # Reported under the step-timeout code clients already know; the
+            # message is what gains the node and the limit it hit.
+            logger.warning(
+                "Node %s exceeded its %s timeout after %.0fs for thread %s",
+                exc.node,
+                exc.kind,
+                exc.elapsed,
+                thread_id,
+            )
+            return await self._report_ingest_error(
+                identity,
+                span,
+                (
+                    f"Graph node {exc.node!r} exceeded its {exc.kind} timeout "
+                    f"after {exc.elapsed:.0f}s - the operation may be retried",
+                    "STEP_TIMEOUT",
+                    True,
+                    "node_timeout",
+                ),
             )
         if isinstance(exc, TimeoutError):
             logger.warning("Graph step_timeout fired for thread %s", thread_id)
@@ -565,14 +795,14 @@ class IngestManager:
                 detail="Provider cancelled the turn",
             )
             return ThreadStatus.CANCELLED
-        if (GraphInterrupt is not None and isinstance(exc, GraphInterrupt)) or (
-            exc.__class__.__name__ == "GraphInterrupt"
-        ):
+        if isinstance(exc, GraphDrained):
             logger.info(
-                "Graph interrupted for thread %s (awaiting approval)", thread_id
+                "Graph drained for thread %s at a superstep boundary (%s)",
+                thread_id,
+                exc.reason,
             )
-            span.set_attribute("interrupted", True)
-            return "interrupted"
+            span.set_attribute("drained", True)
+            return INGEST_DRAINED
         graph_outcome = await self._report_graph_failure(
             identity, exc, stall_timeout, span
         )

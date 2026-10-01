@@ -42,6 +42,7 @@ from typing import NoReturn, TypeGuard, cast
 
 from ..control.state_layout import seal_state_home, state_layout
 from ..utils.atomic_write import atomic_write_text
+from ..utils.file_lock import open_lock_file, release_lock, try_lock
 from .discovery import is_pid_alive
 from .registry import now_ms
 
@@ -367,41 +368,6 @@ def classify_app_home(
     return SingletonState.FOREIGN, record
 
 
-def _try_lock(fd: int) -> bool:
-    """Take a non-blocking exclusive lock on byte zero; ``True`` when granted."""
-    if sys.platform == "win32":
-        import msvcrt
-
-        os.lseek(fd, 0, os.SEEK_SET)
-        try:
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-        except OSError:
-            return False
-        return True
-    import fcntl
-
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return False
-    return True
-
-
-def _unlock(fd: int) -> None:
-    """Release the byte-zero lock. POSIX ``flock`` also releases on close."""
-    if sys.platform == "win32":
-        import msvcrt
-
-        os.lseek(fd, 0, os.SEEK_SET)
-        with contextlib.suppress(OSError):
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        return
-    import fcntl
-
-    with contextlib.suppress(OSError):
-        fcntl.flock(fd, fcntl.LOCK_UN)
-
-
 @dataclass(slots=True)
 class RuntimeSingleton:
     """A held runtime singleton. Release with :meth:`release` or as a context manager.
@@ -433,7 +399,7 @@ class RuntimeSingleton:
         if self._released:
             return
         self._released = True
-        _unlock(self._fd)
+        release_lock(self._fd)
         with contextlib.suppress(OSError):
             os.close(self._fd)
         record_path = singleton_record_path(self.app_home)
@@ -461,7 +427,7 @@ def _acquire_lock_or_conflict(fd: int, record_path: Path) -> bool:
     """
     deadline = time.monotonic() + _ORPHAN_LOCK_TIMEOUT_S
     while True:
-        if _try_lock(fd):
+        if try_lock(fd):
             return True
         prior = _read_record(record_path)
         if prior is not None and recorded_process_is_live(prior):
@@ -505,7 +471,7 @@ def _reject_foreign_record(
     if prior is None or prior.owner == principal:
         return
     prior_is_live = recorded_process_is_live(prior)
-    _unlock(fd)
+    release_lock(fd)
     os.close(fd)
     if prior_is_live:
         raise SingletonConflictError(
@@ -548,7 +514,7 @@ def acquire_singleton(app_home: Path, *, owner: str | None = None) -> RuntimeSin
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        fd = open_lock_file(lock_path)
     except OSError as exc:
         raise SingletonError(
             f"could not open the desktop runtime singleton lock at {lock_path}: {exc}"
@@ -573,7 +539,7 @@ def acquire_singleton(app_home: Path, *, owner: str | None = None) -> RuntimeSin
     try:
         _write_record(record_path, record)
     except OSError as exc:
-        _unlock(fd)
+        release_lock(fd)
         os.close(fd)
         raise SingletonError(
             f"acquired the desktop runtime singleton lock but could not publish its "

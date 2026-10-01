@@ -23,6 +23,7 @@ from ..graph.enums import AgentLifecycleState, ToolCallStatus, ToolKind
 from ..graph.events import DomainEvent, PermissionRequest
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..providers import ProviderCondition
+from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .ingest import IngestManager, IngestRequest
@@ -66,12 +67,16 @@ class _IngestOptions(TypedDict, total=False):
     graph_input: dict[str, Any] | Command[Any] | None
     config: dict[str, Any]
     on_graph_started: Callable[[], Awaitable[None]] | None
+    context: object | None
+    control: object | None
 
 
 def _validate_ingest_arguments(
     args: tuple[object, ...], options: _IngestOptions
 ) -> None:
-    unknown = set(options).difference({"graph_input", "config", "on_graph_started"})
+    unknown = set(options).difference(
+        {"graph_input", "config", "on_graph_started", "context", "control"}
+    )
     if unknown:
         unexpected = next(iter(unknown))
         raise TypeError(
@@ -150,6 +155,9 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
 
     def remove_subscriber(self, client_id: str) -> None:
         self._subscribers_mgr.remove_subscriber(client_id)
+
+    def take_dropped_count(self, client_id: str) -> int:
+        return self._subscribers_mgr.take_dropped_count(client_id)
 
     def subscribe(self, client_id: str, thread_ids: list[str]) -> None:
         self._subscribers_mgr.subscribe(client_id, thread_ids)
@@ -376,24 +384,30 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
     ) -> None:
         await self._emitters.emit_team_status(thread_id, agents, active_thread_ids)
 
-    # -- LangGraph event processing (delegates to transformer/ingest) ---
+    # -- LangGraph stream processing (delegates to transformer/ingest) ---
 
-    async def process_langgraph_event(
+    async def process_stream_frame(
         self,
-        event_data: dict[str, Any],
+        namespace: tuple[str, ...],
+        mode: str,
+        payload: object,
         thread_id: str,
         agent_id: str,
     ) -> None:
-        from .transformer import EventProjectionServices, process_langgraph_event
+        """Project one ``(namespace, mode, payload)`` graph stream frame."""
+        from .transformer import StreamFrame
 
-        await process_langgraph_event(
-            event_data=event_data,
+        await self._ingest.project_frame(
+            StreamFrame(namespace=namespace, mode=mode, payload=payload),
             thread_id=thread_id,
             agent_id=agent_id,
-            services=EventProjectionServices(
-                self._emitters, self._buffering, self._telemetry
-            ),
         )
+
+    def run_lifecycle_callbacks(
+        self, thread_id: str, agent_id: str
+    ) -> RunLifecycleCallbacks:
+        """The tool and model-completion handler a run seats in its config."""
+        return self._ingest.run_lifecycle_callbacks(thread_id, agent_id)
 
     # -- Ingest (delegates to ingest manager) ---------------------------
 
@@ -441,6 +455,8 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
                 graph_input,
                 config,
                 options.get("on_graph_started"),
+                options.get("context"),
+                options.get("control"),
             )
         )
 

@@ -30,6 +30,7 @@ from ..streaming.types import classify_tool_kind
 from ..thread.enums import (
     TERMINAL_STATUS_VALUES,
     ApprovalStatus,
+    DegradedReason,
     RepairStatus,
     ThreadStatus,
 )
@@ -579,11 +580,14 @@ async def enrich_snapshot_from_durable_state(
 
 
 def _mark_execution_projection_unavailable(
-    snapshot: ThreadStateData, reason: str, *, repair_required: bool = False
+    snapshot: ThreadStateData,
+    reason: DegradedReason,
+    *,
+    repair_required: bool = False,
 ) -> None:
     snapshot.snapshot_complete = False
-    if reason not in snapshot.degraded_reasons:
-        snapshot.degraded_reasons.append(reason)
+    if reason.value not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append(reason.value)
     if repair_required:
         snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
         snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
@@ -626,7 +630,7 @@ async def enrich_snapshot_from_execution_state(
     if row is None:
         if checkpoint_present:
             _mark_execution_projection_unavailable(
-                snapshot, "execution_state_projection_missing"
+                snapshot, DegradedReason.EXECUTION_STATE_PROJECTION_MISSING
             )
         return snapshot
 
@@ -634,7 +638,9 @@ async def enrich_snapshot_from_execution_state(
         projection = project_execution_state_model(row)
     except ValueError:
         _mark_execution_projection_unavailable(
-            snapshot, "execution_state_projection_unreadable", repair_required=True
+            snapshot,
+            DegradedReason.EXECUTION_STATE_PROJECTION_UNREADABLE,
+            repair_required=True,
         )
         return snapshot
 

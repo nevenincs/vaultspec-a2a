@@ -23,7 +23,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -40,9 +39,8 @@ from ...control.cancel_service import CancelResult, CancelRuntime, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
-from ...control.message_service import MessageResult, send_followup_message
+from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
@@ -53,7 +51,7 @@ from ...database import (
     get_thread,
     record_permission_request,
 )
-from ...database.models import Base, RecoveryAttemptModel, ThreadModel
+from ...database.models import Base, ThreadModel
 from ...database.session import begin_write_transaction, configure_sqlite_engine
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
@@ -341,130 +339,69 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
     assert action.applied_at is None
 
 
+@pytest.mark.parametrize(
+    "status",
+    [ThreadStatus.SUBMITTED, ThreadStatus.RUNNING, ThreadStatus.CANCELLING],
+)
 @pytest.mark.asyncio
-async def test_concurrent_identical_custom_key_messages_dispatch_once(
+async def test_a_followup_reserves_nothing_while_the_run_owns_a_turn(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    status: ThreadStatus,
 ) -> None:
-    thread_id = "identical-message-thread"
-    custom_key = "client-message-retry"
-    await _running_thread(session_factory, thread_id, team_preset="mock-success-single")
+    """Occupancy is decided before the lease, so the refusal writes nothing.
 
-    async with _worker_runtime(
-        tmp_path / "identical-message-checkpoints.db",
-        receipt_threads=(thread_id,),
-    ) as (worker_client, worker_app, bridge, checkpointer):
+    A follow-up admitted onto an occupied run took that run's write authority
+    from the turn already executing, and the executing turn's own completion was
+    then refused as superseded evidence, quarantining the run. The refusal has
+    to precede the reservation for that to be fixed rather than moved, so this
+    reads the durable side afterwards: no journal action under the key, no
+    writer transition, and no dispatch id admitted by a REAL worker that is
+    running and would have taken one.
+    """
+    thread_id = f"busy-{status.value}-thread"
+    async with session_factory() as db:
+        await _create_current_thread(db, thread_id=thread_id, status=status)
+        await db.commit()
 
-        async def send() -> MessageResult:
-            async with session_factory() as db:
-                return await send_followup_message(
-                    db,
-                    thread_id=thread_id,
-                    content="continue with the audit",
-                    agent_id="vaultspec-supervisor",
-                    idempotency_key=custom_key,
-                    circuit_breaker=_circuit_breaker(),
-                    worker_spawner=_spawner(),
-                    worker_client=worker_client,
-                    recursion_limit=25,
-                    trace_headers=None,
-                )
+    async with session_factory() as db:
+        before = await get_thread(db, thread_id)
+        assert before is not None
+        requested_before = before.last_requested_action
 
-        first, second = await asyncio.gather(send(), send())
-        assert sum(result.dispatched for result in (first, second)) == 1
-        assert first.action_id == second.action_id
-        assert len(worker_app.state.dispatch_ids) == 1
-
-        async with session_factory() as db:
-            action = await get_control_action_by_idempotency_key(
-                db, thread_id=thread_id, idempotency_key=custom_key
-            )
-        assert action is not None
-        assert action.dispatch_id in worker_app.state.dispatch_ids
-        assert action.applied_at is None
-
-        receipt: dict[str, object] | None = None
-        with anyio.fail_after(5.0):
-            while receipt is None:
-                buffered = cast(
-                    "list[dict[str, object]]",
-                    getattr(bridge, "_event_buffer", []),
-                )
-                relayed = cast(
-                    "list[dict[str, object]]",
-                    worker_app.state.relayed_events,
-                )
-                for item in [*buffered, *relayed]:
-                    candidate = item.get("payload")
-                    candidate_mapping = (
-                        cast("dict[str, object]", candidate)
-                        if isinstance(candidate, dict)
-                        else None
-                    )
-                    if (
-                        candidate_mapping is not None
-                        and candidate_mapping.get("type") == "dispatch_applied"
-                        and candidate_mapping.get("dispatch_id") == action.dispatch_id
-                    ):
-                        receipt = candidate_mapping
-                        break
-                if receipt is None:
-                    await anyio.sleep(0.01)
-
-        await relay_event(
-            thread_id,
-            receipt,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-        )
-        async with session_factory() as db:
-            settled = await get_control_action_by_idempotency_key(
-                db, thread_id=thread_id, idempotency_key=custom_key
-            )
-        assert settled is not None
-        assert settled.applied_at is not None
-        assert settled.claim_token is None
-
-
-@pytest.mark.asyncio
-async def test_competing_same_key_messages_conflict_and_dispatch_once(
-    tmp_path: Path,
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    thread_id = "competing-message-thread"
-    custom_key = "client-competing-retry"
-    await _running_thread(session_factory, thread_id)
-
-    async with _worker_runtime(tmp_path / "competing-message-checkpoints.db") as (
+    async with _worker_runtime(tmp_path / f"busy-{status.value}.db") as (
         worker_client,
         worker_app,
         _bridge,
         _checkpointer,
     ):
+        async with session_factory() as db:
+            result = await send_followup_message(
+                db,
+                thread_id=thread_id,
+                content="second turn",
+                agent_id="vaultspec-supervisor",
+                idempotency_key="busy-refusal-key",
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=_spawner(),
+                worker_client=worker_client,
+                recursion_limit=25,
+                trace_headers=None,
+            )
+        assert result.dispatched is False
+        assert result.failure_type is FailureType.RUN_BUSY
+        assert result.action_id == ""
+        assert len(worker_app.state.dispatch_ids) == 0
 
-        async def send(content: str) -> MessageResult:
-            async with session_factory() as db:
-                return await send_followup_message(
-                    db,
-                    thread_id=thread_id,
-                    content=content,
-                    agent_id="vaultspec-supervisor",
-                    idempotency_key=custom_key,
-                    circuit_breaker=_circuit_breaker(),
-                    worker_spawner=_spawner(),
-                    worker_client=worker_client,
-                    recursion_limit=25,
-                    trace_headers=None,
-                )
-
-        first, second = await asyncio.gather(send("approve"), send("reject"))
-        assert sum(result.dispatched for result in (first, second)) == 1
-        assert {first.failure_type, second.failure_type} == {
-            None,
-            FailureType.CONFLICT,
-        }
-        assert first.action_id == second.action_id
-        assert len(worker_app.state.dispatch_ids) == 1
+    async with session_factory() as db:
+        action = await get_control_action_by_idempotency_key(
+            db, thread_id=thread_id, idempotency_key="busy-refusal-key"
+        )
+        after = await get_thread(db, thread_id)
+    assert action is None
+    assert after is not None
+    assert after.status == status.value
+    assert after.last_requested_action == requested_before
 
 
 @pytest.mark.asyncio
@@ -558,92 +495,6 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
             )
         assert action is not None
         assert action.dispatch_id in worker_app.state.dispatch_ids
-
-
-@pytest.mark.asyncio
-async def test_message_definite_failure_releases_and_ambiguous_failure_retains(
-    tmp_path: Path,
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    definite_thread = "definite-message-thread"
-    ambiguous_thread = "ambiguous-message-thread"
-    await _running_thread(session_factory, definite_thread)
-    await _running_thread(session_factory, ambiguous_thread)
-
-    async with _worker_runtime(tmp_path / "failure-checkpoints.db") as (
-        worker_client,
-        worker_app,
-        _bridge,
-        _checkpointer,
-    ):
-        breaker = _circuit_breaker()
-        breaker.force_open()
-        async with session_factory() as db:
-            definite = await send_followup_message(
-                db,
-                thread_id=definite_thread,
-                content="definite",
-                agent_id="vaultspec-supervisor",
-                idempotency_key="definite-key",
-                circuit_breaker=breaker,
-                worker_spawner=_spawner(),
-                worker_client=worker_client,
-                recursion_limit=25,
-                trace_headers=None,
-            )
-        assert definite.failure_type is FailureType.CIRCUIT_OPEN
-        assert len(worker_app.state.dispatch_ids) == 0
-
-    async with (
-        httpx.AsyncClient(
-            base_url="http://127.0.0.1:1", timeout=0.2
-        ) as unreachable_client,
-        session_factory() as db,
-    ):
-        ambiguous = await send_followup_message(
-            db,
-            thread_id=ambiguous_thread,
-            content="ambiguous",
-            agent_id="vaultspec-supervisor",
-            idempotency_key="ambiguous-key",
-            circuit_breaker=_circuit_breaker(),
-            worker_spawner=_spawner("http://127.0.0.1:1"),
-            worker_client=unreachable_client,
-            recursion_limit=25,
-            trace_headers=None,
-        )
-    assert ambiguous.failure_type is FailureType.UNREACHABLE
-
-    async with session_factory() as db:
-        definite_action = await get_control_action_by_idempotency_key(
-            db, thread_id=definite_thread, idempotency_key="definite-key"
-        )
-        ambiguous_action = await get_control_action_by_idempotency_key(
-            db, thread_id=ambiguous_thread, idempotency_key="ambiguous-key"
-        )
-        attempts = (
-            (
-                await db.execute(
-                    select(RecoveryAttemptModel).where(
-                        RecoveryAttemptModel.thread_id.in_(
-                            {definite_thread, ambiguous_thread}
-                        )
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-    assert definite_action is not None
-    assert definite_action.claim_token is None
-    assert definite_action.claim_expires_at is None
-    assert ambiguous_action is not None
-    assert ambiguous_action.claim_token is not None
-    assert ambiguous_action.claim_expires_at is not None
-    assert {attempt.thread_id: attempt.condition for attempt in attempts} == {
-        definite_thread: "circuit_open",
-        ambiguous_thread: "unreachable",
-    }
 
 
 @pytest.mark.asyncio

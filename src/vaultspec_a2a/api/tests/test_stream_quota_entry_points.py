@@ -28,7 +28,7 @@ import pytest
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ThreadStatus
-from ..thread_stream import _stream_thread_events
+from ..thread_stream import ThreadStreamRequest, _stream_thread_events
 from .conftest import seed_run_with_status
 
 if TYPE_CHECKING:
@@ -63,9 +63,11 @@ async def test_a_stream_refused_at_registration_is_told_why(
     frames = [
         frame
         async for frame in _stream_thread_events(
-            aggregator=aggregator,
-            thread_id="run-1",
-            session_factory=session_factory,
+            ThreadStreamRequest(
+                thread_id="run-1",
+                aggregator=aggregator,
+                session_factory=session_factory,
+            )
         )
     ]
 
@@ -96,9 +98,11 @@ async def test_a_served_stream_gives_its_slot_back_and_spares_the_held_ones(
     frames = [
         frame
         async for frame in _stream_thread_events(
-            aggregator=aggregator,
-            thread_id="run-terminal",
-            session_factory=session_factory,
+            ThreadStreamRequest(
+                thread_id="run-terminal",
+                aggregator=aggregator,
+                session_factory=session_factory,
+            )
         )
     ]
 

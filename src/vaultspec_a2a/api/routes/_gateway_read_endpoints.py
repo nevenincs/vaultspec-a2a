@@ -92,7 +92,11 @@ from ..schemas.gateway import (
     TopologyPosition,
 )
 from ..schemas.snapshots import ThreadStateSnapshot
-from ..thread_stream import build_thread_stream_response, offered_resume_cursor
+from ..thread_stream import (
+    ThreadStreamRequest,
+    build_thread_stream_response,
+    offered_resume_cursor,
+)
 from ..workspace import require_existing_workspace_root
 from .gateway import (
     _modern_frozen_disclosure,
@@ -480,13 +484,15 @@ async def run_stream_endpoint(
     was live.
     """
     return await build_thread_stream_response(
+        ThreadStreamRequest(
+            thread_id=run_id,
+            aggregator=aggregator,
+            session_factory=resolve_session_factory(request.app.state),
+            resume_cursor=offered_resume_cursor(last_event_id_header, last_event_id),
+            replay_writer=replay_writer_seat(request.app),
+            not_found_detail="Run not found",
+        ),
         db=db,
-        session_factory=resolve_session_factory(request.app.state),
-        aggregator=aggregator,
-        thread_id=run_id,
-        not_found_detail="Run not found",
-        resume_cursor=offered_resume_cursor(last_event_id_header, last_event_id),
-        replay_writer=replay_writer_seat(request.app),
     )
 
 

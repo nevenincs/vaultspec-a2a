@@ -25,7 +25,7 @@ from ...streaming.subscribers import SequenceAllocation
 from ...testing import settings_override
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
-from ..thread_stream import _replay_window, _ResumePosition
+from .._stream_replay import ResumePosition, replay_window
 from ._sse_reader import SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
 from .test_stream_resume_replay import _progress_event, _relay, _terminal_event
@@ -307,11 +307,11 @@ async def test_a_ring_overflow_leaves_a_hole_the_window_reports(
     ]
     assert retained == [1, 2, 9, 10, 11, 12], "the overflow did not leave a hole"
 
-    window = await _replay_window(
+    window = await replay_window(
         session_factory=session_factory,
         writer=writer,
         thread_id=_RUN,
-        resume=_ResumePosition(after_sequence=1, from_window_start=False),
+        resume=ResumePosition(after_sequence=1, from_window_start=False),
     )
     await writer.aclose()
 
@@ -339,20 +339,20 @@ async def test_the_window_sentinel_is_still_told_about_a_hole_inside_the_window(
         _record(writer, sequence)
     assert await writer.flush() == 4
 
-    holed = await _replay_window(
+    holed = await replay_window(
         session_factory=session_factory,
         writer=writer,
         thread_id=_RUN,
-        resume=_ResumePosition(after_sequence=0, from_window_start=True),
+        resume=ResumePosition(after_sequence=0, from_window_start=True),
     )
     assert holed.gap_reason == "replay_window_exceeded"
     assert holed.first_sequence == 9
 
-    whole = await _replay_window(
+    whole = await replay_window(
         session_factory=session_factory,
         writer=writer,
         thread_id=_RUN,
-        resume=_ResumePosition(after_sequence=8, from_window_start=True),
+        resume=ResumePosition(after_sequence=8, from_window_start=True),
     )
     await writer.aclose()
 
@@ -381,11 +381,11 @@ async def test_a_retained_row_that_cannot_be_decoded_counts_as_a_hole(
         )
         await session.commit()
 
-    window = await _replay_window(
+    window = await replay_window(
         session_factory=session_factory,
         writer=None,
         thread_id=_RUN,
-        resume=_ResumePosition(after_sequence=0, from_window_start=True),
+        resume=ResumePosition(after_sequence=0, from_window_start=True),
     )
 
     assert window.gap_reason == "replay_window_exceeded"

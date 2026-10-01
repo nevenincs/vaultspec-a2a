@@ -22,6 +22,10 @@ one, which would prove nothing about the gateway. What is testable is the
 invariant that makes such a raise harmless: the registered window is enclosed by
 the cleanup guard, exercised below through a normal completion and through a
 client that abandons the stream mid-flight.
+
+The guard now spans the refusals as well, which are the exits that never reach
+registration at all. Releasing is a pop, so a refused stream must remove
+nothing - neither a slot it never took nor another viewer's.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ import pytest
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ThreadStatus
-from ..thread_stream import _stream_thread_events
+from ..thread_stream import ThreadStreamRequest, _stream_thread_events
 from .conftest import seed_run_with_status
 
 if TYPE_CHECKING:
@@ -75,9 +79,11 @@ async def test_a_finished_stream_hands_its_slot_to_the_next_caller(
     frames = [
         frame
         async for frame in _stream_thread_events(
-            aggregator=aggregator,
-            thread_id="run-finished",
-            session_factory=session_factory,
+            ThreadStreamRequest(
+                thread_id="run-finished",
+                aggregator=aggregator,
+                session_factory=session_factory,
+            )
         )
     ]
 
@@ -86,6 +92,50 @@ async def test_a_finished_stream_hands_its_slot_to_the_next_caller(
     assert b"thread_terminal" in frames[1]
     assert aggregator.subscriber_count() == limit - 1
     assert aggregator.get_active_thread_ids() == []
+
+    aggregator.add_subscriber("newcomer")
+    assert aggregator.subscriber_count() == limit
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_a_refused_cursor_takes_no_slot_and_releases_nobody_elses(
+    session_factory: SessionFactory,
+) -> None:
+    """A stream refused before registration must leave the registry untouched.
+
+    The cursor refusal happens ahead of ``add_subscriber``, so this stream
+    never owns a slot - and the cleanup guard that encloses every other exit
+    runs on this one too. Unregistering an id that never registered has to
+    remove nothing: the free slot must still be free, and every held viewer
+    must still hold its own queue. A release that reached further than its own
+    client would turn a bad cursor into an outage for the viewers that arrived
+    first.
+    """
+    aggregator = EventAggregator()
+    limit = domain_config.max_stream_connections
+    _occupy(aggregator, limit - 1, prefix="held")
+    await seed_run_with_status(session_factory, "run-refused", ThreadStatus.RUNNING)
+
+    frames = [
+        frame
+        async for frame in _stream_thread_events(
+            ThreadStreamRequest(
+                thread_id="run-refused",
+                aggregator=aggregator,
+                session_factory=session_factory,
+                resume_cursor="some-other-run:4",
+            )
+        )
+    ]
+
+    assert len(frames) == 1
+    assert b"stream_rejected" in frames[0]
+    assert b"resume_cursor_foreign_run" in frames[0]
+
+    assert aggregator.subscriber_count() == limit - 1
+    assert aggregator.get_active_thread_ids() == []
+    for index in range(limit - 1):
+        assert aggregator.get_subscriber_queue(f"held-{index}") is not None
 
     aggregator.add_subscriber("newcomer")
     assert aggregator.subscriber_count() == limit
@@ -109,9 +159,11 @@ async def test_a_stream_abandoned_mid_flight_hands_its_slot_to_the_next_caller(
     await seed_run_with_status(session_factory, "run-abandoned", ThreadStatus.RUNNING)
 
     stream = _stream_thread_events(
-        aggregator=aggregator,
-        thread_id="run-abandoned",
-        session_factory=session_factory,
+        ThreadStreamRequest(
+            thread_id="run-abandoned",
+            aggregator=aggregator,
+            session_factory=session_factory,
+        )
     )
     task = asyncio.create_task(_drain(stream))
 

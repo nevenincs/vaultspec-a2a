@@ -31,7 +31,7 @@ from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...testing.environment import settings_override
 from ...thread.enums import ThreadStatus
-from ..thread_stream import _stream_thread_events
+from ..thread_stream import ThreadStreamRequest, _stream_thread_events
 from .conftest import seed_run_with_status
 
 if TYPE_CHECKING:
@@ -102,9 +102,11 @@ async def test_a_viewer_is_subscribed_before_it_is_told_the_run_state(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     stream = _stream_thread_events(
-        aggregator=aggregator,
-        thread_id=_RUN,
-        session_factory=session_factory,
+        ThreadStreamRequest(
+            thread_id=_RUN,
+            aggregator=aggregator,
+            session_factory=session_factory,
+        )
     )
     try:
         snapshot = _frame(await anext(stream))
@@ -144,9 +146,11 @@ async def test_no_frame_claims_an_sse_id_the_stream_cannot_resume_from(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     stream = _stream_thread_events(
-        aggregator=aggregator,
-        thread_id=_RUN,
-        session_factory=session_factory,
+        ThreadStreamRequest(
+            thread_id=_RUN,
+            aggregator=aggregator,
+            session_factory=session_factory,
+        )
     )
     try:
         snapshot_raw = await anext(stream)
@@ -178,9 +182,11 @@ async def test_a_run_that_settles_unheard_still_closes_the_stream(
 
     with settings_override(stream_heartbeat_interval_seconds=0.05):
         stream = _stream_thread_events(
-            aggregator=aggregator,
-            thread_id=_RUN,
-            session_factory=session_factory,
+            ThreadStreamRequest(
+                thread_id=_RUN,
+                aggregator=aggregator,
+                session_factory=session_factory,
+            )
         )
         try:
             assert _frame(await anext(stream))["type"] == "stream_snapshot"
@@ -231,9 +237,11 @@ async def test_a_viewer_that_overflows_its_queue_is_told_to_resynchronize(
     overflow = domain_config.event_queue_maxsize + 8
 
     stream = _stream_thread_events(
-        aggregator=aggregator,
-        thread_id=_RUN,
-        session_factory=session_factory,
+        ThreadStreamRequest(
+            thread_id=_RUN,
+            aggregator=aggregator,
+            session_factory=session_factory,
+        )
     )
     try:
         assert _frame(await anext(stream))["type"] == "stream_snapshot"

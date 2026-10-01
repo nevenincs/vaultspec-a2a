@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from ..control import thread_service
+from ..control.thread_service import require_admitted_workspace_root
 from ..thread.constants import MAX_WORKSPACE_ROOT_LENGTH
 
 __all__ = ["require_existing_workspace_root"]
@@ -21,7 +21,7 @@ def require_existing_workspace_root(
             detail=absolute_detail,
         )
     try:
-        canonical = thread_service.require_admitted_workspace_root(value)
+        canonical = require_admitted_workspace_root(value)
     except ValueError as exc:
         detail = str(exc)
         if "configured workspace root" in detail:

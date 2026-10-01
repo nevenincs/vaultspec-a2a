@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CODEX_AUTH_FILENAME",
-    "CodexAuthSeed",
     "codex_credential_store_mode",
     "seed_run_credential",
     "write_back_refreshed_credential",

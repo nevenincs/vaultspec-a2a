@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from ._json_contract import JsonObject, JsonValue
 
 __all__ = [
-    "PathArgumentScan",
     "ProjectScope",
     "RunProjectScope",
     "foreign_project_argument",

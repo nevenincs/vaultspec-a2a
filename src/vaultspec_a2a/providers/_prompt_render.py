@@ -45,7 +45,6 @@ if TYPE_CHECKING:
 __all__ = [
     "render_prompt_blocks",
     "render_prompt_text",
-    "rendered_prompt_sections",
     "speaker_label",
 ]
 

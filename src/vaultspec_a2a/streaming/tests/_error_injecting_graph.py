@@ -36,7 +36,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ERROR_INJECTION_NODE",
-    "InjectableGraphInput",
     "InjectedSignal",
     "build_error_injecting_graph",
 ]

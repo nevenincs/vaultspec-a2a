@@ -61,7 +61,6 @@ __all__ = [
     "codex_mcp_server_specs",
     "compose_harness_mcp_servers",
     "harness_allowed_tool_names",
-    "harness_server_of_tool",
     "harness_spawn_env",
     "pin_harness_mcp_servers",
     "reject_duplicate_identities",

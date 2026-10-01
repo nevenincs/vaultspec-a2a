@@ -33,7 +33,7 @@ from ..graph.events import ErrorOccurred
 if TYPE_CHECKING:
     from .types import SequencedEvent
 
-__all__ = ["PROTECTED_WIRE_TYPES", "DeliveryOutcome", "deliver_bounded"]
+__all__ = ["PROTECTED_WIRE_TYPES", "deliver_bounded"]
 
 logger = logging.getLogger(__name__)
 

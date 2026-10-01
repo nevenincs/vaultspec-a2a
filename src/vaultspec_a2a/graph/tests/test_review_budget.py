@@ -30,10 +30,10 @@ from ...thread.action_receipts import (
 from ...thread.enums import ControlActionType
 from ...thread.errors import DocumentConformanceError
 from ..compiler import compile_team_graph
-from ..nodes.phase_gate import ProposalRevisionRequiredError
+from ..nodes.phase_gate import REVIEW_REVISION_SENTINEL, ProposalRevisionRequiredError
 from .conftest import deterministic_model_assignment
 
-_REVISION = "REVISION REQUIRED\n1. The claims need re-fetchable locators."
+_REVISION = f"{REVIEW_REVISION_SENTINEL}\n1. The claims need re-fetchable locators."
 
 
 class _RoleScriptedFactory:

@@ -19,7 +19,6 @@ from .state_layout import DEFAULT_HOME
 
 __all__ = [
     "DEFAULT_MOCK_API_BASE",
-    "DEFAULT_OTLP_ENDPOINT",
     "GATEWAY_URL_ENV",
     "INTERNAL_TOKEN_ENV",
     "WORKER_URL_ENV",

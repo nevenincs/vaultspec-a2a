@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from .circuit_breaker import WorkerCircuitBreaker
 
 __all__ = [
-    "SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS",
     "SERVICE_HEALTH_DEADLINE_SECONDS",
     "SERVICE_WORKER_PROBE_TIMEOUT_SECONDS",
     "FullHealthRuntime",
@@ -76,19 +75,13 @@ __all__ = [
 _MEMORY_PATH = Path(":memory:")
 
 # Each service-health dependency gets the same deadline and all dependencies run
-# concurrently. This keeps the aggregate under the client contract below even
-# when a SQLite writer, checkpointer, and cold worker are all slow.
+# concurrently. This keeps the aggregate under the five-second budget a
+# service-state caller is entitled to even when a SQLite writer, checkpointer,
+# and cold worker are all slow. What the gateway guarantees is the probe
+# phase: it ends within this deadline and reports how long it took as
+# ``probe_elapsed_ms``; the margin between the two is for transport and
+# scheduling, which a busy host can consume and no server can promise.
 SERVICE_HEALTH_DEADLINE_SECONDS = 3.0
-
-# The response budget a service-state caller is entitled to. Named here beside
-# the deadline it constrains, rather than left in prose: the per-dependency
-# deadline is only correct RELATIVE to this number, and a future caller that
-# wants a different budget must move both together. What the gateway itself
-# guarantees is the probe phase: it ends within the deadline and reports how
-# long it took as ``probe_elapsed_ms``. The margin between the two is for
-# transport and scheduling, which a busy host can consume and no server can
-# promise.
-SERVICE_HEALTH_CLIENT_CONTRACT_SECONDS = 5.0
 
 # How long a journal-mode verification may take before the health surface gives
 # up on it. The probe opens a real connection, so a database locked by a long

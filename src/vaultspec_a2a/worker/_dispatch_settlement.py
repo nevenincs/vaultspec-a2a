@@ -47,7 +47,6 @@ if TYPE_CHECKING:
     from .state_projection import StateProjector
 
 __all__ = [
-    "FailureDisposition",
     "SettlementMixin",
     "TerminalArbitration",
 ]

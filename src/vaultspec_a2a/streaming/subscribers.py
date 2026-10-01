@@ -96,6 +96,10 @@ class AllocationSink(Protocol):
         """Record one numbered frame for later durable writing."""
         ...
 
+    def discard(self, thread_id: str) -> None:
+        """Drop everything held for a run whose durable home is gone."""
+        ...
+
     async def aclose(self) -> None:
         """Stop recording and make a last attempt to write what is held."""
         ...
@@ -276,6 +280,19 @@ class SubscriberManager:
             await sink.aclose()
         except Exception:
             logger.warning("Replay recorder did not close cleanly", exc_info=True)
+
+    def discard_run_replay(self, thread_id: str) -> None:
+        """Drop what the recorder holds for a run whose durable home is gone.
+
+        Deliberately NOT part of :meth:`remove_thread`. A terminal purges a
+        run's aggregator state while the batch carrying that terminal is
+        still unflushed, so dropping the recorder's hold there would discard
+        the very frames a reconnect comes back for. Only a DELETED run has no
+        durable home left: the rows its held frames would become reference a
+        thread that is gone, so no flush can ever place them.
+        """
+        if self._allocation_sink is not None:
+            self._allocation_sink.discard(thread_id)
 
     def _retainable(self, frame: object) -> bool:
         """Whether a number spent on *frame* would leave a retained row behind.

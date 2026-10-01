@@ -277,18 +277,20 @@ async def _relay_worker_event(
     thread_id = cast("str", thread_id_raw)
     payload = cast("dict[str, Any]", payload_raw)
     agg = getattr(websocket.app.state, "aggregator", None)
-    await _relay_single_event(
-        thread_id,
-        payload,
-        _RelayContext.of(
-            websocket.app,
-            agg,
-            "ws",
-            replay=seated_replay_writer(
-                websocket.app, _app_session_factory(websocket.app)
-            ),
-        ),
+    context = _RelayContext.of(
+        websocket.app,
+        agg,
+        "ws",
+        replay=seated_replay_writer(websocket.app, _app_session_factory(websocket.app)),
     )
+    await _relay_single_event(thread_id, payload, context)
+    # Behind the fan-out, once per ingested frame: a WebSocket frame carries
+    # one event, so this is the same per-batch cadence the HTTP routes use
+    # rather than a second policy. Leaving it to the writer's ticker instead
+    # would widen the window in which a terminal purges a run's numbering
+    # before its own frames are durable.
+    if context.replay is not None:
+        await context.replay.flush()
 
 
 @internal_router.websocket("/ws")

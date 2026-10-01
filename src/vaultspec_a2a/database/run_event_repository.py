@@ -202,6 +202,23 @@ class RunEventStore:
                 )
             ).scalar_one()
 
+    async def run_exists(self, thread_id: str) -> bool:
+        """Whether a thread row this log can reference still exists.
+
+        Distinct from :meth:`settled_sequence`, which answers ``None`` both
+        for an absent run and for a present one that never settled. A writer
+        asks THIS after a refused append, because the two refusals it can get
+        are opposites: a store that is temporarily unavailable must be
+        retried, and a foreign-key violation against a deleted run must never
+        be, since every later attempt carries the same doomed rows.
+        """
+        async with self.session_factory() as session:
+            return (
+                await session.execute(
+                    select(ThreadModel.id).where(ThreadModel.id == thread_id)
+                )
+            ).scalar_one_or_none() is not None
+
     async def settled_sequence(self, thread_id: str) -> int | None:
         """Return the cursor captured on *thread_id* when it settled.
 

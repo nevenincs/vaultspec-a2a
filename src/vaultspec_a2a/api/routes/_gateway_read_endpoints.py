@@ -783,6 +783,11 @@ async def run_delete_endpoint(
             detail="Run deletion is in progress; retry to complete cleanup.",
         )
     aggregator.clear_thread_state(run_id)
+    # The run's thread is gone, so a progress frame still held for it can
+    # never become a row: its insert would reference a thread that no longer
+    # exists. Held rather than dropped, it refused this gateway's every later
+    # write of that run and offered a deleted run's frames to a resume.
+    aggregator.discard_run_replay(run_id)
     if result.abandoned_kinds:
         body = RunDeleteResponse(
             run_id=run_id,

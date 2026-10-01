@@ -189,6 +189,15 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         self._ingest.clear_thread_state(thread_id)
         self._emitters.clear_thread_state(thread_id)
 
+    def discard_run_replay(self, thread_id: str) -> None:
+        """Drop the retained frames a DELETED run's recorder still holds.
+
+        Called by the delete path only, and separately from
+        :meth:`clear_thread_state`, which a terminal also calls while the
+        frames it holds are still waiting to be written.
+        """
+        self._subscribers_mgr.discard_run_replay(thread_id)
+
     def relay_payload(self, thread_id: str, payload: object) -> None:
         """Fan out a pre-serialized payload to all subscribers of ``thread_id``.
 

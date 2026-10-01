@@ -22,12 +22,11 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from contextlib import suppress
+from contextlib import closing, suppress
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
-import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...database.permission_repository import create_control_action
@@ -114,9 +113,14 @@ def _retained(database_path: Path) -> list[tuple[int, int]]:
     Read through an independent read-only connection while the gateway still
     owns the database, so the assertion is about what was written rather than
     about what any in-process object believes.
+
+    Closed rather than merely committed: ``sqlite3``'s own context manager
+    ends the transaction and leaves the handle open, so a reader taken here
+    would outlive the gateway it was checking and still hold the write-ahead
+    log open while the next gateway boots over the same files.
     """
-    with sqlite3.connect(
-        f"file:{database_path.as_posix()}?mode=ro", uri=True
+    with closing(
+        sqlite3.connect(f"file:{database_path.as_posix()}?mode=ro", uri=True)
     ) as connection:
         rows = connection.execute(
             "SELECT sequence, payload_json FROM run_events "
@@ -208,11 +212,14 @@ def test_a_restarted_gateway_continues_the_run_sequence(tmp_path: Path) -> None:
     assert [body for _, body in after_second] == [1, 2, 3, 4, 5]
 
 
-@pytest.mark.parametrize("enabled", ["false"])
-def test_a_gateway_serving_no_replay_retains_nothing(
-    tmp_path: Path, enabled: str
-) -> None:
-    """The switch is honest in both directions: off, no row and no number."""
+def test_a_gateway_serving_no_replay_retains_nothing(tmp_path: Path) -> None:
+    """Switched off, a real gateway writes no row and offers no number.
+
+    The off direction only. The on direction is the restart proof above,
+    which boots two gateways with the switch at its default and reads five
+    retained rows back out of the database; a parametrization naming one
+    value claimed both and proved neither.
+    """
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
@@ -234,7 +241,7 @@ def test_a_gateway_serving_no_replay_retains_nothing(
                     gateway_port=gateway_port,
                     worker_port=worker_port,
                     auto_spawn_worker=False,
-                    extra={"VAULTSPEC_A2A_STREAM_REPLAY_ENABLED": enabled},
+                    extra={"VAULTSPEC_A2A_STREAM_REPLAY_ENABLED": "false"},
                 ),
                 log_handle=handle,
                 new_session=True,

@@ -870,7 +870,7 @@ class TestLangGraphStreamProcessing:
             tool_call_id="call_SEARCH",
         )
 
-        events = []
+        events: list[DomainEvent] = []
         while not queue.empty():
             events.append(queue.get_nowait().event)
         identities = {
@@ -911,7 +911,7 @@ class TestLangGraphStreamProcessing:
             RuntimeError("disk is full"), run_id=run_id, tool_call_id="call_WRITE"
         )
 
-        events = []
+        events: list[DomainEvent] = []
         while not queue.empty():
             events.append(queue.get_nowait().event)
         updates = [event for event in events if isinstance(event, ToolCallUpdate)]
@@ -1121,7 +1121,7 @@ class TestLangGraphStreamProcessing:
             agent_id="agent-1",
         )
 
-        events = []
+        events: list[DomainEvent] = []
         while not queue.empty():
             events.append(queue.get_nowait().event)
         plans = [event for event in events if isinstance(event, PlanUpdate)]
@@ -1168,7 +1168,7 @@ class TestLangGraphStreamProcessing:
                 (), "custom", payload, thread_id="thread-1", agent_id="agent-1"
             )
 
-        relayed = []
+        relayed: list[DomainEvent] = []
         while not queue.empty():
             relayed.append(queue.get_nowait().event)
         assert [

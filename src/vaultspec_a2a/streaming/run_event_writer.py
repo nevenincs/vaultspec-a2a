@@ -20,7 +20,7 @@ import json
 import logging
 from collections import OrderedDict, deque
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..database.run_event_repository import RunEventRecord
 
@@ -69,7 +69,7 @@ type FrameProjector = Callable[[object], Mapping[str, object] | None]
 
 def projected_mappings_only(frame: object) -> Mapping[str, object] | None:
     """Retain a frame that already IS a projected mapping, and nothing else."""
-    return frame if isinstance(frame, Mapping) else None
+    return cast("Mapping[str, object]", frame) if isinstance(frame, Mapping) else None
 
 
 class RunEventWriter:
@@ -194,11 +194,11 @@ class RunEventWriter:
 
     def _ring_for(self, thread_id: str) -> deque[RunEventRecord]:
         """Return the run's ring, creating it and evicting the coldest run."""
-        ring = self._rings.get(thread_id)
-        if ring is not None:
+        tracked = self._rings.get(thread_id)
+        if tracked is not None:
             self._rings.move_to_end(thread_id)
-            return ring
-        ring = deque(maxlen=self._ring_capacity)
+            return tracked
+        ring: deque[RunEventRecord] = deque(maxlen=self._ring_capacity)
         self._rings[thread_id] = ring
         while len(self._rings) > self._tracked_runs:
             evicted, dropped = self._rings.popitem(last=False)

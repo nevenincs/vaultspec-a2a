@@ -15,7 +15,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import httpx
@@ -27,6 +27,9 @@ from ..graph.enums import ServerEventType
 from ..streaming.fanout import PROTECTED_WIRE_TYPES
 from ..telemetry import inject_trace_context
 from ..thread.snapshots import wire_event_type
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = ["WorkerBridge", "event_client_timeout"]
 
@@ -76,7 +79,7 @@ def event_client_timeout() -> httpx.Timeout:
 
 def _entry_event_type(entry: dict[str, Any]) -> str:
     """Return the wire event type of one buffered entry, or an empty string."""
-    payload = entry.get("payload")
+    payload: Mapping[str, Any] | None = entry.get("payload")
     return wire_event_type(payload) if isinstance(payload, dict) else ""
 
 

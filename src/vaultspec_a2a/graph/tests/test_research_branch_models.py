@@ -25,7 +25,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from ...authoring.submitter import DocumentProposalSubmitter
 from ...team.team_config import ResearchThreadSpec, load_agent_config, load_team_config
 from ...worker.token_store import RunTokenStore
-from ..compiler import compile_team_graph, researcher_node_name
+from ..compiler import compile_team_graph
+from ..nodes.diverge import researcher_node_name
 from .conftest import deterministic_model_assignment
 
 SIMULATOR_PATH = Path(__file__).parent / "acp_simulator.py"

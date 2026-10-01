@@ -90,7 +90,7 @@ def _relevant(notes: list[str]) -> list[str]:
 
 def test_the_submitter_reports_what_core_reports_in_core_words(tmp_path: Path) -> None:
     documents = _documents()
-    paths = {}
+    paths: dict[str, tuple[str, str]] = {}
     for index, ((doc_type, name), text) in enumerate(sorted(documents.items())):
         directory = tmp_path / ".vault" / doc_type
         directory.mkdir(parents=True, exist_ok=True)
@@ -112,7 +112,7 @@ def test_the_submitter_reports_what_core_reports_in_core_words(tmp_path: Path) -
             assert diagnostic.path is not None
             core_notes[diagnostic.path.name].append(diagnostic.message)
 
-    disagreements = {}
+    disagreements: dict[tuple[str, str], tuple[list[str], list[str]]] = {}
     for file_name, key in paths.items():
         doc_type, _name = key
         expected = _relevant(core_notes[file_name])

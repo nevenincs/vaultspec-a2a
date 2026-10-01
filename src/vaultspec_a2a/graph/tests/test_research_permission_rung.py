@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, cast, override
 import pytest
 import pytest_asyncio
 from langchain_core.language_models import BaseChatModel
-from langchain_core.language_models.fake_chat_models import FakeChatModel
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -121,7 +121,7 @@ class _ResearcherPermissionFactory:
     ) -> BaseChatModel:
         if getattr(agent_config, "role", None) == "researcher":
             return _PermissionAskingResearcher(calls_per_turn=self._calls_per_turn)
-        return FakeChatModel(responses=["stub response"])
+        return FakeListChatModel(responses=["stub response"])
 
 
 class _FakeSubmitter:
@@ -180,7 +180,7 @@ def _permission_interrupts(result: dict[str, Any]) -> list[Interrupt[Any]]:
         parked
         for parked in result.get("__interrupt__", ())
         if isinstance(parked.value, dict)
-        and parked.value.get("type") == "permission_request"
+        and cast("dict[str, Any]", parked.value).get("type") == "permission_request"
     ]
 
 
@@ -198,7 +198,8 @@ def _answer(parked: Interrupt[Any], option_id: str, *, request_id: str = "") -> 
 
 
 def _claims(result: dict[str, Any]) -> list[str]:
-    return sorted(str(f["claim"]) for f in result.get("research_findings") or [])
+    findings: list[dict[str, Any]] = result.get("research_findings") or []
+    return sorted(str(finding["claim"]) for finding in findings)
 
 
 @pytest.mark.asyncio

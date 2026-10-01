@@ -25,6 +25,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -90,12 +91,12 @@ def _two_step_graph(saver: AsyncSqliteSaver, log: list[str]) -> StreamableGraph:
         return {"note": "second"}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    builder.add_node("first", first)
-    builder.add_node("second", second)
+    add_test_node(builder, "first", first)
+    add_test_node(builder, "second", second)
     builder.add_edge(START, "first")
     builder.add_edge("first", "second")
     builder.add_edge("second", END)
-    return cast("StreamableGraph", builder.compile(checkpointer=saver))
+    return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
 
 
 @pytest.mark.asyncio
@@ -140,12 +141,12 @@ def _gated_graph(saver: AsyncSqliteSaver, log: list[str]) -> StreamableGraph:
         return {"note": "after"}
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    builder.add_node("gate", gate)
-    builder.add_node("after", after)
+    add_test_node(builder, "gate", gate)
+    add_test_node(builder, "after", after)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", "after")
     builder.add_edge("after", END)
-    return cast("StreamableGraph", builder.compile(checkpointer=saver))
+    return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
 
 
 @pytest.mark.asyncio

@@ -144,7 +144,7 @@ class CodexChatModel(BaseChatModel):
     # The Codex counterpart of ``AcpChatModel.permission_callback``, in the same
     # field shape so the two lanes converge: the worker node wires a supervised
     # run's human rung onto any model that DECLARES this attribute
-    # (``_resolve_effective_worker_model``), which is why its absence used to
+    # (``resolve_effective_worker_model``), which is why its absence used to
     # skip Codex silently rather than fail. Left unset, the lane is autonomous
     # and decides against the run's composed surface.
     permission_callback: PermissionCallback | None = Field(

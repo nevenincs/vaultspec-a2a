@@ -57,9 +57,9 @@ from .nodes.phase_gate import (
     review_requests_revision,
 )
 from .nodes.worker import (
-    _recorded_permission_answers,
-    _resolve_effective_worker_model,
     create_worker_node,
+    recorded_permission_answers,
+    resolve_effective_worker_model,
 )
 from .web_locators import extract_web_locators
 
@@ -299,10 +299,10 @@ def _make_research_producer(
             )
         )
         messages.extend(state.get("messages", []))
-        effective_model = _resolve_effective_worker_model(
+        effective_model = resolve_effective_worker_model(
             model=model,
             autonomous=autonomous,
-            answers=_recorded_permission_answers(state),
+            answers=recorded_permission_answers(state),
             answers_reach_the_node=False,
         )
         if harness_mcp_servers:

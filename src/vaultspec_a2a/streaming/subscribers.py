@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Protocol, cast
 
 from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
@@ -456,7 +456,10 @@ class SubscriberManager:
         allocation = self._allocate(thread_id)
         if allocation is not None:
             if isinstance(payload, Mapping):
-                payload = {**payload, "sequence": allocation.sequence}
+                payload = {
+                    **cast("Mapping[str, object]", payload),
+                    "sequence": allocation.sequence,
+                }
             self._record(allocation, payload)
         for client_id, queue in list(self._subscribers.items()):
             client_subs = self._subscriptions.get(client_id, set())

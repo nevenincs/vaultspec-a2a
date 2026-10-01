@@ -65,7 +65,12 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-__all__ = ["create_worker_node", "render_research_findings"]
+__all__ = [
+    "create_worker_node",
+    "recorded_permission_answers",
+    "render_research_findings",
+    "resolve_effective_worker_model",
+]
 
 # A lane name and a model id are bounded configuration values, not free text, and
 # they reach a client-visible failure reason. Anything longer than this is not an
@@ -270,7 +275,7 @@ def _build_worker_messages(
     return messages
 
 
-def _resolve_effective_worker_model(
+def resolve_effective_worker_model(
     *,
     model: BaseChatModel,
     autonomous: bool,
@@ -498,7 +503,7 @@ async def _collect_mock_permission_result(
 
     This lane exists only for the mock chat model. A real ACP provider never
     reaches here: its permission callback is wired onto the model itself (see
-    :func:`_resolve_effective_worker_model`), so the callback raises the
+    :func:`resolve_effective_worker_model`), so the callback raises the
     interrupt from *inside* ``model.ainvoke`` and no response is produced at
     all. VidaiMock instead surfaces ``session_request_permission`` as an
     ordinary tool call, but the LangGraph interrupt must still be raised from a
@@ -813,7 +818,7 @@ def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return once or options
 
 
-def _recorded_permission_answers(state: TeamState) -> Mapping[str, str]:
+def recorded_permission_answers(state: TeamState) -> Mapping[str, str]:
     """The run's answered tool-permission requests, narrowed at the boundary.
 
     Read through the untrusted-state boundary because the annotation on the
@@ -1182,7 +1187,7 @@ def create_worker_node(
         # execution and bound onto both permission lanes. A replayed turn
         # finds its earlier approvals here rather than in the order its
         # interrupts happened to fall in.
-        permission_answers = _recorded_permission_answers(state)
+        permission_answers = recorded_permission_answers(state)
         # The task queue is thread-scoped, so build the mark-complete
         # tool per invocation using the thread_id carried in graph state — the
         # compiled graph is shared across threads and cannot close over it. The
@@ -1219,7 +1224,7 @@ def create_worker_node(
             )
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
-        effective_model = _resolve_effective_worker_model(
+        effective_model = resolve_effective_worker_model(
             model=model,
             autonomous=settings["autonomous"],
             answers=permission_answers,

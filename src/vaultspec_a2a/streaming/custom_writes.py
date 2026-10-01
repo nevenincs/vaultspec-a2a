@@ -15,7 +15,7 @@ custom event does not repeat the same undocumented gap the audit found.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from langgraph.config import get_stream_writer
 
@@ -81,7 +81,7 @@ def custom_write_node_name(data: object) -> str | None:
     legal; only the second carries a node.
     """
     if isinstance(data, dict):
-        node = data.get(CUSTOM_WRITE_NODE_FIELD)
+        node = cast("dict[str, object]", data).get(CUSTOM_WRITE_NODE_FIELD)
         if isinstance(node, str) and node:
             return node
     return None

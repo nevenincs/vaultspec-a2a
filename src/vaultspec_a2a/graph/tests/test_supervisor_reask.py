@@ -10,7 +10,7 @@ fails the run instead of ending it as if the work were done.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -78,6 +78,7 @@ class _SupervisorPrompts(AsyncCallbackHandler):
     def __init__(self) -> None:
         self.prompts: list[str] = []
 
+    @override
     async def on_chat_model_start(
         self,
         serialized: dict[str, Any],

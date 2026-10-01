@@ -20,7 +20,7 @@ references to perform side effects but hold no state of their own.
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
@@ -386,8 +386,6 @@ def _custom_text(payload: object) -> str:
         text = raw if isinstance(raw, str) else str(raw)
     elif payload is None:
         return ""
-    elif isinstance(payload, Sequence | bytes):
-        text = str(payload)
     else:
         text = str(payload)
     if not text:

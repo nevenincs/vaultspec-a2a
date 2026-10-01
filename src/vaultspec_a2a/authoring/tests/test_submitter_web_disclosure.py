@@ -81,6 +81,12 @@ The fetch tool retrieves only search-derived or user-supplied URLs.
 
 #: Discloses neither retrieval — only an internal locator.
 _SILENT = _document("`src/x.py:10`")
+#: The same silent document as an ADR, whose H1 carries the status token an ADR
+#: owes; the disclosure obligation is the only thing the two differ on here.
+_SILENT_ADR = _SILENT.replace(
+    "# `web-grounding` research: provider tool surfaces",
+    "# `web-grounding` adr: `provider tool surfaces` | (**status:** `accepted`)",
+)
 #: Discloses URL A alone (a strict subset when the run retrieved A and B).
 _DISCLOSES_A = _document(f"{_URL_A} (retrieved 2026-08-01)")
 #: Discloses both retrievals.
@@ -326,14 +332,15 @@ class TestDocumentTypeScope:
         # An ADR that decides on web-grounded research cites the research stem; it
         # does not restate the evidence, and no template but research carries a
         # Sources section to restate it into.
-        assert _conformance_notes(_SILENT, doc_type, [_URL_A, _URL_B]) == []
+        document = _SILENT_ADR if doc_type == "adr" else _SILENT
+        assert _conformance_notes(document, doc_type, [_URL_A, _URL_B]) == []
 
     def test_an_adr_body_submits_while_the_run_holds_retrievals(self) -> None:
         # Same accumulated state that refuses a research document, driven through
         # the seam the production __call__ uses, with the ADR phase's doc_type.
-        state = _state(_SILENT, [_web_finding(_URL_A)])
+        state = _state(_SILENT_ADR, [_web_finding(_URL_A)])
         body, _ = _latest_document(state, _WRITER, _SENTINEL, "adr")
-        assert body == _SILENT
+        assert body == _SILENT_ADR
 
     def test_the_same_state_still_refuses_the_research_document(self) -> None:
         # The contrast that makes the scoping a real axis rather than a disabled

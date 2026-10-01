@@ -37,7 +37,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from vaultspec_core.vaultcore.checks import check_body_links
+from vaultspec_core.vaultcore.checks import (
+    check_adr_status,
+    check_annotations,
+    check_body_links,
+    check_placeholders,
+)
 from vaultspec_core.vaultcore.parser import parse_vault_metadata, split_frontmatter
 
 from ..graph.enums import PipelinePhase
@@ -72,17 +77,6 @@ __all__ = [
     "engine_scope_token",
 ]
 
-#: Literal template placeholders whose presence in a finished body proves the
-#: writer echoed the scaffold instead of authoring content. Kept tight (the
-#: narrative heading placeholders the shipped research/adr templates carry) so a
-#: real document mentioning ``{}`` in a code snippet never false-positives.
-_TEMPLATE_PLACEHOLDERS: tuple[str, ...] = ("{topic}", "{title}", "{phase}")
-
-#: The HTML-comment marker the vault templates use for their guidance blocks. A
-#: materialized vault document never carries these; their presence is the
-#: strongest signal the writer reproduced the template verbatim.
-_TEMPLATE_ANNOTATION = "<!--"
-
 #: The opening frontmatter fence, possibly GLUED to leading preamble narration on
 #: the same line (a capable writer sometimes prefixes orientation prose before the
 #: document). Matched as a ``---`` immediately followed
@@ -91,18 +85,12 @@ _TEMPLATE_ANNOTATION = "<!--"
 #: preamble and is stripped so the submitted body begins at the frontmatter.
 _FRONTMATTER_OPEN_RE = re.compile(r"---\r?\n(?=[A-Za-z_][\w-]*[ \t]*:)")
 
-#: Where the one-document snapshot handed to core's ``body-links`` check places
-#: the proposal. Core reports a finding relative to the root and reads nothing
-#: from disk when it is not repairing, so the location need only sit under it.
+#: Where the one-document snapshot handed to core's checks places the proposal.
+#: Core reports a finding relative to the root and reads nothing from disk when
+#: it is not repairing, so the location need only sit under it - and under an
+#: ``adr`` directory for an ADR, which is how core's status check knows one.
 _PROPOSAL_ROOT = Path(".")
-_PROPOSAL_PATH = Path(".vault") / "proposal.md"
-
-# A legacy ``## Status`` section — the canonical ADR template carries the status in
-# the H1 token ``# {feature} adr: {title} | (**status:** `accepted`)``, never a
-# level-two ``Status`` heading. The two-step apply preserves the authored body, so a
-# ## Status section survives to disk and trips `adr-status`; the submit-node refuses
-# it (ADR phase only) and routes the author to rewrite the H1 token.
-_LEGACY_STATUS_HEADING_RE = re.compile(r"^##[ \t]+Status[ \t]*$", re.MULTILINE)
+_PROPOSAL_DIR = Path(".vault")
 
 
 def engine_scope_token(project_root: str | os.PathLike[str]) -> str:
@@ -479,19 +467,27 @@ def _web_locator_urls(state: TeamState) -> list[str]:
     return urls
 
 
-def _body_link_notes(document: str) -> list[str]:
-    """Core's own ``body-links`` diagnostics for *document*, as revision notes.
+def _core_check_notes(document: str, doc_type: str | None) -> list[str]:
+    """Core's own diagnostics for *document*, as revision notes.
 
     The proposal is checked as core checks a vault: parsed by core, then handed
-    to core's check as a one-document snapshot. A wiki-link or a path link in
-    body prose belongs in ``related:`` frontmatter or a code span, and the
-    writer is told so in core's words.
+    to core's annotation, placeholder and body-link checks - and, for an ADR,
+    its status check - as a one-document snapshot. A writer is refused for
+    exactly what core would report once the document lands, in core's words.
     """
+    path = _PROPOSAL_DIR / (doc_type or "document") / "proposal.md"
     metadata, body = parse_vault_metadata(document)
-    result = check_body_links(
-        _PROPOSAL_ROOT, snapshot={_PROPOSAL_PATH: (metadata, body)}
-    )
-    return [diagnostic.message for diagnostic in result.diagnostics]
+    snapshot = {path: (metadata, body)}
+    results = [
+        check_annotations(_PROPOSAL_ROOT, raw_texts={path: (document, False)}),
+        check_placeholders(_PROPOSAL_ROOT, snapshot=snapshot),
+        check_body_links(_PROPOSAL_ROOT, snapshot=snapshot),
+    ]
+    if doc_type == "adr":
+        results.append(check_adr_status(_PROPOSAL_ROOT, snapshot=snapshot))
+    return [
+        diagnostic.message for result in results for diagnostic in result.diagnostics
+    ]
 
 
 def _undisclosed_web_source_notes(
@@ -532,29 +528,12 @@ def _conformance_notes(
     notes: list[str] = []
     split = split_frontmatter(body)
     prose_region = split.body
-    if doc_type == "adr" and _LEGACY_STATUS_HEADING_RE.search(prose_region):
-        notes.append(
-            "ADR status is in a legacy `## Status` section; move it into the H1 as "
-            "`# `{feature}` adr: `{title}` | (**status:** `accepted`)` and remove the "
-            "`## Status` heading"
-        )
     if split.yaml_block is None:
         notes.append(
             "document must begin with a `---` frontmatter fence; the body carries "
             "no frontmatter block (remove any preamble before the document)"
         )
-    if _TEMPLATE_ANNOTATION in body:
-        notes.append(
-            "template annotation comments (`<!-- ... -->`) remain in the document; "
-            "remove them and author real content following the template structure"
-        )
-    present = [ph for ph in _TEMPLATE_PLACEHOLDERS if ph in body]
-    if present:
-        notes.append(
-            f"unfilled template placeholder(s) {present} remain; fill every section "
-            "with authored content"
-        )
-    notes.extend(_body_link_notes(body))
+    notes.extend(_core_check_notes(body, doc_type))
     # Web-source disclosure, RESEARCH ONLY. The vault's document boundary gives
     # each fact one home: the research document grounds, and every later document
     # cites it by stem without restating its evidence. A URL is evidence, so its

@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:a87abfdbb964e62cbfc627187fffd94a32084496daeeca137e146045ce35dfd5'
+body_hash: 'sha256:e4a034d6353cbe7b4e15020c07440f5175970b6d9d59e92fbfac3f5637d0f5ae'
 related:
   - "[[2026-09-30-langgraph-conformance-plan]]"
 ---
@@ -499,6 +499,13 @@ related:
 - `S49` `M` `src/vaultspec_a2a/context/tests/test_rules.py`
 - `S49` `verify:` `pytest src/vaultspec_a2a/context` -> `pass`
 - `S49` `verify:` `ruff, ty check src/vaultspec_a2a/context` -> `pass`
+- `S50` `M` `src/vaultspec_a2a/authoring/submitter.py`
+- `S50` `A` `src/vaultspec_a2a/authoring/tests/test_core_document_checks.py`
+- `S50` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_content.py`
+- `S50` `M` `src/vaultspec_a2a/authoring/tests/test_submitter_web_disclosure.py`
+- `S50` `M` `.vault/audit/2026-09-30-langgraph-conformance-audit.md`
+- `S50` `verify:` `pytest src/vaultspec_a2a/authoring` -> `pass`
+- `S50` `verify:` `pytest graph control worker acceptance team` -> `pass`
 
 ## Notes
 
@@ -545,3 +552,4 @@ related:
 - `S28` User approved the drafted amendments as recommended on 2026-09-30. team-composition-topology and orchestration-topology-pipeline accepted; event-aggregation amended but left proposed pending the user's accept-or-deprecate choice.
 - `S38` Unblocked on 2026-10-01: the user chose a port held to core by a parity test; recorded in the core-reader-parity ADR, accepted under the user's blanket approval.
 - `S28` User decisions of 2026-10-01: event-aggregation accepted; the research fan-out stays on Send; no served star preset yet; the terminal fan-out keeps its one-heartbeat bound; the rag hosted-ranking rule is an operator rule; no repository override of the builtin hosted-search guidance; the retired example trigger deleted.
+- `S50` An ADR proposal whose H1 carries no parseable or canonical status is now refused, as core reports it; two web-disclosure tests used a research-shaped body as an ADR and now use an ADR H1.

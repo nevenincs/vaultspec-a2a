@@ -412,7 +412,7 @@ Body.
 
     def test_legacy_status_section_is_refused_for_adr(self) -> None:
         notes = _conformance_notes(self._ADR_LEGACY, "adr")
-        assert any("legacy `## Status`" in n for n in notes)
+        assert any("legacy '## Status' section" in n for n in notes)
 
     def test_canonical_h1_status_token_passes(self) -> None:
         assert _conformance_notes(self._ADR_CANONICAL, "adr") == []

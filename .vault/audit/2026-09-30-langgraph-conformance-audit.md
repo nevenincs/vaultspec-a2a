@@ -5,7 +5,7 @@ tags:
 date: '2026-09-30'
 modified: '2026-10-01'
 body_schema: 'body-v2'
-body_hash: 'sha256:fda8c96a212574f5c52b652a544192bde9cfd631816b00ad4a7ad932fcc2aaeb'
+body_hash: 'sha256:4be299cadadb20f1668a05c19f2a93064d0423c6161bccd5bab71b50e0835f26'
 related:
   - "[[2026-09-24-architecture-review-audit]]"
   - "[[2026-09-24-architecture-review-research]]"
@@ -501,4 +501,4 @@ Status: recorded. 47 findings between `research-findings-never-reach-synthesis` 
 
 ### core-check-copies-remain-in-the-submitter | medium | the submitter still copies three core checks, and both copies disagree with core
 
-Open, owned by P07.S50; raised by the 2026-10-01 plan-close review. `src/vaultspec_a2a/authoring/submitter.py` still hand-rolls the placeholder, annotation and legacy-status checks core exports as `check_placeholders`, `check_annotations` and `check_adr_status`, which `2026-10-01-langgraph-conformance-core-runtime-dependency-adr` says it must call instead. The reviewer drove both directions against core 0.3.2: core knows twenty placeholder tokens and the submitter three, so a body using `{summary}` or `{step_id}` was accepted and then reported dirty by core; and the legacy-status regex is fence-blind while core reads headings, so an ADR quoting `## Status` in a fenced sample was refused for a document core accepts.
+Fixed in P07.S50: the submitter runs core's `check_annotations`, `check_placeholders`, `check_body_links` and, for an ADR, `check_adr_status` over the proposal (`src/vaultspec_a2a/authoring/submitter.py`, `_core_check_notes`), and `src/vaultspec_a2a/authoring/tests/test_core_document_checks.py` compares its notes with core's checks over a real on-disk vault. Raised by the 2026-10-01 plan-close review. `src/vaultspec_a2a/authoring/submitter.py` still hand-rolls the placeholder, annotation and legacy-status checks core exports as `check_placeholders`, `check_annotations` and `check_adr_status`, which `2026-10-01-langgraph-conformance-core-runtime-dependency-adr` says it must call instead. The reviewer drove both directions against core 0.3.2: core knows twenty placeholder tokens and the submitter three, so a body using `{summary}` or `{step_id}` was accepted and then reported dirty by core; and the legacy-status regex is fence-blind while core reads headings, so an ADR quoting `## Status` in a fenced sample was refused for a document core accepts.

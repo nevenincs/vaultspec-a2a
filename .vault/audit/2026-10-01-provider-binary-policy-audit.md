@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:f679d91cf4cca67421966c77e4603cb2d6077b2581d3e517f2ce2feeabfae0dc'
+body_hash: 'sha256:49c78b1cc9ad2b0814dfc20575ba010ec1683ab012197c8bc2b72d15525985b3'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -184,3 +184,6 @@ Fixed in P03.S13. Codex records its app-server initialize and native thread, whi
 ### admin-clear-omitted-runtime-identity-table | high | clear could report success while keeping runtime identity rows
 
 Fixed in P03.S13 after the integrated CI gate exposed the defect. The S11 migration added `provider_runtime_identities`, but the database admin clear order was not updated. The completeness and foreign-key order tests failed; `_CLEAR_ORDER` now includes the child table before `threads`, and all seven admin tests pass on a real SQLite database. Type: destructive administrative operation and migration integration.
+### desktop-component-fixture-pinned-prior-wheel | medium | desktop contract failed after 0.4.0 release
+
+Fixed in P02.S25. The dashboard release-manifest fixture still pinned vaultspec-a2a 0.3.0 while the clean wheel built from this branch reports 0.4.0. The fixture now names 0.4.0; it remains explicitly fixture-only and does not claim release binding. The three desktop component contract tests pass. Type: release fixture and CI contract drift.

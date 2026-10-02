@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:6a6bf0605197abfcfbdc4afbd3ad22450f43f6c36b6c9a076cd7b54f1f5e7c4d'
+body_hash: 'sha256:8d5d3836db765c0a9a6d192d3ea6edeefab95a51da4859206d99c9d7972b173a'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -295,6 +295,12 @@ related:
 - `S13` `verify:` `changed-file ruff format ty` -> `pass`
 - `S13` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S13` `by:` `provider-proof`
+- `S25` `M` `src/vaultspec_a2a/desktop_tests/fixtures/dashboard-release-manifest.json`
+- `S25` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S25` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S25` `verify:` `desktop component contract tests 3 passed` -> `pass`
+- `S25` `verify:` `git diff --check` -> `pass`
+- `S25` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -323,3 +329,4 @@ related:
 - `S15` S15 review passed with no new finding; shared integrated CI remains pending.
 - `S24` Review: private cross-module helper fixed; no further S24 finding surfaced. Integrated CI pending.
 - `S13` Managed policy presence remains unknown and audited; integrated CI pending root branch.
+- `S25` Review: stale fixture corrected; no additional finding in S25. Integrated CI pending.

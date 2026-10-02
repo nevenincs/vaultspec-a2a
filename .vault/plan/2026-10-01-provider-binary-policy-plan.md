@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:c1fa3628b3eab73b3a8460474e5d3bff635146cfe9a03d13c1069bc09754b531'
+body_hash: 'sha256:b3c514b952cbd3e5a3576fafca4ee4699c1f59c6bc246765f66ba28ff2a96208'
 ---
 
 # `provider-binary-policy` plan
@@ -61,6 +61,7 @@ A lane proof declares the binary identity and version range it covers, and a res
 - [ ] `P02.S21` - Re-enroll Claude and Z.ai with hand-recorded binary versions and ranges only after their cited live turns complete on the resolved launchers; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/`.
 - [x] `P02.S22` - Narrow parsed proof versions before comparing host PATH bounds so strict typing verifies the admission gate; `src/vaultspec_a2a/providers/lane_admission.py`.
 - [x] `P02.S23` - Repair integration CI contracts for the lock-vendored CLI asset and changelog history after the 0.4.0 release; `src/vaultspec_a2a/providers/cli_resolution.py, dev/tests/test_release_please_automation.py`.
+- [x] `P02.S25` - Align the desktop component fixture with the released 0.4.0 wheel identity exposed by integration CI; `src/vaultspec_a2a/desktop_tests/fixtures/dashboard-release-manifest.json`.
 
 ### Phase `P03` - Recorded runtime identity per run and lane
 

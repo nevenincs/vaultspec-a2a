@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:5fb791d12b52f914e8db4c9f5b1e4fd4ec0ebeffd0d861a8a30b5d67557398e6'
+body_hash: 'sha256:504bf88abff72a44bddbea0a42779811e6693ca3ae361fceca4c5a7bbe5e3394'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -82,6 +82,15 @@ related:
 - `S02` `verify:` `ty desktop profile files` -> `pass`
 - `S02` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S02` `verify:` `just ci` -> `fail`
+- `S11` `A` `src/vaultspec_a2a/database/migrations/versions/0025_provider_runtime_identity.py`
+- `S11` `A` `src/vaultspec_a2a/database/runtime_identity_repository.py`
+- `S11` `A` `src/vaultspec_a2a/database/tests/test_runtime_identity_repository.py`
+- `S11` `M` `src/vaultspec_a2a/database/models.py`
+- `S11` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S11` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S11` `verify:` `dual-backend runtime identity migration/repository pytest` -> `pass`
+- `S11` `verify:` `SQLite schema parity pytest 66 passed` -> `pass`
+- `S11` `verify:` `Ruff lint and format plus Ty targeted` -> `pass`
 
 ## Notes
 
@@ -89,3 +98,4 @@ related:
 - `S16` just ci remains red on base 78f3a89f: 44 strict type diagnostics in `dev/ci_contract.py,` 16 in `control/settings_base.py,` and three unconsumed exports in `settings_base.py;` assigned to main integration owner. Changed-file checks and targeted real-behavior tests pass.
 - `S01` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; this Step changes neither.
 - `S02` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
+- `S11` PostgreSQL proof used an isolated Compose project and its exact ephemeral volume was removed after the tests.

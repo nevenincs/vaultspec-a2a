@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:1e3a80ebdbabd3daf11418492959cf503eac294eb194116c8c5d37ce91f2c0f7'
+body_hash: 'sha256:5874ddabc5f6bab415159d85565a58f397e780933b3e1f66d6b357e780351f2c'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -17,6 +17,8 @@ related:
 Findings raised while executing P01.S17 of `2026-10-01-provider-binary-policy-plan`, the move of the vendored Claude ACP adapter from 0.59.0 to 0.84.0 (Agent SDK 0.3.207 to 0.3.284, CLI 2.1.207 to 2.1.284), read against `2026-10-01-provider-binary-policy-acp-adapter-upgrade-research`. Rolling: later Steps append here.
 
 P01.S01 review (2026-10-02): PASS for the capsule CLI path authority and installed-binary version probe. The path stays under the capsule npm closure, uses the ACP adapter platform and libc preference order, and the focused real-binary test, lint, format, and targeted type check pass. No new review finding was queued.
+
+P03.S11 review (2026-10-02): PASS for the additive identity table and write-once repository. The migration upgrades and downgrades on SQLite and PostgreSQL, model/schema parity passes, and an exact retry keeps one row while changed binary evidence is refused without poisoning the transaction. No new review finding was queued.
 
 ## Findings
 

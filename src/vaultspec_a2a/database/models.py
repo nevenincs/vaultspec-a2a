@@ -58,6 +58,7 @@ __all__ = [
     "MoneyAmount",
     "PermissionLogModel",
     "PermissionRequestModel",
+    "ProviderRuntimeIdentityModel",
     "RecoveryAttemptModel",
     "RunEventModel",
     "RunWriteAuthority",
@@ -898,6 +899,34 @@ class RunEventModel(Base):
             f"RunEventModel(thread_id={self.thread_id!r}, "
             f"sequence={self.sequence!r}, event_type={self.event_type!r})"
         )
+
+
+class ProviderRuntimeIdentityModel(Base):
+    """Immutable evidence of the provider runtime first initialized for a run.
+
+    The composite key permits one row per run and execution-mode-specific lane.
+    A retry may repeat the same evidence, but may not replace it with a new
+    binary or session claim.
+    """
+
+    __tablename__ = "provider_runtime_identities"
+
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("threads.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    execution_mode: Mapped[str] = mapped_column(String(64), primary_key=True)
+    runtime_authority: Mapped[str] = mapped_column(String(32))
+    adapter_name: Mapped[str] = mapped_column(String(128))
+    adapter_version: Mapped[str] = mapped_column(String(64))
+    adapter_entry_path: Mapped[str] = mapped_column(Text)
+    cli_executable_path: Mapped[str] = mapped_column(Text)
+    cli_version: Mapped[str] = mapped_column(String(64))
+    node_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    auth_mode: Mapped[str] = mapped_column(String(32))
+    provider_session_id: Mapped[str | None] = mapped_column(Text, default=None)
+    managed_policy_present: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
 
 class CostTrackingModel(Base):

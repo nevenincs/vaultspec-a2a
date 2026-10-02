@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:1e812524a539b4f9a96ec92a57bad92765a5a51936a8ee318618e5c82966930c'
+body_hash: 'sha256:8bc1d3cbdf6700c2863a55b29e7a63d2606361036d5927b36fe64245dbe0a095'
 ---
 
 # `provider-binary-policy` plan
@@ -63,7 +63,7 @@ A lane proof declares the binary identity and version range it covers, and a res
 
 Every run durably records the adapter, CLI, authority, auth mode, and provider-native session id that produced it, before any claim about that run's behaviour is made.
 
-- [ ] `P03.S11` - Add the provider runtime identity table, its model, and its repository, naming the migration by purpose and assigning its revision and down-revision ids at execution time in the order it merges with the migrations other plans land concurrently; `src/vaultspec_a2a/database/migrations/versions/, src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/runtime_identity_repository.py, src/vaultspec_a2a/database/__init__.py`.
+- [x] `P03.S11` - Add the provider runtime identity table, its model, and its repository, naming the migration by purpose and assigning its revision and down-revision ids at execution time in the order it merges with the migrations other plans land concurrently; `src/vaultspec_a2a/database/migrations/versions/, src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/runtime_identity_repository.py, src/vaultspec_a2a/database/__init__.py`.
 - [ ] `P03.S12` - Add the runtime identity port, its worker SQL adapter, and its graph-compile injection beside the cost port; `src/vaultspec_a2a/graph/protocols.py, src/vaultspec_a2a/worker/runtime_identity_port.py, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/graph/compiler.py`.
 - [ ] `P03.S13` - Capture provider, catalog key, runtime authority, adapter name and version, adapter entry path, CLI path and version, Node version, auth mode, and provider-native session id at a lane first successful initialize, and write one row per run and lane while keeping the existing INFO line; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_model_state.py, src/vaultspec_a2a/graph/nodes/worker.py`.
 

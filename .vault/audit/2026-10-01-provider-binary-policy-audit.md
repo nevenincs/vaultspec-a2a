@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:c04123cb1636d6c4299c02c24c17e7edf825a7a295c18c7cef515bc5b90ac98d'
+body_hash: 'sha256:ca8a5946e2be31cd132f19d03e910111849fb17b36dc0eadea34315ec81ff9c6'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -51,7 +51,7 @@ Open, owned by P03.S23 of `2026-10-01-tool-permission-model-plan`. Since SDK 0.3
 
 ### session-updates-dropped-silently | medium | three session update kinds that reach this lane are dropped with no log
 
-Open, owned by P06.S19. The adapter emits eighteen update kinds; `usage_update`, `config_option_update` and `session_info_update` reach this lane ungated and fall through a dispatcher with no default branch.
+Fixed in P06.S19. The adapter emits eighteen update kinds; `usage_update`, `config_option_update` and `session_info_update` reached this lane ungated and previously fell through a dispatcher with no default branch. The dispatcher now logs bounded context occupancy, configuration-option count, and session-info receipt without copying provider payloads into logs. Eight other adapter kinds are logged by kind, and a bounded fallback records future kinds. Terminal per-model usage remains the accounting source; context occupancy never adds turn tokens. Type: protocol observability and accounting boundary.
 
 ### terminal-handlers-unreachable-on-claude | low | the client terminal handlers are never called by this adapter
 
@@ -153,3 +153,6 @@ Open; owned by P03.S13. The adapter applies managed policy before sessions but i
 ### claude-auth-example-stale | medium | the operator example describes the old ambient-only Claude auth contract
 
 Open, owned by P04.S15. The example still says this service never reads CLAUDE_CODE_OAUTH_TOKEN and gives no editable VAULTSPEC_A2A_CLAUDE_AUTH_CHANNEL or VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN line. After S14 that is false: a declared oauth_token channel reads the configured secret and injects it. The env-example coverage test reports both missing names; it also reports the independently added SUCCESSOR_TRANSCRIPT_DEPTH setting, owned by the continuation workstream. Type: operator documentation and settings coverage drift. S15 must explain that a token only in a project .env authenticates nothing under the default channel and must document how to opt in.
+### acp-per-model-usage-strict-type | low | S18 read optional nested TypedDict fields as required
+
+Fixed in P06.S19. The S18 per-model usage aggregation built the nested cache details in every row but read them through LangChain's optional `UsageMetadata.input_token_details` type, producing four `reportTypedDictNotRequiredAccess` diagnostics in the strict type gate. The parser now accumulates its already validated cache counts directly while constructing each row, preserving the turn totals and eliminating those four diagnostics. The remaining lane-admission and checkpoint diagnostics are owned by P02.S22 and continuation P06.S17. Type: static type safety and CI integration.

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:f22ac0d6e30f4736e95bc401807eaffd5f20071789a0c56939beb502c58bec7b'
+body_hash: 'sha256:251e7223f872f044851a19f0d34a3dfded11ad3a35066d49bc35c8f04f3e49c6'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -235,6 +235,15 @@ related:
 - `S14` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S14` `verify:` `git diff --check` -> `pass`
 - `S14` `by:` `provider-runtime`
+- `S19` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S19` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S19` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S19` `A` `src/vaultspec_a2a/providers/tests/test_acp_session_update_visibility.py`
+- `S19` `verify:` `focused update/native/stop tests 26 passed` -> `pass`
+- `S19` `verify:` `changed-file ruff format ty` -> `pass`
+- `S19` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S19` `verify:` `git diff --check` -> `pass`
+- `S19` `by:` `provider-proof`
 
 ## Notes
 
@@ -258,3 +267,4 @@ related:
 - `S22` Review: no remaining code finding in S22; strict CI diagnostics in ACP protocol and checkpoints are assigned to their owning continuation and S19 passes.
 - `S20` Formal review fixed the false settings-source claim and queued medium managed-policy presence evidence for S13.
 - `S14` Env-example coverage pending S15 and continuation successor setting; integrated CI and credentialed live turn pending.
+- `S19` Strict global type gate has remaining checkpoints diagnostics assigned to continuation S17; lane-admission diagnostics fixed in P02.S22. Integrated just ci pending.

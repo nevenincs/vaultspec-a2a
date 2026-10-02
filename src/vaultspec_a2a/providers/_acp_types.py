@@ -204,7 +204,6 @@ class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
     # repr=False keeps injected auth tokens out of the frozen config's default
     # dataclass repr (env_vars redaction audit).
     env_vars: dict[str, str] = field(repr=False)
-    session_id: str | None
     mcp_servers: list[JsonObject]
     use_exec: bool
     provider: str | None

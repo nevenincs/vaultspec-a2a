@@ -35,6 +35,12 @@ def test_no_production_caller_resumes_a_persisted_acp_session() -> None:
     assert not resuming, f"production callers resume persisted ACP sessions: {resuming}"
 
 
+def test_acp_model_has_no_resume_option() -> None:
+    from ..acp_chat_model import AcpChatModel
+
+    assert "session_id" not in AcpChatModel.model_fields
+
+
 def _acp_lane_sources() -> list[Path]:
     """List every module the ACP chat lane is composed of.
 

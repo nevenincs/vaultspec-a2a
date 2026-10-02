@@ -87,7 +87,6 @@ def _config(
         workspace_root=workspace_root,
         command=["claude-code-acp"],
         env_vars={},
-        session_id=None,
         mcp_servers=[],
         use_exec=False,
         provider="anthropic",

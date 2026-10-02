@@ -66,7 +66,6 @@ def _config(
         workspace_root=str(workspace_root),
         command=["claude-agent-acp"],
         env_vars={},
-        session_id=None,
         mcp_servers=[],
         use_exec=False,
         provider="claude",
@@ -294,7 +293,7 @@ async def test_unattended_session_is_pinned_away_from_an_ambient_mode(
     permission rung is consulted.
     """
     config = _config(agent_id="vaultspec-adr-author", workspace_root=tmp_path)
-    task = asyncio.create_task(setup_session(echo_context, config, {}, []))
+    task = asyncio.create_task(setup_session(echo_context, config, []))
 
     new_session = await read_acp_frame(
         echo_context.stdout, AcpRequestId.SESSION_SETUP, timeout=_TIMEOUT
@@ -353,7 +352,7 @@ async def test_unattended_session_refuses_a_mode_it_cannot_verify(
 ) -> None:
     """A session that reports a different mode than it was set to fails the run."""
     config = _config(agent_id="vaultspec-adr-author", workspace_root=tmp_path)
-    task = asyncio.create_task(setup_session(echo_context, config, {}, []))
+    task = asyncio.create_task(setup_session(echo_context, config, []))
 
     await read_acp_frame(
         echo_context.stdout, AcpRequestId.SESSION_SETUP, timeout=_TIMEOUT
@@ -395,7 +394,7 @@ async def test_unattended_session_refuses_a_lane_without_the_mode(
 ) -> None:
     """A lane that advertises modes but cannot deny by default is refused."""
     config = _config(agent_id="vaultspec-adr-author", workspace_root=tmp_path)
-    task = asyncio.create_task(setup_session(echo_context, config, {}, []))
+    task = asyncio.create_task(setup_session(echo_context, config, []))
 
     await read_acp_frame(
         echo_context.stdout, AcpRequestId.SESSION_SETUP, timeout=_TIMEOUT
@@ -429,7 +428,7 @@ async def test_supervised_session_keeps_the_mode_it_negotiated(
         workspace_root=tmp_path,
         permission_callback=callback,
     )
-    task = asyncio.create_task(setup_session(echo_context, config, {}, []))
+    task = asyncio.create_task(setup_session(echo_context, config, []))
 
     await read_acp_frame(
         echo_context.stdout, AcpRequestId.SESSION_SETUP, timeout=_TIMEOUT
@@ -460,7 +459,7 @@ async def test_unattended_session_refuses_an_agent_that_advertises_no_modes(
     is the condition the pin exists to prevent rather than a lesser form of it.
     """
     config = _config(agent_id="vaultspec-adr-author", workspace_root=tmp_path)
-    task = asyncio.create_task(setup_session(echo_context, config, {}, []))
+    task = asyncio.create_task(setup_session(echo_context, config, []))
 
     await read_acp_frame(
         echo_context.stdout, AcpRequestId.SESSION_SETUP, timeout=_TIMEOUT
@@ -495,7 +494,7 @@ async def test_supervised_session_still_runs_against_an_agent_without_modes(
         workspace_root=tmp_path,
         permission_callback=callback,
     )
-    task = asyncio.create_task(setup_session(echo_context, config, {}, []))
+    task = asyncio.create_task(setup_session(echo_context, config, []))
 
     await read_acp_frame(
         echo_context.stdout, AcpRequestId.SESSION_SETUP, timeout=_TIMEOUT
@@ -629,7 +628,7 @@ def test_a_read_grant_names_the_workspace_it_is_for(tmp_path: Path) -> None:
     """
     rule = workspace_scoped_tool_rule("Read", str(tmp_path))
 
-    assert rule == f"Read(/{tmp_path}/**)"
+    assert rule == f"Read({claude_rule_path(str(tmp_path))}/**)"
     assert rule.startswith("Read(//")
     # A tool whose rule grammar takes no path keeps its bare name rather than
     # carrying an unmatchable one, and so does a run with no workspace to name.

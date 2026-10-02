@@ -100,7 +100,6 @@ def _served_config(workspace: str) -> AcpModelConfig:
         workspace_root=workspace,
         command=[],
         env_vars={},
-        session_id=None,
         mcp_servers=[],
         use_exec=False,
         provider=Provider.CLAUDE.value,

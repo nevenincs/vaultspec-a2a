@@ -44,8 +44,6 @@ _TIMEOUT = 10.0
 
 def _config(
     desired_model: str | None,
-    *,
-    session_id: str | None = None,
 ) -> AcpModelConfig:
     """Build the minimal real config the selection seam reads."""
     return AcpModelConfig(
@@ -54,7 +52,6 @@ def _config(
         workspace_root=None,
         command=["echo"],
         env_vars={},
-        session_id=session_id,
         mcp_servers=[],
         use_exec=False,
         provider=None,
@@ -213,19 +210,6 @@ async def test_initialize_rejects_missing_or_malformed_protocol_version(
                 "agentCapabilities": {},
                 "authMethods": [],
             },
-        )
-
-
-@pytest.mark.asyncio
-async def test_initialize_refuses_resume_without_negotiated_support(
-    echo_context: AcpSessionContext,
-) -> None:
-    config = _config(None, session_id="existing-session")
-    with pytest.raises(AcpSessionError, match="does not advertise loadSession"):
-        await _initialize(
-            echo_context,
-            config,
-            {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": []},
         )
 
 

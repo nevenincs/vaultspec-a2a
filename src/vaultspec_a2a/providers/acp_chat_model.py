@@ -8,7 +8,6 @@ Architecture:
   - Handles bidirectional RPCs (session/request_permission)
   - Yields streaming `agent_message_chunk` notifications as LangChain chunks
   - Maps `tool_call` / `tool_call_update` to ToolCallChunk for LangGraph
-  - Supports session/load for session resumption
   - Supports session/cancel notification for interruption
   - Terminates on `stopReason: "end_turn"`
   - Propagates LangGraph GraphBubbleUp from permission_callback to caller
@@ -120,13 +119,9 @@ class AcpChatModel(BaseChatModel):
         repr=False,
         exclude=True,
     )
-    session_id: str | None = Field(
-        default=None,
-        description="If set, resume an existing session via session/load.",
-    )
     mcp_servers: list[JsonObject] = Field(
         default_factory=list,
-        description="MCP server configs to pass via session/new or session/load.",
+        description="MCP server configs to pass via session/new.",
     )
     allowed_tools: list[str] = Field(
         default_factory=list,
@@ -240,7 +235,6 @@ class AcpChatModel(BaseChatModel):
                 workspace_root=self.workspace_root,
                 command=self.command,
                 env_vars=dict(self.env_vars),
-                session_id=self.session_id,
                 mcp_servers=list(self.mcp_servers),
                 allowed_tools=list(self.allowed_tools),
                 use_exec=self.use_exec,
@@ -517,7 +511,6 @@ class AcpChatModel(BaseChatModel):
             result = await setup_session(
                 ctx,
                 self._state.config,
-                init_result.agent_capabilities,
                 init_result.auth_methods,
             )
             self._state.session.active_session_id = result.session_id

@@ -10,9 +10,9 @@ related:
   - '[[2026-08-02-provider-capability-evidence-adr]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:1afce7edfa6b120b71b397099d5407f70e7a59bc6c69e0b3846f8665fe82992f'
+body_hash: 'sha256:e185895b5d6e7afd3b702a6fd9170022be4c3999ff83e197b5c8656d64ad05a7'
 ---
 
 # `provider-binary-policy` plan
@@ -78,7 +78,7 @@ A new channel setting decides whether the worker injects the headless OAuth toke
 
 The session/load branch and the session id option no production path can reach leave the code, and per-call sessions stay the only shape.
 
-- [ ] `P05.S16` - Remove the unreachable session/load branch and the session id option, and prove no production caller sets a provider session id; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
+- [x] `P05.S16` - Remove the unreachable session/load branch and the session id option, and prove no production caller sets a provider session id; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_types.py, src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`.
 
 ### Phase `P06` - adapter release enrolment
 

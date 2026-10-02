@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#provider-binary-policy'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:1691bdf3cb667fd5055c9d8b9734ac65ced2408afaadc25aa9bb63182e4e2be1'
+body_hash: 'sha256:22cab856e3eddfdb00f0c3e330a1dfdfef9cb9c10fd2f32d10ce3884ee6a0808'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -57,6 +57,18 @@ Recorded. The adapter pins SDK 0.3.284 (CLI 2.1.284) while 0.3.286 exists; forci
 ### claude-lane-proof-predates-the-binary | medium | the Claude lane's completed-turn proof was earned on an older binary
 
 Open; needs a credentialed host. No model turn is possible here, so the bump is proven to the handshake and binary boundary only. Under the served-profile rule's binary-identity clause the Claude lane must re-earn its completed-turn proof on CLI 2.1.284 before that identity is admitted; P02.S07 of this plan records proved versions.
+
+### workspace-scope-test-posix-only | low | workspace read grant test assumed POSIX temporary paths
+
+Fixed in P05.S16. The workspace read grant assertion expected a POSIX spelling of tmp_path. On Windows the production rule correctly anchors the drive, so the assertion failed despite correct behavior. It now composes the separately tested production path renderer with the workspace rule. Type: test portability.
+
+### desktop-test-still-passed-resume-option | low | desktop process test used the removed model option
+
+Fixed in P05.S16. After removing AcpChatModel.session_id, the owned-process-tree test still passed session_id=None. The typed gate found the stale constructor call at src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py:158. Type: test compatibility. The argument is removed and the targeted type check passes.
+
+### ownership-test-used-absolute-import | low | new test violated the relative-import guard
+
+Fixed in P05.S16. The new model-field assertion initially imported the provider with an absolute intra-package path. The repository guard found it; the test now imports the production model relatively. Type: test convention.
 
 ## Recommendations
 

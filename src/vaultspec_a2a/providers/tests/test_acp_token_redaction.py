@@ -27,7 +27,6 @@ def _config() -> AcpModelConfig:
         workspace_root=None,
         command=["node", "acp.js"],
         env_vars={"ANTHROPIC_AUTH_TOKEN": _TOKEN},
-        session_id=None,
         mcp_servers=[],
         use_exec=False,
         provider="zai",

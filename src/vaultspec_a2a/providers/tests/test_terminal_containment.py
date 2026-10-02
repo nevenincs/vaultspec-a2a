@@ -59,7 +59,6 @@ def _make_config(workspace_root: str) -> AcpModelConfig:
         workspace_root=workspace_root,
         command=["python"],
         env_vars={},
-        session_id=None,
         mcp_servers=[],
         use_exec=False,
         provider=None,

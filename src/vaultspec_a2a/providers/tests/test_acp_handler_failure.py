@@ -85,7 +85,6 @@ def _config() -> AcpModelConfig:
         workspace_root=None,
         command=["echo"],
         env_vars={},
-        session_id=None,
         mcp_servers=[],
         use_exec=False,
         provider=None,

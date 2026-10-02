@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import SecretStr
 
+from ...conftest import _claude_credentialed
 from ...graph.enums import Provider
 from ...testing import armed_environment, settings_override
 from .._factory_commands import (
@@ -56,6 +57,36 @@ def _cli_file(root: Path) -> Path:
     cli = root / ("claude.exe" if os.name == "nt" else "claude")
     cli.write_text("owned CLI\n", encoding="utf-8")
     return cli
+
+
+@pytest.mark.parametrize(
+    ("channel", "configured", "ambient", "expected"),
+    (
+        ("subscription_login", SecretStr("configured-test-token"), None, False),
+        ("subscription_login", None, "ambient-test-token", True),
+        ("oauth_token", SecretStr("configured-test-token"), None, True),
+        ("oauth_token", None, "ambient-test-token", False),
+    ),
+)
+def test_credential_prerequisite_uses_production_channel(
+    tmp_path: Path,
+    channel: str,
+    configured: SecretStr | None,
+    ambient: str | None,
+    expected: bool,
+) -> None:
+    with (
+        settings_override(
+            claude_auth_channel=channel,
+            claude_code_oauth_token=configured,
+        ),
+        armed_environment(
+            PATH=str(tmp_path),
+            CLAUDE_CONFIG_DIR=str(tmp_path),
+            CLAUDE_CODE_OAUTH_TOKEN=ambient,
+        ),
+    ):
+        assert _claude_credentialed() is expected
 
 
 def test_subscription_channel_does_not_inject_the_configured_token(

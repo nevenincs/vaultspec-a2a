@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:109655e0e4b77a3150c4e77f009210cc4c69813f80c9b2e6018862dcc39f0b37'
+body_hash: 'sha256:1ab24eb1aeec9f4ed3b7329c146503e13517bc8c78d5b8d340cb97d1c11f2f1a'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -152,7 +152,7 @@ Fixed in P02.S22. The P02.S08 proof predicate rejected missing parse results in 
 Open; owned by P03.S13. The adapter applies managed policy before sessions but its ACP initialize and session/new results do not report whether that tier existed or its read succeeded. P06.S20 logs the resolution path only. `ProviderRuntimeIdentityModel.managed_policy_present` must remain unknown until S13 obtains a reliable presence signal, for example by probing the same SDK `resolveSettings({settingSources: []})` policy tier without exporting its values. Type: runtime evidence gap.
 ### claude-auth-example-stale | medium | the operator example describes the old ambient-only Claude auth contract
 
-Open, owned by P04.S15. The example still says this service never reads CLAUDE_CODE_OAUTH_TOKEN and gives no editable VAULTSPEC_A2A_CLAUDE_AUTH_CHANNEL or VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN line. After S14 that is false: a declared oauth_token channel reads the configured secret and injects it. The env-example coverage test reports both missing names; it also reports the independently added SUCCESSOR_TRANSCRIPT_DEPTH setting, owned by the continuation workstream. Type: operator documentation and settings coverage drift. S15 must explain that a token only in a project .env authenticates nothing under the default channel and must document how to opt in.
+Fixed in P04.S15. The example now documents the two canonical Claude auth settings, the alternate CLI token name, and the distinction between a token held only in project .env and an operator export under the default channel. It also covers SUCCESSOR_TRANSCRIPT_DEPTH. The env-example drift and coverage suite passes. Type: operator documentation and settings coverage drift.
 ### acp-per-model-usage-strict-type | low | S18 read optional nested TypedDict fields as required
 
 Fixed in P06.S19. The S18 per-model usage aggregation built the nested cache details in every row but read them through LangChain's optional `UsageMetadata.input_token_details` type, producing four `reportTypedDictNotRequiredAccess` diagnostics in the strict type gate. The parser now accumulates its already validated cache counts directly while constructing each row, preserving the turn totals and eliminating those four diagnostics. The remaining lane-admission and checkpoint diagnostics are owned by P02.S22 and continuation P06.S17. Type: static type safety and CI integration.
@@ -163,3 +163,4 @@ Fixed in P02.S23. P01.S04's lock-vendored Claude CLI fallback reads the declared
 ### release-history-test-assumed-no-new-release | medium | 0.4.0 changelog entry broke the dev CI gate
 
 Fixed in P02.S23. The release-please contract test required exactly the three bootstrapped headings even after 0.4.0 was released. It now requires those exact historical headings as the preserved suffix while allowing newer releases to prepend. The focused release and storage-anchor suites pass together (25 tests). Type: stale test contract and CI integration.
+P04.S15 review (2026-10-02): PASS for the declared-channel credential prerequisite and operator example. The prerequisite calls the production auth selector, so a configured token under subscription_login alone is insufficient and an ambient token under oauth_token cannot mask a missing configured token. The example gives editable channel and token settings, explains dotenv-only behavior, and documents successor transcript depth. The stale env-example guard is removed. Twenty-nine focused tests and changed-file checks pass. No new finding was surfaced; shared integrated CI remains pending.

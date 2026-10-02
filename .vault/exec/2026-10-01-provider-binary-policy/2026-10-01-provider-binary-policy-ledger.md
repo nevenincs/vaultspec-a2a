@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:3c9650ca10dbc5a90debe6c7d4d7c37ed30129c1deb98ca35f84681e8ce6e90b'
+body_hash: 'sha256:b32ca7ce27030c632f6edb9e160dc18c6fca104d71d5ea11e04ed361c17a7f76'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -252,6 +252,16 @@ related:
 - `S23` `verify:` `changed-file ruff format ty basedpyright` -> `pass`
 - `S23` `verify:` `git diff --check` -> `pass`
 - `S23` `by:` `vaultspec-high-executor`
+- `S15` `M` `src/vaultspec_a2a/conftest.py`
+- `S15` `M` `.env.example`
+- `S15` `M` `src/vaultspec_a2a/control/tests/_env_example.py`
+- `S15` `M` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S15` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S15` `verify:` `focused auth and env example tests 29 passed` -> `pass`
+- `S15` `verify:` `changed-file ruff format ty` -> `pass`
+- `S15` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S15` `verify:` `git diff --check` -> `pass`
+- `S15` `by:` `provider-runtime`
 
 ## Notes
 
@@ -277,3 +287,4 @@ related:
 - `S14` Env-example coverage pending S15 and continuation successor setting; integrated CI and credentialed live turn pending.
 - `S19` Strict global type gate has remaining checkpoints diagnostics assigned to continuation S17; lane-admission diagnostics fixed in P02.S22. Integrated just ci pending.
 - `S23` Review: low guard classification and medium stale release test fixed; integrated CI remains pending.
+- `S15` S15 review passed with no new finding; shared integrated CI remains pending.

@@ -46,6 +46,7 @@ from ...graph.compiler import compile_team_graph
 from ...graph.nodes.worker import (
     _describe_worker_model,
     _finalize_worker_response,
+    _record_turn_usage,
     _turn_token_usage,
     _worker_model_identity,
     create_worker_node,
@@ -53,6 +54,8 @@ from ...graph.nodes.worker import (
 from ...graph.protocols import CostPort
 from ...providers._codex_app_server_client import _CodexAppServerClient
 from ...providers._subprocess import spawn_acp_process
+from ...providers.acp_chat_model import AcpChatModel
+from ...providers.acp_exceptions import AcpPromptError
 from ...providers.codex_chat_model import CodexChatModel
 from ...providers.deterministic_chat_model import DeterministicResearchAdrChatModel
 from ...tests._write_authority import make_test_thread_authority_columns
@@ -648,6 +651,42 @@ class TestCodexUsageCapture:
 
 class TestUsageReachesAPersistedRow:
     """End to end: a real provider frame becomes a real database row."""
+
+    @pytest.mark.asyncio
+    async def test_failed_acp_usage_reaches_durable_cost_row(
+        self, engine: AsyncEngine, session: AsyncSession
+    ) -> None:
+        await _seed_thread(session, "t-failed-acp")
+        await session.commit()
+        error = AcpPromptError(
+            "ACP agent refused the prompt",
+            usage_metadata=UsageMetadata(
+                input_tokens=8,
+                output_tokens=2,
+                total_tokens=10,
+                input_token_details={"cache_read": 4, "cache_creation": 1},
+            ),
+        )
+        usage = _turn_token_usage(error)
+        assert usage is not None
+        await _record_turn_usage(
+            cost_port=SqlCostPort(async_sessionmaker(engine, expire_on_commit=False)),
+            thread_id="t-failed-acp",
+            worker_name="coder-1",
+            model=AcpChatModel(command=["unused"]),
+            usage=usage,
+        )
+        totals = await sum_cost_by_thread(session, "t-failed-acp")
+        assert totals["input_tokens"] == 8
+        assert totals["output_tokens"] == 2
+        row = (
+            await session.execute(
+                select(CostTrackingModel).where(
+                    CostTrackingModel.thread_id == "t-failed-acp"
+                )
+            )
+        ).scalar_one()
+        assert (row.cache_read_tokens, row.cache_write_tokens) == (4, 1)
 
     @pytest.mark.asyncio
     async def test_codex_frame_persists_token_accounting(

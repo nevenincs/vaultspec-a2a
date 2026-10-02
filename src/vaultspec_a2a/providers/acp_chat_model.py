@@ -712,6 +712,7 @@ class AcpChatModel(BaseChatModel):
         _raise_for_prompt_stop_reason(
             ctx.prompt_stop_reason,
             effects_may_have_occurred=ctx.effects_may_have_occurred,
+            usage_metadata=ctx.prompt_usage,
         )
         if ctx.prompt_usage is not None:
             # A terminal-only chunk lets LangChain merge usage into the final

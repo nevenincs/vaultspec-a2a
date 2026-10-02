@@ -26,6 +26,7 @@ from ...context.anchoring import build_anchoring_context
 from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
+from ...providers.acp_exceptions import AcpPromptError
 from ...thread.enums import ApprovalStatus
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
@@ -456,7 +457,7 @@ def _wrap_worker_exception(
     )
 
 
-def _turn_token_usage(response: BaseMessage) -> TokenUsageEntry | None:
+def _turn_token_usage(response: BaseMessage | AcpPromptError) -> TokenUsageEntry | None:
     """Read the turn's token accounting off the message the provider returned.
 
     Reads LangChain's standard ``usage_metadata``, so any lane that reports
@@ -945,6 +946,16 @@ def create_worker_node(
         except GraphBubbleUp:
             raise
         except Exception as exc:
+            if isinstance(exc, AcpPromptError):
+                failed_usage = _turn_token_usage(exc)
+                if failed_usage is not None:
+                    await _record_turn_usage(
+                        cost_port=settings["cost_port"],
+                        thread_id=thread_id,
+                        worker_name=name,
+                        model=effective_model,
+                        usage=failed_usage,
+                    )
             raise _wrap_worker_exception(
                 exc=exc,
                 worker=name,

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:16f29ca6201ed5c9c6c7c14ab24153b1df0b1e615e5597315afadd1a9642837d'
+body_hash: 'sha256:fac2aa33e757a2238e201b2e54d50e093a28f6029d5ca0cdb1139d4ad91ae729'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -143,7 +143,7 @@ Fixed in P03.S12. The public compiler delegates worker construction to `_compile
 Fixed in P03.S13. Research branch models are invoked by `_make_research_producer` through `create_researcher_node`, so the producer now binds the per-run identity port after model composition, as the worker does. A real Codex worker turn followed by a research producer turn wrote one durable row and retained the first native session ID. Type: topology coverage and runtime evidence.
 ### failed-acp-turn-usage-unrecorded | medium | failed prompts can spend tokens without a returned usage message
 
-Open; follow-up scope is the graph's error-path accounting contract. The upgraded adapter reports usage on terminal prompt results even for refusal, cancellation and budget stops. This Step attaches usage to the final message only after a successful end_turn because those other outcomes raise a typed prompt error and return no message for the graph's _turn_token_usage reader. A failed turn can therefore incur provider usage without a token_usage entry. Type: cost-accounting gap. A later Step must decide how error-path usage reaches the durable turn record without treating a failed prompt as a successful response.
+Fixed in P06.S27. ACP parses provider-reported terminal usage for every supported stop reason, retains it on the typed failure, and the worker writes the measured counts through the existing durable cost port before propagating the failure. Failed prompts remain failures and produce no successful response or checkpoint token_usage delta; the cost table is the durable accounting record for those attempts. Type: cost-accounting gap.
 ### proof-range-typing-was-not-narrowed | low | strict CI could not verify version comparisons
 
 Fixed in P02.S22. The P02.S08 proof predicate rejected missing parse results in a compound condition that basedpyright could not narrow, leaving three strict diagnostics at the host PATH comparison. It now checks all four parsed versions for `None` before comparing them. Behavior is unchanged; focused lane admission tests and strict type checks pass. Type: CI type correctness and proof gate readability.
@@ -285,3 +285,7 @@ The current focused provider, auth and graph set passes 141 tests; strict types,
 ## P02.S09 integrated verification and review, 2026-10-02
 
 The final working tree passed `just ci-merge` on Windows with Python 3.13.11 and pinned Node 26.8.1: lint, format, strict types, dependency and vault guards, 153 development tests, and 2,130 unit tests with five Linux-only skips. The focused provider/auth/graph set passed 141 tests. The two timing-sensitive lifecycle tests from the earlier constrained run passed in the immediate isolated rerun and again in this complete merge profile without source changes, closing that verification follow-up. Review traced frozen worker and supervisor resolution, catalog admission, factory construction, and ACP/Codex pre-spawn checks against both amended ADRs; no further finding was surfaced in this step. Review verdict for P02.S09: PASS. P02.S21 remains open pending credentialed Claude and Z.ai live turns.
+
+### P06.S27 implementation review | low | no new finding surfaced
+
+Provider stop-reason parsing, typed error propagation, worker failure handling, and SQL cost persistence were reviewed together. The cost write remains observational and best-effort, as for successful turns; a database outage can still leave usage unrecorded and is logged. Four failure stop reasons retain usage while still raising. Focused provider and database tests pass (55), strict types, Ruff, and diff checks pass. The first merge-profile run had a single host disk-full failure while copying Node; that test passed in isolation after test artifacts were moved to free space. The full clean rerun passed 153 development tests and 2,134 unit tests with five Windows platform skips. Review verdict: PASS for P06.S27; no new defect surfaced. Type: review outcome.

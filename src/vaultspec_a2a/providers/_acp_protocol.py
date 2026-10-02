@@ -322,18 +322,17 @@ def _finish_prompt_response(data: JsonObject, ctx: AcpSessionContext) -> None:
         )
         ctx.prompt_done.set()
         return
-    if stop_reason == "end_turn":
-        try:
-            ctx.prompt_usage = _prompt_usage_metadata(result)
-        except ValueError as exc:
-            ctx.interrupt_exc.append(
-                AcpPromptError(
-                    f"ACP session/prompt returned invalid usage: {exc}",
-                    code=AcpErrorCode.INVALID_PARAMS,
-                )
+    try:
+        ctx.prompt_usage = _prompt_usage_metadata(result)
+    except ValueError as exc:
+        ctx.interrupt_exc.append(
+            AcpPromptError(
+                f"ACP session/prompt returned invalid usage: {exc}",
+                code=AcpErrorCode.INVALID_PARAMS,
             )
-            ctx.prompt_done.set()
-            return
+        )
+        ctx.prompt_done.set()
+        return
     ctx.prompt_stop_reason = stop_reason
     ctx.prompt_done.set()
 

@@ -222,6 +222,47 @@ def test_provider_cancel_has_a_distinct_outcome() -> None:
     assert caught.value.data == {"acp_stop_reason": "cancelled"}
 
 
+@pytest.mark.parametrize(
+    "stop_reason", ["refusal", "cancelled", "max_tokens", "max_turn_requests"]
+)
+def test_failed_terminal_turn_preserves_reported_usage_on_error(
+    stop_reason: str,
+) -> None:
+    async def exercise() -> None:
+        ctx = _context()
+        future = cast("AcpResponseFuture", asyncio.get_running_loop().create_future())
+        ctx.response_futures[7] = future
+        await handle_client_response(
+            {
+                "id": 7,
+                "result": {
+                    "stopReason": stop_reason,
+                    "usage": {
+                        "inputTokens": 3,
+                        "outputTokens": 2,
+                        "cachedReadTokens": 4,
+                        "cachedWriteTokens": 1,
+                        "totalTokens": 10,
+                    },
+                },
+            },
+            ctx,
+        )
+        model = AcpChatModel(command=["unused"])
+        with pytest.raises(AcpPromptError) as caught:
+            async for _chunk in model._yield_chunks(ctx, future, None):
+                pass
+        assert caught.value.usage_metadata == {
+            "input_tokens": 8,
+            "output_tokens": 2,
+            "total_tokens": 10,
+            "input_token_details": {"cache_read": 4, "cache_creation": 1},
+            "output_token_details": {"reasoning": 0},
+        }
+
+    asyncio.run(exercise())
+
+
 def test_partial_output_does_not_turn_refusal_into_success() -> None:
     async def exercise() -> None:
         ctx = _context()

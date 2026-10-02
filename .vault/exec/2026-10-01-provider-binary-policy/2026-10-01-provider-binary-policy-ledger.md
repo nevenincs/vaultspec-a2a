@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:b1f0cb60f115dfdaa1a71224e9ac64b80bedf818b17766af7877f57ccf6427e5'
+body_hash: 'sha256:7ae6b10d5bfa2ea6af134a2684f3319d54a6f19b756f1127d686088ebd9a4b4e'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -350,6 +350,19 @@ related:
 - `S09` `verify:` `just ci-merge` -> `pass`
 - `S09` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S09` `by:` `Codex`
+- `S27` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S27` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S27` `M` `src/vaultspec_a2a/database/tests/test_cost_tracking.py`
+- `S27` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S27` `M` `src/vaultspec_a2a/providers/_acp_prompt_outcomes.py`
+- `S27` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S27` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S27` `M` `src/vaultspec_a2a/providers/acp_exceptions.py`
+- `S27` `M` `src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py`
+- `S27` `verify:` `pytest focused` -> `pass`
+- `S27` `verify:` `just audit-types` -> `pass`
+- `S27` `verify:` `just ci-merge` -> `pass`
+- `S27` `by:` `Codex`
 
 ## Notes
 

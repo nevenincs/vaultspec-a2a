@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:ce376ea96ea84c9ba8794e4f7e21b786a4b589dcfa9a8dd055b04273d6b31d86'
+body_hash: 'sha256:054045001532187dfc4617245c04fbea124e1b1e512a6cfa18200e01cecad13f'
 ---
 
 # `provider-binary-policy` plan
@@ -93,6 +93,7 @@ Take up what the newer vendored adapter offers this lane, as the upgrade researc
 - [x] `P06.S18` - Carry the per-model token usage the adapter now reports on each prompt result into the turn's usage metadata; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_types.py`.
 - [x] `P06.S19` - Handle or log every session update kind the adapter emits, including usage, config option and session info updates; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/tests/`.
 - [x] `P06.S20` - State and record that the adapter's managed-policy tier reaches the provider child, correcting the claim that no setting sources drops managed configuration; `src/vaultspec_a2a/providers/_claude_tool_policy.py, src/vaultspec_a2a/providers/_acp_session.py`.
+- [x] `P06.S27` - Persist provider-reported token usage from failed ACP terminal turns through the worker cost port without returning a successful message; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_prompt_outcomes.py, src/vaultspec_a2a/providers/acp_exceptions.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/database/tests/test_cost_tracking.py`.
 
 ## Parallelization
 

@@ -12,7 +12,7 @@ related:
   - '[[2026-08-02-clarification-continuation-adr]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:44e8a34baea7cb06e3a36964f1c633dae89064185a7f1b35088c1e5b3157c2cc'
+body_hash: 'sha256:84360aed333a819a7424fa2c7c10e2d334a05584e5df5afbfdda1e771982a068'
 ---
 
 # `run-continuation` plan
@@ -85,7 +85,7 @@ A busy run admits at most one continuation as a reserved journal action answered
 run-start accepts an optional continues_run_id, the successor seeds its graph input from the predecessor's surviving final checkpoint, and both runs disclose the link.
 
 - [x] `P05.S14` - Accept an optional continues_run_id on run-start, refuse a predecessor that is not a settled run of the same workspace, record the single-parent link on the successor, and disclose it on run-status; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py, src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/context/metadata.py, openapi.json`.
-- [ ] `P05.S15` - Seed the successor run's graph input from the predecessor's surviving final checkpoint at a configured bounded transcript depth, refusing rather than starting empty when that checkpoint is gone; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/domain_config.py`.
+- [x] `P05.S15` - Seed the successor run's graph input from the predecessor's surviving final checkpoint at a configured bounded transcript depth, refusing rather than starting empty when that checkpoint is gone; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/domain_config.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py, src/vaultspec_a2a/ipc/schemas.py, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/api/tests/test_run_continuation_lineage.py, src/vaultspec_a2a/worker/tests/test_executor.py`.
 
 ### Phase `P06` - Contract event and end-to-end proof
 

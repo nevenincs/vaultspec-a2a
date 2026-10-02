@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from langchain_core.messages import AIMessage
+
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.accepted_input import freeze_accepted_input
@@ -45,9 +47,15 @@ from ..database import (
     successor_thread_write_authority,
     thread_write_expectation,
 )
+from ..database.checkpoints import surviving_transcript
 from ..database.models import RunWriteAuthority, ThreadModel
 from ..graph.nodes.vault_reader import build_initial_vault_index
-from ..ipc.schemas import DispatchRequest, canonical_project_root, to_dispatch_action
+from ..ipc.schemas import (
+    DispatchRequest,
+    SeedTranscriptMessage,
+    canonical_project_root,
+    to_dispatch_action,
+)
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
@@ -72,6 +80,7 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..database.checkpoints import Checkpointer
     from ..thread.actor_tokens import ActorTokenBundle
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
@@ -146,6 +155,7 @@ class ThreadCreationRequest:  # pylint: disable=too-many-instance-attributes
     actor_tokens: ActorTokenBundle | None = None
     # The exact served selection frozen at admission and threaded to the worker.
     model_assignment: dict[str, dict[str, Any]] = field(default_factory=dict)
+    seed_transcript: list[SeedTranscriptMessage] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +247,22 @@ def process_metadata(
     return ws_root, nickname, metadata.model_dump_json()
 
 
+async def successor_seed_transcript(
+    checkpointer: Checkpointer, predecessor_id: str, depth: int
+) -> list[SeedTranscriptMessage] | None:
+    """Carry conversation prose from a predecessor's surviving checkpoint."""
+    messages = await surviving_transcript(checkpointer, predecessor_id, depth)
+    if messages is None:
+        return None
+    return [
+        SeedTranscriptMessage(
+            role="assistant" if isinstance(message, AIMessage) else "user",
+            content=str(message.content),
+        )
+        for message in messages
+    ]
+
+
 def _initial_dispatch(
     req: ThreadCreationRequest, *, dispatch_id: str, recursion_limit: int
 ) -> DispatchRequest:
@@ -267,6 +293,7 @@ def _initial_dispatch(
         metadata_json=req.metadata_json,
         content=req.initial_message,
         context_preamble=context_preamble,
+        seed_transcript=req.seed_transcript,
         recursion_limit=recursion_limit,
         active_feature=feature_tag,
         feedback_batch_id=(

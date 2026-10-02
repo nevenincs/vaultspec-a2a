@@ -185,6 +185,7 @@ class RunStartRequest(BaseModel):
     # Client-supplied stable run/idempotency id. Explicit provider selection is
     # replay-safe only when every start owns a durable caller identity.
     run_id: PathSafeRunId
+    continues_run_id: PathSafeRunId | None = None
     # Explicit whole-team catalog choice. New runs have no implicit profile or
     # provider default; every selected value must revalidate against the current
     # workspace catalog before admission.
@@ -485,6 +486,7 @@ class RunStatusResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     run_id: PathSafeRunId
+    continues_run_id: PathSafeRunId | None = None
     status: ThreadStatus
     # Product-safe semantic authoring phase projected from topology position and
     # gate state, so the Rust backend never interprets LangGraph node names.

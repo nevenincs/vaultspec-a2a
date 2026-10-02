@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Vaultspec A2A Orchestrator",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "paths": {
     "/admin/shutdown": {
@@ -4021,6 +4021,20 @@
             "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
           },
+          "continues_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continues Run Id"
+          },
           "selection": {
             "$ref": "#/components/schemas/ProviderCatalogSelection"
           },
@@ -4140,6 +4154,20 @@
             "minLength": 1,
             "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
             "title": "Run Id"
+          },
+          "continues_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continues Run Id"
           },
           "status": {
             "$ref": "#/components/schemas/ThreadStatus"
@@ -4850,6 +4878,17 @@
             "type": "string",
             "title": "Callee",
             "default": ""
+          },
+          "continues_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continues Run Id"
           },
           "feature_tag": {
             "type": "string",

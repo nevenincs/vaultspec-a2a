@@ -10,9 +10,9 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-08-05-served-capability-contract-state-truthfulness-adr]]'
   - '[[2026-08-02-clarification-continuation-adr]]'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:52d8d4f498e5e0bdc84b4b979b4e98616014b9d019f918cf39a897855ef5535a'
+body_hash: 'sha256:44e8a34baea7cb06e3a36964f1c633dae89064185a7f1b35088c1e5b3157c2cc'
 ---
 
 # `run-continuation` plan
@@ -84,7 +84,7 @@ A busy run admits at most one continuation as a reserved journal action answered
 
 run-start accepts an optional continues_run_id, the successor seeds its graph input from the predecessor's surviving final checkpoint, and both runs disclose the link.
 
-- [ ] `P05.S14` - Accept an optional continues_run_id on run-start, refuse a predecessor that is not a settled run of the same workspace, record the single-parent link on the successor, and disclose it on run-status; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py, src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/context/metadata.py, openapi.json`.
+- [x] `P05.S14` - Accept an optional continues_run_id on run-start, refuse a predecessor that is not a settled run of the same workspace, record the single-parent link on the successor, and disclose it on run-status; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py, src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py, src/vaultspec_a2a/context/metadata.py, openapi.json`.
 - [ ] `P05.S15` - Seed the successor run's graph input from the predecessor's surviving final checkpoint at a configured bounded transcript depth, refusing rather than starting empty when that checkpoint is gone; `src/vaultspec_a2a/control/thread_service.py, src/vaultspec_a2a/database/checkpoints.py, src/vaultspec_a2a/domain_config.py`.
 
 ### Phase `P06` - Contract event and end-to-end proof

@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#run-continuation'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:d311a4af7d368ea985461613b6ed5a204402f3005fde57e623bee22992fd4e5d'
+body_hash: 'sha256:979fc8f4a4aea435b3b3239d7201e296647fda225df01575a6397a92358d3511'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -127,6 +127,16 @@ related:
 - `S13` `M` `src/vaultspec_a2a/thread/snapshots.py`
 - `S13` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
 - `S13` `by:` `vaultspec-high-executor`
+- `S14` `M` `src/vaultspec_a2a/api/routes/_gateway_run_start.py`
+- `S14` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S14` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S14` `M` `src/vaultspec_a2a/context/metadata.py`
+- `S14` `M` `openapi.json`
+- `S14` `A` `src/vaultspec_a2a/api/tests/test_run_continuation_lineage.py`
+- `S14` `verify:` `python -m pytest test_run_continuation_lineage.py test_openapi_artifact.py` -> `pass`
+- `S14` `verify:` `ruff check and format --check touched Python` -> `pass`
+- `S14` `verify:` `ty check touched Python` -> `pass`
+- `S14` `by:` `vaultspec-standard-executor`
 
 ## Notes
 

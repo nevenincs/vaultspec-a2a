@@ -188,7 +188,34 @@ def _run_metadata_with_request_fields(body: RunStartRequest) -> ThreadMetadata |
         metadata = metadata.model_copy(
             update={"feedback_batch_id": body.feedback_batch_id}
         )
+    if metadata is not None:
+        metadata = metadata.model_copy(
+            update={"continues_run_id": body.continues_run_id}
+        )
     return metadata
+
+
+async def _require_settled_predecessor(
+    db: AsyncSession, predecessor_id: str, workspace_root: Path
+) -> None:
+    predecessor = await get_thread(db, predecessor_id)
+    if predecessor is None or predecessor.status not in {
+        ThreadStatus.COMPLETED.value,
+        ThreadStatus.FAILED.value,
+        ThreadStatus.CANCELLED.value,
+        ThreadStatus.ARCHIVED.value,
+    }:
+        raise HTTPException(status_code=409, detail="predecessor run is not settled")
+    try:
+        metadata = ThreadMetadata.model_validate_json(predecessor.thread_metadata or "")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409, detail="predecessor run has no readable workspace"
+        ) from exc
+    if metadata.workspace_root != str(workspace_root):
+        raise HTTPException(
+            status_code=409, detail="predecessor run belongs to another workspace"
+        )
 
 
 async def _prepare_run_admission(
@@ -366,6 +393,11 @@ async def _create_run_core(
     run_id = body.run_id
 
     prepared = await _prepare_run_admission(request, body, commit_binding)
+    if body.continues_run_id is not None:
+        await _require_settled_predecessor(
+            db, body.continues_run_id, prepared.workspace_root
+        )
+        await db.rollback()
     frozen = prepared.frozen
 
     # Admission gate: a draining gateway refuses a new run before any durable

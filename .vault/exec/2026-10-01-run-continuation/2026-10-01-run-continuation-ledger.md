@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:979fc8f4a4aea435b3b3239d7201e296647fda225df01575a6397a92358d3511'
+body_hash: 'sha256:0bfe35931ae8e33cea6e17fdbcf73a561a0b855f5aa3f0d50b4f483b3470e1c3'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -137,6 +137,20 @@ related:
 - `S14` `verify:` `ruff check and format --check touched Python` -> `pass`
 - `S14` `verify:` `ty check touched Python` -> `pass`
 - `S14` `by:` `vaultspec-standard-executor`
+- `S15` `M` `src/vaultspec_a2a/api/routes/_gateway_run_start.py`
+- `S15` `M` `src/vaultspec_a2a/api/tests/test_run_continuation_lineage.py`
+- `S15` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S15` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S15` `M` `src/vaultspec_a2a/domain_config.py`
+- `S15` `M` `src/vaultspec_a2a/ipc/schemas.py`
+- `S15` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S15` `M` `.vault/audit/2026-10-01-run-continuation-audit.md`
+- `S15` `verify:` `pytest lineage and worker executor SQLite` -> `pass`
+- `S15` `verify:` `pytest lineage PostgreSQL --require-prerequisite=postgres` -> `pass`
+- `S15` `verify:` `ruff check and format --check touched Python` -> `pass`
+- `S15` `verify:` `ty check touched Python` -> `pass`
+- `S15` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S15` `by:` `vaultspec-standard-executor`
 
 ## Notes
 

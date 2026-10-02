@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from ..domain_config import domain_config
 from ..graph.compiler import compile_team_graph, resolve_model_for_worker
@@ -939,10 +939,19 @@ class GraphLifecycleManager:
             A ``dict`` suitable for passing directly to
             ``EventAggregator.ingest()`` as *graph_input*.
         """
-        messages: list[SystemMessage | HumanMessage] = []
+        messages: list[BaseMessage] = []
         if req.context_preamble:
             messages.append(
                 stamp_message_created_at(SystemMessage(content=req.context_preamble))
+            )
+        if is_first_ingest:
+            messages.extend(
+                stamp_message_created_at(
+                    AIMessage(content=turn.content)
+                    if turn.role == "assistant"
+                    else HumanMessage(content=turn.content)
+                )
+                for turn in req.seed_transcript
             )
         if req.content:
             messages.append(stamp_message_created_at(HumanMessage(content=req.content)))

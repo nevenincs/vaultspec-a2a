@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
@@ -38,7 +39,34 @@ __all__ = [
     "postgres_checkpoint_pool",
     "prune_settled_thread",
     "setup_postgres_checkpointer",
+    "surviving_transcript",
 ]
+
+
+async def surviving_transcript(
+    checkpointer: Checkpointer, thread_id: str, depth: int
+) -> list[HumanMessage | AIMessage] | None:
+    """Read a settled run's retained final conversation from its checkpoint."""
+    checkpoint = await checkpointer.aget_tuple(
+        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+    )
+    if checkpoint is None:
+        return None
+    values = checkpoint.checkpoint.get("channel_values")
+    if not isinstance(values, dict):
+        return None
+    messages = values.get("messages")
+    if not isinstance(messages, list):
+        return None
+    transcript = [
+        message
+        for message in messages
+        if isinstance(message, (HumanMessage, AIMessage))
+        and isinstance(message.content, str)
+        and message.content
+    ]
+    return transcript[-depth:] or None
+
 
 # Headroom over the worker's concurrent-run bound. Every run in flight can be
 # writing a checkpoint at a superstep boundary, so the bound is the floor; the

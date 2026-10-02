@@ -221,6 +221,15 @@ class DomainConfig(ProjectSettings):
             "it is a typed refusal, never a silent drop."
         ),
     )
+    successor_transcript_depth: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description=(
+            "Maximum number of predecessor user and assistant messages "
+            "seeded into a successor run."
+        ),
+    )
     max_run_lifetime_seconds: int = Field(
         default=86_400,
         ge=1,

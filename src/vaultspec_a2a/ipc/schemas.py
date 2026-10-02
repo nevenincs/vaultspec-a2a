@@ -146,6 +146,13 @@ def _validate_model_assignment_candidate(
         _validate_model_assignment_control(raw_selected)
 
 
+class SeedTranscriptMessage(BaseModel):
+    """A bounded conversation turn copied into a successor's first graph input."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=65536)
+
+
 class DispatchRequest(BaseModel):
     """Work dispatch command from gateway to worker."""
 
@@ -174,6 +181,9 @@ class DispatchRequest(BaseModel):
     autonomous: bool = False
     metadata_json: str | None = None
     context_preamble: str | None = None
+    seed_transcript: list[SeedTranscriptMessage] = Field(
+        default_factory=list, max_length=100
+    )
     recursion_limit: int = Field(ge=1, le=500)
     # SDD blackboard fields
     active_feature: str | None = None

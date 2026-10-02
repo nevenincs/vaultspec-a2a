@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#run-continuation'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:c44059b7a60bf4afc773b9391c9c92cc9b1b2cb21bfcbf340681ac6430fc90bc'
+body_hash: 'sha256:2d0f6f9abce0fef8a77e91e4f919eafe3450bcdd0d26244b8dbe3af42f416d80'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -106,9 +106,19 @@ Recorded from P04.S10. A gateway that never runs its recovery pass accepts turns
 
 Recorded from P04.S10. `FailureType.QUEUE_FULL` is not keyed in `thread/dispatch_policy.py`; it is an admission refusal and unreachable from a dispatch outcome, an invariant to keep if the two vocabularies merge.
 
+### windows-postgres-fixture-uses-proactor | low | direct pooled PostgreSQL fixture cannot connect on Windows
+
+Open. Type: test portability. `pooled_postgres_saver` opens psycopg's async pool on the default Windows Proactor event loop, which psycopg rejects; the S15 PostgreSQL attempt timed out in fixture setup. The successor checkpoint proof passed through the production `open_checkpointer` selector-thread bridge instead. The direct pooled fixture should use the same supported event-loop path or declare a selector loop.
+
+### successor-seed-omits-non-dialogue-messages | low | a successor carries textual user and assistant turns only
+
+Open. Type: transcript fidelity. `surviving_transcript` projects the retained checkpoint to nonempty textual `HumanMessage` and `AIMessage` values. System, tool, and rich-content messages do not cross into the successor's first graph input. This avoids invalid truncated tool-call pairs, but a continuation that needs a prior tool result may need to retrieve it again. Revisit if the settled-run consumer requires tool context to survive the lineage boundary.
+
 ## Recommendations
 
 - Rule under `2026-08-02-control-action-leases-adr` whether a draining worker's refusal is admission or transport, then classify it (`drain-refusal-counts-as-transport-failure`).
 - Carry the worker's retry delay through to the 503 (`capacity-refusal-lacks-retry-after`).
 - Type the permission verb's guard refusals with the shared refusal vocabulary (`permission-pre-dispatch-refusals-untyped`).
 - Refuse queued continuations on every failed or cancelled settlement and gate the client terminal frame on the promotion disposition before P04 admits anything (`queued-continuation-survives-a-failed-or-cancelled-run`, `terminal-frame-still-relayed-on-a-promoted-turn`).
+- Repair the direct PostgreSQL test fixture on Windows (`windows-postgres-fixture-uses-proactor`).
+- Assess whether tool results must survive a settled-run lineage boundary (`successor-seed-omits-non-dialogue-messages`).

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:fd12e4732fddd67c2037610dcc1c81f368cf2e74c9197595a2d431aa05b560bc'
+body_hash: 'sha256:bbd0271f9d51eeba5d4ef7bf98b4f7783176913b0407cc6cd29d36414eabc86d'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -131,8 +131,9 @@ model are out of scope and keep their current owners.
 
 **D1 Binary authority is the profile's, not the PATH's.**
 `pin_claude_executable` resolves in this order and records which rung answered:
-an explicit absolute `claude_cli_executable` setting; the capsule asset when
-`settings.capsule_assets_root` is armed, exclusively and fail-loud; a
+the capsule asset when `settings.capsule_assets_root` is armed, exclusively
+and fail-loud; an explicit absolute `claude_cli_executable` setting only when
+no capsule root is armed; a
 `CLAUDE_CODE_EXECUTABLE` already present in the child environment; this service's
 own PATH; and finally the lock-vendored binary resolved by this service rather
 than by the adapter's internal fallback. The capsule path is a new
@@ -331,3 +332,16 @@ The vendored adapter applies the Claude managed-policy settings tier before any 
 D3's one row stores the first observed provider-native session ID for a run and lane. D5 opens a new native session for each model call, so later session IDs are not enumerated by that row. Later calls must match the stored stable binary, adapter, runtime-authority, and authentication fields or fail before their prompt. A row therefore proves the identity of its first initialized session and the stable identity checks on later sessions; it is not a session history.
 
 The preceding managed-policy amendment establishes that the adapter honors any host managed tier. ACP initialize and session creation do not disclose whether a tier existed or loaded on a particular host. Until a trustworthy host-tier presence signal is available, D3 records `managed_policy_present = null` (unknown), including for Claude. The earlier sentence claiming the row records presence is superseded; capability advertisement alone is not a presence signal.
+## Amendment (2026-10-02): capsule authority precedence
+
+The 2026-10-02 integrated review found that the original D1 ordering let an
+explicit setting select an external CLI while a desktop capsule was armed,
+contrary to the binding capsule-owned runtime constraint. The user authorized
+the recommended capsule-first resolution after that finding was presented.
+An armed capsule therefore owns the Claude CLI even when an explicit path is
+configured. A missing or escaping capsule CLI refuses catalog probing and
+construction with a typed runtime-unavailable result; neither the explicit
+setting nor any other rung substitutes for it. Outside a capsule, the explicit
+absolute setting remains the first rung, including for the pinned Compose
+profile. This amendment replaces the conflicting D1 ordering and preserves the
+single shared resolver for probe and turn.

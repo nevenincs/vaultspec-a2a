@@ -169,12 +169,12 @@ def pin_claude_executable(env: dict[str, str]) -> ClaudeCliResolution:
     explicit = settings.claude_cli_executable
     capsule_root = settings.capsule_assets_root
     try:
-        if explicit is not None:
-            authority: ClaudeCliAuthority = "explicit_setting"
-            candidate = explicit
-        elif capsule_root is not None:
-            authority = "capsule"
+        if capsule_root is not None:
+            authority: ClaudeCliAuthority = "capsule"
             candidate = capsule_claude_executable(capsule_root)
+        elif explicit is not None:
+            authority = "explicit_setting"
+            candidate = explicit
         elif inherited := env.get(CLAUDE_EXECUTABLE_ENV):
             authority = "child_environment"
             candidate = Path(inherited)

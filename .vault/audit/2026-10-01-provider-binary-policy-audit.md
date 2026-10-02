@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:9611054785edfc2b0dda1fc2311eae2bfd77b6cc09452f5f952c9dcb12e417ea'
+body_hash: 'sha256:4141c9a284671a472ac943c42bb80318d8e7b71f5919c6701309aab8b360c895'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -248,3 +248,9 @@ Fixed in P02.S26. Removing the duplicate `ProviderRuntimeUnavailableError` facto
 The repaired working tree passed `just ci-merge`: strict types, repository guards, vault checks, 153 development tests, and 2,129 unit tests with five Windows platform skips. It also passed `just ci`: lint, types, dependency and vault checks, 153 development tests, 5,233 selected tests with 19 skips and 281 service deselections, package build, six documentation tests, and warning-free Sphinx build. Both gates ran on Windows with Python 3.13.11 and pinned Node 26.8.1. The code diff and affected graph, provider, and worker interfaces were reviewed after these repairs; no further defect was found in P02.S26. Review verdict: REVISION REQUIRED for the two open high policy conflicts above. P02.S21 remains open because Claude and Z.ai lack completed credentialed live turns on the resolved binaries. No merge readiness is claimed.
 
 The high findings reopen P01.S04 for the capsule authority order and P02.S09 for withdrawn-proof enforcement at provider construction and spawn. Those steps remain open pending the requested policy choices. P02.S26 stays closed because its integrated gate repairs and review are complete.
+
+## P01.S04 capsule authority resolution, 2026-10-02
+
+### explicit-cli-setting-can-escape-an-armed-capsule | high | resolved by capsule-first CLI authority
+
+Fixed in reopened P01.S04 under the user's instruction to continue with the recommended rule. The single resolver now chooses the capsule CLI before an explicit setting when a capsule root is armed. A present capsule asset reaches the real child environment despite a conflicting explicit path, and a missing capsule asset refuses with the typed CLI-unavailable reason rather than borrowing that path. Outside a capsule, the explicit setting still selects the CLI. The accepted provider-binary-policy ADR's D1 order is amended and cross-referenced against relevant accepted decisions. Six focused capsule/explicit tests passed after the change; the full 16-test binary-identity file passed before the final real-child test expansion. Ruff lint and format, strict types, and vault checks pass. Integrated review of the resolver, catalog probe, factory, and child-environment seam found no new issue in this step. Review verdict for P01.S04: PASS. P02.S09 and P02.S21 remain open.

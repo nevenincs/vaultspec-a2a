@@ -170,7 +170,9 @@ async def test_capsule_cli_outranks_inherited_pin_and_service_path(
     )
 
     with (
-        settings_override(capsule_assets_root=capsule),
+        settings_override(
+            capsule_assets_root=capsule, claude_cli_executable=earlier_on_path
+        ),
         armed_environment(PATH=str(tmp_path) + os.pathsep + os.environ["PATH"]),
     ):
         assert os.path.normcase(
@@ -197,20 +199,57 @@ async def test_capsule_cli_outranks_inherited_pin_and_service_path(
     assert observed.stdout.strip() == str(cli.resolve())
 
 
-def test_explicit_setting_outranks_capsule(tmp_path: Path) -> None:
-    """An operator's absolute setting is the top authority rung."""
+def test_capsule_outranks_explicit_setting(tmp_path: Path) -> None:
+    """An armed capsule keeps ownership despite an external explicit path."""
+    explicit = tmp_path / "explicit-claude"
+    explicit.write_text("explicit cli\n", encoding="utf-8")
+    capsule = tmp_path / "capsule"
+    cli = capsule_claude_executable(capsule)
+    cli.parent.mkdir(parents=True, exist_ok=True)
+    cli.write_text("capsule cli\n", encoding="utf-8")
+    env: dict[str, str] = {}
+
+    with settings_override(claude_cli_executable=explicit, capsule_assets_root=capsule):
+        resolution = pin_claude_executable(env)
+
+    assert resolution.authority == "capsule"
+    assert resolution.path == cli.resolve()
+    assert env[CLAUDE_EXECUTABLE_ENV] == str(cli.resolve())
+
+
+def test_explicit_setting_selects_cli_without_capsule(tmp_path: Path) -> None:
+    """The explicit rung still controls non-capsule profiles."""
     explicit = tmp_path / "explicit-claude"
     explicit.write_text("explicit cli\n", encoding="utf-8")
     env: dict[str, str] = {}
 
-    with settings_override(
-        claude_cli_executable=explicit, capsule_assets_root=tmp_path / "empty-capsule"
-    ):
+    with settings_override(claude_cli_executable=explicit, capsule_assets_root=None):
         resolution = pin_claude_executable(env)
 
     assert resolution.authority == "explicit_setting"
     assert resolution.path == explicit.resolve()
     assert env[CLAUDE_EXECUTABLE_ENV] == str(explicit.resolve())
+
+
+def test_missing_capsule_cli_refuses_even_with_explicit_setting(tmp_path: Path) -> None:
+    """A desktop repair condition cannot borrow an external configured CLI."""
+    capsule = tmp_path / "capsule"
+    capsule.mkdir()
+    explicit = tmp_path / "explicit-claude"
+    explicit.write_text("explicit cli\n", encoding="utf-8")
+    env: dict[str, str] = {}
+
+    with (
+        settings_override(claude_cli_executable=explicit, capsule_assets_root=capsule),
+        pytest.raises(ProviderRuntimeUnavailableError) as refusal,
+    ):
+        pin_claude_executable(env)
+
+    assert (
+        refusal.value.reason is ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE
+    )
+    assert "capsule path is unavailable" in str(refusal.value)
+    assert CLAUDE_EXECUTABLE_ENV not in env
 
 
 def test_missing_capsule_cli_never_borrows_an_inherited_path(tmp_path: Path) -> None:

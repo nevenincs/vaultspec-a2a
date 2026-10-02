@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:aaf493419cea3e1c92023c21281f670e26d813111c17014a9e34f03edfba89f2'
+body_hash: 'sha256:f1cc48b8adae3cea043dc678c26bbdd5cdfda405d3f552ffe0b41921bd879f25'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -331,6 +331,13 @@ related:
 - `S26` `verify:` `just ci` -> `pass`
 - `S26` `verify:` `git diff --check` -> `pass`
 - `S26` `by:` `Codex`
+- `S04` `M` `.vault/adr/2026-10-01-provider-binary-policy-adr.md`
+- `S04` `verify:` `pytest test_claude_binary_identity.py` -> `pass`
+- `S04` `verify:` `pytest capsule-or-explicit` -> `pass`
+- `S04` `verify:` `just audit-types` -> `pass`
+- `S04` `verify:` `ruff check and format` -> `pass`
+- `S04` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S04` `by:` `Codex`
 
 ## Notes
 

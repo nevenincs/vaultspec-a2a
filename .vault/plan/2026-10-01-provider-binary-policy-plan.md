@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:d5d69031ff668ff4edd5816a50a40edb52dbc381928cf0fc7e97ddf840226b61'
+body_hash: 'sha256:333887bd48be1f47d5e7110f5687e95be7fedd5f7262966f9602591a667bb7fc'
 ---
 
 # `provider-binary-policy` plan
@@ -85,7 +85,7 @@ The session/load branch and the session id option no production path can reach l
 
 Take up what the newer vendored adapter offers this lane, as the upgrade research found it, without a new decision.
 
-- [ ] `P06.S18` - Carry the per-model token usage the adapter now reports on each prompt result into the turn's usage metadata; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_types.py`.
+- [x] `P06.S18` - Carry the per-model token usage the adapter now reports on each prompt result into the turn's usage metadata; `src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_types.py`.
 - [ ] `P06.S19` - Handle or log every session update kind the adapter emits, including usage, config option and session info updates; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_protocol.py`.
 - [ ] `P06.S20` - State and record that the adapter's managed-policy tier reaches the provider child, correcting the claim that no setting sources drops managed configuration; `src/vaultspec_a2a/providers/_claude_tool_policy.py, src/vaultspec_a2a/providers/_acp_session.py`.
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:2218ff2a264ba70853fdc267d9383663abf686eb498101131cfddc601ada4d71'
+body_hash: 'sha256:d770427ef0ae127e5b2bfa9b2a70fa83bf33a45cad67e73f1429057aef00dd0d'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -141,3 +141,6 @@ Fixed in P03.S12. The public compiler delegates worker construction to `_compile
 ### research-branch-identity-seam | medium | research fan-out bypasses the worker node binder
 
 Open; owned by P03.S13. Research branch models are invoked by `_make_research_producer` through `create_researcher_node`, while S12's port reaches the six research document workers through `create_worker_node`. A provider used only by a fan-out branch would receive no identity row if S13 records solely in the worker node. S13 must capture that initialize path too. Type: topology coverage and runtime evidence.
+### failed-acp-turn-usage-unrecorded | medium | failed prompts can spend tokens without a returned usage message
+
+Open; follow-up scope is the graph's error-path accounting contract. The upgraded adapter reports usage on terminal prompt results even for refusal, cancellation and budget stops. This Step attaches usage to the final message only after a successful end_turn because those other outcomes raise a typed prompt error and return no message for the graph's _turn_token_usage reader. A failed turn can therefore incur provider usage without a token_usage entry. Type: cost-accounting gap. A later Step must decide how error-path usage reaches the durable turn record without treating a failed prompt as a successful response.

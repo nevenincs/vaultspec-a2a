@@ -26,7 +26,7 @@ from langchain_core.language_models.chat_models import (
     BaseChatModel,
     generate_from_stream,
 )
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
@@ -644,6 +644,14 @@ class AcpChatModel(BaseChatModel):
             ctx.prompt_stop_reason,
             effects_may_have_occurred=ctx.effects_may_have_occurred,
         )
+        if ctx.prompt_usage is not None:
+            # A terminal-only chunk lets LangChain merge usage into the final
+            # message without duplicating text streamed earlier in the turn.
+            usage_chunk = ChatGenerationChunk(
+                message=AIMessageChunk(content="", usage_metadata=ctx.prompt_usage)
+            )
+            await notify_chunk(run_manager, usage_chunk)
+            yield usage_chunk
 
     def _raise_for_early_exit(
         self, ctx: AcpSessionContext, prompt_future: AcpResponseFuture

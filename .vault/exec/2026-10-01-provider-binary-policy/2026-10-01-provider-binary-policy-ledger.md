@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:6bb7b68c278ed7198aef7198443c15c62574082b7e4c3bf43c2ffac275d4e18f'
+body_hash: 'sha256:f8c756f2fe074b24ffcbceabb4659f7a36e1129aadba32677cc40b0db5216edb'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -196,6 +196,17 @@ related:
 - `S12` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S12` `verify:` `git diff --check` -> `pass`
 - `S12` `by:` `provider-proof`
+- `S18` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S18` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S18` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S18` `M` `src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py`
+- `S18` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S18` `verify:` `focused ACP stop/handler/model/native suites` -> `pass`
+- `S18` `verify:` `ty check changed ACP files` -> `pass`
+- `S18` `verify:` `ruff check and format changed ACP files` -> `pass`
+- `S18` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S18` `verify:` `git diff --check` -> `pass`
+- `S18` `by:` `provider-runtime`
 
 ## Notes
 
@@ -215,3 +226,4 @@ related:
 - `S09` Formal review classified and queued the version drift, catalog wording, malformed plan row, and residual filesystem race.
 - `S12` Integrated just ci deferred to root after S13 and other serial steps; focused checks cover this isolated Step.
 - `S12` Review: fixed low plan-scope gap in S12; queued medium research fan-out identity seam for S13 in audit.
+- `S18` Full just ci and ci-merge remain shared integration gates; credentialed live model turn unavailable. Medium error-path accounting follow-up queued in audit.

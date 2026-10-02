@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:71039295cd69f4bbbaee662bd921a01ea22e7c14077b29fad647e8d902ab8c73'
+body_hash: 'sha256:240f92aafa9717b095ae875a94ba05c2bdefa151cbfd3e4b9c32e31c217a24a6'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -136,6 +136,15 @@ related:
 - `S08` `verify:` `ty check on S08 files` -> `pass`
 - `S08` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S08` `by:` `vaultspec-standard-executor`
+- `S10` `M` `.github/workflows/test.yml`
+- `S10` `M` `.github/ci-contract-allow.txt`
+- `S10` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S10` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S10` `verify:` `isolated @openai/codex@0.159.2 npm audit signatures` -> `pass`
+- `S10` `verify:` `actionlint test.yml` -> `pass`
+- `S10` `verify:` `dev.ci_contract` -> `pass`
+- `S10` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S10` `by:` `vaultspec-standard-executor`
 
 ## Notes
 
@@ -149,3 +158,4 @@ related:
 - `S07` Claude prompt returned Authentication required; Z.ai credential absent, so both lanes are withheld until P02.S21.
 - `S07` Integrated just ci is assigned to the root branch after parallel steps land.
 - `S08` Integrated just ci is assigned to the root branch after parallel steps land.
+- `S10` Integrated just ci is assigned to the root branch after parallel steps land.

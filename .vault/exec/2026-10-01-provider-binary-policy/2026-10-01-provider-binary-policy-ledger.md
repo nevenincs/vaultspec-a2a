@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:6ef329931ebe94880f3e08d7f0f2196ae07a62e1587a04e6b4345f1f8597eae1'
+body_hash: 'sha256:f3a8b0b34b9d55ca321fa5bb8caf2bba8eb7802a73da1759d74432ae730d9dbf'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -193,6 +193,17 @@ related:
 - `S14` `verify:` `uv run --no-sync ty check changed S14 Python files` -> `pass`
 - `S14` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S14` `verify:` `git diff --check` -> `pass`
+- `S15` `M` `src/vaultspec_a2a/conftest.py`
+- `S15` `M` `.env.example`
+- `S15` `M` `src/vaultspec_a2a/control/tests/_env_example.py`
+- `S15` `M` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S15` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S15` `verify:` `uv run --no-sync pytest -q src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py src/vaultspec_a2a/control/tests/test_env_example_drift.py src/vaultspec_a2a/control/tests/test_env_example_coverage.py` -> `pass`
+- `S15` `verify:` `uv run --no-sync ruff check changed Python files` -> `pass`
+- `S15` `verify:` `uv run --no-sync ruff format --check changed Python files` -> `pass`
+- `S15` `verify:` `uv run --no-sync ty check changed Python files` -> `pass`
+- `S15` `verify:` `git diff --check` -> `pass`
+- `S15` `verify:` `vaultspec-core vault check all` -> `pass`
 
 ## Notes
 

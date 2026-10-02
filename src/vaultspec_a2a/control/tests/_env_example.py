@@ -49,9 +49,6 @@ DOCUMENTED_BUT_NOT_READ = {
     "LANGSMITH_PROJECT": "langsmith SDK",
     "LANGSMITH_TRACING": "langsmith SDK",
     "LANGCHAIN_TRACING_V2": "langsmith SDK",
-    # Read by the Claude CLI from the environment it inherits; the recipes'
-    # credential scopes export it from .env, and the service never reads it.
-    "CLAUDE_CODE_OAUTH_TOKEN": "Claude CLI",
     # Documented as deliberately absent: the agent scrub strips it.
     "ANTHROPIC_API_KEY": "documented absence",
     # Substituted by the Postgres Compose profile, never read by the service.

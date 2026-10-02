@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 import httpx
+from sqlalchemy.engine import make_url
 
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
@@ -264,6 +265,7 @@ class ServiceStack:
 
     project_name: str
     ports: dict[str, int]
+    postgres_url: str | None = field(default=None, repr=False)
     started_at: float = field(default_factory=time.time)
     runtime_dir: Path = field(init=False)
     artifacts: dict[str, Any] = field(default_factory=dict)
@@ -274,7 +276,9 @@ class ServiceStack:
         default=None, init=False, repr=False
     )
     _gateway_log: Any | None = field(default=None, init=False, repr=False)
+    _gateway_log_name: str = field(default="gateway.log", init=False, repr=False)
     _worker_log: Any | None = field(default=None, init=False, repr=False)
+    _mock_paused: bool = field(default=False, init=False, repr=False)
     _stopped: bool = field(default=False, init=False, repr=False)
     # One served selection per (workspace, preset). The first catalog read on a
     # gateway builds it cold across every registered lane, so it is paid once per
@@ -362,7 +366,12 @@ class ServiceStack:
             "worker": self._worker_proc,
         }
         return [
-            (name, proc, self.runtime_dir / f"{name}.log")
+            (
+                name,
+                proc,
+                self.runtime_dir
+                / (self._gateway_log_name if name == "gateway" else f"{name}.log"),
+            )
             for name in names
             if (proc := owned[name]) is not None
         ]
@@ -408,15 +417,24 @@ class ServiceStack:
 
     def _local_env(self) -> dict[str, str]:
         env = os.environ.copy()
+        if self.postgres_url is None:
+            database_url = (
+                f"sqlite+aiosqlite:///{(self.runtime_dir / 'service.db').as_posix()}"
+            )
+            backend = "sqlite"
+        else:
+            database_url = (
+                make_url(self.postgres_url)
+                .set(drivername="postgresql+asyncpg", query={})
+                .render_as_string(hide_password=False)
+            )
+            backend = "postgres"
         env.update(
             {
                 "VAULTSPEC_A2A_ENVIRONMENT": "production",
-                "VAULTSPEC_A2A_DATABASE_URL": (
-                    "sqlite+aiosqlite:///"
-                    f"{(self.runtime_dir / 'service.db').as_posix()}"
-                ),
-                "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
-                "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
+                "VAULTSPEC_A2A_DATABASE_URL": database_url,
+                "VAULTSPEC_A2A_DATABASE_BACKEND": backend,
+                "VAULTSPEC_A2A_CHECKPOINT_BACKEND": backend,
                 "VAULTSPEC_A2A_GATEWAY_URL": self.gateway_url,
                 "VAULTSPEC_A2A_WORKER_URL": self.worker_url,
                 "VAULTSPEC_A2A_WORKER_HOST": "127.0.0.1",
@@ -448,6 +466,9 @@ class ServiceStack:
                 "OTEL_SDK_DISABLED": "false",
             }
         )
+        if self.postgres_url is not None:
+            env["VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL"] = self.postgres_url
+            env["VAULTSPEC_A2A_POSTGRES_REQUIRED"] = "true"
         return env
 
     def _start_worker(self) -> None:
@@ -484,7 +505,7 @@ class ServiceStack:
             "--port",
             str(self.ports["gateway"]),
             env=self._local_env(),
-            log_path=self.runtime_dir / "gateway.log",
+            log_path=self.runtime_dir / self._gateway_log_name,
         )
         self._gateway_proc = proc
         self._gateway_log = log_file
@@ -497,6 +518,38 @@ class ServiceStack:
         tree_kill(proc.pid, timeout=30.0)
         with contextlib.suppress(Exception):
             proc.wait(timeout=30.0)
+
+    def crash_gateway(self) -> None:
+        """Kill this stack's gateway while leaving its worker and stores running."""
+        if self._gateway_proc is None:
+            raise RuntimeError("gateway is not running")
+        self._stop_process(self._gateway_proc)
+        self._gateway_proc = None
+        if self._gateway_log is not None:
+            self._gateway_log.close()
+            self._gateway_log = None
+        self._gateway_log_name = "gateway-restarted.log"
+
+    def restart_gateway(self) -> None:
+        """Start the same gateway profile over this stack's durable stores."""
+        if self._gateway_proc is not None:
+            raise RuntimeError("gateway is already running")
+        self._start_gateway()
+        self.wait_for_ready()
+
+    def pause_mock_service(self) -> None:
+        """Hold model replies while a real worker retains its active turn."""
+        if self._mock_paused:
+            raise RuntimeError("mock service is already paused")
+        _run_compose(self.project_name, "pause", "vidaimock", ports=self.ports)
+        self._mock_paused = True
+
+    def resume_mock_service(self) -> None:
+        """Release a held model reply after the gateway has been killed."""
+        if not self._mock_paused:
+            raise RuntimeError("mock service is not paused")
+        _run_compose(self.project_name, "unpause", "vidaimock", ports=self.ports)
+        self._mock_paused = False
 
     def _wait_for_process_health(
         self,
@@ -520,6 +573,11 @@ class ServiceStack:
             self.record("teardown", {"status": "already_stopped"})
             return
         self._stopped = True
+        if self._mock_paused:
+            try:
+                self.resume_mock_service()
+            except Exception as exc:
+                self.record("mock-unpause-error", {"error": repr(exc)})
         self._stop_process(self._gateway_proc)
         self._stop_process(self._worker_proc)
         if self._gateway_log is not None:
@@ -599,7 +657,7 @@ class ServiceStack:
             )
         self._write_session_summary()
         for name, proc_path in (
-            ("gateway", self.runtime_dir / "gateway.log"),
+            ("gateway", self.runtime_dir / self._gateway_log_name),
             ("worker", self.runtime_dir / "worker.log"),
         ):
             if proc_path.exists():
@@ -921,7 +979,7 @@ class ServiceStack:
             return payload
 
 
-def build_service_stack() -> ServiceStack:
+def build_service_stack(*, postgres_url: str | None = None) -> ServiceStack:
     ports = {
         "gateway": free_port(),
         "worker": free_port(),
@@ -930,4 +988,6 @@ def build_service_stack() -> ServiceStack:
         "jaeger_otlp": free_port(),
     }
     project_name = f"vaultspec-service-tests-{uuid.uuid4().hex[:8]}"
-    return ServiceStack(project_name=project_name, ports=ports)
+    return ServiceStack(
+        project_name=project_name, ports=ports, postgres_url=postgres_url
+    )

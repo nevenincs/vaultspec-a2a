@@ -52,12 +52,14 @@ async def surviving_transcript(
     )
     if checkpoint is None:
         return None
-    values = checkpoint.checkpoint.get("channel_values")
-    if not isinstance(values, dict):
+    raw_values = cast("object", checkpoint.checkpoint.get("channel_values"))
+    if not isinstance(raw_values, dict):
         return None
-    messages = values.get("messages")
-    if not isinstance(messages, list):
+    values = cast("dict[str, object]", raw_values)
+    raw_messages: object = values.get("messages")
+    if not isinstance(raw_messages, list):
         return None
+    messages = cast("list[object]", raw_messages)
     transcript = [
         message
         for message in messages

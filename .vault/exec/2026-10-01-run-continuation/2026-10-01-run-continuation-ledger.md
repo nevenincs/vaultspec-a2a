@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:b059fd5e177c6f3e2634e8e39cb3d951d27729375922ac053b8cf46a3b78bf86'
+body_hash: 'sha256:3aaefab29dd8c853ae233c523b4f2ef63bae6419d336f3715fbd09d7bb0978e1'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -154,6 +154,25 @@ related:
 - `S16` `M` `.vault/adr/2026-07-14-a2a-edge-conformance-adr.md`
 - `S16` `M` `.vault/audit/2026-10-01-run-continuation-audit.md`
 - `S16` `verify:` `python -m pytest -q api continuation admission/lineage/terminal suites` -> `pass`
+- `S17` `A` `src/vaultspec_a2a/service_tests/test_run_continuation_live.py`
+- `S17` `M` `src/vaultspec_a2a/service_tests/harness.py`
+- `S17` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S17` `M` `src/vaultspec_a2a/control/tests/test_continuation_settlement_refusal.py`
+- `S17` `M` `.vault/audit/2026-10-01-run-continuation-audit.md`
+- `S17` `verify:` `pytest -m service test_run_continuation_live.py SQLite --require-prerequisite=docker` -> `pass`
+- `S17` `verify:` `pytest -m service test_run_continuation_live.py PostgreSQL --require-prerequisite=docker --require-prerequisite=postgres` -> `pass`
+- `S17` `verify:` `pytest test_continuation_admission_race.py --require-prerequisite=postgres` -> `pass`
+- `S17` `verify:` `pytest test_continuation_settlement_refusal.py focused SQLite and PostgreSQL` -> `pass`
+- `S17` `verify:` `pytest neighboring event, terminal, recovery, harness suites` -> `pass`
+- `S17` `verify:` `ruff check and format --check touched Python` -> `pass`
+- `S17` `verify:` `ty check touched Python` -> `pass`
+- `S17` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S17` `by:` `vaultspec-standard-executor`
+- `S17` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S17` `verify:` `pytest -m service real worker run_busy SQLite --require-prerequisite=docker` -> `pass`
+- `S17` `verify:` `pytest -m service real worker run_busy PostgreSQL --require-prerequisite=docker --require-prerequisite=postgres` -> `pass`
+- `S17` `verify:` `pytest lineage SQLite` -> `pass`
+- `S17` `verify:` `just audit-types: 60 advisory diagnostics, none in database/checkpoints.py` -> `pass`
 
 ## Notes
 
@@ -171,3 +190,4 @@ related:
 - `S11` Admission and every settlement path now take one run lock, closing a PostgreSQL race that left a queued row on a settled run; replay is decided before eligibility and serves the journal row's own status.
 - `S13` Scope correction: `queued_messages` joins the snapshot in control/projection.py, where durable state reaches it, not control/snapshot.py; it is declared on both snapshot types the parity guard holds equal.
 - `S16` The R6 amendment already existed; this Step reconciled it with the served `queue_position` and narrowed dispatch-time answers.
+- `S17` Real worker 409 is exercised over loopback; gateway breaker and claim classification is supplied by `test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running` because public continuation admission queues and ordinary redelivery reuses the dispatch ID.

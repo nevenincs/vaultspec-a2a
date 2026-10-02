@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:acc6eb3cd40a4fc0dfd328200a7ed538fee66ce46e73d48065dd551ebb179707'
+body_hash: 'sha256:6a6bf0605197abfcfbdc4afbd3ad22450f43f6c36b6c9a076cd7b54f1f5e7c4d'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -270,6 +270,31 @@ related:
 - `S24` `verify:` `changed-file basedpyright ruff format ty` -> `pass`
 - `S24` `verify:` `git diff --check` -> `pass`
 - `S24` `by:` `vaultspec-high-executor`
+- `S13` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S13` `M` `.vault/adr/2026-10-01-provider-binary-policy-adr.md`
+- `S13` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S13` `M` `src/vaultspec_a2a/database/admin.py`
+- `S13` `M` `src/vaultspec_a2a/database/runtime_identity_repository.py`
+- `S13` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S13` `M` `src/vaultspec_a2a/graph/protocols.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/acp_simulator.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S13` `A` `src/vaultspec_a2a/graph/tests/test_runtime_identity_graph_live.py`
+- `S13` `A` `src/vaultspec_a2a/providers/_runtime_identity.py`
+- `S13` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S13` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/worker/runtime_identity_port.py`
+- `S13` `M` `src/vaultspec_a2a/worker/tests/test_runtime_identity_port.py`
+- `S13` `verify:` `57 focused provider worker tests` -> `pass`
+- `S13` `verify:` `two real Codex SQLite identity turns` -> `pass`
+- `S13` `verify:` `ACP subprocess identity turn` -> `pass`
+- `S13` `verify:` `database admin tests 7 passed` -> `pass`
+- `S13` `verify:` `changed-file ruff format ty` -> `pass`
+- `S13` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S13` `by:` `provider-proof`
 
 ## Notes
 
@@ -297,3 +322,4 @@ related:
 - `S23` Review: low guard classification and medium stale release test fixed; integrated CI remains pending.
 - `S15` S15 review passed with no new finding; shared integrated CI remains pending.
 - `S24` Review: private cross-module helper fixed; no further S24 finding surfaced. Integrated CI pending.
+- `S13` Managed policy presence remains unknown and audited; integrated CI pending root branch.

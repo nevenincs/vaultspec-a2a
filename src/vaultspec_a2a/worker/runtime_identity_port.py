@@ -23,7 +23,7 @@ class SqlRuntimeIdentityPort:
     async def record_identity(
         self, **kwargs: Unpack[RuntimeIdentityRecordArgs]
     ) -> None:
-        """Commit the first run/lane identity and refuse changed evidence."""
+        """Keep the first session ID and refuse later stable-identity drift."""
         async with self._session_factory() as session:
             await record_provider_runtime_identity(
                 session,
@@ -42,5 +42,6 @@ class SqlRuntimeIdentityPort:
                     provider_session_id=kwargs["provider_session_id"],
                     managed_policy_present=kwargs["managed_policy_present"],
                 ),
+                allow_later_session=True,
             )
             await session.commit()

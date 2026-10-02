@@ -129,7 +129,7 @@ class CostPort(Protocol):
 
 
 class RuntimeIdentityRecordArgs(TypedDict):
-    """Primitive evidence captured at a lane's first successful initialize."""
+    """Primitive evidence from an initialized session of one run/lane."""
 
     thread_id: str
     provider_id: str
@@ -148,12 +148,12 @@ class RuntimeIdentityRecordArgs(TypedDict):
 
 @runtime_checkable
 class RuntimeIdentityPort(Protocol):
-    """Write-once runtime evidence without exposing persistence to graph nodes."""
+    """Write-once lane evidence without exposing persistence to graph nodes."""
 
     async def record_identity(
         self, **kwargs: Unpack[RuntimeIdentityRecordArgs]
     ) -> None:
-        """Persist one run/lane identity or refuse a conflicting retry."""
+        """Keep the first session ID; reject drift in other identity fields."""
         ...
 
 

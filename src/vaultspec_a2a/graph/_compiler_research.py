@@ -61,6 +61,7 @@ from .nodes.worker import (
     recorded_permission_answers,
     resolve_effective_worker_model,
 )
+from .run_context import run_thread_id
 from .web_locators import extract_web_locators
 
 __all__ = [
@@ -233,6 +234,7 @@ def _make_research_producer(
     harness_mcp_servers: list[str] | None = None,
     *,
     autonomous: bool = False,
+    runtime_identity_port: RuntimeIdentityPort | None = None,
 ) -> ResearchFindingProducer:
     """Bridge a researcher model into a ResearchFindingProducer.
 
@@ -342,6 +344,13 @@ def _make_research_producer(
                 ),
                 lane=harness_lane,
             )
+        from ..providers._runtime_identity import bind_model_runtime_identity
+
+        effective_model = bind_model_runtime_identity(
+            effective_model,
+            thread_id=run_thread_id(state, None),
+            port=runtime_identity_port,
+        )
         response = await effective_model.ainvoke(messages, config=config)
         claim = str(response.content)
         # Stamped once for the whole turn: a provider-native retrieval happens
@@ -496,6 +505,7 @@ def _compile_research_adr(
             workspace_root=options.get("workspace_root"),
             harness_mcp_servers=harness_mcp_servers,
             autonomous=options.get("autonomous", False),
+            runtime_identity_port=options.get("runtime_identity_port"),
         )
         for spec, branch_model in zip(specs, researcher_models, strict=True)
     }

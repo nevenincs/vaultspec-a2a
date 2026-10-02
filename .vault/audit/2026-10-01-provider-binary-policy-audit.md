@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:88831d87e6a6f244dee8d8d1c83d67e4f7a60aad9be0ce646c929b7d268ba908'
+body_hash: 'sha256:f679d91cf4cca67421966c77e4603cb2d6077b2581d3e517f2ce2feeabfae0dc'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -140,7 +140,7 @@ Fixed in P03.S12. The public compiler delegates worker construction to `_compile
 
 ### research-branch-identity-seam | medium | research fan-out bypasses the worker node binder
 
-Open; owned by P03.S13. Research branch models are invoked by `_make_research_producer` through `create_researcher_node`, while S12's port reaches the six research document workers through `create_worker_node`. A provider used only by a fan-out branch would receive no identity row if S13 records solely in the worker node. S13 must capture that initialize path too. Type: topology coverage and runtime evidence.
+Fixed in P03.S13. Research branch models are invoked by `_make_research_producer` through `create_researcher_node`, so the producer now binds the per-run identity port after model composition, as the worker does. A real Codex worker turn followed by a research producer turn wrote one durable row and retained the first native session ID. Type: topology coverage and runtime evidence.
 ### failed-acp-turn-usage-unrecorded | medium | failed prompts can spend tokens without a returned usage message
 
 Open; follow-up scope is the graph's error-path accounting contract. The upgraded adapter reports usage on terminal prompt results even for refusal, cancellation and budget stops. This Step attaches usage to the final message only after a successful end_turn because those other outcomes raise a typed prompt error and return no message for the graph's _turn_token_usage reader. A failed turn can therefore incur provider usage without a token_usage entry. Type: cost-accounting gap. A later Step must decide how error-path usage reaches the durable turn record without treating a failed prompt as a successful response.
@@ -149,7 +149,7 @@ Open; follow-up scope is the graph's error-path accounting contract. The upgrade
 Fixed in P02.S22. The P02.S08 proof predicate rejected missing parse results in a compound condition that basedpyright could not narrow, leaving three strict diagnostics at the host PATH comparison. It now checks all four parsed versions for `None` before comparing them. Behavior is unchanged; focused lane admission tests and strict type checks pass. Type: CI type correctness and proof gate readability.
 ### managed-policy-presence-not-observable-from-acp | medium | runtime identity cannot yet assert host policy presence
 
-Open; owned by P03.S13. The adapter applies managed policy before sessions but its ACP initialize and session/new results do not report whether that tier existed or its read succeeded. P06.S20 logs the resolution path only. `ProviderRuntimeIdentityModel.managed_policy_present` must remain unknown until S13 obtains a reliable presence signal, for example by probing the same SDK `resolveSettings({settingSources: []})` policy tier without exporting its values. Type: runtime evidence gap.
+Open for a later adapter/host-tier evidence Step. The adapter applies managed policy before sessions but ACP initialize and session/new do not report whether that tier existed or loaded. P06.S20 logs the resolution path only, and `managedSettings: true` advertises capability rather than actual presence. P03.S13 persists `managed_policy_present = null` for ACP and Codex; the ADR now states this explicitly. A separate host SDK probe cannot prove that the adapter child successfully loaded that tier. Type: runtime evidence gap.
 ### claude-auth-example-stale | medium | the operator example describes the old ambient-only Claude auth contract
 
 Fixed in P04.S15. The example now documents the two canonical Claude auth settings, the alternate CLI token name, and the distinction between a token held only in project .env and an operator export under the default channel. It also covers SUCCESSOR_TRANSCRIPT_DEPTH. The env-example drift and coverage suite passes. Type: operator documentation and settings coverage drift.
@@ -167,3 +167,20 @@ P04.S15 review (2026-10-02): PASS for the declared-channel credential prerequisi
 ### claude-auth-prerequisite-used-private-factory-helper | low | strict CI rejected the cross-module seam
 
 Fixed in P04.S24. S15 correctly shared production credential resolution with the Claude test prerequisite but imported a private factory helper, producing one `reportPrivateUsage` diagnostic in the integrated strict type gate. The factory now names that shared interface `claude_auth_env`; served construction, catalog probing and the prerequisite call it. Focused real-child auth and binary admission tests pass, and changed-file strict typing is clean. Type: API visibility and CI integration.
+P03.S13 review (2026-10-02): PASS on the isolated branch. A real catalog-selected Codex 0.159.2 app-server turn completed and wrote a SQLite identity row; a graph worker/research pair retained the first native session ID while checking stable evidence on a later call. A real ACP simulator subprocess covered initialize, session creation, and write-before-prompt. Focused provider/worker tests, database-admin tests, two service proofs, and changed-file checks pass. Integrated CI remains with the branch supervisor.
+
+### first-native-session-id-is-not-a-session-history | medium | D3's one row was ambiguous under D5 per-call sessions
+
+Fixed in P03.S13. D3's write-once row now retains the first observed native session ID; each later initialized call may have a different native ID but must match every stable binary, adapter, authority, and auth field in the same atomic transaction. The ADR states that the row does not enumerate later ephemeral sessions. SQLite concurrent-session and changed-version tests cover the rule. Type: runtime evidence semantics and storage contract.
+
+### acp-private-identity-bypassed-by-custom-getattr | high | ACP could fail after session creation before recording evidence
+
+Fixed in P03.S13. `AcpChatModel` overrides Pydantic's private-attribute getter to expose its session state. The new runtime binding was a private attribute, so the first real ACP subprocess test reached `session/new` and then raised `AttributeError` before writing. The getter now explicitly reads that private binding; the subprocess test completes its turn and finds the row. Type: runtime state integration.
+
+### runtime-identity-step-scope-omitted-producer-and-codex | low | the original S13 row named only ACP and worker files
+
+Fixed in P03.S13. Codex records its app-server initialize and native thread, while the research producer invokes models outside the worker node. Core expanded S13's file scope to those providers, graph paths, SQL port/repository, tests, and ADR/audit evidence before closure. Type: plan scope and topology coverage.
+
+### admin-clear-omitted-runtime-identity-table | high | clear could report success while keeping runtime identity rows
+
+Fixed in P03.S13 after the integrated CI gate exposed the defect. The S11 migration added `provider_runtime_identities`, but the database admin clear order was not updated. The completeness and foreign-key order tests failed; `_CLEAR_ORDER` now includes the child table before `threads`, and all seven admin tests pass on a real SQLite database. Type: destructive administrative operation and migration integration.

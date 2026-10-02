@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:06305bd0e819e9af9cdff592ccb2fe491de4d9de01d408bf5e19d9cfca47970f'
+body_hash: 'sha256:fd12e4732fddd67c2037610dcc1c81f368cf2e74c9197595a2d431aa05b560bc'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -325,3 +325,9 @@ Accepted 2026-10-01 under the user's blanket approval of that date.
 ## Amendment - provider-binary-policy (2026-10-01, managed policy)
 
 The vendored adapter applies the Claude managed-policy settings tier before any session exists, writing its `env` entries into the environment the CLI child inherits; a client cannot suppress it, and passing no setting sources does not (`2026-10-01-provider-binary-policy-audit`, `managed-policy-env-reaches-the-child`). That tier is the operator organisation's own authority over Claude Code on the host, so this record honours it rather than working around the adapter: a served Claude lane runs under whatever managed policy the host carries, and the lane's runtime identity records that a managed tier was present. No source, comment or document of this repository may claim that the lane drops managed configuration.
+
+## Amendment - runtime evidence precision (2026-10-02)
+
+D3's one row stores the first observed provider-native session ID for a run and lane. D5 opens a new native session for each model call, so later session IDs are not enumerated by that row. Later calls must match the stored stable binary, adapter, runtime-authority, and authentication fields or fail before their prompt. A row therefore proves the identity of its first initialized session and the stable identity checks on later sessions; it is not a session history.
+
+The preceding managed-policy amendment establishes that the adapter honors any host managed tier. ACP initialize and session creation do not disclose whether a tier existed or loaded on a particular host. Until a trustworthy host-tier presence signal is available, D3 records `managed_policy_present = null` (unknown), including for Claude. The earlier sentence claiming the row records presence is superseded; capability advertisement alone is not a presence signal.

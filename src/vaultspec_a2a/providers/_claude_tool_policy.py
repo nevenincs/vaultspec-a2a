@@ -6,6 +6,11 @@ allowed to read, which of its built-in tools a persona may not use at all, and
 which permission mode an unattended run may run in. Each value here names a
 surface of the pinned adapter and its SDK, so it is a contract with an installed
 artefact rather than a preference.
+
+The adapter also resolves the organisation's managed-policy tier before a
+session exists and copies its environment entries into the CLI child's
+environment. Session ``settingSources=[]`` does not remove that tier. Its
+presence is host policy, not a permission this module grants or denies.
 """
 
 from __future__ import annotations

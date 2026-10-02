@@ -74,7 +74,8 @@ def claude_session_options(config: AcpModelConfig) -> JsonObject:
 
     ``strictMcpConfig`` is UNCONDITIONAL, armed or not: the CLI's own
     ``--strict-mcp-config`` mode drops every ambient MCP registration scope -
-    enterprise managed config, user-global ``mcpServers``, project ``.mcp.json``,
+    enterprise managed MCP registrations, user-global ``mcpServers``, project
+    ``.mcp.json``,
     local scope, plugin servers, and the account's claude.ai remote connectors -
     and admits only the dynamic set carried by the session injection. That makes
     the spawned agent's MCP surface EXACTLY the injected set (empty on a plain
@@ -87,15 +88,18 @@ def claude_session_options(config: AcpModelConfig) -> JsonObject:
     static approval is taken with the arguments unknown and would put the one
     boundary that can see a foreign project out of reach.
 
-    ``settingSources`` is the same statement for the CLI's SETTINGS scopes, and
-    for the same reason. The adapter defaults it to user, project, and local, so
+    ``settingSources`` bounds the CLI's user, project, and local SETTINGS scopes.
+    The adapter defaults it to all three, so
     the lane would otherwise adopt the operator's own ``permissions`` block and
     the allow rules and hooks of whichever repository the run was pointed at -
     ambient authority that decides tool permissions before this project's rung
     is ever consulted. An empty list is honoured as "no sources" by the SDK
     (only an absent value falls back to the default), and it is the caller's
     value that survives: the adapter spreads the caller's option block over its
-    own defaults.
+    own defaults. The adapter separately resolves the organisation's managed
+    policy before any session and copies its environment entries into the CLI
+    child's environment. No ``settingSources`` value suppresses that host tier;
+    a failed policy read is best effort and cannot be inferred from this option.
 
     ``disallowedTools`` carries the persona's capability declaration into the
     only place the CLI's own built-ins respect. The adapter appends its entries
@@ -763,6 +767,14 @@ async def setup_session(
         raise AcpSessionError(
             f"ACP {method} succeeded without a sessionId",
             code=AcpErrorCode.INTERNAL_ERROR,
+        )
+    if is_strict_claude_session(config):
+        logger.info(
+            "ACP Claude managed-policy resolution is adapter controlled",
+            extra={
+                **runtime_log_extra(config, process=ctx.process, session_id=session_id),
+                "managed_policy_resolution": "adapter_best_effort_pre_session",
+            },
         )
     config_options = _config_options(result, operation=method)
     config_options = await _select_desired_model(

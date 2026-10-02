@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:55a771a252f898178ba103c4321e365e6da35e1bb9bd3b3759af6dc498b8cc9c'
+body_hash: 'sha256:0ef2b3cc76aaaaed7f6c7ba133e85a69c7cdaa0d024fe3696098ab300dacf5fb'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -214,6 +214,13 @@ related:
 - `S22` `verify:` `changed-file basedpyright ruff ty` -> `pass`
 - `S22` `verify:` `git diff --check` -> `pass`
 - `S22` `by:` `vaultspec-high-executor`
+- `S20` `M` `src/vaultspec_a2a/providers/_claude_tool_policy.py`
+- `S20` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S20` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S20` `verify:` `focused Claude permission and ACP session tests 35 passed` -> `pass`
+- `S20` `verify:` `changed-file ruff ty basedpyright` -> `pass`
+- `S20` `verify:` `git diff --check` -> `pass`
+- `S20` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -235,3 +242,4 @@ related:
 - `S12` Review: fixed low plan-scope gap in S12; queued medium research fan-out identity seam for S13 in audit.
 - `S18` Full just ci and ci-merge remain shared integration gates; credentialed live model turn unavailable. Medium error-path accounting follow-up queued in audit.
 - `S22` Review: no remaining code finding in S22; strict CI diagnostics in ACP protocol and checkpoints are assigned to their owning continuation and S19 passes.
+- `S20` Formal review fixed the false settings-source claim and queued medium managed-policy presence evidence for S13.

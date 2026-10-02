@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:bdac0af93b955c6e56495cfa4fd25a32b72457580d8d67ec04130538fad09742'
+body_hash: 'sha256:2b39ee7272a990167f076d427ac0b420184f02903f80031cdcd2e6b4a13c8ecf'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -43,7 +43,7 @@ Fixed in P01.S17. The adapter treats `PowerShell` as a shell tool beside `Bash`,
 
 ### managed-policy-env-reaches-the-child | high | the adapter injects managed-policy environment into the CLI child before any session
 
-Open, owned by P06.S20; ruled by the 2026-10-01 amendment to `2026-10-01-provider-binary-policy-adr`. At module load the adapter reads the managed-policy settings tier, which includes macOS MDM and the Windows policy registry hives, and writes its `env` entries into its own process environment, which the CLI child inherits. Passing no setting sources does not suppress it, so the docstring claim that no setting sources drops enterprise managed configuration is wrong.
+Fixed in P06.S20; ruled by the 2026-10-01 amendment to `2026-10-01-provider-binary-policy-adr`. At module load the adapter reads the managed-policy settings tier, which includes macOS MDM and the Windows policy registry hives, and writes its `env` entries into its own process environment, which the CLI child inherits. Session documentation now distinguishes ordinary settings scopes from managed policy, and a bounded session log records the adapter-controlled best-effort resolution without claiming a policy was present. Type: runtime policy and contract wording.
 
 ### permission-request-carries-tool-identity | medium | the permission request now names its tool and MCP server, which the rung does not read
 
@@ -147,3 +147,6 @@ Open; follow-up scope is the graph's error-path accounting contract. The upgrade
 ### proof-range-typing-was-not-narrowed | low | strict CI could not verify version comparisons
 
 Fixed in P02.S22. The P02.S08 proof predicate rejected missing parse results in a compound condition that basedpyright could not narrow, leaving three strict diagnostics at the host PATH comparison. It now checks all four parsed versions for `None` before comparing them. Behavior is unchanged; focused lane admission tests and strict type checks pass. Type: CI type correctness and proof gate readability.
+### managed-policy-presence-not-observable-from-acp | medium | runtime identity cannot yet assert host policy presence
+
+Open; owned by P03.S13. The adapter applies managed policy before sessions but its ACP initialize and session/new results do not report whether that tier existed or its read succeeded. P06.S20 logs the resolution path only. `ProviderRuntimeIdentityModel.managed_policy_present` must remain unknown until S13 obtains a reliable presence signal, for example by probing the same SDK `resolveSettings({settingSources: []})` policy tier without exporting its values. Type: runtime evidence gap.

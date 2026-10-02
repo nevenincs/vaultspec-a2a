@@ -41,7 +41,6 @@ async def test_explicit_auth_failure_carries_credential_condition() -> None:
         workspace_root=None,
         command=["unused"],
         env_vars={},
-        session_id=None,
         mcp_servers=[],
         use_exec=False,
         provider=None,

@@ -463,7 +463,7 @@ async def initialize_session(
         raise _session_wire_error(
             f"ACP initialize failed: {resp['error']}", resp["error"]
         )
-    return _validated_initialize_result(resp, config)
+    return _validated_initialize_result(resp)
 
 
 def _validated_auth_methods(result: JsonObject) -> list[JsonObject]:
@@ -478,9 +478,7 @@ def _validated_auth_methods(result: JsonObject) -> list[JsonObject]:
     return cast("list[JsonObject]", auth_methods)
 
 
-def _validated_initialize_result(
-    resp: JsonObject, config: AcpModelConfig
-) -> InitializeResult:
+def _validated_initialize_result(resp: JsonObject) -> InitializeResult:
     result = resp.get("result")
     if not isinstance(result, dict):
         raise AcpSessionError(
@@ -504,12 +502,6 @@ def _validated_initialize_result(
         raise AcpSessionError(
             "ACP initialize returned malformed agentCapabilities",
             code=AcpErrorCode.INTERNAL_ERROR,
-        )
-    if config.session_id and capabilities.get("loadSession") is not True:
-        raise AcpSessionError(
-            "ACP session resume was requested but the agent does not advertise "
-            "loadSession support",
-            code=AcpErrorCode.INVALID_PARAMS,
         )
     agent_info = result.get("agentInfo")
     return InitializeResult(
@@ -711,10 +703,9 @@ def _session_modes(result: JsonObject) -> JsonObject:
 async def setup_session(
     ctx: AcpSessionContext,
     config: AcpModelConfig,
-    agent_capabilities: JsonObject,
     auth_methods: list[JsonObject],
 ) -> SessionSetupResult:
-    """Create or load an ACP session.
+    """Create an ACP session.
 
     Returns a ``SessionSetupResult`` with the session id and agent modes.
     Writes session-scoped mutables (``tool_calls``, ``agent_modes``) to
@@ -760,10 +751,6 @@ async def setup_session(
                 config.allowed_tools,
                 extra=runtime_log_extra(config, process=ctx.process),
             )
-    if config.session_id and agent_capabilities.get("loadSession") is True:
-        method = "session/load"
-        params["sessionId"] = config.session_id
-
     resp = await _session_setup_response(ctx, config, method, params, auth_methods)
     result = resp.get("result")
     if not isinstance(result, dict):

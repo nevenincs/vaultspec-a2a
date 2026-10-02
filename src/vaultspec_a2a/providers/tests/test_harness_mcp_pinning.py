@@ -1275,7 +1275,6 @@ def _strict_config(specs: list[JsonObject]) -> AcpModelConfig:
         workspace_root=None,
         command=["claude"],
         env_vars={},
-        session_id=None,
         mcp_servers=specs,
         use_exec=False,
         provider="claude",

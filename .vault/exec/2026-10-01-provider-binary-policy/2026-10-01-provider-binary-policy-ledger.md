@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:e36ae9fcbd66a1afeb33ed89a52c32fdacab5a559502af18621b7b4588f3f426'
+body_hash: 'sha256:1c39875ed145e2abf5ae1d3e3bc429c8b0d460ee3cce55a0f2bd437d0b891b93'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -113,6 +113,17 @@ related:
 - `S04` `verify:` `ty provider resolver files` -> `pass`
 - `S04` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S04` `verify:` `just ci` -> `fail`
+- `S07` `M` `src/vaultspec_a2a/providers/lane_admission.py`
+- `S07` `M` `src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`
+- `S07` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S07` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S07` `verify:` `codex live app-server turn` -> `pass`
+- `S07` `verify:` `claude live ACP turn` -> `fail`
+- `S07` `verify:` `targeted provider catalog and admission pytest: 54 tests` -> `pass`
+- `S07` `verify:` `ruff check and format on S07 files` -> `pass`
+- `S07` `verify:` `ty check on S07 files` -> `pass`
+- `S07` `verify:` `real ProviderCatalogService admission probe` -> `pass`
+- `S07` `by:` `vaultspec-standard-executor`
 
 ## Notes
 
@@ -123,3 +134,5 @@ related:
 - `S11` PostgreSQL proof used an isolated Compose project and its exact ephemeral volume was removed after the tests.
 - `S03` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
 - `S04` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration. Missing-CLI typed refusal is queued to P01.S05.
+- `S07` Claude prompt returned Authentication required; Z.ai credential absent, so both lanes are withheld until P02.S21.
+- `S07` Integrated just ci is assigned to the root branch after parallel steps land.

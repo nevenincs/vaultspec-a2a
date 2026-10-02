@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:451c9c2c8be5781e8ca8ea9a51357a6c75f77e50192c7a66d397acf2c96589d2'
+body_hash: 'sha256:6ac09f76b9a30c8abeaf6b57d7936f3c7620baff8a7af009300bc274414e5ac0'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -62,7 +62,7 @@ Recorded. The adapter pins SDK 0.3.284 (CLI 2.1.284) while 0.3.286 exists; forci
 
 ### claude-lane-proof-predates-the-binary | medium | the Claude lane's completed-turn proof was earned on an older binary
 
-Open; needs a credentialed host. No model turn is possible here, so the bump is proven to the handshake and binary boundary only. Under the served-profile rule's binary-identity clause the Claude lane must re-earn its completed-turn proof on CLI 2.1.284 before that identity is admitted; P02.S07 of this plan records proved versions.
+Open; the current Claude binary still lacks a completed-turn proof. P02.S07 withheld served admission after the 2.1.286 prompt failed authentication; P02.S21 will reenroll it only when its cited live turn completes on the resolved binary.
 
 ### workspace-scope-test-posix-only | low | workspace read grant test assumed POSIX temporary paths
 
@@ -87,9 +87,20 @@ Open; owned by P01.S05. The P01.S04 resolver now refuses a missing selected bina
 ### catalog-binary-test-was-posix-only | low | catalog pin proof was skipped on Windows
 
 Fixed in P01.S04. The previous capsule catalog test used a POSIX shell script as its fake Node executable and skipped the Windows host. It now copies the installed Node binary into a real capsule tree and uses a tiny JavaScript entry to write the child environment, so the same catalog probe runs on both hosts. Type: test coverage and portability.
+### claude-current-binary-auth-refused | high | the current Claude CLI could not complete its cited live turn
+
+Open auth integration finding, with served admission withheld in P02.S07 and reenrollment owned by P02.S21. The host CLI reported logged in, and the production ACP child initialized and opened a session, but `test_claude_live_turn_completes_and_returns_content` failed on its first prompt with `ACP Error [-32000]: Authentication required`. The resolved host CLI reported 2.1.286; no completed-turn proof was earned for that version. Type: runtime authentication and proof invalidation. Investigate the child authentication context before rerunning the proof; a successful CLI status or ACP handshake does not qualify.
+
+### zai-current-binary-proof-unavailable | medium | Z.ai had no credential for a current-binary live turn
+
+Open external prerequisite, with served admission withheld in P02.S07 and reenrollment owned by P02.S21. Neither `ZAI_AUTH_TOKEN` nor `ZAI_API_KEY` was present on the proof host, so the cited `test_zai_streaming_shape_is_faithful` could not establish a version-bound completed turn. Type: verification gap. Record the resolved binary's reported version only after that test completes with a valid credential.
+
+### codex-proof-citation-mismatched-to-current-run | low | the old citation named a stack acceptance test that was not rerun
+
+Fixed in P02.S07. The original citation named the PW7 document-authoring acceptance run, which requires a gateway and engine stack absent from this proof host. The production-factory `test_codex_live_turn_returns_output` completed a real turn through the catalog's `codex-app-server` mode on resolved Codex 0.159.2, so the lane declaration now cites that test and claims only the work it completed. Type: evidence precision.
 ## Recommendations
 
 - Rule on the managed-policy tier and correct the claim (`managed-policy-env-reaches-the-child`), done by the ADR amendment and P06.S20.
-- Re-run the Claude lane's completed-turn test on a credentialed host against 2.1.284 (`claude-lane-proof-predates-the-binary`).
+- Re-run the Claude lane's completed-turn test with working child authentication against the resolved binary (`claude-lane-proof-predates-the-binary`, `claude-current-binary-auth-refused`).
 
 - Map missing Claude CLI resolution to typed catalog and launch unavailability in P01.S05 (catalog-missing-cli-propagates-configuration-error).

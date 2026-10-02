@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:e185895b5d6e7afd3b702a6fd9170022be4c3999ff83e197b5c8656d64ad05a7'
+body_hash: 'sha256:59154c06a690e4e1f416e0a258ce649ea9e4c0a20a38016d8ba7a9fd702f69da'
 ---
 
 # `provider-binary-policy` plan
@@ -42,7 +42,7 @@ Concurrency with other work. An executor is landing P06.S46 of `2026-09-24-archi
 
 Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer is an absolute path chosen by the profile's authority order, and an armed desktop capsule owns that asset exclusively.
 
-- [ ] `P01.S01` - Add the capsule-owned Claude CLI path authority beside the existing Node and ACP authorities, selecting the libc variant by the rule the adapter uses; `src/vaultspec_a2a/providers/_factory_commands.py`.
+- [x] `P01.S01` - Add the capsule-owned Claude CLI path authority beside the existing Node and ACP authorities, selecting the libc variant by the rule the adapter uses; `src/vaultspec_a2a/providers/_factory_commands.py`.
 - [ ] `P01.S02` - Require the capsule Claude CLI as a third validated capsule asset so an armed desktop profile refuses to arm without it; `src/vaultspec_a2a/desktop/profile.py`.
 - [ ] `P01.S03` - Declare the absolute-path claude_cli_executable setting as the explicit top rung and resolve it with the other path settings; `src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/control/config.py, .env.example`.
 - [ ] `P01.S04` - Rewrite pin_claude_executable into the profile-scoped authority order returning the absolute path and the rung that answered, with an armed capsule exclusive and fail-loud over an inherited executable override, and update the served-turn and catalog-probe call sites; `src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/factory.py`.

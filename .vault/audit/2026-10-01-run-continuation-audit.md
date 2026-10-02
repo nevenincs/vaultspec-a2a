@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:2d0f6f9abce0fef8a77e91e4f919eafe3450bcdd0d26244b8dbe3af42f416d80'
+body_hash: 'sha256:deab8de6f6cfd883ca3c549e201e6ced3a6b29c77d7e0c3e7eaa661ff0a74c36'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -113,6 +113,10 @@ Open. Type: test portability. `pooled_postgres_saver` opens psycopg's async pool
 ### successor-seed-omits-non-dialogue-messages | low | a successor carries textual user and assistant turns only
 
 Open. Type: transcript fidelity. `surviving_transcript` projects the retained checkpoint to nonempty textual `HumanMessage` and `AIMessage` values. System, tool, and rich-content messages do not cross into the successor's first graph input. This avoids invalid truncated tool-call pairs, but a continuation that needs a prior tool result may need to retrieve it again. Revisit if the settled-run consumer requires tool context to survive the lineage boundary.
+
+### queued-position-missing-from-r6-event | low | the recorded edge event omitted the served queue position
+
+Fixed in P06.S16. Type: contract drift. The live `202` response includes a one-based `queue_position` so a client can distinguish queue admission from execution; R6's draft event named `action_status` but omitted that field. The amendment now states the served shape and the narrowed `502`/`503` answers.
 
 ## Recommendations
 

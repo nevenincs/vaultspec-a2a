@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import sys
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, override
 
@@ -11,7 +12,9 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ...graph.enums import Provider
+from ...testing import settings_override
 from .. import factory as factory_module
+from ..acp_chat_model import AcpChatModel
 from ..binary_version import probe_binary_version
 from ..cli_resolution import (
     ProviderRuntimeUnavailableError,
@@ -163,6 +166,46 @@ def test_unreadable_version_has_a_typed_blocker(
     assert binary_proof_reason(Provider.CODEX, "/bin/codex", "service_path") is (
         ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
     )
+
+
+@pytest.mark.parametrize("provider", (Provider.CLAUDE, Provider.ZAI))
+def test_withdrawn_turn_proof_refuses_before_any_binary_probe(
+    provider: Provider,
+) -> None:
+    """An absent proof cannot authorize a frozen lane by default."""
+    assert binary_proof_reason(provider, "/missing/claude", "service_path") is (
+        ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    )
+
+
+@pytest.mark.asyncio
+async def test_claude_model_rechecks_withdrawn_proof_before_child_spawn(
+    tmp_path: Path,
+) -> None:
+    """A model retained in memory cannot spawn after its lane is withdrawn."""
+    cli = tmp_path / "claude-cli"
+    cli.write_text("selected binary\n", encoding="utf-8")
+    marker = tmp_path / "spawned.txt"
+    model = AcpChatModel(
+        command=[
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import sys; Path(sys.argv[1]).touch()",
+            str(marker),
+        ],
+        workspace_root=str(tmp_path),
+        provider=Provider.CLAUDE.value,
+        version_proof_required=True,
+    )
+
+    with (
+        settings_override(claude_cli_executable=cli, capsule_assets_root=None),
+        pytest.raises(ProviderRuntimeUnavailableError) as refusal,
+    ):
+        await model.ainvoke([HumanMessage(content="hello")])
+
+    assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    assert not marker.exists()
 
 
 @pytest.mark.asyncio

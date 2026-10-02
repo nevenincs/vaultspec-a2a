@@ -316,7 +316,7 @@ async def test_catalog_reports_a_missing_selected_cli_as_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_served_turn_refuses_if_cli_disappears_after_construction(
+async def test_model_refuses_if_cli_disappears_after_construction(
     tmp_path: Path,
 ) -> None:
     """The launch checks the same selected file again before spawning ACP."""
@@ -324,10 +324,13 @@ async def test_served_turn_refuses_if_cli_disappears_after_construction(
     _capsule_that_dumps_its_environment(capsule, tmp_path / "unused-report")
 
     with settings_override(capsule_assets_root=capsule):
-        model = ProviderFactory().create(
-            Provider.CLAUDE, model="frozen", workspace_root=tmp_path
+        model = AcpChatModel(
+            command=["node", "index.js"],
+            workspace_root=str(tmp_path),
+            acp_family="claude",
+            provider=Provider.CLAUDE.value,
+            version_proof_required=True,
         )
-        assert isinstance(model, AcpChatModel)
         capsule_claude_executable(capsule).unlink()
         with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
             await model._acp_environment()

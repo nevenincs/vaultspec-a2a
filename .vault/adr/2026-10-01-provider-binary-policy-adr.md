@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:bbd0271f9d51eeba5d4ef7bf98b4f7783176913b0407cc6cd29d36414eabc86d'
+body_hash: 'sha256:e552e38360baddf9d67aa075dead85f610fdde1a6dc49c081b4a4968aa7a4abf'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -345,3 +345,20 @@ setting nor any other rung substitutes for it. Outside a capsule, the explicit
 absolute setting remains the first rung, including for the pinned Compose
 profile. This amendment replaces the conflicting D1 ordering and preserves the
 single shared resolver for probe and turn.
+
+## Amendment (2026-10-02): current proof remains required for frozen runs
+
+An exact frozen catalog selection preserves the run's provider, execution mode,
+model, native controls, and explicitly selected fallbacks across catalog drift.
+It does not preserve eligibility to execute a binary after its completed-turn
+proof is withdrawn. Catalog health, provider construction, and the final
+pre-spawn check refuse a Claude, Z.ai, or Codex lane without current
+proof using a
+typed `binary_proof_missing` reason, just as an out-of-range resolved binary is
+refused. A recovered run must not re-resolve its frozen values from the current
+catalog. An explicitly frozen fallback may be tried only under its own current
+proof; no unproven proof-bound lane runs. If proof for the selected lane is
+restored on a
+qualifying binary, the same exact frozen values may resume without changing
+the run's selection. The user authorized this fail-closed ruling on 2026-10-02
+after the conflicting restart and proof requirements were presented.

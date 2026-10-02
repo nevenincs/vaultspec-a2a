@@ -26,8 +26,8 @@ from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpError
 from ..cli_resolution import ProviderRuntimeUnavailableError, resolve_service_executable
 from ..factory import (
-    ProviderFactory,
     _discover_claude_catalog,
+    claude_auth_env,
 )
 from ..provider_catalog import CatalogStatus, ProviderCatalogKey
 
@@ -56,6 +56,18 @@ def _cli_file(root: Path) -> Path:
     cli = root / ("claude.exe" if os.name == "nt" else "claude")
     cli.write_text("owned CLI\n", encoding="utf-8")
     return cli
+
+
+def _auth_model(root: Path) -> AcpChatModel:
+    """Build the real ACP model from production credential selection."""
+    env_vars, auth_mode = claude_auth_env()
+    return AcpChatModel(
+        command=["node", "index.js"],
+        env_vars=env_vars,
+        workspace_root=str(root),
+        provider=Provider.CLAUDE.value,
+        auth_mode=auth_mode,
+    )
 
 
 @pytest.mark.parametrize(
@@ -100,10 +112,7 @@ def test_subscription_channel_does_not_inject_the_configured_token(
         ),
         armed_environment(CLAUDE_CODE_OAUTH_TOKEN=None),
     ):
-        model = ProviderFactory().create(
-            Provider.CLAUDE, model="frozen", workspace_root=tmp_path
-        )
-        assert isinstance(model, AcpChatModel)
+        model = _auth_model(tmp_path)
         env = asyncio.run(model._acp_environment())
 
     assert model.auth_mode == "subscription_login"
@@ -123,10 +132,7 @@ def test_subscription_channel_preserves_the_operators_ambient_export(
         ),
         armed_environment(CLAUDE_CODE_OAUTH_TOKEN="ambient-test-token"),
     ):
-        model = ProviderFactory().create(
-            Provider.CLAUDE, model="frozen", workspace_root=tmp_path
-        )
-        assert isinstance(model, AcpChatModel)
+        model = _auth_model(tmp_path)
         env = asyncio.run(model._acp_environment())
 
     assert model.auth_mode == "subscription_login"
@@ -143,10 +149,7 @@ def test_oauth_channel_overrides_ambient_token_in_the_child(tmp_path: Path) -> N
         ),
         armed_environment(CLAUDE_CODE_OAUTH_TOKEN="different-ambient-token"),
     ):
-        model = ProviderFactory().create(
-            Provider.CLAUDE, model="frozen", workspace_root=tmp_path
-        )
-        assert isinstance(model, AcpChatModel)
+        model = _auth_model(tmp_path)
         env = asyncio.run(model._acp_environment())
 
     assert model.auth_mode == "oauth_token"
@@ -156,7 +159,7 @@ def test_oauth_channel_overrides_ambient_token_in_the_child(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("token", (None, SecretStr("   ")))
-def test_oauth_channel_without_a_token_refuses_construction(
+def test_oauth_channel_without_a_token_refuses_selection(
     token: SecretStr | None, tmp_path: Path
 ) -> None:
     cli = _cli_file(tmp_path)
@@ -168,9 +171,7 @@ def test_oauth_channel_without_a_token_refuses_construction(
         ),
         pytest.raises(ProviderRuntimeUnavailableError, match="configured OAuth token"),
     ):
-        ProviderFactory().create(
-            Provider.CLAUDE, model="frozen", workspace_root=tmp_path
-        )
+        claude_auth_env()
 
 
 @pytest.mark.asyncio

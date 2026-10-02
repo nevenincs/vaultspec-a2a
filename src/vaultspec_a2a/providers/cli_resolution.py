@@ -42,6 +42,8 @@ class ClaudeCliResolution:
 
 class ProviderRuntimeUnavailableReason(StrEnum):
     CLAUDE_CLI_UNAVAILABLE = "claude_cli_unavailable"
+    TURN_PROOF_MISSING = "turn_proof_missing"
+    BINARY_PROOF_MISSING = "binary_proof_missing"
     BINARY_VERSION_UNAVAILABLE = "binary_version_unavailable"
     BINARY_OUT_OF_PROOF_RANGE = "binary_out_of_proof_range"
 

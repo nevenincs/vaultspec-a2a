@@ -12,9 +12,9 @@ related:
   - '[[2026-10-01-provider-binary-policy-adr]]'
 supersedes:
   - '2026-07-15-model-profiles-adr'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v1'
-body_hash: 'sha256:5a357a13a10db1ea9d8fb36498b41b915483c5a73d48f086fa782ed93863ec5b'
+body_hash: 'sha256:0924454531890d7a23fddca6db516cbf28f5398a7fffffc76a118b850ec5074d'
 ---
 # `provider-model-catalog` adr: `provider-owned model catalogs, bounded run selection, and truthful provider health` | (**status:** `accepted`)
 
@@ -233,3 +233,18 @@ The earlier provider-adapter sentence granting Gemini a separate advertised
 session-model shape is superseded. Future Gemini support requires a new accepted
 current mechanism and its own exact-mode proof; old configuration is not a
 bootstrap path.
+
+## Amendment (2026-10-02): frozen values do not freeze runtime eligibility
+
+This amendment qualifies the earlier constraint that existing runs restart from
+exact frozen values after catalog drift. Those values remain the sole selection
+authority; a restart never re-resolves model, controls, provider, or fallback
+from the current catalog. Current completed-turn proof and binary-version
+admission remain separate launch prerequisites. If proof for a frozen external lane is
+withdrawn, frozen-run resolution refuses it before model construction with a
+typed reason. For Claude, Z.ai, and Codex, the binary-policy factory and
+pre-spawn checks also refuse the withdrawn lane. An explicitly frozen
+fallback may run only if its own current proof qualifies; it
+is not a substitute selected from a changed catalog. A later qualifying proof
+allows the exact frozen lane to resume. The user authorized the recommended
+fail-closed ruling after the restart/proof conflict was presented on 2026-10-02.

@@ -174,7 +174,7 @@ def binary_proof_reason(
     """Check the same resolved launcher that this lane would hand to its child."""
     proof = PROVEN_TURN_LANES.get(provider)
     if proof is None:
-        return None
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
     expected_binary = (
         "claude" if provider in {Provider.CLAUDE, Provider.ZAI} else provider.value
     )
@@ -194,7 +194,7 @@ def codex_binary_proof_reason(
 ) -> ProviderRuntimeUnavailableReason | None:
     """Probe the service-path Codex launcher selected by the factory."""
     if Provider.CODEX not in PROVEN_TURN_LANES:
-        return None
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
     if command is None:
         command, _ = _classify_codex_command()
     if not os.path.isabs(command[0]):
@@ -207,7 +207,7 @@ def _claude_binary_proof_reason(
 ) -> ProviderRuntimeUnavailableReason | None:
     """Resolve and probe a Claude-backed catalog lane without child PATH lookup."""
     if provider not in PROVEN_TURN_LANES:
-        return None
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
     try:
         resolved = pin_claude_executable(resolve_env_vars(workspace_root))
     except ProviderRuntimeUnavailableError as exc:
@@ -218,7 +218,7 @@ def _claude_binary_proof_reason(
 def require_binary_proof(reason: ProviderRuntimeUnavailableReason | None) -> None:
     if reason is not None:
         raise ProviderRuntimeUnavailableError(
-            "resolved provider binary is outside its completed-turn proof",
+            "resolved provider binary lacks a current completed-turn proof",
             reason=reason,
         )
 

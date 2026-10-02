@@ -12,11 +12,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
-from ..providers.cli_resolution import ProviderRuntimeUnavailableError
+from ..providers.cli_resolution import (
+    ProviderRuntimeUnavailableError,
+    ProviderRuntimeUnavailableReason,
+)
 from ..providers.factory import (
     validate_current_execution_lane,
     validate_current_native_controls,
 )
+from ..providers.lane_admission import catalog_lane_admission_reason
+from ..providers.provider_catalog import ProviderCatalogKey
 from .enums import Provider
 
 if TYPE_CHECKING:
@@ -38,6 +43,16 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def _require_current_frozen_lane_proof(provider: Provider, execution_mode: str) -> None:
+    reason = catalog_lane_admission_reason(
+        ProviderCatalogKey(provider.value, execution_mode)
+    )
+    if reason is not None:
+        raise ProviderRuntimeUnavailableError(
+            reason, reason=ProviderRuntimeUnavailableReason.TURN_PROOF_MISSING
+        )
 
 
 class _ModelResolutionOptional(TypedDict, total=False):
@@ -74,6 +89,7 @@ def resolve_model_for_worker(
     catalog_exc: Exception | None = None
     for provider, model_name, execution_mode, native_controls in parsed_candidates:
         try:
+            _require_current_frozen_lane_proof(provider, execution_mode)
             model = provider_factory.create(
                 provider,
                 model=model_name,
@@ -244,6 +260,7 @@ def resolve_supervisor_model(
         frozen
     )
     validate_current_execution_lane(provider, execution_mode)
+    _require_current_frozen_lane_proof(provider, execution_mode)
     model = provider_factory.create(
         provider,
         model=model_name,

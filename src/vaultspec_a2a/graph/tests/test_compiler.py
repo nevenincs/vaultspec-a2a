@@ -22,11 +22,15 @@ if TYPE_CHECKING:
 
     from ..protocols import ProviderFactoryProtocol
 
+from ...control.config import settings
 from ...database.tests._backends import migrated_session_factory
 from ...graph.enums import Provider
 from ...providers import AcpPromptError, ProviderCondition
 from ...providers._codex_protocol import _turn_failure
-from ...providers.cli_resolution import ProviderRuntimeUnavailableError
+from ...providers.cli_resolution import (
+    ProviderRuntimeUnavailableError,
+    ProviderRuntimeUnavailableReason,
+)
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
 from ...providers.factory import ProviderFactory
 from ...team.team_config import (
@@ -46,7 +50,11 @@ from ...thread.errors import (
 )
 from ...thread.state import TeamState
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
-from .._compiler_models import parse_catalog_preferences, resolve_model_for_worker
+from .._compiler_models import (
+    parse_catalog_preferences,
+    resolve_model_for_worker,
+    resolve_supervisor_model,
+)
 from .._compiler_prompts import build_supervisor_prompt
 from .._compiler_research import _make_research_producer
 from .._compiler_retry import (
@@ -231,6 +239,75 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
     assert factory.calls == ["primary", "fallback"]
     assert provider is Provider.CODEX
     assert model_name == "fallback"
+
+
+@pytest.mark.parametrize(
+    ("provider", "execution_mode"),
+    (
+        (Provider.CLAUDE, f"claude-agent-acp:{settings.acp_backend}"),
+        (Provider.ZAI, f"zai-claude-agent-acp:{settings.acp_backend}"),
+        (Provider.KIMI, "kimi-code-acp"),
+        (Provider.OPENAI, "openai-api"),
+        (Provider.ZHIPU, "zhipu-openai-compatible-api"),
+        (Provider.ANTIGRAVITY, "antigravity-cli"),
+    ),
+)
+def test_frozen_external_assignment_refuses_without_current_proof(
+    provider: Provider,
+    execution_mode: str,
+) -> None:
+    """Exact frozen values do not waive each lane's current turn proof."""
+    team = load_team_config("vaultspec-solo-coder")
+    worker = team.workers[0]
+    agent = load_agent_config(worker.agent_id)
+    frozen: dict[str, Any] = {
+        "schema_version": 1,
+        "provider": provider.value,
+        "execution_mode": execution_mode,
+        "catalog_revision": "frozen-revision",
+        "entry_id": "frozen-entry",
+        "model_name": "frozen-model",
+        "controls": [],
+        "provenance": {"selection_source": "team_selection"},
+        "fallbacks": [],
+    }
+
+    with pytest.raises(ValueError, match="All frozen provider lanes exhausted") as exc:
+        resolve_model_for_worker(
+            worker,
+            agent,
+            team,
+            provider_factory=ProviderFactory(),
+            frozen_assignment={worker.agent_id: frozen},
+        )
+
+    assert isinstance(exc.value.__cause__, ProviderRuntimeUnavailableError)
+    assert (
+        exc.value.__cause__.reason
+        is ProviderRuntimeUnavailableReason.TURN_PROOF_MISSING
+    )
+
+
+def test_frozen_supervisor_refuses_without_current_proof() -> None:
+    frozen: dict[str, Any] = {
+        "schema_version": 1,
+        "provider": Provider.CLAUDE.value,
+        "execution_mode": f"claude-agent-acp:{settings.acp_backend}",
+        "catalog_revision": "frozen-revision",
+        "entry_id": "frozen-entry",
+        "model_name": "frozen-model",
+        "controls": [],
+        "provenance": {"selection_source": "team_selection"},
+        "fallbacks": [],
+    }
+
+    with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
+        resolve_supervisor_model(
+            provider_factory=ProviderFactory(),
+            frozen_assignment={"__supervisor__": frozen},
+        )
+
+    assert refusal.value.reason is ProviderRuntimeUnavailableReason.TURN_PROOF_MISSING
 
 
 def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() -> None:

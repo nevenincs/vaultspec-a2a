@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:f1cc48b8adae3cea043dc678c26bbdd5cdfda405d3f552ffe0b41921bd879f25'
+body_hash: 'sha256:b1f0cb60f115dfdaa1a71224e9ac64b80bedf818b17766af7877f57ccf6427e5'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -338,6 +338,18 @@ related:
 - `S04` `verify:` `ruff check and format` -> `pass`
 - `S04` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S04` `by:` `Codex`
+- `S09` `M` `.vault/adr/2026-08-02-provider-model-catalog-adr.md`
+- `S09` `M` `src/vaultspec_a2a/graph/_compiler_models.py`
+- `S09` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_binary_proof_admission.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S09` `verify:` `pytest focused provider-auth-graph` -> `pass`
+- `S09` `verify:` `just audit-types` -> `pass`
+- `S09` `verify:` `just ci-merge` -> `pass`
+- `S09` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S09` `by:` `Codex`
 
 ## Notes
 

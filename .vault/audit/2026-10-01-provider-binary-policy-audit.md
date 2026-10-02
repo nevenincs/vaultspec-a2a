@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:4141c9a284671a472ac943c42bb80318d8e7b71f5919c6701309aab8b360c895'
+body_hash: 'sha256:16f29ca6201ed5c9c6c7c14ab24153b1df0b1e615e5597315afadd1a9642837d'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -254,3 +254,34 @@ The high findings reopen P01.S04 for the capsule authority order and P02.S09 for
 ### explicit-cli-setting-can-escape-an-armed-capsule | high | resolved by capsule-first CLI authority
 
 Fixed in reopened P01.S04 under the user's instruction to continue with the recommended rule. The single resolver now chooses the capsule CLI before an explicit setting when a capsule root is armed. A present capsule asset reaches the real child environment despite a conflicting explicit path, and a missing capsule asset refuses with the typed CLI-unavailable reason rather than borrowing that path. Outside a capsule, the explicit setting still selects the CLI. The accepted provider-binary-policy ADR's D1 order is amended and cross-referenced against relevant accepted decisions. Six focused capsule/explicit tests passed after the change; the full 16-test binary-identity file passed before the final real-child test expansion. Ruff lint and format, strict types, and vault checks pass. Integrated review of the resolver, catalog probe, factory, and child-environment seam found no new issue in this step. Review verdict for P01.S04: PASS. P02.S09 and P02.S21 remain open.
+## Reopened P02.S09 review, 2026-10-02
+
+### withdrawn-proof-can-restart-a-frozen-provider | high | resolved by current proof at every frozen launch boundary
+
+Fixed in reopened P02.S09 under the user's instruction to apply the recommended fail-closed rule. A missing Claude or Z.ai binary proof now produces typed `binary_proof_missing` at catalog health, factory construction and the pre-spawn model recheck. A frozen Claude worker assignment was exercised through the real compiler and factory path and refused before model construction. The provider-binary-policy and provider-model-catalog ADRs now distinguish frozen selection identity from current execution eligibility. Type: served-proof enforcement and decision reconciliation.
+
+### other-frozen-lanes-could-bypass-current-turn-proof | high | compiler admitted unproven external frozen lanes
+
+Fixed in P02.S09. Review found the same frozen-path gap for Kimi, OpenAI, Zhipu and Antigravity even though none has a current exact-lane completed-turn proof. Worker and supervisor resolution now check the existing exact-mode admission declaration before asking any factory for a model, with typed `turn_proof_missing`; an explicitly frozen fallback is evaluated under its own proof. Six external lane cases and the supervisor case pass, while Codex and in-process frozen paths remain covered by neighboring graph tests. Type: served admission and frozen restart authority.
+
+### withheld-factory-tests-expected-unproven-models | medium | five factory assertions assumed Claude or Z.ai could construct now
+
+Fixed in P02.S09. With both lanes intentionally withheld, those assertions could no longer reach a model. Their command and environment builders retain independent coverage; the factory tests now assert typed proof refusal, and model/configuration assertions are deferred until credentialed reenrollment can make the lane reachable. Type: test contract drift after proof withdrawal.
+
+### auth-channel-tests-constructed-a-withheld-lane | low | credential tests failed before reaching child auth selection
+
+Fixed in P02.S09. The three child-environment assertions now use the production `claude_auth_env` selector to construct a real ACP model directly and inspect its real child environment. The empty-token assertion calls the same selector. This retains the credential precedence proof without claiming the withdrawn lane is served. Type: test seam and admission separation.
+
+### graph-test-used-provider-only-fixture | low | the new frozen-run test named a fixture unavailable to graph tests
+
+Fixed in P02.S09. The frozen-run test needs no ACP adapter fixture because the current-proof guard refuses before adapter construction. The fixture dependency was removed, and the real compiler/factory path passed. Type: test fixture scope.
+
+### constrained-merge-run-exposed-lifecycle-timing | low | two unrelated lifecycle tests failed under one-worker resource admission
+
+Verification follow-up. The first `just ci-merge` run admitted one worker under host resource pressure and failed the desktop discovery racing-reader and parked-SSE shutdown clock tests; both passed in the immediate isolated `--lf` rerun without code changes. They are classified as timing-sensitive verification failures, with no provider-policy defect evidenced. The full merge profile must pass on the final tree before this Step closes. Type: CI environment and timing.
+
+The current focused provider, auth and graph set passes 141 tests; strict types, changed-file Ruff lint and formatting pass. The integrated merge profile is pending rerun after the general frozen-lane guard.
+
+## P02.S09 integrated verification and review, 2026-10-02
+
+The final working tree passed `just ci-merge` on Windows with Python 3.13.11 and pinned Node 26.8.1: lint, format, strict types, dependency and vault guards, 153 development tests, and 2,130 unit tests with five Linux-only skips. The focused provider/auth/graph set passed 141 tests. The two timing-sensitive lifecycle tests from the earlier constrained run passed in the immediate isolated rerun and again in this complete merge profile without source changes, closing that verification follow-up. Review traced frozen worker and supervisor resolution, catalog admission, factory construction, and ACP/Codex pre-spawn checks against both amended ADRs; no further finding was surfaced in this step. Review verdict for P02.S09: PASS. P02.S21 remains open pending credentialed Claude and Z.ai live turns.

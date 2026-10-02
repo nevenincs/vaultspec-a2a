@@ -25,6 +25,8 @@ from .._factory_commands import (
 )
 from ..acp_chat_model import AcpChatModel
 from ..cli_resolution import (
+    ProviderRuntimeUnavailableError,
+    ProviderRuntimeUnavailableReason,
     resolve_provider_cli_executable,
     resolve_service_executable,
 )
@@ -231,51 +233,14 @@ def test_build_zai_env_omits_blank_base_url() -> None:
     assert env == {"ANTHROPIC_AUTH_TOKEN": "zai-secret"}
 
 
-def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
-    """Z.ai rides the claude-agent-acp wrapper: same command as the Claude path."""
-    if not claude_acp_entry().exists():
-        with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
-            ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
-        return
-    model = ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
-    assert isinstance(model, AcpChatModel)
-    assert model.command == [
-        resolve_service_executable("node"),
-        str(claude_acp_entry()),
-    ]
-    assert model.provider == Provider.ZAI.value
-    assert model.acp_backend == "node"
-    assert model.use_exec is False
-    assert model.auth_mode in {"zai_auth_token", "none_detected"}
-
-
-def test_provider_factory_zai_retains_requested_model_for_acp_selection() -> None:
-    """A frozen Z.ai catalog value must reach the shared Claude ACP model."""
-    if not claude_acp_entry().exists():
-        with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
-            ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
-        return
-    model = ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
-    assert isinstance(model, AcpChatModel)
-    assert model.desired_model == _FROZEN_ZAI_MODEL
-    assert model._config.desired_model == _FROZEN_ZAI_MODEL
-
-
-def test_provider_factory_zai_injects_configured_token() -> None:
-    """When a Z.ai token is configured, both Anthropic gateway vars are injected."""
-    if not claude_acp_entry().exists():
-        with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
-            ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
-        return
-    model = ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
-    assert isinstance(model, AcpChatModel)
-    if settings.zai_auth_token and settings.zai_auth_token.strip():
-        assert model.env_vars["ANTHROPIC_AUTH_TOKEN"] == settings.zai_auth_token
-        assert model.env_vars["ANTHROPIC_BASE_URL"] == settings.zai_base_url
-        assert model.auth_mode == "zai_auth_token"
-    else:
-        assert "ANTHROPIC_AUTH_TOKEN" not in model.env_vars
-        assert model.auth_mode == "none_detected"
+def test_provider_factory_zai_refuses_without_current_turn_proof(
+    installed_acp_adapter: Path,
+) -> None:
+    """A frozen Z.ai model cannot bypass the withdrawn served proof."""
+    del installed_acp_adapter
+    with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
+        ProviderFactory().create(Provider.ZAI, model=_FROZEN_ZAI_MODEL)
+    assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
 
 
 def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
@@ -457,22 +422,24 @@ def test_factory_applies_exact_kimi_model_scoped_effort() -> None:
     assert model.env_vars["KIMI_MODEL_THINKING_EFFORT"] == "deep"
 
 
-def test_factory_applies_exact_acp_session_controls(
+def test_factory_refuses_unproven_acp_session_controls(
     installed_acp_adapter: Path,
 ) -> None:
     del installed_acp_adapter
-    model = ProviderFactory().create(
-        Provider.CLAUDE,
-        model="catalog-model",
-        execution_mode=f"claude-agent-acp:{settings.acp_backend}",
-        native_controls={"thinking-budget": "brief-wire"},
-    )
-    assert isinstance(model, AcpChatModel)
-    assert model.desired_model == "catalog-model"
-    assert model.desired_config_options == {"thinking-budget": "brief-wire"}
+    with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
+        ProviderFactory().create(
+            Provider.CLAUDE,
+            model="catalog-model",
+            execution_mode=f"claude-agent-acp:{settings.acp_backend}",
+            native_controls={"thinking-budget": "brief-wire"},
+        )
+    assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
 
 
-def test_factory_restarts_the_frozen_acp_backend_not_the_current_default() -> None:
+def test_factory_refuses_frozen_acp_backend_without_current_proof(
+    installed_acp_adapter: Path,
+) -> None:
+    del installed_acp_adapter
     if not claude_acp_entry().exists():
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             ProviderFactory().create(
@@ -481,17 +448,13 @@ def test_factory_restarts_the_frozen_acp_backend_not_the_current_default() -> No
                 execution_mode="claude-agent-acp:node",
             )
         return
-    model = ProviderFactory().create(
-        Provider.CLAUDE,
-        model="catalog-model",
-        execution_mode="claude-agent-acp:node",
-    )
-    assert isinstance(model, AcpChatModel)
-    assert model.acp_backend == "node"
-    assert model.command == [
-        resolve_service_executable("node"),
-        str(claude_acp_entry()),
-    ]
+    with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
+        ProviderFactory().create(
+            Provider.CLAUDE,
+            model="catalog-model",
+            execution_mode="claude-agent-acp:node",
+        )
+    assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
 
 
 def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable() -> (
@@ -536,8 +499,6 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
 
 
 def test_production_factory_types_a_missing_acp_runtime() -> None:
-    from ..cli_resolution import ProviderRuntimeUnavailableError
-
     if _BIN_PATH is not None:
         pytest.skip("repository carries the optional binary ACP runtime")
     with pytest.raises(ProviderRuntimeUnavailableError, match="no executable found"):

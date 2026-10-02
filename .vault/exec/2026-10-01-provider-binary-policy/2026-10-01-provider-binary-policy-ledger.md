@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:240f92aafa9717b095ae875a94ba05c2bdefa151cbfd3e4b9c32e31c217a24a6'
+body_hash: 'sha256:5c17661bb038c6d7caeab88976d9365b021e2b1405c5a5b6cee1d6e83ff26a14'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -145,6 +145,24 @@ related:
 - `S10` `verify:` `dev.ci_contract` -> `pass`
 - `S10` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S10` `by:` `vaultspec-standard-executor`
+- `S12` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S12` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S12` `M` `src/vaultspec_a2a/graph/protocols.py`
+- `S12` `A` `src/vaultspec_a2a/worker/runtime_identity_port.py`
+- `S12` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S12` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S12` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S12` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S12` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S12` `A` `src/vaultspec_a2a/worker/tests/test_runtime_identity_port.py`
+- `S12` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S12` `M` `src/vaultspec_a2a/graph/tests/test_research_adr.py`
+- `S12` `verify:` `focused pytest: SQL port, nonresearch compile, research compile` -> `pass`
+- `S12` `verify:` `ruff check and format (10 owned Python files)` -> `pass`
+- `S12` `verify:` `ty check (10 owned Python files)` -> `pass`
+- `S12` `verify:` `vaultspec-core vault check all --feature provider-binary-policy --fix --no-hints` -> `pass`
+- `S12` `verify:` `git diff --check` -> `pass`
+- `S12` `by:` `provider-proof`
 
 ## Notes
 
@@ -159,3 +177,5 @@ related:
 - `S07` Integrated just ci is assigned to the root branch after parallel steps land.
 - `S08` Integrated just ci is assigned to the root branch after parallel steps land.
 - `S10` Integrated just ci is assigned to the root branch after parallel steps land.
+- `S12` Integrated just ci deferred to root after S13 and other serial steps; focused checks cover this isolated Step.
+- `S12` Review: fixed low plan-scope gap in S12; queued medium research fan-out identity seam for S13 in audit.

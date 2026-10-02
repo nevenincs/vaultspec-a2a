@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:674ae6deae81a5b2433e7a9c8bb72ca6105b6b44005271d853d9c6a60f770660'
+body_hash: 'sha256:9a0333e852ef2b3308a93ca9618cb0acaa29e6d8f7196f7afcf7bade119707f2'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -108,6 +108,15 @@ Fixed in P02.S10. The provider prerequisite job installed `@openai/codex` withou
 ### codex-ci-allowance-described-obsolete-risk | low | the CI contract allowance still called Codex unpinned
 
 Fixed in P02.S10. The allowlist rationale named the old unpinned command. It now describes the exact-version install and signature verification, with both inline runner-setup steps declared; `dev.ci_contract` passes. Type: audit trail and CI contract drift.
+
+### runtime-identity-compile-scope-gap | low | the approved Step omitted compiler forwarding sites
+
+Fixed in P03.S12. The public compiler delegates worker construction to `_compiler_topologies.py` and `_compiler_research.py`, and `create_worker_node` binds a fixed set of options. A port added only to the four originally named S12 files would not reach compiled workers. Core expanded S12's scope to the two topology modules and the worker binder before implementation. Type: plan scope and dependency injection coverage.
+
+### research-branch-identity-seam | medium | research fan-out bypasses the worker node binder
+
+Open; owned by P03.S13. Research branch models are invoked by `_make_research_producer` through `create_researcher_node`, while S12's port reaches the six research document workers through `create_worker_node`. A provider used only by a fan-out branch would receive no identity row if S13 records solely in the worker node. S13 must capture that initialize path too. Type: topology coverage and runtime evidence.
+
 ## Recommendations
 
 - Rule on the managed-policy tier and correct the claim (`managed-policy-env-reaches-the-child`), done by the ADR amendment and P06.S20.

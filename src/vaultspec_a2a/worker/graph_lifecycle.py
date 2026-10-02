@@ -254,6 +254,7 @@ class GraphLifecycleManager:
         from ..database import get_session_factory
         from ..providers.factory import ProviderFactory
         from .cost_port import SqlCostPort
+        from .runtime_identity_port import SqlRuntimeIdentityPort
         from .task_queue_port import SqlTaskQueuePort
 
         (
@@ -276,6 +277,7 @@ class GraphLifecycleManager:
         )
         self._task_queue_port = SqlTaskQueuePort(get_session_factory())
         self._cost_port = SqlCostPort(get_session_factory())
+        self._runtime_identity_port = SqlRuntimeIdentityPort(get_session_factory())
         self._state = GraphLifecycleState()
 
     # ------------------------------------------------------------------
@@ -742,6 +744,7 @@ class GraphLifecycleManager:
                 feature_tag=req.active_feature,
                 task_queue_port=self._task_queue_port,
                 cost_port=self._cost_port,
+                runtime_identity_port=self._runtime_identity_port,
                 provider_factory=self._ports.provider_factory,
                 proposal_submitter=proposal_submitter,
                 feedback_reader=feedback_reader,

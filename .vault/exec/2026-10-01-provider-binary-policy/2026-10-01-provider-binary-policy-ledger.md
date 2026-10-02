@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:32c8568548d70097c23de58afd6d0dcd3c013860e8f038686521e46ece4785b7'
+body_hash: 'sha256:f63c538b3c007e4bed639fd5e01ba9296a2e904f01eb1ab23d6b3bc8afe9b5fb'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -114,6 +114,16 @@ related:
 - `S05` `verify:` `uv run ty check changed provider files` -> `pass`
 - `S05` `verify:` `git diff --check` -> `pass`
 - `S05` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S06` `M` `service/docker/prod.Dockerfile`
+- `S06` `M` `service/docker-compose.prod.yml`
+- `S06` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S06` `verify:` `docker build --target claude-cli` -> `pass`
+- `S06` `verify:` `docker build --target worker` -> `pass`
+- `S06` `verify:` `docker run --user 1002:1002 claude --version` -> `pass`
+- `S06` `verify:` `docker run worker resolver with explicit setting` -> `pass`
+- `S06` `verify:` `docker compose config --quiet` -> `pass`
+- `S06` `verify:` `git diff --check` -> `pass`
+- `S06` `verify:` `vaultspec-core vault check all` -> `pass`
 
 ## Notes
 
@@ -124,3 +134,4 @@ related:
 - `S03` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
 - `S04` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration. Missing-CLI typed refusal is queued to P01.S05.
 - `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.
+- `S06` Full just ci and ci-merge remain shared integration gates with the plan supervisor; no provider credentials are available for a completed model turn on this host.

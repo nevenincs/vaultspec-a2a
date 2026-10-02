@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:55325378e41806f1e25ae7cd3afcaf0b9809ca74fb484ec4874d8cfd7ed9afa5'
+body_hash: 'sha256:b33a9a99bd6e37d97347976455d85e4dbb508b9df728760974f1774335e540a6'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -22,6 +22,9 @@ P01.S03 review (2026-10-02): PASS for the explicit absolute-path setting declara
 
 P01.S05 review (2026-10-02): PASS for typed CLI unavailability at Claude and Z.ai construction, at served-turn environment resolution, and in Claude catalog discovery. The resolver owns the reason; the catalog returns unavailable without spawning a child. The 131 focused identity, factory and compiler tests, changed-file lint, format and type checks pass. Full CI remains a shared integration gate owned by the plan supervisor. The previously queued catalog finding is fixed; no new review finding was raised.
 
+P01.S06 review (2026-10-02): PASS for the Compose worker image's exact Claude CLI 2.1.284 install and explicit absolute service setting. The CLI stage and complete worker image build, the CLI reports 2.1.284 as agentuser, the image's resolver selects /usr/local/bin/claude as explicit_setting, and Compose config parses. No new review finding was raised.
+
+P01 integrated review (2026-10-02): PENDING shared integration gates. S01-S06 jointly give one profile-scoped CLI resolution, refuse a missing selected asset before ACP spawn, and name an exact Compose binary. Focused behavior, type, lint, image and Compose checks pass. The plan supervisor owns just ci and ci-merge on the integrated branch, which also carries baseline CI fixes. No new code finding was raised.
 ## Findings
 
 ### root-session-armed-skip-permissions | critical | a root host with IS_SANDBOX set could open no Claude session

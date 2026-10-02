@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:89600c3d07ca44e73b5834266d65e17474dac6ec8cc928abd7bbb0081dc941cb'
+body_hash: 'sha256:32c8568548d70097c23de58afd6d0dcd3c013860e8f038686521e46ece4785b7'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -104,6 +104,16 @@ related:
 - `S04` `verify:` `ty provider resolver files` -> `pass`
 - `S04` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S04` `verify:` `just ci` -> `fail`
+- `S05` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S05` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S05` `M` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S05` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S05` `verify:` `uv run pytest -q src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py src/vaultspec_a2a/providers/tests/test_factory.py src/vaultspec_a2a/graph/tests/test_compiler.py` -> `pass`
+- `S05` `verify:` `uv run ruff check changed provider files` -> `pass`
+- `S05` `verify:` `uv run ruff format --check changed provider files` -> `pass`
+- `S05` `verify:` `uv run ty check changed provider files` -> `pass`
+- `S05` `verify:` `git diff --check` -> `pass`
+- `S05` `verify:` `vaultspec-core vault check all` -> `pass`
 
 ## Notes
 
@@ -113,3 +123,4 @@ related:
 - `S02` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
 - `S03` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
 - `S04` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration. Missing-CLI typed refusal is queued to P01.S05.
+- `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.

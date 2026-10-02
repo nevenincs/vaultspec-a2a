@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:e185895b5d6e7afd3b702a6fd9170022be4c3999ff83e197b5c8656d64ad05a7'
+body_hash: 'sha256:5c9b3abf94e5fa41d28951d90447c247cd8128fc8cdf0f429769727a90f7d0e7'
 ---
 
 # `provider-binary-policy` plan
@@ -54,10 +54,11 @@ Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer i
 
 A lane proof declares the binary identity and version range it covers, and a resolved binary outside that range makes the lane ineligible with a typed reason that presets-list and launch both read.
 
-- [ ] `P02.S07` - Give LaneProof the binary, proved version, floor, and exclusive ceiling its live test covers, and record those values for the claude, codex, and zai entries from reruns against the binaries in force; `src/vaultspec_a2a/providers/lane_admission.py`.
+- [x] `P02.S07` - Declare the LaneProof binary identity and proved version range, record Codex 0.159.2 from its completed direct app-server turn, and withdraw Claude and Z.ai admission until their current binaries complete live turns; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`.
 - [ ] `P02.S08` - Add a binary version probe that reads a resolved launcher's reported version once per launch identity, memoized per process, and derive the admitted range as exact equality for the pinned rungs and floor to next minor for the host PATH rung; `src/vaultspec_a2a/providers/binary_version.py, src/vaultspec_a2a/providers/lane_admission.py`.
 - [ ] `P02.S09` - Make an out-of-range resolved binary a typed lane ineligibility so presets-list omits the lane and provider construction refuses it; `src/vaultspec_a2a/providers/provider_catalog_service.py, src/vaultspec_a2a/providers/factory.py`.
-- [ ] `P02.S10` - Pin the CI Codex install to an exact version, verify its npm signatures, and make that version the codex lane proved version; `.github/workflows/test.yml, src/vaultspec_a2a/providers/lane_admission.py`.
+- [ ] `P02.S10` - Pin the CI Codex install to its proved exact version 0.159.2 and verify npm signatures before provider prerequisite gates; `.github/workflows/test.yml`.
+- [ ] `P02.S21` - Re-enroll Claude and Z.ai with hand-recorded binary versions and ranges only after their cited live turns complete on the resolved launchers; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/`.
 
 ### Phase `P03` - Recorded runtime identity per run and lane
 
@@ -95,7 +96,7 @@ P05.S16 lands first, alone. It only deletes, and it clears `src/vaultspec_a2a/pr
 Three owners then run concurrently, with disjoint write ownership:
 
 - Owner A - P01.S01, P01.S02, P01.S03, P01.S04, P01.S05, P01.S06, in that order. Owns `src/vaultspec_a2a/providers/cli_resolution.py`, `src/vaultspec_a2a/providers/_factory_commands.py`, `src/vaultspec_a2a/providers/factory.py`, `src/vaultspec_a2a/providers/acp_chat_model.py`, `src/vaultspec_a2a/desktop/profile.py`, `src/vaultspec_a2a/control/infra_config.py`, `src/vaultspec_a2a/control/config.py`, `.env.example` and `service/docker/`.
-- Owner B - P02.S07, P02.S08, P02.S10, in that order. Owns `src/vaultspec_a2a/providers/lane_admission.py`, `src/vaultspec_a2a/providers/binary_version.py` and `.github/workflows/test.yml`.
+- Owner B - P02.S07, P02.S08, P02.S10, in that order. Owns `src/vaultspec_a2a/providers/lane_admission.py`, `src/vaultspec_a2a/providers/binary_version.py` and `.github/workflows/test.yml`. P02.S21 is a later reenrollment on a host where the withheld lanes complete live turns.
 - Owner C - P03.S11 then P03.S12. Owns `src/vaultspec_a2a/database/`, `src/vaultspec_a2a/graph/protocols.py`, `src/vaultspec_a2a/graph/compiler.py` and `src/vaultspec_a2a/worker/`.
 
 Four Steps join those owners' files and are therefore serial, in this order, after the owner that held each file has finished with it:
@@ -124,6 +125,6 @@ Plan-level criteria:
 - The Claude credential prerequisite agrees with the production resolution on a host with no token set (P04.S15).
 - No production caller sets a provider session id, proven over the source tree (P05.S16).
 
-Credential limits on this host. No live provider credentials are available here, so the following Steps are proven only up to the binary boundary: P01.S01, P01.S02, P01.S04, P01.S05, P01.S06, P02.S08, P02.S09, P04.S14 and P04.S15. Their tests spawn real binaries, real capsule trees and real stub launchers that report versions, and they assert the environment and the refusal a real child would receive; none of them completes a model turn. Two Steps cannot be finished here at all and must run on a credentialed host before the plan closes: P02.S07, because a proof moves only by rerunning its cited live test against the binary in force and recording that version by hand, and P03.S13, whose criterion is a completed live turn writing its identity row. Until those two reruns happen, the recorded `proved_version` values are provisional and must be reported as pending verification rather than as proof.
+Live proof status on this host. Codex 0.159.2 completed the direct production-factory app-server turn cited in P02.S07. The current Claude CLI reached ACP session creation but its first prompt failed with `Authentication required`; no Z.ai credential was available. P02.S07 therefore withdraws those two lanes, and P02.S21 reenrolls each only after its own completed live turn against the resolved binary. P01.S01, P01.S02, P01.S04, P01.S05, P01.S06, P02.S08, P02.S09, P04.S14 and P04.S15 are verified to the binary boundary rather than by a model turn. P03.S13 still requires its separate completed live turn and durable identity-row assertion before the plan closes.
 
 Review follows the vaultspec system section: one review at each Phase close, one at plan close, and one before handoff for merge, with coincident gates sharing a single integrated review.

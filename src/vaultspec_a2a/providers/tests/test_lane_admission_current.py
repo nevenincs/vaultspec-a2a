@@ -8,13 +8,16 @@ import pytest
 from ...graph.enums import Provider
 from ...thread.errors import ConfigError
 from ..lane_admission import (
+    PROVEN_CATALOG_TURN_LANES,
     PROVEN_TURN_LANES,
     PROVEN_WEB_LANES,
     LaneProof,
     WebLaneProof,
     _lane_of,
     _require_web_proof_implies_turn_proof,
+    is_catalog_lane_admissible,
 )
+from ..provider_catalog import ProviderCatalogKey
 
 _ROOT = Path(__file__).resolve().parents[4]
 _HERE = "src/vaultspec_a2a/providers/tests/test_lane_admission_current.py"
@@ -50,7 +53,7 @@ def test_live_and_rotten_proof_citations_are_discriminated() -> None:
 def test_proof_declarations_are_immutable() -> None:
     with pytest.raises(TypeError):
         cast("dict[Provider, LaneProof]", PROVEN_TURN_LANES)[Provider.KIMI] = LaneProof(
-            "x", "x"
+            "x", "x", "x", "0.0.1", "0.0.1", "0.1.0"
         )
     with pytest.raises(TypeError):
         cast("dict[Provider, WebLaneProof]", PROVEN_WEB_LANES)[Provider.KIMI] = (
@@ -67,3 +70,23 @@ def test_web_proof_requires_turn_proof_and_provider_resolution_is_exact() -> Non
         assert _lane_of(provider.value) is provider
     for invalid in (None, "", "Claude", " claude", "unknown"):
         assert _lane_of(invalid) is None
+
+
+def test_only_the_reproved_codex_binary_is_declared_for_external_serving() -> None:
+    assert set(PROVEN_TURN_LANES) == {Provider.CODEX}
+    assert set(PROVEN_WEB_LANES) == {Provider.CODEX}
+    assert set(PROVEN_CATALOG_TURN_LANES) == {
+        ProviderCatalogKey("codex", "codex-app-server")
+    }
+    proof = PROVEN_TURN_LANES[Provider.CODEX]
+    assert proof.binary == "codex"
+    assert proof.proved_version == proof.floor == "0.159.2"
+    assert proof.ceiling_exclusive == "0.160.0"
+    for provider, execution_mode in (
+        (Provider.CLAUDE, "claude-agent-acp:node"),
+        (Provider.ZAI, "zai-claude-agent-acp:node"),
+    ):
+        assert provider not in PROVEN_TURN_LANES
+        assert not is_catalog_lane_admissible(
+            ProviderCatalogKey(provider.value, execution_mode)
+        )

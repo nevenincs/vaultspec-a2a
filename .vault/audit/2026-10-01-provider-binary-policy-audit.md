@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:22cab856e3eddfdb00f0c3e330a1dfdfef9cb9c10fd2f32d10ce3884ee6a0808'
+body_hash: 'sha256:9124feb33383f84691af74ed7d5cafc006fbc3c61f34bd42176f579b13db7d8c'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -74,3 +74,15 @@ Fixed in P05.S16. The new model-field assertion initially imported the provider 
 
 - Rule on the managed-policy tier and correct the claim (`managed-policy-env-reaches-the-child`), done by the ADR amendment and P06.S20.
 - Re-run the Claude lane's completed-turn test on a credentialed host against 2.1.284 (`claude-lane-proof-predates-the-binary`).
+
+### claude-current-binary-auth-refused | high | the current Claude CLI could not complete its cited live turn
+
+Open auth integration finding, with served admission withheld in P02.S07 and reenrollment owned by P02.S21. The host CLI reported logged in, and the production ACP child initialized and opened a session, but `test_claude_live_turn_completes_and_returns_content` failed on its first prompt with `ACP Error [-32000]: Authentication required`. The resolved host CLI reported 2.1.286; no completed-turn proof was earned for that version. Type: runtime authentication and proof invalidation. Investigate the child authentication context before rerunning the proof; a successful CLI status or ACP handshake does not qualify.
+
+### zai-current-binary-proof-unavailable | medium | Z.ai had no credential for a current-binary live turn
+
+Open external prerequisite, with served admission withheld in P02.S07 and reenrollment owned by P02.S21. Neither `ZAI_AUTH_TOKEN` nor `ZAI_API_KEY` was present on the proof host, so the cited `test_zai_streaming_shape_is_faithful` could not establish a version-bound completed turn. Type: verification gap. Record the resolved binary's reported version only after that test completes with a valid credential.
+
+### codex-proof-citation-mismatched-to-current-run | low | the old citation named a stack acceptance test that was not rerun
+
+Fixed in P02.S07. The original citation named the PW7 document-authoring acceptance run, which requires a gateway and engine stack absent from this proof host. The production-factory `test_codex_live_turn_returns_output` completed a real turn through the catalog's `codex-app-server` mode on resolved Codex 0.159.2, so the lane declaration now cites that test and claims only the work it completed. Type: evidence precision.

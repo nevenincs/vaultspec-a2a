@@ -115,11 +115,18 @@ class LaneProof:
     ``test`` is the pytest node id of the proof, so a reviewer can re-run the
     exact thing that admitted the lane. ``proves`` states what that run completed
     in one line - it is the claim being made, and it must describe finished work,
-    never a spawn, a handshake, or a successful construction.
+    never a spawn, a handshake, or a successful construction. ``binary`` names
+    the CLI that completed the turn; ``proved_version`` is its reported version.
+    The bounds state the host PATH range this proof covers. Pinned launchers
+    additionally require exact equality with ``proved_version``.
     """
 
     test: str
     proves: str
+    binary: str
+    proved_version: str
+    floor: str
+    ceiling_exclusive: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +166,8 @@ class WebLaneProof:
 # passed - none of those are turns.
 #
 # Deliberately absent, with the coverage they actually have:
+#   - claude  the current CLI failed its live prompt with Authentication required
+#   - zai     no credential was available to rerun its completed-turn proof
 #   - kimi    handshake only (test_kimi_handshake_live.py proves the installed
 #             `kimi acp` speaks our handshake - that is spawn, not work)
 #   - openai  no live turn coverage
@@ -166,29 +175,17 @@ class WebLaneProof:
 # ---------------------------------------------------------------------------
 PROVEN_TURN_LANES: Mapping[Provider, LaneProof] = MappingProxyType(
     {
-        Provider.CLAUDE: LaneProof(
-            test=(
-                "src/vaultspec_a2a/providers/tests/test_claude_live_turn.py"
-                "::test_claude_live_turn_completes_and_returns_content"
-            ),
-            proves="a real Claude turn completes through the production chain "
-            "and returns model content",
-        ),
         Provider.CODEX: LaneProof(
             test=(
-                "src/vaultspec_a2a/service_tests/test_pw7_acceptance.py"
-                "::test_pw7_research_adr_materializes_two_documents[codex]"
+                "src/vaultspec_a2a/providers/tests/test_codex_chat_model.py"
+                "::test_codex_live_turn_returns_output"
             ),
-            proves="a real research-to-ADR acceptance run completes with the "
-            "authoring roles on the codex lane",
-        ),
-        Provider.ZAI: LaneProof(
-            test=(
-                "src/vaultspec_a2a/providers/tests/test_zai_fidelity.py"
-                "::test_zai_streaming_shape_is_faithful"
-            ),
-            proves="a real Z.ai turn against the real endpoint streams assistant "
-            "content through the production ACP path",
+            proves="a real Codex app-server turn returns model content through "
+            "the production factory",
+            binary="codex",
+            proved_version="0.159.2",
+            floor="0.159.2",
+            ceiling_exclusive="0.160.0",
         ),
     }
 )
@@ -266,21 +263,6 @@ PROVEN_WEB_LANES: Mapping[Provider, WebLaneProof] = MappingProxyType(
             proves="a real codex turn under the served live posture retrieved a "
             "value only the live index could supply, and the same prompt under "
             "the disabled posture performed no search at all",
-        ),
-        # Only ``WebFetch`` is declared, because only ``WebFetch`` was exercised.
-        # The proven run's agent reached the web by fetching named URLs; its
-        # ``WebSearch`` sibling never fired, so composing it here would activate a
-        # tool on the strength of another tool's evidence - the exact substitution
-        # this declaration exists to refuse. ``WebSearch`` is earned by its own run.
-        Provider.CLAUDE: WebLaneProof(
-            test=(
-                "src/vaultspec_a2a/service_tests/test_claude_web_grounding_live.py"
-                "::test_claude_lane_completes_a_real_web_retrieval"
-            ),
-            proves="a real autonomous claude run fetched a live URL and carried the "
-            "retrieved value into checkpointed state as a typed web locator and into "
-            "the proposed research document's Sources section",
-            tool_names=("WebFetch",),
         ),
     }
 )

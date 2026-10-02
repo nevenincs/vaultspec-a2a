@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:b0035583171d0ba9c02fb294bdf73dee709b3fdb56305f1f1e320f4d0f2b3628'
+body_hash: 'sha256:7d81e5fcacbac23b9f8f225313f6a4cfaf363da8c7db93aedc645b4db308bc89'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -27,6 +27,7 @@ P01.S05 review (2026-10-02): PASS for typed CLI unavailability at Claude and Z.a
 P01.S06 review (2026-10-02): PASS for the Compose worker image's exact Claude CLI 2.1.284 install and explicit absolute service setting. The CLI stage and complete worker image build, the CLI reports 2.1.284 as agentuser, the image's resolver selects /usr/local/bin/claude as explicit_setting, and Compose config parses. No new review finding was raised.
 
 P01 integrated review (2026-10-02): PENDING shared integration gates. S01-S06 jointly give one profile-scoped CLI resolution, refuse a missing selected asset before ACP spawn, and name an exact Compose binary. Focused behavior, type, lint, image and Compose checks pass. The plan supervisor owns just ci and ci-merge on the integrated branch, which also carries baseline CI fixes. No new code finding was raised.
+P04.S14 review (2026-10-02): PENDING the adjacent example-documentation Step and shared integration CI. The declared subscription_login channel leaves the configured SecretStr token out of the child; a real child still receives an operator's ambient export. The oauth_token channel overrides that ambient value with the configured token in both served turn and catalog probe, and empty configured tokens refuse the lane. The gated workspace .env supplies the secret only under its existing interpreter gate; it cannot select a noncredential channel. Seventy-seven focused settings, factory and binary-admission tests pass, as do changed-file lint, format and type checks. Env-example coverage fails because P04.S15 has not documented these settings and concurrent continuation work has not documented SUCCESSOR_TRANSCRIPT_DEPTH. One medium documentation finding is queued below.
 ## Findings
 
 ### root-session-armed-skip-permissions | critical | a root host with IS_SANDBOX set could open no Claude session
@@ -113,6 +114,9 @@ Fixed in P02.S10. The provider prerequisite job installed `@openai/codex` withou
 ### codex-ci-allowance-described-obsolete-risk | low | the CI contract allowance still called Codex unpinned
 
 Fixed in P02.S10. The allowlist rationale named the old unpinned command. It now describes the exact-version install and signature verification, with both inline runner-setup steps declared; `dev.ci_contract` passes. Type: audit trail and CI contract drift.
+### claude-auth-example-stale | medium | the operator example describes the old ambient-only Claude auth contract
+
+Open, owned by P04.S15. The example still says this service never reads CLAUDE_CODE_OAUTH_TOKEN and gives no editable VAULTSPEC_A2A_CLAUDE_AUTH_CHANNEL or VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN line. After S14 that is false: a declared oauth_token channel reads the configured secret and injects it. The env-example coverage test reports both missing names; it also reports the independently added SUCCESSOR_TRANSCRIPT_DEPTH setting, owned by the continuation workstream. Type: operator documentation and settings coverage drift. S15 must explain that a token only in a project .env authenticates nothing under the default channel and must document how to opt in.
 ## Recommendations
 
 - Rule on the managed-policy tier and correct the claim (`managed-policy-env-reaches-the-child`), done by the ADR amendment and P06.S20.

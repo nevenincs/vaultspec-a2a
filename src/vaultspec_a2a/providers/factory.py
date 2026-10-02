@@ -261,6 +261,21 @@ def _transport_evidence(discovery: ProviderCatalogDiscovery) -> HealthState:
     return HealthState.UNKNOWN
 
 
+def _claude_auth_env() -> tuple[dict[str, str], str]:
+    """Select only the declared Claude credential channel for a child."""
+    if settings.claude_auth_channel == "subscription_login":
+        return {}, "subscription_login"
+    if settings.claude_auth_channel != "oauth_token":
+        raise ProviderRuntimeUnavailableError("unsupported Claude auth channel")
+    configured = settings.claude_code_oauth_token
+    token = configured.get_secret_value() if configured is not None else ""
+    if not token.strip():
+        raise ProviderRuntimeUnavailableError(
+            "Claude oauth_token auth channel requires a configured OAuth token"
+        )
+    return {"CLAUDE_CODE_OAUTH_TOKEN": token}, "oauth_token"
+
+
 async def _discover_claude_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
@@ -284,6 +299,15 @@ async def _discover_claude_catalog(
             reason=exc.reason.value if exc.reason else str(exc),
             transport=HealthState.UNAVAILABLE,
         )
+    try:
+        auth_env, auth_mode = _claude_auth_env()
+    except ProviderRuntimeUnavailableError:
+        return _unavailable_catalog_discovery(
+            key,
+            reason="claude_oauth_token_unavailable",
+            configured=HealthState.UNAVAILABLE,
+        )
+    env.update(auth_env)
     use_exec = metadata["acp_backend"] == "binary"
     if use_exec:
         env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
@@ -298,6 +322,7 @@ async def _discover_claude_catalog(
             **metadata,
             "cli_runtime_authority": cli_resolution.authority,
             "cli_executable": str(cli_resolution.path),
+            "auth_mode": auth_mode,
         },
         # The probe opens a real session, so it opens it under the same
         # permission posture a served turn gets. Leaving the bypass capability
@@ -644,8 +669,7 @@ def _create_claude_model(
         binary_proof_reason(Provider.CLAUDE, str(cli.path), cli.authority)
     )
 
-    # The CLI inherits ambient authentication; this lane injects no credential.
-    env_vars: dict[str, str] = {}
+    env_vars, auth_mode = _claude_auth_env()
     if backend == "binary":
         env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
     return AcpChatModel(
@@ -663,7 +687,7 @@ def _create_claude_model(
         command_executable=command_meta["command_executable"],
         command_target=command_meta["command_target"],
         acp_backend=command_meta["acp_backend"],
-        auth_mode="ambient",
+        auth_mode=auth_mode,
         version_proof_required=True,
     )
 

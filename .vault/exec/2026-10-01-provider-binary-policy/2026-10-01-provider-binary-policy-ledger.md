@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:b090427f20fd0989f2ccdb3715d122ceefd68d962e57ca068d4d9f9a40aa384e'
+body_hash: 'sha256:6ef329931ebe94880f3e08d7f0f2196ae07a62e1587a04e6b4345f1f8597eae1'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -178,6 +178,21 @@ related:
 - `S09` `verify:` `changed-file-ruff-ty-basedpyright` -> `pass`
 - `S09` `verify:` `vault-check-all` -> `pass`
 - `S09` `by:` `vaultspec-high-executor`
+- `S14` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S14` `M` `src/vaultspec_a2a/control/env_registry.py`
+- `S14` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S14` `M` `src/vaultspec_a2a/control/tests/test_settings_sources.py`
+- `S14` `A` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S14` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S14` `M` `src/vaultspec_a2a/providers/tests/test_claude_live_turn.py`
+- `S14` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S14` `verify:` `uv run --no-sync pytest -q focused auth factory binary admission settings suites` -> `pass`
+- `S14` `verify:` `uv run --no-sync pytest -q env-example drift and coverage suites` -> `fail`
+- `S14` `verify:` `uv run --no-sync ruff check changed S14 Python files` -> `pass`
+- `S14` `verify:` `uv run --no-sync ruff format --check changed S14 Python files` -> `pass`
+- `S14` `verify:` `uv run --no-sync ty check changed S14 Python files` -> `pass`
+- `S14` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S14` `verify:` `git diff --check` -> `pass`
 
 ## Notes
 
@@ -195,3 +210,4 @@ related:
 - `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.
 - `S06` Full just ci and ci-merge remain shared integration gates with the plan supervisor; no provider credentials are available for a completed model turn on this host.
 - `S09` Formal review classified and queued the version drift, catalog wording, malformed plan row, and residual filesystem race.
+- `S14` Env-example coverage has two expected failures: S15 has not yet documented `CLAUDE_AUTH_CHANNEL` and `CLAUDE_CODE_OAUTH_TOKEN;` concurrent continuation work has not documented `SUCCESSOR_TRANSCRIPT_DEPTH.` Full just ci and ci-merge remain shared integration gates with the plan supervisor. A credentialed live turn is unavailable on this host.

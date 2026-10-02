@@ -469,15 +469,34 @@ class InfraConfig(ProjectSettings):
     )
     # Other tools' settings: the a2a name wins, and the owning tool's own name is
     # read as a fallback so an existing login keeps working.
-    # No Claude credential is declared: that lane runs as the operator's own CLI
-    # session and is never handed a token, so a setting here would be read by
-    # nothing. ANTHROPIC_API_KEY is deliberately absent too: every agent
+    # Claude defaults to the operator's own CLI session. Its configured OAuth
+    # token is injected only when the operator declares the oauth_token channel.
+    # ANTHROPIC_API_KEY is deliberately absent: every agent
     # subprocess has it stripped from its environment by the workspace scrub
     # (workspace/environment.py), because the key alongside an OAuth token
     # silently downgrades a flat-rate subscription to pay-as-you-go billing.
     # The scrub is the single removal site: the ACP layer re-injects only the
     # auth a lane intentionally supports and strips nothing itself. Declaring
     # the key here would advertise a credential the code exists to remove.
+    claude_auth_channel: Literal["subscription_login", "oauth_token"] = Field(
+        default="subscription_login",
+        description=(
+            "Declare whether the Claude lane uses the operator's ambient CLI "
+            "login or injects the configured headless OAuth token."
+        ),
+    )
+    claude_code_oauth_token: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"
+        ),
+        exclude=True,
+        repr=False,
+        description=(
+            "Claude headless OAuth token. Used only when claude_auth_channel "
+            "is oauth_token; never injected for subscription_login."
+        ),
+    )
     # Antigravity ships `agy` OUTSIDE PATH - its installer drops the binary in
     # a per-user application directory and exposes it through a wrapper - so a
     # bare name lookup finds nothing on a machine where the CLI works. This

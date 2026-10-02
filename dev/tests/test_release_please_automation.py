@@ -73,12 +73,12 @@ def test_release_please_config_tracks_the_python_package_version() -> None:
     ]
 
 
-def test_release_please_can_insert_the_first_pr_above_bootstrapped_history() -> None:
-    """Historical headings match release-please's version-header insertion point."""
+def test_release_please_preserves_bootstrapped_history_after_new_releases() -> None:
+    """Later releases may prepend headings while preserving the initial history."""
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     headings = re.findall(r"^## \[[0-9]+\.[0-9]+\.[0-9]+\].*$", changelog, re.MULTILINE)
 
-    assert headings == [
+    historical_headings = [
         "## [0.3.0](https://github.com/nevenincs/vaultspec-a2a/compare/"
         "v0.2.0...v0.3.0) (2026-08-02)",
         "## [0.2.0](https://github.com/nevenincs/vaultspec-a2a/compare/"
@@ -86,6 +86,7 @@ def test_release_please_can_insert_the_first_pr_above_bootstrapped_history() -> 
         "## [0.1.0](https://github.com/nevenincs/vaultspec-a2a/releases/tag/"
         "v0.1.0) (2026-07-24)",
     ]
+    assert headings[-len(historical_headings) :] == historical_headings
     assert changelog.index(headings[0]) > changelog.index("# Changelog")
     assert "prepared releases are inserted" not in changelog
 

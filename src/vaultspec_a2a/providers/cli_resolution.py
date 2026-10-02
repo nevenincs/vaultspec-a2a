@@ -183,7 +183,9 @@ def pin_claude_executable(env: dict[str, str]) -> ClaudeCliResolution:
             candidate = Path(installed)
         else:
             authority = "lock_vendored"
-            candidate = capsule_claude_executable(settings.install_root)
+            # The locked Claude CLI is a shipped asset under the configured root.
+            locked_assets_root = settings.install_root  # storage-anchor-ok
+            candidate = capsule_claude_executable(locked_assets_root)
 
         path = _resolved_cli_file(candidate, authority=authority)
         if capsule_root is not None and authority == "capsule":

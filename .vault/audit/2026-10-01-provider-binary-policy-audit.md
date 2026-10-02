@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:ca8a5946e2be31cd132f19d03e910111849fb17b36dc0eadea34315ec81ff9c6'
+body_hash: 'sha256:109655e0e4b77a3150c4e77f009210cc4c69813f80c9b2e6018862dcc39f0b37'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -156,3 +156,10 @@ Open, owned by P04.S15. The example still says this service never reads CLAUDE_C
 ### acp-per-model-usage-strict-type | low | S18 read optional nested TypedDict fields as required
 
 Fixed in P06.S19. The S18 per-model usage aggregation built the nested cache details in every row but read them through LangChain's optional `UsageMetadata.input_token_details` type, producing four `reportTypedDictNotRequiredAccess` diagnostics in the strict type gate. The parser now accumulates its already validated cache counts directly while constructing each row, preserving the turn totals and eliminating those four diagnostics. The remaining lane-admission and checkpoint diagnostics are owned by P02.S22 and continuation P06.S17. Type: static type safety and CI integration.
+### lock-vendored-cli-storage-anchor-flag | low | the new asset resolver use failed the storage-anchor guard
+
+Fixed in P02.S23. P01.S04's lock-vendored Claude CLI fallback reads the declared install root to locate a shipped binary, which is an asset resolver use. The guard only allowed the existing factory-command resolver module and flagged this call. The line now carries the guard's documented `storage-anchor-ok` annotation beside an explanation; no storage location or runtime behavior changed. Type: CI guard classification.
+
+### release-history-test-assumed-no-new-release | medium | 0.4.0 changelog entry broke the dev CI gate
+
+Fixed in P02.S23. The release-please contract test required exactly the three bootstrapped headings even after 0.4.0 was released. It now requires those exact historical headings as the preserved suffix while allowing newer releases to prepend. The focused release and storage-anchor suites pass together (25 tests). Type: stale test contract and CI integration.

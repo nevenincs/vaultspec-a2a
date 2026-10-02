@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:1bab8c527e012f648f72786457753c9b8818743e8a188a0036caef111acc94e0'
+body_hash: 'sha256:143911dda73900fb00f61ce51e2b0a359cf98ec43c2743dda48320aa2684c54b'
 ---
 
 # `provider-binary-policy` plan
@@ -60,6 +60,7 @@ A lane proof declares the binary identity and version range it covers, and a res
 - [x] `P02.S10` - Pin the CI Codex install to its proved exact version 0.159.2 and verify npm signatures before provider prerequisite gates; `.github/workflows/test.yml, .github/ci-contract-allow.txt`.
 - [ ] `P02.S21` - Re-enroll Claude and Z.ai with hand-recorded binary versions and ranges only after their cited live turns complete on the resolved launchers; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/`.
 - [x] `P02.S22` - Narrow parsed proof versions before comparing host PATH bounds so strict typing verifies the admission gate; `src/vaultspec_a2a/providers/lane_admission.py`.
+- [x] `P02.S23` - Repair integration CI contracts for the lock-vendored CLI asset and changelog history after the 0.4.0 release; `src/vaultspec_a2a/providers/cli_resolution.py, dev/tests/test_release_please_automation.py`.
 
 ### Phase `P03` - Recorded runtime identity per run and lane
 

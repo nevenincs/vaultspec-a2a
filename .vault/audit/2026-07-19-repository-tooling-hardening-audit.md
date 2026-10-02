@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-10-01'
-body_hash: 'sha256:0e5aefad99cf5da8d0045ea93da668776be60b3562f0cfad1f951e6785d4fe24'
+modified: '2026-10-02'
+body_hash: 'sha256:e1e5c22f1ceeaa84a330ef68740a10ca9a327a0bb51a78f6ce078a00cf680da4'
 related: []
 ---
 
@@ -779,6 +779,14 @@ Recorded from W07.P14.S48. A fresh worktree carries no `node_modules`, so thirte
 ### graduation-2026-10-01 | info | five gates joined the blocking aggregate at zero
 
 Recorded from W08.P15. `type-strict`, `nesting`, `reachability`, `symbols` and `exports` read zero and joined `lint all` (14bfd86, 8a5cea1, facbd89); a probe unused export made the aggregate fail and was reverted. The pre-promotion duplication review found one production clone - migration 0009's downgrade reproducing 0008's upgrade, which Alembic immutability requires - and none of the graduated gates measures shape or duplication. Still burning down outside the aggregate: complexity, cyclomatic, shape, limits and size.
+
+### strict-type-regression-after-main-consolidation | high | the blocking strict type gate reported 60 diagnostics
+
+Fixed in W07.P14.S50. Later runner-placement and settings-source changes left 44 diagnostics in dev/ci_contract.py and 16 in src/vaultspec_a2a/control/settings_base.py, so just ci stopped before tests on the 2026-10-01 main head. The YAML reader now narrows parsed values before reading matrix legs and jobs; the deferred settings proxy declares and initializes its slots. The locked basedpyright run reports zero diagnostics, and focused workflow/settings tests pass.
+
+### settings-only-names-were-published | medium | three internal settings names failed the unconsumed export gate
+
+Fixed in W07.P14.S50. The main CI run reported PROJECT_DOTENV, PROJECT_MARKERS and build_now as unconsumed exports from src/vaultspec_a2a/control/settings_base.py. They are module-internal configuration or a test-harness helper, not a served public API; removing them from __all__ leaves the helper directly importable by the root conftest.py and makes the export and unused-symbol gates pass without exemptions.
 
 ## Recommendations
 

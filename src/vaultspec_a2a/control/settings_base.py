@@ -71,11 +71,8 @@ from .env_registry import CREDENTIAL_VARIABLES, ENV_FILE_VARIABLE
 
 __all__ = [
     "ENV_FILE_ENV",
-    "PROJECT_DOTENV",
-    "PROJECT_MARKERS",
     "PROJECT_ROOT_ENV",
     "ProjectSettings",
-    "build_now",
     "built_at_first_use",
     "env_name",
     "field_env_names",
@@ -130,6 +127,7 @@ class _OperatorEnvFileMarker:
     def __iter__(self) -> Iterator[Path]:
         return iter(())
 
+    @override
     def __repr__(self) -> str:
         return "<the operator's environment file, if one is named>"
 
@@ -359,9 +357,11 @@ def _construction_project_root(
     """
     if not isinstance(init_settings, InitSettingsSource):
         return None
-    named = init_settings.init_kwargs.get("project_root")
+    named = cast("dict[str, object]", init_settings.init_kwargs).get("project_root")
     if named is None:
         return None
+    if not isinstance(named, (str, os.PathLike)):
+        raise ConfigurationError("project_root must be a filesystem path")
     # Routed through the resolver so a relative value is joined to the working
     # directory exactly as the environment variable's would be.
     return resolve_project_root({PROJECT_ROOT_ENV: os.fspath(named)})
@@ -612,11 +612,14 @@ class _BuiltAtFirstUse[T: BaseSettings]:
     """
 
     __slots__ = ("_build", "_instance", "_lock")
+    _build: Callable[[], T]
+    _instance: T | None
+    _lock: threading.RLock
 
     def __init__(self, build: Callable[[], T]) -> None:
-        object.__setattr__(self, "_build", build)
-        object.__setattr__(self, "_instance", None)
-        object.__setattr__(self, "_lock", threading.RLock())
+        self._build = build
+        self._instance = None
+        self._lock = threading.RLock()
 
     def _settings(self) -> T:
         built: T | None = object.__getattribute__(self, "_instance")
@@ -626,37 +629,51 @@ class _BuiltAtFirstUse[T: BaseSettings]:
         # and every mutation of the loser's copy would be silently discarded.
         # Re-entrant because the build reads settings itself - a validator
         # that consults the singleton would deadlock on a plain lock.
-        with object.__getattribute__(self, "_lock"):
-            built = object.__getattribute__(self, "_instance")
+        with self._lock:
+            built = self._instance
             if built is None:
-                built = object.__getattribute__(self, "_build")()
-                object.__setattr__(self, "_instance", built)
+                built = self._build()
+                self._instance = built
+        assert built is not None
         return built
+
+    def materialize(self) -> T:
+        """Build the settings now for callers that establish startup state."""
+        return self._settings()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._settings(), name)
 
+    @override
     def __setattr__(self, name: str, value: Any) -> None:
+        if name in {"_build", "_instance", "_lock"}:
+            object.__setattr__(self, name, value)
+            return
         setattr(self._settings(), name, value)
 
+    @override
     def __repr__(self) -> str:
         return repr(self._settings())
 
+    @override
     def __dir__(self) -> list[str]:
         return dir(self._settings())
 
+    @override
     def __eq__(self, other: object) -> bool:
         # Forwarded rather than left to identity: a caller comparing the
         # singleton to a settings object it built is asking about the values,
         # and identity would answer a different question every time.
         return self._settings() == other
 
+    @override
     def __hash__(self) -> int:
         return hash(self._settings())
 
     def __bool__(self) -> bool:
         return bool(self._settings())
 
+    @override
     def __reduce__(self) -> Never:
         # Pickling the proxy would carry the FACTORY across the boundary, and
         # the receiving process would rebuild the settings from ITS own
@@ -685,4 +702,4 @@ def build_now(settings: object) -> None:
     itself. Calling this after those declarations pins them.
     """
     if isinstance(settings, _BuiltAtFirstUse):
-        settings._settings()
+        settings.materialize()

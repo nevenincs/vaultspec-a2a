@@ -354,8 +354,16 @@ async def run_status_endpoint(
     )
     modern_frozen = _read_persisted_team_selection(capture.thread_metadata)
 
+    metadata = None
+    if capture.thread_metadata:
+        try:
+            metadata = ThreadMetadata.model_validate_json(capture.thread_metadata)
+        except ValidationError:
+            logger.warning("run status: stored metadata for %s is unreadable", run_id)
+
     return RunStatusResponse(
         run_id=snapshot.thread_id,
+        continues_run_id=metadata.continues_run_id if metadata is not None else None,
         status=ThreadStatus(snapshot.status),
         semantic_phase=semantic_phase,
         feature_tag=semantic.feature_tag,

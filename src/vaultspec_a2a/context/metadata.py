@@ -54,6 +54,7 @@ class ThreadMetadata(BaseModel):
     source_repo: str = ""
     source_branch: str = ""
     callee: str = ""
+    continues_run_id: str | None = None
 
     # --- SDD Pipeline Context ---
     feature_tag: str = ""

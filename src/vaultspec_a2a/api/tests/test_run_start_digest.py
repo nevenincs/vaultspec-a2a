@@ -92,6 +92,7 @@ def test_identical_bodies_share_a_fingerprint() -> None:
         ("title", "a different title"),
         ("feature_tag", "another-feature"),
         ("feedback_batch_id", "feedback-batch:deadbeef"),
+        ("continues_run_id", "predecessor-1"),
     ],
 )
 def test_a_behaviour_affecting_change_produces_a_different_fingerprint(
@@ -188,14 +189,16 @@ def test_the_current_rule_digests_exactly_what_its_specification_says() -> None:
 
     The expectation is recomputed here from the rule as STATED - canonical JSON
     with sorted keys and fixed separators, over every field except the two
-    request-identifying ones and the credential bundle, hashed with SHA-256 -
+    request-identifying ones, the credential bundle, and an absent predecessor,
+    hashed with SHA-256 -
     rather than by calling the production tables, so a change to those tables
     fails here instead of redefining what the rule means.
     """
     body = _request(actor_tokens=_bundle("tok-1"))
 
     payload = body.model_dump(
-        mode="json", exclude={"stage", "reservation_id", "actor_tokens"}
+        mode="json",
+        exclude={"stage", "reservation_id", "actor_tokens", "continues_run_id"},
     )
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -274,7 +277,26 @@ def test_every_top_level_request_field_is_consciously_classified() -> None:
         "overrides",
         "fallbacks",
         "feedback_batch_id",
+        "continues_run_id",
     }
+
+
+def test_a_predecessor_changes_staged_and_replay_identity() -> None:
+    """An explicit lineage changes the work while an absent one keeps old bytes."""
+    plain = _request()
+    linked = _request(continues_run_id="predecessor-1")
+    other = _request(continues_run_id="predecessor-2")
+
+    for prepared in (True, False):
+        assert request_digest(plain, prepared=prepared) != request_digest(
+            linked, prepared=prepared
+        )
+        assert request_digest(linked, prepared=prepared) != request_digest(
+            other, prepared=prepared
+        )
+    for rule in ReplayDigestRule:
+        assert replay_digest(plain, rule=rule) != replay_digest(linked, rule=rule)
+        assert replay_digest(linked, rule=rule) != replay_digest(other, rule=rule)
 
 
 def test_the_commit_binding_stays_credential_sensitive() -> None:
@@ -311,13 +333,15 @@ def test_a_prepare_digest_ignores_the_prompt_and_tokens() -> None:
 def _legacy_digest(body: RunStartRequest) -> str:
     """Recompute the pre-classification fingerprint from its specification.
 
-    Derived here from the stated rule - canonical JSON over every field except
-    the two request-identifying ones, SHA-256 - rather than from the production
-    exclusion tables, so a change to those tables cannot quietly redefine what
+    Derived here from the stated rule - canonical JSON over every field that
+    existed then except the two request-identifying ones, SHA-256 - rather than
+    from the production exclusion tables, so a change cannot redefine what
     "the old rule" means and green-wash a stored fingerprint that no longer
     compares.
     """
-    payload = body.model_dump(mode="json", exclude={"stage", "reservation_id"})
+    payload = body.model_dump(
+        mode="json", exclude={"stage", "reservation_id", "continues_run_id"}
+    )
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

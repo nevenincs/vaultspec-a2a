@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:90e2c035d54f7ccb1ae118870e6c3e7ac2ece429e839dc540dc310117d85741b'
+body_hash: 'sha256:1e6de2f50aeadb7ad67c968aff43870ccf0203417d1f8280ddb02caf47358acf'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -137,6 +137,18 @@ Accepted in P06.S17. Type: verification boundary. The live service test holds a 
 ### checkpoint-transcript-added-two-type-diagnostics | medium | S15 transcript guards missed the basedpyright baseline
 
 Fixed in P06.S17. Type: CI regression. Integrated `just ci` found new `reportUnnecessaryIsInstance` and `reportUnknownVariableType` diagnostics in `surviving_transcript`. The first guard tested a checkpoint channel map already declared as `dict[str, Any]`; the list comprehension then iterated values with unknown element type. The runtime guards remain, but the channel map and message list are explicitly narrowed to `object` and checked before typed casts. `just audit-types` now reports 60 advisory diagnostics with none in `database/checkpoints.py`, down from 62; the lineage test and Ruff/Ty checks pass.
+
+### absent-lineage-changed-persisted-run-digest | high | a new null field refused identical older requests
+
+Fixed in P06.S20. Type: backward-compatibility defect. `RunStartRequest.continues_run_id` was added with a `None` default, and the shared digest function serialized that default into every plain-start and staged request. The pinned current-rule fingerprint moved from `74449631...` to `48dc128b...`, so an otherwise identical retry of a previously accepted run would conflict after upgrade. The digest now omits only an absent predecessor, preserving older request bytes; a non-null predecessor remains in both staged and replay fingerprints and is explicitly classified as work identity. The pinned digest, independent rule calculations, and cross-process and predecessor-variation tests pass.
+
+### stream-resume-tests-relayed-unproven-completion | medium | terminal gate withheld synthetic test events
+
+Fixed in P06.S20. Type: test-fixture drift. Two live SSE resume tests created only a RUNNING row, then relayed a fabricated COMPLETED terminal. The S17 settlement gate correctly refused the frame because no accepted graph action or completed checkpoint proved it, leaving the viewer waiting for a terminal. The tests now seed a real accepted action receipt and completed checkpoint through existing test helpers before relaying; the previously timing-out cursor test and neighboring reconnect test both pass without weakening the terminal gate.
+
+### stream-test-sqlite-connections-reach-garbage-collector | low | neighboring suites emitted pooled connection warnings
+
+Open. Type: test resource hygiene. The focused eight-module API run passed 64 tests but emitted four SQLAlchemy warnings that an `aiosqlite` adapted connection reached garbage collection while not checked into its pool. The warnings came from neighboring stream and promoted-terminal tests, not the two repaired terminal tests. Trace fixture and app/session shutdown ownership if this persists in integrated CI.
 
 ## Recommendations
 

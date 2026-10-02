@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:52fb9535f49b0b97d00ed36e1874922e3ff3df25f1f10a2d47461da01e3a4f4a'
+body_hash: 'sha256:84f1de8efe3e0d5ecfbdbc6662b44bbfae6b6cba64b35207926b188ab2707c36'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -90,3 +90,11 @@ Fixed in P02.S07. The original citation named the PW7 document-authoring accepta
 ### scoop-shim-target-changes-behind-launcher | medium | caching only the shim EXE would miss a Codex package update
 
 Fixed in P02.S08. The resolved Codex path on the proof host is Scoop's `codex.EXE`, whose file stat predates the installed CLI version; its `.shim` points at the moving `apps/codex/current/bin/codex.exe` target. The version probe's process cache now keys on the shim, sidecar, and resolved target file identities, so replacing the package while the service stays up causes a new `--version` probe. Type: runtime identity and cache invalidation. A real target-change test and a direct probe of the installed launcher pass.
+
+### codex-ci-install-was-unpinned | medium | provider prerequisite CI could certify an unproved Codex version
+
+Fixed in P02.S10. The provider prerequisite job installed `@openai/codex` without a version, while the lane's completed turn was on 0.159.2. The job now globally installs exactly 0.159.2, asserts the CLI reports that version, and audits the same exact package in an isolated npm tree before running the provider gates. The isolated audit verified both registry signatures and attestations. Type: CI supply-chain and proof drift.
+
+### codex-ci-allowance-described-obsolete-risk | low | the CI contract allowance still called Codex unpinned
+
+Fixed in P02.S10. The allowlist rationale named the old unpinned command. It now describes the exact-version install and signature verification, with both inline runner-setup steps declared; `dev.ci_contract` passes. Type: audit trail and CI contract drift.

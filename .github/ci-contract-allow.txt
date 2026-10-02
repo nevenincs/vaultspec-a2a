@@ -37,10 +37,11 @@ release-please.yml:Name a release this token cannot tag
 release-please.yml:Require the tag on the proven commit
 
 # --- pending ----------------------------------------------------------------
-# Installs the Codex CLI the prerequisite gates spawn, UNPINNED and globally:
-# `npm install -g @openai/codex`. An unpinned global install decides what a
-# gate is testing. Recipe needed: `init-tools` should provision it.
+# The provider prerequisite job installs the CLI version that completed its
+# live turn, then verifies that exact npm package through a temporary lockfile.
+# These runner setup commands have no shared recipe yet.
 test.yml:Install the provider CLI these gates require
+test.yml:Verify pinned Codex registry signatures
 
 # Three `alembic` invocations that walk a migration to head, back to base, and
 # to head again. A real gate with no recipe, so nobody can run it before

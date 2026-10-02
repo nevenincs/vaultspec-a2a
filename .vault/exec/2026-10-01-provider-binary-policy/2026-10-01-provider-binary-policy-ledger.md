@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:82c96470996e1bcfc289caa7e8994f856f307f697533977d9dc75a7f39e8efce'
+body_hash: 'sha256:5fb791d12b52f914e8db4c9f5b1e4fd4ec0ebeffd0d861a8a30b5d67557398e6'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -71,9 +71,21 @@ related:
 - `S01` `verify:` `ty capsule path files` -> `pass`
 - `S01` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S01` `verify:` `just ci` -> `fail`
+- `S02` `M` `src/vaultspec_a2a/desktop/profile.py`
+- `S02` `M` `src/vaultspec_a2a/desktop/tests/test_profile.py`
+- `S02` `M` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
+- `S02` `M` `src/vaultspec_a2a/cli/tests/test_desktop_serve.py`
+- `S02` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S02` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S02` `verify:` `pytest desktop profile and CLI tests` -> `pass`
+- `S02` `verify:` `ruff desktop profile files` -> `pass`
+- `S02` `verify:` `ty desktop profile files` -> `pass`
+- `S02` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S02` `verify:` `just ci` -> `fail`
 
 ## Notes
 
 - `S17` Adapter 0.59.0 to 0.84.0, SDK 0.3.207 to 0.3.284, CLI 2.1.207 to 2.1.284. Fixed: session/new died as root with `IS_SANDBOX` set because the adapter armed the skip-permissions flag (declined now); three new error kinds mapped; PowerShell denied to a terminal-less persona. No completed model turn was possible here: the claude lane must re-earn its completed-turn proof on 2.1.284 on a credentialed host.
 - `S16` just ci remains red on base 78f3a89f: 44 strict type diagnostics in `dev/ci_contract.py,` 16 in `control/settings_base.py,` and three unconsumed exports in `settings_base.py;` assigned to main integration owner. Changed-file checks and targeted real-behavior tests pass.
 - `S01` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; this Step changes neither.
+- `S02` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.

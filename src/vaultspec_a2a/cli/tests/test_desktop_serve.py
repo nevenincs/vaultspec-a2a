@@ -18,7 +18,11 @@ import pytest
 
 from ...control.config import Settings
 from ...desktop.profile import DesktopProfileError, derive_state_paths
-from ...providers._factory_commands import capsule_acp_entry, capsule_node_executable
+from ...providers._factory_commands import (
+    capsule_acp_entry,
+    capsule_claude_executable,
+    capsule_node_executable,
+)
 from ...testing import armed_environment
 from ..main import _DesktopServePlan, _prepare_desktop_serve
 
@@ -30,6 +34,7 @@ def _build_capsule(root: Path) -> Path:
     for asset, content in (
         (capsule_node_executable(root), "node runtime\n"),
         (capsule_acp_entry(root), "// acp entry\n"),
+        (capsule_claude_executable(root), "claude runtime\n"),
     ):
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_text(content, encoding="utf-8")

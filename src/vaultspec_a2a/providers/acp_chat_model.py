@@ -328,14 +328,11 @@ class AcpChatModel(BaseChatModel):
         )
         env = resolve_env_vars(_ws_path)
         env.update(self.env_vars)
-        # Bypass the adapter's bundled cli.js — drive the same installed claude
-        # binary an interactive invocation runs, so the lane's behaviour (and
-        # credential resolution) matches the operator's own CLI exactly. Only
-        # for the claude-family adapter; Kimi runs its own CLI. Resolved through
-        # the one seam the catalog probe also uses, so a lane cannot be qualified
-        # by one binary and then served by another.
+        # The served turn and catalog probe use the same profile-scoped CLI
+        # authority. Kimi runs its own CLI.
         if self._state.config.acp_family == "claude" and self.command:
-            self._state.session.claude_executable = pin_claude_executable(env)
+            resolved = pin_claude_executable(env)
+            self._state.session.claude_executable = str(resolved.path)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
         # Suppress interactive prompts that
         # stall non-interactive ACP subprocesses.

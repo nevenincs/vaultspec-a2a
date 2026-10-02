@@ -214,7 +214,7 @@ async def _discover_claude_catalog(
     # The probe drives the same CLI a served turn will. Unpinned, the adapter
     # falls back to its vendored binary, so the catalog this builds would
     # describe a different Claude from the one the lane then runs.
-    pin_claude_executable(env)
+    cli_resolution = pin_claude_executable(env)
     use_exec = metadata["acp_backend"] == "binary"
     if use_exec:
         env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
@@ -224,7 +224,12 @@ async def _discover_claude_catalog(
         cwd=str(workspace_root),
         key=key,
         use_exec=use_exec,
-        metadata={"provider": Provider.CLAUDE.value, **metadata},
+        metadata={
+            "provider": Provider.CLAUDE.value,
+            **metadata,
+            "cli_runtime_authority": cli_resolution.authority,
+            "cli_executable": str(cli_resolution.path),
+        },
         # The probe opens a real session, so it opens it under the same
         # permission posture a served turn gets. Leaving the bypass capability
         # granted here would qualify a lane nobody runs - and where the CLI

@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:4258ad99b0471016a721b9067af52ff7a19f2ff3defc2dce74ceac82403a231b'
+body_hash: 'sha256:eb3deef1c9dd0df3b37f7be3749282f036aa2cdbdc92464e3475b37312dc8573'
 ---
 
 # `provider-binary-policy` plan
@@ -44,8 +44,8 @@ Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer i
 
 - [x] `P01.S01` - Add the capsule-owned Claude CLI path authority beside the existing Node and ACP authorities, selecting the libc variant by the rule the adapter uses; `src/vaultspec_a2a/providers/_factory_commands.py`.
 - [x] `P01.S02` - Require the capsule Claude CLI as a third validated capsule asset so an armed desktop profile refuses to arm without it; `src/vaultspec_a2a/desktop/profile.py, src/vaultspec_a2a/desktop/tests/test_profile.py, src/vaultspec_a2a/desktop_tests/test_profile_paths.py, src/vaultspec_a2a/cli/tests/test_desktop_serve.py`.
-- [x] `P01.S03` - Declare the absolute-path claude_cli_executable setting as the explicit top rung and resolve it with the other path settings; `src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/control/config.py, .env.example`.
-- [ ] `P01.S04` - Rewrite pin_claude_executable into the profile-scoped authority order returning the absolute path and the rung that answered, with an armed capsule exclusive and fail-loud over an inherited executable override, and update the served-turn and catalog-probe call sites; `src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/factory.py`.
+- [x] `P01.S03` - Declare the absolute-path claude_cli_executable setting as the explicit top rung and resolve it with the other path settings; `src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/control/config.py, .env.example, src/vaultspec_a2a/control/tests/test_settings_sources.py`.
+- [x] `P01.S04` - Rewrite pin_claude_executable into the profile-scoped authority order returning the absolute path and the rung that answered, with an armed capsule exclusive and fail-loud over an inherited executable override, and update the served-turn and catalog-probe call sites; `src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`.
 - [ ] `P01.S05` - Refuse a served Claude or Z.ai launch and the Claude catalog probe when no rung resolves a CLI, with a typed runtime-unavailable reason instead of an unpinned child; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/cli_resolution.py`.
 - [ ] `P01.S06` - Install one exact Claude CLI version in the Compose worker image and name it to the service through the new setting; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.
 - [x] `P01.S17` - Bump the vendored Claude ACP adapter to its latest release and re-prove the protocol surface the ACP layer depends on; `package.json, package-lock.json, src/vaultspec_a2a/graph/tests/acp_simulator.py, src/vaultspec_a2a/providers/`.

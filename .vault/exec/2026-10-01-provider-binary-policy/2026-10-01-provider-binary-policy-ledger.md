@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:f75da72e7f0e0b0a46af3e1001d0210edcf2194d69e98d99c90d29d23bf570bf'
+body_hash: 'sha256:e36ae9fcbd66a1afeb33ed89a52c32fdacab5a559502af18621b7b4588f3f426'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -102,6 +102,17 @@ related:
 - `S03` `verify:` `ty settings files` -> `pass`
 - `S03` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S03` `verify:` `just ci` -> `fail`
+- `S04` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S04` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S04` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S04` `M` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S04` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S04` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S04` `verify:` `pytest Claude binary identity/capsule/factory` -> `pass`
+- `S04` `verify:` `ruff provider resolver files` -> `pass`
+- `S04` `verify:` `ty provider resolver files` -> `pass`
+- `S04` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S04` `verify:` `just ci` -> `fail`
 
 ## Notes
 
@@ -111,3 +122,4 @@ related:
 - `S02` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
 - `S11` PostgreSQL proof used an isolated Compose project and its exact ephemeral volume was removed after the tests.
 - `S03` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
+- `S04` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration. Missing-CLI typed refusal is queued to P01.S05.

@@ -16,7 +16,7 @@ Architecture:
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
-from typing import Any, Never, override
+from typing import TYPE_CHECKING, Any, Never, override
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -93,10 +93,15 @@ from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject
 from ._mcp_contract import verify_harness_mcp_contract
 from ._prompt_render import render_prompt_blocks
+from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import AcpError
+from .binary_version import probe_binary_version
 from .cli_resolution import pin_claude_executable
+
+if TYPE_CHECKING:
+    from ..graph.protocols import RuntimeIdentityRecordArgs
 
 __all__ = ["AcpChatModel"]
 
@@ -162,6 +167,7 @@ class AcpChatModel(BaseChatModel):
         description="Bounded provider identity for ACP runtime evidence.",
     )
     version_proof_required: bool = Field(default=False, exclude=True)
+    execution_mode: str | None = Field(default=None, exclude=True)
     runtime_authority: str | None = Field(
         default=None,
         description="Bounded runtime authority classification for the ACP command.",
@@ -208,8 +214,19 @@ class AcpChatModel(BaseChatModel):
     desired_config_options: dict[str, str] = Field(default_factory=dict)
 
     _state: AcpModelState = PrivateAttr()
+    _runtime_identity: RuntimeIdentityBinding | None = PrivateAttr(default=None)
+
+    def with_runtime_identity(self, binding: RuntimeIdentityBinding) -> "AcpChatModel":
+        """Return a run-bound copy without mutating the compiled model."""
+        updated = self.model_copy()
+        updated._runtime_identity = binding
+        return updated
 
     def __getattr__(self, name: str) -> Any:
+        if name == "_runtime_identity":
+            private = self.__pydantic_private__
+            if private is not None and name in private:
+                return private[name]
         state = model_state_or_none(self)
         state_field = model_state_path(name)
         if name == "_state" and state is not None:
@@ -419,6 +436,57 @@ class AcpChatModel(BaseChatModel):
             ),
         )
 
+    async def _persist_runtime_identity(self, session_id: str) -> None:
+        """Write the first initialized session before sending a model prompt."""
+        binding = self._runtime_identity
+        if binding is None:
+            return
+        entry = identity_path(self.command_target, field="adapter entry path")
+        if self.acp_family == "claude":
+            cli = identity_path(
+                self._state.session.claude_executable, field="CLI executable path"
+            )
+            node = (
+                identity_path(self.command[0], field="Node executable path")
+                if self.acp_backend == "node" and self.command
+                else None
+            )
+        else:
+            cli = identity_path(self.command[0], field="CLI executable path")
+            node = None
+        cli_version = await asyncio.to_thread(probe_binary_version, cli)
+        node_version = (
+            await asyncio.to_thread(probe_binary_version, node)
+            if node is not None
+            else None
+        )
+        agent_info = self._state.session.agent_info
+        evidence: RuntimeIdentityRecordArgs = {
+            "thread_id": binding.thread_id,
+            "provider_id": identity_text(self.provider, field="provider ID"),
+            "execution_mode": identity_text(
+                self.execution_mode, field="execution mode"
+            ),
+            "runtime_authority": identity_text(
+                self.runtime_authority, field="runtime authority"
+            ),
+            "adapter_name": identity_text(agent_info.get("name"), field="adapter name"),
+            "adapter_version": identity_text(
+                agent_info.get("version"), field="adapter version"
+            ),
+            "adapter_entry_path": entry,
+            "cli_executable_path": cli,
+            "cli_version": cli_version,
+            "node_version": node_version,
+            "auth_mode": identity_text(self.auth_mode, field="auth mode"),
+            "provider_session_id": identity_text(
+                session_id, field="provider session ID", maximum=512
+            ),
+            # ACP does not report whether host managed policy existed or loaded.
+            "managed_policy_present": None,
+        }
+        await binding.port.record_identity(**evidence)
+
     async def _astream_session(
         self,
         messages: list[BaseMessage],
@@ -535,6 +603,7 @@ class AcpChatModel(BaseChatModel):
                     session_id=result.session_id,
                 ),
             )
+            await self._persist_runtime_identity(result.session_id)
             self._state.transport.process = ctx.process
             self._state.transport.stdin = ctx.stdin
             self._state.transport.stdin_lock = ctx.stdin_lock

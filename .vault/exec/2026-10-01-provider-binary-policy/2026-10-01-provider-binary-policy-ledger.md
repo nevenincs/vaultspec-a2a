@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:251e7223f872f044851a19f0d34a3dfded11ad3a35066d49bc35c8f04f3e49c6'
+body_hash: 'sha256:593952a508738919420f8c1603485b4a946408f654a00f474f249e5d6ae44b52'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -244,6 +244,33 @@ related:
 - `S19` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S19` `verify:` `git diff --check` -> `pass`
 - `S19` `by:` `provider-proof`
+- `S13` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S13` `M` `.vault/adr/2026-10-01-provider-binary-policy-adr.md`
+- `S13` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S13` `M` `src/vaultspec_a2a/database/runtime_identity_repository.py`
+- `S13` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S13` `M` `src/vaultspec_a2a/graph/protocols.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/acp_simulator.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S13` `A` `src/vaultspec_a2a/graph/tests/test_runtime_identity_graph_live.py`
+- `S13` `A` `src/vaultspec_a2a/providers/_runtime_identity.py`
+- `S13` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S13` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/worker/runtime_identity_port.py`
+- `S13` `M` `src/vaultspec_a2a/worker/tests/test_runtime_identity_port.py`
+- `S13` `verify:` `57 focused non-service tests` -> `pass`
+- `S13` `verify:` `real Codex SQLite identity turn` -> `pass`
+- `S13` `verify:` `real Codex graph worker and research turns` -> `pass`
+- `S13` `verify:` `changed-file ruff format ty` -> `pass`
+- `S13` `verify:` `just audit-types: two unchanged checkpoint advisories` -> `pass`
+- `S13` `verify:` `vaultspec-core vault check all -f provider-binary-policy` -> `pass`
+- `S13` `verify:` `git diff --check` -> `pass`
+- `S13` `by:` `provider-proof`
+- `S13` `M` `src/vaultspec_a2a/database/admin.py`
+- `S13` `verify:` `database admin tests 7 passed after clear-order repair` -> `pass`
 
 ## Notes
 
@@ -268,3 +295,4 @@ related:
 - `S20` Formal review fixed the false settings-source claim and queued medium managed-policy presence evidence for S13.
 - `S14` Env-example coverage pending S15 and continuation successor setting; integrated CI and credentialed live turn pending.
 - `S19` Strict global type gate has remaining checkpoints diagnostics assigned to continuation S17; lane-admission diagnostics fixed in P02.S22. Integrated just ci pending.
+- `S13` Integrated just ci is owned by the plan supervisor after branch integration.

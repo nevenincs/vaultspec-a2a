@@ -182,6 +182,7 @@ def _initialize_response(
         "id": msg_id,
         "result": {
             "protocolVersion": 1,
+            "agentInfo": {"name": "acp-simulator", "version": "1.0.0"},
             "agentCapabilities": {"streaming": True},
             "authMethods": [],
         },

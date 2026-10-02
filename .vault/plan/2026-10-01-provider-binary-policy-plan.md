@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:1bab8c527e012f648f72786457753c9b8818743e8a188a0036caef111acc94e0'
+body_hash: 'sha256:bedfcbbe8d49e194edc5df353fa78205176d0306a4d8176560063067b7093a24'
 ---
 
 # `provider-binary-policy` plan
@@ -67,7 +67,7 @@ Every run durably records the adapter, CLI, authority, auth mode, and provider-n
 
 - [x] `P03.S11` - Add the provider runtime identity table, its model, and its repository, naming the migration by purpose and assigning its revision and down-revision ids at execution time in the order it merges with the migrations other plans land concurrently; `src/vaultspec_a2a/database/migrations/versions/, src/vaultspec_a2a/database/models.py, src/vaultspec_a2a/database/runtime_identity_repository.py, src/vaultspec_a2a/database/__init__.py`.
 - [x] `P03.S12` - Add the runtime identity port, its worker SQL adapter, and its graph-compile injection beside the cost port; `src/vaultspec_a2a/graph/protocols.py, src/vaultspec_a2a/worker/runtime_identity_port.py, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/_compiler_topologies.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/worker/tests/, src/vaultspec_a2a/graph/tests/`.
-- [ ] `P03.S13` - Capture provider, catalog key, runtime authority, adapter name and version, adapter entry path, CLI path and version, Node version, auth mode, and provider-native session id at a lane first successful initialize, and write one row per run and lane while keeping the existing INFO line; `src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_model_state.py, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P03.S13` - Capture provider, catalog key, runtime authority, adapter name and version, adapter entry path, CLI path and version, Node version, auth mode, and provider-native session id at a lane first successful initialize, and write one row per run and lane while keeping the existing INFO line; `src/vaultspec_a2a/database/admin.py, src/vaultspec_a2a/database/runtime_identity_repository.py, src/vaultspec_a2a/database/tests/, src/vaultspec_a2a/graph/protocols.py, src/vaultspec_a2a/worker/runtime_identity_port.py, src/vaultspec_a2a/worker/tests/, src/vaultspec_a2a/providers/_runtime_identity.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/_acp_model_state.py, src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/tests/, .vault/adr/2026-10-01-provider-binary-policy-adr.md, .vault/audit/2026-10-01-provider-binary-policy-audit.md`.
 
 ### Phase `P04` - The Claude authentication channel is declared, not inferred
 

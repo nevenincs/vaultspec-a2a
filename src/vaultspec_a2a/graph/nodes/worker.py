@@ -912,6 +912,13 @@ def create_worker_node(
                 getattr(effective_model, "provider", None)
             ),
         )
+        from ...providers._runtime_identity import bind_model_runtime_identity
+
+        effective_model = bind_model_runtime_identity(
+            effective_model,
+            thread_id=thread_id,
+            port=settings["runtime_identity_port"],
+        )
 
         model_label = _describe_worker_model(effective_model)
         _logger.debug(

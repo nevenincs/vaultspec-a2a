@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:b33a9a99bd6e37d97347976455d85e4dbb508b9df728760974f1774335e540a6'
+body_hash: 'sha256:36fdf5ed0535810a4eb88220d65892a43ff9e808e2367c4828da2c763f144dea'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -25,6 +25,7 @@ P01.S05 review (2026-10-02): PASS for typed CLI unavailability at Claude and Z.a
 P01.S06 review (2026-10-02): PASS for the Compose worker image's exact Claude CLI 2.1.284 install and explicit absolute service setting. The CLI stage and complete worker image build, the CLI reports 2.1.284 as agentuser, the image's resolver selects /usr/local/bin/claude as explicit_setting, and Compose config parses. No new review finding was raised.
 
 P01 integrated review (2026-10-02): PENDING shared integration gates. S01-S06 jointly give one profile-scoped CLI resolution, refuse a missing selected asset before ACP spawn, and name an exact Compose binary. Focused behavior, type, lint, image and Compose checks pass. The plan supervisor owns just ci and ci-merge on the integrated branch, which also carries baseline CI fixes. No new code finding was raised.
+P06.S18 review (2026-10-02): PASS for successful-turn ACP token accounting, with a medium follow-up queued below. The terminal prompt result now yields one usage-bearing LangChain chunk; per-model quota rows supply accounting totals and remain attached to usage_metadata, including cache detail. Without rows, the prompt's usage summary is used. Malformed counts refuse the result rather than recording false totals. Fifty focused protocol/model/native-command tests plus changed-file lint, format and type checks pass. Full CI and a credentialed live turn remain integration evidence gaps owned by the plan supervisor.
 ## Findings
 
 ### root-session-armed-skip-permissions | critical | a root host with IS_SANDBOX set could open no Claude session
@@ -91,6 +92,9 @@ Fixed in P01.S05. A missing selected CLI raises ProviderRuntimeUnavailableError 
 
 Fixed in P01.S04. The previous capsule catalog test used a POSIX shell script as its fake Node executable and skipped the Windows host. It now copies the installed Node binary into a real capsule tree and uses a tiny JavaScript entry to write the child environment, so the same catalog probe runs on both hosts. Type: test coverage and portability.
 
+### failed-acp-turn-usage-unrecorded | medium | failed prompts can spend tokens without a returned usage message
+
+Open; follow-up scope is the graph's error-path accounting contract. The upgraded adapter reports usage on terminal prompt results even for refusal, cancellation and budget stops. This Step attaches usage to the final message only after a successful end_turn because those other outcomes raise a typed prompt error and return no message for the graph's _turn_token_usage reader. A failed turn can therefore incur provider usage without a token_usage entry. Type: cost-accounting gap. A later Step must decide how error-path usage reaches the durable turn record without treating a failed prompt as a successful response.
 ## Recommendations
 
 - Rule on the managed-policy tier and correct the claim (`managed-policy-env-reaches-the-child`), done by the ADR amendment and P06.S20.

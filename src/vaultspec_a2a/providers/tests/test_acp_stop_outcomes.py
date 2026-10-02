@@ -6,7 +6,8 @@ import asyncio
 from typing import cast
 
 import pytest
-from langchain_core.messages import AIMessageChunk
+from langchain_core.language_models.chat_models import generate_from_stream
+from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 
 from .._acp_protocol import handle_client_response, handle_session_update
@@ -41,6 +42,161 @@ async def _consume(stop_reason: str) -> None:
 
 def test_end_turn_is_the_only_successful_terminal_reason() -> None:
     asyncio.run(_consume("end_turn"))
+
+
+def test_prompt_result_carries_accounting_usage_by_model_to_final_message() -> None:
+    async def exercise() -> None:
+        ctx = _context()
+        future = cast("AcpResponseFuture", asyncio.get_running_loop().create_future())
+        ctx.response_futures[7] = future
+        await ctx.chunk_queue.put(
+            ChatGenerationChunk(message=AIMessageChunk(content="reply"))
+        )
+        await handle_client_response(
+            {
+                "id": 7,
+                "result": {
+                    "stopReason": "end_turn",
+                    "usage": {
+                        "inputTokens": 1,
+                        "outputTokens": 1,
+                        "cachedReadTokens": 0,
+                        "cachedWriteTokens": 0,
+                        "totalTokens": 2,
+                    },
+                    "_meta": {
+                        "quota": {
+                            "model_usage": [
+                                {
+                                    "model": "sonnet",
+                                    "token_count": {
+                                        "inputTokens": 3,
+                                        "outputTokens": 2,
+                                        "cachedInputTokens": 4,
+                                        "cachedWriteTokens": 1,
+                                        "totalTokens": 10,
+                                        "reasoningOutputTokens": 0,
+                                    },
+                                },
+                                {
+                                    "model": "haiku",
+                                    "token_count": {
+                                        "inputTokens": 5,
+                                        "outputTokens": 1,
+                                        "cachedInputTokens": 0,
+                                        "cachedWriteTokens": 2,
+                                        "totalTokens": 8,
+                                        "reasoningOutputTokens": 0,
+                                    },
+                                },
+                            ]
+                        }
+                    },
+                },
+            },
+            ctx,
+        )
+
+        model = AcpChatModel(command=["unused"])
+        chunks = [chunk async for chunk in model._yield_chunks(ctx, future, None)]
+        final = generate_from_stream(iter(chunks)).generations[0].message
+
+        assert isinstance(final, AIMessage)
+        assert final.content == "reply"
+        assert final.usage_metadata == {
+            "input_tokens": 15,
+            "output_tokens": 3,
+            "total_tokens": 18,
+            "input_token_details": {"cache_read": 4, "cache_creation": 3},
+            "output_token_details": {"reasoning": 0},
+            "model_usage": {
+                "sonnet": {
+                    "input_tokens": 8,
+                    "output_tokens": 2,
+                    "total_tokens": 10,
+                    "input_token_details": {
+                        "cache_read": 4,
+                        "cache_creation": 1,
+                    },
+                    "output_token_details": {"reasoning": 0},
+                },
+                "haiku": {
+                    "input_tokens": 7,
+                    "output_tokens": 1,
+                    "total_tokens": 8,
+                    "input_token_details": {
+                        "cache_read": 0,
+                        "cache_creation": 2,
+                    },
+                    "output_token_details": {"reasoning": 0},
+                },
+            },
+        }
+
+    asyncio.run(exercise())
+
+
+def test_prompt_result_without_model_rows_keeps_main_loop_usage() -> None:
+    async def exercise() -> None:
+        ctx = _context()
+        future = cast("AcpResponseFuture", asyncio.get_running_loop().create_future())
+        ctx.response_futures[7] = future
+        await handle_client_response(
+            {
+                "id": 7,
+                "result": {
+                    "stopReason": "end_turn",
+                    "usage": {
+                        "inputTokens": 2,
+                        "outputTokens": 3,
+                        "cachedReadTokens": 4,
+                        "cachedWriteTokens": 1,
+                        "totalTokens": 10,
+                    },
+                },
+            },
+            ctx,
+        )
+        model = AcpChatModel(command=["unused"])
+        chunks = [chunk async for chunk in model._yield_chunks(ctx, future, None)]
+        final = generate_from_stream(iter(chunks)).generations[0].message
+        assert isinstance(final, AIMessage)
+        usage = final.usage_metadata
+        assert usage is not None
+        assert usage["input_tokens"] == 7
+        assert usage["output_tokens"] == 3
+        assert usage["total_tokens"] == 10
+
+    asyncio.run(exercise())
+
+
+def test_invalid_prompt_usage_fails_instead_of_recording_wrong_tokens() -> None:
+    async def exercise() -> None:
+        ctx = _context()
+        future = cast("AcpResponseFuture", asyncio.get_running_loop().create_future())
+        ctx.response_futures[7] = future
+        await handle_client_response(
+            {
+                "id": 7,
+                "result": {
+                    "stopReason": "end_turn",
+                    "usage": {
+                        "inputTokens": True,
+                        "outputTokens": 1,
+                        "cachedReadTokens": 0,
+                        "cachedWriteTokens": 0,
+                        "totalTokens": 2,
+                    },
+                },
+            },
+            ctx,
+        )
+        model = AcpChatModel(command=["unused"])
+        with pytest.raises(AcpPromptError, match="invalid usage"):
+            async for _chunk in model._yield_chunks(ctx, future, None):
+                pass
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize(

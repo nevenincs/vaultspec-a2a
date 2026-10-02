@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:f63c538b3c007e4bed639fd5e01ba9296a2e904f01eb1ab23d6b3bc8afe9b5fb'
+body_hash: 'sha256:e0299d4687d1fbcee09d10cd645b15c44b28e7ece7dbce175f111e98c505364f'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -124,6 +124,17 @@ related:
 - `S06` `verify:` `docker compose config --quiet` -> `pass`
 - `S06` `verify:` `git diff --check` -> `pass`
 - `S06` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S18` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S18` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S18` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S18` `M` `src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py`
+- `S18` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S18` `verify:` `uv run pytest -q focused ACP stop/handler/model/native suites` -> `pass`
+- `S18` `verify:` `uv run ty check changed ACP files` -> `pass`
+- `S18` `verify:` `uv run ruff check changed ACP files` -> `pass`
+- `S18` `verify:` `uv run ruff format --check changed ACP files` -> `pass`
+- `S18` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S18` `verify:` `git diff --check` -> `pass`
 
 ## Notes
 
@@ -135,3 +146,4 @@ related:
 - `S04` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration. Missing-CLI typed refusal is queued to P01.S05.
 - `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.
 - `S06` Full just ci and ci-merge remain shared integration gates with the plan supervisor; no provider credentials are available for a completed model turn on this host.
+- `S18` Full just ci and ci-merge remain shared integration gates owned by the plan supervisor; no credentialed live model turn is available on this host. Medium error-path accounting follow-up is queued in the audit.

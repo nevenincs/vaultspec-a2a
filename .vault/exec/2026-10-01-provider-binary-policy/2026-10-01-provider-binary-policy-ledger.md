@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:57c4bd8284caf26047b5e76c22bfc679f063f420f1dfb71acce6919c8f663467'
+body_hash: 'sha256:66505d4e2d34ed7563ea44a4cb25d2ebed3188911ce4d4f45afbd39811a778a3'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -155,6 +155,16 @@ related:
 - `S05` `verify:` `uv run ty check changed provider files` -> `pass`
 - `S05` `verify:` `git diff --check` -> `pass`
 - `S05` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S06` `M` `service/docker/prod.Dockerfile`
+- `S06` `M` `service/docker-compose.prod.yml`
+- `S06` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S06` `verify:` `docker build --target claude-cli` -> `pass`
+- `S06` `verify:` `docker build --target worker` -> `pass`
+- `S06` `verify:` `docker run --user 1002:1002 claude --version` -> `pass`
+- `S06` `verify:` `docker run worker resolver with explicit setting` -> `pass`
+- `S06` `verify:` `docker compose config --quiet` -> `pass`
+- `S06` `verify:` `git diff --check` -> `pass`
+- `S06` `verify:` `vaultspec-core vault check all` -> `pass`
 
 ## Notes
 
@@ -170,3 +180,4 @@ related:
 - `S08` Integrated just ci is assigned to the root branch after parallel steps land.
 - `S10` Integrated just ci is assigned to the root branch after parallel steps land.
 - `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.
+- `S06` Full just ci and ci-merge remain shared integration gates with the plan supervisor; no provider credentials are available for a completed model turn on this host.

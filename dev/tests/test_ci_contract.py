@@ -95,6 +95,12 @@ def test_ci_contract() -> None:
     assert " pytest " not in just_test_commands
 
     steps = _test_job_steps()
+    run_commands = [step.get("run") for step in steps]
+    assert (
+        run_commands.index("just init-full")
+        < run_commands.index("just deps-claude-cli")
+        < run_commands.index("just ci")
+    )
     assert len(_run_steps(steps, "just ci")) == 1
     # Bind the run text rather than re-indexing: an isinstance check on
     # ``step.get("run")`` does not narrow a second ``step["run"]`` lookup, so the

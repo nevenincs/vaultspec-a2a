@@ -196,6 +196,11 @@ deps-tooling:
 deps-node:
     {{dev}} deps node
 
+# Expose the locked Claude CLI for hosted binary-identity tests.
+[group('setup')]
+deps-claude-cli:
+    {{dev}} deps claude-cli
+
 # Resolve every runtime extra plus the composed all dependency group.
 [group('setup')]
 deps-all:
@@ -250,7 +255,6 @@ doctor-docker:
 # Resolve the locked development environment used by the git hooks.
 [group('setup')]
 hooks-bootstrap:
-    uv venv .venv --allow-existing
     uv sync --locked --no-default-groups --extra server --group all
 
 # Install the repository-managed, path-agnostic prek hook.

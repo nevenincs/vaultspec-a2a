@@ -78,7 +78,7 @@ def test_release_please_can_insert_the_first_pr_above_bootstrapped_history() -> 
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     headings = re.findall(r"^## \[[0-9]+\.[0-9]+\.[0-9]+\].*$", changelog, re.MULTILINE)
 
-    assert headings == [
+    assert headings[-3:] == [
         "## [0.3.0](https://github.com/nevenincs/vaultspec-a2a/compare/"
         "v0.2.0...v0.3.0) (2026-08-02)",
         "## [0.2.0](https://github.com/nevenincs/vaultspec-a2a/compare/"
@@ -86,6 +86,10 @@ def test_release_please_can_insert_the_first_pr_above_bootstrapped_history() -> 
         "## [0.1.0](https://github.com/nevenincs/vaultspec-a2a/releases/tag/"
         "v0.1.0) (2026-07-24)",
     ]
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]["version"]
+    assert headings[0].startswith(f"## [{version}](")
     assert changelog.index(headings[0]) > changelog.index("# Changelog")
     assert "prepared releases are inserted" not in changelog
 
@@ -170,7 +174,9 @@ def test_the_proposal_keeps_up_and_never_releases() -> None:
     assert "token" not in action["with"]
 
     by_name = {str(step.get("name")): step for step in steps}
-    assert "just deps-lock" in by_name["Refresh the release branch lockfile"]["run"]
+    refresh = by_name["Refresh the release branch lockfile"]["run"]
+    assert refresh.index("just deps-lock") < refresh.index("just hooks-bootstrap")
+    assert refresh.index("just hooks-bootstrap") < refresh.index("git commit")
     dispatch = by_name["Dispatch the merge gate for the release pull request"]
     assert str(dispatch["run"]).startswith("gh workflow run merge-gate.yml ")
     assert steps[-1] is dispatch, (

@@ -96,6 +96,9 @@ jobs:
       - name: Initialize the worktree
         run: just init-full
 
+      - name: Expose the locked Claude CLI required by binary identity tests
+        run: just deps-claude-cli
+
       - name: Run canonical CI
         run: just ci
 

@@ -264,6 +264,11 @@ DEPS = Verb(
             ),
         ),
         Target(
+            "claude-cli",
+            "Expose the locked Claude CLI for hosted binary-identity tests.",
+            (dev_module("ci_claude_cli"),),
+        ),
+        Target(
             "all",
             "Resolve every runtime extra plus the composed 'all' group.",
             (

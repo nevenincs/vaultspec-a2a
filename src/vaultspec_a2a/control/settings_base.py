@@ -71,8 +71,6 @@ from .env_registry import CREDENTIAL_VARIABLES, ENV_FILE_VARIABLE
 
 __all__ = [
     "ENV_FILE_ENV",
-    "PROJECT_DOTENV",
-    "PROJECT_MARKERS",
     "PROJECT_ROOT_ENV",
     "ProjectSettings",
     "build_now",
@@ -130,6 +128,7 @@ class _OperatorEnvFileMarker:
     def __iter__(self) -> Iterator[Path]:
         return iter(())
 
+    @override
     def __repr__(self) -> str:
         return "<the operator's environment file, if one is named>"
 
@@ -359,12 +358,14 @@ def _construction_project_root(
     """
     if not isinstance(init_settings, InitSettingsSource):
         return None
-    named = init_settings.init_kwargs.get("project_root")
+    named = cast("dict[str, object]", init_settings.init_kwargs).get("project_root")
     if named is None:
         return None
     # Routed through the resolver so a relative value is joined to the working
     # directory exactly as the environment variable's would be.
-    return resolve_project_root({PROJECT_ROOT_ENV: os.fspath(named)})
+    return resolve_project_root(
+        {PROJECT_ROOT_ENV: os.fspath(cast("str | os.PathLike[str]", named))}
+    )
 
 
 def _operator_env_file(
@@ -611,14 +612,12 @@ class _BuiltAtFirstUse[T: BaseSettings]:
     one named error.
     """
 
-    __slots__ = ("_build", "_instance", "_lock")
-
     def __init__(self, build: Callable[[], T]) -> None:
         object.__setattr__(self, "_build", build)
         object.__setattr__(self, "_instance", None)
         object.__setattr__(self, "_lock", threading.RLock())
 
-    def _settings(self) -> T:
+    def materialize(self) -> T:
         built: T | None = object.__getattribute__(self, "_instance")
         if built is not None:
             return built
@@ -631,32 +630,39 @@ class _BuiltAtFirstUse[T: BaseSettings]:
             if built is None:
                 built = object.__getattribute__(self, "_build")()
                 object.__setattr__(self, "_instance", built)
+        assert built is not None
         return built
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._settings(), name)
+        return getattr(self.materialize(), name)
 
+    @override
     def __setattr__(self, name: str, value: Any) -> None:
-        setattr(self._settings(), name, value)
+        setattr(self.materialize(), name, value)
 
+    @override
     def __repr__(self) -> str:
-        return repr(self._settings())
+        return repr(self.materialize())
 
+    @override
     def __dir__(self) -> list[str]:
-        return dir(self._settings())
+        return dir(self.materialize())
 
+    @override
     def __eq__(self, other: object) -> bool:
         # Forwarded rather than left to identity: a caller comparing the
         # singleton to a settings object it built is asking about the values,
         # and identity would answer a different question every time.
-        return self._settings() == other
+        return self.materialize() == other
 
+    @override
     def __hash__(self) -> int:
-        return hash(self._settings())
+        return hash(self.materialize())
 
     def __bool__(self) -> bool:
-        return bool(self._settings())
+        return bool(self.materialize())
 
+    @override
     def __reduce__(self) -> Never:
         # Pickling the proxy would carry the FACTORY across the boundary, and
         # the receiving process would rebuild the settings from ITS own
@@ -685,4 +691,4 @@ def build_now(settings: object) -> None:
     itself. Calling this after those declarations pins them.
     """
     if isinstance(settings, _BuiltAtFirstUse):
-        settings._settings()
+        settings.materialize()

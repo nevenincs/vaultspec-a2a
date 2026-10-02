@@ -25,9 +25,11 @@ from dev.audit.unreachable_code import declared_exports
 from dev.exit_codes import FAILED, OK, TOOL_BROKEN
 from dev.paths import PACKAGE_ROOT, REPO_ROOT, repo_relative
 from dev.quality.source_import_analysis import (
+    SourceModule,
     UnreadableSourceError,
     imported_symbols,
     load_modules,
+    parse_module,
     repo_source_roots,
 )
 
@@ -105,6 +107,13 @@ def run_gate(
         consumers = dict(shipped)
         for root in repo_source_roots(repo_root):
             consumers.update(load_modules(root, src_root=repo_root))
+        for path in sorted(repo_root.glob("*.py")):
+            consumers[path.stem] = SourceModule(
+                name=path.stem,
+                path=path,
+                tree=parse_module(path),
+                is_test=False,
+            )
     except UnreadableSourceError as exc:
         msg = f"export scan unavailable, coverage unproven: {exc}"
         raise RuntimeError(msg) from exc

@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-10-01'
-body_hash: 'sha256:0e5aefad99cf5da8d0045ea93da668776be60b3562f0cfad1f951e6785d4fe24'
+modified: '2026-10-02'
+body_hash: 'sha256:41d8a8ac43eef0d623c09c27b292ae44dcaac3241bdfa52e0edfc478eaf87de7'
 related: []
 ---
 
@@ -780,6 +780,41 @@ Recorded from W07.P14.S48. A fresh worktree carries no `node_modules`, so thirte
 
 Recorded from W08.P15. `type-strict`, `nesting`, `reachability`, `symbols` and `exports` read zero and joined `lint all` (14bfd86, 8a5cea1, facbd89); a probe unused export made the aggregate fail and was reverted. The pre-promotion duplication review found one production clone - migration 0009's downgrade reproducing 0008's upgrade, which Alembic immutability requires - and none of the graduated gates measures shape or duplication. Still burning down outside the aggregate: complexity, cyclomatic, shape, limits and size.
 
+### ci-root-export-consumers | high | fixed and verified
+
+Type: CI correctness. Status: fixed. `dev/quality/unconsumed_export_coverage.py` omitted repository-root Python files, so it called `build_now` unconsumed even though `conftest.py` imports it. The scanner now parses root Python files and a real-tree fixture proves that import counts. `PROJECT_DOTENV` and `PROJECT_MARKERS` had no external consumers and were removed from `settings_base.py`'s declared export list. The export gate reports zero findings across 1,477 published names.
+
+### strict-type-merge-regression | high | fixed and verified
+
+Type: CI blocking and typing. Status: fixed. The merged runner-placement YAML reader and settings singleton introduced 60 strict checker diagnostics, which made both canonical CI and the merge profile red before tests. The reader now validates string-keyed mappings at each YAML boundary, and the settings proxy carries explicit override and materialization types. `just check-all` passes without type suppressions; focused workflow, trust-boundary, and settings tests pass.
+
+### release-lock-hook-environment | high | fixed with hosted proof pending
+
+Type: release automation and setup. Status: fixed locally; hosted lock-refresh proof pending. The release proposal's `git commit` invokes a persisted managed hook whose `prek` binary was absent because that job had only run `uv lock`. The lock-refresh step now calls `just hooks-bootstrap` after validating the diff and before committing. That recipe uses locked `uv sync` directly, so an existing Windows environment is not recreated under an active Python executable. `just hooks-bootstrap`, the `prek` executable probe, release contract tests, and workflow lint pass locally. The latest hosted Release Please success skipped lock refresh, so it does not yet prove this path.
+
+### changelog-version-contract-drift | medium | fixed and verified
+
+Type: test maintenance and CI blocking. Status: fixed. The release contract test required the 0.3.0 heading to be first even after 0.4.0 landed. It now checks the three bootstrapped historical headings as the retained suffix and the current package version as the first heading. The release contract suite passes.
+
+### local-node-version-verification-gap | low | open until matching-host run
+
+Type: verification environment. Status: pending. `just ci` stopped at its pinned Node prerequisite on this Windows workstation, which has 26.10.0 while `.node-version` requires 26.8.1. The subsequent independent `just check-all` and 154-test harness suite passed, as did focused release, trust, scanner, and settings tests. A 5,200-test broad unit selection was stopped before completion after the relevant evidence was obtained. The next hosted run at the changed commit must prove canonical CI and the release lock-refresh path.
+
+### dependabot-trust-gate | info | expected behavior
+
+Type: security policy. Status: accepted behavior. `2026-09-30-release-standard-adr` deliberately withholds self-hosted CI from Dependabot's CONTRIBUTOR-authored pull requests until a collaborator reviews the change and applies `ci:full`. The resulting red required gate is an admission decision, not a setup error. No Dependabot pull request remained open during this pass.
+
+### ci-contract-deployment-parity | low | open follow-up
+
+Type: shared tooling maintenance. Status: queued. `dev/ci_contract.py` describes itself as a deployed copy shared with other repositories. The local YAML type repair and string-key validation pass this repository's trust tests, but the private canonical source was not available in this checkout. Reconcile this implementation with that owner before the next cross-repository deployment.
+
+### claude-cli-binary-identity-setup | high | fixed with hosted proof pending
+
+Type: CI setup and provider identity. Status: fixed locally; hosted Linux proof pending. The full validation unit lane collects real Claude binary-identity tests, while `just init-full` restores the locked adapter but does not put its platform CLI on PATH. A CI-only setup target now finds the one installed `claude-agent-sdk-*` platform binary, verifies its reported Claude Code version is 2.1.207, and appends its directory to `GITHUB_PATH` before canonical CI. It uses the existing npm lock and does not install another CLI or alter the runner's global tools. A real Windows probe found the vendored executable and five identity tests passed; the existing POSIX-only case remained skipped on Windows. The next hosted Linux run must prove the full lane.
+### ci-remediation-review-formatting | low | fixed and verified
+
+Type: review hygiene. Status: fixed. The final implementation review and aggregate check found an extra blank line in the Claude CLI helper and assertion formatting in the workflow contract test. Both were corrected; no remaining implementation finding was observed in the reviewed diff. The CI, release, audit, and environment follow-ups are tracked in the findings above.
+
 ## Recommendations
 
 No open task remains for S01, S02, or the S03 implementation. Preserve the two
@@ -840,3 +875,7 @@ real-filesystem tests, and exact workflow-lint pin as repository-tooling
 regression gates. Repeat canonical `just ci` from a clean commit whenever those
 contracts change. Keep the single Windows skip limited to its existing
 POSIX-permission boundary; do not suppress any portable behavior.
+
+- Preserve the accepted `2026-09-30-release-standard-adr` trust gate: Dependabot remains an untrusted author until a collaborator reviews the change and applies `ci:full`. A red unapproved bot PR is expected, not a setup failure.
+- On the next proposal that changes `uv.lock`, confirm the hosted release job reaches `git commit` with the locked `prek` executable. On the next changed-commit validation, confirm canonical CI passes under the pinned Node release.
+- Reconcile the typed runner-placement reader with the private canonical CI-contract deployment source before the next cross-repository rollout; this repository's tests prove its local behavior only.

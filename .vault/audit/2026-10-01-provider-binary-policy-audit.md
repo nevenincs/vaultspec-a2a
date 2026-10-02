@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:1ab24eb1aeec9f4ed3b7329c146503e13517bc8c78d5b8d340cb97d1c11f2f1a'
+body_hash: 'sha256:88831d87e6a6f244dee8d8d1c83d67e4f7a60aad9be0ce646c929b7d268ba908'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -164,3 +164,6 @@ Fixed in P02.S23. P01.S04's lock-vendored Claude CLI fallback reads the declared
 
 Fixed in P02.S23. The release-please contract test required exactly the three bootstrapped headings even after 0.4.0 was released. It now requires those exact historical headings as the preserved suffix while allowing newer releases to prepend. The focused release and storage-anchor suites pass together (25 tests). Type: stale test contract and CI integration.
 P04.S15 review (2026-10-02): PASS for the declared-channel credential prerequisite and operator example. The prerequisite calls the production auth selector, so a configured token under subscription_login alone is insufficient and an ambient token under oauth_token cannot mask a missing configured token. The example gives editable channel and token settings, explains dotenv-only behavior, and documents successor transcript depth. The stale env-example guard is removed. Twenty-nine focused tests and changed-file checks pass. No new finding was surfaced; shared integrated CI remains pending.
+### claude-auth-prerequisite-used-private-factory-helper | low | strict CI rejected the cross-module seam
+
+Fixed in P04.S24. S15 correctly shared production credential resolution with the Claude test prerequisite but imported a private factory helper, producing one `reportPrivateUsage` diagnostic in the integrated strict type gate. The factory now names that shared interface `claude_auth_env`; served construction, catalog probing and the prerequisite call it. Focused real-child auth and binary admission tests pass, and changed-file strict typing is clean. Type: API visibility and CI integration.

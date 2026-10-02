@@ -261,7 +261,7 @@ def _transport_evidence(discovery: ProviderCatalogDiscovery) -> HealthState:
     return HealthState.UNKNOWN
 
 
-def _claude_auth_env() -> tuple[dict[str, str], str]:
+def claude_auth_env() -> tuple[dict[str, str], str]:
     """Select only the declared Claude credential channel for a child."""
     if settings.claude_auth_channel == "subscription_login":
         return {}, "subscription_login"
@@ -300,7 +300,7 @@ async def _discover_claude_catalog(
             transport=HealthState.UNAVAILABLE,
         )
     try:
-        auth_env, auth_mode = _claude_auth_env()
+        auth_env, auth_mode = claude_auth_env()
     except ProviderRuntimeUnavailableError:
         return _unavailable_catalog_discovery(
             key,
@@ -669,7 +669,7 @@ def _create_claude_model(
         binary_proof_reason(Provider.CLAUDE, str(cli.path), cli.authority)
     )
 
-    env_vars, auth_mode = _claude_auth_env()
+    env_vars, auth_mode = claude_auth_env()
     if backend == "binary":
         env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
     return AcpChatModel(

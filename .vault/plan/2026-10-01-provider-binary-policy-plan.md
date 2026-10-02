@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:13ea60c6aa7d29a288c1b7ad183e171b7aac28284cbf9c90e6a036c70bdbc9ee'
+body_hash: 'sha256:73e12dcc8cb1b22b56ee11f0a80a63a0b96e197914919d39bfc64c6ddcab9d16'
 ---
 
 # `provider-binary-policy` plan
@@ -76,6 +76,7 @@ A new channel setting decides whether the worker injects the headless OAuth toke
 
 - [x] `P04.S14` - Add the claude_auth_channel setting defaulting to subscription_login, inject the configured token into the child as CLAUDE_CODE_OAUTH_TOKEN only under oauth_token, refuse the lane when that value is empty, and record the auth mode the run used; `src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/control/env_registry.py, src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/control/tests/test_settings_sources.py, src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py, src/vaultspec_a2a/providers/tests/test_factory.py, src/vaultspec_a2a/providers/tests/test_claude_live_turn.py`.
 - [x] `P04.S15` - Probe the production credential resolution in the Claude test prerequisite instead of the settings value, and state in the example environment that a dotenv-only token authenticates nothing outside the declared channel; `src/vaultspec_a2a/conftest.py, .env.example, src/vaultspec_a2a/control/tests/_env_example.py, src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`.
+- [x] `P04.S24` - Expose the shared Claude auth resolution used by the test prerequisite as a typed public factory interface; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/conftest.py`.
 
 ### Phase `P05` - Unreachable provider-session resume removed
 

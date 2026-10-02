@@ -177,10 +177,10 @@ def _cli_reports_logged_in(
 
 def _claude_credentialed() -> bool:
     """Whether the production Claude auth channel has a usable credential."""
-    from .providers.factory import ProviderRuntimeUnavailableError, _claude_auth_env
+    from .providers.factory import ProviderRuntimeUnavailableError, claude_auth_env
 
     try:
-        injected, channel = _claude_auth_env()
+        injected, channel = claude_auth_env()
     except ProviderRuntimeUnavailableError:
         return False
     if channel == "oauth_token":

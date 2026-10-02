@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:b32ca7ce27030c632f6edb9e160dc18c6fca104d71d5ea11e04ed361c17a7f76'
+body_hash: 'sha256:acc6eb3cd40a4fc0dfd328200a7ed538fee66ce46e73d48065dd551ebb179707'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -262,6 +262,14 @@ related:
 - `S15` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S15` `verify:` `git diff --check` -> `pass`
 - `S15` `by:` `provider-runtime`
+- `S24` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S24` `M` `src/vaultspec_a2a/conftest.py`
+- `S24` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S24` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S24` `verify:` `focused auth binary and env tests 25 passed` -> `pass`
+- `S24` `verify:` `changed-file basedpyright ruff format ty` -> `pass`
+- `S24` `verify:` `git diff --check` -> `pass`
+- `S24` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -288,3 +296,4 @@ related:
 - `S19` Strict global type gate has remaining checkpoints diagnostics assigned to continuation S17; lane-admission diagnostics fixed in P02.S22. Integrated just ci pending.
 - `S23` Review: low guard classification and medium stale release test fixed; integrated CI remains pending.
 - `S15` S15 review passed with no new finding; shared integrated CI remains pending.
+- `S24` Review: private cross-module helper fixed; no further S24 finding surfaced. Integrated CI pending.

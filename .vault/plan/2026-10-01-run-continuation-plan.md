@@ -12,7 +12,7 @@ related:
   - '[[2026-08-02-clarification-continuation-adr]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:8a28f19b62c6a9eefad3493d462e31c133aab676e3b582c6d6d541a9d683da9d'
+body_hash: 'sha256:7c45718943a73a64b2535205f29cf12be8f3718b5a4eb0669f8886f656a3a825'
 ---
 
 # `run-continuation` plan
@@ -92,7 +92,7 @@ run-start accepts an optional continues_run_id, the successor seeds its graph in
 The R6 contract event is recorded for the dashboard, and the ADR's full verification list runs against a real gateway and worker on both database backends.
 
 - [x] `P06.S16` - Record the R6 contract event for the dashboard: the reachable 202 queued answer, the sixth refusal code queue_full, the queued_messages and continues_run_id disclosures, and the behavioural change that a quiet turn boundary is not completion; `.vault/adr/2026-07-14-a2a-edge-conformance-adr.md`.
-- [ ] `P06.S17` - Certify the whole continuation lifecycle against a real gateway and worker: a continuation queued during a live in-flight turn runs after it with no RECONCILING and no refused terminal, one terminal frame at the second turn's end, the admission-versus-settlement race resolving to exactly one outcome, and a gateway kill between settlement and promotion promoting once on restart; new file src/vaultspec_a2a/service_tests/test_run_continuation_live.py; `src/vaultspec_a2a/service_tests/test_run_continuation_live.py, src/vaultspec_a2a/service_tests/harness.py, src/vaultspec_a2a/service_tests/_state.py`.
+- [x] `P06.S17` - Certify the whole continuation lifecycle against a real gateway and worker: a continuation queued during a live in-flight turn runs after it with no RECONCILING and no refused terminal, one terminal frame at the second turn's end, the admission-versus-settlement race resolving to exactly one outcome, and a gateway kill between settlement and promotion promoting once on restart; new file src/vaultspec_a2a/service_tests/test_run_continuation_live.py; `src/vaultspec_a2a/service_tests/test_run_continuation_live.py, src/vaultspec_a2a/service_tests/harness.py, src/vaultspec_a2a/service_tests/_state.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/tests/test_continuation_settlement_refusal.py, src/vaultspec_a2a/database/checkpoints.py`.
 
 ## Parallelization
 

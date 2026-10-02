@@ -786,9 +786,10 @@ async def _handle_terminal_event(
     because only the settlement below knows whether this terminal ends the
     RUN or only the TURN: a run with a continuation waiting takes the next
     turn instead of ending, and a terminal shown there is a lie a viewer
-    cannot take back. Every other outcome publishes exactly where it always
-    did - in front of the prune, the drain release and the aggregator purge,
-    which is what keeps the frame deliverable at all.
+    cannot take back. A refused terminal also cannot be shown: a delayed
+    first-turn event may arrive after recovery already promoted its successor.
+    Only a settled run publishes, before the prune, drain release and
+    aggregator purge that would otherwise make the frame undeliverable.
     """
     unknown = set(options).difference(_RELAY_OPTIONS)
     if unknown:
@@ -811,22 +812,18 @@ async def _handle_terminal_event(
     )
     terminal_status = _validated_terminal_status(thread_id, payload)
     if terminal_status is None:
-        # Nothing was decided, so nothing is withheld: an unreadable terminal
-        # reaches viewers exactly as it did before this gate existed.
-        _publish_terminal(thread_id, publish)
+        # An unreadable terminal settled nothing and cannot close a stream.
         return
     factory = _session_factory(session_factory)
     disposition = await _accept_terminal_event(
         thread_id, payload, terminal_status, (factory, last_sequence, checkpointer)
     )
-    if disposition is _TerminalDisposition.PROMOTED:
-        # The turn ended, the run did not. The frame is dropped rather than
-        # deferred: it describes a run that is still going, it would take a
-        # number the next turn's frames need, and the replay log would then
-        # hand it to every reconnect for the rest of the run.
+    if disposition is not _TerminalDisposition.SETTLED:
+        # A promoted turn or refused stale event did not end the run. Its
+        # frame takes no number and never enters the replay log.
         return
     _publish_terminal(thread_id, publish)
-    if disposition is not _TerminalDisposition.SETTLED or factory is None:
+    if factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
     if prune_registry is not None:

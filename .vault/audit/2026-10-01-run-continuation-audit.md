@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:deab8de6f6cfd883ca3c549e201e6ced3a6b29c77d7e0c3e7eaa661ff0a74c36'
+body_hash: 'sha256:90e2c035d54f7ccb1ae118870e6c3e7ac2ece429e839dc540dc310117d85741b'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -60,7 +60,7 @@ Recorded from P03.S07. A queued continuation is invisible to `_expire_overdue_ac
 
 ### promotion-proofs-run-on-sqlite-only | low | the promotion suites prove the row locking on SQLite, where it is a no-op
 
-Recorded from P03.S06-S09. S04 and S05 prove both backends; the promotion, recovery, ownership and lifetime suites run on SQLite only, like their sibling recovery suites, so the `FOR UPDATE` locking they rely on is exercised only on PostgreSQL. P06.S17 is the natural home for the PostgreSQL lane.
+Addressed in P06.S17. Type: verification coverage. S04 and S05 proved both backends, while the original promotion and recovery suites ran on SQLite only. S17 now drives queued promotion, replay, completion and gateway restart through real PostgreSQL gateway and worker processes; the PostgreSQL admission-versus-settlement race suite also proves the shared run lock.
 
 ### real-worker-app-harness-needs-a-settings-mutation | low | the real worker app cannot be given its IPC credential without mutating settings
 
@@ -72,7 +72,7 @@ Fixed in P03.S07. Reading the queue made a SELECT the first statement of the set
 
 ### terminal-shown-when-a-continuation-cannot-be-promoted | medium | a refused promotion publishes a terminal on a run that has not ended
 
-Open; raised by the P03.S19 executor. `_promote_queued_continuation` can refuse (unreadable envelope, lost election, refused receipt) and `_confirm_completed_terminal` folds that into `_TerminalDisposition.REFUSED`, which publishes; the run stays RUNNING with an accepted continuation waiting, so viewers see a terminal on a run that neither settled nor ended. It needs a disposition of its own, and it compounds `promotion-refusal-stalls-rather-than-settles`.
+Fixed in P06.S17. `_promote_queued_continuation` can refuse (unreadable envelope, lost election, refused receipt) and `_confirm_completed_terminal` folds that into `_TerminalDisposition.REFUSED`. Previously the relay published that refusal even though the run remained RUNNING with an accepted continuation. The terminal gate now publishes only settled dispositions. The separate promotion-stall issue remains tracked as `promotion-refusal-stalls-rather-than-settles`.
 
 ### settled-cursor-and-stream-ids-are-different-number-spaces | medium | a run's recorded cursor and its stream ids come from different counters
 
@@ -117,6 +117,26 @@ Open. Type: transcript fidelity. `surviving_transcript` projects the retained ch
 ### queued-position-missing-from-r6-event | low | the recorded edge event omitted the served queue position
 
 Fixed in P06.S16. Type: contract drift. The live `202` response includes a one-based `queue_position` so a client can distinguish queue admission from execution; R6's draft event named `action_status` but omitted that field. The amendment now states the served shape and the narrowed `502`/`503` answers.
+
+### refused-terminal-published-after-promotion | high | a stale first-turn terminal closed a live PostgreSQL run
+
+Fixed in P06.S17. Type: behavioral defect. The real PostgreSQL gateway/worker test queued and completed two turns but retained two `thread_terminal` frames. Recovery had already promoted the queued successor when the delayed first-turn terminal arrived, so completion reconciliation returned `lost`; `_handle_terminal_event` treated that refusal as publishable. The terminal gate now publishes only a durable `SETTLED` disposition, and both backends prove a refused terminal emits no frame while a valid final settlement emits one. The real PostgreSQL service test now sees one terminal in the replay log.
+
+### restart-proof-could-miss-the-crash-window | low | an observed second turn alone did not prove restart promoted it
+
+Fixed in P06.S17. Type: test coverage. The first live restart test killed the gateway after a fast mock turn had already been promoted. It still observed two user turns after restart, so it passed without proving recovery owned the queued action. The harness now pauses VidaiMock while the worker retains the first turn, kills the gateway, releases the mock reply, waits for the worker checkpoint, and asserts the continuation journal row is still `queued` with no graph receipt before restart. SQLite and PostgreSQL pass this exact window.
+
+### postgres-scratch-url-preserves-unsupported-sslmode | low | a psycopg test URL fails when converted to asyncpg
+
+Open. Type: test configuration. `database/tests/_backends.py` converts `VAULTSPEC_A2A_TEST_POSTGRES_URL` to an asyncpg SQLAlchemy URL for scratch databases but retains a `sslmode=disable` query argument, which asyncpg rejects as an unexpected `connect()` keyword. The S17 PostgreSQL service lane used the psycopg URL directly and passed; its focused scratch-backend regression passed after the same URL omitted that optional query. Normalize or translate driver-specific query arguments in the scratch backend fixture.
+
+### run-busy-proof-spans-two-real-seams | info | the public continuation verb does not dispatch a second active turn
+
+Accepted in P06.S17. Type: verification boundary. The live service test holds a real worker turn and sends a distinct valid dispatch over loopback HTTP; the worker returns `409 run_busy`, its original action receipt remains exact, the gateway health breaker stays closed, and the accepted run completes after the model is released. This probe goes directly to the worker, so it does not itself exercise gateway dispatch classification. `test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running` supplies that half by driving `redrive_direct_control_actions` against the real worker FastAPI app and asserting the breaker stays closed and the recovery claim remains owned. A public continuation queues without dispatch, and ordinary redelivery uses the same dispatch ID, so a gateway-originated second dispatch to this active run would require synthetic journal or writer mutation. An `applied` journal row can still name an active worker turn; application is not graph completion.
+
+### checkpoint-transcript-added-two-type-diagnostics | medium | S15 transcript guards missed the basedpyright baseline
+
+Fixed in P06.S17. Type: CI regression. Integrated `just ci` found new `reportUnnecessaryIsInstance` and `reportUnknownVariableType` diagnostics in `surviving_transcript`. The first guard tested a checkpoint channel map already declared as `dict[str, Any]`; the list comprehension then iterated values with unknown element type. The runtime guards remain, but the channel map and message list are explicitly narrowed to `object` and checked before typed casts. `just audit-types` now reports 60 advisory diagnostics with none in `database/checkpoints.py`, down from 62; the lineage test and Ruff/Ty checks pass.
 
 ## Recommendations
 

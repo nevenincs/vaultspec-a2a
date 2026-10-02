@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:6ac09f76b9a30c8abeaf6b57d7936f3c7620baff8a7af009300bc274414e5ac0'
+body_hash: 'sha256:68b380ec4c4291ac8ec632bca59479076a2d27241122f4378784c8af46968dfd'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -98,6 +98,9 @@ Open external prerequisite, with served admission withheld in P02.S07 and reenro
 ### codex-proof-citation-mismatched-to-current-run | low | the old citation named a stack acceptance test that was not rerun
 
 Fixed in P02.S07. The original citation named the PW7 document-authoring acceptance run, which requires a gateway and engine stack absent from this proof host. The production-factory `test_codex_live_turn_returns_output` completed a real turn through the catalog's `codex-app-server` mode on resolved Codex 0.159.2, so the lane declaration now cites that test and claims only the work it completed. Type: evidence precision.
+### scoop-shim-target-changes-behind-launcher | medium | caching only the shim EXE would miss a Codex package update
+
+Fixed in P02.S08. The resolved Codex path on the proof host is Scoop's `codex.EXE`, whose file stat predates the installed CLI version; its `.shim` points at the moving `apps/codex/current/bin/codex.exe` target. The version probe's process cache now keys on the shim, sidecar, and resolved target file identities, so replacing the package while the service stays up causes a new `--version` probe. Type: runtime identity and cache invalidation. A real target-change test and a direct probe of the installed launcher pass.
 ## Recommendations
 
 - Rule on the managed-policy tier and correct the claim (`managed-policy-env-reaches-the-child`), done by the ADR amendment and P06.S20.

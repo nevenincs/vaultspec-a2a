@@ -1,5 +1,6 @@
 """Regression coverage for current lane-admission proof declarations."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -16,6 +17,7 @@ from ..lane_admission import (
     _lane_of,
     _require_web_proof_implies_turn_proof,
     is_catalog_lane_admissible,
+    lane_proof_accepts_version,
 )
 from ..provider_catalog import ProviderCatalogKey
 
@@ -90,3 +92,19 @@ def test_only_the_reproved_codex_binary_is_declared_for_external_serving() -> No
         assert not is_catalog_lane_admissible(
             ProviderCatalogKey(provider.value, execution_mode)
         )
+
+
+def test_proof_range_rejects_unproved_and_malformed_versions() -> None:
+    proof = PROVEN_TURN_LANES[Provider.CODEX]
+    assert lane_proof_accepts_version(proof, "0.159.2", "service_path")
+    assert lane_proof_accepts_version(proof, "0.159.3", "service_path")
+    assert not lane_proof_accepts_version(proof, "0.160.0", "service_path")
+    assert not lane_proof_accepts_version(proof, "0.159.1", "service_path")
+    assert lane_proof_accepts_version(proof, "0.159.2", "capsule")
+    assert not lane_proof_accepts_version(proof, "0.159.3", "capsule")
+    assert not lane_proof_accepts_version(proof, "0.159.2-dev", "service_path")
+    assert not lane_proof_accepts_version(proof, "unknown", "service_path")
+    assert not lane_proof_accepts_version(proof, "0.159.2", "unknown")
+    assert not lane_proof_accepts_version(
+        replace(proof, ceiling_exclusive="0.161.0"), "0.159.2", "service_path"
+    )

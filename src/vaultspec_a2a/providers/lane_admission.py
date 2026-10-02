@@ -87,6 +87,7 @@ from typing import TYPE_CHECKING
 
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
+from .binary_version import next_minor_version, parse_binary_version
 from .in_process_catalog import IN_PROCESS_EXECUTION_MODES
 from .provider_catalog import ProviderCatalogKey
 
@@ -104,6 +105,7 @@ __all__ = [
     "catalog_lane_admission_reason",
     "is_catalog_lane_admissible",
     "is_web_lane_proven",
+    "lane_proof_accepts_version",
     "web_tool_names_for",
 ]
 
@@ -127,6 +129,33 @@ class LaneProof:
     proved_version: str
     floor: str
     ceiling_exclusive: str
+
+
+def lane_proof_accepts_version(
+    proof: LaneProof, reported_version: str, authority: str
+) -> bool:
+    """Check a launcher against the completed turn's exact or host PATH range."""
+    proved = parse_binary_version(proof.proved_version)
+    observed = parse_binary_version(reported_version)
+    floor = parse_binary_version(proof.floor)
+    ceiling = parse_binary_version(proof.ceiling_exclusive)
+    if (
+        proved is None
+        or observed is None
+        or floor != proved
+        or ceiling != next_minor_version(proved)
+    ):
+        return False
+    if authority == "service_path":
+        return floor <= observed < ceiling
+    if authority in {
+        "explicit_setting",
+        "capsule",
+        "child_environment",
+        "lock_vendored",
+    }:
+        return observed == proved
+    return False
 
 
 @dataclass(frozen=True, slots=True)

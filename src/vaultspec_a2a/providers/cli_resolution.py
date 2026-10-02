@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +17,8 @@ from ..thread.errors import ConfigError
 __all__ = [
     "CLAUDE_EXECUTABLE_ENV",
     "ClaudeCliResolution",
+    "ProviderRuntimeUnavailableError",
+    "ProviderRuntimeUnavailableReason",
     "pin_claude_executable",
     "resolve_provider_cli_executable",
     "resolve_service_executable",
@@ -35,6 +38,23 @@ ClaudeCliAuthority = Literal[
 class ClaudeCliResolution:
     path: Path
     authority: ClaudeCliAuthority
+
+
+class ProviderRuntimeUnavailableReason(StrEnum):
+    CLAUDE_CLI_UNAVAILABLE = "claude_cli_unavailable"
+
+
+class ProviderRuntimeUnavailableError(ConfigError):
+    """A structurally valid provider lane has no usable runtime asset."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: ProviderRuntimeUnavailableReason | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 _SYSTEM_CLI_NAMES: dict[Provider, str] = {
@@ -146,31 +166,38 @@ def pin_claude_executable(env: dict[str, str]) -> ClaudeCliResolution:
 
     explicit = settings.claude_cli_executable
     capsule_root = settings.capsule_assets_root
-    if explicit is not None:
-        authority: ClaudeCliAuthority = "explicit_setting"
-        candidate = explicit
-    elif capsule_root is not None:
-        authority = "capsule"
-        candidate = capsule_claude_executable(capsule_root)
-    elif inherited := env.get(CLAUDE_EXECUTABLE_ENV):
-        authority = "child_environment"
-        candidate = Path(inherited)
-    elif installed := resolve_provider_cli_executable(Provider.CLAUDE):
-        authority = "service_path"
-        candidate = Path(installed)
-    else:
-        authority = "lock_vendored"
-        candidate = capsule_claude_executable(settings.install_root)
+    try:
+        if explicit is not None:
+            authority: ClaudeCliAuthority = "explicit_setting"
+            candidate = explicit
+        elif capsule_root is not None:
+            authority = "capsule"
+            candidate = capsule_claude_executable(capsule_root)
+        elif inherited := env.get(CLAUDE_EXECUTABLE_ENV):
+            authority = "child_environment"
+            candidate = Path(inherited)
+        elif installed := resolve_provider_cli_executable(Provider.CLAUDE):
+            authority = "service_path"
+            candidate = Path(installed)
+        else:
+            authority = "lock_vendored"
+            candidate = capsule_claude_executable(settings.install_root)
 
-    path = _resolved_cli_file(candidate, authority=authority)
-    if capsule_root is not None and authority == "capsule":
-        try:
-            root = capsule_root.resolve(strict=True)
-        except (OSError, RuntimeError) as exc:
-            raise ConfigError(
-                f"Claude CLI capsule assets root is unavailable: {capsule_root}"
-            ) from exc
-        if not path.is_relative_to(root):
-            raise ConfigError(f"Claude CLI capsule asset escapes its root: {candidate}")
+        path = _resolved_cli_file(candidate, authority=authority)
+        if capsule_root is not None and authority == "capsule":
+            try:
+                root = capsule_root.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise ConfigError(
+                    f"Claude CLI capsule assets root is unavailable: {capsule_root}"
+                ) from exc
+            if not path.is_relative_to(root):
+                raise ConfigError(
+                    f"Claude CLI capsule asset escapes its root: {candidate}"
+                )
+    except ConfigError as exc:
+        raise ProviderRuntimeUnavailableError(
+            str(exc), reason=ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE
+        ) from exc
     env[CLAUDE_EXECUTABLE_ENV] = str(path)
     return ClaudeCliResolution(path=path, authority=authority)

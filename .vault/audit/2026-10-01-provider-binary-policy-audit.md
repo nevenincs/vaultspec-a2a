@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:674ae6deae81a5b2433e7a9c8bb72ca6105b6b44005271d853d9c6a60f770660'
+body_hash: 'sha256:dbceb33027d76f6ce978b14a25f83980333bf34904924fd4c75de54dc41e126d'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -21,6 +21,8 @@ P01.S01 review (2026-10-02): PASS for the capsule CLI path authority and install
 P03.S11 review (2026-10-02): PASS for the additive identity table and write-once repository. The migration upgrades and downgrades on SQLite and PostgreSQL, model/schema parity passes, and an exact retry keeps one row while changed binary evidence is refused without poisoning the transaction. No new review finding was queued.
 
 P01.S03 review (2026-10-02): PASS for the explicit absolute-path setting declaration and operator example. A real settings load accepts an absolute CLI path and refuses a relative one before project-root rebasing; the example-profile, lint, format, and targeted type checks pass. Launch consumption is scheduled by P01.S04. No new review finding was queued.
+
+P01.S05 review (2026-10-02): PASS for typed CLI unavailability at Claude and Z.ai construction, at served-turn environment resolution, and in Claude catalog discovery. The resolver owns the reason; the catalog returns unavailable without spawning a child. The 131 focused identity, factory and compiler tests, changed-file lint, format and type checks pass. Full CI remains a shared integration gate owned by the plan supervisor. The previously queued catalog finding is fixed; no new review finding was raised.
 
 ## Findings
 
@@ -82,7 +84,7 @@ Fixed in P01.S02. The desktop profile previously validated runtime assets only w
 
 ### catalog-missing-cli-propagates-configuration-error | medium | catalog lacks a typed unavailable result for a missing CLI
 
-Open; owned by P01.S05. The P01.S04 resolver now refuses a missing selected binary with ConfigError. The Claude catalog probe catches classifier errors before calling the resolver, but the resolver call itself sits outside that catch in src/vaultspec_a2a/providers/factory.py. A missing CLI can therefore escape discovery instead of returning a typed runtime-unavailable catalog result. Type: error mapping and availability. P01.S05 is already approved to close this seam together with served launch refusal.
+Fixed in P01.S05. A missing selected CLI raises ProviderRuntimeUnavailableError with the typed claude_cli_unavailable reason during construction or served-turn environment resolution. Claude catalog discovery maps the same reason to an unavailable result before spawning ACP. Type: error mapping and availability.
 
 ### catalog-binary-test-was-posix-only | low | catalog pin proof was skipped on Windows
 
@@ -113,4 +115,4 @@ Fixed in P02.S10. The allowlist rationale named the old unpinned command. It now
 - Rule on the managed-policy tier and correct the claim (`managed-policy-env-reaches-the-child`), done by the ADR amendment and P06.S20.
 - Re-run the Claude lane's completed-turn test with working child authentication against the resolved binary (`claude-lane-proof-predates-the-binary`, `claude-current-binary-auth-refused`).
 
-- Map missing Claude CLI resolution to typed catalog and launch unavailability in P01.S05 (catalog-missing-cli-propagates-configuration-error).
+- Keep the typed Claude CLI unavailable reason in the shared resolver when later admission work adds version checks.

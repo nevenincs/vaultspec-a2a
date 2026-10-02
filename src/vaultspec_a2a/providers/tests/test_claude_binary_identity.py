@@ -36,12 +36,14 @@ from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpError
 from ..cli_resolution import (
     CLAUDE_EXECUTABLE_ENV,
+    ProviderRuntimeUnavailableError,
+    ProviderRuntimeUnavailableReason,
     pin_claude_executable,
     resolve_provider_cli_executable,
     resolve_service_executable,
 )
-from ..factory import _discover_claude_catalog
-from ..provider_catalog import ProviderCatalogKey
+from ..factory import ProviderFactory, _discover_claude_catalog
+from ..provider_catalog import CatalogStatus, HealthState, ProviderCatalogKey
 
 if TYPE_CHECKING:
     from .._acp_types import AcpSessionContext
@@ -226,6 +228,74 @@ def test_missing_capsule_cli_never_borrows_an_inherited_path(tmp_path: Path) -> 
         pin_claude_executable(env)
 
     assert env[CLAUDE_EXECUTABLE_ENV] == str(inherited)
+
+
+@pytest.mark.parametrize("provider", (Provider.CLAUDE, Provider.ZAI))
+def test_factory_refuses_a_missing_selected_cli(
+    provider: Provider, tmp_path: Path
+) -> None:
+    """Both ACP lanes refuse construction when their selected CLI is absent."""
+    capsule = tmp_path / "capsule"
+    _capsule_that_dumps_its_environment(capsule, tmp_path / "unused-report")
+    capsule_claude_executable(capsule).unlink()
+    inherited = tmp_path / "inherited-claude"
+    inherited.write_text("host CLI\n", encoding="utf-8")
+
+    with (
+        settings_override(capsule_assets_root=capsule),
+        armed_environment(CLAUDE_CODE_EXECUTABLE=str(inherited)),
+        pytest.raises(ProviderRuntimeUnavailableError) as refusal,
+    ):
+        ProviderFactory().create(provider, model="frozen", workspace_root=tmp_path)
+
+    assert (
+        refusal.value.reason is ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE
+    )
+    assert "capsule path is unavailable" in str(refusal.value)
+
+
+@pytest.mark.asyncio
+async def test_catalog_reports_a_missing_selected_cli_as_unavailable(
+    tmp_path: Path,
+) -> None:
+    """Catalog discovery gives a typed reason without opening an ACP child."""
+    capsule = tmp_path / "capsule"
+    report = tmp_path / "unexpected-child.txt"
+    _capsule_that_dumps_its_environment(capsule, report)
+    capsule_claude_executable(capsule).unlink()
+    key = ProviderCatalogKey(Provider.CLAUDE.value, "claude-agent-acp:node")
+
+    with settings_override(capsule_assets_root=capsule):
+        discovery = await _discover_claude_catalog(key, tmp_path)
+
+    assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
+    assert discovery.catalog.state.reason == (
+        ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE.value
+    )
+    assert discovery.transport is HealthState.UNAVAILABLE
+    assert not report.exists()
+
+
+@pytest.mark.asyncio
+async def test_served_turn_refuses_if_cli_disappears_after_construction(
+    tmp_path: Path,
+) -> None:
+    """The launch checks the same selected file again before spawning ACP."""
+    capsule = tmp_path / "capsule"
+    _capsule_that_dumps_its_environment(capsule, tmp_path / "unused-report")
+
+    with settings_override(capsule_assets_root=capsule):
+        model = ProviderFactory().create(
+            Provider.CLAUDE, model="frozen", workspace_root=tmp_path
+        )
+        assert isinstance(model, AcpChatModel)
+        capsule_claude_executable(capsule).unlink()
+        with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
+            await model._acp_environment()
+
+    assert (
+        refusal.value.reason is ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE
+    )
 
 
 def test_lock_vendored_cli_is_an_explicit_last_rung(tmp_path: Path) -> None:

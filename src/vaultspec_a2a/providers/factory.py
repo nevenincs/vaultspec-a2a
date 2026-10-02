@@ -11,6 +11,7 @@ which provider a command resolves to no longer loads a model stack to answer.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -39,7 +40,10 @@ from ._factory_commands import (
 from .acp_catalog import discover_acp_catalog
 from .antigravity_catalog import discover_antigravity_catalog
 from .antigravity_cli import resolve_antigravity_command
-from .cli_resolution import pin_claude_executable
+from .cli_resolution import (
+    ProviderRuntimeUnavailableError,
+    pin_claude_executable,
+)
 from .codex_catalog import discover_codex_catalog
 from .in_process_catalog import (
     IN_PROCESS_EXECUTION_MODES,
@@ -70,10 +74,6 @@ __all__ = [
 
 class UnsupportedExecutionLaneError(ValueError):
     """A frozen provider/mode pair is outside the current execution inventory."""
-
-
-class ProviderRuntimeUnavailableError(ConfigError):
-    """A structurally valid frozen lane cannot be constructed right now."""
 
 
 def validate_current_execution_lane(provider: Provider, execution_mode: str) -> None:
@@ -214,7 +214,14 @@ async def _discover_claude_catalog(
     # The probe drives the same CLI a served turn will. Unpinned, the adapter
     # falls back to its vendored binary, so the catalog this builds would
     # describe a different Claude from the one the lane then runs.
-    cli_resolution = pin_claude_executable(env)
+    try:
+        cli_resolution = pin_claude_executable(env)
+    except ProviderRuntimeUnavailableError as exc:
+        return _unavailable_catalog_discovery(
+            key,
+            reason=exc.reason.value if exc.reason else str(exc),
+            transport=HealthState.UNAVAILABLE,
+        )
     use_exec = metadata["acp_backend"] == "binary"
     if use_exec:
         env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
@@ -547,6 +554,12 @@ def _create_codex_model(
     )
 
 
+def _require_claude_cli(workspace_root: Path | None) -> None:
+    """Refuse construction before a child can inherit an unpinned CLI."""
+    env = resolve_env_vars(workspace_root) if workspace_root else dict(os.environ)
+    pin_claude_executable(env)
+
+
 def _create_claude_model(
     model_name: str,
     agent_config: AgentConfig | None,
@@ -562,6 +575,7 @@ def _create_claude_model(
         command, command_meta = _classify_acp_command(backend)
     except ConfigError as exc:
         raise ProviderRuntimeUnavailableError(str(exc)) from exc
+    _require_claude_cli(workspace_root)
 
     # The CLI inherits ambient authentication; this lane injects no credential.
     env_vars: dict[str, str] = {}
@@ -607,6 +621,7 @@ def _create_zai_model(
         command, command_meta = _classify_acp_command(backend)
     except ConfigError as exc:
         raise ProviderRuntimeUnavailableError(str(exc)) from exc
+    _require_claude_cli(workspace_root)
     env_vars = _build_zai_env(
         zai_base_url=settings.zai_base_url,
         zai_auth_token=auth_token,

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:240f92aafa9717b095ae875a94ba05c2bdefa151cbfd3e4b9c32e31c217a24a6'
+body_hash: 'sha256:57c4bd8284caf26047b5e76c22bfc679f063f420f1dfb71acce6919c8f663467'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -145,6 +145,16 @@ related:
 - `S10` `verify:` `dev.ci_contract` -> `pass`
 - `S10` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S10` `by:` `vaultspec-standard-executor`
+- `S05` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S05` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S05` `M` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S05` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S05` `verify:` `uv run pytest -q src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py src/vaultspec_a2a/providers/tests/test_factory.py src/vaultspec_a2a/graph/tests/test_compiler.py` -> `pass`
+- `S05` `verify:` `uv run ruff check changed provider files` -> `pass`
+- `S05` `verify:` `uv run ruff format --check changed provider files` -> `pass`
+- `S05` `verify:` `uv run ty check changed provider files` -> `pass`
+- `S05` `verify:` `git diff --check` -> `pass`
+- `S05` `verify:` `vaultspec-core vault check all` -> `pass`
 
 ## Notes
 
@@ -159,3 +169,4 @@ related:
 - `S07` Integrated just ci is assigned to the root branch after parallel steps land.
 - `S08` Integrated just ci is assigned to the root branch after parallel steps land.
 - `S10` Integrated just ci is assigned to the root branch after parallel steps land.
+- `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.

@@ -297,17 +297,25 @@ def derive_state_paths(app_home: Path) -> DesktopStatePaths:
     )
 
 
-def _capsule_asset_paths(capsule_root: Path) -> tuple[Path, Path]:
-    """Return the (Node executable, ACP entry) paths beneath a capsule root.
+def _capsule_asset_paths(capsule_root: Path) -> tuple[Path, Path, Path]:
+    """Return the Node, ACP adapter, and Claude CLI paths beneath a capsule root.
 
     The provider factory owns the installed-runtime asset layout, so its path
     authorities are imported lazily here: the desktop package stays importable
     for the manifest contract without pulling the provider/langchain stack, and
     the asset layout has exactly one definition.
     """
-    from ..providers._factory_commands import capsule_acp_entry, capsule_node_executable
+    from ..providers._factory_commands import (
+        capsule_acp_entry,
+        capsule_claude_executable,
+        capsule_node_executable,
+    )
 
-    return capsule_node_executable(capsule_root), capsule_acp_entry(capsule_root)
+    return (
+        capsule_node_executable(capsule_root),
+        capsule_acp_entry(capsule_root),
+        capsule_claude_executable(capsule_root),
+    )
 
 
 def _validate_capsule_root(capsule_root: Path) -> Path:
@@ -323,14 +331,20 @@ def _validate_capsule_root(capsule_root: Path) -> Path:
             f"desktop capsule root is not a directory: {root}. "
             "Install or repair the desktop capsule before arming the profile."
         )
-    node_executable, acp_entry = _capsule_asset_paths(root)
+    node_executable, acp_entry, claude_executable = _capsule_asset_paths(root)
     for asset, description in (
         (node_executable, "bundled Node.js runtime executable"),
         (acp_entry, "bundled ACP adapter entry point"),
+        (claude_executable, "bundled Claude CLI executable"),
     ):
         if not asset.is_file():
             raise DesktopProfileError(
                 f"desktop capsule root {root} is missing its {description}: {asset}. "
+                "Install or repair the desktop capsule before arming the profile."
+            )
+        if not asset.resolve().is_relative_to(root.resolve()):
+            raise DesktopProfileError(
+                f"desktop capsule {description} escapes its assets root: {asset}. "
                 "Install or repair the desktop capsule before arming the profile."
             )
     return root

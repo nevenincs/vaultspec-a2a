@@ -11,7 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from ...providers._factory_commands import capsule_acp_entry, capsule_node_executable
+from ...providers._factory_commands import (
+    capsule_acp_entry,
+    capsule_claude_executable,
+    capsule_node_executable,
+)
 from .._platform_acl import windows_file_is_restricted
 from ..profile import (
     DesktopProfile,
@@ -24,12 +28,17 @@ from ..profile import (
 def _build_capsule(root: Path) -> Path:
     """Materialise a minimal but real capsule tree at ``root``.
 
-    Writes the two runtime assets the provider factory resolves — the bundled
-    Node executable and the ACP adapter entry — at their production-owned paths.
+    Writes the three runtime assets the provider factory resolves at their
+    production-owned paths.
     """
     node = capsule_node_executable(root)
     acp = capsule_acp_entry(root)
-    for asset, content in ((node, "node runtime\n"), (acp, "// acp entry\n")):
+    claude = capsule_claude_executable(root)
+    for asset, content in (
+        (node, "node runtime\n"),
+        (acp, "// acp entry\n"),
+        (claude, "claude runtime\n"),
+    ):
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_text(content, encoding="utf-8")
     return root
@@ -116,6 +125,36 @@ def test_resolve_rejects_capsule_missing_acp_entry(tmp_path: Path) -> None:
     node.parent.mkdir(parents=True, exist_ok=True)
     node.write_text("node runtime\n", encoding="utf-8")
     with pytest.raises(DesktopProfileError, match="ACP adapter entry point"):
+        DesktopProfile.resolve(tmp_path / "app", capsule)
+
+
+def test_resolve_rejects_capsule_missing_claude_cli(tmp_path: Path) -> None:
+    """A capsule cannot arm without its own Claude CLI binary."""
+    capsule = tmp_path / "capsule"
+    for asset, content in (
+        (capsule_node_executable(capsule), "node runtime\n"),
+        (capsule_acp_entry(capsule), "// acp entry\n"),
+    ):
+        asset.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_text(content, encoding="utf-8")
+
+    with pytest.raises(DesktopProfileError) as caught:
+        DesktopProfile.resolve(tmp_path / "app", capsule)
+
+    assert "bundled Claude CLI executable" in str(caught.value)
+    assert str(capsule_claude_executable(capsule)) in str(caught.value)
+
+
+def test_resolve_rejects_claude_cli_symlink_outside_capsule(tmp_path: Path) -> None:
+    """An externally owned CLI cannot satisfy capsule validation."""
+    capsule = _build_capsule(tmp_path / "capsule")
+    cli = capsule_claude_executable(capsule)
+    cli.unlink()
+    outside = tmp_path / "outside-claude"
+    outside.write_text("host cli\n", encoding="utf-8")
+    cli.symlink_to(outside)
+
+    with pytest.raises(DesktopProfileError, match="escapes its assets root"):
         DesktopProfile.resolve(tmp_path / "app", capsule)
 
 

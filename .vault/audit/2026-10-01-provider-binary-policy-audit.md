@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:47e49e8f3daabe081da8f7231e8afe871b60ef59236eda1556454d7890d01189'
+body_hash: 'sha256:1e3a80ebdbabd3daf11418492959cf503eac294eb194116c8c5d37ce91f2c0f7'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -71,6 +71,10 @@ Fixed in P05.S16. After removing AcpChatModel.session_id, the owned-process-tree
 ### ownership-test-used-absolute-import | low | new test violated the relative-import guard
 
 Fixed in P05.S16. The new model-field assertion initially imported the provider with an absolute intra-package path. The repository guard found it; the test now imports the production model relatively. Type: test convention.
+
+### capsule-cli-symlink-escaped-root | medium | desktop arming could accept an externally owned CLI
+
+Fixed in P01.S02. The desktop profile previously validated runtime assets only with is_file(), which follows a symlink outside the capsule. Adding the Claude CLI as a third asset would have admitted a host-owned binary through that path. The profile now resolves each of the three assets against the resolved capsule root and refuses an escape; a real symlink test proves the refusal. Type: runtime authority and asset containment.
 
 ## Recommendations
 

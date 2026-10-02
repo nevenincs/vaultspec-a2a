@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:5874ddabc5f6bab415159d85565a58f397e780933b3e1f66d6b357e780351f2c'
+body_hash: 'sha256:23ab0901625483c6457d35e5e0c8677e98034641da2d69a4666b1a851347c4fc'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -19,6 +19,8 @@ Findings raised while executing P01.S17 of `2026-10-01-provider-binary-policy-pl
 P01.S01 review (2026-10-02): PASS for the capsule CLI path authority and installed-binary version probe. The path stays under the capsule npm closure, uses the ACP adapter platform and libc preference order, and the focused real-binary test, lint, format, and targeted type check pass. No new review finding was queued.
 
 P03.S11 review (2026-10-02): PASS for the additive identity table and write-once repository. The migration upgrades and downgrades on SQLite and PostgreSQL, model/schema parity passes, and an exact retry keeps one row while changed binary evidence is refused without poisoning the transaction. No new review finding was queued.
+
+P01.S03 review (2026-10-02): PASS for the explicit absolute-path setting declaration and operator example. A real settings load accepts an absolute CLI path and refuses a relative one before project-root rebasing; the example-profile, lint, format, and targeted type checks pass. Launch consumption is scheduled by P01.S04. No new review finding was queued.
 
 ## Findings
 

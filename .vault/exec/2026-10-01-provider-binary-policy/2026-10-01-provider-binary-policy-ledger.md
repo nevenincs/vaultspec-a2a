@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:504bf88abff72a44bddbea0a42779811e6693ca3ae361fceca4c5a7bbe5e3394'
+body_hash: 'sha256:f75da72e7f0e0b0a46af3e1001d0210edcf2194d69e98d99c90d29d23bf570bf'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -91,6 +91,17 @@ related:
 - `S11` `verify:` `dual-backend runtime identity migration/repository pytest` -> `pass`
 - `S11` `verify:` `SQLite schema parity pytest 66 passed` -> `pass`
 - `S11` `verify:` `Ruff lint and format plus Ty targeted` -> `pass`
+- `S03` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S03` `M` `src/vaultspec_a2a/control/config.py`
+- `S03` `M` `.env.example`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_settings_sources.py`
+- `S03` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S03` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S03` `verify:` `pytest settings sources and env example` -> `pass`
+- `S03` `verify:` `ruff settings files` -> `pass`
+- `S03` `verify:` `ty settings files` -> `pass`
+- `S03` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S03` `verify:` `just ci` -> `fail`
 
 ## Notes
 
@@ -99,3 +110,4 @@ related:
 - `S01` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; this Step changes neither.
 - `S02` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
 - `S11` PostgreSQL proof used an isolated Compose project and its exact ephemeral volume was removed after the tests.
+- `S03` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.

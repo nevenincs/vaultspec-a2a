@@ -28,6 +28,7 @@ from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import ResumePosition, replay_window
 from ._sse_reader import SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
+from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 from .test_stream_resume_replay import _progress_event, _relay, _terminal_event
 
 if TYPE_CHECKING:
@@ -209,7 +210,10 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
     and closes on the terminal like any other.
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
-    await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
+    async with session_factory() as session:
+        _, receipt = await _seed_accepted_thread(session, thread_id=_RUN)
+        await session.commit()
+    await _record_completed_checkpoint(checkpointer, receipt)
 
     async with (
         _live_server(app) as base,

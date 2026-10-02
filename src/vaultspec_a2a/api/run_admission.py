@@ -136,7 +136,12 @@ def _digest(body: RunStartRequest, excluded: frozenset[str]) -> str:
     Serialisation is canonical - keys sorted, separators fixed - so the digest
     depends on the values rather than on dictionary ordering or formatting.
     """
-    payload = body.model_dump(mode="json", exclude=set(excluded))
+    omitted = set(excluded)
+    # This optional field was added after fingerprints were persisted. Its
+    # absent value must retain the exact bytes of those older requests.
+    if body.continues_run_id is None:
+        omitted.add("continues_run_id")
+    payload = body.model_dump(mode="json", exclude=omitted)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

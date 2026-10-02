@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:3aaefab29dd8c853ae233c523b4f2ef63bae6419d336f3715fbd09d7bb0978e1'
+body_hash: 'sha256:bb8bf525ade8a4e590e982476d046282f80674eaf840cad8b698a6c27dfdd4ae'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -173,6 +173,16 @@ related:
 - `S17` `verify:` `pytest -m service real worker run_busy PostgreSQL --require-prerequisite=docker --require-prerequisite=postgres` -> `pass`
 - `S17` `verify:` `pytest lineage SQLite` -> `pass`
 - `S17` `verify:` `just audit-types: 60 advisory diagnostics, none in database/checkpoints.py` -> `pass`
+- `S20` `M` `src/vaultspec_a2a/api/run_admission.py`
+- `S20` `M` `src/vaultspec_a2a/api/tests/test_run_start_digest.py`
+- `S20` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_gap.py`
+- `S20` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_replay.py`
+- `S20` `verify:` `uv run --no-sync python -m pytest -q [8 relevant API modules] --tb=line --show-capture=no` -> `pass`
+- `S20` `verify:` `uv run --no-sync ruff check [4 touched Python]` -> `pass`
+- `S20` `verify:` `uv run --no-sync ruff format --check [4 touched Python]` -> `pass`
+- `S20` `verify:` `uv run --no-sync ty check [4 touched Python]` -> `pass`
+- `S20` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S20` `by:` `vaultspec-standard-executor`
 
 ## Notes
 
@@ -191,3 +201,4 @@ related:
 - `S13` Scope correction: `queued_messages` joins the snapshot in control/projection.py, where durable state reaches it, not control/snapshot.py; it is declared on both snapshot types the parity guard holds equal.
 - `S16` The R6 amendment already existed; this Step reconciled it with the served `queue_position` and narrowed dispatch-time answers.
 - `S17` Real worker 409 is exercised over loopback; gateway breaker and claim classification is supplied by `test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running` because public continuation admission queues and ordinary redelivery reuses the dispatch ID.
+- `S20` 64 focused SQLite/API tests passed; one existing PostgreSQL live proof was withheld by the optional prerequisite and is unchanged by this Step. Review PASS; three findings recorded in rolling audit, including an open low SQLite test connection warning.

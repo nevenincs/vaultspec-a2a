@@ -12,7 +12,7 @@ related:
   - '[[2026-08-02-clarification-continuation-adr]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:7c45718943a73a64b2535205f29cf12be8f3718b5a4eb0669f8886f656a3a825'
+body_hash: 'sha256:39b2a9418733b154b9012ea0d7dc38352400d27cad035e1f0d11fd2d1dd5cb25'
 ---
 
 # `run-continuation` plan
@@ -93,6 +93,7 @@ The R6 contract event is recorded for the dashboard, and the ADR's full verifica
 
 - [x] `P06.S16` - Record the R6 contract event for the dashboard: the reachable 202 queued answer, the sixth refusal code queue_full, the queued_messages and continues_run_id disclosures, and the behavioural change that a quiet turn boundary is not completion; `.vault/adr/2026-07-14-a2a-edge-conformance-adr.md`.
 - [x] `P06.S17` - Certify the whole continuation lifecycle against a real gateway and worker: a continuation queued during a live in-flight turn runs after it with no RECONCILING and no refused terminal, one terminal frame at the second turn's end, the admission-versus-settlement race resolving to exactly one outcome, and a gateway kill between settlement and promotion promoting once on restart; new file src/vaultspec_a2a/service_tests/test_run_continuation_live.py; `src/vaultspec_a2a/service_tests/test_run_continuation_live.py, src/vaultspec_a2a/service_tests/harness.py, src/vaultspec_a2a/service_tests/_state.py, src/vaultspec_a2a/control/event_handlers.py, src/vaultspec_a2a/control/tests/test_continuation_settlement_refusal.py, src/vaultspec_a2a/database/checkpoints.py`.
+- [x] `P06.S20` - Repair integrated continuation digest and stream proofs: preserve prior digests for requests with no predecessor, classify a non-null predecessor as work identity, and seed valid accepted-action completion evidence in live terminal stream tests; `src/vaultspec_a2a/api/run_admission.py, src/vaultspec_a2a/api/tests/test_run_start_digest.py, src/vaultspec_a2a/api/tests/test_stream_resume_gap.py, src/vaultspec_a2a/api/tests/test_stream_resume_replay.py`.
 
 ## Parallelization
 
@@ -100,7 +101,7 @@ Three executors may run at once in the first group, each in its own git worktree
 
 Two files cross those boundaries and are serialized rather than owned. `src/vaultspec_a2a/api/schemas/gateway.py` is appended to by owners B and C and later by P04; each adds only its own fields and the orchestrator merges. `openapi.json` is generated, never hand-edited: each executor regenerates it inside its own Step with `uv run --no-sync python -m vaultspec_a2a.api.tests.test_openapi_artifact`, and the orchestrator re-runs that one command after every merge so the artifact matches the merged application. `src/vaultspec_a2a/domain_config.py` is appended to by P02.S05, P03.S09 and P05.S15; the same merge rule applies.
 
-Everything after that group is strictly ordered and single-owner. P02 runs after the first group merges, and its two Steps are sequential because `P02.S05` queries the columns `P02.S04` adds. P03 runs after P02, one owner, Steps in order: `P03.S07` and `P03.S08` both write `src/vaultspec_a2a/control/recovery_authority.py`, and `P03.S09` writes the handler `P03.S06` changes. P04 runs after P03 and never before it, because an admitted continuation with no promotion path would be accepted work behind a settled run; its four Steps are one owner, in order, since `P04.S10`, `P04.S11` and `P04.S12` all write `src/vaultspec_a2a/control/message_service.py`. `P06.S16` may be drafted while P04 runs but is committed only once P04 and P05 are merged, so no record advertises a capability the service does not yet serve. `P06.S17` is last and single-owner.
+Everything after that group is strictly ordered and single-owner. P02 runs after the first group merges, and its two Steps are sequential because `P02.S05` queries the columns `P02.S04` adds. P03 runs after P02, one owner, Steps in order: `P03.S07` and `P03.S08` both write `src/vaultspec_a2a/control/recovery_authority.py`, and `P03.S09` writes the handler `P03.S06` changes. P04 runs after P03 and never before it, because an admitted continuation with no promotion path would be accepted work behind a settled run; its four Steps are one owner, in order, since `P04.S10`, `P04.S11` and `P04.S12` all write `src/vaultspec_a2a/control/message_service.py`. `P06.S16` may be drafted while P04 runs but is committed only once P04 and P05 are merged, so no record advertises a capability the service does not yet serve. `P06.S17` is the final lifecycle proof and single-owner. `P06.S20` follows the integrated CI run and repairs digest compatibility and stream-proof fixtures in one Step.
 
 Executors commit one Step per commit, and do not write `.vault/`. The orchestrator logs rows, closes Steps and merges. `P06.S16` is the one Step whose scope is a vault record; it belongs to the orchestrator, not to a code executor.
 

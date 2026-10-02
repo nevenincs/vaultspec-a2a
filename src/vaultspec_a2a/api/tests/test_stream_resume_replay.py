@@ -26,6 +26,7 @@ from ...thread.enums import ThreadStatus
 from .._stream_replay import retained_after
 from ._sse_reader import SseFrame, SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
+from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -92,7 +93,10 @@ async def test_a_reconnect_covers_every_sequence_to_the_terminal_exactly_once(
     emitted; without it the resume would deliver the same frames twice.
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
-    await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
+    async with session_factory() as session:
+        _, receipt = await _seed_accepted_thread(session, thread_id=_RUN)
+        await session.commit()
+    await _record_completed_checkpoint(checkpointer, receipt)
 
     async with (
         _live_server(app) as base,

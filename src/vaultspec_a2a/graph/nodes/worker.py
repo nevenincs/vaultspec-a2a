@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from ...providers._acp_authoring import AuthoringToolBinding
     from ...thread.state import TeamState
     from ...worker.authoring_binding import AuthoringBindingProvider
-    from ..protocols import CostPort, TaskQueuePort
+    from ..protocols import CostPort, RuntimeIdentityPort, TaskQueuePort
     from .vault_reader import ContextMounter
 
 _logger = logging.getLogger(__name__)
@@ -714,6 +714,7 @@ class _WorkerNodeOptions(TypedDict, total=False):
     cost_port: CostPort | None
     context_mounter: ContextMounter | None
     joins_research_findings: bool
+    runtime_identity_port: RuntimeIdentityPort | None
 
 
 class _WorkerNodeSettings(TypedDict):
@@ -729,6 +730,7 @@ class _WorkerNodeSettings(TypedDict):
     cost_port: CostPort | None
     context_mounter: ContextMounter | None
     joins_research_findings: bool
+    runtime_identity_port: RuntimeIdentityPort | None
 
 
 def _bind_worker_node_settings(
@@ -750,6 +752,7 @@ def _bind_worker_node_settings(
         "cost_port": None,
         "context_mounter": None,
         "joins_research_findings": False,
+        "runtime_identity_port": None,
     }
     for index, value in enumerate(args):
         name = names[index]
@@ -787,6 +790,8 @@ def create_worker_node(
         cost_port:         Optional database-backed token-accounting port; when
                            present, each turn that reports usage persists one
                            ``cost_tracking`` row for the running thread.
+        runtime_identity_port: Optional write-once runtime evidence port,
+                           forwarded for provider initialization recording.
         authoring_binding_provider: Optional per-run builder of the engine's
                            bridged authoring binding; when present, each invocation
                            resolves this role's binding for the running thread and,

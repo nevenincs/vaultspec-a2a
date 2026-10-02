@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from ..authoring import FeedbackContextReader
     from .nodes.worker import WorkerNode
-    from .protocols import CostPort, ProviderFactoryProtocol
+    from .protocols import CostPort, ProviderFactoryProtocol, RuntimeIdentityPort
     from .run_context import RunContext
 
 from langgraph.graph import START, StateGraph
@@ -100,6 +100,7 @@ class _CompileResearchAdrOptions(
     feedback_reader: FeedbackContextReader | None
     frozen_assignment: dict[str, dict[str, Any]] | None
     cost_port: CostPort | None
+    runtime_identity_port: RuntimeIdentityPort | None
 
 
 def _clarification_request_id(thread_id: str) -> str:
@@ -524,6 +525,7 @@ def _compile_research_adr(
             role="synthesist",
             harness_mcp_servers=harness_mcp_servers,
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
             # This node IS the fan-out's join point, so every branch's finding
             # reaches its prompt. The branches write findings and nothing else,
             # so without this the stage synthesises research it never saw.
@@ -550,6 +552,7 @@ def _compile_research_adr(
                 role="doc-reviewer",
                 harness_mcp_servers=harness_mcp_servers,
                 cost_port=options.get("cost_port"),
+                runtime_identity_port=options.get("runtime_identity_port"),
             ),
             PipelinePhase.RESEARCH.value,
         ),
@@ -573,6 +576,7 @@ def _compile_research_adr(
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=options.get("feedback_reader"),
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
         ),
         metadata=adr_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -592,6 +596,7 @@ def _compile_research_adr(
                 role="doc-reviewer",
                 harness_mcp_servers=harness_mcp_servers,
                 cost_port=options.get("cost_port"),
+                runtime_identity_port=options.get("runtime_identity_port"),
             ),
             PipelinePhase.ADR.value,
         ),
@@ -615,6 +620,7 @@ def _compile_research_adr(
             # reviewer's batch when a revision run carries a feedback_batch_id.
             feedback_reader=options.get("feedback_reader"),
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
         ),
         metadata=plan_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
@@ -634,6 +640,7 @@ def _compile_research_adr(
                 role="doc-reviewer",
                 harness_mcp_servers=harness_mcp_servers,
                 cost_port=options.get("cost_port"),
+                runtime_identity_port=options.get("runtime_identity_port"),
             ),
             PipelinePhase.PLAN.value,
         ),

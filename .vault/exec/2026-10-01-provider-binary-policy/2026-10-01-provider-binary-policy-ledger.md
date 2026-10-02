@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:b090427f20fd0989f2ccdb3715d122ceefd68d962e57ca068d4d9f9a40aa384e'
+body_hash: 'sha256:6bb7b68c278ed7198aef7198443c15c62574082b7e4c3bf43c2ffac275d4e18f'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -178,6 +178,24 @@ related:
 - `S09` `verify:` `changed-file-ruff-ty-basedpyright` -> `pass`
 - `S09` `verify:` `vault-check-all` -> `pass`
 - `S09` `by:` `vaultspec-high-executor`
+- `S12` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S12` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S12` `M` `src/vaultspec_a2a/graph/protocols.py`
+- `S12` `A` `src/vaultspec_a2a/worker/runtime_identity_port.py`
+- `S12` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S12` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S12` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S12` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S12` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S12` `A` `src/vaultspec_a2a/worker/tests/test_runtime_identity_port.py`
+- `S12` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S12` `M` `src/vaultspec_a2a/graph/tests/test_research_adr.py`
+- `S12` `verify:` `focused pytest: SQL port, nonresearch compile, research compile` -> `pass`
+- `S12` `verify:` `ruff check and format (10 owned Python files)` -> `pass`
+- `S12` `verify:` `ty check (10 owned Python files)` -> `pass`
+- `S12` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S12` `verify:` `git diff --check` -> `pass`
+- `S12` `by:` `provider-proof`
 
 ## Notes
 
@@ -195,3 +213,5 @@ related:
 - `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.
 - `S06` Full just ci and ci-merge remain shared integration gates with the plan supervisor; no provider credentials are available for a completed model turn on this host.
 - `S09` Formal review classified and queued the version drift, catalog wording, malformed plan row, and residual filesystem race.
+- `S12` Integrated just ci deferred to root after S13 and other serial steps; focused checks cover this isolated Step.
+- `S12` Review: fixed low plan-scope gap in S12; queued medium research fan-out identity seam for S13 in audit.

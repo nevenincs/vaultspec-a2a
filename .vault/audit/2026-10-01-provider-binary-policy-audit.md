@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:b0035583171d0ba9c02fb294bdf73dee709b3fdb56305f1f1e320f4d0f2b3628'
+body_hash: 'sha256:2218ff2a264ba70853fdc267d9383663abf686eb498101131cfddc601ada4d71'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -134,3 +134,10 @@ Fixed in P02.S09. A prior manual conflict resolution dropped the Markdown code s
 ### launcher-replacement-between-final-probe-and-spawn | low | filesystem race remains at process creation
 
 Open for later runtime hardening. P02.S09 verifies the launcher's identity immediately before child spawn, but the filesystem can replace that path in the interval between the probe and the operating system's process creation. No exploit or observed production incident is established; a descriptor-bound process launch would be needed to eliminate the race completely. Type: residual runtime identity race.
+### runtime-identity-compile-scope-gap | low | the approved Step omitted compiler forwarding sites
+
+Fixed in P03.S12. The public compiler delegates worker construction to `_compiler_topologies.py` and `_compiler_research.py`, and `create_worker_node` binds a fixed set of options. A port added only to the four originally named S12 files would not reach compiled workers. Core expanded S12's scope to the two topology modules and the worker binder before implementation. Type: plan scope and dependency injection coverage.
+
+### research-branch-identity-seam | medium | research fan-out bypasses the worker node binder
+
+Open; owned by P03.S13. Research branch models are invoked by `_make_research_producer` through `create_researcher_node`, while S12's port reaches the six research document workers through `create_worker_node`. A provider used only by a fan-out branch would receive no identity row if S13 records solely in the worker node. S13 must capture that initialize path too. Type: topology coverage and runtime evidence.

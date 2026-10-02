@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
     from ..protocols import ProviderFactoryProtocol
 
+from ...database.tests._backends import migrated_session_factory
 from ...graph.enums import Provider
 from ...providers import AcpPromptError, ProviderCondition
 from ...providers._codex_protocol import _turn_failure
@@ -43,6 +44,7 @@ from ...thread.errors import (
     WorkerExecutionError,
 )
 from ...thread.state import TeamState
+from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
 from .._compiler_research import _make_research_producer
 from .._compiler_retry import (
     _NODE_RETRY_POLICY,
@@ -124,8 +126,9 @@ async def test_compile_graph_structure(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
     case: tuple[str, str, set[str], bool],
+    tmp_path: Path,
 ) -> None:
-    """Compiled graph has the correct node set and empty interrupt_before."""
+    """A non-research graph compiles with the concrete runtime identity port."""
     preset, topology, expected_workers, has_supervisor = case
     team = load_team_config(preset)
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
@@ -133,14 +136,16 @@ async def test_compile_graph_structure(
         load_agent_config("vaultspec-supervisor") if has_supervisor else None
     )
 
-    graph = compile_team_graph(
-        team_config=team,
-        agent_configs=agent_configs,
-        checkpointer=checkpointer,
-        supervisor_agent_config=supervisor_cfg,
-        provider_factory=pf,
-        model_assignment=deterministic_model_assignment(team),
-    )
+    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=checkpointer,
+            supervisor_agent_config=supervisor_cfg,
+            provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
+            runtime_identity_port=SqlRuntimeIdentityPort(factory),
+        )
 
     assert team.topology.type == topology
 

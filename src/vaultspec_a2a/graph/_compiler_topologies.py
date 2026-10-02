@@ -20,7 +20,12 @@ if TYPE_CHECKING:
 
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.worker import WorkerNode
-    from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
+    from .protocols import (
+        CostPort,
+        ProviderFactoryProtocol,
+        RuntimeIdentityPort,
+        TaskQueuePort,
+    )
     from .run_context import RunContext
 
 from langgraph.graph import START, StateGraph
@@ -136,6 +141,7 @@ class _TopologyOptional(TypedDict, total=False):
     feature_tag: str | None
     task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
+    runtime_identity_port: RuntimeIdentityPort | None
     authoring_binding_provider: AuthoringBindingProvider | None
     frozen_assignment: dict[str, dict[str, Any]] | None
 
@@ -206,6 +212,7 @@ def _compile_star(
             feature_tag=options.get("feature_tag"),
             task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         _add_node(
@@ -337,6 +344,7 @@ def _compile_pipeline(
             feature_tag=options.get("feature_tag"),
             task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         # Insert mount node between pipeline stages.
@@ -489,6 +497,7 @@ def _compile_pipeline_loop(
             feature_tag=options.get("feature_tag"),
             task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         if agent_id == loop_node_id:

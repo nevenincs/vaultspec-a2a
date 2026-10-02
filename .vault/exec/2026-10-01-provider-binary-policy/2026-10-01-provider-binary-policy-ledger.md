@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:6d39a2638ebc03f131c8a0784aa7d846b11b17918e24320931b6712b82392d81'
+body_hash: 'sha256:7626c8a30b5218b82447af78d34c340c3494bf291c1215c6b28256eb124c2b93'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -74,6 +74,18 @@ related:
 - `S07` `verify:` `ty check on S07 files` -> `pass`
 - `S07` `verify:` `real ProviderCatalogService admission probe` -> `pass`
 - `S07` `by:` `vaultspec-standard-executor`
+- `S08` `A` `src/vaultspec_a2a/providers/binary_version.py`
+- `S08` `M` `src/vaultspec_a2a/providers/lane_admission.py`
+- `S08` `A` `src/vaultspec_a2a/providers/tests/test_binary_version.py`
+- `S08` `M` `src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`
+- `S08` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S08` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S08` `verify:` `real launcher and lane range pytest: 14 tests` -> `pass`
+- `S08` `verify:` `direct installed Claude and Codex version probes` -> `pass`
+- `S08` `verify:` `ruff check and format on S08 files` -> `pass`
+- `S08` `verify:` `ty check on S08 files` -> `pass`
+- `S08` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S08` `by:` `vaultspec-standard-executor`
 
 ## Notes
 
@@ -81,3 +93,4 @@ related:
 - `S16` just ci remains red on base 78f3a89f: 44 strict type diagnostics in `dev/ci_contract.py,` 16 in `control/settings_base.py,` and three unconsumed exports in `settings_base.py;` assigned to main integration owner. Changed-file checks and targeted real-behavior tests pass.
 - `S07` Claude prompt returned Authentication required; Z.ai credential absent, so both lanes are withheld until P02.S21.
 - `S07` Integrated just ci is assigned to the root branch after parallel steps land.
+- `S08` Integrated just ci is assigned to the root branch after parallel steps land.

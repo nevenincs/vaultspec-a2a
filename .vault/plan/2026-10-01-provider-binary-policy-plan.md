@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:5c9b3abf94e5fa41d28951d90447c247cd8128fc8cdf0f429769727a90f7d0e7'
+body_hash: 'sha256:ae8a292576853f018dff7ae2b8ded5852d0d0fa28f5f383bcf3493dfbfe3f7a9'
 ---
 
 # `provider-binary-policy` plan
@@ -55,7 +55,7 @@ Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer i
 A lane proof declares the binary identity and version range it covers, and a resolved binary outside that range makes the lane ineligible with a typed reason that presets-list and launch both read.
 
 - [x] `P02.S07` - Declare the LaneProof binary identity and proved version range, record Codex 0.159.2 from its completed direct app-server turn, and withdraw Claude and Z.ai admission until their current binaries complete live turns; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`.
-- [ ] `P02.S08` - Add a binary version probe that reads a resolved launcher's reported version once per launch identity, memoized per process, and derive the admitted range as exact equality for the pinned rungs and floor to next minor for the host PATH rung; `src/vaultspec_a2a/providers/binary_version.py, src/vaultspec_a2a/providers/lane_admission.py`.
+- [x] `P02.S08` - Add a binary version probe that reads a resolved launcher's reported version once per launch identity, memoized per process, and derive the admitted range as exact equality for the pinned rungs and floor to next minor for the host PATH rung; `src/vaultspec_a2a/providers/binary_version.py, src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/test_binary_version.py, src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`.
 - [ ] `P02.S09` - Make an out-of-range resolved binary a typed lane ineligibility so presets-list omits the lane and provider construction refuses it; `src/vaultspec_a2a/providers/provider_catalog_service.py, src/vaultspec_a2a/providers/factory.py`.
 - [ ] `P02.S10` - Pin the CI Codex install to its proved exact version 0.159.2 and verify npm signatures before provider prerequisite gates; `.github/workflows/test.yml`.
 - [ ] `P02.S21` - Re-enroll Claude and Z.ai with hand-recorded binary versions and ranges only after their cited live turns complete on the resolved launchers; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/`.

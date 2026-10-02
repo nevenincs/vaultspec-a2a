@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:d770427ef0ae127e5b2bfa9b2a70fa83bf33a45cad67e73f1429057aef00dd0d'
+body_hash: 'sha256:9b12b63da87cd0f8396b7cb03e2dde6762640b541db7d741ce0a85f096039b8f'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -27,6 +27,9 @@ P01.S05 review (2026-10-02): PASS for typed CLI unavailability at Claude and Z.a
 P01.S06 review (2026-10-02): PASS for the Compose worker image's exact Claude CLI 2.1.284 install and explicit absolute service setting. The CLI stage and complete worker image build, the CLI reports 2.1.284 as agentuser, the image's resolver selects /usr/local/bin/claude as explicit_setting, and Compose config parses. No new review finding was raised.
 
 P01 integrated review (2026-10-02): PENDING shared integration gates. S01-S06 jointly give one profile-scoped CLI resolution, refuse a missing selected asset before ACP spawn, and name an exact Compose binary. Focused behavior, type, lint, image and Compose checks pass. The plan supervisor owns just ci and ci-merge on the integrated branch, which also carries baseline CI fixes. No new code finding was raised.
+
+P06.S19 review (2026-10-02): PENDING shared integration gate; the scoped implementation passes review. The pinned adapter's eighteen update kinds either reach existing handlers, explicit kind-only logging, or a bounded future-kind fallback. Logs omit provider payloads, and context occupancy stays separate from S18's terminal per-model accounting. The 26 focused tests, Ruff, Ty, and Core checks pass. Four S18 strict type diagnostics in the owned protocol module are fixed; five remaining global diagnostics are in root-owned files. The two fixed findings are classified below.
+
 ## Findings
 
 ### root-session-armed-skip-permissions | critical | a root host with IS_SANDBOX set could open no Claude session
@@ -51,7 +54,11 @@ Open, owned by P03.S23 of `2026-10-01-tool-permission-model-plan`. Since SDK 0.3
 
 ### session-updates-dropped-silently | medium | three session update kinds that reach this lane are dropped with no log
 
-Open, owned by P06.S19. The adapter emits eighteen update kinds; `usage_update`, `config_option_update` and `session_info_update` reach this lane ungated and fall through a dispatcher with no default branch.
+Fixed in P06.S19. The adapter emits eighteen update kinds; `usage_update`, `config_option_update` and `session_info_update` reached this lane ungated and previously fell through a dispatcher with no default branch. The dispatcher now logs bounded context occupancy, configuration-option count, and session-info receipt without copying provider payloads into logs. Eight other adapter kinds are logged by kind, and a bounded fallback records future kinds. Terminal per-model usage remains the accounting source; context occupancy never adds turn tokens. Type: protocol observability and accounting boundary.
+
+### acp-per-model-usage-strict-type | low | S18 read optional nested TypedDict fields as required
+
+Fixed in P06.S19. The S18 per-model usage aggregation built the nested cache details in every row but read them through LangChain's optional `UsageMetadata.input_token_details` type, producing four `reportTypedDictNotRequiredAccess` diagnostics in the strict type gate. The parser now accumulates its already validated cache counts directly while constructing each row, preserving the turn totals and eliminating those four diagnostics. Five unrelated strict diagnostics remain in `lane_admission.py` and `database/checkpoints.py` for the integration owner. Type: static type safety and CI integration.
 
 ### terminal-handlers-unreachable-on-claude | low | the client terminal handlers are never called by this adapter
 

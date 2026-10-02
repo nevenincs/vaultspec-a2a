@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:f8c756f2fe074b24ffcbceabb4659f7a36e1129aadba32677cc40b0db5216edb'
+body_hash: 'sha256:5785f3158771c21c4962b86302a6fdde32fa245e098028382c8de8f9507726c8'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -207,6 +207,17 @@ related:
 - `S18` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S18` `verify:` `git diff --check` -> `pass`
 - `S18` `by:` `provider-runtime`
+- `S19` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S19` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S19` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S19` `A` `src/vaultspec_a2a/providers/tests/test_acp_session_update_visibility.py`
+- `S19` `verify:` `focused pytest: update visibility, native command advertisements, ACP stop outcomes (26 tests)` -> `pass`
+- `S19` `verify:` `ruff check and format: S19 Python files` -> `pass`
+- `S19` `verify:` `ty check: S19 Python files` -> `pass`
+- `S19` `verify:` `vaultspec-core vault check all --feature provider-binary-policy --fix --no-hints` -> `pass`
+- `S19` `verify:` `git diff --check` -> `pass`
+- `S19` `verify:` `strict dev.quality.types global (5 unrelated diagnostics)` -> `fail`
+- `S19` `by:` `provider-proof`
 
 ## Notes
 
@@ -227,3 +238,5 @@ related:
 - `S12` Integrated just ci deferred to root after S13 and other serial steps; focused checks cover this isolated Step.
 - `S12` Review: fixed low plan-scope gap in S12; queued medium research fan-out identity seam for S13 in audit.
 - `S18` Full just ci and ci-merge remain shared integration gates; credentialed live model turn unavailable. Medium error-path accounting follow-up queued in audit.
+- `S19` Strict global type gate has 3 remaining diagnostics in `providers/lane_admission.py` and 2 in database/checkpoints.py; root owns those files. S19 removed all 4 diagnostics in `providers/_acp_protocol.py.`
+- `S19` Integrated just ci is deferred to root after serial plan integration; focused checks and the S19-owned strict type surface pass.

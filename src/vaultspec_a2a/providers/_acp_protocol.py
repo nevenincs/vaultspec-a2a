@@ -67,6 +67,18 @@ _EFFECTFUL_SERVER_METHODS = frozenset(
 _MAX_COMMAND_DESCRIPTION_LENGTH = 1024
 _MAX_COMMAND_INPUT_HINT_LENGTH = 512
 _MAX_AVAILABLE_COMMANDS = 256
+_OBSERVED_ONLY_SESSION_UPDATES = frozenset(
+    {
+        "async_task_progress",
+        "async_task_spawned",
+        "async_task_state_update",
+        "compaction_summary_chunk",
+        "compaction_update",
+        "notice",
+        "subagent_spawned",
+        "subagent_state_update",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,6 +381,8 @@ def _prompt_usage_metadata(result: JsonObject) -> AcpUsageMetadata | None:
         raise ValueError("_meta.quota.model_usage must be an array")
     model_usage: dict[str, UsageMetadata] = {}
     reasoning_tokens = 0
+    cache_read_tokens = 0
+    cache_write_tokens = 0
     for raw_model in raw_models or []:
         if not isinstance(raw_model, dict):
             raise ValueError("model_usage entries must be objects")
@@ -380,6 +394,8 @@ def _prompt_usage_metadata(result: JsonObject) -> AcpUsageMetadata | None:
             raise ValueError("model_usage token_count must be an object")
         model_usage[model] = _usage_metadata(counts, quota=True)
         reasoning_tokens += _token_count(counts, "reasoningOutputTokens")
+        cache_read_tokens += _token_count(counts, "cachedInputTokens")
+        cache_write_tokens += _token_count(counts, "cachedWriteTokens")
 
     if model_usage:
         return AcpUsageMetadata(
@@ -387,14 +403,8 @@ def _prompt_usage_metadata(result: JsonObject) -> AcpUsageMetadata | None:
             output_tokens=sum(row["output_tokens"] for row in model_usage.values()),
             total_tokens=sum(row["total_tokens"] for row in model_usage.values()),
             input_token_details=InputTokenDetails(
-                cache_read=sum(
-                    row["input_token_details"]["cache_read"]
-                    for row in model_usage.values()
-                ),
-                cache_creation=sum(
-                    row["input_token_details"]["cache_creation"]
-                    for row in model_usage.values()
-                ),
+                cache_read=cache_read_tokens,
+                cache_creation=cache_write_tokens,
             ),
             output_token_details=OutputTokenDetails(reasoning=reasoning_tokens),
             model_usage=model_usage,
@@ -589,6 +599,40 @@ async def handle_session_update(
             "ACP plan update: %d entries received",
             len(plan_entries) if isinstance(plan_entries, list) else 0,
         )
+        return
+    if u_type == "usage_update":
+        # This is context-window occupancy, not the accounting-grade per-model
+        # usage on the terminal prompt response. Logging it must not add tokens
+        # to the turn's usage metadata a second time.
+        used, size = update.get("used"), update.get("size")
+        if (
+            isinstance(used, int)
+            and not isinstance(used, bool)
+            and isinstance(size, int)
+            and not isinstance(size, bool)
+        ):
+            logger.debug("ACP context usage update: used=%d size=%d", used, size)
+        else:
+            logger.debug("ACP context usage update received")
+        return
+    if u_type == "config_option_update":
+        options = update.get("configOptions")
+        if isinstance(options, list):
+            logger.debug("ACP config option update: %d options received", len(options))
+        else:
+            logger.warning("ACP config option update omitted configOptions array")
+        return
+    if u_type == "session_info_update":
+        # AIR goal and file-change metadata may contain workspace or user text.
+        logger.debug("ACP session info update received")
+        return
+    if u_type in _OBSERVED_ONLY_SESSION_UPDATES:
+        logger.debug("ACP session update observed: %s", u_type)
+        return
+    # Future adapter versions remain compatible without silently dropping a
+    # newly introduced update. Never log the payload: it may contain prompts.
+    kind = u_type if 0 < len(u_type) <= 64 and u_type.isprintable() else "<invalid>"
+    logger.debug("ACP unrecognized session update: %s", kind)
 
 
 async def on_tool_call(update: JsonObject, ctx: AcpSessionContext) -> None:

@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:1e812524a539b4f9a96ec92a57bad92765a5a51936a8ee318618e5c82966930c'
+body_hash: 'sha256:7c156798283ea0a717a8494d985499bd7cb83712da5e454090ee8ca0a8285143'
 ---
 
 # `provider-binary-policy` plan
@@ -44,7 +44,7 @@ Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer i
 
 - [x] `P01.S01` - Add the capsule-owned Claude CLI path authority beside the existing Node and ACP authorities, selecting the libc variant by the rule the adapter uses; `src/vaultspec_a2a/providers/_factory_commands.py`.
 - [x] `P01.S02` - Require the capsule Claude CLI as a third validated capsule asset so an armed desktop profile refuses to arm without it; `src/vaultspec_a2a/desktop/profile.py, src/vaultspec_a2a/desktop/tests/test_profile.py, src/vaultspec_a2a/desktop_tests/test_profile_paths.py, src/vaultspec_a2a/cli/tests/test_desktop_serve.py`.
-- [ ] `P01.S03` - Declare the absolute-path claude_cli_executable setting as the explicit top rung and resolve it with the other path settings; `src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/control/config.py, .env.example`.
+- [x] `P01.S03` - Declare the absolute-path claude_cli_executable setting as the explicit top rung and resolve it with the other path settings; `src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/control/config.py, .env.example, src/vaultspec_a2a/control/tests/test_settings_sources.py`.
 - [ ] `P01.S04` - Rewrite pin_claude_executable into the profile-scoped authority order returning the absolute path and the rung that answered, with an armed capsule exclusive and fail-loud over an inherited executable override, and update the served-turn and catalog-probe call sites; `src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/factory.py`.
 - [ ] `P01.S05` - Refuse a served Claude or Z.ai launch and the Claude catalog probe when no rung resolves a CLI, with a typed runtime-unavailable reason instead of an unpinned child; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/cli_resolution.py`.
 - [ ] `P01.S06` - Install one exact Claude CLI version in the Compose worker image and name it to the service through the new setting; `service/docker/prod.Dockerfile, service/docker-compose.prod.yml`.

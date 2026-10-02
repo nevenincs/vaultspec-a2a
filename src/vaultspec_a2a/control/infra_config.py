@@ -303,6 +303,14 @@ class InfraConfig(ProjectSettings):
             "resolution is checkout-relative as before."
         ),
     )
+    claude_cli_executable: Path | None = Field(
+        default=None,
+        description=(
+            "Explicit absolute path to the Claude CLI used by Claude and Z.ai. "
+            "When set, this operator choice outranks the desktop capsule and "
+            "the service's installed CLI."
+        ),
+    )
     desktop_app_home: Path | None = Field(
         default=None,
         description=(
@@ -938,6 +946,13 @@ class InfraConfig(ProjectSettings):
         """Resolve an explicitly supplied project root exactly as the default is."""
         if isinstance(value, str | Path) and str(value).strip():
             return resolve_project_root({"VAULTSPEC_A2A_PROJECT_ROOT": str(value)})
+        return value
+
+    @field_validator("claude_cli_executable")
+    @classmethod
+    def _absolute_claude_cli_executable(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError("VAULTSPEC_A2A_CLAUDE_CLI_EXECUTABLE must be absolute")
         return value
 
     @field_validator("internal_token", "gateway_service_token", mode="before")

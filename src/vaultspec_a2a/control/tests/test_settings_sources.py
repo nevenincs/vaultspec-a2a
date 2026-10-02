@@ -299,6 +299,22 @@ def test_the_construction_call_steers_the_operator_file_lookup(tmp_path: Path) -
     assert configured.port == int(_SETTING_VALUE)
 
 
+def test_explicit_claude_cli_setting_requires_an_absolute_path(tmp_path: Path) -> None:
+    """The declared override cannot resolve from a run's working directory."""
+    cli = tmp_path / "claude"
+    cli.write_text("cli\n", encoding="utf-8")
+    name = "VAULTSPEC_A2A_CLAUDE_CLI_EXECUTABLE"
+    with armed_environment(**{PROJECT_ROOT_ENV: str(tmp_path), name: str(cli)}):
+        configured = Settings()
+    assert configured.claude_cli_executable == cli
+
+    with (
+        armed_environment(**{PROJECT_ROOT_ENV: str(tmp_path), name: "claude"}),
+        pytest.raises(ValueError, match=f"{name} must be absolute"),
+    ):
+        Settings()
+
+
 def test_the_construction_call_steers_the_credential_gate(tmp_path: Path) -> None:
     """The gated ``.env`` is the one under the root the call named."""
     _workspace_dotenv(tmp_path)

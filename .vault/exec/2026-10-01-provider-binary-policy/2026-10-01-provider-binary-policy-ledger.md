@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:5fb791d12b52f914e8db4c9f5b1e4fd4ec0ebeffd0d861a8a30b5d67557398e6'
+body_hash: 'sha256:f22f947c9215f081d333ef9c7bfefe4c08d2949c210dd89ec849296b4e9b9137'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -82,6 +82,17 @@ related:
 - `S02` `verify:` `ty desktop profile files` -> `pass`
 - `S02` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S02` `verify:` `just ci` -> `fail`
+- `S03` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S03` `M` `src/vaultspec_a2a/control/config.py`
+- `S03` `M` `.env.example`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_settings_sources.py`
+- `S03` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S03` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S03` `verify:` `pytest settings sources and env example` -> `pass`
+- `S03` `verify:` `ruff settings files` -> `pass`
+- `S03` `verify:` `ty settings files` -> `pass`
+- `S03` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S03` `verify:` `just ci` -> `fail`
 
 ## Notes
 
@@ -89,3 +100,4 @@ related:
 - `S16` just ci remains red on base 78f3a89f: 44 strict type diagnostics in `dev/ci_contract.py,` 16 in `control/settings_base.py,` and three unconsumed exports in `settings_base.py;` assigned to main integration owner. Changed-file checks and targeted real-behavior tests pass.
 - `S01` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; this Step changes neither.
 - `S02` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
+- `S03` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.

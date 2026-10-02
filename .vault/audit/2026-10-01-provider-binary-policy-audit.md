@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:1e3a80ebdbabd3daf11418492959cf503eac294eb194116c8c5d37ce91f2c0f7'
+body_hash: 'sha256:3dee898cc6a528ae37d9ff41b2a252d0e2b0bedce2a1f49c4ebcd9c1902113d4'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -17,6 +17,8 @@ related:
 Findings raised while executing P01.S17 of `2026-10-01-provider-binary-policy-plan`, the move of the vendored Claude ACP adapter from 0.59.0 to 0.84.0 (Agent SDK 0.3.207 to 0.3.284, CLI 2.1.207 to 2.1.284), read against `2026-10-01-provider-binary-policy-acp-adapter-upgrade-research`. Rolling: later Steps append here.
 
 P01.S01 review (2026-10-02): PASS for the capsule CLI path authority and installed-binary version probe. The path stays under the capsule npm closure, uses the ACP adapter platform and libc preference order, and the focused real-binary test, lint, format, and targeted type check pass. No new review finding was queued.
+
+P01.S03 review (2026-10-02): PASS for the explicit absolute-path setting declaration and operator example. A real settings load accepts an absolute CLI path and refuses a relative one before project-root rebasing; the example-profile, lint, format, and targeted type checks pass. Launch consumption is scheduled by P01.S04. No new review finding was queued.
 
 ## Findings
 

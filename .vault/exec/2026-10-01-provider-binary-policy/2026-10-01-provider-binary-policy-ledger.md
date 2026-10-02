@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:66505d4e2d34ed7563ea44a4cb25d2ebed3188911ce4d4f45afbd39811a778a3'
+body_hash: 'sha256:b090427f20fd0989f2ccdb3715d122ceefd68d962e57ca068d4d9f9a40aa384e'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -165,6 +165,19 @@ related:
 - `S06` `verify:` `docker compose config --quiet` -> `pass`
 - `S06` `verify:` `git diff --check` -> `pass`
 - `S06` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S09` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S09` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S09` `M` `src/vaultspec_a2a/providers/provider_catalog_service.py`
+- `S09` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S09` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S09` `A` `src/vaultspec_a2a/providers/tests/test_binary_proof_admission.py`
+- `S09` `M` `.vault/adr/2026-10-01-provider-binary-policy-adr.md`
+- `S09` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S09` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S09` `verify:` `focused-provider-tests` -> `pass`
+- `S09` `verify:` `changed-file-ruff-ty-basedpyright` -> `pass`
+- `S09` `verify:` `vault-check-all` -> `pass`
+- `S09` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -181,3 +194,4 @@ related:
 - `S10` Integrated just ci is assigned to the root branch after parallel steps land.
 - `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.
 - `S06` Full just ci and ci-merge remain shared integration gates with the plan supervisor; no provider credentials are available for a completed model turn on this host.
+- `S09` Formal review classified and queued the version drift, catalog wording, malformed plan row, and residual filesystem race.

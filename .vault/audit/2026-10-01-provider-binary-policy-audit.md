@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:1192d3e18744afeb254ef8dc7e83be131436466c4d333e77ec712218ac944712'
+body_hash: 'sha256:b0035583171d0ba9c02fb294bdf73dee709b3fdb56305f1f1e320f4d0f2b3628'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -119,3 +119,18 @@ Fixed in P02.S10. The allowlist rationale named the old unpinned command. It now
 - Re-run the Claude lane's completed-turn test with working child authentication against the resolved binary (`claude-lane-proof-predates-the-binary`, `claude-current-binary-auth-refused`).
 
 - Keep the typed Claude CLI unavailable reason in the shared resolver when later admission work adds version checks.
+### version-proof-could-drift-before-child-spawn | medium | constructed model retained an old version verdict
+
+Fixed in P02.S09. Factory construction and provider-catalog selection now return typed `binary_out_of_proof_range` or `binary_version_unavailable` blockers. Review found that a constructed model could outlive its launcher file, so both Codex and Claude-backed model paths recheck the resolved binary immediately before child spawn. A real launcher replacement test confirms refusal before a child starts. Type: runtime admission and time-of-check drift.
+
+### preset-list-is-not-provider-selection | medium | D2 named the wrong read surface
+
+Fixed in P02.S09 by correcting the factual wording in the accepted ADR and plan. The `/v1/presets` response lists static team configurations without provider/model eligibility; `/v1/provider-catalog` supplies selectable lanes, and run-start checks that selection. The binary verdict is therefore enforced in provider-catalog selection, factory construction, and child spawn. Type: decision and contract wording drift.
+
+### malformed-p02-s21-plan-row | low | reenrollment Step was invisible to plan parsing
+
+Fixed in P02.S09. A prior manual conflict resolution dropped the Markdown code spans around P02.S21, making the row noncanonical and omitting it from Core's Step census. The row is restored through Core and remains open pending Claude and Z.ai live turns. Type: plan state integrity.
+
+### launcher-replacement-between-final-probe-and-spawn | low | filesystem race remains at process creation
+
+Open for later runtime hardening. P02.S09 verifies the launcher's identity immediately before child spawn, but the filesystem can replace that path in the interval between the probe and the operating system's process creation. No exploit or observed production incident is established; a descriptor-bound process launch would be needed to eliminate the race completely. Type: residual runtime identity race.

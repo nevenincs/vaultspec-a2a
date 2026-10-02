@@ -161,6 +161,7 @@ class AcpChatModel(BaseChatModel):
         default=None,
         description="Bounded provider identity for ACP runtime evidence.",
     )
+    version_proof_required: bool = Field(default=False, exclude=True)
     runtime_authority: str | None = Field(
         default=None,
         description="Bounded runtime authority classification for the ACP command.",
@@ -443,6 +444,16 @@ class AcpChatModel(BaseChatModel):
         # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
         # as an additive overlay from ProviderFactory.
         env = await self._acp_environment()
+        if self.version_proof_required:
+            from ..graph.enums import Provider
+            from .factory import binary_proof_reason, require_binary_proof
+
+            resolved = pin_claude_executable(env)
+            require_binary_proof(
+                binary_proof_reason(
+                    Provider(self.provider), str(resolved.path), resolved.authority
+                )
+            )
 
         # The spawn and session setup run INSIDE the try so the finally below
         # is the single cleanup path: a spawn-time raise (missing binary,

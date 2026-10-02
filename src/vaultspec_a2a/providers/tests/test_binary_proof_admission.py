@@ -1,0 +1,210 @@
+"""The served catalog and model factory share one version-bound lane verdict."""
+
+from __future__ import annotations
+
+import os
+import shlex
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, override
+
+import pytest
+from langchain_core.messages import HumanMessage
+
+from ...graph.enums import Provider
+from .. import factory as factory_module
+from ..binary_version import probe_binary_version
+from ..cli_resolution import (
+    ProviderRuntimeUnavailableError,
+    ProviderRuntimeUnavailableReason,
+)
+from ..codex_chat_model import CodexChatModel
+from ..factory import (
+    ProviderCatalogDiscovery,
+    ProviderCatalogRegistration,
+    ProviderFactory,
+    binary_proof_reason,
+)
+from ..provider_catalog import (
+    AdmissionState,
+    AuthenticationState,
+    CatalogState,
+    CatalogStatus,
+    HealthState,
+    ModelCatalogEntry,
+    ProviderCatalog,
+    ProviderCatalogKey,
+)
+from ..provider_catalog_service import ProviderCatalogService
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+_CODEX = ProviderCatalogKey("codex", "codex-app-server")
+
+
+class _CodexProofFactory(ProviderFactory):
+    def __init__(self, binary: Path) -> None:
+        super().__init__()
+        self.binary = binary
+        self.discoveries = 0
+
+    @override
+    def catalog_registrations(
+        self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
+    ) -> tuple[ProviderCatalogRegistration, ...]:
+        async def discover() -> ProviderCatalogDiscovery:
+            self.discoveries += 1
+            return ProviderCatalogDiscovery(
+                catalog=ProviderCatalog(
+                    _CODEX,
+                    CatalogState(CatalogStatus.AVAILABLE, datetime.now(UTC), "rev"),
+                    (ModelCatalogEntry("entry", "model", "Model"),),
+                ),
+                authentication=AuthenticationState.AUTHENTICATED,
+                configured=HealthState.AVAILABLE,
+                transport=HealthState.AVAILABLE,
+            )
+
+        return (
+            ProviderCatalogRegistration(
+                _CODEX,
+                discover,
+                lambda: binary_proof_reason(
+                    Provider.CODEX, str(self.binary), "service_path"
+                ),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_catalog_rechecks_version_beside_cached_models(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A binary update revokes selectability without waiting for catalog TTL."""
+    version = ["0.160.0"]
+
+    def report(_path: Path | str) -> str:
+        return version[0]
+
+    monkeypatch.setattr(factory_module, "probe_binary_version", report)
+    factory = _CodexProofFactory(tmp_path / "codex")
+    service = ProviderCatalogService(factory=factory)
+
+    rejected = (await service.records(str(tmp_path)))[0]
+    assert rejected.health.admission is AdmissionState.NOT_ADMITTED
+    assert rejected.health.selectable is False
+    assert ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE.value in (
+        rejected.health.reasons
+    )
+
+    version[0] = "0.159.3"
+    admitted = (await service.records(str(tmp_path)))[0]
+    assert factory.discoveries == 1
+    assert admitted.health.admission is AdmissionState.ADMITTED
+    assert admitted.health.selectable is True
+
+
+def test_factory_refuses_out_of_range_codex_before_model_construction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A caller bypassing catalog selection still cannot construct that binary."""
+    binary = str(tmp_path / "codex")
+    metadata = {
+        "runtime_authority": "system_cli",
+        "command_origin": "system_path_executable",
+        "command_kind": "codex_cli",
+        "command_executable": "codex",
+        "command_target": binary,
+    }
+    monkeypatch.setattr(
+        factory_module,
+        "_classify_codex_command",
+        lambda: ([binary, "app-server"], metadata),
+    )
+
+    def report(_path: Path | str) -> str:
+        return "0.160.0"
+
+    monkeypatch.setattr(factory_module, "probe_binary_version", report)
+
+    with pytest.raises(ProviderRuntimeUnavailableError) as caught:
+        ProviderFactory().create(Provider.CODEX, "catalog-model")
+
+    assert (
+        caught.value.reason
+        is ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE
+    )
+
+
+def test_pinned_launcher_requires_exact_proved_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capsule patch change cannot ride a proof earned on another binary."""
+
+    def report(_path: Path | str) -> str:
+        return "0.159.3"
+
+    monkeypatch.setattr(factory_module, "probe_binary_version", report)
+    assert binary_proof_reason(Provider.CODEX, "/capsule/codex", "capsule") is (
+        ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE
+    )
+
+
+def test_unreadable_version_has_a_typed_blocker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Probe failure cannot silently admit the lane as unknown."""
+    from ..binary_version import BinaryVersionProbeError
+
+    def fail(_path: str) -> str:
+        raise BinaryVersionProbeError("broken launcher")
+
+    monkeypatch.setattr(factory_module, "probe_binary_version", fail)
+    assert binary_proof_reason(Provider.CODEX, "/bin/codex", "service_path") is (
+        ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
+    )
+
+
+@pytest.mark.asyncio
+async def test_model_rechecks_changed_launcher_before_child_spawn(
+    tmp_path: Path,
+) -> None:
+    """A constructed model cannot spawn a binary replaced before its turn."""
+    launcher = tmp_path / ("codex.cmd" if os.name == "nt" else "codex")
+    marker = tmp_path / "spawned.txt"
+
+    def write_launcher(version: str) -> None:
+        if os.name == "nt":
+            launcher.write_text(
+                "@echo off\r\n"
+                f'if "%1"=="--version" (echo codex-cli {version}& exit /b 0)\r\n'
+                f'echo spawned>"{marker}"\r\n',
+                encoding="utf-8",
+            )
+        else:
+            launcher.write_text(
+                "#!/bin/sh\n"
+                'if [ "$1" = "--version" ]; then '
+                f"echo codex-cli {version}; exit 0; fi\n"
+                f"echo spawned > {shlex.quote(str(marker))}\n",
+                encoding="utf-8",
+            )
+            launcher.chmod(0o755)
+
+    write_launcher("0.159.2")
+    assert probe_binary_version(launcher) == "0.159.2"
+    model = CodexChatModel(
+        command=[str(launcher), "app-server"],
+        workspace_root=str(tmp_path),
+        version_proof_required=True,
+    )
+    previous = launcher.stat()
+    write_launcher("0.160.0")
+    os.utime(launcher, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000_000))
+    with pytest.raises(ProviderRuntimeUnavailableError) as caught:
+        await model.ainvoke([HumanMessage(content="hello")])
+    assert (
+        caught.value.reason
+        is ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE
+    )
+    assert not marker.exists()

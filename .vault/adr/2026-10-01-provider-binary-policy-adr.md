@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#provider-binary-policy'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:7e3920566f07bbb323f8e3b7893ec15e369393bb50bdbb29e631d3961f97e79a'
+body_hash: 'sha256:06305bd0e819e9af9cdff592ccb2fe491de4d9de01d408bf5e19d9cfca47970f'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -157,7 +157,7 @@ smallest range that neither unserves the product on a routine patch nor lets a
 feature-level change ride an old proof. Admission probes the resolved binary's
 version once per launch identity, memoized per process (0.22 s measured), and an
 out-of-range result makes the lane ineligible with a typed blocker that
-`presets-list` and launch both read. A proof moves only by rerunning its cited
+`provider-catalog` selection, provider construction, and child spawn all read. A proof moves only by rerunning its cited
 live test against the new binary and recording that version by hand. CI pins
 `npm install -g @openai/codex@<exact>` (`.github/workflows/test.yml:223`) and runs
 `npm audit signatures`, and the pinned version is that lane's `proved_version`.
@@ -203,7 +203,7 @@ id is recorded by D3 so an operator can still find the CLI's own transcript.
 tree whose CLI asset is absent refuses to arm, and one whose asset is present is
 the path a served launch resolves even with a `claude` earlier on PATH and a
 `CLAUDE_CODE_EXECUTABLE` set; a lane whose resolved binary reports a version
-outside its proof range is absent from `presets-list` and refused at launch, with
+outside its proof range is ineligible in `provider-catalog` and refused at construction and child spawn, with
 the in-range case served; a completed live turn writes an identity row carrying
 the CLI version the same binary reports; under `subscription_login` the child
 environment carries no token derived from settings, and under `oauth_token` with

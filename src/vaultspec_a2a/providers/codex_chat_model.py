@@ -168,6 +168,7 @@ class CodexChatModel(BaseChatModel):
     command_kind: str | None = None
     command_executable: str | None = None
     command_target: str | None = None
+    version_proof_required: bool = Field(default=False, exclude=True)
 
     _active_turns: dict[tuple[str, str], _ActiveCodexTurn] = PrivateAttr(
         default_factory=dict
@@ -505,6 +506,10 @@ class CodexChatModel(BaseChatModel):
         client: _CodexAppServerClient | None = None
         process: asyncio.subprocess.Process | None = None
         try:
+            if self.version_proof_required:
+                from .factory import codex_binary_proof_reason, require_binary_proof
+
+                require_binary_proof(codex_binary_proof_reason(self.command))
             codex_config_home = self._build_codex_config_home()
             env["CODEX_HOME"] = str(codex_config_home)
             metadata = {

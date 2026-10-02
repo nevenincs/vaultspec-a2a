@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:abb32cab2cfdfc55480460955397209cd3624a62dee61cea7cf66cd46ed4562c'
+body_hash: 'sha256:98438758979b8040439b71bb3378d2da97f737e245b96fb06e8687ab692a1f2f'
 ---
 
 # `provider-binary-policy` plan
@@ -52,14 +52,13 @@ Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer i
 
 ### Phase `P02` - Proof-bound version ranges at the eligibility service
 
-A lane proof declares the binary identity and version range it covers, and a resolved binary outside that range makes the lane ineligible with a typed reason that presets-list and launch both read.
+A lane proof declares the binary identity and version range it covers, and a resolved binary outside that range makes the lane ineligible with a typed reason that provider-catalog selection, construction, and child spawn all read.
 
 - [x] `P02.S07` - Declare the LaneProof binary identity and proved version range, record Codex 0.159.2 from its completed direct app-server turn, and withdraw Claude and Z.ai admission until their current binaries complete live turns; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`.
 - [x] `P02.S08` - Add a binary version probe that reads a resolved launcher's reported version once per launch identity, memoized per process, and derive the admitted range as exact equality for the pinned rungs and floor to next minor for the host PATH rung; `src/vaultspec_a2a/providers/binary_version.py, src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/test_binary_version.py, src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`.
-- [ ] `P02.S09` - Make an out-of-range resolved binary a typed lane ineligibility so presets-list omits the lane and provider construction refuses it; `src/vaultspec_a2a/providers/provider_catalog_service.py, src/vaultspec_a2a/providers/factory.py`.
+- [x] `P02.S09` - Make an out-of-range resolved binary a typed lane ineligibility so provider-catalog selection and provider construction refuse it, then recheck immediately before child spawn; `src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/provider_catalog_service.py, src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/tests/test_binary_proof_admission.py`.
 - [x] `P02.S10` - Pin the CI Codex install to its proved exact version 0.159.2 and verify npm signatures before provider prerequisite gates; `.github/workflows/test.yml, .github/ci-contract-allow.txt`.
-
-- [ ] P02.S21 - Re-enroll Claude and Z.ai with hand-recorded binary versions and ranges only after their cited live turns complete on the resolved launchers; src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/.
+- [ ] `P02.S21` - Re-enroll Claude and Z.ai with hand-recorded binary versions and ranges only after their cited live turns complete on the resolved launchers; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/`.
 
 ### Phase `P03` - Recorded runtime identity per run and lane
 
@@ -119,7 +118,7 @@ Plan-level criteria:
 - A capsule tree whose Claude CLI asset is absent refuses to arm, naming the missing path (P01.S02).
 - A capsule tree whose Claude CLI asset is present is the path a served launch resolves, with a different `claude` earlier on the service's own PATH and a `CLAUDE_CODE_EXECUTABLE` already set in the child environment (P01.S01, P01.S04).
 - A resolution that reaches no rung refuses the launch and the catalog probe with a typed reason, and never hands the adapter an unpinned child (P01.S05).
-- A lane whose resolved binary reports a version outside its proof range is absent from `presets-list` and refused at provider construction, and the same lane in range is served (P02.S08, P02.S09).
+- A lane whose resolved binary reports a version outside its proof range is ineligible in `provider-catalog` and refused at provider construction and child spawn, and the same lane in range is served (P02.S08, P02.S09).
 - The migration upgrades and downgrades cleanly from the head present at merge time, on both the SQLite and Postgres backends (P03.S11).
 - A completed turn writes exactly one runtime identity row per run and lane, carrying the CLI version the same resolved binary reports when asked directly (P03.S13).
 - Under `subscription_login` the child environment carries no token derived from settings, and an operator's ambient export still reaches the child; under `oauth_token` with an empty setting the lane refuses rather than running unauthenticated (P04.S14).

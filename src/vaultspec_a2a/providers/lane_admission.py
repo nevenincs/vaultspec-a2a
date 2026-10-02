@@ -139,12 +139,9 @@ def lane_proof_accepts_version(
     observed = parse_binary_version(reported_version)
     floor = parse_binary_version(proof.floor)
     ceiling = parse_binary_version(proof.ceiling_exclusive)
-    if (
-        proved is None
-        or observed is None
-        or floor != proved
-        or ceiling != next_minor_version(proved)
-    ):
+    if proved is None or observed is None or floor is None or ceiling is None:
+        return False
+    if floor != proved or ceiling != next_minor_version(proved):
         return False
     if authority == "service_path":
         return floor <= observed < ceiling

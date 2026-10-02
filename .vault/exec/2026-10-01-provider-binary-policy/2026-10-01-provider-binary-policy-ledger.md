@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:f8c756f2fe074b24ffcbceabb4659f7a36e1129aadba32677cc40b0db5216edb'
+body_hash: 'sha256:55a771a252f898178ba103c4321e365e6da35e1bb9bd3b3759af6dc498b8cc9c'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -207,6 +207,13 @@ related:
 - `S18` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S18` `verify:` `git diff --check` -> `pass`
 - `S18` `by:` `provider-runtime`
+- `S22` `M` `src/vaultspec_a2a/providers/lane_admission.py`
+- `S22` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S22` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S22` `verify:` `focused lane admission tests 10 passed` -> `pass`
+- `S22` `verify:` `changed-file basedpyright ruff ty` -> `pass`
+- `S22` `verify:` `git diff --check` -> `pass`
+- `S22` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -227,3 +234,4 @@ related:
 - `S12` Integrated just ci deferred to root after S13 and other serial steps; focused checks cover this isolated Step.
 - `S12` Review: fixed low plan-scope gap in S12; queued medium research fan-out identity seam for S13 in audit.
 - `S18` Full just ci and ci-merge remain shared integration gates; credentialed live model turn unavailable. Medium error-path accounting follow-up queued in audit.
+- `S22` Review: no remaining code finding in S22; strict CI diagnostics in ACP protocol and checkpoints are assigned to their owning continuation and S19 passes.

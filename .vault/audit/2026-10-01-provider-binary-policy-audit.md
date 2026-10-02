@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:d770427ef0ae127e5b2bfa9b2a70fa83bf33a45cad67e73f1429057aef00dd0d'
+body_hash: 'sha256:bdac0af93b955c6e56495cfa4fd25a32b72457580d8d67ec04130538fad09742'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -144,3 +144,6 @@ Open; owned by P03.S13. Research branch models are invoked by `_make_research_pr
 ### failed-acp-turn-usage-unrecorded | medium | failed prompts can spend tokens without a returned usage message
 
 Open; follow-up scope is the graph's error-path accounting contract. The upgraded adapter reports usage on terminal prompt results even for refusal, cancellation and budget stops. This Step attaches usage to the final message only after a successful end_turn because those other outcomes raise a typed prompt error and return no message for the graph's _turn_token_usage reader. A failed turn can therefore incur provider usage without a token_usage entry. Type: cost-accounting gap. A later Step must decide how error-path usage reaches the durable turn record without treating a failed prompt as a successful response.
+### proof-range-typing-was-not-narrowed | low | strict CI could not verify version comparisons
+
+Fixed in P02.S22. The P02.S08 proof predicate rejected missing parse results in a compound condition that basedpyright could not narrow, leaving three strict diagnostics at the host PATH comparison. It now checks all four parsed versions for `None` before comparing them. Behavior is unchanged; focused lane admission tests and strict type checks pass. Type: CI type correctness and proof gate readability.

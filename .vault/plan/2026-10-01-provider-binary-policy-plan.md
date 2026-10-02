@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:333887bd48be1f47d5e7110f5687e95be7fedd5f7262966f9602591a667bb7fc'
+body_hash: 'sha256:d2a6202dcd6b80fe56c34ee56f4dce428a06dd3ec778a1da27f0a7397052fd2a'
 ---
 
 # `provider-binary-policy` plan
@@ -59,6 +59,7 @@ A lane proof declares the binary identity and version range it covers, and a res
 - [x] `P02.S09` - Make an out-of-range resolved binary a typed lane ineligibility so provider-catalog selection and provider construction refuse it, then recheck immediately before child spawn; `src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/provider_catalog_service.py, src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/codex_chat_model.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/tests/test_binary_proof_admission.py`.
 - [x] `P02.S10` - Pin the CI Codex install to its proved exact version 0.159.2 and verify npm signatures before provider prerequisite gates; `.github/workflows/test.yml, .github/ci-contract-allow.txt`.
 - [ ] `P02.S21` - Re-enroll Claude and Z.ai with hand-recorded binary versions and ranges only after their cited live turns complete on the resolved launchers; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/`.
+- [x] `P02.S22` - Narrow parsed proof versions before comparing host PATH bounds so strict typing verifies the admission gate; `src/vaultspec_a2a/providers/lane_admission.py`.
 
 ### Phase `P03` - Recorded runtime identity per run and lane
 

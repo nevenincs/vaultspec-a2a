@@ -65,8 +65,6 @@ _logger = logging.getLogger(__name__)
 
 __all__ = [
     "create_worker_node",
-    "permission_callback_for",
-    "recorded_permission_answers",
     "render_research_findings",
     "resolve_effective_worker_model",
 ]

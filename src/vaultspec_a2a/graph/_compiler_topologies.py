@@ -37,6 +37,12 @@ from ..thread.errors import (
 from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations
 )
+from ._compiler_models import resolve_supervisor_model
+from ._compiler_prompts import (
+    build_supervisor_prompt,
+    compose_persona_prompt,
+    lane_web_demonstrated,
+)
 from ._compiler_retry import _NODE_RETRY_POLICY
 from .compiler import (
     _ROLE_TO_PHASE,
@@ -44,10 +50,6 @@ from .compiler import (
     _compile_worker_node,
     _loop_route,
     _route_from_supervisor,
-    build_supervisor_prompt,
-    compose_persona_prompt,
-    lane_web_demonstrated,
-    resolve_supervisor_model,
 )
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE

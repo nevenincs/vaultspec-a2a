@@ -9,7 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from ...control.config import settings
-from ...graph.compiler import resolve_model_for_worker
+from ...graph._compiler_models import resolve_model_for_worker
 from ...graph.enums import Provider
 from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import ConfigError
@@ -536,7 +536,7 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
 
 
 def test_production_factory_types_a_missing_acp_runtime() -> None:
-    from ..factory import ProviderRuntimeUnavailableError
+    from ..cli_resolution import ProviderRuntimeUnavailableError
 
     if _BIN_PATH is not None:
         pytest.skip("repository carries the optional binary ACP runtime")

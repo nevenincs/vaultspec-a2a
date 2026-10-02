@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:49c78b1cc9ad2b0814dfc20575ba010ec1683ab012197c8bc2b72d15525985b3'
+body_hash: 'sha256:df2104f97b573f13da42d9d58f5f32af6f6d0bc59cc9da6d341f3bb43b529c59'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -187,3 +187,62 @@ Fixed in P03.S13 after the integrated CI gate exposed the defect. The S11 migrat
 ### desktop-component-fixture-pinned-prior-wheel | medium | desktop contract failed after 0.4.0 release
 
 Fixed in P02.S25. The dashboard release-manifest fixture still pinned vaultspec-a2a 0.3.0 while the clean wheel built from this branch reports 0.4.0. The fixture now names 0.4.0; it remains explicitly fixture-only and does not claim release binding. The three desktop component contract tests pass. Type: release fixture and CI contract drift.
+## Integrated review after P02.S25, 2026-10-02
+
+`just ci` on 1be5a0cd passed lint, vault integrity and 153 development tests, then finished its 5,252 selected unit tests with 5,217 passed, 19 skipped and 16 failed. The failures were reproduced in isolation. P02.S26 repairs the following roots; 292 focused tests passed together, the repaired worker test passed separately, and changed-file lint, format and type checks passed. The full gates are to be rerun after the commit.
+
+### withdrawn-web-proof-left-tests-with-no-live-subject | medium | three tests assumed a Claude web declaration still existed
+
+Fixed in P02.S26. With Claude's completed-turn proof withdrawn, Codex is the only turn-proven external lane and its web reach is configured with no allowlist names. The three graph tests no longer assert a nonexistent turn-only or allowlist-lit lane; the real ACP simulator still proves supplied built-in composition, while shipped Claude darkness and Codex's empty built-in declaration are asserted separately. Type: test evidence drift after proof withdrawal.
+
+### vault-index-paths-varied-by-host | medium | checkpointed vault paths used host separators
+
+Fixed in P02.S26. `build_initial_vault_index` and mounted document headers used `str(Path.relative_to(...))`, producing backslashes in Windows checkpoint state while the graph contract and other tests used `.vault/...`. Both now serialize relative paths with `as_posix()`, which remains readable by `Path` on Windows. The two original graph failures and neighboring mount tests pass. Type: cross-platform state serialization.
+
+### core-mcp-launch-test-missed-interpreter-pin | low | the registry test expected an obsolete launch argument list
+
+Fixed in P02.S26. The production `vaultspec-core` MCP launch includes `uvx --python 3.13`; the test now expects the same interpreter pin its sibling already reads from the production seam. Type: test contract drift.
+
+### acp-stderr-fixture-broke-under-windows-shell | low | three subprocess tests exited before initialize
+
+Fixed in P02.S26. The fixture passed a multiline Python program through `python -c` to the Windows `cmd.exe` ACP spawn path; the child closed before handshake, so no stderr-tail behavior was exercised. It now writes and executes a real script file, and all three redaction, warning and retention tests pass. Type: test subprocess portability.
+
+### claude-native-rule-test-overclaimed-path-grammar | medium | two CLI assertions assumed POSIX handling on Windows
+
+Fixed in P02.S26 with a correction in `2026-09-24-architecture-review-audit`. The current Windows CLI accepted a drive-absolute grant and applied the matching deny, while the old tests expected both to miss. The production explicit `//` grant and deny still pass unchanged. The tests now state and assert the host-specific native-path observation. Type: platform-dependent CLI rule grammar and audit evidence precision.
+
+### cli-resolution-tests-assumed-posix-launchers | low | two resolver assertions used POSIX executable names on Windows
+
+Fixed in P02.S26. Windows correctly admits a `.cmd` shim and does not resolve an extensionless test file as an executable. The tests now check the platform's real candidate rules and use an executable filename it can launch. Type: test portability.
+
+### rag-compat-test-split-on-posix-newlines | low | a real unreported verdict was parsed as empty on Windows
+
+Fixed in P02.S26. The external client's own mismatch and unreported responses were both produced, but the test partitioned byte-decoded Windows CRLF output on an LF-only separator. It normalizes CRLF before partitioning; the production classifier is unchanged. Type: test output portability.
+
+### duplicate-export-homes-blocked-unit-gate | medium | 11 ordinary-module names were declared from other modules
+
+Fixed in P02.S26. Eight compiler names, two worker permission names and the moved provider-runtime error remained in facade `__all__` declarations, violating the repository's one-declaring-module guard. The exports were removed, and compiler/worker consumers were directed to the declaring modules while retaining used imports. The export-home guard and focused graph tests pass. Type: public API ownership and CI contract drift.
+
+### worker-dispatch-test-inspected-an-in-flight-buffer | low | one replay test missed a terminal while the bridge flushed it
+
+Fixed in P02.S26. The test captured the event batch at one instant even though `flush_events` clears it during retries; the terminal appeared only after the failed batch was requeued. It now reads after the bridge's flush lock, waiting for the real retained terminal, and still asserts one accepted dispatch and one terminal. Type: asynchronous test observation race.
+
+### provider-plan-live-identity-status-was-stale | low | verification prose still described P03.S13 as pending
+
+Fixed in P02.S26. The plan now records the completed real Codex turn and durable SQLite identity-row assertion, while leaving P02.S21 open for Claude and Z.ai credentialed live turns. Type: plan evidence drift.
+
+### explicit-cli-setting-can-escape-an-armed-capsule | high | D1 order conflicts with the capsule-owned runtime constraint
+
+Open pending a decision. `pin_claude_executable` checks `claude_cli_executable` before `capsule_assets_root`, and `test_explicit_setting_outranks_capsule` asserts that an external file wins even when a capsule is armed. D1 states that order, but the same accepted ADR's binding constraint says an armed desktop capsule runs a capsule-owned CLI and must fail loudly when that asset is absent. Type: accepted-decision conflict and runtime authority. The integrated review requested the intended rule before changing it.
+
+### withdrawn-proof-can-restart-a-frozen-provider | high | a previously frozen lane can reach the factory after its proof is withdrawn
+
+Open pending a decision. `resolve_model_for_worker` and `resolve_supervisor_model` accept exact frozen values, while `binary_proof_reason` returns no blocker when `PROVEN_TURN_LANES` has no entry. Thus a recovered Claude or Z.ai run frozen before P02.S07 can construct its lane despite current served admission being withheld. The provider catalog ADR requires restart from frozen values after catalog drift; the newer proof rule requires current version-bound completed-turn evidence at launch. Type: served-proof enforcement and accepted-decision conflict. The review requested whether withdrawal refuses restart or honors the accepted frozen run.
+
+### moved-runtime-error-left-four-private-imports | low | strict typing rejected old factory import sites
+
+Fixed in P02.S26. Removing the duplicate `ProviderRuntimeUnavailableError` factory export left four consumers importing it from the facade: the provider test prerequisite and three test modules. They now import the class from `cli_resolution`, its declaring module. Type: module API ownership and strict CI integration.
+
+## P02.S26 verification and integrated review, 2026-10-02
+
+The repaired working tree passed `just ci-merge`: strict types, repository guards, vault checks, 153 development tests, and 2,129 unit tests with five Windows platform skips. It also passed `just ci`: lint, types, dependency and vault checks, 153 development tests, 5,233 selected tests with 19 skips and 281 service deselections, package build, six documentation tests, and warning-free Sphinx build. Both gates ran on Windows with Python 3.13.11 and pinned Node 26.8.1. The code diff and affected graph, provider, and worker interfaces were reviewed after these repairs; no further defect was found in P02.S26. Review verdict: REVISION REQUIRED for the two open high policy conflicts above. P02.S21 remains open because Claude and Z.ai lack completed credentialed live turns on the resolved binaries. No merge readiness is claimed.

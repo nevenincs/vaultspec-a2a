@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:170dbb59dab4bc2aeaa8533ee2f775d56a1496d3edcbf40af1795cc9b02c4d96'
+body_hash: 'sha256:d2f83846c7bc199d75b507ef32241fd1fdb165e4b5b15d819916c5cbfbbb7984'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -644,3 +644,6 @@ Open until the Docker-backed service tier runs; a Docker daemon is now available
 ### quality-coverage-gates-red | medium | the unused-symbol and unconsumed-export gates fail, so the composed CI gate cannot pass
 
 Partly fixed in P06.S50: reachability is zero (six type-only testing modules, not five, all reached once the testing facade named them by absolute module name); symbols holds one name, `mark_ingest_applied`, whose gap P06.S51 owns; exports holds four names in database and thread files under concurrent run-continuation work, left to close after that merge. Original finding: both gates run inside `lint all`, which `just ci` composes, and both report findings on the current branch: six unused symbols and one orphaned test module (also present on `main` at `72974d6`), and 29 published names with no importer, several added by this plan's residual Steps (`PathArgumentScan`, `event_client_timeout`). Each finding needs a consumer, a removal, or a narrower `__all__`.
+### claude-native-path-rule-grammar-varies-by-platform | medium | the old unanchored rule claim was too broad
+
+Correction from the P02.S26 integrated Windows proof on 2026-10-02. Claude CLI 2.1.286 interpreted `Read(Y:/.../**)` and its matching drive-path deny as absolute Windows paths: the grant read the named file and the deny blocked it. The earlier P06.S46 finding's statement that the old native-path spelling grants and denies nothing describes the previously observed POSIX behavior, not Windows. The production `claude_rule_path` still emits the explicit `//` absolute anchor and both production grant and deny passed the real CLI proof on Windows. Type: platform-dependent provider rule grammar and audit evidence precision. The test now asserts each host's observed behavior without weakening the production `//` assertion.

@@ -12,8 +12,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
+from ..providers.cli_resolution import ProviderRuntimeUnavailableError
 from ..providers.factory import (
-    ProviderRuntimeUnavailableError,
     validate_current_execution_lane,
     validate_current_native_controls,
 )
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "parse_catalog_preferences",
+    "resolve_model_for_worker",
     "resolve_supervisor_model",
     "validate_frozen_assignment_inventory",
 ]

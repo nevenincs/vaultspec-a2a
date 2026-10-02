@@ -26,7 +26,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from ....thread.state import merge_permission_answers
-from ...nodes.worker import permission_callback_for, recorded_permission_answers
+from ...nodes._worker_permissions import (
+    permission_callback_for,
+    recorded_permission_answers,
+)
 from .._state_graph_helpers import add_test_node, compile_test_graph
 
 _OPTIONS = [

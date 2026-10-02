@@ -177,7 +177,8 @@ def _cli_reports_logged_in(
 
 def _claude_credentialed() -> bool:
     """Whether the production Claude auth channel has a usable credential."""
-    from .providers.factory import ProviderRuntimeUnavailableError, claude_auth_env
+    from .providers.cli_resolution import ProviderRuntimeUnavailableError
+    from .providers.factory import claude_auth_env
 
     try:
         injected, channel = claude_auth_env()

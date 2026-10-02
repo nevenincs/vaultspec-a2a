@@ -26,8 +26,9 @@ from ...database.tests._backends import migrated_session_factory
 from ...graph.enums import Provider
 from ...providers import AcpPromptError, ProviderCondition
 from ...providers._codex_protocol import _turn_failure
+from ...providers.cli_resolution import ProviderRuntimeUnavailableError
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
-from ...providers.factory import ProviderFactory, ProviderRuntimeUnavailableError
+from ...providers.factory import ProviderFactory
 from ...team.team_config import (
     TeamConfig,
     TeamGraphConfig,
@@ -45,6 +46,8 @@ from ...thread.errors import (
 )
 from ...thread.state import TeamState
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
+from .._compiler_models import parse_catalog_preferences, resolve_model_for_worker
+from .._compiler_prompts import build_supervisor_prompt
 from .._compiler_research import _make_research_producer
 from .._compiler_retry import (
     _NODE_RETRY_POLICY,
@@ -57,10 +60,7 @@ from ..compiler import (
     STEP_BACKSTOP_GRACE_SECONDS,
     _loop_route,
     _route_from_supervisor,
-    build_supervisor_prompt,
     compile_team_graph,
-    parse_catalog_preferences,
-    resolve_model_for_worker,
 )
 from ._state_graph_helpers import add_test_node, compile_test_graph
 from .conftest import deterministic_model_assignment

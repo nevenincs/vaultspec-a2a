@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:8d5d3836db765c0a9a6d192d3ea6edeefab95a51da4859206d99c9d7972b173a'
+body_hash: 'sha256:aaf493419cea3e1c92023c21281f670e26d813111c17014a9e34f03edfba89f2'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -301,6 +301,36 @@ related:
 - `S25` `verify:` `desktop component contract tests 3 passed` -> `pass`
 - `S25` `verify:` `git diff --check` -> `pass`
 - `S25` `by:` `vaultspec-high-executor`
+- `S26` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S26` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S26` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S26` `M` `src/vaultspec_a2a/conftest.py`
+- `S26` `M` `src/vaultspec_a2a/graph/_compiler_models.py`
+- `S26` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S26` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S26` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S26` `M` `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+- `S26` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/nodes/test_vault_reader.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_web_tool_composition.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/test_persona_web_composition.py`
+- `S26` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_acp_stderr_tail.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_cli_resolution.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_mcp_contract.py`
+- `S26` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S26` `M` `src/vaultspec_a2a/worker/tests/test_dispatch_ids.py`
+- `S26` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S26` `verify:` `just ci-merge` -> `pass`
+- `S26` `verify:` `just ci` -> `pass`
+- `S26` `verify:` `git diff --check` -> `pass`
+- `S26` `by:` `Codex`
 
 ## Notes
 
@@ -330,3 +360,4 @@ related:
 - `S24` Review: private cross-module helper fixed; no further S24 finding surfaced. Integrated CI pending.
 - `S13` Managed policy presence remains unknown and audited; integrated CI pending root branch.
 - `S25` Review: stale fixture corrected; no additional finding in S25. Integrated CI pending.
+- `S26` Review verdict REVISION REQUIRED: two high policy conflicts await a decision; P02.S21 credentialed Claude and Z.ai turns remain open.

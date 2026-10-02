@@ -24,10 +24,9 @@ from .._factory_commands import (
 )
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpError
-from ..cli_resolution import resolve_service_executable
+from ..cli_resolution import ProviderRuntimeUnavailableError, resolve_service_executable
 from ..factory import (
     ProviderFactory,
-    ProviderRuntimeUnavailableError,
     _discover_claude_catalog,
 )
 from ..provider_catalog import CatalogStatus, ProviderCatalogKey

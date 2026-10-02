@@ -139,7 +139,7 @@ async def test_mount_refreshes_vault_index_for_documents_written_mid_run(
     state = _make_state(pipeline_phase="research", vault_index={})
     update, mounted = await _mount_pass(tmp_path, state)
 
-    expected_rel = str(Path(".vault/research/my-feature-research.md"))
+    expected_rel = ".vault/research/my-feature-research.md"
     assert update["vault_index"] == {"research": [expected_rel]}
     assert mounted is not None
     assert "Produced mid-run." in mounted
@@ -161,7 +161,7 @@ async def test_mount_refresh_preserves_prior_index_entries(tmp_path: Path) -> No
 
     # The returned update carries only the freshly discovered ADR; the reducer
     # merges it with the surviving plan entry already in state.
-    expected_rel = str(Path(".vault/adr/my-feature-adr.md"))
+    expected_rel = ".vault/adr/my-feature-adr.md"
     assert update["vault_index"] == {"adr": [expected_rel]}
     assert mounted is not None
     assert "Binding." in mounted

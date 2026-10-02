@@ -50,18 +50,11 @@ from ..thread.errors import (
 )
 from ..thread.state import TeamState
 from ._compiler_models import (
-    parse_catalog_preferences,
     resolve_model_for_worker,
-    resolve_supervisor_model,
     validate_frozen_assignment_inventory,
 )
 from ._compiler_prompts import (
-    WEB_GROUNDING_MARKER,
-    build_supervisor_prompt,
-    compose_persona_prompt,
     composed_worker_prompt,
-    lane_web_demonstrated,
-    web_grounding_text,
 )
 from ._compiler_retry import _NODE_RETRY_POLICY, node_occupancy_ceiling
 from .enums import PipelinePhase, Provider
@@ -79,7 +72,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "STEP_BACKSTOP_GRACE_SECONDS",
-    "WEB_GROUNDING_MARKER",
     "_ROLE_TO_PHASE",
     "CompiledTeamGraph",
     "_add_node",
@@ -88,15 +80,8 @@ __all__ = [
     "_loop_route",
     "_route_from_supervisor",
     "_wire_diverge_stage",
-    "build_supervisor_prompt",
     "compile_team_graph",
-    "compose_persona_prompt",
-    "lane_web_demonstrated",
-    "parse_catalog_preferences",
     "required_recursion_limit_for_finish_blocks",
-    "resolve_model_for_worker",
-    "resolve_supervisor_model",
-    "web_grounding_text",
 ]
 
 

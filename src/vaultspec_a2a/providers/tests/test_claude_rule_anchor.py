@@ -315,23 +315,23 @@ def test_the_scope_rule_this_lane_writes_admits_the_path_it_names(
     assert granted.get("is_error") is not True
 
 
-def test_a_single_slash_scope_rule_admits_nothing_at_the_path_it_names(
+def test_native_path_scope_rule_follows_host_cli_path_grammar(
     claude_cli: str, probe_paths: _ProbePaths
 ) -> None:
-    """The spelling this lane used to write grants nothing, and says so silently.
-
-    Same run, same path, one slash fewer. The rule is accepted, the read is
-    refused, and nothing anywhere reports that the grant named a directory
-    under the workspace instead of the one in the rule.
-    """
+    """Observe the host CLI's platform-specific native path rule behavior."""
     refused = _read_under_rules(
         probe_paths,
         cli=claude_cli,
         allowed=f"Read({probe_paths.target.parent.as_posix()}/**)",
     )
 
-    assert _FILE_MARKER not in _answered(refused)
-    assert refused.get("is_error") is True
+    if os.name == "nt":
+        # Claude CLI 2.1.286 resolves the drive spelling as an absolute path.
+        assert _FILE_MARKER in _answered(refused)
+        assert refused.get("is_error") is not True
+    else:
+        assert _FILE_MARKER not in _answered(refused)
+        assert refused.get("is_error") is True
 
 
 def test_the_deny_spelling_this_lane_writes_blocks_a_granted_read(
@@ -359,15 +359,10 @@ def test_the_deny_spelling_this_lane_writes_blocks_a_granted_read(
     assert blocked.get("is_error") is True
 
 
-def test_a_single_slash_deny_rule_blocks_nothing_at_the_path_it_names(
+def test_native_path_deny_rule_follows_host_cli_path_grammar(
     claude_cli: str, probe_paths: _ProbePaths
 ) -> None:
-    """The spelling the deny list used to carry is a deny that never fires.
-
-    This is the same shape the credential and process-tree denies were written
-    in, which is why they are rendered through one anchor with the scope rule:
-    a deny that misses reads exactly like a deny that holds.
-    """
+    """Observe whether a native path deny resolves on this platform."""
     target = probe_paths.target
 
     not_blocked = _read_under_rules(
@@ -377,4 +372,8 @@ def test_a_single_slash_deny_rule_blocks_nothing_at_the_path_it_names(
         denied=f"Read({target.as_posix()})",
     )
 
-    assert _FILE_MARKER in _answered(not_blocked)
+    if os.name == "nt":
+        assert _FILE_MARKER not in _answered(not_blocked)
+        assert not_blocked.get("is_error") is True
+    else:
+        assert _FILE_MARKER in _answered(not_blocked)

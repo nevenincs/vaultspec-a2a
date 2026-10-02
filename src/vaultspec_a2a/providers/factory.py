@@ -69,7 +69,6 @@ __all__ = [
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
-    "ProviderRuntimeUnavailableError",
     "UnsupportedExecutionLaneError",
     "validate_current_execution_lane",
     "validate_current_native_controls",

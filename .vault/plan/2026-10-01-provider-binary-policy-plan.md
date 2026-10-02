@@ -12,7 +12,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
 modified: '2026-10-02'
 body_schema: body-v2
-body_hash: 'sha256:b3c514b952cbd3e5a3576fafca4ee4699c1f59c6bc246765f66ba28ff2a96208'
+body_hash: 'sha256:eb92d89203de2a771ce3d3cbf13a655e39fb610399c69ed0d1fe1ba88f92b404'
 ---
 
 # `provider-binary-policy` plan
@@ -62,6 +62,7 @@ A lane proof declares the binary identity and version range it covers, and a res
 - [x] `P02.S22` - Narrow parsed proof versions before comparing host PATH bounds so strict typing verifies the admission gate; `src/vaultspec_a2a/providers/lane_admission.py`.
 - [x] `P02.S23` - Repair integration CI contracts for the lock-vendored CLI asset and changelog history after the 0.4.0 release; `src/vaultspec_a2a/providers/cli_resolution.py, dev/tests/test_release_please_automation.py`.
 - [x] `P02.S25` - Align the desktop component fixture with the released 0.4.0 wheel identity exposed by integration CI; `src/vaultspec_a2a/desktop_tests/fixtures/dashboard-release-manifest.json`.
+- [x] `P02.S26` - Repair integrated unit-gate drift after proof withdrawal and make CLI, vault-index, ACP subprocess, export, and worker replay assertions portable and current; `src/vaultspec_a2a/conftest.py, src/vaultspec_a2a/graph/_compiler_models.py, src/vaultspec_a2a/graph/_compiler_research.py, src/vaultspec_a2a/graph/_compiler_topologies.py, src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/tests/nodes/test_vault_reader.py, src/vaultspec_a2a/graph/tests/nodes/test_worker_web_tool_composition.py, src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py, src/vaultspec_a2a/graph/tests/test_compiler.py, src/vaultspec_a2a/graph/tests/test_persona_web_composition.py, src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/tests/test_acp_mcp.py, src/vaultspec_a2a/providers/tests/test_acp_stderr_tail.py, src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py, src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py, src/vaultspec_a2a/providers/tests/test_cli_resolution.py, src/vaultspec_a2a/providers/tests/test_factory.py, src/vaultspec_a2a/providers/tests/test_mcp_contract.py, src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/worker/tests/test_dispatch_ids.py, src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py, .vault/audit/2026-09-24-architecture-review-audit.md, .vault/audit/2026-10-01-provider-binary-policy-audit.md, .vault/plan/2026-10-01-provider-binary-policy-plan.md`.
 
 ### Phase `P03` - Recorded runtime identity per run and lane
 
@@ -129,6 +130,6 @@ Plan-level criteria:
 - The Claude credential prerequisite agrees with the production resolution on a host with no token set (P04.S15).
 - No production caller sets a provider session id, proven over the source tree (P05.S16).
 
-Live proof status on this host. Codex 0.159.2 completed the direct production-factory app-server turn cited in P02.S07. The current Claude CLI reached ACP session creation but its first prompt failed with `Authentication required`; no Z.ai credential was available. P02.S07 therefore withdraws those two lanes, and P02.S21 reenrolls each only after its own completed live turn against the resolved binary. P01.S01, P01.S02, P01.S04, P01.S05, P01.S06, P02.S08, P02.S09, P04.S14 and P04.S15 are verified to the binary boundary rather than by a model turn. P03.S13 still requires its separate completed live turn and durable identity-row assertion before the plan closes.
+Live proof status on this host. Codex 0.159.2 completed the direct production-factory app-server turn cited in P02.S07. The current Claude CLI reached ACP session creation but its first prompt failed with `Authentication required`; no Z.ai credential was available. P02.S07 therefore withdraws those two lanes, and P02.S21 reenrolls each only after its own completed live turn against the resolved binary. P01.S01, P01.S02, P01.S04, P01.S05, P01.S06, P02.S08, P02.S09, P04.S14 and P04.S15 are verified to the binary boundary rather than by a model turn. P03.S13 completed a real Codex turn and durable identity-row assertion on SQLite, plus worker and research graph-path proofs. P02.S21 remains open until Claude and Z.ai each complete a credentialed live turn on their resolved binary.
 
 Review follows the vaultspec system section: one review at each Phase close, one at plan close, and one before handoff for merge, with coincident gates sharing a single integrated review.

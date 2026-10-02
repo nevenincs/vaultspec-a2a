@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, overri
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from ..domain_config import domain_config
-from ..graph.compiler import compile_team_graph, resolve_model_for_worker
+from ..graph._compiler_models import resolve_model_for_worker
+from ..graph.compiler import compile_team_graph
 from ..ipc.schemas import canonical_project_root
 from ..providers.team_selection import model_assignment_digest
 from ..providers.warmup import warm_model_imports

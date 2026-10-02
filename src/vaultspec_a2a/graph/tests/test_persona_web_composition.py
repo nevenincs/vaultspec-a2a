@@ -49,12 +49,12 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from ..compiler import (
+from .._compiler_prompts import (
     WEB_GROUNDING_MARKER,
-    compile_team_graph,
     compose_persona_prompt,
     web_grounding_text,
 )
+from ..compiler import compile_team_graph
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:

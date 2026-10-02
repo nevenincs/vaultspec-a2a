@@ -29,17 +29,17 @@ from ..thread.errors import ConfigError
 from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations
 )
+from ._compiler_models import resolve_model_for_worker
+from ._compiler_prompts import compose_persona_prompt, lane_web_demonstrated
 from ._compiler_retry import _NODE_RETRY_POLICY, _SUBMIT_RETRY_POLICY
 from .compiler import (
     _add_node,
     _agent_node_metadata,
     _wire_diverge_stage,
-    compose_persona_prompt,
-    lane_web_demonstrated,
-    resolve_model_for_worker,
 )
 from .enums import PipelinePhase
 from .nodes._config_contract import accepting_runnable_config
+from .nodes._worker_permissions import recorded_permission_answers
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
 from .nodes.clarification import (
     ClarificationQuestionProducer,
@@ -58,7 +58,6 @@ from .nodes.phase_gate import (
 )
 from .nodes.worker import (
     create_worker_node,
-    recorded_permission_answers,
     resolve_effective_worker_model,
 )
 from .run_context import run_thread_id

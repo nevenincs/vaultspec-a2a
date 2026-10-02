@@ -68,8 +68,10 @@ for line in sys.stdin:
 
 
 def _model(tmp_path: Path, stderr_lines: list[str]) -> AcpChatModel:
+    script = tmp_path / "dying_agent.py"
+    script.write_text(_dying_agent(stderr_lines), encoding="utf-8")
     return AcpChatModel(
-        command=[sys.executable, "-c", _dying_agent(stderr_lines)],
+        command=[sys.executable, str(script)],
         env_vars={},
         workspace_root=str(tmp_path),
     )

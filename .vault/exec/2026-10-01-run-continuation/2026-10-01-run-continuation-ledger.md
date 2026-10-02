@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:0bfe35931ae8e33cea6e17fdbcf73a561a0b855f5aa3f0d50b4f483b3470e1c3'
+body_hash: 'sha256:b059fd5e177c6f3e2634e8e39cb3d951d27729375922ac053b8cf46a3b78bf86'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -151,6 +151,9 @@ related:
 - `S15` `verify:` `ty check touched Python` -> `pass`
 - `S15` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S15` `by:` `vaultspec-standard-executor`
+- `S16` `M` `.vault/adr/2026-07-14-a2a-edge-conformance-adr.md`
+- `S16` `M` `.vault/audit/2026-10-01-run-continuation-audit.md`
+- `S16` `verify:` `python -m pytest -q api continuation admission/lineage/terminal suites` -> `pass`
 
 ## Notes
 
@@ -167,3 +170,4 @@ related:
 - `S10` The follow-up verb no longer dispatches: its claim, receipt and dispatch path became unreachable once both admitting states answer queued, so it and the route's 502 and worker-saturation 503 are removed. The recursion budget is frozen from the run's accepted graph definition.
 - `S11` Admission and every settlement path now take one run lock, closing a PostgreSQL race that left a queued row on a settled run; replay is decided before eligibility and serves the journal row's own status.
 - `S13` Scope correction: `queued_messages` joins the snapshot in control/projection.py, where durable state reaches it, not control/snapshot.py; it is declared on both snapshot types the parity guard holds equal.
+- `S16` The R6 amendment already existed; this Step reconciled it with the served `queue_position` and narrowed dispatch-time answers.

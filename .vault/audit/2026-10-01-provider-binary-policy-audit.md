@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:3dee898cc6a528ae37d9ff41b2a252d0e2b0bedce2a1f49c4ebcd9c1902113d4'
+body_hash: 'sha256:91dfe347988961586ac0db106075be8f5af07cdaf2884f6a56f348c90add0d21'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -78,7 +78,17 @@ Fixed in P05.S16. The new model-field assertion initially imported the provider 
 
 Fixed in P01.S02. The desktop profile previously validated runtime assets only with is_file(), which follows a symlink outside the capsule. Adding the Claude CLI as a third asset would have admitted a host-owned binary through that path. The profile now resolves each of the three assets against the resolved capsule root and refuses an escape; a real symlink test proves the refusal. Type: runtime authority and asset containment.
 
+### catalog-missing-cli-propagates-configuration-error | medium | catalog lacks a typed unavailable result for a missing CLI
+
+Open; owned by P01.S05. The P01.S04 resolver now refuses a missing selected binary with ConfigError. The Claude catalog probe catches classifier errors before calling the resolver, but the resolver call itself sits outside that catch in src/vaultspec_a2a/providers/factory.py. A missing CLI can therefore escape discovery instead of returning a typed runtime-unavailable catalog result. Type: error mapping and availability. P01.S05 is already approved to close this seam together with served launch refusal.
+
+### catalog-binary-test-was-posix-only | low | catalog pin proof was skipped on Windows
+
+Fixed in P01.S04. The previous capsule catalog test used a POSIX shell script as its fake Node executable and skipped the Windows host. It now copies the installed Node binary into a real capsule tree and uses a tiny JavaScript entry to write the child environment, so the same catalog probe runs on both hosts. Type: test coverage and portability.
+
 ## Recommendations
 
 - Rule on the managed-policy tier and correct the claim (`managed-policy-env-reaches-the-child`), done by the ADR amendment and P06.S20.
 - Re-run the Claude lane's completed-turn test on a credentialed host against 2.1.284 (`claude-lane-proof-predates-the-binary`).
+
+- Map missing Claude CLI resolution to typed catalog and launch unavailability in P01.S05 (catalog-missing-cli-propagates-configuration-error).

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:f22f947c9215f081d333ef9c7bfefe4c08d2949c210dd89ec849296b4e9b9137'
+body_hash: 'sha256:89600c3d07ca44e73b5834266d65e17474dac6ec8cc928abd7bbb0081dc941cb'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -93,6 +93,17 @@ related:
 - `S03` `verify:` `ty settings files` -> `pass`
 - `S03` `verify:` `vault check provider-binary-policy` -> `pass`
 - `S03` `verify:` `just ci` -> `fail`
+- `S04` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S04` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S04` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S04` `M` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S04` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S04` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S04` `verify:` `pytest Claude binary identity/capsule/factory` -> `pass`
+- `S04` `verify:` `ruff provider resolver files` -> `pass`
+- `S04` `verify:` `ty provider resolver files` -> `pass`
+- `S04` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S04` `verify:` `just ci` -> `fail`
 
 ## Notes
 
@@ -101,3 +112,4 @@ related:
 - `S01` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; this Step changes neither.
 - `S02` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
 - `S03` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
+- `S04` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration. Missing-CLI typed refusal is queued to P01.S05.

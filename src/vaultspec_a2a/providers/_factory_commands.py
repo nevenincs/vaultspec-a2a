@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import functools
 import os
+import platform
+import sys
 from pathlib import Path
 
 from ..control.config import settings
@@ -20,6 +22,7 @@ __all__ = [
     "_classify_kimi_command",
     "_kimi_home_env",
     "capsule_acp_entry",
+    "capsule_claude_executable",
     "capsule_node_executable",
     "classify_provider_command",
     "claude_acp_entry",
@@ -180,6 +183,46 @@ def capsule_acp_entry(capsule_assets_root: Path) -> Path:
     resolves from capsule assets.
     """
     return capsule_assets_root / _CAPSULE_ACP_RELATIVE_PATH
+
+
+def capsule_claude_executable(capsule_assets_root: Path) -> Path:
+    """Return the CLI path selected by the bundled ACP adapter on this host.
+
+    The adapter prefers the Linux package matching the host libc and tries the
+    other variant only when the preferred package is absent. The capsule uses
+    the same verbatim npm layout, so no checkout or PATH lookup is involved.
+    """
+    node_platform = {
+        "win32": "win32",
+        "darwin": "darwin",
+        "linux": "linux",
+    }.get(sys.platform)
+    node_arch = {
+        "amd64": "x64",
+        "x86_64": "x64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+    }.get(platform.machine().lower())
+    if node_platform is None or node_arch is None:
+        raise ConfigError(
+            f"No capsule Claude CLI variant for {sys.platform}/{platform.machine()}"
+        )
+    variants = [f"@anthropic-ai/claude-agent-sdk-{node_platform}-{node_arch}"]
+    if node_platform == "linux":
+        musl_variant = f"{variants[0]}-musl"
+        variants = (
+            [musl_variant, variants[0]]
+            if platform.libc_ver()[0] != "glibc"
+            else [variants[0], musl_variant]
+        )
+    binary_name = "claude.exe" if node_platform == "win32" else "claude"
+    candidates = [
+        capsule_assets_root / "node_modules" / variant / binary_name
+        for variant in variants
+    ]
+    return next(
+        (candidate for candidate in candidates if candidate.is_file()), candidates[0]
+    )
 
 
 def _canonical_capsule_assets_root(capsule_assets_root: Path) -> Path:

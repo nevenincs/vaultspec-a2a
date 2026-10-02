@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:2b39ee7272a990167f076d427ac0b420184f02903f80031cdcd2e6b4a13c8ecf'
+body_hash: 'sha256:c04123cb1636d6c4299c02c24c17e7edf825a7a295c18c7cef515bc5b90ac98d'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -150,3 +150,6 @@ Fixed in P02.S22. The P02.S08 proof predicate rejected missing parse results in 
 ### managed-policy-presence-not-observable-from-acp | medium | runtime identity cannot yet assert host policy presence
 
 Open; owned by P03.S13. The adapter applies managed policy before sessions but its ACP initialize and session/new results do not report whether that tier existed or its read succeeded. P06.S20 logs the resolution path only. `ProviderRuntimeIdentityModel.managed_policy_present` must remain unknown until S13 obtains a reliable presence signal, for example by probing the same SDK `resolveSettings({settingSources: []})` policy tier without exporting its values. Type: runtime evidence gap.
+### claude-auth-example-stale | medium | the operator example describes the old ambient-only Claude auth contract
+
+Open, owned by P04.S15. The example still says this service never reads CLAUDE_CODE_OAUTH_TOKEN and gives no editable VAULTSPEC_A2A_CLAUDE_AUTH_CHANNEL or VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN line. After S14 that is false: a declared oauth_token channel reads the configured secret and injects it. The env-example coverage test reports both missing names; it also reports the independently added SUCCESSOR_TRANSCRIPT_DEPTH setting, owned by the continuation workstream. Type: operator documentation and settings coverage drift. S15 must explain that a token only in a project .env authenticates nothing under the default channel and must document how to opt in.

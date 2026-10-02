@@ -136,19 +136,10 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     assert model.command_origin == "package_bin"
     assert model.command_kind == "bun_binary"
     assert model.acp_backend == "binary"
-    assert model.auth_mode in {"cli_session", "none_detected"}
 
 
-def test_provider_factory_claude_never_injects_an_env_token() -> None:
-    """The Claude lane's identity is the operator's CLI session, never a token.
-
-    An exported ``CLAUDE_CODE_OAUTH_TOKEN`` is a SEPARATE
-    credential window from the account the operator is logged in as; injecting
-    it would silently redirect every run onto that other identity. The factory
-    must therefore construct the model with no token in ``env_vars`` regardless
-    of what settings carry, and stamp the lane from the CLI session credential's
-    presence alone.
-    """
+def test_provider_factory_claude_default_never_injects_a_setting_token() -> None:
+    """The default channel leaves a configured token out of the child overlay."""
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(
             lambda: ProviderFactory().create(
@@ -156,14 +147,22 @@ def test_provider_factory_claude_never_injects_an_env_token() -> None:
             )
         )
         return
-    model = ProviderFactory().create(
-        Provider.CLAUDE, model="catalog-model", backend="binary"
-    )
+    from pydantic import SecretStr
+
+    from ...testing import settings_override
+
+    with settings_override(
+        claude_auth_channel="subscription_login",
+        claude_code_oauth_token=SecretStr("configured-test-token"),
+    ):
+        model = ProviderFactory().create(
+            Provider.CLAUDE, model="catalog-model", backend="binary"
+        )
     assert isinstance(model, AcpChatModel)
     assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in model.env_vars
     assert "ANTHROPIC_API_KEY" not in model.env_vars
-    assert model.auth_mode in {"cli_session", "none_detected"}
+    assert model.auth_mode == "subscription_login"
 
 
 def test_provider_factory_claude_binary_sets_use_exec() -> None:

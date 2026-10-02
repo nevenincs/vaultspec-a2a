@@ -13,11 +13,9 @@ is. Both channels are asserted here — the streamed deltas and the final
 aggregated result — because a provider can stream nothing and still return a
 result object, or stream and then lose the aggregation.
 
-The Claude lane implements no authentication of its own: the spawned CLI
-inherits the ambient environment and the operator's real config home, and
-authenticates however the operator ambiently does - on this project's dev hosts,
-a flat-rate subscription login. The prompt is trivial regardless, to keep the
-turn short.
+The default Claude channel inherits the ambient environment and the operator's
+real config home. The explicit oauth_token channel injects the configured
+headless token. The prompt is trivial regardless, to keep the turn short.
 
 Re-arm (one command, once the prerequisites exist):
 
@@ -83,11 +81,11 @@ async def test_claude_live_turn_completes_and_returns_content(
         Provider.CLAUDE, model=served, workspace_root=tmp_path
     )
     assert isinstance(model, AcpChatModel)
-    # The production chain injects NO credential of its own: the lane is
-    # ambient-auth by contract, and the subprocess resolves whatever the
-    # operator's environment carries.
-    assert model.auth_mode == "ambient"
-    assert "CLAUDE_CODE_OAUTH_TOKEN" not in model.env_vars
+    assert model.auth_mode == settings.claude_auth_channel
+    if settings.claude_auth_channel == "subscription_login":
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in model.env_vars
+    else:
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in model.env_vars
     assert "ANTHROPIC_API_KEY" not in model.env_vars
 
     messages = [

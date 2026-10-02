@@ -5,7 +5,7 @@ tags:
 date: '2026-10-01'
 modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:0ef2b3cc76aaaaed7f6c7ba133e85a69c7cdaa0d024fe3696098ab300dacf5fb'
+body_hash: 'sha256:f22ac0d6e30f4736e95bc401807eaffd5f20071789a0c56939beb502c58bec7b'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -221,6 +221,20 @@ related:
 - `S20` `verify:` `changed-file ruff ty basedpyright` -> `pass`
 - `S20` `verify:` `git diff --check` -> `pass`
 - `S20` `by:` `vaultspec-high-executor`
+- `S14` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S14` `M` `src/vaultspec_a2a/control/env_registry.py`
+- `S14` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S14` `M` `src/vaultspec_a2a/control/tests/test_settings_sources.py`
+- `S14` `A` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S14` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S14` `M` `src/vaultspec_a2a/providers/tests/test_claude_live_turn.py`
+- `S14` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S14` `verify:` `focused auth factory binary admission settings suites 77 passed` -> `pass`
+- `S14` `verify:` `env-example drift and coverage suites` -> `fail`
+- `S14` `verify:` `changed-file ruff format ty` -> `pass`
+- `S14` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S14` `verify:` `git diff --check` -> `pass`
+- `S14` `by:` `provider-runtime`
 
 ## Notes
 
@@ -243,3 +257,4 @@ related:
 - `S18` Full just ci and ci-merge remain shared integration gates; credentialed live model turn unavailable. Medium error-path accounting follow-up queued in audit.
 - `S22` Review: no remaining code finding in S22; strict CI diagnostics in ACP protocol and checkpoints are assigned to their owning continuation and S19 passes.
 - `S20` Formal review fixed the false settings-source claim and queued medium managed-policy presence evidence for S13.
+- `S14` Env-example coverage pending S15 and continuation successor setting; integrated CI and credentialed live turn pending.

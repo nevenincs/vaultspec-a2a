@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:bde660e1cbf911aa9f51c93edd44f3bf6511280a357c5ad980c2e4f047711789'
+body_hash: 'sha256:8efb797a06da7ab5759deea04acdb322d1c0fb4ce2a8fc3f586d5e81334a8cce'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-07-19-observability-lanes-adr]]"
@@ -318,3 +318,21 @@ and narrows invalid objects, with no provider admission change. Focused Ruff,
 format and strict Basedpyright pass; all three existing retirement tests pass.
 The user-authorized all-changes commit follow-through includes this final edit.
 The ACP manifest and lock are both confirmed at 0.85.1 after cede7801.
+### final-journal-replacement-review | low | verified: concurrent closed-header publication
+
+Type: concurrent compatibility and durability maintenance. Status: reviewed and
+verified. The retirement owner also changed compaction to validate the existing
+owner through a read-only SQLite connection and atomically publish an empty
+closed header from a same-directory temporary database. That source change was
+included when the shared file was indexed for f9f2ae89. Review of the actual
+commit inventory identified the broader change; it is not covered only by the
+regularity guard described above. The owning ADR now records the compatible
+read-only legacy journal path and unchanged manifest-driven bounded cleanup.
+
+The final source uses a writable handle for the temporary file durability flush,
+then replaces the owned path and flushes its directory on POSIX. The closed-run
+marker and unsupported version-2 owner preserve refusal for retained old/new
+role identities. Fresh Ruff lint/format and strict Basedpyright pass. All ten
+retirement/deletion cases pass against the final source, including failure retry
+and claim release. The plan keeps its remaining proof prerequisites open. This
+review and its documentation are included in the authorized commit follow-through.

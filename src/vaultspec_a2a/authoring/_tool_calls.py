@@ -12,6 +12,7 @@ import sqlite3
 import stat
 import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import aiosqlite
@@ -21,7 +22,6 @@ from ._ids import derive_idempotency_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
-    from pathlib import Path
 
 
 def tool_call_journal_path(run_id: str, call_scope: str) -> Path:
@@ -230,8 +230,6 @@ class ToolCallJournal:
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=".retiring-", suffix=".db", dir=self.path.parent
         )
-        from pathlib import Path
-
         temporary = Path(temporary_name)
         try:
             os.close(descriptor)
@@ -239,7 +237,7 @@ class ToolCallJournal:
             async with closed._transaction(retiring=True) as db:
                 # Earlier bridge binaries refuse an unknown owner version too.
                 await db.execute("UPDATE owner SET version = 2 WHERE id = 1")
-            with temporary.open("rb") as file:
+            with temporary.open("r+b") as file:
                 os.fsync(file.fileno())
             if os.name == "posix":
                 temporary.chmod(0o660)

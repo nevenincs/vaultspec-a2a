@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:53d3ddd05bcf08c3a1c3218d76515b1d613dd6d2f3c424df4a7936b39685a875'
+body_hash: 'sha256:f5ae735d45a4af1b74953a318ebaeb6b38172b45ab675a5fc65972926be39002'
 related:
   - "[[2026-10-04-a2a-edge-conformance-authoring-retry-audit]]"
   - "[[2026-10-01-run-continuation-adr]]"
@@ -35,7 +35,11 @@ This is a separate store-retention refinement within the authoring-edge and acti
 
 ## Implementation
 
-Use a deterministic credential-free marker in each configured authoring journal directory. The deletion coordinator closes and compacts matching owned SQLite journals before finalizing its existing deletion saga. A failure retains DELETING and reports incomplete cleanup for retry. Existing cleanup items keep their own independent outcomes. A completed retirement deletes per-call/lifecycle rows and vacuums the owned database, retaining its closed owner header. The marker also fences any new journal path for that run. Keep source-version handling explicit, with no translation of unsupported ownership.
+Use a deterministic credential-free marker in each configured authoring journal directory. Capture each existing store root as an immutable authoring-replay cleanup item using the existing artifact_file kind. The deletion saga independently executes and records those items, releases its claim after incomplete passes, and preserves its existing three-attempt abandonment/reporting policy. An abandoned item retains its replay data; failure never permits eviction or fresh identity.
+
+Close the run and durably flush its marker before reclaiming rows. Verify each candidate's run/scope owner and deterministic filename, then atomically replace its owned database with a compact empty closed owner header. This also permits retirement of legacy agent-owned files that the service can read but cannot write. New isolated journal files are created by the service with explicit group read/write access before handing them to the agent. Existing linked or multiply-linked candidates are refused or skipped, and foreign run data is left alone. The run marker fences new role paths; unsupported owner version 2 fences existing paths for earlier bridge binaries. Keep source-version handling explicit, without translating unsupported ownership.
+
+Implementation review on 2026-10-04 replaced an initial coordinator hook with manifest-driven cleanup because a hook failure could retain the deletion claim and bypass bounded abandonment. The accepted retention and closed-identity constraints are unchanged.
 
 ## Rationale
 

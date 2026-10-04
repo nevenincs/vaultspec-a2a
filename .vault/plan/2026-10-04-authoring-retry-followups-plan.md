@@ -11,7 +11,7 @@ related:
   - '[[2026-10-04-authoring-retry-followups-journal-retirement-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:9cb7a190a8c74c7f0c8f0090c9ead916fca2cf762b50df8c97a3881fd6306e2d'
+body_hash: 'sha256:4b9d9a12f195217b521f2ed7e6b5c129915c6d6d39347fc9a2cc224a5ab7e5b4'
 ---
 
 # `authoring-retry-followups` plan
@@ -26,7 +26,7 @@ Basis: the user's instruction to continue the three follow-ups recorded in `2026
 
 - [ ] `S01` - Consume the Codex native logical identity and establish the remaining provider proof boundary; `src/vaultspec_a2a/protocols/mcp and providers/_acp_authoring.py with corresponding tests`.
 - [ ] `S02` - Wire stdio bearer refresh to explicitly handed protected discovery and verify rotation; `new authoring/_bridge_refresh.py, protocols/mcp/authoring_stdio.py, providers/_acp_authoring.py and process tests`.
-- [ ] `S03` - Reclaim authoring journal entries at durable run deletion while preserving closed identity; `authoring/_tool_calls.py, control/thread_service.py, journal/deletion tests and retention decision`.
+- [x] `S03` - Reclaim authoring journal entries at durable run deletion while preserving closed identity; `authoring/_tool_calls.py, control/cleanup/executor.py, journal and deletion tests and retention decision`.
 
 ## Parallelization
 

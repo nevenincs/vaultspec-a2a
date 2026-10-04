@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-10-02'
+modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:d2f83846c7bc199d75b507ef32241fd1fdb165e4b5b15d819916c5cbfbbb7984'
+body_hash: 'sha256:507c7300e89ede37ce6820010d8462605d4c553270d906929e0bfef7c64903f3'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -15,7 +15,6 @@ related:
   - "[[2026-07-19-observability-lanes-adr]]"
   - "[[2026-07-19-a2a-edge-conformance-adr]]"
 ---
-
 # `architecture-review` audit: `architecture review against modern agent orchestration standards`
 
 ## Scope
@@ -647,3 +646,150 @@ Partly fixed in P06.S50: reachability is zero (six type-only testing modules, no
 ### claude-native-path-rule-grammar-varies-by-platform | medium | the old unanchored rule claim was too broad
 
 Correction from the P02.S26 integrated Windows proof on 2026-10-02. Claude CLI 2.1.286 interpreted `Read(Y:/.../**)` and its matching drive-path deny as absolute Windows paths: the grant read the named file and the deny blocked it. The earlier P06.S46 finding's statement that the old native-path spelling grants and denies nothing describes the previously observed POSIX behavior, not Windows. The production `claude_rule_path` still emits the explicit `//` absolute anchor and both production grant and deny passed the real CLI proof on Windows. Type: platform-dependent provider rule grammar and audit evidence precision. The test now asserts each host's observed behavior without weakening the production `//` assertion.
+
+## ACP negative read-range remediation review, 2026-10-04
+
+The user explicitly requested the repository-scan finding fix. This direct,
+bounded pass addresses the negative read range and configured-cap boundary
+within the existing filesystem handler; it does not complete the ACP v1
+migration in `2026-08-02-llm-context-provider-abstraction-plan`. Independent
+read-only investigation and candidate review were completed. Review verdict:
+PASS for the scoped change after the verification below; no surviving
+negative-size bypass or introduced runtime regression was found.
+
+### read-cap-bypass-remediation | low | negative limits no longer reach an unbounded stream read
+
+Status: fixed for the reported negative-limit defect; type: security/input
+validation. Before the fix, the new real-file suite reproduced numeric,
+string, and float negative limits returning content, with 27 failures and
+13 passing controls. `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`,
+`_non_negative_integer`, now rejects negative values, fractional floats,
+booleans, and malformed values. `_read_workspace_text` validates offset,
+limit, and the configured maximum before anchor resolution or opening either
+backend, then clamps accepted limits to the maximum. Invalid requests retain
+the existing `-32603` error envelope and return no content. The original
+`read-cap-bypass` entry remains historical; the following open contract
+items remain separately owned.
+
+### configured-read-cap-domain | low | a negative configured maximum could independently make reads unbounded
+
+Status: fixed; type: security/configuration validation.
+`src/vaultspec_a2a/control/infra_config.py:917` constrains
+`acp_fs_read_max_bytes` with `ge=0`; the shared reader also validates the
+runtime maximum before I/O, so unsafe reassignment cannot pass a negative
+size to a stream. Zero remains a supported empty-read cap.
+
+### falsey-and-fractional-read-ranges | low | malformed offsets could be replaced by zero or truncated
+
+Status: fixed; type: input-validation/contract correctness. The handler
+previously used a falsey offset default and integer conversion truncated
+fractional floats, including negative fractions. Missing/null offset still
+means zero, and missing/null limit still means the configured cap; explicit
+false, empty strings/containers, and fractional numeric values now fail
+validation. Positive integer strings and integral floats retain their
+existing behavior.
+
+### read-byte-budget-residual | low | text reads still count decoded characters rather than UTF-8 bytes
+
+Status: open, pre-existing; type: resource-limit/contract drift. Both stream
+branches still use text `read(limit)`, so multibyte content can exceed the
+documented byte budget in `acp_fs_read_max_bytes`. This fix closes negative
+stream sizes and does not claim byte-accurate limiting. Owner:
+`2026-08-02-llm-context-provider-abstraction-plan`, P01.S01, under
+`2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr`.
+The existing `read-cap-bypass` entry already records this remaining work.
+
+### acp-read-contract-residual | medium | line pagination and session ownership remain unmigrated
+
+Status: open, pre-existing; type: protocol/authority contract drift.
+The filesystem handler still supports the legacy offset/text-count
+behavior, ignores ACP v1 `line`, and does not validate `sessionId`.
+Owner: P01.S01 and P02.S05 of
+`2026-08-02-llm-context-provider-abstraction-plan`; the accepted ACP v1
+client-wire ADR governs migration. These Steps remain open; positive legacy
+controls passing here are compatibility evidence for this bounded patch,
+not proof of ACP v1 conformance.
+
+### remediation-review-coverage | low | backend and parser evidence gaps were closed by focused Linux probes
+
+Status: resolved; type: verification coverage. The candidate reviewer found
+no code defect but identified missing execution of the secure POSIX branch
+and JSON/dispatch transitions. WSL Ubuntu executed the regression suite with
+`VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER=/bin/true` and a 32-character
+configured cap; all 41 tests passed. A six-case real-pipe probe through
+`_dispatch_stdout_line` exercised `limit=-1`, a negative integer string
+with whitespace/underscores, a negative fraction, boolean offset, and
+positive integer/numeric-string controls; all passed and the probe confirmed
+`_secure_callback_enabled() == True`.
+
+Verification against the reviewed three-file candidate:
+
+- `uv run --no-sync --frozen --no-default-groups --group tooling ruff check`
+  and `ruff format --check` on the handler, infra config, and
+  `src/vaultspec_a2a/providers/tests/test_acp_fs_read_limits.py`: PASS.
+- The same locked tooling profile with
+  `ty check src dev docs scripts packaging`: PASS.
+- `pytest src/vaultspec_a2a/providers/tests/test_acp_fs_read_limits.py src/vaultspec_a2a/providers/tests/test_acp_vault_deny.py -q`:
+  53 passed on Windows. Real files prove negative requests disclose no
+  content, missing-file requests reject ranges before opening, oversized
+  reads stop at the cap, and omitted/null/zero/positive partial reads and
+  vault-read behavior remain intact.
+- `pytest src/vaultspec_a2a/providers/tests/test_acp_security.py src/vaultspec_a2a/providers/tests/test_project_confinement.py -q`:
+  80 passed on Windows; three existing Linux-only descriptor tests skipped.
+  The focused WSL secure-backend run above supplies evidence for the changed
+  read boundary independently of those unchanged platform tests.
+- Linux dependencies were installed from `uv.lock` with
+  `uv sync --frozen --no-default-groups --group tooling` into an isolated
+  temporary environment. The WSL run used that environment with
+  `uv run --no-sync --frozen --no-default-groups --group tooling --project /mnt/y/code/vaultspec-a2a-worktrees/main pytest /mnt/y/code/vaultspec-a2a-worktrees/main/src/vaultspec_a2a/providers/tests/test_acp_fs_read_limits.py -q`:
+  41 passed, secure callbacks enabled as described above.
+- Code semantic discovery was attempted but returned
+  `index_unverifiable`; server status confirmed failed indexing. Discovery
+  continued with targeted source searches and the Core ADR listing/search.
+
+### scoped-commit-hook-concurrency | low | unrelated unstaged desktop implementation prevents the isolated commit hook
+
+Status: open, integration checkpoint; type: verification/environment
+concurrency. The scoped commit attempt
+`git commit -m "fix: reject ACP read ranges that bypass the configured cap"`
+was rejected by the Ty hook: an untracked concurrent desktop test imports
+`path_is_owner_restricted`, while the hook temporarily stashes that helper's
+unstaged implementation in
+`src/vaultspec_a2a/desktop/_platform_acl.py`. Other hooks passed, including
+Ruff, format, Markdown, Vault Doctor, annotations, and the framework commit
+gate. The full working-tree
+`ty check src dev docs scripts packaging` was rerun afterward and passed.
+No hook was bypassed and no concurrent change was included in the scoped
+fix. This pass therefore leaves the fix uncommitted; the concurrent desktop
+workstream owns the missing index consistency, after which the normal
+scoped commit can be retried.
+
+## Sequential ACP read follow-through, 2026-10-04
+
+The user subsequently authorized commit-hook removal and all current validation
+and ACP read byte/line/session repairs, one at a time. The owning harness removed
+the hook and verified its absence; manual required checks continue. This resolves
+`scoped-commit-hook-concurrency` for this pass. The earlier bounded-remediation
+entries above describe the historical intermediate state.
+
+`2026-10-04-acp-read-remediation-plan` S02 supersedes that intermediate read
+implementation with the accepted v1 contract: strict constrained line/limit
+requests, rejection of legacy offsets, exact active-session ownership, and a
+shared bounded UTF-8 byte-cap reader on ordinary and anchored backends.
+`read-byte-budget-residual` and the read portion of `acp-read-contract-residual`
+are now resolved. Numeric strings and integral floats are deliberately rejected
+by the strict v1 range schema; omitted/null ranges remain valid. The documented
+new audit records the tests, review findings, repairs, and retained sibling debt.
+
+Verification: 156 focused Windows tests passed (three existing Linux-only skips),
+113 native Linux secure read/confinement tests passed without skips, one installed
+ACP SDK subprocess callback test passed, the real pinned Claude adapter handshake
+passed, and all three Docker filesystem/identity-boundary proofs passed. Full
+Ruff lint/format and Ty passed; scoped Basedpyright reported zero issues.
+The candidate review found no surviving read bypass or runtime regression after
+repairing one introduced race-probe error handling regression.
+
+The Medium sibling write/terminal session-ownership debt and High
+`acp-client-enforcement-unreached` remain open under the older migration plan.
+Callback contract verification does not establish Claude native-tool enforcement
+and does not close the larger migration plan.

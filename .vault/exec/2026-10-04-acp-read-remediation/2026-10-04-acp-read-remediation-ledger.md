@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:d1cad324545d6f74ee049aa3472cbc9909d4e430f7ae38aeef090e616cc5a7f1'
+body_hash: 'sha256:ef26b830b231e0e28c07d0178915f2c62113cfad4c4f53be06ce703b4ffec7d2'
 related:
   - "[[2026-10-04-acp-read-remediation-plan]]"
 ---
@@ -40,7 +40,16 @@ related:
 - `S02` `verify:` `Docker provider boundary three tests` -> `pass`
 - `S02` `verify:` `independent candidate and corrective review` -> `pass`
 - `S02` `by:` `root`
+- `S03` `M` `.vault/audit/2026-10-04-acp-read-remediation-audit.md`
+- `S03` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S03` `verify:` `final integrated review including corrective findings` -> `pass`
+- `S03` `verify:` `feature-scoped vault health checks` -> `pass`
+- `S03` `verify:` `shared-file commit isolation preserves concurrent source changes` -> `pass`
+- `S03` `by:` `root`
+- `S03` `verify:` `SDK 1.6.0, Claude adapter 0.85.1, and permission posture 34 tests after concurrent dependency upgrade` -> `pass`
+- `S03` `verify:` `final hook absence` -> `pass`
 
 ## Notes
 
 - `S02` Sibling write and terminal ownership and native-tool enforcement remain open under the older ACP migration plan.
+- `S03` The older ACP provider migration remains open for sibling session authority and native-tool enforcement.

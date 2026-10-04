@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:cc420eb25191ef45d2e6071791d4457955be0207037f0ac10c59b93aeb2320e2'
+body_hash: 'sha256:4aac655fbebe6c2cff184b786b1275af64b5c80b4bb5adde9cc672f1c3dcc388'
 related:
   - "[[2026-10-04-acp-read-remediation-plan]]"
 ---
@@ -174,3 +174,48 @@ checked; every surfaced item above has severity, type, status, and ownership.
 Semantic discovery returned `index_unverifiable`, so targeted code searches
 and Core ADR queries supplied grounding. Concurrent source and vault changes
 remain outside the authored commit.
+
+## S03 integrated checkpoint
+
+Final review verdict: PASS. The follow-up review accepted the confirmed race
+probe repair and installed-SDK transport evidence; no new defect remained in
+the authored read changes. Full quality checks and focused Windows, Linux,
+installed SDK, real adapter, and Docker evidence above are the final results.
+The feature-scoped vault checks also passed without diagnostics.
+
+S02 committed as `e39c2ff9`, containing only authored source/test changes and
+its plan, ledger, and audit checkpoint. Shared source files were committed at
+hunk granularity using an isolated index, preserving concurrent workspace
+boundary and discovery work. The hook remains absent after committing.
+
+The architecture-review audit now appends the later read-specific resolution
+without rewriting its historical intermediate findings. Every surfaced review
+item is recorded above; sibling protocol authority and native callback
+reachability remain explicitly open with their existing owners. S03 completes
+this read-remediation plan, not the larger provider migration.
+
+### older-architecture-step-in-flight | info | existing ledger rows refer to an open Step
+
+Status: in flight, pre-existing; type: execution checkpoint advisory.
+The architecture-review feature vault check passed with one informational
+exec-mapping item: its ledger already records S50 while that plan Step remains
+open. The owning architecture-review plan continues that work; no metadata was
+changed by this read-remediation pass. The acp-read-remediation feature has no
+vault health diagnostics.
+
+### audit-markdown-hygiene | info | an appended body left an extra trailing blank line
+
+Status: resolved; type: introduced documentation formatting. Feature-scoped
+vault checks surfaced one extra blank line after the S03 body append. The
+owning `vault check markdown --feature acp-read-remediation --fix` removed it;
+subsequent feature health checks returned no diagnostics.
+
+### concurrent-adapter-upgrade-reverification | info | final transport evidence includes the newer installed dependencies
+
+Status: verified; type: integration checkpoint. Another workstream changed
+package.json and package-lock.json to Claude ACP adapter 0.85.1 and ACP SDK
+1.6.0 after the earlier 0.84.0/1.5.1 evidence. Those dependency changes were
+preserved and excluded from this pass's commits. With pinned Node 26.8.1,
+reran the installed-SDK callback test, real adapter migration-surface handshake,
+and complete permission-posture file with `-m 'service or not service' -q`:
+34 passed. No additional source fix was needed.

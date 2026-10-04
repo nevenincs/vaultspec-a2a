@@ -47,6 +47,8 @@ from typing import TYPE_CHECKING
 from ..control.config import settings
 from ..thread.errors import ConfigError
 from ..utils.enums import CodexWebSearchMode
+from ..utils.runtime_exec import is_module_invocation
+from ._acp_authoring import AUTHORING_MCP_SERVER_NAME, AUTHORING_STDIO_MODULE
 from ._codex_auth import seed_run_credential, write_back_refreshed_credential
 from ._config_home_roots import (
     sweep_orphan_homes,
@@ -249,6 +251,12 @@ def render_codex_config_toml(
     plus ``sandbox = "read-only"`` composition. Deterministic and stdlib-
     ``tomllib``-parseable.
 
+    The runtime authoring bridge additionally receives ``approval_mode =
+    "approve"`` for each exact catalog tool. Its mutations advertise
+    ``readOnlyHint=false``, so ``auto`` would require a prompt that ``never``
+    refuses. Engine actor permissions and human review before apply remain
+    authoritative; unknown tools receive no approval override.
+
     "An exact allowlist" is ENFORCED here rather than assumed of the caller: every
     registry-known spec's ``tools`` is compared against the registry's own
     declaration (:func:`registry_tools_divergence`) before it is written, because
@@ -323,6 +331,21 @@ def render_codex_config_toml(
         ) and harness_server_addresses_projects_per_call(name)
         if not per_call_project:
             lines.append('default_tools_approval_mode = "auto"')
+        if name == AUTHORING_MCP_SERVER_NAME:
+            if not is_module_invocation(args, AUTHORING_STDIO_MODULE):
+                raise ConfigError(
+                    "authoring approvals require the runtime stdio bridge"
+                )
+            # Mutations correctly advertise readOnlyHint=false. Under 'never',
+            # 'auto' refuses them. Admit only the engine-owned catalog allowlist;
+            # engine actor permissions and mutation approval still govern execution.
+            for tool in tools:
+                lines.extend(
+                    [
+                        f"[mcp_servers.{key}.tools.{_table_key(tool)}]",
+                        'approval_mode = "approve"',
+                    ]
+                )
         block = "\n".join(lines)
         if environment:
             env_lines = [f"[mcp_servers.{key}.env]"]

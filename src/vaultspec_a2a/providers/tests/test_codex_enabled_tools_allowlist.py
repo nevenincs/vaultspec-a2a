@@ -166,6 +166,17 @@ def test_a_server_the_registry_does_not_own_is_skipped_not_refused() -> None:
     parsed = _render([bridge])
     written = parsed["mcp_servers"][AUTHORING_MCP_SERVER_NAME]
     assert written["enabled_tools"] == ["read_context", "propose_changeset"]
+    assert written["tools"] == {
+        "read_context": {"approval_mode": "approve"},
+        "propose_changeset": {"approval_mode": "approve"},
+    }
+
+
+def test_authoring_approval_refuses_foreign_server_invocation() -> None:
+    bridge = _bridge_spec()
+    bridge["args"] = ["-m", "foreign.bridge"]
+    with pytest.raises(ConfigError, match="runtime stdio bridge"):
+        _render([bridge])
 
 
 def test_the_bridge_rides_beside_a_registry_server_in_one_render() -> None:

@@ -15,7 +15,7 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import httpx
 import pytest
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from mcp.types import RequestParamsMeta
 
     from ...conftest import ExternalPrerequisiteRule
+    from ...providers._acp_authoring import AuthoringToolBinding
 
 _BEARER = "loop-bearer"
 _CATALOG = {
@@ -73,9 +74,10 @@ class _EngineState:
     advance_revisions: bool = False
     drop_next_response: bool = False
     rejection_status: int | None = None
+    health_gate: tuple[threading.Event, threading.Event] | None = None
 
 
-def _make_handler(state: _EngineState) -> type[JsonReplyHandler]:
+def _make_handler(state: _EngineState, bearer: str = _BEARER) -> type[JsonReplyHandler]:
     # BaseHTTPRequestHandler is listed again, redundantly - see
     # testing/http_handlers.py's docstring for why.
     class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
@@ -83,7 +85,11 @@ def _make_handler(state: _EngineState) -> type[JsonReplyHandler]:
 
         def do_GET(self) -> None:
             if self.path == "/health":
-                reply_health_proof(self, _BEARER)
+                if state.health_gate is not None:
+                    entered, release = state.health_gate
+                    entered.set()
+                    assert release.wait(timeout=10)
+                reply_health_proof(self, bearer)
                 return
             self._reply(200, {"status": "ok"})
 
@@ -350,13 +356,17 @@ async def test_codex_native_turn_supplies_logical_call_identity(
     """The installed Codex model invokes the production bridge with its native ID."""
     from langchain_core.messages import HumanMessage
 
+    from ...control.config import settings
     from ...graph.enums import Provider
     from ...providers._acp_authoring import (
         AuthoringToolBinding,
         codex_authoring_mcp_server_spec,
     )
+    from ...providers._codex_protocol import _CodexProtocolError
+    from ...providers.acp_exceptions import AcpError
+    from ...providers.cli_resolution import resolve_provider_cli_executable
     from ...providers.codex_chat_model import CodexChatModel
-    from ...providers.factory import ProviderFactory
+    from ...providers.conditions import ProviderCondition
     from ...service_tests._provider_catalog_live import declared_lane_model_value
 
     external_prerequisite("codex-cli")
@@ -365,8 +375,14 @@ async def test_codex_native_turn_supplies_logical_call_identity(
     if served is None:
         external_prerequisite.absent("provider-catalog-live-selection", reason)
     base_url, state = engine
-    model = ProviderFactory().create(
-        Provider.CODEX, model=served, workspace_root=tmp_path
+    command = resolve_provider_cli_executable(Provider.CODEX)
+    assert command is not None
+    # Certification must exercise the actual binary before serving can admit it.
+    model = CodexChatModel(
+        command=[command, "app-server"],
+        model_name=served,
+        codex_home=settings.codex_home,
+        workspace_root=str(tmp_path),
     )
     assert isinstance(model, CodexChatModel)
     binding = AuthoringToolBinding(
@@ -374,25 +390,142 @@ async def test_codex_native_turn_supplies_logical_call_identity(
         bearer_token=_BEARER,
         actor_token="actor-tok",
         engine_base_url=base_url,
-        run_id="native-codex-proof",
+        run_id=f"native-codex-proof:{tmp_path.name}",
         call_scope="writer",
     )
     model = model.with_authoring_mcp_server(codex_authoring_mcp_server_spec(binding))
-    await model.ainvoke(
-        [
-            HumanMessage(
-                content=(
-                    "Call vaultspec-authoring.propose_changeset exactly once with "
-                    "operation create. This is a disposable loopback protocol test. "
-                    "Use no filesystem, terminal or other tools. Then reply done."
+    try:
+        answer = await model.ainvoke(
+            [
+                HumanMessage(
+                    content=(
+                        "Call vaultspec-authoring.propose_changeset exactly once with "
+                        "operation create. This is a disposable loopback "
+                        "protocol test. "
+                        "Use no filesystem, terminal or other tools. Then reply done."
+                    )
                 )
+            ]
+        )
+    except (AcpError, _CodexProtocolError) as exc:
+        if exc.condition is ProviderCondition.UNAUTHENTICATED:
+            external_prerequisite.absent(
+                "codex-credential", "provider rejected authentication"
             )
-        ]
-    )
+        raise
     bodies = _execute_bodies(state)
-    assert len(bodies) == 1
+    assert len(bodies) == 1, answer.content
     call_id = _dict(bodies[0]["payload"])["tool_call_id"]
     assert isinstance(call_id, str) and call_id
+    await _replay_native_bridge(binding, call_id, "codex", tmp_path)
+    assert _execute_bodies(state) == [bodies[0], bodies[0]]
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_claude_native_turn_supplies_logical_call_identity(
+    engine: tuple[str, _EngineState],
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Certify Claude's native metadata independently of Codex authentication."""
+    from langchain_core.messages import HumanMessage
+
+    from ...control.config import settings
+    from ...graph.enums import Provider
+    from ...providers._acp_authoring import AuthoringToolBinding, attach_authoring_tools
+    from ...providers._factory_commands import _classify_acp_command
+    from ...providers.acp_chat_model import AcpChatModel
+    from ...providers.acp_exceptions import AcpError
+    from ...providers.conditions import ProviderCondition
+    from ...providers.factory import claude_auth_env
+    from ...service_tests._provider_catalog_live import declared_lane_model_value
+
+    external_prerequisite("claude-cli")
+    external_prerequisite("claude-credential")
+    served, reason = await declared_lane_model_value(Provider.CLAUDE.value, tmp_path)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
+    command, metadata = _classify_acp_command(settings.acp_backend)
+    environment, auth_mode = claude_auth_env()
+    model = AcpChatModel(
+        command=command,
+        env_vars=environment,
+        desired_model=served,
+        workspace_root=str(tmp_path),
+        use_exec=metadata["acp_backend"] == "binary",
+        provider=Provider.CLAUDE.value,
+        auth_mode=auth_mode,
+    )
+    base_url, state = engine
+    binding = AuthoringToolBinding(
+        snapshot=parse_catalog(_CATALOG),
+        bearer_token=_BEARER,
+        actor_token="actor-tok",
+        engine_base_url=base_url,
+        run_id=f"native-claude-proof:{tmp_path.name}",
+        call_scope="writer",
+    )
+    composed = attach_authoring_tools(model, binding, autonomous=True)
+    try:
+        answer = await composed.ainvoke(
+            [
+                HumanMessage(
+                    content=(
+                        "Call vaultspec-authoring.propose_changeset exactly once with "
+                        "operation create. This is a disposable loopback "
+                        "protocol test. "
+                        "Use no filesystem, terminal or other tools. Then reply done."
+                    )
+                )
+            ]
+        )
+    except AcpError as exc:
+        if exc.condition is ProviderCondition.UNAUTHENTICATED:
+            external_prerequisite.absent(
+                "claude-credential", "provider rejected authentication"
+            )
+        raise
+    bodies = _execute_bodies(state)
+    assert len(bodies) == 1, answer.content
+    call_id = _dict(bodies[0]["payload"])["tool_call_id"]
+    assert isinstance(call_id, str) and call_id
+    await _replay_native_bridge(binding, call_id, "claude", tmp_path)
+    assert _execute_bodies(state) == [bodies[0], bodies[0]]
+
+
+async def _replay_native_bridge(
+    binding: AuthoringToolBinding,
+    call_id: str,
+    source: Literal["codex", "claude"],
+    tmp_path: Path,
+) -> None:
+    """A new process recovers the ID observed at the actual native provider boundary."""
+    from mcp.client import Client
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    from ...providers._acp_authoring import build_authoring_stdio_mcp_servers
+
+    entry = build_authoring_stdio_mcp_servers(binding, call_id_source=source)[0]
+    fields = entry["env"]
+    assert isinstance(fields, list)
+    environment: dict[str, str] = {}
+    for raw in fields:
+        item = _dict(raw)
+        assert isinstance(item["name"], str) and isinstance(item["value"], str)
+        environment[item["name"]] = item["value"]
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"],
+        env=environment,
+    )
+    key = "callId" if source == "codex" else "claudecode/toolUseId"
+    with (tmp_path / "native-replay.log").open("w", encoding="utf-8") as errlog:
+        async with Client(stdio_client(params, errlog=errlog)) as client:
+            result = await client.call_tool(
+                "propose_changeset", {"operation": "create"}, meta={key: call_id}
+            )
+            assert not result.is_error
 
 
 @pytest.mark.asyncio

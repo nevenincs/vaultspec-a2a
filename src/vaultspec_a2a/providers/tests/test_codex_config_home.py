@@ -647,6 +647,10 @@ def test_authoring_bridge_composition_seam_threads_into_codex_config_toml(
         # registry's read-verb-only allowlist.
         assert set(bridge["enabled_tools"]) == {"read_context", "propose_changeset"}
         assert bridge["default_tools_approval_mode"] == "auto"
+        assert bridge["tools"] == {
+            "read_context": {"approval_mode": "approve"},
+            "propose_changeset": {"approval_mode": "approve"},
+        }
         env = bridge["env"]
         assert env["VAULTSPEC_A2A_AUTHORING_BASE_URL"] == "http://127.0.0.1:8767"
         assert env["VAULTSPEC_A2A_AUTHORING_RUN_ID"] == "run:codex-test"

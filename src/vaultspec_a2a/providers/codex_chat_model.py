@@ -59,6 +59,7 @@ from ._codex_app_server_client import (
     _STREAM_CLOSED,
     _CodexAppServerClient,
 )
+from ._codex_authoring_ready import verify_authoring_ready
 from ._codex_config_home import (
     build_codex_config_home,
     cleanup_codex_config_home,
@@ -625,6 +626,13 @@ class CodexChatModel(BaseChatModel):
                 context="thread/start result thread",
             )
             await self._persist_runtime_identity(initialize_result, thread_id)
+
+            await verify_authoring_ready(
+                client,
+                thread_id,
+                self.authoring_mcp_server,
+                timeout=self.timeout,
+            )
 
             turn_started = await asyncio.wait_for(
                 client.request(

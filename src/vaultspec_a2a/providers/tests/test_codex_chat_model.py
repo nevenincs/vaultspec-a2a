@@ -46,10 +46,13 @@ from .._factory_commands import _classify_codex_command, classify_provider_comma
 from .._project_scope import RunProjectScope
 from .._runtime_identity import bind_model_runtime_identity
 from .._subprocess import STDERR_TAIL_LINES, spawn_acp_process
-from ..cli_resolution import resolve_provider_cli_executable
+from ..cli_resolution import (
+    ProviderRuntimeUnavailableError,
+    resolve_provider_cli_executable,
+)
 from ..codex_chat_model import CodexChatModel, _ActiveCodexTurn
 from ..conditions import ProviderCondition
-from ..factory import ProviderFactory
+from ..factory import ProviderFactory, codex_binary_proof_reason
 from ..provider_readiness import probe_provider_readiness
 
 if TYPE_CHECKING:
@@ -667,8 +670,14 @@ def test_codex_readiness_ready_when_installed() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_factory_creates_codex_chat_model() -> None:
-    """The factory dispatches Provider.CODEX to a CodexChatModel BaseChatModel."""
+def test_factory_enforces_codex_binary_proof_before_creating_a_model() -> None:
+    """An installed binary alone cannot authorize a served model."""
+    reason = codex_binary_proof_reason()
+    if reason is not None:
+        with pytest.raises(ProviderRuntimeUnavailableError) as refused:
+            ProviderFactory().create(Provider.CODEX, model="catalog-selected-model")
+        assert refused.value.reason is reason
+        return
     model = ProviderFactory().create(Provider.CODEX, model="catalog-selected-model")
     assert isinstance(model, CodexChatModel)
     assert isinstance(model, BaseChatModel)
@@ -695,7 +704,7 @@ def test_codex_output_message_accepts_name_assignment() -> None:
 
 def test_codex_sync_generate_unsupported() -> None:
     """Synchronous _generate is explicitly unsupported (async-only provider)."""
-    model = ProviderFactory().create(Provider.CODEX, model="catalog-selected-model")
+    model = CodexChatModel(model_name="catalog-selected-model")
     with pytest.raises(NotImplementedError, match="async"):
         model.invoke([HumanMessage(content="hi")])
 

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:09dacb7eda2d643047f1e399d38d3d280bd6507410c52a28d984935585d396b8'
+body_hash: 'sha256:f2f8eed2413ff0ee1d6d67f5b9d1a423ac776873a6424832e5a4589f7f4c9d8d'
 related:
   - "[[2026-10-04-authoring-retry-followups-plan]]"
 ---
@@ -91,6 +91,22 @@ related:
 - `S05` `verify:` `uv run --no-sync ruff check and ruff format --check affected ten Python files` -> `pass`
 - `S05` `verify:` `uv run --no-sync ty check src dev docs scripts packaging` -> `pass`
 - `S05` `by:` `vaultspec-standard-executor`
+- `S06` `A` `src/vaultspec_a2a/providers/_codex_authoring_ready.py`
+- `S06` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S06` `A` `src/vaultspec_a2a/providers/tests/test_codex_authoring_ready.py`
+- `S06` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S06` `M` `.vault/plan/2026-10-04-authoring-retry-followups-plan.md`
+- `S06` `M` `.vault/index/authoring-retry-followups.index.md`
+- `S06` `M` `.vault/audit/2026-10-04-a2a-edge-conformance-authoring-retry-audit.md`
+- `S06` `verify:` `uv run --no-sync pytest -m service test_dispatch_injection.py -k codex_native_turn (pre-guard unavailable-tool non-auth failure)` -> `fail`
+- `S06` `verify:` `uv run --no-sync pytest -m service test_dispatch_injection.py -k codex_native_turn (gpt-6-luna actual thread readiness and native-ID replay; two final passes)` -> `pass`
+- `S06` `verify:` `uv run --no-sync pytest -m service test_dispatch_injection.py -k claude_native_turn (haiku independent native-ID replay)` -> `pass`
+- `S06` `verify:` `uv run --no-sync pytest test_codex_authoring_ready.py (eight real stdio scenarios, no model work on refusal)` -> `pass`
+- `S06` `verify:` `uv run --no-sync pytest final affected scope (177 passed, four unrelated service deselections)` -> `pass`
+- `S06` `verify:` `uv run --no-sync ruff check and ruff format --check affected ten Python files` -> `pass`
+- `S06` `verify:` `uv run --no-sync ty check src dev docs scripts packaging` -> `pass`
+- `S06` `verify:` `git diff --check` -> `pass`
+- `S06` `by:` `vaultspec-standard-executor`
 
 ## Notes
 

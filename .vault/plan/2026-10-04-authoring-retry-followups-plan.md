@@ -13,7 +13,7 @@ related:
   - '[[2026-10-04-authoring-retry-followups-run-index-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:b20ff2d58b99ae86fc4e75cde23437235e7fb43b3e1d8b0a1bbaa32af86116b4'
+body_hash: 'sha256:ebf6741bb5ac3ba67259092f512a0657611ac57aa1e75327ff2ef5df703bf61e'
 ---
 
 # `authoring-retry-followups` plan
@@ -37,7 +37,7 @@ During S05 verification the authenticated Codex Luna turn returned without invok
 - [x] `S03` - Reclaim authoring journal entries at durable run deletion while preserving closed identity; `authoring/_tool_calls.py, control/cleanup/executor.py, journal and deletion tests and retention decision`.
 - [x] `S04` - Execute provider authoring calls through worker-owned runtime authority and private replay state; `new worker/authoring_relay.py and authoring/_relay_client.py, worker lifespan and binding, stdio provider handoff, connection proof and real protocol platform tests`.
 - [x] `S05` - Index run-owned replay journals and reclaim corrupt owned data without cross-run scan failures; `new authoring/_journal_index.py, authoring/_tool_calls.py, control/cleanup/executor.py, real journal/relay/deletion tests and retained Linux corruption/crash proof`.
-- [ ] `S06` - Verify the declared Codex authoring tools on the thread before starting its native model turn; `providers/codex_chat_model.py, new providers/_codex_authoring_ready.py, providers/tests/test_codex_authoring_ready.py, providers/tests/test_codex_chat_model.py and native certification tests`.
+- [x] `S06` - Verify the declared Codex authoring tools on the thread before starting its native model turn; `providers/codex_chat_model.py, new providers/_codex_authoring_ready.py, providers/tests/test_codex_authoring_ready.py, providers/tests/test_codex_chat_model.py and native certification tests`.
 
 ## Parallelization
 

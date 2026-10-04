@@ -50,7 +50,10 @@ async def _write(
     config: AcpModelConfig, ctx: AcpSessionContext, path: str
 ) -> JsonObject:
     return await on_fs_write_text_file(
-        1, {"path": path, "content": "SHOULD NOT LAND"}, ctx, config
+        1,
+        {"path": path, "content": "SHOULD NOT LAND", "sessionId": ctx.session_id},
+        ctx,
+        config,
     )
 
 
@@ -161,7 +164,11 @@ class TestWorkspaceRootedInsideVault:
         config = _make_config(str(ws))
         result = await on_fs_write_text_file(
             1,
-            {"path": "notes/output.md", "content": "ok"},
+            {
+                "path": "notes/output.md",
+                "content": "ok",
+                "sessionId": acp_session_context.session_id,
+            },
             acp_session_context,
             config,
         )
@@ -179,7 +186,11 @@ class TestNonVaultAndReadsPermitted:
         config = _make_config(str(tmp_path))
         result = await on_fs_write_text_file(
             1,
-            {"path": "notes/ok.md", "content": "landed"},
+            {
+                "path": "notes/ok.md",
+                "content": "landed",
+                "sessionId": acp_session_context.session_id,
+            },
             acp_session_context,
             config,
         )

@@ -616,7 +616,11 @@ async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
     monkeypatch.setattr(os, "open", swapping_open)
     response = await on_fs_write_text_file(
         1,
-        {"path": "safe/target.txt", "content": "workspace-write"},
+        {
+            "path": "safe/target.txt",
+            "content": "workspace-write",
+            "sessionId": acp_session_context.session_id,
+        },
         acp_session_context,
         _config(workspace_root=str(bound)),
     )

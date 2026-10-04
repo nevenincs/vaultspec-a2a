@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ._acp_types import MAX_ACP_SESSION_ID_LENGTH
+from ._acp_client_requests import AcpSessionRequest
 
 if TYPE_CHECKING:
     from typing import TextIO
@@ -26,14 +26,11 @@ class AcpFileReadRange(BaseModel):
     limit: int | None = Field(default=None, ge=0, le=_MAX_LINE_RANGE)
 
 
-class AcpFileReadRequest(AcpFileReadRange):
+class AcpFileReadRequest(AcpFileReadRange, AcpSessionRequest):
     """The ACP v1 filesystem read payload."""
 
     model_config = ConfigDict(strict=True, extra="ignore")
 
-    session_id: str = Field(
-        alias="sessionId", min_length=1, max_length=MAX_ACP_SESSION_ID_LENGTH
-    )
     path: str = Field(min_length=1)
 
 

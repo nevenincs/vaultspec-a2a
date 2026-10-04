@@ -22,14 +22,17 @@ def _docker(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[
     docker = shutil.which("docker") or shutil.which("docker.exe")
     if docker is None:
         raise RuntimeError("Docker CLI is required for provider isolation proof")
-    return subprocess.run(
+    completed = subprocess.run(
         [docker, *arguments],
         cwd=REPO_ROOT,
-        check=check,
+        check=False,
         capture_output=True,
         text=True,
         timeout=600,
     )
+    if check and completed.returncode:
+        raise RuntimeError(f"Docker proof failed: {completed.stderr}")
+    return completed
 
 
 @pytest.fixture(scope="module")
@@ -174,14 +177,7 @@ class Config:
 async def main():
     workspace = Path('/app/data/workspaces/project')
     Path('/app/data/fresh.db').write_text('fresh-database-state', encoding='utf-8')
-    callback_write = await handlers.on_fs_write_text_file(
-        1,
-        {{'path': 'callback-created.txt', 'content': 'callback-write'}},
-        None,
-        Config(),
-    )
-    if callback_write.get('result') != {{}}:
-        raise RuntimeError(str(callback_write))
+    handlers._write_workspace_text('callback-created.txt', 'callback-write', Config())
     environment = resolve_env_vars(workspace)
     process = await spawn_acp_process(
         [sys.executable, '-c', {child!r}],
@@ -196,11 +192,7 @@ async def main():
     result['callback_read'] = handlers._read_workspace_text(
         'agent-created.txt', Config(), line=None, limit=None
     )
-    callback_update = await handlers.on_fs_write_text_file(
-        3, {{'path': 'agent-created.txt', 'content': 'callback-update'}}, None, Config()
-    )
-    if callback_update.get('result') != {{}}:
-        raise RuntimeError(str(callback_update))
+    handlers._write_workspace_text('agent-created.txt', 'callback-update', Config())
     verify = await spawn_acp_process(
         [sys.executable, '-c', "from pathlib import Path; "
          "print(Path('agent-created.txt').read_text())"],
@@ -354,7 +346,7 @@ swapped_root = False
 
 def run_root_race(path, flags, *args, **kwargs):
     global swapped_root
-    if path == managed and not swapped_root:
+    if path == managed.name and not swapped_root:
         swapped_root = True
         (managed / 'switch').rename(managed / 'parked-switch')
         (managed / 'switch').symlink_to('/app', target_is_directory=True)
@@ -369,6 +361,7 @@ except (ValueError, OSError):
     pass
 else:
     raise AssertionError('replaced run-root component was not refused')
+assert swapped_root
 handlers.os.open = real_open
 
 replaced = managed / 'replaced'
@@ -418,10 +411,7 @@ def write_race(path, flags, *args, **kwargs):
     return real_open(path, flags, *args, **kwargs)
 
 handlers.os.open = write_race
-written = asyncio.run(handlers.on_fs_write_text_file(
-    2, {'path': 'safe/target.txt', 'content': 'workspace-write'}, None, Config()
-))
-assert written['result'] == {}
+handlers._write_workspace_text('safe/target.txt', 'workspace-write', Config())
 assert protected_target.read_text(encoding='utf-8') == 'service-state'
 assert (parked / 'target.txt').read_text(encoding='utf-8') == 'workspace-write'
 handlers.os.open = real_open
@@ -438,13 +428,14 @@ def create_race(path, *args, **kwargs):
     return result
 
 handlers.os.mkdir = create_race
-create_result = asyncio.run(handlers.on_fs_write_text_file(
-    3,
-    {'path': 'created/child.txt', 'content': 'must-stay-in-workspace'},
-    None,
-    Config(),
-))
-assert 'error' in create_result
+try:
+    handlers._write_workspace_text(
+        'created/child.txt', 'must-stay-in-workspace', Config()
+    )
+except (ValueError, OSError):
+    pass
+else:
+    raise AssertionError('replaced created directory was not refused')
 assert not (protected / 'child.txt').exists()
 
 settings.provider_agent_uid = 1002

@@ -20,6 +20,7 @@ from ..control.config import settings
 from ..control.workspace import configured_workspace_boundary
 from ..desktop._filesystem_authority import confined_file_descriptor
 from ..graph.acp_options import option_id_of, valid_option_ids
+from ._acp_client_requests import AcpSessionRequest
 from ._acp_fs_read import AcpFileReadRange, AcpFileReadRequest, read_text_lines
 from ._acp_rpc_terminal_handlers import on_terminal_create as on_terminal_create
 from ._acp_rpc_terminal_handlers import on_terminal_kill as on_terminal_kill
@@ -639,8 +640,7 @@ async def on_fs_read_text_file(
         if "offset" in params:
             raise ValueError("ACP field 'offset' is unsupported; use 'line'")
         request = AcpFileReadRequest.model_validate(params)
-        if ctx.session_id is None or request.session_id != ctx.session_id:
-            raise ValueError("ACP sessionId does not match the active session")
+        request.require_active_session(ctx)
 
         text = await asyncio.to_thread(
             _read_workspace_text,
@@ -661,7 +661,7 @@ async def on_fs_read_text_file(
 async def on_fs_write_text_file(
     rpc_id: AcpRpcId,
     params: JsonObject,
-    _ctx: AcpSessionContext,
+    ctx: AcpSessionContext,
     config: AcpModelConfig,
 ) -> JsonObject:
     """Handle fs/write_text_file RPC.
@@ -673,6 +673,8 @@ async def on_fs_write_text_file(
     from ..workspace.concurrency import git_workspace_mutex
 
     try:
+        request = AcpSessionRequest.model_validate(params)
+        request.require_active_session(ctx)
         path = _required_string(params, "path")
         file_path = sandbox_path(path, config)
 
@@ -689,6 +691,7 @@ async def on_fs_write_text_file(
         content = _required_string(params, "content")
 
         async with git_workspace_mutex:
+            request.require_active_session(ctx)
             await asyncio.to_thread(_write_workspace_text, path, content, config)
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
     except _VaultWriteDeniedError:

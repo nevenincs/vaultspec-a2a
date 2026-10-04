@@ -354,7 +354,11 @@ if os.name == "nt":
     ) -> None:
         response = await on_fs_write_text_file(
             7,
-            {"path": f"new/{component}/data.txt", "content": "overwritten"},
+            {
+                "path": f"new/{component}/data.txt",
+                "content": "overwritten",
+                "sessionId": acp_session_context.session_id,
+            },
             acp_session_context,
             _config(tmp_path),
         )

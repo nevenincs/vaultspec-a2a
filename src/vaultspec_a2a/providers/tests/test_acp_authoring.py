@@ -373,7 +373,11 @@ class TestAuthoringVisibleButVaultWriteDenied:
         # Yet a vault write through the ACP fs RPC is still denied as a value.
         result = await on_fs_write_text_file(
             1,
-            {"path": ".vault/plan/x.md", "content": "SHOULD NOT LAND"},
+            {
+                "path": ".vault/plan/x.md",
+                "content": "SHOULD NOT LAND",
+                "sessionId": acp_session_context.session_id,
+            },
             acp_session_context,
             config,
         )
@@ -443,6 +447,7 @@ class TestAcpWriteGitSerialization:
                     {
                         "path": "serialized.txt",
                         "content": "written after the lock frees",
+                        "sessionId": acp_session_context.session_id,
                     },
                     acp_session_context,
                     config,

@@ -18,7 +18,11 @@ from ...team.team_config import AgentConfig
 from ...testing import settings_override
 from .._acp_protocol import _dispatch_stdout_line, process_stdout_loop
 from .._acp_request import issue_request
-from .._acp_rpc_handlers import _read_workspace_text, on_fs_read_text_file
+from .._acp_rpc_handlers import (
+    _read_workspace_text,
+    on_fs_read_text_file,
+    on_fs_write_text_file,
+)
 from .._acp_session import initialize_session, setup_session
 from .._acp_types import AcpModelConfig, AcpSessionContext
 from ._acp_frames import read_acp_frame
@@ -325,7 +329,17 @@ agent({ name: 'read-contract-peer' })
     let foreignRefused = false;
     try { await read({sessionId: 'foreign-session'}); }
     catch (error) { foreignRefused = error.code === -32603; }
-    return {stopReason: 'end_turn', _meta: {first, empty, foreignRefused}};
+    const write = await client.request(methods.client.fs.writeTextFile, {
+      sessionId: params.sessionId, path: 'sdk-written.txt', content: 'owner write'
+    });
+    let foreignWriteRefused = false;
+    try {
+      await client.request(methods.client.fs.writeTextFile, {
+        sessionId: 'foreign-session', path: 'foreign.txt', content: 'foreign write'
+      });
+    } catch (error) { foreignWriteRefused = error.code === -32603; }
+    return {stopReason: 'end_turn',
+      _meta: {first, empty, foreignRefused, write, foreignWriteRefused}};
   })
   .connect(ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
 """
@@ -336,7 +350,7 @@ agent({ name: 'read-contract-peer' })
             "role": "reader",
             "description": "ACP SDK contract reader",
             "persona": {"system_prompt": "Read"},
-            "capabilities": {"filesystem_read": True},
+            "capabilities": {"filesystem_read": True, "filesystem_write": True},
         }
     )
     process = await asyncio.create_subprocess_exec(
@@ -363,7 +377,12 @@ agent({ name: 'read-contract-peer' })
     config = replace(_config(tmp_path), agent_config=agent)
     reader = asyncio.create_task(
         process_stdout_loop(
-            context, config, {"fs/read_text_file": on_fs_read_text_file}
+            context,
+            config,
+            {
+                "fs/read_text_file": on_fs_read_text_file,
+                "fs/write_text_file": on_fs_write_text_file,
+            },
         )
     )
     try:
@@ -392,9 +411,13 @@ agent({ name: 'read-contract-peer' })
                             "first": {"content": "🙂"},
                             "empty": {"content": ""},
                             "foreignRefused": True,
+                            "write": {},
+                            "foreignWriteRefused": True,
                         },
                     },
                 }
+                assert (tmp_path / "sdk-written.txt").read_text() == "owner write"
+                assert not (tmp_path / "foreign.txt").exists()
     finally:
         process.stdin.close()
         try:

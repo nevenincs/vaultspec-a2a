@@ -24,6 +24,7 @@ from .._harness_mcp_registry import (
     _registry_entry,
     interpreter_pin_args,
 )
+from ..cli_resolution import resolve_service_executable
 
 if TYPE_CHECKING:
     from .._json_contract import JsonObject
@@ -55,7 +56,7 @@ def test_every_package_run_server_carries_the_pin(name: str) -> None:
     spec = _launch_spec(name, _registry_entry(name))
     args = _args(spec)
 
-    assert spec["command"] == "uvx"
+    assert spec["command"] == resolve_service_executable("uvx")
     assert args[:2] == list(interpreter_pin_args("uvx"))
     # The pin leads, because the runner reads its own options before the package.
     assert args[2] == "--from"

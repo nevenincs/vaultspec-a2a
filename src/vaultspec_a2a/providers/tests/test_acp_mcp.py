@@ -34,6 +34,7 @@ from .._acp_mcp import (
 from .._harness_mcp_registry import interpreter_pin_args, is_known_harness_server
 from .._native_read_tools import compose_native_read_tools
 from ..acp_chat_model import AcpChatModel
+from ..cli_resolution import resolve_service_executable
 
 if TYPE_CHECKING:
     from .._json_contract import JsonObject
@@ -49,7 +50,7 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
     assert len(specs) == 1
     spec = specs[0]
     assert spec["name"] == "vaultspec-rag"
-    assert spec["command"] == "uvx"
+    assert spec["command"] == resolve_service_executable("uvx")
     # uvx invokes the published package's console script, cwd-independent, under
     # the interpreter serving this run rather than the host's default one.
     assert spec["args"] == [
@@ -73,7 +74,7 @@ def test_vaultspec_core_launch_names_vaultspec_core_mcp_entrypoint() -> None:
     assert len(specs) == 1
     spec = specs[0]
     assert spec["name"] == "vaultspec-core"
-    assert spec["command"] == "uvx"
+    assert spec["command"] == resolve_service_executable("uvx")
     # The args must include the correct console script name and read-only flag.
     assert spec["args"] == [
         "--python",
@@ -317,7 +318,7 @@ def test_declared_surface_admits_the_bridge_beside_the_registry_server() -> None
         {"name": "vaultspec-authoring", "command": "node", "args": ["bridge.js"]},
         {
             "name": "vaultspec-rag",
-            "command": "uvx",
+            "command": resolve_service_executable("uvx"),
             "args": [
                 "--python",
                 _PYTHON_PIN,
@@ -380,7 +381,7 @@ def test_live_preset_harness_drives_read_only_rag_composition() -> None:
         spec = next(
             spec for spec in composed.mcp_servers if spec.get("name") == server_name
         )
-        assert spec["command"] == "uvx"
+        assert spec["command"] == resolve_service_executable("uvx")
         # Registry-only ``tools`` metadata is stripped from the session launch spec.
         assert "tools" not in spec
     # Exactly the composed read tools are auto-permitted (autonomous-only surface).
@@ -419,7 +420,7 @@ def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
     assert len(specs) == 1
     spec = specs[0]
     assert spec["name"] == "vaultspec-rag"
-    assert spec["command"] == "uvx"
+    assert spec["command"] == resolve_service_executable("uvx")
     assert spec["args"] == [
         "--python",
         _PYTHON_PIN,

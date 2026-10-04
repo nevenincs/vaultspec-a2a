@@ -36,6 +36,7 @@ __all__ = [
     "drain_stderr_into",
     "kill_process_tree",
     "process_containment",
+    "provider_execution_command",
     "redact_secrets",
     "spawn_acp_process",
 ]
@@ -174,7 +175,9 @@ def _metadata_extra(metadata: Mapping[str, object] | None) -> dict[str, object]:
     return {key: value for key, value in metadata.items() if value is not None}
 
 
-def _provider_execution_command(command: list[str]) -> list[str]:
+def provider_execution_command(
+    command: list[str], *, supervise: bool = False
+) -> list[str]:
     """Wrap a POSIX provider/tool command in the configured identity boundary."""
     launcher = settings.provider_identity_launcher
     uid = settings.provider_agent_uid
@@ -192,11 +195,12 @@ def _provider_execution_command(command: list[str]) -> list[str]:
         )
     assert launcher is not None and uid is not None and gid is not None
     launcher_path = Path(launcher)
-    if not launcher_path.is_file():
+    if not launcher_path.is_absolute() or not launcher_path.is_file():
         raise ProcessContainmentError(
             f"provider identity launcher is unavailable: {launcher_path}"
         )
-    return [str(launcher_path), str(uid), str(gid), "--", *command]
+    supervision = ["--supervise"] if supervise else []
+    return [str(launcher_path), *supervision, str(uid), str(gid), "--", *command]
 
 
 def _confined_search_env(env: dict[str, str]) -> dict[str, str]:
@@ -291,7 +295,7 @@ async def _spawn_acp_process(
     # branches: releasing in each branch's own handler is the split duty that let
     # the equivalent leak survive elsewhere in this codebase.
     try:
-        command = _provider_execution_command(command)
+        command = provider_execution_command(command)
         env = _confined_search_env(env)
         if sys.platform == "win32":
             if use_exec:

@@ -123,7 +123,13 @@ COPY --from=identity-launcher /vaultspec-agent-launch /usr/local/bin/vaultspec-a
 # it then clears all groups/capabilities and sets no-new-privileges before exec.
 USER root
 RUN chown root:root /usr/local/bin/vaultspec-agent-launch \
-    && chmod 4755 /usr/local/bin/vaultspec-agent-launch
+    && chmod 4755 /usr/local/bin/vaultspec-agent-launch \
+    && mkdir -p /var/cache/vaultspec-mcp \
+    && chown agentuser:agent /var/cache/vaultspec-mcp \
+    && chmod 0700 /var/cache/vaultspec-mcp
+ENV UV_CACHE_DIR=/var/cache/vaultspec-mcp \
+    UV_TOOL_DIR=/var/cache/vaultspec-mcp/tools \
+    UV_PYTHON_INSTALL_DIR=/var/cache/vaultspec-mcp/python
 USER appuser
 
 # PROV-O01: ACP runtime — Claude/Gemini providers spawn claude-agent-acp as a

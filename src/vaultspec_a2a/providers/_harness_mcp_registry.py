@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cache
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ from ._json_contract import (
     freeze_json,
 )
 from ._subprocess import redact_secrets
+from .cli_resolution import resolve_service_executable
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -595,6 +597,17 @@ def harness_server_exact_surface(name: str) -> bool:
     return bool(value)
 
 
+@cache
+def _trusted_launcher(command: str) -> str:
+    """Bind a registry launcher once, before applying any run environment."""
+    resolved = resolve_service_executable(command)
+    if resolved is None:
+        raise ConfigError(
+            f"harness MCP launcher {command!r} is unavailable on service PATH"
+        )
+    return resolved
+
+
 def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:
     """Return the launch spec for one registry entry, free of registry metadata.
 
@@ -629,7 +642,7 @@ def _launch_spec(name: str, entry: FrozenJsonObject) -> JsonObject:
     # the host serving the run, not about the server being launched.
     spec: JsonObject = {
         "name": name,
-        "command": command,
+        "command": _trusted_launcher(command),
         "args": [*interpreter_pin_args(command), *_frozen_strings(entry, "args")],
     }
     return spec

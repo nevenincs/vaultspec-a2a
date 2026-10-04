@@ -19,6 +19,7 @@ from .._acp_mcp import (
 from .._harness_mcp_registry import _KNOWN_MCP_SERVERS, HarnessMcpRuntimeProfile
 from .._json_contract import FrozenJsonObject, JsonObject, freeze_json
 from ..acp_chat_model import AcpChatModel
+from ..cli_resolution import resolve_service_executable
 from ..codex_chat_model import CodexChatModel
 
 RAG_SERVER = "vaultspec-rag"
@@ -105,7 +106,7 @@ def test_desktop_resolution_returns_actionable_path_free_unavailability() -> Non
 
 def test_desktop_serializers_emit_no_runtime_acquisition_material() -> None:
     non_desktop_specs = resolve_harness_mcp_servers(RAG_NAMES)
-    assert non_desktop_specs[0]["command"] == "uvx"
+    assert non_desktop_specs[0]["command"] == resolve_service_executable("uvx")
 
     assert (
         resolve_harness_mcp_servers(
@@ -259,9 +260,9 @@ def test_non_desktop_profile_preserves_live_preset_resolution() -> None:
     # is the failure mode the derivation removes.
     assert resolution.available_servers == tuple(harness.mcp_servers)
     assert resolution.unavailable == ()
-    assert specs[0]["command"] == "uvx"
+    assert specs[0]["command"] == resolve_service_executable("uvx")
     for spec in codex_mcp_server_specs(harness.mcp_servers):
-        assert spec["command"] == "uvx"
+        assert spec["command"] == resolve_service_executable("uvx")
     assert harness_allowed_tool_names(harness.mcp_servers) == [
         "mcp__vaultspec-rag__search_vault",
         "mcp__vaultspec-rag__search_codebase",

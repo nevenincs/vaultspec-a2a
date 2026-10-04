@@ -9,7 +9,7 @@ import pytest
 
 from ...control.config import settings
 from ...utils.process import ProcessContainmentError
-from .._subprocess import _provider_execution_command
+from .._subprocess import provider_execution_command
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,7 +26,7 @@ def test_complete_identity_configuration_wraps_command_without_credentials(
     monkeypatch.setattr(settings, "provider_agent_uid", 1002)
     monkeypatch.setattr(settings, "provider_agent_gid", 1002)
 
-    wrapped = _provider_execution_command(["python", "provider.py"])
+    wrapped = provider_execution_command(["python", "provider.py"])
 
     assert wrapped == [
         str(launcher),
@@ -63,7 +63,7 @@ def test_partial_identity_configuration_fails_closed(
     monkeypatch.setattr(settings, "provider_agent_gid", gid)
 
     with pytest.raises(ProcessContainmentError, match="requires launcher"):
-        _provider_execution_command(["python", "provider.py"])
+        provider_execution_command(["python", "provider.py"])
 
 
 def test_missing_identity_launcher_fails_closed(
@@ -76,4 +76,4 @@ def test_missing_identity_launcher_fails_closed(
     monkeypatch.setattr(settings, "provider_agent_gid", 1002)
 
     with pytest.raises(ProcessContainmentError, match="unavailable"):
-        _provider_execution_command(["python", "provider.py"])
+        provider_execution_command(["python", "provider.py"])

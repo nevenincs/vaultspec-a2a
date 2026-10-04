@@ -63,6 +63,7 @@ from .._harness_mcp_registry import (
 )
 from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
+from ..cli_resolution import resolve_service_executable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -837,7 +838,7 @@ def test_pin_carries_the_bound_project_through_the_declared_channel(
     assert spec["env"] == [{"name": RAG_PIN_VARIABLE, "value": project}]
     # The pin is additive: what to launch is unchanged, only which project it
     # serves is now stated.
-    assert spec["command"] == "uvx"
+    assert spec["command"] == resolve_service_executable("uvx")
     assert spec["args"] == [
         "--python",
         _PYTHON_PIN,

@@ -28,8 +28,9 @@ which is what the composition-time precedent is actually for.
 
 The probe is a short-lived, separate stdio client, not the run's server: the
 run's copy is spawned by the provider CLI as its own child so it inherits that
-root's OS containment. Keeping the probe out of :mod:`._acp_mcp` preserves that
-module's asserted no-spawn invariant.
+root's OS containment. The probe itself enters the same configured identity
+launcher before executing the server. Keeping the probe out of :mod:`._acp_mcp`
+preserves that module's asserted no-spawn invariant.
 
 The one exception to "served tool surface only": vaultspec-rag's stdio server is
 a thin forwarder over a versioned background daemon it does not control, so its
@@ -48,8 +49,10 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import tempfile
 import unicodedata
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TextIO, TypedDict, Unpack
 
@@ -58,6 +61,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import TextContent
 
 from ..thread.errors import HarnessToolContractError
+from ..utils.async_cleanup import complete_cleanup
 from ._config_home_roots import temp_home_root
 from ._harness_mcp_registry import (
     declared_harness_tools,
@@ -66,7 +70,7 @@ from ._harness_mcp_registry import (
     registry_launch_divergence,
     withheld_harness_tools,
 )
-from ._subprocess import redact_secrets
+from ._subprocess import provider_execution_command, redact_secrets
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -96,6 +100,21 @@ _verified: set[tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...], boo
     set()
 )
 _probe_lock = asyncio.Lock()
+
+
+def _probe_environment(env: Mapping[str, str] | None) -> dict[str, str]:
+    """Keep run configuration, but never use workspace executable search paths."""
+    result = dict(env if env is not None else os.environ)
+    result["PATH"] = os.pathsep.join(
+        directory
+        for directory in os.environ.get("PATH", os.defpath).split(os.pathsep)
+        if os.path.isabs(directory)
+    )
+    for key in ("VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"):
+        result.pop(key, None)
+    result["NoDefaultCurrentDirectoryInExePath"] = "1"
+    return result
+
 
 # Enough of the server's own stderr to explain a refusal (an unresolvable
 # requirement, a missing interpreter, a server-side traceback) without dumping an
@@ -237,6 +256,31 @@ async def _served_tool_names(
     captured_stderr: TextIO,
     readiness_tool: str | None,
 ) -> tuple[frozenset[str], str | None]:
+    """Bound the handshake while joining SDK teardown before returning."""
+    probe = asyncio.create_task(
+        _probe_tool_names(launch, captured_stderr, readiness_tool)
+    )
+    try:
+        async with asyncio.timeout(timeout):
+            return await asyncio.shield(probe)
+    except BaseException:
+        # Native repeated cancellation can interrupt the SDK's AnyIO shield.
+        # Cancel once, with the deadline disarmed, then join its cleanup.
+        probe.cancel()
+
+        async def join() -> None:
+            with suppress(asyncio.CancelledError):
+                await probe
+
+        await complete_cleanup(join())
+        raise
+
+
+async def _probe_tool_names(
+    launch: _StdioLaunch,
+    captured_stderr: TextIO,
+    readiness_tool: str | None,
+) -> tuple[frozenset[str], str | None]:
     """Launch the server over stdio; return its tools and a readiness failure.
 
     *readiness_tool*, when given and actually served, is called on this SAME
@@ -247,20 +291,19 @@ async def _served_tool_names(
     not serve leaves the daemon side unobserved rather than refused.
     """
     params = launch.parameters()
-    async with asyncio.timeout(timeout):
-        async with (
-            stdio_client(params, errlog=captured_stderr) as (read, write),
-            ClientSession(read, write) as session,
-        ):
-            await session.initialize()
-            listed = await session.list_tools()
-            served = frozenset(tool.name for tool in listed.tools)
-            diagnostic: str | None = None
-            if readiness_tool is not None and readiness_tool in served:
-                result = await session.call_tool(readiness_tool, {})
-                if result.is_error:
-                    diagnostic = _result_text(result)
-            return served, diagnostic
+    async with (
+        stdio_client(params, errlog=captured_stderr) as (read, write),
+        ClientSession(read, write) as session,
+    ):
+        await session.initialize()
+        listed = await session.list_tools()
+        served = frozenset(tool.name for tool in listed.tools)
+        diagnostic: str | None = None
+        if readiness_tool is not None and readiness_tool in served:
+            result = await session.call_tool(readiness_tool, {})
+            if result.is_error:
+                diagnostic = _result_text(result)
+        return served, diagnostic
 
 
 def _rag_incompatibility_reason(diagnostic: str) -> str | None:
@@ -366,8 +409,19 @@ async def verify_declared_tool_contract(
     withheld = options.get("withheld", ())
     timeout = options.get("timeout", CONTRACT_PROBE_TIMEOUT_SECONDS)
     readiness_tool = options.get("readiness_tool")
-    stdio_launch = _StdioLaunch(command=command, args=args, env=options.get("env"))
-    key = (command, tuple(args), tuple(declared), tuple(withheld), exact_surface)
+    execution = provider_execution_command([command, *args], supervise=True)
+    stdio_launch = _StdioLaunch(
+        command=execution[0],
+        args=execution[1:],
+        env=_probe_environment(options.get("env")),
+    )
+    key = (
+        execution[0],
+        tuple(execution[1:]),
+        tuple(declared),
+        tuple(withheld),
+        exact_surface,
+    )
     if key in _verified:
         return
     async with _probe_lock:
@@ -475,8 +529,8 @@ async def verify_harness_mcp_contract(
     surface is the engine's live catalog, verified at its own seam, not a static
     registry declaration.
 
-    *env* should be the environment the servers will actually be launched under,
-    so the probe exercises the same resolution the provider CLI will.
+    *env* supplies run configuration. Executable search uses the service PATH,
+    and the probe enters the same configured identity boundary as providers.
 
     Raises:
         HarnessToolContractError: On the first server that fails its contract.

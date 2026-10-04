@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:f1f907159e58dbf7c4aeb38e34acf37b36192da2cff9f125bec3e62a953af59a'
+body_hash: 'sha256:50120957b90d3cab1d2ebaf30215d9ed85d43319208686d317bcf083dcf0935a'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-workspace-root-authority-audit]]"
@@ -70,6 +70,12 @@ PASS for S02. Windows focused security tests passed 3 tests; nearest environment
 ### S03 native runtime evidence | high | Windows named-pipe compatibility remains open
 
 Implementation prerequisite; open DNI-003, S03-S05. Correcting restricted-token object default permissions allows the low-integrity process to run genuine Node v26.10.0, deny a private synthetic credential read with EPERM, write its selected project and reach a synthetic HTTP relay on loopback (200). Node descendants using inherited/ignored streams exit as requested (13), and a CMD descendant exits 17. Node's normal piped descendant launch still fails EPERM; widening the token default DACL and dropping its OWNER_RIGHTS entry do not resolve it. Separate AppContainer controls achieved basic CMD read/write separation but genuine Node initialization still failed. Neither candidate qualifies native production or restores desktop admission. Managed disposable probes modify only their unique synthetic files/profiles and remove their resources after children settle; no operator credential or existing path ACL is modified.
+
+### S03 research review | low | Linux primitive evidence supports bounded backend implementation
+
+PASS for the Linux implementation prerequisite; this is not native/provider eligibility. The managed selective-mount probe and retained actual output prove synthetic private absolute/symlink/host-proc denial, selected role-home read, project write, read-only runtime, normal piped Node child exit 13, loopback HTTP 200 and removal of detached setsid descendants after the retained sandbox owner is killed. Runtime versions and persistent artifact locators are recorded in `2026-10-04-desktop-native-isolation-native-backend-primitives-research`. Review confirms no whole-host or application-home bind, private host process namespace is absent, and the evidence does not claim real provider auth/turn or a shipped runtime closure.
+
+Low / verification coverage; open S04-S05: production needs descriptor-bound mount acquisition, capsule-owned helper/dependencies, all launch entry points and actual lane/target proof. Linux dependency discovery via ldd is research setup only and must not become runtime authority. Windows restricted-token pipes fail at both low and medium integrity; AppContainer also requires compatible LOCAL pipe naming and loopback transport. Windows/macOS remain refused. The distinct backend ADR was compared once against current accepted coverage; returned refinement/shared-artifact links preserve the native-admission and binary-proof rulings. Input truncation limits automated comparison, so scoped source/decision reading remains authoritative. No older ruling is superseded: the new decision authorizes implementation while conditional refusal remains binding.
 
 ## Review trail
 

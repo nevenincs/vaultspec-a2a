@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#desktop-native-isolation'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:f2d0138ee7ea115ce141e649c89f52bd1706ec4a7485113cf55d26d8eed235b3'
+body_hash: 'sha256:81c0e6b8b665443ac3cc519cd16b88cefffc6fa2712228b422eedac0ae232a96'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -49,6 +49,14 @@ related:
 - `S02` `verify:` `basedpyright three scoped files` -> `pass`
 - `S02` `verify:` `git diff --check three scoped files` -> `pass`
 - `S02` `verify:` `fresh read-only candidate and actual parent review` -> `pass`
+- `S03` `A` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S03` `A` `.vault/adr/2026-10-05-desktop-native-isolation-linux-namespace-backend-adr.md`
+- `S03` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S03` `M` `.vault/index/desktop-native-isolation.index.md`
+- `S03` `verify:` `Linux selective mount runtime auth relay detached-descendant primitive proof` -> `pass`
+- `S03` `verify:` `Windows restricted-token normal Node pipe compatibility` -> `fail`
+- `S03` `verify:` `actual research and decision compatibility review` -> `pass`
+- `S03` `verify:` `one configured ADR placement comparison` -> `pass`
 
 ## Notes
 
@@ -61,3 +69,6 @@ related:
 - `S02` Existing default selection excluded one nearest-suite test; no new skip/xfail or mock was introduced.
 - `S02` Pre-change exported module completed real MCP handshake and inherited seven synthetic infrastructure spellings; corrected source excludes all tested spellings with both environment modes.
 - `S02` Native OS research remains S03 work and grants no desktop execution eligibility.
+- `S03` Linux proof uses genuine Node22.23.1/Python3.14.4/bubblewrap0.11.1 on available WSL research host; WSL is not a Windows product prerequisite.
+- `S03` Synthetic auth is not provider authentication. Packaged helper closure, actual provider turns and target qualification remain S04-S05.
+- `S03` Windows/macOS and unqualified Linux targets retain native execution refusal; platform-specific backend integration is explicitly bounded.

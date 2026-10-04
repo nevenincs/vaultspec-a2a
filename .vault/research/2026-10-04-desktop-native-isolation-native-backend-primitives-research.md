@@ -1,0 +1,64 @@
+---
+tags:
+  - '#research'
+  - '#desktop-native-isolation'
+date: '2026-10-04'
+modified: '2026-10-04'
+body_schema: 'body-v2'
+body_hash: 'sha256:f9fe9b91c36ebda402a6ba2216ea4a5e98eecd034ee138e93d5c651228e11d9f'
+related:
+  - "[[2026-10-04-desktop-native-isolation-plan]]"
+  - "[[2026-10-04-desktop-native-isolation-audit]]"
+  - "[[2026-10-04-workspace-root-authority-desktop-native-admission-adr]]"
+  - "[[2026-10-04-container-release-native-production-adr]]"
+---
+
+# `desktop-native-isolation` research: `native backend primitives`
+
+Which native OS boundary can restore desktop provider work while withholding lifecycle credentials and service state? Linux selective namespaces support the measured runtime, filesystem, relay and detached-child controls. Windows restricted tokens separate owner-only files but conflict with unmodified Node's normal pipe creation; AppContainer runtime qualification is still being measured. No primitive result qualifies a production lane or changes the accepted execution refusal.
+
+## Findings
+
+### Linux selective mounts and PID namespaces satisfy the measured primitive controls
+
+The available Ubuntu WSL host uses kernel 6.18.40.1-microsoft-standard-WSL2, bubblewrap 0.11.1, Node v22.23.1 and CPython 3.14.4. The retained helper constructs an empty mount namespace, binds only the synthetic project and run home writable, and binds the actual executable, shared-library dependencies and standard library read-only. It creates user/PID/IPC/UTS/cgroup namespaces, disables further user namespaces, drops capabilities, creates isolated proc/dev/tmp, starts a new session, keeps host networking for the role relay, and enables parent-death termination.
+
+Measured results: private absolute path, a project symlink to that path and a host process-root path all fail ENOENT; selected synthetic provider auth is readable; project writes succeed; normal piped Node descendant exits 13; runtime overwrite fails EROFS; loopback HTTP returns 200. Killing the actual retained sandbox owner removes the measured descendants, including one that calls setsid. This is runtime/primitive evidence using synthetic credentials, not genuine provider authentication or a completed model turn. Production integration must replace host-discovered research dependencies with a verified capsule closure and bind mount grants to opened identities. Sources: target-bound persistent `artifacts/desktop-native-isolation/linux-native-mount-probe.py` (SHA256 `05d3d3f39b67f167b14ca7d4ab98305d93ba54b1ddb1379960253b6795dbfe8a`) and `artifacts/desktop-native-isolation/linux-native-mount-probe.log` (`306b765370ecfc82934f7cfe2391eaee8709b4d123b59d7bb8d1ce6a92d82511`). Bubblewrap explicitly delegates sandbox policy to the caller: https://github.com/containers/bubblewrap/blob/main/README.md. Namespace lifecycle grounding: https://man7.org/linux/man-pages/man7/pid_namespaces.7.html.
+
+### Windows restricted-token read separation conflicts with native pipe defaults
+
+A low-integrity primary token with a random restricting capability and deny-only Administrators initially failed legitimate DLL initialization. Narrowing its object default permissions to usable child-owned objects corrected that failure. Genuine Node v26.10.0 then denies owner-only synthetic credentials, writes the scoped project, reaches loopback HTTP, and creates descendants with ignored/inherited streams. Normal piped descendants fail EPERM. Removing OWNER_RIGHTS or adding Everyone to TokenDefaultDacl did not resolve the failure. The independent native probe also reproduces it at medium integrity, so low integrity alone is not its cause.
+
+The installed libuv 1.52.1 pipe path requests write/write-attribute/WRITE_DAC access to both pipe ends. Windows creates a special default named-pipe descriptor for a NULL descriptor; the restricted access check cannot acquire those requested rights through its restricting SIDs. An explicit synthetic per-run pipe descriptor works, but no repository-native mechanism yet makes stock Node and all other descendants use it. Adding the operator's user SID to the restricting set would restore owner-private reads and is not an acceptable fix. WRITE_RESTRICTED does not provide the required read boundary. Sources: independent native probe findings in the rolling audit; https://github.com/libuv/libuv/blob/v1.52.1/src/win/pipe.c; https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights; https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken.
+
+### AppContainer remains a runtime candidate, not an admission basis
+
+### AppContainer needs compatible pipe naming and a working local relay
+
+The independent follow-up on Windows build 26200 uses genuine Node v26.10.0/libuv 1.52.1. A private low windowstation/desktop plus the supported preserve-symlinks flags lets Node load the synthetic script, deny the private read, write the project and create an ignored-stdio child (13). Without the private desktop the Node control still exits 0xc0000142. Default piped child creation hangs beyond its five-second timeout and the outer owner terminates it at ten seconds. Native AppContainer pipe creation using the installed libuv's non-LOCAL spelling fails error 5; LOCAL and LOCAL/uv spellings pass the same access masks. The source's collision retry on access-denied supports the inferred hang cause; no debugger stack was collected. Loopback HTTP returns ETIMEDOUT.
+
+Upstream libuv commit `2cadaa40167050baf7c6905ac897e6fb57afb2c6` (2026-07-13, PR 5181) adds AppContainer detection and the LOCAL prefix. A runtime containing that correction has not been qualified here, and it does not establish loopback relay, provider auth, other binaries or descendant cleanup. Windows remains a research candidate. Only uniquely created synthetic paths/profiles were altered and cleaned; no real account, operator directory ACL or global loopback exemption was changed. Evidence: target-bound persistent `artifacts/windows-isolation-research/evidence.md` (`e8727e3ab8dff15ead35914e888645c86e67b5dfe210cdd6825ba6e83e0776ae`) and `artifacts/windows-isolation-research/observed-outputs.log` (`6f198ad5cceab6f2927de811e59e1f370976920a1d50894efca3a747309a46a2`), with the actual native pipe/AppContainer helper sources retained beside them. Sources: https://github.com/libuv/libuv/commit/2cadaa40167050baf7c6905ac897e6fb57afb2c6; https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea; https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control.
+
+### Integration must carry trusted path authority across every launch path
+
+`src/vaultspec_a2a/providers/_subprocess.py:179` currently receives only argv; shared spawn also receives cwd/env but those values do not themselves mint desktop filesystem authority. The independent MCP SDK launch at `providers/_mcp_contract.py:415` has no project cwd and caches command/tool identity. Binary version probes and catalog/auth setup are additional native entries. A backend must receive worker/lifecycle-selected project, role auth home and immutable runtime authority, bind them before native use, and refuse missing/stale context before a cache hit or child acquisition. Callback confinement and process lifetime remain independent requirements. Existing refusal is governed by `2026-10-04-workspace-root-authority-desktop-native-admission-adr`.
+
+### Remaining proof gaps determine the allowed implementation scope
+
+No actual isolated model turn, shipped capsule/helper closure, Windows ARM64 or Linux ARM64 qualification, or macOS boundary has been proved. Claude's subscription auth currently depends on the real user config home and requires a role-scoped preparation contract. Linux namespace policy is viable on the available research host; that does not establish supported-host availability. Unsupported or unproved targets remain refused. Production Docker is excluded by `2026-10-04-container-release-native-production-adr`.
+
+## Sources
+
+- Target-bound persistent helper and log named above; use the Codex Security artifact reader with the repository target and persistent relative paths.
+- `src/vaultspec_a2a/providers/_subprocess.py:179`; `src/vaultspec_a2a/providers/_mcp_contract.py:415`; `src/vaultspec_a2a/control/provider_execution.py:8`.
+- `2026-10-04-desktop-native-isolation-audit`; `2026-10-04-workspace-root-authority-desktop-native-admission-adr`; `2026-10-04-container-release-native-production-adr`.
+- https://github.com/containers/bubblewrap/blob/main/README.md
+- https://man7.org/linux/man-pages/man7/pid_namespaces.7.html
+- https://github.com/libuv/libuv/blob/v1.52.1/src/win/pipe.c
+- https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights
+- https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken
+- https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control
+
+- Target-bound persistent `artifacts/windows-isolation-research/evidence.md` and `artifacts/windows-isolation-research/observed-outputs.log`, with retained native probe sources.
+- https://github.com/libuv/libuv/commit/2cadaa40167050baf7c6905ac897e6fb57afb2c6
+- https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea

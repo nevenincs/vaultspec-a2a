@@ -9,9 +9,10 @@ related:
   - '[[2026-10-04-workspace-root-authority-desktop-workspace-boundary-adr]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-10-01-provider-binary-policy-adr]]'
+  - '[[2026-10-05-desktop-native-isolation-linux-namespace-backend-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:89f4b76b7ca7c247cb0f8feb23a968378f2cd8a8f9c909b61b26f6f0e7eaa209'
+body_hash: 'sha256:7375051789f95c59e772e92b658af500ae3e3113263ce462b24cec2c3988c136'
 ---
 
 # `desktop-native-isolation` plan
@@ -28,8 +29,8 @@ The user requested the remaining known security fixes, then explicitly instructe
 
 - [x] `S01` - Keep credential refresh destinations in worker-owned memory and confine returned credential reads; `src/vaultspec_a2a/providers/_codex_auth.py, _codex_config_home.py, providers/tests/test_codex_credential_writeback.py, desktop/_filesystem_authority.py and rolling isolation audit`.
 - [x] `S02` - Scrub control-plane credentials at the independent MCP probe boundary; `src/vaultspec_a2a/providers/_mcp_contract.py, workspace/environment.py as needed, real MCP security tests and rolling isolation audit`.
-- [ ] `S03` - Prove viable native OS primitives and settle backend authority before integration; `bounded synthetic Windows/Linux experiments, new isolation research and backend ADR, exact runtime/auth/IPC compatibility`.
-- [ ] `S04` - Implement trusted path-bound launch context and selected native backend across all child entry points; `desktop isolation helpers, shared provider spawn, independent MCP/version probes, provider auth-home preparation, native process tests and backend packaging`.
+- [x] `S03` - Prove viable native OS primitives and settle backend authority before integration; `bounded synthetic Windows/Linux experiments, new isolation research and backend ADR, exact runtime/auth/IPC compatibility`.
+- [ ] `S04` - Implement trusted path-bound launch context and the selected Linux backend across native child entry points; `desktop isolation helpers, shared provider spawn, independent MCP/version probes, provider auth-home preparation, native process tests and pinned helper/runtime closure. Unsupported Windows/macOS and unqualified targets retain refusal`.
 - [ ] `S05` - Qualify actual desktop provider turns and restore only verified target eligibility; `control/provider_execution.py, provider readiness and binary proof, desktop admission/health, native artifact/runtime tests, docs, integrated review and audit`.
 
 ## Parallelization

@@ -361,11 +361,11 @@ def _construction_project_root(
     named = cast("dict[str, object]", init_settings.init_kwargs).get("project_root")
     if named is None:
         return None
+    if not isinstance(named, (str, os.PathLike)):
+        raise ConfigurationError("project_root must be a filesystem path")
     # Routed through the resolver so a relative value is joined to the working
     # directory exactly as the environment variable's would be.
-    return resolve_project_root(
-        {PROJECT_ROOT_ENV: os.fspath(cast("str | os.PathLike[str]", named))}
-    )
+    return resolve_project_root({PROJECT_ROOT_ENV: os.fspath(named)})
 
 
 def _operator_env_file(

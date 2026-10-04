@@ -8,7 +8,7 @@ than the launch directory. No mock, monkeypatch, stub, skip, or expected failure
 is used; the working directory is always restored in a ``finally``.
 
 Capsule realism: the desktop profile validates the capsule's installed-runtime
-assets — the bundled Node executable and the ACP adapter entry the provider
+assets — the bundled Node executable, ACP adapter entry, and Claude CLI the provider
 factory resolves. Those exact files are written on disk here through the factory's
 own path authorities. A full base closure with real CPython, Node.js, and ACP
 archives requires network downloads and belongs to the target-capsule build and
@@ -31,7 +31,11 @@ from ..desktop.profile import (
     DesktopProfileError,
     derive_state_paths,
 )
-from ..providers._factory_commands import capsule_acp_entry, capsule_node_executable
+from ..providers._factory_commands import (
+    capsule_acp_entry,
+    capsule_claude_executable,
+    capsule_node_executable,
+)
 from ..testing import armed_environment
 
 if TYPE_CHECKING:
@@ -46,6 +50,7 @@ def _build_capsule(root: Path) -> Path:
     for asset, content in (
         (capsule_node_executable(root), "node runtime\n"),
         (capsule_acp_entry(root), "// acp entry\n"),
+        (capsule_claude_executable(root), "claude runtime\n"),
     ):
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_text(content, encoding="utf-8")

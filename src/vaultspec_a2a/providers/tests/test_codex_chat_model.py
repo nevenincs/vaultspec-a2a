@@ -26,8 +26,14 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from ...database.models import ProviderRuntimeIdentityModel
+from ...database.tests._backends import migrated_session_factory
+from ...database.thread_repository import create_thread
 from ...graph.enums import Provider
 from ...service_tests._provider_catalog_live import declared_lane_model_value
+from ...tests._write_authority import make_test_write_authority
+from ...thread.enums import ThreadStatus
+from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
 from .._acp_types import NativeCommandOutcome
 from .._codex_app_server_client import _CodexAppServerClient
 from .._codex_permission import CodexPermissionRung
@@ -38,6 +44,7 @@ from .._codex_protocol import (
 )
 from .._factory_commands import _classify_codex_command, classify_provider_command
 from .._project_scope import RunProjectScope
+from .._runtime_identity import bind_model_runtime_identity
 from .._subprocess import STDERR_TAIL_LINES, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 from ..codex_chat_model import CodexChatModel, _ActiveCodexTurn
@@ -732,6 +739,52 @@ async def test_codex_live_turn_returns_output(
     result = await model.ainvoke(messages)
     assert isinstance(result, AIMessage)
     assert str(result.content).strip().casefold() == "pong"
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_codex_live_turn_persists_initialized_runtime_identity(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """The selected real app-server writes its first native thread before the turn."""
+    external_prerequisite("codex-cli")
+    external_prerequisite("codex-credential")
+    served, reason = await declared_lane_model_value(Provider.CODEX.value, tmp_path)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
+    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
+        async with factory() as session:
+            await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                thread_id="codex-live-identity",
+                status=ThreadStatus.RUNNING,
+            )
+            await session.commit()
+        model = ProviderFactory().create(
+            Provider.CODEX, model=served, workspace_root=tmp_path
+        )
+        assert isinstance(model, CodexChatModel)
+        bound = bind_model_runtime_identity(
+            model,
+            thread_id="codex-live-identity",
+            port=SqlRuntimeIdentityPort(factory),
+        )
+        result = await bound.ainvoke(
+            [HumanMessage(content="Reply with exactly this word: pong")]
+        )
+        assert str(result.content).strip().casefold() == "pong"
+        async with factory() as session:
+            row = await session.get(
+                ProviderRuntimeIdentityModel,
+                ("codex-live-identity", "codex", "codex-app-server"),
+            )
+            assert row is not None
+            assert row.cli_version == "0.159.2"
+            assert row.adapter_version == row.cli_version
+            assert row.provider_session_id
+            assert row.managed_policy_present is None
 
 
 @pytest.mark.asyncio

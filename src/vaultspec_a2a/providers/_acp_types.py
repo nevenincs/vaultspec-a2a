@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from langchain_core.messages import UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 
 from ..team.team_config import AgentConfig
@@ -30,6 +31,12 @@ PermissionCallback = Callable[[str, JsonObject, list[JsonObject]], Awaitable[str
 MAX_ACP_SESSION_ID_LENGTH = 512
 MAX_NATIVE_COMMAND_NAME_LENGTH = 128
 MAX_SESSION_COMMAND_CATALOGS = 16
+
+
+class AcpUsageMetadata(UsageMetadata, total=False):
+    """LangChain turn usage with the ACP adapter's per-model breakdown."""
+
+    model_usage: dict[str, UsageMetadata]
 
 
 class NativeCommandDisposition(StrEnum):
@@ -204,7 +211,6 @@ class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
     # repr=False keeps injected auth tokens out of the frozen config's default
     # dataclass repr (env_vars redaction audit).
     env_vars: dict[str, str] = field(repr=False)
-    session_id: str | None
     mcp_servers: list[JsonObject]
     use_exec: bool
     provider: str | None
@@ -288,6 +294,7 @@ class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
     prompt_id_ref: list[int]
     interrupt_exc: list[BaseException]
     prompt_stop_reason: str | None = None
+    prompt_usage: AcpUsageMetadata | None = None
     effects_may_have_occurred: bool = False
     background_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)

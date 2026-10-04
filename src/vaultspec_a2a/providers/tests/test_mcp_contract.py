@@ -452,7 +452,9 @@ async def _real_vaultspec_rag_compat_messages() -> tuple[str, str]:
     )
     stdout, stderr = await process.communicate()
     assert process.returncode == 0, stderr.decode()
-    mismatch, _, unreported = stdout.decode().strip().partition("\n---\n")
+    mismatch, _, unreported = (
+        stdout.decode().replace("\r\n", "\n").strip().partition("\n---\n")
+    )
     return mismatch, unreported
 
 

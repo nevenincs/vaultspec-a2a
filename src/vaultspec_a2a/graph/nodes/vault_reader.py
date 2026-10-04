@@ -102,7 +102,7 @@ def build_initial_vault_index(
         cap = domain_config.vault_index_cap
         matches = sorted(workspace_root.glob(resolved))[-cap:]
         if matches:
-            index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
+            index[stage] = [m.relative_to(workspace_root).as_posix() for m in matches]
     return index
 
 
@@ -185,7 +185,7 @@ async def _mount_document_blocks(
             continue
 
         content = await _read_vault_doc(path, cache)
-        rel_path = str(path.relative_to(workspace_root))
+        rel_path = path.relative_to(workspace_root).as_posix()
         header = _DOC_SEPARATOR.format(path=rel_path)
         block = f"{header}\n{content}\n{_DOC_FOOTER}"
         block_tokens = count_tokens_approximately(block)

@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-10-02'
-body_hash: 'sha256:41d8a8ac43eef0d623c09c27b292ae44dcaac3241bdfa52e0edfc478eaf87de7'
+modified: '2026-10-04'
+body_hash: 'sha256:96887f60ca8914f90f128b04735c609a5be7d86ee3a3736888d7fe43c1ebcd1c'
 related: []
 ---
 
@@ -814,6 +814,14 @@ Type: CI setup and provider identity. Status: fixed locally; hosted Linux proof 
 ### ci-remediation-review-formatting | low | fixed and verified
 
 Type: review hygiene. Status: fixed. The final implementation review and aggregate check found an extra blank line in the Claude CLI helper and assertion formatting in the workflow contract test. Both were corrected; no remaining implementation finding was observed in the reviewed diff. The CI, release, audit, and environment follow-ups are tracked in the findings above.
+
+### strict-type-regression-after-main-consolidation | high | fixed and verified
+
+Type: CI blocking and typing. Status: fixed. The earlier runner-placement and settings-source changes left 60 strict checker diagnostics. The YAML reader now validates string-keyed mappings at each boundary, and the deferred settings proxy has explicit override and materialization types. The locked type check and focused workflow and settings tests passed on the main-line repair. The integration retains that repair.
+
+### settings-only-names-were-published | medium | fixed and verified
+
+Type: export contract. Status: fixed. The earlier integration published `PROJECT_DOTENV`, `PROJECT_MARKERS`, and `build_now` from `settings_base.py` without recognized consumers. The main-line repair removes the internal constants from the export list and teaches the scanner to find the root `conftest.py` import of `build_now`. The integration retains that repair.
 
 ## Recommendations
 

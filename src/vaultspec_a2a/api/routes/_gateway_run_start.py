@@ -13,6 +13,7 @@ from fastapi import (
     HTTPException,
     Request,
 )
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +32,7 @@ from ...control.thread_service import (
     ThreadDispatchRuntime,
     create_and_dispatch_thread,
     process_metadata,
+    successor_seed_transcript,
 )
 from ...database import (
     get_thread,
@@ -38,6 +40,7 @@ from ...database import (
 from ...database.checkpoints import Checkpointer
 from ...database.models import ThreadModel
 from ...domain_config import domain_config
+from ...ipc.schemas import SeedTranscriptMessage
 from ...providers.team_selection import (
     FrozenTeamSelection,
 )
@@ -123,8 +126,8 @@ async def run_start_endpoint(
     ``release`` frees only an uncommitted reservation; and ``start`` (the
     default) preserves the one-shot engine/Compose path.
     """
-    db, _aggregator, _checkpointer, worker_client = services
-    runtime = _RunRuntime(circuit_breaker, worker_spawner, worker_client)
+    db, _aggregator, checkpointer, worker_client = services
+    runtime = _RunRuntime(circuit_breaker, worker_spawner, worker_client, checkpointer)
     if body.stage == RunStage.PREPARE:
         return await _run_prepare(request, body, worker_spawner, worker_client)
     if body.stage == RunStage.COMMIT:
@@ -157,6 +160,7 @@ class _RunRuntime:
     circuit_breaker: Any
     worker_spawner: Any
     worker_client: httpx.AsyncClient
+    checkpointer: Checkpointer
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +192,34 @@ def _run_metadata_with_request_fields(body: RunStartRequest) -> ThreadMetadata |
         metadata = metadata.model_copy(
             update={"feedback_batch_id": body.feedback_batch_id}
         )
+    if metadata is not None:
+        metadata = metadata.model_copy(
+            update={"continues_run_id": body.continues_run_id}
+        )
     return metadata
+
+
+async def _require_settled_predecessor(
+    db: AsyncSession, predecessor_id: str, workspace_root: Path
+) -> None:
+    predecessor = await get_thread(db, predecessor_id)
+    if predecessor is None or predecessor.status not in {
+        ThreadStatus.COMPLETED.value,
+        ThreadStatus.FAILED.value,
+        ThreadStatus.CANCELLED.value,
+        ThreadStatus.ARCHIVED.value,
+    }:
+        raise HTTPException(status_code=409, detail="predecessor run is not settled")
+    try:
+        metadata = ThreadMetadata.model_validate_json(predecessor.thread_metadata or "")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409, detail="predecessor run has no readable workspace"
+        ) from exc
+    if metadata.workspace_root != str(workspace_root):
+        raise HTTPException(
+            status_code=409, detail="predecessor run belongs to another workspace"
+        )
 
 
 async def _prepare_run_admission(
@@ -285,6 +316,7 @@ async def _create_thread_with_retry(
     body: RunStartRequest,
     prepared: _RunAdmission,
     runtime: _RunRuntime,
+    seed_transcript: list[SeedTranscriptMessage],
 ) -> ThreadCreationResult | _RunWinner:
     request = ThreadCreationRequest(
         thread_id=body.run_id,
@@ -298,6 +330,7 @@ async def _create_thread_with_retry(
         workspace_root=prepared.workspace_root,
         actor_tokens=body.actor_tokens,
         model_assignment=prepared.frozen.compiler_map(),
+        seed_transcript=seed_transcript,
     )
     try:
         return await _attempt_thread_creation(db, body, request, runtime)
@@ -366,6 +399,29 @@ async def _create_run_core(
     run_id = body.run_id
 
     prepared = await _prepare_run_admission(request, body, commit_binding)
+    seed_transcript: list[SeedTranscriptMessage] = []
+    if body.continues_run_id is not None:
+        await _require_settled_predecessor(
+            db, body.continues_run_id, prepared.workspace_root
+        )
+        await db.rollback()
+        try:
+            seeded = await successor_seed_transcript(
+                runtime.checkpointer,
+                body.continues_run_id,
+                domain_config.successor_transcript_depth,
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="predecessor transcript exceeds successor input bounds",
+            ) from exc
+        if seeded is None:
+            raise HTTPException(
+                status_code=409,
+                detail="predecessor final checkpoint has no readable transcript",
+            )
+        seed_transcript = seeded
     frozen = prepared.frozen
 
     # Admission gate: a draining gateway refuses a new run before any durable
@@ -392,7 +448,9 @@ async def _create_run_core(
     # active run forever and never quiesce.
     persisted = False
     try:
-        creation = await _create_thread_with_retry(db, body, prepared, runtime)
+        creation = await _create_thread_with_retry(
+            db, body, prepared, runtime, seed_transcript
+        )
         persisted = True
         if isinstance(creation, _RunWinner):
             _replay_identity_or_conflict(

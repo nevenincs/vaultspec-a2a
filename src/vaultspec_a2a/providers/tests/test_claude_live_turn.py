@@ -13,11 +13,9 @@ is. Both channels are asserted here — the streamed deltas and the final
 aggregated result — because a provider can stream nothing and still return a
 result object, or stream and then lose the aggregation.
 
-The Claude lane implements no authentication of its own: the spawned CLI
-inherits the ambient environment and the operator's real config home, and
-authenticates however the operator ambiently does - on this project's dev hosts,
-a flat-rate subscription login. The prompt is trivial regardless, to keep the
-turn short.
+The default Claude channel inherits the ambient environment and the operator's
+real config home. The explicit oauth_token channel injects the configured
+headless token. The prompt is trivial regardless, to keep the turn short.
 
 Re-arm (one command, once the prerequisites exist):
 
@@ -42,12 +40,44 @@ from ...service_tests._provider_catalog_live import declared_lane_model_value
 from .._factory_commands import _classify_acp_command, claude_acp_entry
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel
-from ..factory import ProviderFactory
+from ..factory import ProviderFactory, claude_auth_env
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from ...conftest import ExternalPrerequisiteRule
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_claude_candidate_live_turn_completes_before_admission(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Earn a first turn proof before the production factory may admit this lane."""
+    served, reason = await declared_lane_model_value(Provider.CLAUDE.value, tmp_path)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
+    command, meta = _classify_acp_command(settings.acp_backend)
+    env_vars, auth_mode = claude_auth_env()
+    model = AcpChatModel(
+        command=command,
+        env_vars=env_vars,
+        desired_model=served,
+        workspace_root=str(tmp_path),
+        use_exec=(meta["acp_backend"] == "binary"),
+        provider=Provider.CLAUDE.value,
+        execution_mode=f"claude-agent-acp:{meta['acp_backend']}",
+        auth_mode=auth_mode,
+    )
+    result = await model.ainvoke(
+        [
+            SystemMessage(content="You are terse."),
+            HumanMessage(content="Reply with exactly the single word: pong"),
+        ]
+    )
+    assert isinstance(result, AIMessage)
+    assert "pong" in str(result.content).lower()
 
 
 @pytest.mark.service
@@ -83,11 +113,11 @@ async def test_claude_live_turn_completes_and_returns_content(
         Provider.CLAUDE, model=served, workspace_root=tmp_path
     )
     assert isinstance(model, AcpChatModel)
-    # The production chain injects NO credential of its own: the lane is
-    # ambient-auth by contract, and the subprocess resolves whatever the
-    # operator's environment carries.
-    assert model.auth_mode == "ambient"
-    assert "CLAUDE_CODE_OAUTH_TOKEN" not in model.env_vars
+    assert model.auth_mode == settings.claude_auth_channel
+    if settings.claude_auth_channel == "subscription_login":
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in model.env_vars
+    else:
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in model.env_vars
     assert "ANTHROPIC_API_KEY" not in model.env_vars
 
     messages = [
@@ -100,11 +130,11 @@ async def test_claude_live_turn_completes_and_returns_content(
         streamed = "".join(
             [str(chunk.content) async for chunk in model.astream(messages)]
         )
-        assert streamed.strip(), "Claude returned no streamed assistant text"
+        assert "pong" in streamed.lower(), "Claude streamed no model answer"
 
         result = await model.ainvoke(messages)
         assert isinstance(result, AIMessage)
-        assert str(result.content).strip(), "Claude returned an empty final result"
+        assert "pong" in str(result.content).lower(), "Claude returned no model answer"
     finally:
         # Production reaps its own tree and clears the handle; this guards the
         # path where a turn raises mid-session, because an unreaped tree leaks on

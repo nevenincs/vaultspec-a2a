@@ -299,6 +299,104 @@ def test_the_construction_call_steers_the_operator_file_lookup(tmp_path: Path) -
     assert configured.port == int(_SETTING_VALUE)
 
 
+def test_explicit_claude_cli_setting_requires_an_absolute_path(tmp_path: Path) -> None:
+    """The declared override cannot resolve from a run's working directory."""
+    cli = tmp_path / "claude"
+    cli.write_text("cli\n", encoding="utf-8")
+    name = "VAULTSPEC_A2A_CLAUDE_CLI_EXECUTABLE"
+    with armed_environment(**{PROJECT_ROOT_ENV: str(tmp_path), name: str(cli)}):
+        configured = Settings()
+    assert configured.claude_cli_executable == cli
+
+    with (
+        armed_environment(**{PROJECT_ROOT_ENV: str(tmp_path), name: "claude"}),
+        pytest.raises(ValueError, match=f"{name} must be absolute"),
+    ):
+        Settings()
+
+
+def test_claude_auth_channel_and_token_load_as_declared_settings(
+    tmp_path: Path,
+) -> None:
+    with armed_environment(
+        **{
+            PROJECT_ROOT_ENV: str(tmp_path),
+            "VAULTSPEC_A2A_CLAUDE_AUTH_CHANNEL": "oauth_token",
+            "VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN": "test-headless-token",
+            "CLAUDE_CODE_OAUTH_TOKEN": "other-token",
+        }
+    ):
+        configured = Settings()
+    assert configured.claude_auth_channel == "oauth_token"
+    assert configured.claude_code_oauth_token is not None
+    assert (
+        configured.claude_code_oauth_token.get_secret_value() == "test-headless-token"
+    )
+    assert "test-headless-token" not in repr(configured)
+    assert "test-headless-token" not in str(configured.model_dump())
+
+    with (
+        armed_environment(
+            **{
+                PROJECT_ROOT_ENV: str(tmp_path),
+                "VAULTSPEC_A2A_CLAUDE_AUTH_CHANNEL": "unlisted",
+            }
+        ),
+        pytest.raises(ValueError, match=r"subscription_login|oauth_token"),
+    ):
+        Settings()
+
+
+def test_workspace_dotenv_claude_token_is_gated_but_channel_is_not(
+    tmp_path: Path,
+) -> None:
+    """A real workspace interpreter reads only the registered credential."""
+    (tmp_path / ".env").write_text(
+        "CLAUDE_CODE_OAUTH_TOKEN=dotenv-test-token\n"
+        "VAULTSPEC_A2A_CLAUDE_AUTH_CHANNEL=oauth_token\n",
+        encoding="utf-8",
+    )
+    declaration = _declare_dev_mode(tmp_path)
+    interpreter = _interpreter_inside(tmp_path)
+    probe = tmp_path / "claude_auth_probe.py"
+    probe.write_text(
+        "from vaultspec_a2a.control.config import Settings\n"
+        "s = Settings(project_root=__import__('sys').argv[1])\n"
+        "t = s.claude_code_oauth_token\n"
+        "print(s.claude_auth_channel, t is not None and "
+        "t.get_secret_value() == 'dotenv-test-token')\n",
+        encoding="utf-8",
+    )
+    paths = (
+        sysconfig.get_paths()["purelib"],
+        str(_SOURCE_ROOT),
+        str(Path(vaultspec_core.__file__).parents[1]),
+    )
+    env = {
+        "PATH": str(interpreter.parent),
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+        "PYTHONPATH": ";".join(paths) if sys.platform == "win32" else ":".join(paths),
+        "PYTHONIOENCODING": "utf-8",
+    }
+
+    def read() -> str:
+        completed = subprocess.run(
+            [str(interpreter), str(probe), str(tmp_path)],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=300,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        return completed.stdout.strip()
+
+    assert read() == "subscription_login True"
+    declaration.unlink()
+    assert read() == "subscription_login False"
+
+
 def test_the_construction_call_steers_the_credential_gate(tmp_path: Path) -> None:
     """The gated ``.env`` is the one under the root the call named."""
     _workspace_dotenv(tmp_path)

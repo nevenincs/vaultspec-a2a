@@ -228,11 +228,18 @@ async def test_a_settlement_that_is_refused_refuses_nothing_in_the_queue(
     """
     async with busy_run_state(tmp_path, backend=backend_name) as run:
         continuation = await queue_continuation(run.sessions, run.workspace)
+        published: list[str] = []
 
         payload = _failure_payload(run)
         payload["error_detail"] = "a different failure"
 
-        await _handle_terminal_event(RUN, payload, session_factory=run.sessions)
+        await _handle_terminal_event(
+            RUN,
+            payload,
+            session_factory=run.sessions,
+            publish_terminal=lambda: published.append("terminal"),
+        )
+        assert published == [], "a refused terminal must not close the live stream"
 
         async with run.sessions() as reader:
             thread = await get_thread(reader, RUN)
@@ -243,6 +250,15 @@ async def test_a_settlement_that_is_refused_refuses_nothing_in_the_queue(
             assert waiting.applied_at is None
             assert waiting.claim_token is not None
             assert await count_queued_continuations(reader, thread_id=RUN) == 1
+
+        await _handle_terminal_event(
+            RUN,
+            _failure_payload(run),
+            session_factory=run.sessions,
+            publish_terminal=lambda: published.append("terminal"),
+        )
+        assert published == ["terminal"]
+        await _assert_refused_in_place(run.sessions, continuation)
 
 
 def _authority_absent(workspace: Path) -> str:

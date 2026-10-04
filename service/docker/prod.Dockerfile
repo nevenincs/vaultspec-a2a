@@ -103,11 +103,18 @@ EXPOSE 18000
 CMD ["/app/.venv/bin/vaultspec-a2a", "serve"]
 
 # ── Stage 2c: Worker (agent executor) ───────────────────────────────────────
+FROM node:22-slim AS claude-cli
+# This version matches the Claude CLI carried by the locked ACP adapter.
+# Compose selects this image-owned binary through its explicit CLI setting.
+RUN npm install -g @anthropic-ai/claude-code@2.1.284 \
+    && claude --version
+
+# ── Stage 2d: Gemini CLI ────────────────────────────────────────────────────
 FROM node:22-slim AS gemini-cli
 ARG GEMINI_CLI_NPM_SPEC=@google/gemini-cli@0.3.3
 RUN npm install -g ${GEMINI_CLI_NPM_SPEC}
 
-# ── Stage 2d: Worker (agent executor) ───────────────────────────────────────
+# ── Stage 2e: Worker (agent executor) ───────────────────────────────────────
 FROM python-base AS worker
 
 COPY --from=identity-launcher /vaultspec-agent-launch /usr/local/bin/vaultspec-agent-launch
@@ -123,11 +130,12 @@ USER appuser
 # Node.js subprocess.  The worker needs a glibc-compatible node binary.
 # node:22-slim is Debian/bookworm-based, compatible with python:3.13-slim-bookworm.
 # node_modules carry the claude-agent-sdk glibc native binary, built in the
-# glibc node-deps stage above so it loads under this glibc node (the adapter
-# falls back to the vendored SDK when no system claude is present, so the native
-# binary IS on the Docker Claude path).
+# glibc node-deps stage above so it loads under this glibc node. The service
+# points the adapter at the separate exact-version CLI installed below.
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-deps /app/node_modules ./node_modules/
+COPY --from=claude-cli /usr/local/lib/node_modules/@anthropic-ai /usr/local/lib/node_modules/@anthropic-ai
+COPY --from=claude-cli /usr/local/bin/claude /usr/local/bin/claude
 # PROV-DOCKER-01: Gemini CLI is the official ACP entry point for Gemini. Install
 # it in a dedicated Node stage and copy the package runtime into the worker so
 # Docker support does not depend on a host-level gemini binary.

@@ -288,6 +288,7 @@ _CLEAR_ORDER: tuple[str, ...] = (
     "permission_requests",
     "control_actions",
     "cost_tracking",
+    "provider_runtime_identities",
     "task_queue_entries",
     "thread_execution_state",
     "thread_deletion_saga",

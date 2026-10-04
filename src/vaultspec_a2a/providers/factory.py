@@ -11,6 +11,7 @@ which provider a command resolves to no longer loads a model stack to answer.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -39,7 +40,13 @@ from ._factory_commands import (
 from .acp_catalog import discover_acp_catalog
 from .antigravity_catalog import discover_antigravity_catalog
 from .antigravity_cli import resolve_antigravity_command
-from .cli_resolution import pin_claude_executable
+from .binary_version import BinaryVersionProbeError, probe_binary_version
+from .cli_resolution import (
+    ClaudeCliResolution,
+    ProviderRuntimeUnavailableError,
+    ProviderRuntimeUnavailableReason,
+    pin_claude_executable,
+)
 from .codex_catalog import discover_codex_catalog
 from .in_process_catalog import (
     IN_PROCESS_EXECUTION_MODES,
@@ -47,6 +54,7 @@ from .in_process_catalog import (
     served_in_process_lanes,
 )
 from .kimi_catalog import discover_kimi_catalog
+from .lane_admission import PROVEN_TURN_LANES, lane_proof_accepts_version
 from .openai_catalog import discover_openai_compatible_catalog
 from .provider_catalog import (
     AuthenticationState,
@@ -61,7 +69,6 @@ __all__ = [
     "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
-    "ProviderRuntimeUnavailableError",
     "UnsupportedExecutionLaneError",
     "validate_current_execution_lane",
     "validate_current_native_controls",
@@ -70,10 +77,6 @@ __all__ = [
 
 class UnsupportedExecutionLaneError(ValueError):
     """A frozen provider/mode pair is outside the current execution inventory."""
-
-
-class ProviderRuntimeUnavailableError(ConfigError):
-    """A structurally valid frozen lane cannot be constructed right now."""
 
 
 def validate_current_execution_lane(provider: Provider, execution_mode: str) -> None:
@@ -160,6 +163,64 @@ class ProviderCatalogRegistration:
 
     key: ProviderCatalogKey
     discover: Callable[[], Awaitable[ProviderCatalogDiscovery]]
+    version_admission: Callable[[], ProviderRuntimeUnavailableReason | None] | None = (
+        None
+    )
+
+
+def binary_proof_reason(
+    provider: Provider, executable: str, authority: str
+) -> ProviderRuntimeUnavailableReason | None:
+    """Check the same resolved launcher that this lane would hand to its child."""
+    proof = PROVEN_TURN_LANES.get(provider)
+    if proof is None:
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    expected_binary = (
+        "claude" if provider in {Provider.CLAUDE, Provider.ZAI} else provider.value
+    )
+    if proof.binary != expected_binary:
+        return ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE
+    try:
+        reported = probe_binary_version(executable)
+    except BinaryVersionProbeError:
+        return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
+    if not lane_proof_accepts_version(proof, reported, authority):
+        return ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE
+    return None
+
+
+def codex_binary_proof_reason(
+    command: list[str] | None = None,
+) -> ProviderRuntimeUnavailableReason | None:
+    """Probe the service-path Codex launcher selected by the factory."""
+    if Provider.CODEX not in PROVEN_TURN_LANES:
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    if command is None:
+        command, _ = _classify_codex_command()
+    if not os.path.isabs(command[0]):
+        return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
+    return binary_proof_reason(Provider.CODEX, command[0], "service_path")
+
+
+def _claude_binary_proof_reason(
+    provider: Provider, workspace_root: Path
+) -> ProviderRuntimeUnavailableReason | None:
+    """Resolve and probe a Claude-backed catalog lane without child PATH lookup."""
+    if provider not in PROVEN_TURN_LANES:
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    try:
+        resolved = pin_claude_executable(resolve_env_vars(workspace_root))
+    except ProviderRuntimeUnavailableError as exc:
+        return exc.reason or ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE
+    return binary_proof_reason(provider, str(resolved.path), resolved.authority)
+
+
+def require_binary_proof(reason: ProviderRuntimeUnavailableReason | None) -> None:
+    if reason is not None:
+        raise ProviderRuntimeUnavailableError(
+            "resolved provider binary lacks a current completed-turn proof",
+            reason=reason,
+        )
 
 
 def _unavailable_catalog_discovery(
@@ -199,6 +260,21 @@ def _transport_evidence(discovery: ProviderCatalogDiscovery) -> HealthState:
     return HealthState.UNKNOWN
 
 
+def claude_auth_env() -> tuple[dict[str, str], str]:
+    """Select only the declared Claude credential channel for a child."""
+    if settings.claude_auth_channel == "subscription_login":
+        return {}, "subscription_login"
+    if settings.claude_auth_channel != "oauth_token":
+        raise ProviderRuntimeUnavailableError("unsupported Claude auth channel")
+    configured = settings.claude_code_oauth_token
+    token = configured.get_secret_value() if configured is not None else ""
+    if not token.strip():
+        raise ProviderRuntimeUnavailableError(
+            "Claude oauth_token auth channel requires a configured OAuth token"
+        )
+    return {"CLAUDE_CODE_OAUTH_TOKEN": token}, "oauth_token"
+
+
 async def _discover_claude_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
@@ -214,7 +290,23 @@ async def _discover_claude_catalog(
     # The probe drives the same CLI a served turn will. Unpinned, the adapter
     # falls back to its vendored binary, so the catalog this builds would
     # describe a different Claude from the one the lane then runs.
-    pin_claude_executable(env)
+    try:
+        cli_resolution = pin_claude_executable(env)
+    except ProviderRuntimeUnavailableError as exc:
+        return _unavailable_catalog_discovery(
+            key,
+            reason=exc.reason.value if exc.reason else str(exc),
+            transport=HealthState.UNAVAILABLE,
+        )
+    try:
+        auth_env, auth_mode = claude_auth_env()
+    except ProviderRuntimeUnavailableError:
+        return _unavailable_catalog_discovery(
+            key,
+            reason="claude_oauth_token_unavailable",
+            configured=HealthState.UNAVAILABLE,
+        )
+    env.update(auth_env)
     use_exec = metadata["acp_backend"] == "binary"
     if use_exec:
         env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
@@ -224,7 +316,13 @@ async def _discover_claude_catalog(
         cwd=str(workspace_root),
         key=key,
         use_exec=use_exec,
-        metadata={"provider": Provider.CLAUDE.value, **metadata},
+        metadata={
+            "provider": Provider.CLAUDE.value,
+            **metadata,
+            "cli_runtime_authority": cli_resolution.authority,
+            "cli_executable": str(cli_resolution.path),
+            "auth_mode": auth_mode,
+        },
         # The probe opens a real session, so it opens it under the same
         # permission posture a served turn gets. Leaving the bypass capability
         # granted here would qualify a lane nobody runs - and where the CLI
@@ -515,6 +613,7 @@ def _create_codex_model(
     from .codex_chat_model import CodexChatModel
 
     command, command_meta = _classify_codex_command()
+    require_binary_proof(codex_binary_proof_reason(command))
     # Codex auth is file-based; no secret env is injected.
     codex_controls: dict[str, str] = {}
     for control_id, value in selected_controls.items():
@@ -534,12 +633,20 @@ def _create_codex_model(
         codex_home=settings.codex_home,
         timeout=float(timeout),
         provider=str(Provider.CODEX.value),
+        execution_mode="codex-app-server",
         runtime_authority=command_meta["runtime_authority"],
         command_origin=command_meta["command_origin"],
         command_kind=command_meta["command_kind"],
         command_executable=command_meta["command_executable"],
         command_target=command_meta["command_target"],
+        version_proof_required=True,
     )
+
+
+def _require_claude_cli(workspace_root: Path | None) -> ClaudeCliResolution:
+    """Refuse construction before a child can inherit an unpinned CLI."""
+    env = resolve_env_vars(workspace_root) if workspace_root else dict(os.environ)
+    return pin_claude_executable(env)
 
 
 def _create_claude_model(
@@ -557,9 +664,12 @@ def _create_claude_model(
         command, command_meta = _classify_acp_command(backend)
     except ConfigError as exc:
         raise ProviderRuntimeUnavailableError(str(exc)) from exc
+    cli = _require_claude_cli(workspace_root)
+    require_binary_proof(
+        binary_proof_reason(Provider.CLAUDE, str(cli.path), cli.authority)
+    )
 
-    # The CLI inherits ambient authentication; this lane injects no credential.
-    env_vars: dict[str, str] = {}
+    env_vars, auth_mode = claude_auth_env()
     if backend == "binary":
         env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
     return AcpChatModel(
@@ -571,13 +681,15 @@ def _create_claude_model(
         workspace_root=str(workspace_root) if workspace_root else None,
         use_exec=(backend == "binary"),
         provider=str(Provider.CLAUDE.value),
+        execution_mode=f"claude-agent-acp:{backend}",
         runtime_authority=command_meta["runtime_authority"],
         command_origin=command_meta["command_origin"],
         command_kind=command_meta["command_kind"],
         command_executable=command_meta["command_executable"],
         command_target=command_meta["command_target"],
         acp_backend=command_meta["acp_backend"],
-        auth_mode="ambient",
+        auth_mode=auth_mode,
+        version_proof_required=True,
     )
 
 
@@ -602,6 +714,10 @@ def _create_zai_model(
         command, command_meta = _classify_acp_command(backend)
     except ConfigError as exc:
         raise ProviderRuntimeUnavailableError(str(exc)) from exc
+    cli = _require_claude_cli(workspace_root)
+    require_binary_proof(
+        binary_proof_reason(Provider.ZAI, str(cli.path), cli.authority)
+    )
     env_vars = _build_zai_env(
         zai_base_url=settings.zai_base_url,
         zai_auth_token=auth_token,
@@ -617,6 +733,7 @@ def _create_zai_model(
         workspace_root=str(workspace_root) if workspace_root else None,
         use_exec=(backend == "binary"),
         provider=str(Provider.ZAI.value),
+        execution_mode=f"zai-claude-agent-acp:{backend}",
         runtime_authority=command_meta["runtime_authority"],
         command_origin=command_meta["command_origin"],
         command_kind=command_meta["command_kind"],
@@ -626,6 +743,7 @@ def _create_zai_model(
         auth_mode=(
             "zai_auth_token" if "ANTHROPIC_AUTH_TOKEN" in env_vars else "none_detected"
         ),
+        version_proof_required=True,
     )
 
 
@@ -673,6 +791,7 @@ def _create_kimi_model(
         agent_config=agent_config,
         workspace_root=str(workspace_root) if workspace_root else None,
         provider=str(Provider.KIMI.value),
+        execution_mode="kimi-code-acp",
         acp_family="kimi",
         runtime_authority=command_meta["runtime_authority"],
         command_origin=command_meta["command_origin"],
@@ -816,10 +935,14 @@ class ProviderFactory:
                 lambda: _discover_antigravity_catalog(antigravity, discovery_root),
             ),
             ProviderCatalogRegistration(
-                claude, lambda: _discover_claude_catalog(claude, discovery_root)
+                claude,
+                lambda: _discover_claude_catalog(claude, discovery_root),
+                lambda: _claude_binary_proof_reason(Provider.CLAUDE, discovery_root),
             ),
             ProviderCatalogRegistration(
-                codex, lambda: _discover_codex_catalog(codex, discovery_root)
+                codex,
+                lambda: _discover_codex_catalog(codex, discovery_root),
+                codex_binary_proof_reason,
             ),
             ProviderCatalogRegistration(
                 kimi, lambda: _discover_kimi_catalog(kimi, discovery_root)
@@ -827,7 +950,11 @@ class ProviderFactory:
             ProviderCatalogRegistration(
                 openai, lambda: _discover_openai_catalog(openai)
             ),
-            ProviderCatalogRegistration(zai, lambda: _discover_unverified_catalog(zai)),
+            ProviderCatalogRegistration(
+                zai,
+                lambda: _discover_unverified_catalog(zai),
+                lambda: _claude_binary_proof_reason(Provider.ZAI, discovery_root),
+            ),
             ProviderCatalogRegistration(
                 zhipu, lambda: _discover_unverified_catalog(zhipu)
             ),

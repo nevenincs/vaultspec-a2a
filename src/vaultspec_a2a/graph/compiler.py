@@ -30,7 +30,12 @@ if TYPE_CHECKING:
     from ..authoring import FeedbackContextReader
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.phase_gate import DocumentProposalSubmitter
-    from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
+    from .protocols import (
+        CostPort,
+        ProviderFactoryProtocol,
+        RuntimeIdentityPort,
+        TaskQueuePort,
+    )
 
 from langgraph.graph import END, StateGraph
 from langgraph.types import TimeoutPolicy
@@ -45,18 +50,11 @@ from ..thread.errors import (
 )
 from ..thread.state import TeamState
 from ._compiler_models import (
-    parse_catalog_preferences,
     resolve_model_for_worker,
-    resolve_supervisor_model,
     validate_frozen_assignment_inventory,
 )
 from ._compiler_prompts import (
-    WEB_GROUNDING_MARKER,
-    build_supervisor_prompt,
-    compose_persona_prompt,
     composed_worker_prompt,
-    lane_web_demonstrated,
-    web_grounding_text,
 )
 from ._compiler_retry import _NODE_RETRY_POLICY, node_occupancy_ceiling
 from .enums import PipelinePhase, Provider
@@ -74,7 +72,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "STEP_BACKSTOP_GRACE_SECONDS",
-    "WEB_GROUNDING_MARKER",
     "_ROLE_TO_PHASE",
     "CompiledTeamGraph",
     "_add_node",
@@ -83,15 +80,8 @@ __all__ = [
     "_loop_route",
     "_route_from_supervisor",
     "_wire_diverge_stage",
-    "build_supervisor_prompt",
     "compile_team_graph",
-    "compose_persona_prompt",
-    "lane_web_demonstrated",
-    "parse_catalog_preferences",
     "required_recursion_limit_for_finish_blocks",
-    "resolve_model_for_worker",
-    "resolve_supervisor_model",
-    "web_grounding_text",
 ]
 
 
@@ -329,6 +319,7 @@ class _CompileWorkerOptions(TypedDict):
     feature_tag: str | None
     task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
+    runtime_identity_port: RuntimeIdentityPort | None
     authoring_binding_provider: AuthoringBindingProvider | None
 
 
@@ -389,6 +380,7 @@ def _compile_worker_node(
         feature_tag=options["feature_tag"],
         task_queue_port=options["task_queue_port"],
         cost_port=options["cost_port"],
+        runtime_identity_port=options["runtime_identity_port"],
         authoring_binding_provider=options["authoring_binding_provider"],
         role=agent_cfg.role,
         # The same role-to-phase reading the supervisor gates on, so the worker
@@ -635,6 +627,7 @@ class _CompileTeamOptional(TypedDict, total=False):
     feature_tag: str | None
     task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
+    runtime_identity_port: RuntimeIdentityPort | None
     proposal_submitter: DocumentProposalSubmitter | None
     feedback_reader: FeedbackContextReader | None
     authoring_binding_provider: AuthoringBindingProvider | None
@@ -704,6 +697,7 @@ def compile_team_graph(
     feature_tag = options.get("feature_tag")
     task_queue_port = options.get("task_queue_port")
     cost_port = options.get("cost_port")
+    runtime_identity_port = options.get("runtime_identity_port")
     proposal_submitter = options.get("proposal_submitter")
     feedback_reader = options.get("feedback_reader")
     authoring_binding_provider = options.get("authoring_binding_provider")
@@ -747,6 +741,7 @@ def compile_team_graph(
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
             cost_port=cost_port,
+            runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -761,6 +756,7 @@ def compile_team_graph(
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
             cost_port=cost_port,
+            runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -776,6 +772,7 @@ def compile_team_graph(
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
             cost_port=cost_port,
+            runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
@@ -791,6 +788,7 @@ def compile_team_graph(
             feedback_reader=feedback_reader,
             frozen_assignment=model_assignment,
             cost_port=cost_port,
+            runtime_identity_port=runtime_identity_port,
         )
     else:
         raise ValueError(

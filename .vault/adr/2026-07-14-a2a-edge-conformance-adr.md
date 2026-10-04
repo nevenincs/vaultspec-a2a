@@ -16,8 +16,8 @@ supersedes:
   - '2026-02-28-react-tailwind-figma-migration-adr'
   - '2026-02-26-frontend-backend-contract-adr'
   - '2026-04-05-contract-validation-adr'
-modified: '2026-10-01'
-body_hash: 'sha256:0eaaf68f9c582c0421adbc9cc4a6c5e6e276428722fb4e6bb47619459803c24c'
+modified: '2026-10-02'
+body_hash: 'sha256:0b19ed637e0b2140392df704c6fa61058e8398831ec8ca34c86254284a66d491'
 ---
 
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
@@ -379,12 +379,15 @@ versioned with the engine that owns them.
 
 R6 gains two additive contract events, in the style of the 2026-07-19 discovery-event
 paragraph above. First: the messages verb (`POST /v1/runs/{run_id}/messages`) gains a
-reachable `202` with `action_status="queued"` on a busy run, a sixth refusal code
-`queue_full`, and a bounded `queued_messages` count on `run-status`. Second: `run-start`
-and `run-status` gain an optional `continues_run_id`, naming a settled run's successor.
-Both are additive; a client that only ever saw `409` keeps working. The behavioural change
-neither schema shows on its own: a run with a queued continuation emits no terminal frame
-at the end of its first turn, so a consumer must not treat a quiet turn boundary as
+reachable `202` with `action_status="queued"` and a one-based `queue_position` on a busy
+run, a sixth refusal code `queue_full`, and a bounded `queued_messages` count on
+`run-status`. Admission queues the turn; durable promotion and recovery are its
+dispatch path. The verb no longer serves dispatch-time `502` or worker-saturation
+`503` responses. Second: `run-start` and `run-status` gain an optional
+`continues_run_id`, naming a settled run's successor. Both additions preserve the
+existing `409` refusal for callers that do not queue. The behavioural change neither
+schema shows on its own: a run with a queued continuation emits no terminal frame at
+the end of its first turn, so a consumer must not treat a quiet turn boundary as
 completion.
 
 Adopting A2A's new-task-in-the-same-context SHAPE for a settled run is not adopting the

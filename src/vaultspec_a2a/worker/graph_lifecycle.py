@@ -12,10 +12,11 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from ..domain_config import domain_config
-from ..graph.compiler import compile_team_graph, resolve_model_for_worker
+from ..graph._compiler_models import resolve_model_for_worker
+from ..graph.compiler import compile_team_graph
 from ..ipc.schemas import canonical_project_root
 from ..providers.team_selection import model_assignment_digest
 from ..providers.warmup import warm_model_imports
@@ -254,6 +255,7 @@ class GraphLifecycleManager:
         from ..database import get_session_factory
         from ..providers.factory import ProviderFactory
         from .cost_port import SqlCostPort
+        from .runtime_identity_port import SqlRuntimeIdentityPort
         from .task_queue_port import SqlTaskQueuePort
 
         (
@@ -276,6 +278,7 @@ class GraphLifecycleManager:
         )
         self._task_queue_port = SqlTaskQueuePort(get_session_factory())
         self._cost_port = SqlCostPort(get_session_factory())
+        self._runtime_identity_port = SqlRuntimeIdentityPort(get_session_factory())
         self._state = GraphLifecycleState()
 
     # ------------------------------------------------------------------
@@ -742,6 +745,7 @@ class GraphLifecycleManager:
                 feature_tag=req.active_feature,
                 task_queue_port=self._task_queue_port,
                 cost_port=self._cost_port,
+                runtime_identity_port=self._runtime_identity_port,
                 provider_factory=self._ports.provider_factory,
                 proposal_submitter=proposal_submitter,
                 feedback_reader=feedback_reader,
@@ -939,10 +943,19 @@ class GraphLifecycleManager:
             A ``dict`` suitable for passing directly to
             ``EventAggregator.ingest()`` as *graph_input*.
         """
-        messages: list[SystemMessage | HumanMessage] = []
+        messages: list[BaseMessage] = []
         if req.context_preamble:
             messages.append(
                 stamp_message_created_at(SystemMessage(content=req.context_preamble))
+            )
+        if is_first_ingest:
+            messages.extend(
+                stamp_message_created_at(
+                    AIMessage(content=turn.content)
+                    if turn.role == "assistant"
+                    else HumanMessage(content=turn.content)
+                )
+                for turn in req.seed_transcript
             )
         if req.content:
             messages.append(stamp_message_created_at(HumanMessage(content=req.content)))

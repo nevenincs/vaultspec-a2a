@@ -22,6 +22,7 @@ from ...thread.errors import ConfigError
 from .._factory_commands import (
     _classify_acp_command,
     capsule_acp_entry,
+    capsule_claude_executable,
     capsule_node_executable,
     claude_acp_entry,
 )
@@ -35,6 +36,27 @@ def _write(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def test_capsule_cli_authority_names_the_vendored_binary(
+    installed_acp_adapter: Path,
+) -> None:
+    """The capsule path authority points at a runnable CLI in the npm closure."""
+    assert installed_acp_adapter.is_dir()
+    install_root = Path(__file__).resolve().parents[4]
+    binary = capsule_claude_executable(install_root)
+
+    assert binary.is_file()
+    assert binary.is_relative_to(install_root / "node_modules" / "@anthropic-ai")
+    result = subprocess.run(
+        [str(binary), "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip()
 
 
 def test_capsule_root_resolves_node_and_acp_only_from_capsule(tmp_path: Path) -> None:

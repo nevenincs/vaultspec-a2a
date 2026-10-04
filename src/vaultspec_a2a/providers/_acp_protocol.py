@@ -13,7 +13,12 @@ import json
 import logging
 from dataclasses import dataclass
 
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import (
+    AIMessageChunk,
+    InputTokenDetails,
+    OutputTokenDetails,
+    UsageMetadata,
+)
 from langchain_core.outputs import ChatGenerationChunk
 from pydantic import TypeAdapter, ValidationError
 
@@ -24,6 +29,7 @@ from ._acp_types import (
     AcpModelConfig,
     AcpRpcId,
     AcpSessionContext,
+    AcpUsageMetadata,
     NativeCommandAvailability,
     NativeCommandDisposition,
     RpcHandlerMap,
@@ -61,6 +67,18 @@ _EFFECTFUL_SERVER_METHODS = frozenset(
 _MAX_COMMAND_DESCRIPTION_LENGTH = 1024
 _MAX_COMMAND_INPUT_HINT_LENGTH = 512
 _MAX_AVAILABLE_COMMANDS = 256
+_OBSERVED_ONLY_SESSION_UPDATES = frozenset(
+    {
+        "async_task_progress",
+        "async_task_spawned",
+        "async_task_state_update",
+        "compaction_summary_chunk",
+        "compaction_update",
+        "notice",
+        "subagent_spawned",
+        "subagent_state_update",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,8 +322,99 @@ def _finish_prompt_response(data: JsonObject, ctx: AcpSessionContext) -> None:
         )
         ctx.prompt_done.set()
         return
+    try:
+        ctx.prompt_usage = _prompt_usage_metadata(result)
+    except ValueError as exc:
+        ctx.interrupt_exc.append(
+            AcpPromptError(
+                f"ACP session/prompt returned invalid usage: {exc}",
+                code=AcpErrorCode.INVALID_PARAMS,
+            )
+        )
+        ctx.prompt_done.set()
+        return
     ctx.prompt_stop_reason = stop_reason
     ctx.prompt_done.set()
+
+
+def _token_count(source: JsonObject, key: str) -> int:
+    value = source.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{key} must be a non-negative integer")
+    return value
+
+
+def _usage_metadata(counts: JsonObject, *, quota: bool) -> UsageMetadata:
+    input_count = _token_count(counts, "inputTokens")
+    output_count = _token_count(counts, "outputTokens")
+    read_count = _token_count(
+        counts, "cachedInputTokens" if quota else "cachedReadTokens"
+    )
+    write_count = _token_count(counts, "cachedWriteTokens")
+    total_count = _token_count(counts, "totalTokens")
+    if total_count != input_count + output_count + read_count + write_count:
+        raise ValueError("totalTokens disagrees with its token breakdown")
+    return UsageMetadata(
+        input_tokens=input_count + read_count + write_count,
+        output_tokens=output_count,
+        total_tokens=total_count,
+        input_token_details=InputTokenDetails(
+            cache_read=read_count, cache_creation=write_count
+        ),
+        output_token_details=OutputTokenDetails(
+            reasoning=_token_count(counts, "reasoningOutputTokens") if quota else 0
+        ),
+    )
+
+
+def _prompt_usage_metadata(result: JsonObject) -> AcpUsageMetadata | None:
+    """Prefer accounting-grade model rows over the main-loop usage summary."""
+    raw_meta = result.get("_meta")
+    if raw_meta is not None and not isinstance(raw_meta, dict):
+        raise ValueError("_meta must be an object")
+    raw_quota = raw_meta.get("quota") if isinstance(raw_meta, dict) else None
+    if raw_quota is not None and not isinstance(raw_quota, dict):
+        raise ValueError("_meta.quota must be an object")
+    raw_models = raw_quota.get("model_usage") if isinstance(raw_quota, dict) else None
+    if raw_models is not None and not isinstance(raw_models, list):
+        raise ValueError("_meta.quota.model_usage must be an array")
+    model_usage: dict[str, UsageMetadata] = {}
+    reasoning_tokens = 0
+    cache_read_tokens = 0
+    cache_write_tokens = 0
+    for raw_model in raw_models or []:
+        if not isinstance(raw_model, dict):
+            raise ValueError("model_usage entries must be objects")
+        model = raw_model.get("model")
+        counts = raw_model.get("token_count")
+        if not isinstance(model, str) or not model or model in model_usage:
+            raise ValueError("model_usage model must be unique non-empty text")
+        if not isinstance(counts, dict):
+            raise ValueError("model_usage token_count must be an object")
+        model_usage[model] = _usage_metadata(counts, quota=True)
+        reasoning_tokens += _token_count(counts, "reasoningOutputTokens")
+        cache_read_tokens += _token_count(counts, "cachedInputTokens")
+        cache_write_tokens += _token_count(counts, "cachedWriteTokens")
+
+    if model_usage:
+        return AcpUsageMetadata(
+            input_tokens=sum(row["input_tokens"] for row in model_usage.values()),
+            output_tokens=sum(row["output_tokens"] for row in model_usage.values()),
+            total_tokens=sum(row["total_tokens"] for row in model_usage.values()),
+            input_token_details=InputTokenDetails(
+                cache_read=cache_read_tokens,
+                cache_creation=cache_write_tokens,
+            ),
+            output_token_details=OutputTokenDetails(reasoning=reasoning_tokens),
+            model_usage=model_usage,
+        )
+
+    raw_usage = result.get("usage")
+    if raw_usage is None:
+        return None
+    if not isinstance(raw_usage, dict):
+        raise ValueError("usage must be an object")
+    return AcpUsageMetadata(**_usage_metadata(raw_usage, quota=False))
 
 
 async def handle_server_rpc(
@@ -489,6 +598,40 @@ async def handle_session_update(
             "ACP plan update: %d entries received",
             len(plan_entries) if isinstance(plan_entries, list) else 0,
         )
+        return
+    if u_type == "usage_update":
+        # This is context-window occupancy, not the accounting-grade per-model
+        # usage on the terminal prompt response. Logging it must not add tokens
+        # to the turn's usage metadata a second time.
+        used, size = update.get("used"), update.get("size")
+        if (
+            isinstance(used, int)
+            and not isinstance(used, bool)
+            and isinstance(size, int)
+            and not isinstance(size, bool)
+        ):
+            logger.debug("ACP context usage update: used=%d size=%d", used, size)
+        else:
+            logger.debug("ACP context usage update received")
+        return
+    if u_type == "config_option_update":
+        options = update.get("configOptions")
+        if isinstance(options, list):
+            logger.debug("ACP config option update: %d options received", len(options))
+        else:
+            logger.warning("ACP config option update omitted configOptions array")
+        return
+    if u_type == "session_info_update":
+        # AIR goal and file-change metadata may contain workspace or user text.
+        logger.debug("ACP session info update received")
+        return
+    if u_type in _OBSERVED_ONLY_SESSION_UPDATES:
+        logger.debug("ACP session update observed: %s", u_type)
+        return
+    # Future adapter versions remain compatible without silently dropping a
+    # newly introduced update. Never log the payload: it may contain prompts.
+    kind = u_type if 0 < len(u_type) <= 64 and u_type.isprintable() else "<invalid>"
+    logger.debug("ACP unrecognized session update: %s", kind)
 
 
 async def on_tool_call(update: JsonObject, ctx: AcpSessionContext) -> None:

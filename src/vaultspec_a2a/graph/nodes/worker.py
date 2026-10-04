@@ -26,6 +26,7 @@ from ...context.anchoring import build_anchoring_context
 from ...context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
+from ...providers.acp_exceptions import AcpPromptError
 from ...thread.enums import ApprovalStatus
 from ...thread.errors import WorkerExecutionError
 from ...thread.models import TokenUsageEntry
@@ -57,7 +58,7 @@ if TYPE_CHECKING:
     from ...providers._acp_authoring import AuthoringToolBinding
     from ...thread.state import TeamState
     from ...worker.authoring_binding import AuthoringBindingProvider
-    from ..protocols import CostPort, TaskQueuePort
+    from ..protocols import CostPort, RuntimeIdentityPort, TaskQueuePort
     from .vault_reader import ContextMounter
 
 _logger = logging.getLogger(__name__)
@@ -65,8 +66,6 @@ _logger = logging.getLogger(__name__)
 
 __all__ = [
     "create_worker_node",
-    "permission_callback_for",
-    "recorded_permission_answers",
     "render_research_findings",
     "resolve_effective_worker_model",
 ]
@@ -458,7 +457,7 @@ def _wrap_worker_exception(
     )
 
 
-def _turn_token_usage(response: BaseMessage) -> TokenUsageEntry | None:
+def _turn_token_usage(response: BaseMessage | AcpPromptError) -> TokenUsageEntry | None:
     """Read the turn's token accounting off the message the provider returned.
 
     Reads LangChain's standard ``usage_metadata``, so any lane that reports
@@ -714,6 +713,7 @@ class _WorkerNodeOptions(TypedDict, total=False):
     cost_port: CostPort | None
     context_mounter: ContextMounter | None
     joins_research_findings: bool
+    runtime_identity_port: RuntimeIdentityPort | None
 
 
 class _WorkerNodeSettings(TypedDict):
@@ -729,6 +729,7 @@ class _WorkerNodeSettings(TypedDict):
     cost_port: CostPort | None
     context_mounter: ContextMounter | None
     joins_research_findings: bool
+    runtime_identity_port: RuntimeIdentityPort | None
 
 
 def _bind_worker_node_settings(
@@ -750,6 +751,7 @@ def _bind_worker_node_settings(
         "cost_port": None,
         "context_mounter": None,
         "joins_research_findings": False,
+        "runtime_identity_port": None,
     }
     for index, value in enumerate(args):
         name = names[index]
@@ -787,6 +789,8 @@ def create_worker_node(
         cost_port:         Optional database-backed token-accounting port; when
                            present, each turn that reports usage persists one
                            ``cost_tracking`` row for the running thread.
+        runtime_identity_port: Optional write-once runtime evidence port,
+                           forwarded for provider initialization recording.
         authoring_binding_provider: Optional per-run builder of the engine's
                            bridged authoring binding; when present, each invocation
                            resolves this role's binding for the running thread and,
@@ -907,6 +911,13 @@ def create_worker_node(
                 getattr(effective_model, "provider", None)
             ),
         )
+        from ...providers._runtime_identity import bind_model_runtime_identity
+
+        effective_model = bind_model_runtime_identity(
+            effective_model,
+            thread_id=thread_id,
+            port=settings["runtime_identity_port"],
+        )
 
         model_label = _describe_worker_model(effective_model)
         _logger.debug(
@@ -935,6 +946,16 @@ def create_worker_node(
         except GraphBubbleUp:
             raise
         except Exception as exc:
+            if isinstance(exc, AcpPromptError):
+                failed_usage = _turn_token_usage(exc)
+                if failed_usage is not None:
+                    await _record_turn_usage(
+                        cost_port=settings["cost_port"],
+                        thread_id=thread_id,
+                        worker_name=name,
+                        model=effective_model,
+                        usage=failed_usage,
+                    )
             raise _wrap_worker_exception(
                 exc=exc,
                 worker=name,

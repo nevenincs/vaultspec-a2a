@@ -48,6 +48,7 @@ from .models import ControlActionModel as ControlActionModel
 from .models import CostTrackingModel as CostTrackingModel
 from .models import PermissionLogModel as PermissionLogModel
 from .models import PermissionRequestModel as PermissionRequestModel
+from .models import ProviderRuntimeIdentityModel as ProviderRuntimeIdentityModel
 from .models import RecoveryAttemptModel as RecoveryAttemptModel
 from .models import RunEventModel as RunEventModel
 from .models import TaskQueueEntryModel as TaskQueueEntryModel
@@ -118,6 +119,12 @@ from .permission_repository import (
 )
 from .run_event_repository import RunEventRecord as RunEventRecord
 from .run_event_repository import RunEventStore as RunEventStore
+from .runtime_identity_repository import (
+    RuntimeIdentityConflictError as RuntimeIdentityConflictError,
+)
+from .runtime_identity_repository import (
+    record_provider_runtime_identity as record_provider_runtime_identity,
+)
 from .session import application_session_factory as application_session_factory
 from .session import begin_write_transaction as begin_write_transaction
 from .session import close_db as close_db

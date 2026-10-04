@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#provider-binary-policy'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:db87c3bea0c9ded7da885fba27650f101e172656edc8382d584a033d4c7aaddf'
+body_hash: 'sha256:7ae6b10d5bfa2ea6af134a2684f3319d54a6f19b756f1127d686088ebd9a4b4e'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -35,7 +35,361 @@ related:
 - `S17` `verify:` `live adapter handshake tests -m service` -> `pass`
 - `S17` `verify:` `npm audit signatures: 106 verified` -> `pass`
 - `S17` `by:` `vaultspec-high-executor`
+- `S16` `M` `vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S16` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S16` `M` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`
+- `S16` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S16` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S16` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_authoring.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_exceptions.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_handler_failure.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_migration_surface.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_model_selection.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_permission_option_ids.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_security.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_session_ownership.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_token_redaction.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_vault_deny.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_claude_permission_posture.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_harness_mcp_pinning.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_kimi_permission.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_project_confinement.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_terminal_containment.py`
+- `S16` `verify:` `pytest provider session ownership/model selection/permission posture` -> `pass`
+- `S16` `verify:` `pytest desktop owned process tree` -> `pass`
+- `S16` `verify:` `ty changed test callers` -> `pass`
+- `S16` `verify:` `ruff changed provider files` -> `pass`
+- `S16` `verify:` `relative imports guard` -> `pass`
+- `S16` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S16` `verify:` `just ci` -> `fail`
+- `S01` `M` `src/vaultspec_a2a/providers/_factory_commands.py`
+- `S01` `M` `src/vaultspec_a2a/providers/tests/test_capsule_acp_resolution.py`
+- `S01` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S01` `verify:` `pytest capsule_acp_resolution` -> `pass`
+- `S01` `verify:` `ruff capsule path files` -> `pass`
+- `S01` `verify:` `ty capsule path files` -> `pass`
+- `S01` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S01` `verify:` `just ci` -> `fail`
+- `S02` `M` `src/vaultspec_a2a/desktop/profile.py`
+- `S02` `M` `src/vaultspec_a2a/desktop/tests/test_profile.py`
+- `S02` `M` `src/vaultspec_a2a/desktop_tests/test_profile_paths.py`
+- `S02` `M` `src/vaultspec_a2a/cli/tests/test_desktop_serve.py`
+- `S02` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S02` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S02` `verify:` `pytest desktop profile and CLI tests` -> `pass`
+- `S02` `verify:` `ruff desktop profile files` -> `pass`
+- `S02` `verify:` `ty desktop profile files` -> `pass`
+- `S02` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S02` `verify:` `just ci` -> `fail`
+- `S11` `A` `src/vaultspec_a2a/database/migrations/versions/0025_provider_runtime_identity.py`
+- `S11` `A` `src/vaultspec_a2a/database/runtime_identity_repository.py`
+- `S11` `A` `src/vaultspec_a2a/database/tests/test_runtime_identity_repository.py`
+- `S11` `M` `src/vaultspec_a2a/database/models.py`
+- `S11` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S11` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S11` `verify:` `dual-backend runtime identity migration/repository pytest` -> `pass`
+- `S11` `verify:` `SQLite schema parity pytest 66 passed` -> `pass`
+- `S11` `verify:` `Ruff lint and format plus Ty targeted` -> `pass`
+- `S03` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S03` `M` `src/vaultspec_a2a/control/config.py`
+- `S03` `M` `.env.example`
+- `S03` `M` `src/vaultspec_a2a/control/tests/test_settings_sources.py`
+- `S03` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S03` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S03` `verify:` `pytest settings sources and env example` -> `pass`
+- `S03` `verify:` `ruff settings files` -> `pass`
+- `S03` `verify:` `ty settings files` -> `pass`
+- `S03` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S03` `verify:` `just ci` -> `fail`
+- `S04` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S04` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S04` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S04` `M` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S04` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S04` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S04` `verify:` `pytest Claude binary identity/capsule/factory` -> `pass`
+- `S04` `verify:` `ruff provider resolver files` -> `pass`
+- `S04` `verify:` `ty provider resolver files` -> `pass`
+- `S04` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S04` `verify:` `just ci` -> `fail`
+- `S07` `M` `src/vaultspec_a2a/providers/lane_admission.py`
+- `S07` `M` `src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`
+- `S07` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S07` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S07` `verify:` `codex live app-server turn` -> `pass`
+- `S07` `verify:` `claude live ACP turn` -> `fail`
+- `S07` `verify:` `targeted provider catalog and admission pytest: 54 tests` -> `pass`
+- `S07` `verify:` `ruff check and format on S07 files` -> `pass`
+- `S07` `verify:` `ty check on S07 files` -> `pass`
+- `S07` `verify:` `real ProviderCatalogService admission probe` -> `pass`
+- `S07` `by:` `vaultspec-standard-executor`
+- `S08` `A` `src/vaultspec_a2a/providers/binary_version.py`
+- `S08` `M` `src/vaultspec_a2a/providers/lane_admission.py`
+- `S08` `A` `src/vaultspec_a2a/providers/tests/test_binary_version.py`
+- `S08` `M` `src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`
+- `S08` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S08` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S08` `verify:` `real launcher and lane range pytest: 14 tests` -> `pass`
+- `S08` `verify:` `direct installed Claude and Codex version probes` -> `pass`
+- `S08` `verify:` `ruff check and format on S08 files` -> `pass`
+- `S08` `verify:` `ty check on S08 files` -> `pass`
+- `S08` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S08` `by:` `vaultspec-standard-executor`
+- `S10` `M` `.github/workflows/test.yml`
+- `S10` `M` `.github/ci-contract-allow.txt`
+- `S10` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S10` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S10` `verify:` `isolated @openai/codex@0.159.2 npm audit signatures` -> `pass`
+- `S10` `verify:` `actionlint test.yml` -> `pass`
+- `S10` `verify:` `dev.ci_contract` -> `pass`
+- `S10` `verify:` `vault check provider-binary-policy` -> `pass`
+- `S10` `by:` `vaultspec-standard-executor`
+- `S05` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S05` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S05` `M` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S05` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S05` `verify:` `uv run pytest -q src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py src/vaultspec_a2a/providers/tests/test_factory.py src/vaultspec_a2a/graph/tests/test_compiler.py` -> `pass`
+- `S05` `verify:` `uv run ruff check changed provider files` -> `pass`
+- `S05` `verify:` `uv run ruff format --check changed provider files` -> `pass`
+- `S05` `verify:` `uv run ty check changed provider files` -> `pass`
+- `S05` `verify:` `git diff --check` -> `pass`
+- `S05` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S06` `M` `service/docker/prod.Dockerfile`
+- `S06` `M` `service/docker-compose.prod.yml`
+- `S06` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S06` `verify:` `docker build --target claude-cli` -> `pass`
+- `S06` `verify:` `docker build --target worker` -> `pass`
+- `S06` `verify:` `docker run --user 1002:1002 claude --version` -> `pass`
+- `S06` `verify:` `docker run worker resolver with explicit setting` -> `pass`
+- `S06` `verify:` `docker compose config --quiet` -> `pass`
+- `S06` `verify:` `git diff --check` -> `pass`
+- `S06` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S09` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S09` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S09` `M` `src/vaultspec_a2a/providers/provider_catalog_service.py`
+- `S09` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S09` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S09` `A` `src/vaultspec_a2a/providers/tests/test_binary_proof_admission.py`
+- `S09` `M` `.vault/adr/2026-10-01-provider-binary-policy-adr.md`
+- `S09` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S09` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S09` `verify:` `focused-provider-tests` -> `pass`
+- `S09` `verify:` `changed-file-ruff-ty-basedpyright` -> `pass`
+- `S09` `verify:` `vault-check-all` -> `pass`
+- `S09` `by:` `vaultspec-high-executor`
+- `S12` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S12` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S12` `M` `src/vaultspec_a2a/graph/protocols.py`
+- `S12` `A` `src/vaultspec_a2a/worker/runtime_identity_port.py`
+- `S12` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S12` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S12` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S12` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S12` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S12` `A` `src/vaultspec_a2a/worker/tests/test_runtime_identity_port.py`
+- `S12` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S12` `M` `src/vaultspec_a2a/graph/tests/test_research_adr.py`
+- `S12` `verify:` `focused pytest: SQL port, nonresearch compile, research compile` -> `pass`
+- `S12` `verify:` `ruff check and format (10 owned Python files)` -> `pass`
+- `S12` `verify:` `ty check (10 owned Python files)` -> `pass`
+- `S12` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S12` `verify:` `git diff --check` -> `pass`
+- `S12` `by:` `provider-proof`
+- `S18` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S18` `M` `src/vaultspec_a2a/providers/_acp_types.py`
+- `S18` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S18` `M` `src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py`
+- `S18` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S18` `verify:` `focused ACP stop/handler/model/native suites` -> `pass`
+- `S18` `verify:` `ty check changed ACP files` -> `pass`
+- `S18` `verify:` `ruff check and format changed ACP files` -> `pass`
+- `S18` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S18` `verify:` `git diff --check` -> `pass`
+- `S18` `by:` `provider-runtime`
+- `S22` `M` `src/vaultspec_a2a/providers/lane_admission.py`
+- `S22` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S22` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S22` `verify:` `focused lane admission tests 10 passed` -> `pass`
+- `S22` `verify:` `changed-file basedpyright ruff ty` -> `pass`
+- `S22` `verify:` `git diff --check` -> `pass`
+- `S22` `by:` `vaultspec-high-executor`
+- `S20` `M` `src/vaultspec_a2a/providers/_claude_tool_policy.py`
+- `S20` `M` `src/vaultspec_a2a/providers/_acp_session.py`
+- `S20` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S20` `verify:` `focused Claude permission and ACP session tests 35 passed` -> `pass`
+- `S20` `verify:` `changed-file ruff ty basedpyright` -> `pass`
+- `S20` `verify:` `git diff --check` -> `pass`
+- `S20` `by:` `vaultspec-high-executor`
+- `S14` `M` `src/vaultspec_a2a/control/infra_config.py`
+- `S14` `M` `src/vaultspec_a2a/control/env_registry.py`
+- `S14` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S14` `M` `src/vaultspec_a2a/control/tests/test_settings_sources.py`
+- `S14` `A` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S14` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S14` `M` `src/vaultspec_a2a/providers/tests/test_claude_live_turn.py`
+- `S14` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S14` `verify:` `focused auth factory binary admission settings suites 77 passed` -> `pass`
+- `S14` `verify:` `env-example drift and coverage suites` -> `fail`
+- `S14` `verify:` `changed-file ruff format ty` -> `pass`
+- `S14` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S14` `verify:` `git diff --check` -> `pass`
+- `S14` `by:` `provider-runtime`
+- `S19` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S19` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S19` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S19` `A` `src/vaultspec_a2a/providers/tests/test_acp_session_update_visibility.py`
+- `S19` `verify:` `focused update/native/stop tests 26 passed` -> `pass`
+- `S19` `verify:` `changed-file ruff format ty` -> `pass`
+- `S19` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S19` `verify:` `git diff --check` -> `pass`
+- `S19` `by:` `provider-proof`
+- `S23` `M` `src/vaultspec_a2a/providers/cli_resolution.py`
+- `S23` `M` `dev/tests/test_release_please_automation.py`
+- `S23` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S23` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S23` `verify:` `focused release and storage-anchor tests 25 passed` -> `pass`
+- `S23` `verify:` `changed-file ruff format ty basedpyright` -> `pass`
+- `S23` `verify:` `git diff --check` -> `pass`
+- `S23` `by:` `vaultspec-high-executor`
+- `S15` `M` `src/vaultspec_a2a/conftest.py`
+- `S15` `M` `.env.example`
+- `S15` `M` `src/vaultspec_a2a/control/tests/_env_example.py`
+- `S15` `M` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S15` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S15` `verify:` `focused auth and env example tests 29 passed` -> `pass`
+- `S15` `verify:` `changed-file ruff format ty` -> `pass`
+- `S15` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S15` `verify:` `git diff --check` -> `pass`
+- `S15` `by:` `provider-runtime`
+- `S24` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S24` `M` `src/vaultspec_a2a/conftest.py`
+- `S24` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S24` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S24` `verify:` `focused auth binary and env tests 25 passed` -> `pass`
+- `S24` `verify:` `changed-file basedpyright ruff format ty` -> `pass`
+- `S24` `verify:` `git diff --check` -> `pass`
+- `S24` `by:` `vaultspec-high-executor`
+- `S13` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S13` `M` `.vault/adr/2026-10-01-provider-binary-policy-adr.md`
+- `S13` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S13` `M` `src/vaultspec_a2a/database/admin.py`
+- `S13` `M` `src/vaultspec_a2a/database/runtime_identity_repository.py`
+- `S13` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S13` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S13` `M` `src/vaultspec_a2a/graph/protocols.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/acp_simulator.py`
+- `S13` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+- `S13` `A` `src/vaultspec_a2a/graph/tests/test_runtime_identity_graph_live.py`
+- `S13` `A` `src/vaultspec_a2a/providers/_runtime_identity.py`
+- `S13` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S13` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S13` `M` `src/vaultspec_a2a/worker/runtime_identity_port.py`
+- `S13` `M` `src/vaultspec_a2a/worker/tests/test_runtime_identity_port.py`
+- `S13` `verify:` `57 focused provider worker tests` -> `pass`
+- `S13` `verify:` `two real Codex SQLite identity turns` -> `pass`
+- `S13` `verify:` `ACP subprocess identity turn` -> `pass`
+- `S13` `verify:` `database admin tests 7 passed` -> `pass`
+- `S13` `verify:` `changed-file ruff format ty` -> `pass`
+- `S13` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S13` `by:` `provider-proof`
+- `S25` `M` `src/vaultspec_a2a/desktop_tests/fixtures/dashboard-release-manifest.json`
+- `S25` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S25` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S25` `verify:` `desktop component contract tests 3 passed` -> `pass`
+- `S25` `verify:` `git diff --check` -> `pass`
+- `S25` `by:` `vaultspec-high-executor`
+- `S26` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S26` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S26` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S26` `M` `src/vaultspec_a2a/conftest.py`
+- `S26` `M` `src/vaultspec_a2a/graph/_compiler_models.py`
+- `S26` `M` `src/vaultspec_a2a/graph/_compiler_research.py`
+- `S26` `M` `src/vaultspec_a2a/graph/_compiler_topologies.py`
+- `S26` `M` `src/vaultspec_a2a/graph/compiler.py`
+- `S26` `M` `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+- `S26` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/nodes/test_vault_reader.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_permission_binding.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_web_tool_composition.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S26` `M` `src/vaultspec_a2a/graph/tests/test_persona_web_composition.py`
+- `S26` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_acp_mcp.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_acp_stderr_tail.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_claude_rule_anchor.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_cli_resolution.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S26` `M` `src/vaultspec_a2a/providers/tests/test_mcp_contract.py`
+- `S26` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S26` `M` `src/vaultspec_a2a/worker/tests/test_dispatch_ids.py`
+- `S26` `M` `src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py`
+- `S26` `verify:` `just ci-merge` -> `pass`
+- `S26` `verify:` `just ci` -> `pass`
+- `S26` `verify:` `git diff --check` -> `pass`
+- `S26` `by:` `Codex`
+- `S04` `M` `.vault/adr/2026-10-01-provider-binary-policy-adr.md`
+- `S04` `verify:` `pytest test_claude_binary_identity.py` -> `pass`
+- `S04` `verify:` `pytest capsule-or-explicit` -> `pass`
+- `S04` `verify:` `just audit-types` -> `pass`
+- `S04` `verify:` `ruff check and format` -> `pass`
+- `S04` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S04` `by:` `Codex`
+- `S09` `M` `.vault/adr/2026-08-02-provider-model-catalog-adr.md`
+- `S09` `M` `src/vaultspec_a2a/graph/_compiler_models.py`
+- `S09` `M` `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_binary_proof_admission.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_factory.py`
+- `S09` `verify:` `pytest focused provider-auth-graph` -> `pass`
+- `S09` `verify:` `just audit-types` -> `pass`
+- `S09` `verify:` `just ci-merge` -> `pass`
+- `S09` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S09` `by:` `Codex`
+- `S27` `M` `.vault/audit/2026-10-01-provider-binary-policy-audit.md`
+- `S27` `M` `.vault/plan/2026-10-01-provider-binary-policy-plan.md`
+- `S27` `M` `src/vaultspec_a2a/database/tests/test_cost_tracking.py`
+- `S27` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S27` `M` `src/vaultspec_a2a/providers/_acp_prompt_outcomes.py`
+- `S27` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S27` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S27` `M` `src/vaultspec_a2a/providers/acp_exceptions.py`
+- `S27` `M` `src/vaultspec_a2a/providers/tests/test_acp_stop_outcomes.py`
+- `S27` `verify:` `pytest focused` -> `pass`
+- `S27` `verify:` `just audit-types` -> `pass`
+- `S27` `verify:` `just ci-merge` -> `pass`
+- `S27` `by:` `Codex`
 
 ## Notes
 
 - `S17` Adapter 0.59.0 to 0.84.0, SDK 0.3.207 to 0.3.284, CLI 2.1.207 to 2.1.284. Fixed: session/new died as root with `IS_SANDBOX` set because the adapter armed the skip-permissions flag (declined now); three new error kinds mapped; PowerShell denied to a terminal-less persona. No completed model turn was possible here: the claude lane must re-earn its completed-turn proof on 2.1.284 on a credentialed host.
+- `S16` just ci remains red on base 78f3a89f: 44 strict type diagnostics in `dev/ci_contract.py,` 16 in `control/settings_base.py,` and three unconsumed exports in `settings_base.py;` assigned to main integration owner. Changed-file checks and targeted real-behavior tests pass.
+- `S01` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; this Step changes neither.
+- `S02` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
+- `S11` PostgreSQL proof used an isolated Compose project and its exact ephemeral volume was removed after the tests.
+- `S03` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration; changed-file checks pass.
+- `S04` Full just ci on base 78f3a89f remains red for strict-type and unconsumed-export defects in `dev/ci_contract.py` and `control/settings_base.py,` owned by main integration. Missing-CLI typed refusal is queued to P01.S05.
+- `S07` Claude prompt returned Authentication required; Z.ai credential absent, so both lanes are withheld until P02.S21.
+- `S07` Integrated just ci is assigned to the root branch after parallel steps land.
+- `S08` Integrated just ci is assigned to the root branch after parallel steps land.
+- `S10` Integrated just ci is assigned to the root branch after parallel steps land.
+- `S05` Full just ci and ci-merge are shared integration gates owned by the plan supervisor; this isolated branch retains baseline main failures fixed separately.
+- `S06` Full just ci and ci-merge remain shared integration gates with the plan supervisor; no provider credentials are available for a completed model turn on this host.
+- `S09` Formal review classified and queued the version drift, catalog wording, malformed plan row, and residual filesystem race.
+- `S12` Integrated just ci deferred to root after S13 and other serial steps; focused checks cover this isolated Step.
+- `S12` Review: fixed low plan-scope gap in S12; queued medium research fan-out identity seam for S13 in audit.
+- `S18` Full just ci and ci-merge remain shared integration gates; credentialed live model turn unavailable. Medium error-path accounting follow-up queued in audit.
+- `S22` Review: no remaining code finding in S22; strict CI diagnostics in ACP protocol and checkpoints are assigned to their owning continuation and S19 passes.
+- `S20` Formal review fixed the false settings-source claim and queued medium managed-policy presence evidence for S13.
+- `S14` Env-example coverage pending S15 and continuation successor setting; integrated CI and credentialed live turn pending.
+- `S19` Strict global type gate has remaining checkpoints diagnostics assigned to continuation S17; lane-admission diagnostics fixed in P02.S22. Integrated just ci pending.
+- `S23` Review: low guard classification and medium stale release test fixed; integrated CI remains pending.
+- `S15` S15 review passed with no new finding; shared integrated CI remains pending.
+- `S24` Review: private cross-module helper fixed; no further S24 finding surfaced. Integrated CI pending.
+- `S13` Managed policy presence remains unknown and audited; integrated CI pending root branch.
+- `S25` Review: stale fixture corrected; no additional finding in S25. Integrated CI pending.
+- `S26` Review verdict REVISION REQUIRED: two high policy conflicts await a decision; P02.S21 credentialed Claude and Z.ai turns remain open.

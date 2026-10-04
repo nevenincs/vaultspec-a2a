@@ -176,9 +176,18 @@ def _cli_reports_logged_in(
 
 
 def _claude_credentialed() -> bool:
-    """An exported OAuth token, or the Claude CLI's own subscription login."""
-    # The CLI reads a token from the environment it inherits, which is the
-    # only place the product's Claude lane can take one from.
+    """Whether the production Claude auth channel has a usable credential."""
+    from .providers.cli_resolution import ProviderRuntimeUnavailableError
+    from .providers.factory import claude_auth_env
+
+    try:
+        injected, channel = claude_auth_env()
+    except ProviderRuntimeUnavailableError:
+        return False
+    if channel == "oauth_token":
+        return bool(injected.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
+    # An operator export reaches the child through the allowed ambient
+    # environment. A token only in project .env is not an ambient export.
     if (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip():
         return True
     # `claude auth status` emits JSON carrying "loggedIn", which answers the
@@ -383,10 +392,12 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
     # which half is missing instead of blaming the binary for a missing login.
     ExternalPrerequisite(
         "claude-credential",
-        what="a Claude credential (an injected token or a logged-in CLI)",
+        what="a credential for the declared Claude auth channel",
         supply=(
-            "run `claude login` for a subscription, or export "
-            "CLAUDE_CODE_OAUTH_TOKEN for a headless host"
+            "run `claude login` or export CLAUDE_CODE_OAUTH_TOKEN for the "
+            "default subscription_login channel; for oauth_token, set "
+            "VAULTSPEC_A2A_CLAUDE_AUTH_CHANNEL=oauth_token and configure "
+            "VAULTSPEC_A2A_CLAUDE_CODE_OAUTH_TOKEN"
         ),
         probe=_claude_credentialed,
         skip_reason_tokens=("claude credential",),

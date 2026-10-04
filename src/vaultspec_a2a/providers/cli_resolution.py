@@ -5,11 +5,20 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from dataclasses import dataclass
+from enum import StrEnum
+from pathlib import Path
+from typing import Literal
 
+from ..control.config import settings
 from ..graph.enums import Provider
+from ..thread.errors import ConfigError
 
 __all__ = [
     "CLAUDE_EXECUTABLE_ENV",
+    "ClaudeCliResolution",
+    "ProviderRuntimeUnavailableError",
+    "ProviderRuntimeUnavailableReason",
     "pin_claude_executable",
     "resolve_provider_cli_executable",
     "resolve_service_executable",
@@ -19,6 +28,38 @@ __all__ = [
 # because this module is where the answer is resolved, and both the lanes that
 # need one - a served turn and a catalog probe - take it from here.
 CLAUDE_EXECUTABLE_ENV = "CLAUDE_CODE_EXECUTABLE"
+
+ClaudeCliAuthority = Literal[
+    "explicit_setting", "capsule", "child_environment", "service_path", "lock_vendored"
+]
+
+
+@dataclass(frozen=True)
+class ClaudeCliResolution:
+    path: Path
+    authority: ClaudeCliAuthority
+
+
+class ProviderRuntimeUnavailableReason(StrEnum):
+    CLAUDE_CLI_UNAVAILABLE = "claude_cli_unavailable"
+    TURN_PROOF_MISSING = "turn_proof_missing"
+    BINARY_PROOF_MISSING = "binary_proof_missing"
+    BINARY_VERSION_UNAVAILABLE = "binary_version_unavailable"
+    BINARY_OUT_OF_PROOF_RANGE = "binary_out_of_proof_range"
+
+
+class ProviderRuntimeUnavailableError(ConfigError):
+    """A structurally valid provider lane has no usable runtime asset."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: ProviderRuntimeUnavailableReason | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+
 
 _SYSTEM_CLI_NAMES: dict[Provider, str] = {
     Provider.CLAUDE: "claude",
@@ -108,24 +149,61 @@ def resolve_provider_cli_executable(
     return None
 
 
-def pin_claude_executable(env: dict[str, str]) -> str | None:
-    """Pin the Claude CLI one child will drive, and return the path it will run.
+def _resolved_cli_file(path: Path, *, authority: ClaudeCliAuthority) -> Path:
+    """Validate an authority's exact file before giving it to the adapter."""
+    if not path.is_absolute():
+        raise ConfigError(f"Claude CLI {authority} path must be absolute: {path}")
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ConfigError(
+            f"Claude CLI {authority} path is unavailable: {path}"
+        ) from exc
+    if not resolved.is_file():
+        raise ConfigError(f"Claude CLI {authority} path is not a file: {resolved}")
+    return resolved
 
-    The adapter ships a vendored CLI and falls back to it when nothing names
-    another, so a child left unpinned runs a DIFFERENT binary from one that is
-    pinned - which is how a served turn and the catalog probe that qualified it
-    came to run two different Claude versions on the same host, the probe reading
-    the vendored one and the turn the installed one.
 
-    One resolver, so both take the same answer. The precedence is unchanged: a
-    value already in the child environment (the operator's own) wins, then this
-    service's own installed CLI, and a host with neither leaves the adapter to its
-    vendored binary - reported by returning ``None`` rather than by silence.
-    """
-    if pinned := env.get(CLAUDE_EXECUTABLE_ENV):
-        return pinned
-    executable = resolve_provider_cli_executable(Provider.CLAUDE)
-    if executable is None:
-        return None
-    env[CLAUDE_EXECUTABLE_ENV] = executable
-    return executable
+def pin_claude_executable(env: dict[str, str]) -> ClaudeCliResolution:
+    """Pin one absolute Claude CLI path by the profile's authority order."""
+    from ._factory_commands import capsule_claude_executable
+
+    explicit = settings.claude_cli_executable
+    capsule_root = settings.capsule_assets_root
+    try:
+        if capsule_root is not None:
+            authority: ClaudeCliAuthority = "capsule"
+            candidate = capsule_claude_executable(capsule_root)
+        elif explicit is not None:
+            authority = "explicit_setting"
+            candidate = explicit
+        elif inherited := env.get(CLAUDE_EXECUTABLE_ENV):
+            authority = "child_environment"
+            candidate = Path(inherited)
+        elif installed := resolve_provider_cli_executable(Provider.CLAUDE):
+            authority = "service_path"
+            candidate = Path(installed)
+        else:
+            authority = "lock_vendored"
+            # The locked Claude CLI is a shipped asset under the configured root.
+            locked_assets_root = settings.install_root  # storage-anchor-ok
+            candidate = capsule_claude_executable(locked_assets_root)
+
+        path = _resolved_cli_file(candidate, authority=authority)
+        if capsule_root is not None and authority == "capsule":
+            try:
+                root = capsule_root.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise ConfigError(
+                    f"Claude CLI capsule assets root is unavailable: {capsule_root}"
+                ) from exc
+            if not path.is_relative_to(root):
+                raise ConfigError(
+                    f"Claude CLI capsule asset escapes its root: {candidate}"
+                )
+    except ConfigError as exc:
+        raise ProviderRuntimeUnavailableError(
+            str(exc), reason=ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE
+        ) from exc
+    env[CLAUDE_EXECUTABLE_ENV] = str(path)
+    return ClaudeCliResolution(path=path, authority=authority)

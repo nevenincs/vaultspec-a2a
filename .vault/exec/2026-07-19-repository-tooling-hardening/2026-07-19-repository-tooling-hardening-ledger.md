@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:a49661d0efa1f7e746767ff47f46c9c66b0ed8d421f24e7a946f0d723596a8c4'
+body_hash: 'sha256:1b13fecfca9f9d616054df87d0533ab898ef83bdd89fc5d66d73139aa3c59044'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -266,6 +266,13 @@ related:
 - `S43` `verify:` `python -m dev lint all` -> `pass`
 - `S43` `verify:` `pytest dev/tests` -> `pass`
 - `S43` `by:` `vaultspec-standard-executor`
+- `S50` `M` `dev/ci_contract.py`
+- `S50` `M` `src/vaultspec_a2a/control/settings_base.py`
+- `S50` `verify:` `uv run --isolated --no-project python -m dev lint all` -> `pass`
+- `S50` `verify:` `basedpyright --outputjson` -> `pass`
+- `S50` `verify:` `pytest -q dev/tests/test_ci_contract.py src/vaultspec_a2a/control/tests/test_settings_sources.py src/vaultspec_a2a/control/tests/test_settings_startup.py src/vaultspec_a2a/control/tests/test_settings_redaction.py` -> `pass`
+- `S50` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S50` `by:` `vaultspec-standard-executor`
 
 ## Notes
 

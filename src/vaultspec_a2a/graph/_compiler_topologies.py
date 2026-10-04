@@ -20,7 +20,12 @@ if TYPE_CHECKING:
 
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.worker import WorkerNode
-    from .protocols import CostPort, ProviderFactoryProtocol, TaskQueuePort
+    from .protocols import (
+        CostPort,
+        ProviderFactoryProtocol,
+        RuntimeIdentityPort,
+        TaskQueuePort,
+    )
     from .run_context import RunContext
 
 from langgraph.graph import START, StateGraph
@@ -32,6 +37,12 @@ from ..thread.errors import (
 from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations
 )
+from ._compiler_models import resolve_supervisor_model
+from ._compiler_prompts import (
+    build_supervisor_prompt,
+    compose_persona_prompt,
+    lane_web_demonstrated,
+)
 from ._compiler_retry import _NODE_RETRY_POLICY
 from .compiler import (
     _ROLE_TO_PHASE,
@@ -39,10 +50,6 @@ from .compiler import (
     _compile_worker_node,
     _loop_route,
     _route_from_supervisor,
-    build_supervisor_prompt,
-    compose_persona_prompt,
-    lane_web_demonstrated,
-    resolve_supervisor_model,
 )
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
@@ -136,6 +143,7 @@ class _TopologyOptional(TypedDict, total=False):
     feature_tag: str | None
     task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
+    runtime_identity_port: RuntimeIdentityPort | None
     authoring_binding_provider: AuthoringBindingProvider | None
     frozen_assignment: dict[str, dict[str, Any]] | None
 
@@ -206,6 +214,7 @@ def _compile_star(
             feature_tag=options.get("feature_tag"),
             task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         _add_node(
@@ -337,6 +346,7 @@ def _compile_pipeline(
             feature_tag=options.get("feature_tag"),
             task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         # Insert mount node between pipeline stages.
@@ -489,6 +499,7 @@ def _compile_pipeline_loop(
             feature_tag=options.get("feature_tag"),
             task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
         if agent_id == loop_node_id:

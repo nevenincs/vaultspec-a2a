@@ -127,6 +127,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
             "install_root",
             "desktop_app_home",
             "capsule_assets_root",
+            "claude_cli_executable",
             "workspace_root",
             "procs_home",
             "procs_toml",

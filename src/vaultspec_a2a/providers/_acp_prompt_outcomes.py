@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Never
+from typing import TYPE_CHECKING, Never
 
 from ._acp_types import MAX_NATIVE_COMMAND_NAME_LENGTH
 from ._json_contract import JsonObject, lenient_json_object
@@ -13,6 +13,9 @@ from .acp_exceptions import (
     AcpPromptError,
 )
 from .conditions import ProviderCondition, condition_from_acp_error
+
+if TYPE_CHECKING:
+    from langchain_core.messages import UsageMetadata
 
 __all__: list[str] = []
 
@@ -57,7 +60,10 @@ def raise_prompt_error(
 
 
 def raise_for_prompt_stop_reason(
-    stop_reason: str | None, *, effects_may_have_occurred: bool = False
+    stop_reason: str | None,
+    *,
+    effects_may_have_occurred: bool = False,
+    usage_metadata: UsageMetadata | None = None,
 ) -> None:
     """Preserve every non-success ACP terminal outcome as a typed result."""
     if stop_reason == "end_turn":
@@ -68,6 +74,7 @@ def raise_for_prompt_stop_reason(
             "ACP prompt was cancelled by the agent",
             data=data,
             effects_may_have_occurred=effects_may_have_occurred,
+            usage_metadata=usage_metadata,
         )
     if stop_reason == "max_turn_requests":
         raise AcpPromptError(
@@ -75,6 +82,7 @@ def raise_for_prompt_stop_reason(
             data=data,
             condition=ProviderCondition.BUDGET_EXHAUSTED,
             effects_may_have_occurred=effects_may_have_occurred,
+            usage_metadata=usage_metadata,
         )
     if stop_reason == "max_tokens":
         raise AcpPromptError(
@@ -82,6 +90,7 @@ def raise_for_prompt_stop_reason(
             data=data,
             condition=ProviderCondition.INVALID_REQUEST,
             effects_may_have_occurred=effects_may_have_occurred,
+            usage_metadata=usage_metadata,
         )
     if stop_reason == "refusal":
         raise AcpPromptError(
@@ -89,11 +98,13 @@ def raise_for_prompt_stop_reason(
             data=data,
             condition=ProviderCondition.INVALID_REQUEST,
             effects_may_have_occurred=effects_may_have_occurred,
+            usage_metadata=usage_metadata,
         )
     raise AcpPromptError(
         f"ACP prompt ended without a supported stop reason: {stop_reason!r}",
         data=data,
         effects_may_have_occurred=effects_may_have_occurred,
+        usage_metadata=usage_metadata,
     )
 
 

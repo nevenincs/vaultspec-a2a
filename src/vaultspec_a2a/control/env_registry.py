@@ -88,6 +88,11 @@ ENV_FILE_VARIABLE: Final = ConfigVariable(
 #: is accepted under, canonical first. A field absent from this mapping is a
 #: setting, and the workspace never supplies it.
 CREDENTIAL_VARIABLES: Final[dict[str, tuple[ConfigVariable, ...]]] = {
+    "claude_code_oauth_token": _names(
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        ("CLAUDE_CODE_OAUTH_TOKEN",),
+        "Headless OAuth token for the declared Claude oauth_token channel.",
+    ),
     "openai_api_key": _names(
         "OPENAI_API_KEY", ("OPENAI_API_KEY",), "API key for the OpenAI lane."
     ),

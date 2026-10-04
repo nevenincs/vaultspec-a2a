@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ..graph.enums import Provider
+from .cli_resolution import ProviderRuntimeUnavailableReason
 from .factory import (
     ProviderCatalogRegistration,
     ProviderFactory,
@@ -237,7 +238,23 @@ class ProviderCatalogService:
                 ),
             )
 
-        health = _health_for(key, catalog, authentication, configured, transport)
+        try:
+            binary_reason = (
+                registration.version_admission()
+                if registration.version_admission is not None
+                else None
+            )
+        except Exception as exc:
+            logger.warning(
+                "provider binary admission failed for %s/%s (%s)",
+                key.provider_id,
+                key.execution_mode,
+                type(exc).__name__,
+            )
+            binary_reason = ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
+        health = _health_for(
+            key, catalog, authentication, configured, transport, binary_reason
+        )
         provider = Provider(key.provider_id)
         return ProviderRecord(
             provider_id=key.provider_id,
@@ -254,6 +271,7 @@ def _health_reasons(
     authentication: AuthenticationState,
     configured: HealthState,
     transport: HealthState,
+    binary_reason: ProviderRuntimeUnavailableReason | None = None,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if configured is not HealthState.AVAILABLE:
@@ -272,6 +290,8 @@ def _health_reasons(
     admission_reason = catalog_lane_admission_reason(key)
     if admission_reason is not None:
         reasons.append(admission_reason)
+    if binary_reason is not None:
+        reasons.append(binary_reason.value)
     return tuple(dict.fromkeys(reasons))
 
 
@@ -281,6 +301,7 @@ def _health_for(
     authentication: AuthenticationState,
     configured: HealthState,
     transport: HealthState,
+    binary_reason: ProviderRuntimeUnavailableReason | None = None,
 ) -> StructuredProviderHealth:
     """Compose independent observed facts; do not infer admission from readiness."""
     if authentication is AuthenticationState.AUTHENTICATED:
@@ -296,9 +317,11 @@ def _health_for(
     ):
         transport = HealthState.AVAILABLE
 
-    admitted = is_catalog_lane_admissible(key)
+    admitted = is_catalog_lane_admissible(key) and binary_reason is None
     admission = AdmissionState.ADMITTED if admitted else AdmissionState.NOT_ADMITTED
-    reasons = _health_reasons(key, catalog, authentication, configured, transport)
+    reasons = _health_reasons(
+        key, catalog, authentication, configured, transport, binary_reason
+    )
 
     return StructuredProviderHealth.derive(
         axes=ProviderHealthAxes(

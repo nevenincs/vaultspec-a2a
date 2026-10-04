@@ -8,7 +8,6 @@ Architecture:
   - Handles bidirectional RPCs (session/request_permission)
   - Yields streaming `agent_message_chunk` notifications as LangChain chunks
   - Maps `tool_call` / `tool_call_update` to ToolCallChunk for LangGraph
-  - Supports session/load for session resumption
   - Supports session/cancel notification for interruption
   - Terminates on `stopReason: "end_turn"`
   - Propagates LangGraph GraphBubbleUp from permission_callback to caller
@@ -17,7 +16,7 @@ Architecture:
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
-from typing import Any, Never, override
+from typing import TYPE_CHECKING, Any, Never, override
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -27,7 +26,7 @@ from langchain_core.language_models.chat_models import (
     BaseChatModel,
     generate_from_stream,
 )
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
@@ -94,10 +93,15 @@ from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject
 from ._mcp_contract import verify_harness_mcp_contract
 from ._prompt_render import render_prompt_blocks
+from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import AcpError
+from .binary_version import probe_binary_version
 from .cli_resolution import pin_claude_executable
+
+if TYPE_CHECKING:
+    from ..graph.protocols import RuntimeIdentityRecordArgs
 
 __all__ = ["AcpChatModel"]
 
@@ -120,13 +124,9 @@ class AcpChatModel(BaseChatModel):
         repr=False,
         exclude=True,
     )
-    session_id: str | None = Field(
-        default=None,
-        description="If set, resume an existing session via session/load.",
-    )
     mcp_servers: list[JsonObject] = Field(
         default_factory=list,
-        description="MCP server configs to pass via session/new or session/load.",
+        description="MCP server configs to pass via session/new.",
     )
     allowed_tools: list[str] = Field(
         default_factory=list,
@@ -166,6 +166,8 @@ class AcpChatModel(BaseChatModel):
         default=None,
         description="Bounded provider identity for ACP runtime evidence.",
     )
+    version_proof_required: bool = Field(default=False, exclude=True)
+    execution_mode: str | None = Field(default=None, exclude=True)
     runtime_authority: str | None = Field(
         default=None,
         description="Bounded runtime authority classification for the ACP command.",
@@ -212,8 +214,19 @@ class AcpChatModel(BaseChatModel):
     desired_config_options: dict[str, str] = Field(default_factory=dict)
 
     _state: AcpModelState = PrivateAttr()
+    _runtime_identity: RuntimeIdentityBinding | None = PrivateAttr(default=None)
+
+    def with_runtime_identity(self, binding: RuntimeIdentityBinding) -> "AcpChatModel":
+        """Return a run-bound copy without mutating the compiled model."""
+        updated = self.model_copy()
+        updated._runtime_identity = binding
+        return updated
 
     def __getattr__(self, name: str) -> Any:
+        if name == "_runtime_identity":
+            private = self.__pydantic_private__
+            if private is not None and name in private:
+                return private[name]
         state = model_state_or_none(self)
         state_field = model_state_path(name)
         if name == "_state" and state is not None:
@@ -240,7 +253,6 @@ class AcpChatModel(BaseChatModel):
                 workspace_root=self.workspace_root,
                 command=self.command,
                 env_vars=dict(self.env_vars),
-                session_id=self.session_id,
                 mcp_servers=list(self.mcp_servers),
                 allowed_tools=list(self.allowed_tools),
                 use_exec=self.use_exec,
@@ -334,14 +346,11 @@ class AcpChatModel(BaseChatModel):
         )
         env = resolve_env_vars(_ws_path)
         env.update(self.env_vars)
-        # Bypass the adapter's bundled cli.js — drive the same installed claude
-        # binary an interactive invocation runs, so the lane's behaviour (and
-        # credential resolution) matches the operator's own CLI exactly. Only
-        # for the claude-family adapter; Kimi runs its own CLI. Resolved through
-        # the one seam the catalog probe also uses, so a lane cannot be qualified
-        # by one binary and then served by another.
+        # The served turn and catalog probe use the same profile-scoped CLI
+        # authority. Kimi runs its own CLI.
         if self._state.config.acp_family == "claude" and self.command:
-            self._state.session.claude_executable = pin_claude_executable(env)
+            resolved = pin_claude_executable(env)
+            self._state.session.claude_executable = str(resolved.path)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
         # Suppress interactive prompts that
         # stall non-interactive ACP subprocesses.
@@ -427,6 +436,57 @@ class AcpChatModel(BaseChatModel):
             ),
         )
 
+    async def _persist_runtime_identity(self, session_id: str) -> None:
+        """Write the first initialized session before sending a model prompt."""
+        binding = self._runtime_identity
+        if binding is None:
+            return
+        entry = identity_path(self.command_target, field="adapter entry path")
+        if self.acp_family == "claude":
+            cli = identity_path(
+                self._state.session.claude_executable, field="CLI executable path"
+            )
+            node = (
+                identity_path(self.command[0], field="Node executable path")
+                if self.acp_backend == "node" and self.command
+                else None
+            )
+        else:
+            cli = identity_path(self.command[0], field="CLI executable path")
+            node = None
+        cli_version = await asyncio.to_thread(probe_binary_version, cli)
+        node_version = (
+            await asyncio.to_thread(probe_binary_version, node)
+            if node is not None
+            else None
+        )
+        agent_info = self._state.session.agent_info
+        evidence: RuntimeIdentityRecordArgs = {
+            "thread_id": binding.thread_id,
+            "provider_id": identity_text(self.provider, field="provider ID"),
+            "execution_mode": identity_text(
+                self.execution_mode, field="execution mode"
+            ),
+            "runtime_authority": identity_text(
+                self.runtime_authority, field="runtime authority"
+            ),
+            "adapter_name": identity_text(agent_info.get("name"), field="adapter name"),
+            "adapter_version": identity_text(
+                agent_info.get("version"), field="adapter version"
+            ),
+            "adapter_entry_path": entry,
+            "cli_executable_path": cli,
+            "cli_version": cli_version,
+            "node_version": node_version,
+            "auth_mode": identity_text(self.auth_mode, field="auth mode"),
+            "provider_session_id": identity_text(
+                session_id, field="provider session ID", maximum=512
+            ),
+            # ACP does not report whether host managed policy existed or loaded.
+            "managed_policy_present": None,
+        }
+        await binding.port.record_identity(**evidence)
+
     async def _astream_session(
         self,
         messages: list[BaseMessage],
@@ -452,6 +512,16 @@ class AcpChatModel(BaseChatModel):
         # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
         # as an additive overlay from ProviderFactory.
         env = await self._acp_environment()
+        if self.version_proof_required:
+            from ..graph.enums import Provider
+            from .factory import binary_proof_reason, require_binary_proof
+
+            resolved = pin_claude_executable(env)
+            require_binary_proof(
+                binary_proof_reason(
+                    Provider(self.provider), str(resolved.path), resolved.authority
+                )
+            )
 
         # The spawn and session setup run INSIDE the try so the finally below
         # is the single cleanup path: a spawn-time raise (missing binary,
@@ -517,7 +587,6 @@ class AcpChatModel(BaseChatModel):
             result = await setup_session(
                 ctx,
                 self._state.config,
-                init_result.agent_capabilities,
                 init_result.auth_methods,
             )
             self._state.session.active_session_id = result.session_id
@@ -534,6 +603,7 @@ class AcpChatModel(BaseChatModel):
                     session_id=result.session_id,
                 ),
             )
+            await self._persist_runtime_identity(result.session_id)
             self._state.transport.process = ctx.process
             self._state.transport.stdin = ctx.stdin
             self._state.transport.stdin_lock = ctx.stdin_lock
@@ -642,7 +712,16 @@ class AcpChatModel(BaseChatModel):
         _raise_for_prompt_stop_reason(
             ctx.prompt_stop_reason,
             effects_may_have_occurred=ctx.effects_may_have_occurred,
+            usage_metadata=ctx.prompt_usage,
         )
+        if ctx.prompt_usage is not None:
+            # A terminal-only chunk lets LangChain merge usage into the final
+            # message without duplicating text streamed earlier in the turn.
+            usage_chunk = ChatGenerationChunk(
+                message=AIMessageChunk(content="", usage_metadata=ctx.prompt_usage)
+            )
+            await notify_chunk(run_manager, usage_chunk)
+            yield usage_chunk
 
     def _raise_for_early_exit(
         self, ctx: AcpSessionContext, prompt_future: AcpResponseFuture

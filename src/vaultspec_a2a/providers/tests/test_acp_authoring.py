@@ -321,7 +321,6 @@ def _config_with_authoring(workspace_root: str) -> AcpModelConfig:
         workspace_root=workspace_root,
         command=["echo"],
         env_vars={},
-        session_id=None,
         mcp_servers=build_authoring_mcp_servers(binding),
         allowed_tools=[],
         use_exec=False,

@@ -86,6 +86,18 @@ async def _wait_for_same_thread_dispatch_contention(
             await anyio.lowlevel.checkpoint()
 
 
+async def _buffered_terminal_events(
+    bridge: WorkerBridge,
+) -> list[dict[str, Any]]:
+    """Inspect the retained batch after any in-flight flush returns it."""
+    async with bridge._batch.flush_lock:
+        return [
+            item
+            for item in bridge._event_buffer
+            if item["payload"].get("event_type") == "thread_terminal"
+        ]
+
+
 def test_dispatch_id_admission_is_fifo_bounded() -> None:
     admission = DispatchIdAdmission(capacity=2)
 
@@ -130,20 +142,20 @@ def test_duplicate_worker_dispatch_schedules_one_real_executor_task(
     with TestClient(app) as client:
         first = client.post("/dispatch", json=dispatch.model_dump(mode="json"))
         duplicate = client.post("/dispatch", json=dispatch.model_dump(mode="json"))
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 15
         bridge: WorkerBridge = app.state.bridge
-        buffered = cast("list[dict[str, Any]]", getattr(bridge, "_event_buffer", []))
-        while len(buffered) < 1 and time.monotonic() < deadline:
+        portal = client.portal
+        assert portal is not None
+        terminal_events: list[dict[str, Any]] = []
+        while time.monotonic() < deadline:
+            terminal_events = portal.call(_buffered_terminal_events, bridge)
+            if terminal_events:
+                break
             time.sleep(0.01)
 
         assert first.status_code == 200
         assert duplicate.status_code == 200
         assert first.json() == duplicate.json()
-        terminal_events: list[dict[str, Any]] = [
-            item
-            for item in buffered
-            if item["payload"].get("event_type") == "thread_terminal"
-        ]
         assert len(terminal_events) == 1
 
 

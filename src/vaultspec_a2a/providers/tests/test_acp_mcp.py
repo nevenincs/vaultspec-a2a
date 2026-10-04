@@ -76,6 +76,8 @@ def test_vaultspec_core_launch_names_vaultspec_core_mcp_entrypoint() -> None:
     assert spec["command"] == "uvx"
     # The args must include the correct console script name and read-only flag.
     assert spec["args"] == [
+        "--python",
+        _PYTHON_PIN,
         "--from",
         "vaultspec-core",
         "vaultspec-core-mcp",

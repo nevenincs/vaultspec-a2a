@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#provider-binary-policy'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:7e3920566f07bbb323f8e3b7893ec15e369393bb50bdbb29e631d3961f97e79a'
+body_hash: 'sha256:e552e38360baddf9d67aa075dead85f610fdde1a6dc49c081b4a4968aa7a4abf'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -131,8 +131,9 @@ model are out of scope and keep their current owners.
 
 **D1 Binary authority is the profile's, not the PATH's.**
 `pin_claude_executable` resolves in this order and records which rung answered:
-an explicit absolute `claude_cli_executable` setting; the capsule asset when
-`settings.capsule_assets_root` is armed, exclusively and fail-loud; a
+the capsule asset when `settings.capsule_assets_root` is armed, exclusively
+and fail-loud; an explicit absolute `claude_cli_executable` setting only when
+no capsule root is armed; a
 `CLAUDE_CODE_EXECUTABLE` already present in the child environment; this service's
 own PATH; and finally the lock-vendored binary resolved by this service rather
 than by the adapter's internal fallback. The capsule path is a new
@@ -157,7 +158,7 @@ smallest range that neither unserves the product on a routine patch nor lets a
 feature-level change ride an old proof. Admission probes the resolved binary's
 version once per launch identity, memoized per process (0.22 s measured), and an
 out-of-range result makes the lane ineligible with a typed blocker that
-`presets-list` and launch both read. A proof moves only by rerunning its cited
+`provider-catalog` selection, provider construction, and child spawn all read. A proof moves only by rerunning its cited
 live test against the new binary and recording that version by hand. CI pins
 `npm install -g @openai/codex@<exact>` (`.github/workflows/test.yml:223`) and runs
 `npm audit signatures`, and the pinned version is that lane's `proved_version`.
@@ -203,7 +204,7 @@ id is recorded by D3 so an operator can still find the CLI's own transcript.
 tree whose CLI asset is absent refuses to arm, and one whose asset is present is
 the path a served launch resolves even with a `claude` earlier on PATH and a
 `CLAUDE_CODE_EXECUTABLE` set; a lane whose resolved binary reports a version
-outside its proof range is absent from `presets-list` and refused at launch, with
+outside its proof range is ineligible in `provider-catalog` and refused at construction and child spawn, with
 the in-range case served; a completed live turn writes an identity row carrying
 the CLI version the same binary reports; under `subscription_login` the child
 environment carries no token derived from settings, and under `oauth_token` with
@@ -325,3 +326,39 @@ Accepted 2026-10-01 under the user's blanket approval of that date.
 ## Amendment - provider-binary-policy (2026-10-01, managed policy)
 
 The vendored adapter applies the Claude managed-policy settings tier before any session exists, writing its `env` entries into the environment the CLI child inherits; a client cannot suppress it, and passing no setting sources does not (`2026-10-01-provider-binary-policy-audit`, `managed-policy-env-reaches-the-child`). That tier is the operator organisation's own authority over Claude Code on the host, so this record honours it rather than working around the adapter: a served Claude lane runs under whatever managed policy the host carries, and the lane's runtime identity records that a managed tier was present. No source, comment or document of this repository may claim that the lane drops managed configuration.
+
+## Amendment - runtime evidence precision (2026-10-02)
+
+D3's one row stores the first observed provider-native session ID for a run and lane. D5 opens a new native session for each model call, so later session IDs are not enumerated by that row. Later calls must match the stored stable binary, adapter, runtime-authority, and authentication fields or fail before their prompt. A row therefore proves the identity of its first initialized session and the stable identity checks on later sessions; it is not a session history.
+
+The preceding managed-policy amendment establishes that the adapter honors any host managed tier. ACP initialize and session creation do not disclose whether a tier existed or loaded on a particular host. Until a trustworthy host-tier presence signal is available, D3 records `managed_policy_present = null` (unknown), including for Claude. The earlier sentence claiming the row records presence is superseded; capability advertisement alone is not a presence signal.
+## Amendment (2026-10-02): capsule authority precedence
+
+The 2026-10-02 integrated review found that the original D1 ordering let an
+explicit setting select an external CLI while a desktop capsule was armed,
+contrary to the binding capsule-owned runtime constraint. The user authorized
+the recommended capsule-first resolution after that finding was presented.
+An armed capsule therefore owns the Claude CLI even when an explicit path is
+configured. A missing or escaping capsule CLI refuses catalog probing and
+construction with a typed runtime-unavailable result; neither the explicit
+setting nor any other rung substitutes for it. Outside a capsule, the explicit
+absolute setting remains the first rung, including for the pinned Compose
+profile. This amendment replaces the conflicting D1 ordering and preserves the
+single shared resolver for probe and turn.
+
+## Amendment (2026-10-02): current proof remains required for frozen runs
+
+An exact frozen catalog selection preserves the run's provider, execution mode,
+model, native controls, and explicitly selected fallbacks across catalog drift.
+It does not preserve eligibility to execute a binary after its completed-turn
+proof is withdrawn. Catalog health, provider construction, and the final
+pre-spawn check refuse a Claude, Z.ai, or Codex lane without current
+proof using a
+typed `binary_proof_missing` reason, just as an out-of-range resolved binary is
+refused. A recovered run must not re-resolve its frozen values from the current
+catalog. An explicitly frozen fallback may be tried only under its own current
+proof; no unproven proof-bound lane runs. If proof for the selected lane is
+restored on a
+qualifying binary, the same exact frozen values may resume without changing
+the run's selection. The user authorized this fail-closed ruling on 2026-10-02
+after the conflicting restart and proof requirements were presented.

@@ -8,8 +8,8 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
-modified: '2026-10-01'
-body_hash: 'sha256:92524fed916d26d176ba11b44f3912d224457328e642813317454e030d3246ea'
+modified: '2026-10-02'
+body_hash: 'sha256:5412bab3d9229b9b890ab013bd5af9f66fcfbb963d5c2a0f30a533dbc77b586c'
 ---
 
 # `repository-tooling-hardening` plan
@@ -163,6 +163,7 @@ Finish graph, lifecycle, desktop, and utility structural debt at the configured 
 - [x] `W07.P14.S35` - Decompose lifecycle discovery and singleton hotspots without weakening ownership checks.; `src/vaultspec_a2a/lifecycle`.
 - [x] `W07.P14.S36` - Decompose desktop filesystem and process-utility hotspots with real-process regression evidence.; `src/vaultspec_a2a/desktop, src/vaultspec_a2a/utils/process.py`.
 - [ ] `W07.P14.S48` - Resolve every residual production complexity, shape, nesting, and size finding before any structural-sentinel graduation.; `src/vaultspec_a2a`.
+- [x] `W07.P14.S50` - Restore the graduated strict-type gate after the runner-placement and deferred-settings changes; `dev/ci_contract.py, src/vaultspec_a2a/control/settings_base.py, covering tests`.
 
 ## Wave `W08` - evidence-bound graduation and audit
 

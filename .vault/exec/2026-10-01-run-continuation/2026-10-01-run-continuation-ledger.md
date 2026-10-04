@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#run-continuation'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-02'
 body_schema: 'body-v2'
-body_hash: 'sha256:d311a4af7d368ea985461613b6ed5a204402f3005fde57e623bee22992fd4e5d'
+body_hash: 'sha256:bb8bf525ade8a4e590e982476d046282f80674eaf840cad8b698a6c27dfdd4ae'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -127,6 +127,62 @@ related:
 - `S13` `M` `src/vaultspec_a2a/thread/snapshots.py`
 - `S13` `verify:` `pytest-control-database-thread-api-worker-postgres` -> `pass`
 - `S13` `by:` `vaultspec-high-executor`
+- `S14` `M` `src/vaultspec_a2a/api/routes/_gateway_run_start.py`
+- `S14` `M` `src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py`
+- `S14` `M` `src/vaultspec_a2a/api/schemas/gateway.py`
+- `S14` `M` `src/vaultspec_a2a/context/metadata.py`
+- `S14` `M` `openapi.json`
+- `S14` `A` `src/vaultspec_a2a/api/tests/test_run_continuation_lineage.py`
+- `S14` `verify:` `python -m pytest test_run_continuation_lineage.py test_openapi_artifact.py` -> `pass`
+- `S14` `verify:` `ruff check and format --check touched Python` -> `pass`
+- `S14` `verify:` `ty check touched Python` -> `pass`
+- `S14` `by:` `vaultspec-standard-executor`
+- `S15` `M` `src/vaultspec_a2a/api/routes/_gateway_run_start.py`
+- `S15` `M` `src/vaultspec_a2a/api/tests/test_run_continuation_lineage.py`
+- `S15` `M` `src/vaultspec_a2a/control/thread_service.py`
+- `S15` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S15` `M` `src/vaultspec_a2a/domain_config.py`
+- `S15` `M` `src/vaultspec_a2a/ipc/schemas.py`
+- `S15` `M` `src/vaultspec_a2a/worker/graph_lifecycle.py`
+- `S15` `M` `.vault/audit/2026-10-01-run-continuation-audit.md`
+- `S15` `verify:` `pytest lineage and worker executor SQLite` -> `pass`
+- `S15` `verify:` `pytest lineage PostgreSQL --require-prerequisite=postgres` -> `pass`
+- `S15` `verify:` `ruff check and format --check touched Python` -> `pass`
+- `S15` `verify:` `ty check touched Python` -> `pass`
+- `S15` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S15` `by:` `vaultspec-standard-executor`
+- `S16` `M` `.vault/adr/2026-07-14-a2a-edge-conformance-adr.md`
+- `S16` `M` `.vault/audit/2026-10-01-run-continuation-audit.md`
+- `S16` `verify:` `python -m pytest -q api continuation admission/lineage/terminal suites` -> `pass`
+- `S17` `A` `src/vaultspec_a2a/service_tests/test_run_continuation_live.py`
+- `S17` `M` `src/vaultspec_a2a/service_tests/harness.py`
+- `S17` `M` `src/vaultspec_a2a/control/event_handlers.py`
+- `S17` `M` `src/vaultspec_a2a/control/tests/test_continuation_settlement_refusal.py`
+- `S17` `M` `.vault/audit/2026-10-01-run-continuation-audit.md`
+- `S17` `verify:` `pytest -m service test_run_continuation_live.py SQLite --require-prerequisite=docker` -> `pass`
+- `S17` `verify:` `pytest -m service test_run_continuation_live.py PostgreSQL --require-prerequisite=docker --require-prerequisite=postgres` -> `pass`
+- `S17` `verify:` `pytest test_continuation_admission_race.py --require-prerequisite=postgres` -> `pass`
+- `S17` `verify:` `pytest test_continuation_settlement_refusal.py focused SQLite and PostgreSQL` -> `pass`
+- `S17` `verify:` `pytest neighboring event, terminal, recovery, harness suites` -> `pass`
+- `S17` `verify:` `ruff check and format --check touched Python` -> `pass`
+- `S17` `verify:` `ty check touched Python` -> `pass`
+- `S17` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S17` `by:` `vaultspec-standard-executor`
+- `S17` `M` `src/vaultspec_a2a/database/checkpoints.py`
+- `S17` `verify:` `pytest -m service real worker run_busy SQLite --require-prerequisite=docker` -> `pass`
+- `S17` `verify:` `pytest -m service real worker run_busy PostgreSQL --require-prerequisite=docker --require-prerequisite=postgres` -> `pass`
+- `S17` `verify:` `pytest lineage SQLite` -> `pass`
+- `S17` `verify:` `just audit-types: 60 advisory diagnostics, none in database/checkpoints.py` -> `pass`
+- `S20` `M` `src/vaultspec_a2a/api/run_admission.py`
+- `S20` `M` `src/vaultspec_a2a/api/tests/test_run_start_digest.py`
+- `S20` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_gap.py`
+- `S20` `M` `src/vaultspec_a2a/api/tests/test_stream_resume_replay.py`
+- `S20` `verify:` `uv run --no-sync python -m pytest -q [8 relevant API modules] --tb=line --show-capture=no` -> `pass`
+- `S20` `verify:` `uv run --no-sync ruff check [4 touched Python]` -> `pass`
+- `S20` `verify:` `uv run --no-sync ruff format --check [4 touched Python]` -> `pass`
+- `S20` `verify:` `uv run --no-sync ty check [4 touched Python]` -> `pass`
+- `S20` `verify:` `vaultspec-core vault check all` -> `pass`
+- `S20` `by:` `vaultspec-standard-executor`
 
 ## Notes
 
@@ -143,3 +199,6 @@ related:
 - `S10` The follow-up verb no longer dispatches: its claim, receipt and dispatch path became unreachable once both admitting states answer queued, so it and the route's 502 and worker-saturation 503 are removed. The recursion budget is frozen from the run's accepted graph definition.
 - `S11` Admission and every settlement path now take one run lock, closing a PostgreSQL race that left a queued row on a settled run; replay is decided before eligibility and serves the journal row's own status.
 - `S13` Scope correction: `queued_messages` joins the snapshot in control/projection.py, where durable state reaches it, not control/snapshot.py; it is declared on both snapshot types the parity guard holds equal.
+- `S16` The R6 amendment already existed; this Step reconciled it with the served `queue_position` and narrowed dispatch-time answers.
+- `S17` Real worker 409 is exercised over loopback; gateway breaker and claim classification is supplied by `test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running` because public continuation admission queues and ordinary redelivery reuses the dispatch ID.
+- `S20` 64 focused SQLite/API tests passed; one existing PostgreSQL live proof was withheld by the optional prerequisite and is unchanged by this Step. Review PASS; three findings recorded in rolling audit, including an open low SQLite test connection warning.

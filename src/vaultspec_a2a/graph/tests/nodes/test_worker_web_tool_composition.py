@@ -17,10 +17,9 @@ exactly as a live-proof change would record one, and the production composition 
 consumes it unchanged. What the test never does is edit the declaration, reach past
 the seam, or set an allowlist field directly.
 
-The supplied-proof shape is KEPT now that real entries exist, rather than retired in
-favour of them. It covers a tool set no shipped lane has yet earned in full, so the
-seam stays proven for names ahead of any lane's proof; the derivation from the real
-declaration is exercised separately, on both stances, at the end of this module.
+The supplied-proof shape covers a tool set no shipped lane currently holds, so the
+seam stays proven for names ahead of a lane's proof. The production declaration
+currently grants Codex web reach through configuration, with no allowlist names.
 
 The names it supplies are not written out; they are read off the egress axis, so a
 built-in added to or removed from that declaration changes what this test demands
@@ -204,22 +203,12 @@ def test_only_a_declared_lane_earns_a_web_builtin(
     assert web_tool_names_for(lane) == (proof.tool_names if proof else ())
 
 
-def test_completed_turn_proof_does_not_read_as_completed_retrieval_proof() -> None:
-    """A lane that may be SERVED is not thereby a lane that may reach outward.
-
-    The two proofs are separate claims over the same lane, and the failure this
-    guards is the quiet one: a lane sliding into web activation on the strength of
-    its turn admission. Asserted against a lane that really does hold turn proof
-    and really does not hold retrieval proof, so the claim has a live subject
-    rather than being true of an empty set.
-    """
-    turn_only = [lane for lane in PROVEN_TURN_LANES if lane not in PROVEN_WEB_LANES]
-    assert turn_only, (
-        "every turn-proven lane is now web-proven too, so this claim has no subject; "
-        "name a lane deliberately or retire the test with a reason"
-    )
-    for lane in turn_only:
-        assert web_tool_names_for(lane) == ()
+def test_completed_turn_and_configured_web_proofs_add_no_builtin_names() -> None:
+    """Codex's two real proofs do not invent an allowlistable web tool."""
+    assert Provider.CODEX in PROVEN_TURN_LANES
+    assert Provider.CODEX in PROVEN_WEB_LANES
+    assert PROVEN_WEB_LANES[Provider.CODEX].tool_names == ()
+    assert web_tool_names_for(Provider.CODEX) == ()
 
 
 @pytest.mark.asyncio
@@ -351,63 +340,41 @@ async def test_the_production_derivation_stays_dark_for_an_unproven_lane(
 ) -> None:
     """The same document role, composed the way production composes it, stays dark.
 
-    The tests above SUPPLY the proof; this one supplies none and drives the node
-    exactly as the graph does, on a lane the declaration does not carry. It is what
-    keeps the lit assertions from reading as a claim that the capability is on
-    everywhere: the seam admits a proven lane's names, this lane has none, so the
-    shipped payload is the read floor alone.
+    The tests above SUPPLY a proof; this one drives the node on a withheld lane.
+    Its shipped payload must remain the read floor alone.
 
     The equality guard distinguishes the two ways this could pass. Darkness because
     the lane has earned no names is the state under test; darkness because the
     names were withdrawn from the tree is a different fact wearing its clothes.
     """
     assert WEB_TOOL_NAMES == DECIDED_WEB_TOOL_NAMES
-    unproven = next(
-        lane for lane in PROVEN_TURN_LANES if lane not in PROVEN_WEB_LANES
-    ).value
+    assert Provider.CLAUDE not in PROVEN_TURN_LANES
+    assert Provider.CLAUDE not in PROVEN_WEB_LANES
     record_file = tmp_path / "session_new.json"
 
     allowed = await _allowed_tools_at_spawn(
-        _model(tmp_path, session_new=record_file, provider=unproven),
+        _model(tmp_path, session_new=record_file, provider=Provider.CLAUDE.value),
         role="researcher",
         record_file=record_file,
     )
 
-    assert web_tool_names_for(unproven) == ()
+    assert web_tool_names_for(Provider.CLAUDE) == ()
     assert allowed == scoped_read_floor(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_the_production_derivation_lights_a_proven_lane(
+async def test_the_configured_web_lane_adds_no_builtin_names(
     tmp_path: Path,
 ) -> None:
-    """The production derivation, with nothing supplied, carries a proven lane's names.
-
-    The counterpart the module lacked while the declaration was empty, and the one
-    that matters most now that it is not: no proof is handed in, the lane is read
-    off the model exactly as the graph reads it, and the spawned CLI receives the
-    read floor PLUS precisely what that lane's own proof recorded. Asserted as the
-    declaration's own tuple rather than a literal, so a lane that later earns a
-    second built-in is covered without an edit, and a lane whose names were widened
-    beyond its proof fails here.
-    """
-    # Not merely the first declared lane: a lane whose reach is CONFIGURED rather
-    # than permitted declares no names at all and would make this observation
-    # vacuous. The subject has to be a lane that composes something.
-    permitting = [lane for lane, proof in PROVEN_WEB_LANES.items() if proof.tool_names]
-    assert permitting, (
-        "no declared web lane composes an allowlist name, so a lit production "
-        "derivation cannot be observed at this seam; every proven lane today "
-        "delivers its reach through configuration instead"
-    )
-    proven = permitting[0]
-    earned = PROVEN_WEB_LANES[proven].tool_names
+    """The configured Codex retrieval posture grants no ACP built-in."""
+    assert Provider.CODEX in PROVEN_WEB_LANES
+    assert PROVEN_WEB_LANES[Provider.CODEX].tool_names == ()
     record_file = tmp_path / "session_new.json"
 
     allowed = await _allowed_tools_at_spawn(
-        _model(tmp_path, session_new=record_file, provider=proven.value),
+        _model(tmp_path, session_new=record_file, provider=Provider.CODEX.value),
         role="researcher",
         record_file=record_file,
     )
 
-    assert allowed == [*scoped_read_floor(tmp_path), *earned]
+    assert allowed == scoped_read_floor(tmp_path)

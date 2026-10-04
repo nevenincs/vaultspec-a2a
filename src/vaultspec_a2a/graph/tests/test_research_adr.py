@@ -21,6 +21,7 @@ from langgraph.types import Command
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
 
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 
 from langchain_core.messages import AIMessage
 
+from ...database.tests._backends import migrated_session_factory
 from ...streaming.node_metadata import node_metadata_from_graph
 from ...team.team_config import (
     ResearchThreadSpec,
@@ -35,6 +37,7 @@ from ...team.team_config import (
     load_team_config,
 )
 from ...thread.errors import ConfigError
+from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
 from .._compiler_research import _doc_review_router
 from ..compiler import compile_team_graph
 from ..nodes.worker import render_research_findings
@@ -153,6 +156,7 @@ def _answer(parked: Any, verdict: str, notes: str | None = None) -> Command[str]
 async def test_research_adr_compiles_expected_node_set(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
+    tmp_path: Path,
 ) -> None:
     team = _research_adr_team(
         [
@@ -160,15 +164,17 @@ async def test_research_adr_compiles_expected_node_set(
             ResearchThreadSpec(thread_id="prior-art"),
         ]
     )
-    graph = compile_team_graph(
-        team_config=team,
-        agent_configs=_agent_configs(team),
-        checkpointer=checkpointer,
-        provider_factory=pf,
-        step_timeout=42.0,
-        proposal_submitter=_FakeSubmitter(),
-        model_assignment=deterministic_model_assignment(team),
-    )
+    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=_agent_configs(team),
+            checkpointer=checkpointer,
+            provider_factory=pf,
+            step_timeout=42.0,
+            proposal_submitter=_FakeSubmitter(),
+            model_assignment=deterministic_model_assignment(team),
+            runtime_identity_port=SqlRuntimeIdentityPort(factory),
+        )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert {

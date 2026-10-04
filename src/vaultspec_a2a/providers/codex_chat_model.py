@@ -17,10 +17,11 @@ the ChatGPT-session auth mode.
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -81,9 +82,14 @@ from ._codex_protocol import (
 from ._json_contract import JsonObject, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
 from ._project_scope import RunProjectScope
+from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
 from ._subprocess import kill_process_tree, spawn_acp_process
+from .binary_version import probe_binary_version
 from .conditions import ProviderCondition
 from .lane_admission import is_web_lane_proven
+
+if TYPE_CHECKING:
+    from ..graph.protocols import RuntimeIdentityRecordArgs
 
 logger = logging.getLogger(__name__)
 
@@ -163,15 +169,72 @@ class CodexChatModel(BaseChatModel):
 
     # Observability metadata (mirrors AcpChatModel's runtime fields).
     provider: str = "codex"
+    execution_mode: str | None = Field(default=None, exclude=True)
     runtime_authority: str | None = None
     command_origin: str | None = None
     command_kind: str | None = None
     command_executable: str | None = None
     command_target: str | None = None
+    version_proof_required: bool = Field(default=False, exclude=True)
 
     _active_turns: dict[tuple[str, str], _ActiveCodexTurn] = PrivateAttr(
         default_factory=dict
     )
+    _runtime_identity: RuntimeIdentityBinding | None = PrivateAttr(default=None)
+
+    def with_runtime_identity(
+        self, binding: RuntimeIdentityBinding
+    ) -> "CodexChatModel":
+        """Return a run-bound copy without mutating the compiled model."""
+        updated = self.model_copy()
+        updated._runtime_identity = binding
+        return updated
+
+    async def _persist_runtime_identity(
+        self, initialize_result: JsonObject, provider_thread_id: str
+    ) -> None:
+        """Record the first app-server thread before starting its model turn."""
+        binding = self._runtime_identity
+        if binding is None:
+            return
+        user_agent = identity_text(
+            initialize_result.get("userAgent"),
+            field="Codex server user agent",
+            maximum=512,
+        )
+        match = re.match(r"^[^/\s]+/(\d+\.\d+\.\d+)\s+\(", user_agent)
+        if match is None:
+            raise _CodexProtocolError(
+                "Codex initialize omitted a versioned server identity"
+            )
+        cli = identity_path(self.command_target, field="Codex CLI executable path")
+        cli_version = await asyncio.to_thread(probe_binary_version, cli)
+        if match.group(1) != cli_version:
+            raise _CodexProtocolError(
+                "Codex initialize version disagrees with the resolved launcher"
+            )
+        evidence: RuntimeIdentityRecordArgs = {
+            "thread_id": binding.thread_id,
+            "provider_id": identity_text(self.provider, field="provider ID"),
+            "execution_mode": identity_text(
+                self.execution_mode, field="execution mode"
+            ),
+            "runtime_authority": identity_text(
+                self.runtime_authority, field="runtime authority"
+            ),
+            "adapter_name": "codex-app-server",
+            "adapter_version": match.group(1),
+            "adapter_entry_path": cli,
+            "cli_executable_path": cli,
+            "cli_version": cli_version,
+            "node_version": None,
+            "auth_mode": "codex_home",
+            "provider_session_id": identity_text(
+                provider_thread_id, field="provider thread ID", maximum=512
+            ),
+            "managed_policy_present": None,
+        }
+        await binding.port.record_identity(**evidence)
 
     @property
     @override
@@ -505,6 +568,10 @@ class CodexChatModel(BaseChatModel):
         client: _CodexAppServerClient | None = None
         process: asyncio.subprocess.Process | None = None
         try:
+            if self.version_proof_required:
+                from .factory import codex_binary_proof_reason, require_binary_proof
+
+                require_binary_proof(codex_binary_proof_reason(self.command))
             codex_config_home = self._build_codex_config_home()
             env["CODEX_HOME"] = str(codex_config_home)
             metadata = {
@@ -529,7 +596,7 @@ class CodexChatModel(BaseChatModel):
                     project_scope=RunProjectScope(self.workspace_root),
                 ),
             )
-            await asyncio.wait_for(
+            initialize_result = await asyncio.wait_for(
                 client.request(
                     "initialize",
                     {"clientInfo": _CLIENT_INFO, "capabilities": _CAPABILITIES},
@@ -557,6 +624,7 @@ class CodexChatModel(BaseChatModel):
                 "id",
                 context="thread/start result thread",
             )
+            await self._persist_runtime_identity(initialize_result, thread_id)
 
             turn_started = await asyncio.wait_for(
                 client.request(

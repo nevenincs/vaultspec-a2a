@@ -25,7 +25,6 @@ def _make_config(workspace_root: str | None = None) -> AcpModelConfig:
         workspace_root=workspace_root,
         command=["echo"],
         env_vars={},
-        session_id=None,
         mcp_servers=[],
         use_exec=False,
         provider=None,

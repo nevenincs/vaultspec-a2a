@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from ...api.tests.clarification_harness import new_state_graph
 from ...control.accepted_input import freeze_accepted_input
 from ...control.permission_dispatch import permission_resume_value
-from ...graph.nodes.worker import (
+from ...graph.nodes._worker_permissions import (
     permission_callback_for,
     recorded_permission_answers,
 )

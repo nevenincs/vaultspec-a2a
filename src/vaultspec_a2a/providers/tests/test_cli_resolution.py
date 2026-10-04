@@ -32,15 +32,14 @@ def test_windows_admits_command_shims_and_unix_does_not() -> None:
 
 
 def test_unix_resolution_does_not_admit_windows_shims(tmp_path: Path) -> None:
-    """On this host a ``.cmd`` file alone never makes a lane look runnable."""
+    """The host admits a command shim only where its platform can run one."""
     shim = _install(tmp_path / "tools", "kimi.cmd")
-
-    assert (
-        cli_resolution.resolve_provider_cli_executable(
-            Provider.KIMI, search_path=str(shim.parent)
-        )
-        is None
+    resolved = cli_resolution.resolve_provider_cli_executable(
+        Provider.KIMI, search_path=str(shim.parent)
     )
+    assert (resolved is not None) is (os.name == "nt")
+    if resolved is not None:
+        assert os.path.normcase(resolved) == os.path.normcase(str(shim))
 
 
 def test_resolution_ignores_relative_search_entries(tmp_path: Path) -> None:
@@ -58,7 +57,9 @@ def test_resolution_ignores_relative_search_entries(tmp_path: Path) -> None:
 
 def test_resolved_executable_is_absolute(tmp_path: Path) -> None:
     """What resolution returns can be launched without a second PATH search."""
-    executable = _install(tmp_path / "tools", "codex")
+    executable = _install(
+        tmp_path / "tools", "codex.cmd" if os.name == "nt" else "codex"
+    )
 
     resolved = cli_resolution.resolve_provider_cli_executable(
         Provider.CODEX, search_path=str(executable.parent)
@@ -66,7 +67,7 @@ def test_resolved_executable_is_absolute(tmp_path: Path) -> None:
 
     assert resolved is not None
     assert os.path.isabs(resolved)
-    assert resolved == str(executable)
+    assert os.path.normcase(resolved) == os.path.normcase(str(executable))
 
 
 def test_non_cli_provider_is_rejected() -> None:

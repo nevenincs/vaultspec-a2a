@@ -29,6 +29,8 @@ __all__ = [
     "NullTelemetryHook",
     "ProviderFactoryProtocol",
     "QueueEntryView",
+    "RuntimeIdentityPort",
+    "RuntimeIdentityRecordArgs",
     "TaskQueuePort",
     "TelemetryHook",
     "UsageRecordArgs",
@@ -123,6 +125,35 @@ class CostPort(Protocol):
 
     async def record_usage(self, **kwargs: Unpack[UsageRecordArgs]) -> None:
         """Persist one invocation's reported token usage."""
+        ...
+
+
+class RuntimeIdentityRecordArgs(TypedDict):
+    """Primitive evidence from an initialized session of one run/lane."""
+
+    thread_id: str
+    provider_id: str
+    execution_mode: str
+    runtime_authority: str
+    adapter_name: str
+    adapter_version: str
+    adapter_entry_path: str
+    cli_executable_path: str
+    cli_version: str
+    node_version: str | None
+    auth_mode: str
+    provider_session_id: str | None
+    managed_policy_present: bool | None
+
+
+@runtime_checkable
+class RuntimeIdentityPort(Protocol):
+    """Write-once lane evidence without exposing persistence to graph nodes."""
+
+    async def record_identity(
+        self, **kwargs: Unpack[RuntimeIdentityRecordArgs]
+    ) -> None:
+        """Keep the first session ID; reject drift in other identity fields."""
         ...
 
 

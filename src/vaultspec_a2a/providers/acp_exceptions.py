@@ -6,6 +6,8 @@ Derived from Agent Client Protocol and JSON-RPC specifications.
 from enum import IntEnum
 from typing import TypedDict, Unpack
 
+from langchain_core.messages import UsageMetadata
+
 from .conditions import ProviderCondition
 
 __all__ = [
@@ -101,7 +103,20 @@ class AcpSessionError(AcpError):
 class AcpPromptError(AcpError):
     """Raised when session/prompt fails (e.g. quota, refusal)."""
 
-    __slots__ = ()
+    __slots__ = ("usage_metadata",)
+
+    def __init__(
+        self,
+        message: str,
+        code: int = AcpErrorCode.INTERNAL_ERROR,
+        data: object = None,
+        request_id: str | int | None = None,
+        *,
+        usage_metadata: UsageMetadata | None = None,
+        **kwargs: Unpack[_AcpErrorOptions],
+    ) -> None:
+        self.usage_metadata = usage_metadata
+        super().__init__(message, code, data, request_id, **kwargs)
 
 
 class AcpPromptCancelledError(AcpPromptError):

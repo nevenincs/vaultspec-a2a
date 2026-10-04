@@ -10,7 +10,7 @@ related:
   - '[[2026-10-04-workspace-root-authority-desktop-native-admission-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:37cab2fea903828f50c421a68895d169c4eb68b20bdbe5db504ce8515dea6945'
+body_hash: 'sha256:46d1dafcac51f58c46dec9066dda4a8487268b694c92a0abfe4e39515056e8c2'
 ---
 
 # `workspace-root-authority` plan
@@ -26,7 +26,7 @@ Preserve concurrent work. The parent owns scoped implementation and verification
 
 - [x] `S01` - Replace pathname callback opens with cross-platform handle-anchored regular-file I/O and real replacement proofs; `src/vaultspec_a2a/desktop/_filesystem_authority.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py`.
 - [x] `S02` - Refuse native desktop launches until an OS isolation backend is verified, with honest readiness and refusal before execution admission; `src/vaultspec_a2a/control/provider_execution.py, src/vaultspec_a2a/providers/_subprocess.py, src/vaultspec_a2a/providers/provider_readiness.py, src/vaultspec_a2a/providers/binary_version.py, src/vaultspec_a2a/control/health.py, src/vaultspec_a2a/api/routes/_gateway_run_start.py, src/vaultspec_a2a/api/schemas/gateway_readiness.py, src/vaultspec_a2a/providers/tests/test_desktop_native_execution.py, src/vaultspec_a2a/desktop_tests/test_readiness_model.py, src/vaultspec_a2a/desktop_tests/test_run_admission.py, .vault/adr`.
-- [ ] `S03` - Verify the concurrent ACP repair and complete integrated review and audit queue updates; `src/vaultspec_a2a/providers/tests, .vault/audit/2026-10-04-workspace-root-authority-audit.md, .vault/exec, .vault/plan`.
+- [x] `S03` - Verify the concurrent ACP repair and complete integrated review and audit queue updates; `src/vaultspec_a2a/providers/tests, .vault/audit/2026-10-04-workspace-root-authority-audit.md, .vault/exec, .vault/plan`.
 
 ## Parallelization
 

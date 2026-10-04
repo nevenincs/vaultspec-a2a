@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:bdac3d7034474dd1e679c954783def9137aead56a0d628e3e6f839d0684900c0'
+body_hash: 'sha256:ef3f962710c32d53c4998c87fd2ca540bdd5cabb819798618ac5d492accad3d8'
 related:
   - "[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]"
 ---
@@ -126,6 +126,10 @@ Type: verification / test isolation. Status: corrected before final verification
 
 Type: product availability / certification. Status: accepted restriction; future backend work remains queued. Native desktop execution and packaged provider certification are intentionally unavailable. Existing execution-dependent desktop proofs in lazy-worker, worker provenance/pairing, owned-worker trees, ownership prerequisites and terminal-settlement suites require reconciliation with the new admission restriction or a later verified backend; they were not rerun or certified by this pass. Preserve their real-process evidence requirements rather than claiming a provider turn or OS isolation from refusal tests. Re-enablement requires real absolute-path synthetic-state denial, project I/O, authentication, actor IPC, descendants/cleanup and completed provider turns on every admitted target. Native macOS and packaged artifacts are not certified here. This entry records the availability/verification consequence, not an open same-user launch route.
 
+### workspace-followup-current-status | low | Three scoped security follow-ups are implemented and reviewed
+
+Type: execution / current status. Status: complete for the approved remediation plan. The current resolutions are managed-root authority, anchored callback I/O (including hard-link/vault-name and compatibility corrections), native fail-closed desktop admission and the concurrent ACP read repair. Earlier pending/deferred entries are historical observations superseded by their later resolution entries. The accepted medium product-certification prerequisite remains queued for future native backend enablement; no all-repository certification claim is made. Source for the workspace/callback work is now included in shared commit `3f4a8f6a`; native remediation was separately checkpointed as `86b26dd4`, with an exact 19-file owned inventory. Unrelated active edits and commits were preserved.
+
 ## Recommendations
 
 Record an explicit desktop workspace authority decision under the user's remediation authorization, then enforce one shared profile boundary at all affected entry points. Preserve configured Compose containment and unconfigured development behavior. Require real-filesystem malicious cases and admitted project controls, followed by independent candidate review and final check evidence.
@@ -205,3 +209,9 @@ Gate 3: Windows command `uv run --no-sync pytest src/vaultspec_a2a/providers/tes
 The final corrected-storage broker command `uv run --no-sync pytest src/vaultspec_a2a/desktop_tests/test_run_admission.py -q --show-capture=no -n 2 --dist=loadgroup` reports 8 passed. It uses real migrated SQLite stores, gateway/worker processes, loopback HTTP and in-process lane opt-in. Capacity, expired reservations, concurrent commit/release, exact replay, role binding, rollback after a pre-durability conflict, restart lease recovery and body limits remain verified.
 
 S03 integrated review: PASS for the three scoped follow-ups. Reuse the unchanged S01 callback/ACP evidence above: 186 Windows passes with existing platform exclusions and 186 Linux passes without exclusions. The concurrently owned `2026-10-04-acp-read-remediation-plan` now has all three Steps checked and its read repair is committed. Its implementation was preserved. All review findings are classified and appended to this rolling queue; earlier pending native entries are superseded in current status by the accepted refusal and resolution entry above. The only retained product prerequisite is a real OS isolation backend and its full desktop certification before native execution is re-enabled. This pass does not claim an all-repository green suite or shipped desktop sandbox. Concurrent authoring, service and ACP ownership work remains outside the candidate.
+
+### Final integration checkpoint
+
+After the concurrent ACP owner extended session checks, parent inspection confirmed the current callback still uses the same confined descriptors. The six callback/ACP/native-file-authority suites were therefore rerun rather than relying only on earlier unchanged-source evidence: Windows again reports 186 passed, 3 existing Linux skips and 1 service deselection; WSL Linux again reports 186 passed with no exclusions. Session-aware callback test edits remain the concurrent owner's work and were excluded from the native commit. The feature index's generated scaffold-status label was reconciled through the owning Core prose edit to the accepted native decision. The locked Core feature health check reports no diagnostics. The native commit contains only its explicit verified paths; no push or remote scan-status update was performed.
+
+Final caller-change control: after the concurrent terminal owner added typed session ownership and local terminal teardown, the parent rechecked its real shared-spawn call and reran `test_desktop_native_execution.py` on both hosts. Windows reports 7 passed and WSL Linux reports 7 passed; no exclusion. The native guard and genuine unarmed controls remain effective with those current callers. The three remediation Steps are checked through owning Core progress, and the final scoped source/decision/review checkpoint preserves unrelated working changes.

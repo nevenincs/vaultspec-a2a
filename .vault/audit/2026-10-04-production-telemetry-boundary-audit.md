@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:5a4df800b7f0e0d087ce8c8c5cfe16c99000466c888d0bb8e97926e8db204deb'
+body_hash: 'sha256:0a16f9e687b639ea70c72f2e7ebed1500cd8905f833c84991ec50b9bea1f2460'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-07-19-observability-lanes-adr]]"
@@ -355,3 +355,44 @@ journal tampering boundary as medium and installation-wide scan costs and
 isolated credential refresh as low. Those remain open in their owning queue;
 this descriptor check does not establish hostile-agent integrity. Reviewed
 source and the owner's audit/ledger are included in the all-changes commit.
+### integration-jaeger-loopback-remediation | medium | resolved: local host ingestion and querying
+
+Type: security/network boundary. Status: fixed and verified. The user's
+continue-fixing instruction authorizes the integration-jaeger-publication
+follow-up recorded above. This bounded configuration correction needs no new
+costly decision or durable plan. Accepted service-lifecycle and observability
+lane decisions preserve tracing and health; no accepted decision requires
+public diagnostic ingress. Both integration and infrastructure recipes use the
+same file. Its OTLP gRPC and UI host publications now bind explicitly to
+127.0.0.1 while retaining JAEGER_OTLP_PORT and JAEGER_UI_PORT overrides.
+Container exporters and internal health remain unchanged. README and env port
+notes now identify the loopback host workflow and supported Docker minimum.
+
+Before the fix all eight added real Compose regression cases failed: four
+numeric/default combinations lacked host_ip and four IPv4/IPv6 address
+injections succeeded. After the fix all 23 focused profile cases pass, including
+these eight cases, and all seven deployment contract cases pass. Compose
+rejects both injected address forms for either override. Focused Ruff lint,
+format, Ty and strict Basedpyright pass; diff whitespace checks pass.
+
+Live evidence uses Engine 29.8.1 and Compose v5.5.1, starting only Jaeger 2.16.0
+from the exact integration file with no dependencies in isolated project
+vaultspec-jaeger-loopback-b1f8082e5a. Docker inspection confirmed a healthy
+container and exactly two publications, each HostIp 127.0.0.1: gRPC 4317 and UI
+16686 at custom free host ports. HTTP OTLP and health were not published. A
+real host OTLPSpanExporter sent trace cb61b63ef5a14a875112a9cd206946ea over gRPC;
+the loopback query API retrieved that exact trace. A real network peer retained
+gRPC connectivity and received HTTP 200 from internal health. Final teardown
+removed the isolated project and no labeled containers remained.
+
+Actual implementation review: PASS. The independent investigator reconciled
+the host certification requirement with the production precedent. A fresh
+read-only reviewer found no concrete bypass or compatibility regression,
+including equivalent short-syntax forms and the infrastructure reuse path.
+No new review finding was surfaced in this scoped pass. The existing full-URL
+privacy investigation remains open for its separate pass. No full gateway or
+worker rebuild was needed for unchanged application configuration. Remote peer
+packet testing was not run; the boundary is established by real Docker
+publication inventory under the default NAT bridge and Engine at least 28.
+Semantic search remained index_unverifiable; discovery used Core decision
+listing/search and targeted source reads after confirming failed indexing.

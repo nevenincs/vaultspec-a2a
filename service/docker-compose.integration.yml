@@ -132,8 +132,9 @@ services:
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.16.0
     restart: unless-stopped
     ports:
-      - '${JAEGER_OTLP_PORT:-4317}:4317'
-      - '${JAEGER_UI_PORT:-16686}:16686'
+      # Host certification needs ingestion and querying, but only locally.
+      - '127.0.0.1:${JAEGER_OTLP_PORT:-4317}:4317'
+      - '127.0.0.1:${JAEGER_UI_PORT:-16686}:16686'
     environment:
       COLLECTOR_OTLP_ENABLED: 'true'
     healthcheck:

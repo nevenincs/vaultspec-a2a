@@ -60,7 +60,14 @@ just stack-integration-down
 
 The stack publishes the gateway at <http://localhost:18000>, VidaiMock at
 <http://localhost:8100>, and the Jaeger user interface (UI) at
-<http://localhost:16686>.
+<http://127.0.0.1:16686>. Jaeger's UI and OTLP gRPC collector are bound to
+127.0.0.1; host certification exports to `http://127.0.0.1:4317`.
+`JAEGER_UI_PORT` and `JAEGER_OTLP_PORT` change those host ports without changing
+the bind address. Container exporters still use `http://jaeger:4317`; OTLP HTTP
+and health remain inside the Compose network. These restrictions also apply to
+the infrastructure recipes, which use this same profile. Use Docker Engine
+28.0.0 or newer and an authenticated TLS proxy with access controls and resource
+limits for remote telemetry access.
 
 ## Production-image stack
 

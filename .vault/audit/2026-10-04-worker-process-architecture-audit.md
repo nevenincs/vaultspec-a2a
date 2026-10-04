@@ -5,12 +5,13 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:66c6faf3247e37d800870352789af3965ac9efb04d49f95347e2f6aa5de3ac06'
+body_hash: 'sha256:77371cab00981f48500ea2de0a680e169ff40c35d064d1f1a9f65da62475996e'
 related:
   - "[[2026-03-04-worker-process-architecture-adr]]"
   - "[[2026-08-04-canonical-homes-adr]]"
   - "[[2026-07-19-codebase-health-adr]]"
 ---
+
 # `worker-process-architecture` audit: `Internal HTTP body-limit remediation`
 
 ## Scope
@@ -58,3 +59,7 @@ Final validation used the isolated `fix/internal-http-body-limit` branch at base
 The original four routes now reject oversized missing-length or chunked bodies at the first overflowing chunk, before JSON/model allocation and before liveness or dispatch mutation. Misleading lengths and UTF-8 inputs cannot defeat the byte cap. Exact-cap gateway bodies, larger permitted event batches, small-body authentication/validation, real executor behavior, and dispatch refusal classification retain passing evidence. This validation exercises real ASGI applications; no live deployment or external scan-state write was requested.
 
 Commit hooks: Ruff lint, Ruff formatting, whole-tree Ty, Markdown lint, Vault Doctor, Vault annotation gate, and Vaultspec commit gate all passed. Unrelated file-type hooks had no applicable files. The patch is retained on `fix/internal-http-body-limit`; the shared main worktree retains its local fix alongside concurrent work.
+
+Integration 2026-10-04: the user explicitly requested merging all changes into the main worktree. Commit `76335234` merges `fix/internal-http-body-limit` into main with parents `3b24e4f5` and `a2a98a3d`. A scoped stash preserved the affected local files; restoring it produced one audit-document add/add conflict, resolved with the original local record. All nine surviving affected-file Git blob hashes exactly matched the pre-merge snapshot after restoration, including the unrelated local infra_config.py and worker/app.py hunks. There are no unresolved paths, and `git merge-base --is-ancestor fix/internal-http-body-limit main` passes. The temporary integration stash was removed after its restored hashes were verified.
+
+Integration review: the merged source is the reviewed fix; local workspace-admission changes remain downstream of body admission, and no additional received-byte bypass or regression was found. The existing medium generated-dispatch-budget follow-up remains open. `uv run --no-sync python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/api/tests/test_http_body_limits.py src/vaultspec_a2a/worker/tests/test_app.py -q --no-showlocals` passes in the combined main worktree: 60 tests. Feature-scoped vault validation reports zero errors and warnings, and the affected working-tree diff passes `git diff --check`.

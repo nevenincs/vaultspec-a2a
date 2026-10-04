@@ -4,7 +4,7 @@ tags:
   - '#repository-tooling-hardening'
 date: '2026-07-19'
 modified: '2026-10-04'
-body_hash: 'sha256:96887f60ca8914f90f128b04735c609a5be7d86ee3a3736888d7fe43c1ebcd1c'
+body_hash: 'sha256:469f2b0b5fc07fada097bd41ab6e918b42632f5dbbaabfb4261dbda30fd1d7c3'
 related: []
 ---
 
@@ -822,6 +822,18 @@ Type: CI blocking and typing. Status: fixed. The earlier runner-placement and se
 ### settings-only-names-were-published | medium | fixed and verified
 
 Type: export contract. Status: fixed. The earlier integration published `PROJECT_DOTENV`, `PROJECT_MARKERS`, and `build_now` from `settings_base.py` without recognized consumers. The main-line repair removes the internal constants from the export list and teaches the scanner to find the root `conftest.py` import of `build_now`. The integration retains that repair.
+
+### all-work-main-integration-review | info | consolidated code passed the merge gate
+
+Type: integrated review. Status: review verdict PENDING because full local CI is incomplete. The main-line CI and settings repairs were retained while the provider and continuation follow-up line was merged. Every local branch tip is now an ancestor of the integration head; attaching superseded branch histories changed no file tree after the consolidated merge. The reviewed code differences retain the later proof, capsule, auth, usage, and runtime-identity corrections. `just ci-merge` passed 154 development tests and 2,134 unit tests with five platform skips. The full local `just ci` run passed 5,247 selected tests, with 19 skips, before one unchanged Windows desktop discovery race test failed; its isolated rerun passed. The package build, six documentation tests, and strict Sphinx build passed separately. No new code defect was found in the integrated diff.
+
+### full-ci-discovery-race-recurred | medium | an unchanged Windows file-replace race blocked the full local gate
+
+Type: CI reliability. Status: open; this recurs under `load-sensitive-wall-clock-budgets` and the provider audit's P02.S09 verification follow-up. The full serial `just ci` run failed `test_publication_is_atomic_under_a_racing_reader` while publishing the desktop discovery file under a concurrent reader. Neither `lifecycle/discovery.py`, `utils/atomic_write.py`, nor the test changed in this integration, and the same test passed in isolation immediately afterward. The complete local gate therefore has no passing result for this merge. Keep this recurrence in the queue until the Windows retry boundary is made reliable under the full suite or a complete hosted run supplies applicable passing evidence.
+
+### merge-history-branch-rule-conflict | medium | preserving all local tips requires a branch-rule bypass
+
+Type: repository governance. Status: open. The requested integration preserves all source branch commits as merge ancestry, while GitHub's `main` rule rejects merge commits and expects pull-request checks. The preceding `main` sync was accepted only with an explicit rule-bypass report from GitHub. Reconcile the branch rule with the desired history policy before the next multi-branch consolidation; until then, any accepted push of this ancestry must be reported as a bypass.
 
 ## Recommendations
 

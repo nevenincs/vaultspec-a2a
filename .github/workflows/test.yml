@@ -272,3 +272,27 @@ jobs:
 
       - name: Run Compose server profile regression
         run: just test-service-path src/vaultspec_a2a/service_tests/test_compose_profile_regression.py
+
+  worker-image:
+    name: "Test: Production worker isolation (Linux)"
+    needs: test
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          prune-cache: false
+          enable-cache: false
+          version: "0.11.29"
+      - name: Set up just
+        uses: taiki-e/install-action@6012bba2f8e3e666a2b212f8823c06831704ce92 # just
+        with:
+          tool: just@1.38.0
+      - name: Qualify the production worker
+        run: just ci-worker-image

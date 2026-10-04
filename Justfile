@@ -987,3 +987,8 @@ ci:
 [group('check')]
 ci-merge:
     uv run --isolated --no-project python -m dev ci merge
+
+# Build committed production source and execute the worker identity proof.
+[group('check')]
+ci-worker-image:
+    uv run --isolated --no-project python -m dev.container_release

@@ -144,3 +144,18 @@ def test_merge_gate_accepts_an_explicit_release_ref() -> None:
     assert triggers["workflow_call"]["inputs"]["ref"]["required"] is True
     checkout = workflow["jobs"]["basic"]["steps"][0]
     assert checkout["with"]["ref"] == "${{ inputs.ref || github.sha }}"
+
+
+def test_release_health_requires_production_worker_isolation() -> None:
+    """A release cannot bypass the image-level service identity proof."""
+    release = _workflow("release.yml")
+    assert release["jobs"]["health"]["uses"] == "./.github/workflows/test.yml"
+    validation = _workflow("test.yml")
+    worker = validation["jobs"]["worker-image"]
+    assert worker.get("if") is None
+    assert worker.get("continue-on-error", False) is False
+    proof = next(
+        step for step in worker["steps"] if step.get("run") == "just ci-worker-image"
+    )
+    assert proof.get("continue-on-error", False) is False
+    assert proof.get("if") is None

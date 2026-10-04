@@ -7,11 +7,13 @@ the worktrees directory) or in the main repository root.
 """
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 __all__ = [
     "resolve_env_vars",
     "resolve_venv",
+    "scrub_agent_environment",
 ]
 
 
@@ -57,47 +59,8 @@ def resolve_venv(workspace_path: Path) -> Path | None:
     return None
 
 
-def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
-    """Build an environment dict for an agent running at *workspace_path*.
-
-    Inherits the current process environment, then overlays:
-    - ``VIRTUAL_ENV``: points to the resolved venv
-    - ``PATH``: prepends the venv's ``Scripts`` (Windows) or ``bin``
-      directory
-    - ``PWD``: set to *workspace_path* for clarity
-
-    The base environment is scrubbed, never inherited wholesale. A spawned agent
-    is a lower-trust process than the service that spawns it, so a credential the
-    operator happens to carry must not become a credential the agent can spend.
-    Five removal families:
-
-    - Known provider secrets by name. The provider layer re-injects only the auth
-      a lane intentionally supports (for example ``_build_zai_env``),
-      so removing them here costs nothing a supported lane depends on. Two
-      concrete hazards this closes: the Z.ai lane retargets
-      ``ANTHROPIC_BASE_URL`` at a third-party gateway, and an inherited
-      ``ANTHROPIC_API_KEY`` would then be presented to that gateway; and an
-      ``ANTHROPIC_API_KEY`` alongside a Claude OAuth token silently downgrades a
-      flat-rate subscription to metered API billing.
-    - ``CLAUDE_CODE_*`` except a narrow allowlist. Anything outside it (internal
-      session markers set by a parent Claude Code process, auth-helper hooks)
-      would hand a nested ACP subprocess the parent session's identity.
-    - ``VAULTSPEC_*``: this service's OWN infrastructure state (gateway/internal
-      bearer tokens, port wiring). Handing agents the tokens that authenticate
-      the control plane would let a spawned agent impersonate the
-      infrastructure. Additive ``VAULTSPEC_A2A_AUTHORING_*`` bridge values are
-      re-injected explicitly by the provider layer after this base.
-    - ``ANTHROPIC_LOG``: ``debug`` makes the Anthropic SDK emit debug text to
-      stdout, corrupting the ACP JSON-RPC stream (-32603 parse errors). The
-      probe re-injects it explicitly only when debug=True via run_probe().
-    - ``PYTEST_*`` markers: the spawning process's own test-runner state.
-      Env-sniffing agent tool servers (the rag MCP's own-test guard) read them
-      as "I am running inside a test" and refuse their live backends.
-
-    ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` are deliberately NOT scrubbed:
-    they are endpoint/token names the Z.ai lane rides, distinct from
-    ``ANTHROPIC_API_KEY``.
-    """
+def scrub_agent_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    """Remove infrastructure and ambient provider credentials before role additions."""
     scrub_keys = frozenset(
         {
             "ANTHROPIC_API_KEY",
@@ -154,11 +117,20 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     )
     env = {
         k: v
-        for k, v in os.environ.items()
-        if k not in scrub_keys
-        and not k.startswith("VAULTSPEC_")
-        and not (k.startswith("CLAUDE_CODE_") and k not in claude_code_allowlist)
+        for k, v in environment.items()
+        if k.upper() not in scrub_keys
+        and not k.upper().startswith("VAULTSPEC_")
+        and not (
+            k.upper().startswith("CLAUDE_CODE_")
+            and k.upper() not in claude_code_allowlist
+        )
     }
+    return env
+
+
+def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
+    """Build a scrubbed child environment with the workspace Python metadata."""
+    env = scrub_agent_environment(os.environ)
     # use PWD (POSIX standard) instead of the non-standard CWD variable
     env["PWD"] = str(workspace_path)
 

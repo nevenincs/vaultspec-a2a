@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:c1e4d9565dc9d829f2ca34bb17badb704a340c9f69b3431849ce5217b640066c'
+body_hash: 'sha256:f1f907159e58dbf7c4aeb38e34acf37b36192da2cff9f125bec3e62a953af59a'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-workspace-root-authority-audit]]"
@@ -61,10 +61,20 @@ Compatibility consequence: refresh provenance is intentionally process-bound; a 
 
 PASS for the implemented credential-return Step. The consolidated Linux credential, config-home and callback ownership suite passed 95 tests from an isolated cwd with the same repository source and locked environment; the preceding mounted-checkout environmental finding is resolved. Windows final controls passed 62 tests and the final alias correction passed junction coverage. Formatting, lint, Ty for Windows/Linux/macOS, strict Basedpyright and diff whitespace checks passed. The candidate's medium alias regression is resolved; no open critical/high issue remains in S01. OS primitive research and its unresolved runtime/IPC controls remain S03 work and grant no eligibility.
 
+### S02 final review | medium | MCP environment credential transfer closed
+
+Security / credential disclosure; resolved DNI-002. The shared MCP probe boundary now scrubs both ambient and explicit environments using the provider environment policy, with case-insensitive matching for service/database aliases. A fresh interpreter launches the genuine production RAG MCP command, observes only presence of synthetic credential names, and completes initialization/tool discovery. Both environment modes exclude every tested control-plane spelling and preserve a declared ordinary option. The exported pre-change production module completed the same real handshake while inheriting all seven supplied infrastructure spellings; its security assertion failed, establishing the baseline without changing live source.
+
+PASS for S02. Windows focused security tests passed 3 tests; nearest environment, MCP composition, egress and contract suites passed 111 tests with one existing selection exclusion. Linux focused security/environment tests passed 5 tests from the isolated cwd and locked environment. Formatting, lint, strict Basedpyright and Ty Windows/Linux/macOS checks passed on the three edited files; diff whitespace passed. The fresh read-only candidate reviewer checked SDK default merging, direct callers, auth reinjection, cache and retry paths and found no concrete surviving bypass or regression. Parent review confirmed snapshots leave the caller's authenticated environment intact. Initial new test runs exposed invalid synthetic parent settings and nested Windows path escaping; the fixtures were corrected without settings overrides, source bypasses, skips or mocks.
+
+### S03 native runtime evidence | high | Windows named-pipe compatibility remains open
+
+Implementation prerequisite; open DNI-003, S03-S05. Correcting restricted-token object default permissions allows the low-integrity process to run genuine Node v26.10.0, deny a private synthetic credential read with EPERM, write its selected project and reach a synthetic HTTP relay on loopback (200). Node descendants using inherited/ignored streams exit as requested (13), and a CMD descendant exits 17. Node's normal piped descendant launch still fails EPERM; widening the token default DACL and dropping its OWNER_RIGHTS entry do not resolve it. Separate AppContainer controls achieved basic CMD read/write separation but genuine Node initialization still failed. Neither candidate qualifies native production or restores desktop admission. Managed disposable probes modify only their unique synthetic files/profiles and remove their resources after children settle; no operator credential or existing path ACL is modified.
+
 ## Review trail
 
 2026-10-04: independent pre-patch investigation traced shared native spawn, the separate MCP SDK launch, auth copy/refresh, actor relay and retained-handle process ownership. No agent edits or duplicated tests. Semantic discovery returned `index_unverifiable`; the named daemon status confirmed failed indexing, so named-module source inspection was used. Existing workspace callback and execution-refusal remediation remain governed by their completed plan.
 
 ## Recommendations
 
-Execute S02 credential scrubbing, then complete S03 OS/runtime proof and record backend authority before S04 integration. Keep armed desktop refusal until S05 proves each admitted target and binary through actual provider work, authentication, actor IPC, project I/O and descendant cleanup. Maintain the process-bound credential return boundary; any later crash-recovery promise requires protected worker-owned provenance rather than a writable child-home seed file.
+Complete S03 OS/runtime proof and record backend authority before S04 integration. Keep armed desktop refusal until S05 proves each admitted target and binary through actual provider work, authentication, actor IPC, project I/O and descendant cleanup. Maintain the process-bound credential return boundary; any later crash-recovery promise requires protected worker-owned provenance rather than a writable child-home seed file.

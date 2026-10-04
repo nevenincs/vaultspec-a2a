@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:3e99e8b4a47e702a579ab46d70f2f09035e899b1d1377ccb5f525f69ea9ad0ea'
+body_hash: 'sha256:f2d0138ee7ea115ce141e649c89f52bd1706ec4a7485113cf55d26d8eed235b3'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -35,6 +35,20 @@ related:
 - `S01` `M` `.vault/index/desktop-native-isolation.index.md`
 - `S01` `verify:` `vaultspec-core scoped canonical metadata repair` -> `pass`
 - `S01` `verify:` `vaultspec-core feature index desktop-native-isolation` -> `pass`
+- `S02` `M` `src/vaultspec_a2a/providers/_mcp_contract.py`
+- `S02` `M` `src/vaultspec_a2a/workspace/environment.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_mcp_probe_security.py`
+- `S02` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S02` `verify:` `exported baseline real MCP environment security assertion` -> `fail`
+- `S02` `verify:` `pytest Windows MCP probe security 3 tests` -> `pass`
+- `S02` `verify:` `pytest Windows nearest environment MCP composition egress contract suites 111 tests` -> `pass`
+- `S02` `verify:` `pytest Linux focused MCP security environment 5 tests` -> `pass`
+- `S02` `verify:` `ruff check three scoped files` -> `pass`
+- `S02` `verify:` `ruff format --check three scoped files` -> `pass`
+- `S02` `verify:` `ty check three scoped files windows/linux/darwin` -> `pass`
+- `S02` `verify:` `basedpyright three scoped files` -> `pass`
+- `S02` `verify:` `git diff --check three scoped files` -> `pass`
+- `S02` `verify:` `fresh read-only candidate and actual parent review` -> `pass`
 
 ## Notes
 
@@ -44,3 +58,6 @@ related:
 - `S01` Provenance is process-bound; abandoned child directories cannot acquire refresh publication authority. Crash recovery remains separately recorded.
 - `S01` Native backend and completed provider proof still pending; desktop native admission remains blocked.
 - `S01` Filled required Recommendations and repaired generated ledger annotations, index coverage and markdown using owning Core verbs.
+- `S02` Existing default selection excluded one nearest-suite test; no new skip/xfail or mock was introduced.
+- `S02` Pre-change exported module completed real MCP handshake and inherited seven synthetic infrastructure spellings; corrected source excludes all tested spellings with both environment modes.
+- `S02` Native OS research remains S03 work and grants no desktop execution eligibility.

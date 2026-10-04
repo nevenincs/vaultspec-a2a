@@ -6,10 +6,27 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+import pytest
+
 from ...testing.children import run_child
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+_CONTROL_ENV_NAMES = (
+    "VAULTSPEC_A2A_GATEWAY_TOKEN",
+    "VAULTSPEC_A2A_INTERNAL_TOKEN",
+    "vaultspec_a2a_lifecycle_token",
+    "DATABASE_URL",
+    "CHECKPOINT_DATABASE_URL",
+    "SQLALCHEMY_DATABASE_URI",
+    "PGPASSWORD",
+    "POSTGRES_PASSWORD",
+    "SERVICE_TOKEN",
+    "gateway_token",
+    "INTERNAL_TOKEN",
+)
 
 
 def test_workspace_uvx_and_python_never_supply_the_contract_probe(
@@ -51,3 +68,50 @@ print('trusted MCP contract verified')
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "trusted MCP contract verified" in completed.stdout
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("explicit_environment", [False, True])
+def test_real_mcp_probe_receives_no_infrastructure_credentials(
+    tmp_path: Path, explicit_environment: bool
+) -> None:
+    marker = tmp_path / "probe-environment.json"
+    script = f"""
+import asyncio, json, os, sys
+from pathlib import Path
+from vaultspec_a2a.providers._acp_mcp import resolve_harness_mcp_servers
+from vaultspec_a2a.providers._harness_mcp_registry import declared_harness_tools
+from vaultspec_a2a.providers._mcp_contract import verify_declared_tool_contract
+from vaultspec_a2a.control.config import settings
+# Load the valid parent profile before introducing the synthetic child inputs.
+assert isinstance(settings.desktop_profile_armed, bool)
+names = {_CONTROL_ENV_NAMES!r}
+for name in names:
+    os.environ[name] = 'synthetic-control-plane-' + name.upper()
+os.environ['MCP_PROBE_OPTION'] = 'declared-option'
+spec = resolve_harness_mcp_servers(['vaultspec-rag'])[0]
+guard = '''
+import json, os, subprocess, sys
+from pathlib import Path
+names = {_CONTROL_ENV_NAMES!r}
+observed = {{name: name in os.environ for name in names}}
+observed['option'] = os.environ.get('MCP_PROBE_OPTION')
+Path({marker.as_posix()!r}).write_text(json.dumps(observed), encoding='utf8')
+sys.exit(subprocess.call(sys.argv[1:]))
+'''
+asyncio.run(verify_declared_tool_contract(
+    name='environment-guarded-rag', command=sys.executable,
+    args=['-c', guard, spec['command'], *spec['args']],
+    declared=declared_harness_tools('vaultspec-rag'),
+    env=dict(os.environ) if {explicit_environment!r} else None,
+))
+observed = json.loads(Path({str(marker)!r}).read_text(encoding='utf8'))
+assert observed.pop('option') == 'declared-option', observed
+assert not any(observed.values()), observed
+print('real MCP environment confined')
+"""
+    completed = run_child(
+        [sys.executable, "-c", script],
+        what="MCP infrastructure environment confinement",
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "real MCP environment confined" in completed.stdout

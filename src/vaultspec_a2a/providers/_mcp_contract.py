@@ -62,6 +62,7 @@ from mcp.types import TextContent
 
 from ..thread.errors import HarnessToolContractError
 from ..utils.async_cleanup import complete_cleanup
+from ..workspace.environment import scrub_agent_environment
 from ._config_home_roots import temp_home_root
 from ._harness_mcp_registry import (
     declared_harness_tools,
@@ -104,7 +105,7 @@ _probe_lock = asyncio.Lock()
 
 def _probe_environment(env: Mapping[str, str] | None) -> dict[str, str]:
     """Keep run configuration, but never use workspace executable search paths."""
-    result = dict(env if env is not None else os.environ)
+    result = scrub_agent_environment(env if env is not None else os.environ)
     # storage-anchor-ok: launch search inherits the host authority, not workspace env.
     host_path = os.environ.get("PATH", os.defpath)  # storage-anchor-ok
     result["PATH"] = os.pathsep.join(

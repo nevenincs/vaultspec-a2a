@@ -6,6 +6,7 @@ responses and actor credentials remain with their existing owners.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -14,11 +15,13 @@ import tempfile
 from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+from weakref import WeakValueDictionary
 
 import aiosqlite
 
 from ..desktop._filesystem_authority import path_is_link_like
 from ._ids import derive_idempotency_key
+from ._journal_index import JournalIndex, closed_marker_name, journal_name
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -38,6 +41,12 @@ _LIFECYCLE_SCHEMA = (
     "CREATE TABLE IF NOT EXISTS lifecycle ("
     "id INTEGER PRIMARY KEY CHECK (id = 1), refs TEXT NOT NULL)"
 )
+
+_JOURNAL_LOCKS: WeakValueDictionary[Path, asyncio.Lock] = WeakValueDictionary()
+
+
+def _journal_lock(path: Path) -> asyncio.Lock:
+    return _JOURNAL_LOCKS.setdefault(Path(os.path.abspath(path)), asyncio.Lock())
 
 
 def private_tool_call_journal_path(run_id: str, call_scope: str) -> Path:
@@ -128,8 +137,7 @@ def tool_call_journal_path(run_id: str, call_scope: str) -> Path:
 
 
 def _closed_run_marker(directory: Path, run_id: str) -> Path:
-    identity = derive_idempotency_key(json.dumps([run_id]))
-    return directory / (identity.removeprefix("idk:") + ".closed")
+    return directory / closed_marker_name(run_id)
 
 
 def tool_call_journal_directories() -> tuple[Path, ...]:
@@ -152,7 +160,7 @@ async def retire_run_tool_calls(run_id: str, *, directory: Path | None = None) -
         (directory,) if directory is not None else tool_call_journal_directories()
     )
     for directory in directories:
-        if not directory.exists():
+        if not os.path.lexists(directory):
             continue
         if path_is_link_like(directory) or not directory.is_dir():
             raise ValueError("authoring journal directory is not a real directory")
@@ -173,37 +181,16 @@ async def retire_run_tool_calls(run_id: str, *, directory: Path | None = None) -
                 finally:
                     os.close(directory_fd)
         failures: list[Exception] = []
-        for path in directory.glob("*.db"):
-            if (
-                path_is_link_like(path)
-                or not path.is_file()
-                or path.stat().st_nlink != 1
-            ):
-                continue
+        index = JournalIndex(directory)
+        for scope in await index.scopes(run_id):
+            path = directory / journal_name(run_id, scope)
             try:
-                async with aiosqlite.connect(
-                    path.as_uri() + "?mode=ro", uri=True
-                ) as db:
-                    async with db.execute(
-                        "SELECT 1 FROM sqlite_master WHERE name = 'owner'"
-                    ) as cursor:
-                        owner_table = await cursor.fetchone()
-                    if owner_table is None:
-                        continue
-                    async with db.execute(
-                        "SELECT run_id, scope FROM owner WHERE id = 1"
-                    ) as cursor:
-                        owner = await cursor.fetchone()
-                if owner is None or owner[0] != run_id:
-                    continue
-                identity = derive_idempotency_key(json.dumps([run_id, owner[1]]))
-                if path.name != identity.removeprefix("idk:") + ".db":
-                    raise ValueError("authoring journal filename ownership mismatch")
-                await ToolCallJournal(path, run_id, owner[1]).retire()
+                await ToolCallJournal(path, run_id, scope).retire(indexed=True)
             except (OSError, ValueError, sqlite3.Error) as exc:
                 failures.append(exc)
         if failures:
             raise failures[0]
+        await index.forget(run_id)
 
 
 class ToolCallJournal:
@@ -215,7 +202,20 @@ class ToolCallJournal:
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncGenerator[aiosqlite.Connection]:
+        # Close admission before waiting for an existing transaction. Retirement
+        # uses this same lock, so Windows never replaces our own open SQLite file.
+        if os.path.lexists(_closed_run_marker(self.path.parent, self._owner[0])):
+            raise ValueError("authoring run has been retired; replay is closed")
+        async with _journal_lock(self.path), self._locked_transaction() as db:
+            yield db
+
+    @asynccontextmanager
+    async def _locked_transaction(self) -> AsyncGenerator[aiosqlite.Connection]:
         marker = _closed_run_marker(self.path.parent, self._owner[0])
+        if os.path.lexists(marker):
+            raise ValueError("authoring run has been retired; replay is closed")
+        if self.path.name == journal_name(*self._owner):
+            await JournalIndex(self.path.parent).register(*self._owner)
         if os.path.lexists(marker):
             raise ValueError("authoring run has been retired; replay is closed")
         async with aiosqlite.connect(self.path) as db:
@@ -239,22 +239,34 @@ class ToolCallJournal:
                 raise ValueError("authoring run has been retired; replay is closed")
             await db.commit()
 
-    async def retire(self) -> None:
+    async def retire(self, *, indexed: bool = False) -> None:
+        async with _journal_lock(self.path):
+            await self._retire_closed(indexed=indexed)
+
+    async def _retire_closed(self, *, indexed: bool) -> None:
         if not os.path.lexists(_closed_run_marker(self.path.parent, self._owner[0])):
             raise ValueError("authoring run must be closed before journal retirement")
-        if (
-            path_is_link_like(self.path)
-            or not self.path.is_file()
-            or self.path.stat().st_nlink != 1
-        ):
-            raise ValueError("authoring journal must be an unlinked regular file")
-        async with (
-            aiosqlite.connect(self.path.as_uri() + "?mode=ro", uri=True) as db,
-            db.execute("SELECT version, run_id, scope FROM owner") as cursor,
-        ):
-            owner = await cursor.fetchone()
-        if owner not in ((1, *self._owner), (2, *self._owner)):
-            raise ValueError("tool call journal version or ownership mismatch")
+        if indexed:
+            if self.path.name != journal_name(*self._owner):
+                raise ValueError("authoring journal filename ownership mismatch")
+            if os.path.lexists(self.path) and not (
+                path_is_link_like(self.path) or self.path.is_file()
+            ):
+                raise ValueError("authoring journal entry is not a file")
+        else:
+            if (
+                path_is_link_like(self.path)
+                or not self.path.is_file()
+                or self.path.stat().st_nlink != 1
+            ):
+                raise ValueError("authoring journal must be an unlinked regular file")
+            async with (
+                aiosqlite.connect(self.path.as_uri() + "?mode=ro", uri=True) as db,
+                db.execute("SELECT version, run_id, scope FROM owner") as cursor,
+            ):
+                owner = await cursor.fetchone()
+            if owner not in ((1, *self._owner), (2, *self._owner)):
+                raise ValueError("tool call journal version or ownership mismatch")
 
         # Older isolated bridges created group-readable files that the service
         # cannot write. After closing replay, replace the owned file atomically
@@ -287,6 +299,15 @@ class ToolCallJournal:
                 if opened.st_ino != named.st_ino or opened.st_dev != named.st_dev:
                     raise ValueError("authoring retirement file identity changed")
             os.replace(temporary, self.path)
+            # A hot rollback journal can otherwise restore the old owner/calls
+            # over the new closed header. These names belong to this same
+            # closed database; unlink entries without following their targets.
+            for suffix in ("-journal", "-wal", "-shm"):
+                sidecar = self.path.with_name(self.path.name + suffix)
+                if os.path.lexists(sidecar):
+                    if not (path_is_link_like(sidecar) or sidecar.is_file()):
+                        raise ValueError("authoring journal sidecar is not a file")
+                    sidecar.unlink()
             if os.name == "posix":
                 directory_fd = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
                 try:

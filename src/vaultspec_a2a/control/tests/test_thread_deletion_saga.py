@@ -12,6 +12,7 @@ assert on the rows and checkpoints that survive.
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -198,8 +199,9 @@ async def test_authoring_retirement_failure_retries_without_losing_the_saga(
             return {}, "idk:retained"
 
         await journal.prepare("original-call", "original-input", build)
-        misplaced = path.with_name("wrong-owner-name.db")
-        path.rename(misplaced)
+        contents = path.read_bytes()
+        path.unlink()
+        path.mkdir()
         async with session_factory() as session:
             await _create_terminal_thread(session, run_id)
             await session.commit()
@@ -213,8 +215,9 @@ async def test_authoring_retirement_failure_retries_without_losing_the_saga(
             assert saga is not None and saga.claimed_at is None
         with pytest.raises(ValueError, match="retired"):
             await journal.prepare("original-call", "original-input", build)
-        assert not path.exists()
-        misplaced.rename(path)
+        assert path.is_dir()
+        path.rmdir()
+        path.write_bytes(contents)
         async with session_factory() as session:
             retry = await delete_thread_service(session, run_id)
         assert retry.deleted and not retry.cleanup_incomplete
@@ -222,6 +225,45 @@ async def test_authoring_retirement_failure_retries_without_losing_the_saga(
             await ToolCallJournal(path, run_id, "writer").prepare(
                 "original-call", "original-input", build
             )
+
+
+@pytest.mark.asyncio
+async def test_delete_reclaims_corrupt_owned_replay_without_cross_run_poisoning(
+    session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    shared = workspace / ".vaultspec-authoring-calls"
+    shared.mkdir(parents=True)
+    foreign = shared / "foreign-corrupt.db"
+    foreign.write_bytes(b"unrelated corrupt shared data")
+    with settings_override(a2a_home=tmp_path / "state", workspace_root=workspace):
+        run_id = "t-corrupt-authoring"
+        path = tool_call_journal_path(run_id, "writer")
+        journal = ToolCallJournal(path, run_id, "writer")
+
+        async def build(
+            refs: dict[str, str | None],
+        ) -> tuple[dict[str, str | None], str]:
+            return {}, "idk:original"
+
+        await journal.prepare("original-call", "original-input", build)
+        path.write_bytes(b"corrupt owned database requiring automatic reclamation")
+        async with session_factory() as session:
+            await _create_terminal_thread(session, run_id)
+            await session.commit()
+        async with session_factory() as session:
+            result = await delete_thread_service(session, run_id)
+        assert result.deleted and not result.cleanup_incomplete
+        assert result.abandoned_kinds == ()
+        assert foreign.read_bytes() == b"unrelated corrupt shared data"
+        with sqlite3.connect(path) as db:
+            assert db.execute("SELECT version FROM owner").fetchone() == (2,)
+            assert db.execute("SELECT count(*) FROM calls").fetchone() == (0,)
+        async with session_factory() as session:
+            assert await get_thread(session, run_id) is None
+            assert await session.get(ThreadDeletionSagaModel, run_id) is None
+        with pytest.raises(ValueError, match="retired"):
+            await journal.prepare("original-call", "original-input", build)
 
 
 @pytest.mark.asyncio

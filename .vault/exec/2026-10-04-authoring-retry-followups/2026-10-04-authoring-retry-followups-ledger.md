@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:4ef616fa2f648dd77f05c71a9476b2ea1bc51fb9013d5fa1f1980ea80a9178e0'
+body_hash: 'sha256:09dacb7eda2d643047f1e399d38d3d280bd6507410c52a28d984935585d396b8'
 related:
   - "[[2026-10-04-authoring-retry-followups-plan]]"
 ---
@@ -73,6 +73,24 @@ related:
 - `S02` `verify:` `isolated production builder launcher private refresh Linux proof` -> `pass`
 - `S02` `verify:` `stable retry envelopes through relay rotation and restart` -> `pass`
 - `S02` `verify:` `final integrated implementation review and classified audit queue update` -> `pass`
+- `S05` `A` `src/vaultspec_a2a/authoring/_journal_index.py`
+- `S05` `M` `src/vaultspec_a2a/authoring/_tool_calls.py`
+- `S05` `M` `src/vaultspec_a2a/authoring/tests/test_tool_call_retirement.py`
+- `S05` `M` `src/vaultspec_a2a/authoring/tests/test_authoring_relay.py`
+- `S05` `M` `src/vaultspec_a2a/control/cleanup/executor.py`
+- `S05` `M` `src/vaultspec_a2a/control/tests/test_thread_deletion_saga.py`
+- `S05` `A` `.vault/adr/2026-10-04-authoring-retry-followups-run-index-adr.md`
+- `S05` `M` `.vault/adr/2026-10-04-authoring-retry-followups-journal-retirement-adr.md`
+- `S05` `M` `.vault/plan/2026-10-04-authoring-retry-followups-plan.md`
+- `S05` `M` `.vault/index/authoring-retry-followups.index.md`
+- `S05` `M` `.vault/audit/2026-10-04-a2a-edge-conformance-authoring-retry-audit.md`
+- `S05` `verify:` `uv run --no-sync pytest authoring/tests protocols/mcp/tests providers/tests/test_acp_authoring.py worker/tests/test_authoring_binding.py control/tests/test_thread_deletion_saga.py (344 passed, 24 default service deselections)` -> `pass`
+- `S05` `verify:` `uv run --no-sync pytest final affected journal relay dispatch deletion cleanup and Codex regression scope (177 passed, four unrelated service deselections)` -> `pass`
+- `S05` `verify:` `uv run --no-sync pytest test_tool_call_retirement.py -k processes_racing (four real OS processes)` -> `pass`
+- `S05` `verify:` `docker run vaultspec-worker-s06 retained linux_authoring_indexed_retirement.py (separate UID corruption and link proof)` -> `pass`
+- `S05` `verify:` `uv run --no-sync ruff check and ruff format --check affected ten Python files` -> `pass`
+- `S05` `verify:` `uv run --no-sync ty check src dev docs scripts packaging` -> `pass`
+- `S05` `by:` `vaultspec-standard-executor`
 
 ## Notes
 

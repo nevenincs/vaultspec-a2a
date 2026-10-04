@@ -140,7 +140,7 @@ async def invoke(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "scenario", ["lost_response", "rotation", "conflict", "retired"]
+    "scenario", ["lost_response", "rotation", "conflict", "retired", "corrupt_retired"]
 )
 async def test_parent_replay_and_refresh_survive_child_restart(
     tmp_path: Path, secure_engine_dir: Path, scenario: str
@@ -176,18 +176,21 @@ async def test_parent_replay_and_refresh_survive_child_restart(
                 ).exists()
                 if scenario == "conflict":
                     assert await invoke(params, log=log, operation="append")
-                if scenario == "retired":
+                retired = scenario in {"retired", "corrupt_retired"}
+                if scenario == "corrupt_retired":
+                    path.write_bytes(b"corrupt owned SQLite payload")
+                if retired:
                     await retire_run_tool_calls("relay-run")
                 # New parent dispatcher and new actual MCP child read the same journal.
                 app.state.authoring_relay = AuthoringRelay(tokens, catalogs)
-                assert await invoke(params, log=log) is (scenario == "retired")
+                assert await invoke(params, log=log) is retired
             if scenario == "rotation":
                 assert len(rotation.execute) == 3
                 assert rotation.execute[0] == rotation.execute[1] == rotation.execute[2]
                 assert rotation.actors == [_ACTOR] * 3
             else:
                 bodies = _execute_bodies(lost)
-                assert len(bodies) == (1 if scenario == "retired" else 2)
+                assert len(bodies) == (1 if retired else 2)
                 if len(bodies) == 2:
                     assert bodies[0] == bodies[1]
     finally:

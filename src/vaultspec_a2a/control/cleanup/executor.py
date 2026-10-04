@@ -21,6 +21,7 @@ Two properties matter here and are enforced by construction:
 from __future__ import annotations
 
 import logging
+import os
 import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -143,7 +144,7 @@ def build_cleanup_manifest(
             )
         )
     for index, directory in enumerate(tool_call_journal_directories()):
-        if directory.exists():
+        if os.path.lexists(directory):
             # File-backed replay state uses the existing artifact cleanup kind;
             # its key selects compaction rather than a workspace-file unlink.
             items.append(

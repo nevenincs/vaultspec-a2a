@@ -62,6 +62,7 @@ from ..database.checkpoints import Checkpointer, open_checkpointer
 from ..database.reconciliation import reconcile_threads_on_startup
 from ..database.run_event_retention import sweep_replay_log_periodically
 from ..domain_config import domain_config
+from ..ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
 from ..lifecycle.discovery import (
     HEARTBEAT_REFRESH_SECONDS,
     another_resident_is_live,
@@ -85,7 +86,6 @@ from ..utils.asyncio_compat import configure_asyncio_runtime
 from ..utils.ipc_auth import BearerVerdict
 from ._utils import trace_headers
 from .auth import verify_attach_bearer
-from .body_limit import BoundedV1WriteBodyMiddleware
 from .internal import internal_router
 from .routes import register_routes
 from .schemas.gateway_readiness import LivenessResponse
@@ -925,7 +925,7 @@ def create_app(
         # mint the worker IPC secret. Fails closed if a dashboard file is absent.
         _load_desktop_credentials(app)
 
-    app.add_middleware(cast("Any", BoundedV1WriteBodyMiddleware))
+    app.add_middleware(cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit)
     app.add_middleware(cast("Any", TelemetryMiddleware))
 
     register_routes(app)

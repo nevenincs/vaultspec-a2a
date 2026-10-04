@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:db2296aba3962eef38f593de9459b0f0cca7fa7c5d6ee5c604ef89bba1cd4428'
+body_hash: 'sha256:bde660e1cbf911aa9f51c93edd44f3bf6511280a357c5ad980c2e4f047711789'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-07-19-observability-lanes-adr]]"
@@ -307,3 +307,14 @@ is reported as implemented. Scope and gate evidence above distinguish the
 original failed full invocation from the passing affected reruns. No additional
 full run is required to repeat unchanged passing cases under the repository's
 proportionate evidence-reuse rule.
+### final-concurrent-journal-regularity | low | resolved: reject nonregular existing journals
+
+Type: concurrent validation hardening. Status: resolved and reviewed. After the
+84-file integration commit 3f4a8f6a, the owning retirement implementation added
+an explicit is_file guard alongside its existing link and link-count checks in
+the isolated shared-journal creation branch. The refusal also suppresses the
+underlying FileExistsError context. This retains valid regular journal behavior
+and narrows invalid objects, with no provider admission change. Focused Ruff,
+format and strict Basedpyright pass; all three existing retirement tests pass.
+The user-authorized all-changes commit follow-through includes this final edit.
+The ACP manifest and lock are both confirmed at 0.85.1 after cede7801.

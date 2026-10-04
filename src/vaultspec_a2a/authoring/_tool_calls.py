@@ -10,6 +10,7 @@ import json
 import os
 import sqlite3
 import stat
+import tempfile
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, cast
 
@@ -64,8 +65,14 @@ def tool_call_journal_path(run_id: str, call_scope: str) -> Path:
         try:
             descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o660)
         except FileExistsError:
-            if path_is_link_like(path) or path.stat().st_nlink != 1:
-                raise ValueError("authoring journal must be an unlinked regular file")
+            if (
+                path_is_link_like(path)
+                or not path.is_file()
+                or path.stat().st_nlink != 1
+            ):
+                raise ValueError(
+                    "authoring journal must be an unlinked regular file"
+                ) from None
         else:
             try:
                 os.fchmod(descriptor, 0o660)
@@ -203,13 +210,48 @@ class ToolCallJournal:
     async def retire(self) -> None:
         if not os.path.lexists(_closed_run_marker(self.path.parent, self._owner[0])):
             raise ValueError("authoring run must be closed before journal retirement")
-        async with self._transaction(retiring=True) as db:
-            await db.execute("DELETE FROM calls")
-            await db.execute("DELETE FROM lifecycle")
-            # Earlier bridge binaries refuse an unknown owner version too.
-            await db.execute("UPDATE owner SET version = 2 WHERE id = 1")
-        async with aiosqlite.connect(self.path) as db:
-            await db.execute("VACUUM")
+        if (
+            path_is_link_like(self.path)
+            or not self.path.is_file()
+            or self.path.stat().st_nlink != 1
+        ):
+            raise ValueError("authoring journal must be an unlinked regular file")
+        async with (
+            aiosqlite.connect(self.path.as_uri() + "?mode=ro", uri=True) as db,
+            db.execute("SELECT version, run_id, scope FROM owner") as cursor,
+        ):
+            owner = await cursor.fetchone()
+        if owner not in ((1, *self._owner), (2, *self._owner)):
+            raise ValueError("tool call journal version or ownership mismatch")
+
+        # Older isolated bridges created group-readable files that the service
+        # cannot write. After closing replay, replace the owned file atomically
+        # with its empty closed header instead of changing that file's owner.
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".retiring-", suffix=".db", dir=self.path.parent
+        )
+        from pathlib import Path
+
+        temporary = Path(temporary_name)
+        try:
+            os.close(descriptor)
+            closed = ToolCallJournal(temporary, *self._owner)
+            async with closed._transaction(retiring=True) as db:
+                # Earlier bridge binaries refuse an unknown owner version too.
+                await db.execute("UPDATE owner SET version = 2 WHERE id = 1")
+            with temporary.open("rb") as file:
+                os.fsync(file.fileno())
+            if os.name == "posix":
+                temporary.chmod(0o660)
+            os.replace(temporary, self.path)
+            if os.name == "posix":
+                directory_fd = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     async def prepare(
         self,

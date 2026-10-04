@@ -129,6 +129,14 @@ beneath the home:
    * - ``workspaces/``
      - Desktop profile only: the managed agent workspaces.
 
+**Desktop execution.** An armed desktop profile accepts attachment and queries
+within its managed ``workspaces/`` tree, but new run start, prepare and commit
+requests return HTTP 503 until a verified OS isolation backend is available.
+Authenticated readiness reports ``run_admission = blocked`` with that reason.
+Native provider, terminal and MCP launches also refuse. Existing run queries,
+cancellation and lifecycle operations remain available. Development and Compose
+retain their existing execution behavior.
+
 **Relative paths.** Every path setting accepts an absolute path or one relative
 to the project root - never to the working directory, so two processes of one
 project open the same files wherever each was launched. The armed desktop

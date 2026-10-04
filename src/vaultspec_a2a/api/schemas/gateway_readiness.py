@@ -78,7 +78,8 @@ class RunAdmission(StrEnum):
     ``deferred`` means gateway-ready but not yet execution-ready - the worker is
     cold or starting and will start on demand. It remains informational on the
     readiness surface, while staged ``prepare`` admission refuses it fail-closed.
-    ``blocked`` means a hard gateway dependency (the database) is unavailable.
+    ``blocked`` means a hard dependency or the profile's required native
+    execution isolation is unavailable. Attachment can remain gateway-ready.
     """
 
     READY = "ready"
@@ -103,8 +104,8 @@ class DesktopReadiness(BaseModel):
     Carries process and product identity alongside the five separate bounded
     readiness facts. The facts are never collapsed into a single boolean: a cold,
     startable worker leaves ``gateway_readiness`` ``ready`` while ``run_admission``
-    stays ``deferred``, so gateway-readiness and execution-readiness remain
-    distinct. Served only to an attach-authenticated caller.
+    stays ``deferred`` or ``blocked``, so attachment and execution readiness
+    remain distinct. Served only to an attach-authenticated caller.
     """
 
     api_version: Literal["v1"] = API_VERSION

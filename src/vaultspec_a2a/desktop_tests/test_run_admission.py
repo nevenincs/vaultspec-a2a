@@ -1,7 +1,7 @@
-"""Certify two-stage run admission against a real armed desktop gateway.
+"""Certify two-stage run admission with the unarmed in-process test lane.
 
-A real child interpreter boots the production gateway armed with the desktop
-profile over a genuinely migrated app home, with auto-spawn enabled so the
+A real child interpreter boots the production gateway over a genuinely migrated
+SQLite state home, with auto-spawn enabled so the
 gateway owns and spawns its own worker. The parent then proves, over real
 loopback sockets and HTTP, the run-admission invariants:
 
@@ -22,6 +22,11 @@ The valid database is seated by the real ``migrate`` entrypoint in a
 separate process; the gateway is a second real process and the worker a third,
 gateway-owned one. No mock, monkeypatch, stub, skip, or expected failure is used;
 every child is reaped in a ``finally`` by killing the gateway process tree.
+
+Desktop admission refuses while its native OS isolation backend is unavailable;
+that real armed-profile contract is covered by ``test_readiness_model.py``.
+These independent broker proofs use explicit in-process lane opt-in outside
+the desktop profile and make no desktop native execution claim.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from ..control.state_layout import state_layout
 from ..testing.progress import ProgressDeadline, wait_for
 from ..tests.gateway_boot import (
     FIRST_DEMAND_TIMEOUT,
@@ -86,17 +92,33 @@ def _running_gateway(
     log_handle = log_path.open("wb")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
+        env = armed_gateway_env(
+            app_home,
+            gateway_port=gateway_port,
+            worker_port=worker_port,
+            extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true", **extra_env},
+        )
+        env.pop("VAULTSPEC_A2A_DESKTOP_APP_HOME", None)
+        layout = state_layout(app_home)
+        env.update(
+            {
+                "VAULTSPEC_A2A_HOME": str(app_home),
+                "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
+                "VAULTSPEC_A2A_DATABASE_URL": (
+                    f"sqlite+aiosqlite:///{layout.database_path.as_posix()}"
+                ),
+                "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
+                "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": (
+                    f"sqlite+aiosqlite:///{layout.checkpoint_path.as_posix()}"
+                ),
+                "VAULTSPEC_A2A_GATEWAY_TOKEN": _ATTACH,
+                "VAULTSPEC_A2A_INTERNAL_TOKEN": "broker-worker-credential-0123456789",
+            }
+        )
         return spawn_gateway(
             script=_GATEWAY,
             gateway_port=gateway_port,
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-                # Every run this module admits selects an in-process lane
-                # (see ``_catalog.py``); the gateway must serve one to select.
-                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true", **extra_env},
-            ),
+            env=env,
             log_handle=log_handle,
             new_session=True,
         )
@@ -112,10 +134,10 @@ def _running_gateway(
 
 
 @contextmanager
-def _armed_gateway(
+def _admission_gateway(
     tmp_path: Path, *, warm_first_demand: bool = True, **extra_env: str
 ) -> Generator[tuple[str, str]]:
-    """Seat and boot a real armed desktop gateway over a migrated app home.
+    """Seat and boot a real gateway over a migrated SQLite state home.
 
     *warm_first_demand* is opt-out for the one scenario whose subject IS the
     unready worker: there, a successful warm-up is not a precondition but the
@@ -314,7 +336,7 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
     # No warm-up: the subject is the first-demand race itself, so the worker
     # must still be cold when the prepares arrive. The harness's worker-ready
     # and first-demand budgets already absorb a slow cold start.
-    with _armed_gateway(
+    with _admission_gateway(
         tmp_path, warm_first_demand=False, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2"
     ) as (base, auth):
         # --- Concurrent first demand: hard reservation bound, one worker. ---
@@ -404,7 +426,7 @@ def test_reservation_times_out_and_expired_commit_creates_no_run(
     configured one and not the product's.
     """
     ttl_s = 20.0
-    with _armed_gateway(
+    with _admission_gateway(
         tmp_path,
         VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2",
         VAULTSPEC_A2A_ADMISSION_RESERVATION_TTL_SECONDS=f"{ttl_s:g}",
@@ -542,7 +564,7 @@ def test_exact_commit_replay_role_binding_and_release_are_linearized(
     tmp_path: Path,
 ) -> None:
     """Exact replays converge while mismatches and release stay atomic."""
-    with _armed_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3") as (
+    with _admission_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3") as (
         base,
         auth,
     ):
@@ -552,7 +574,7 @@ def test_exact_commit_replay_role_binding_and_release_are_linearized(
 
 def test_release_commit_race_is_linearized(tmp_path: Path) -> None:
     """The release/commit race starts with a fresh worker and reservation."""
-    with _armed_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3") as (
+    with _admission_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3") as (
         base,
         auth,
     ):
@@ -563,7 +585,7 @@ def test_prepare_refuses_when_real_worker_is_not_execution_ready(
     tmp_path: Path,
 ) -> None:
     """A cold externally managed worker yields no reservation or durable run."""
-    with _armed_gateway(
+    with _admission_gateway(
         tmp_path, warm_first_demand=False, VAULTSPEC_A2A_AUTO_SPAWN_WORKER="false"
     ) as (
         base,
@@ -581,7 +603,7 @@ def test_pre_durability_commit_failure_restores_reservation_for_release(
     """A real post-authorization conflict restores the prepared authority."""
     owner_run_id = "run-nickname-owner"
     failed_run_id = "run-pre-durability-failure"
-    with _armed_gateway(tmp_path) as (base, auth):
+    with _admission_gateway(tmp_path) as (base, auth):
         metadata = {
             "workspace_root": desktop_workspace(base),
             "nickname": "post-authorization-conflict",
@@ -670,7 +692,7 @@ def test_v1_write_body_is_rejected_before_unbounded_json_parsing(
     tmp_path: Path,
 ) -> None:
     """The live production gateway caps authenticated v1 write-body memory."""
-    with _armed_gateway(tmp_path) as (base, auth):
+    with _admission_gateway(tmp_path) as (base, auth):
         response = httpx.post(
             f"{base}/v1/runs",
             headers={"Authorization": auth, "Content-Type": "application/json"},

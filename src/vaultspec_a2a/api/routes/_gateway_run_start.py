@@ -21,6 +21,7 @@ from ...context.metadata import ThreadMetadata
 from ...control._worker_health import worker_liveness
 from ...control.admission import AdmissionBroker
 from ...control.config import settings
+from ...control.provider_execution import native_execution_refusal_reason
 from ...control.run_start_policy import (
     evaluate_execution_eligibility,
     evaluate_run_start_eligibility,
@@ -100,6 +101,14 @@ from .gateway import (
 __all__ = ["_RunLeaseBinding"]
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
+
+
+def _require_profile_execution() -> None:
+    """Refuse unavailable execution before worker startup or run admission."""
+    reason = native_execution_refusal_reason()
+    if reason is not None:
+        raise HTTPException(status_code=503, detail=reason)
+
 
 # ---------------------------------------------------------------------------
 # run-start
@@ -242,6 +251,8 @@ async def _prepare_run_admission(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    _require_profile_execution()
 
     logger.info("commit step: load_preset")
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
@@ -544,6 +555,7 @@ async def _run_prepare(
     """
     logger.info("commit step: workspace_root")
     ws_root = _prepare_workspace_root(body)
+    _require_profile_execution()
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     frozen = await _validate_and_freeze_selection_or_refuse(
         request.app, body, team_config, ws_root
@@ -664,6 +676,7 @@ async def _prepare_commit_eligibility(
 ) -> tuple[RunStartRequest, str]:
     broker = admission_broker(request.app)
     ws_root = _prepare_workspace_root(body)
+    _require_profile_execution()
     team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     frozen = await _validate_and_freeze_selection_or_refuse(
         request.app, body, team_config, ws_root

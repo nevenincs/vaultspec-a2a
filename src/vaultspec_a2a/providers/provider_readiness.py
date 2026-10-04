@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..control.config import settings
+from ..control.provider_execution import native_execution_refusal_reason
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ._factory_commands import (
@@ -77,11 +78,15 @@ def _kimi_readiness() -> ProviderReadiness:
 def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
     """Report whether ``provider`` is runnable without instantiating anything.
 
-    Presence/resolvability only (never quota headroom): a configured credential
-    and, for the subprocess providers, a resolvable command. Credentials and
+    Profile execution authority, then presence/resolvability (never quota
+    headroom): a configured credential and a resolvable command. Credentials and
     commands are workspace-independent, so no workspace is taken. The reason
     string is safe - it names what is missing, never a secret value.
     """
+    if provider in (Provider.CLAUDE, Provider.CODEX, Provider.ZAI, Provider.KIMI):
+        reason = native_execution_refusal_reason()
+        if reason is not None:
+            return ProviderReadiness(provider=provider, ready=False, reason=reason)
     if provider in (Provider.MOCK, Provider.DETERMINISTIC):
         # Neither provider needs a credential or launch command. This readiness
         # probe says construction can proceed, not that MOCK's external tape

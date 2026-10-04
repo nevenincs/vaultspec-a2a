@@ -39,6 +39,7 @@ from ..database import inspect_sqlite_database, verify_wal_mode
 from ..utils.coercion import coerce_object_mapping
 from ._worker_health import WorkerState, probe_worker_health, worker_liveness
 from .config import settings
+from .provider_execution import native_execution_refusal_reason
 from .worker_management import LazyWorkerSpawner
 from .worker_status import WorkerConnectionStatus
 
@@ -568,6 +569,7 @@ def _desktop_run_admission(
     if (
         gateway_readiness is not GatewayReadiness.READY
         or recovery_owner_error is not None
+        or native_execution_refusal_reason() is not None
     ):
         return RunAdmission.BLOCKED
     if (
@@ -649,7 +651,10 @@ def assemble_desktop_readiness(
         provider_eligibility = ProviderEligibility.ELIGIBLE
     else:
         provider_eligibility = ProviderEligibility.INELIGIBLE
-        reasons.append("no subprocess provider is installed and credentialed here")
+        reasons.append(
+            native_execution_refusal_reason()
+            or "no subprocess provider is installed and credentialed here"
+        )
 
     # --- Run admission: execution readiness, distinct from gateway readiness. ---
     run_admission = _desktop_run_admission(

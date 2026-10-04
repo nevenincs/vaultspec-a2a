@@ -7,6 +7,8 @@ import subprocess
 from functools import cache
 from pathlib import Path
 
+from ..control.provider_execution import native_execution_refusal_reason
+
 __all__ = [
     "BinaryVersionProbeError",
     "next_minor_version",
@@ -88,6 +90,9 @@ def probe_binary_version(executable: Path | str) -> str:
     its sidecar and current target, since the EXE itself stays unchanged across
     package updates. A changed identity is probed again.
     """
+    reason = native_execution_refusal_reason()
+    if reason is not None:
+        raise BinaryVersionProbeError(reason)
     path = Path(executable)
     if not path.is_absolute():
         raise BinaryVersionProbeError("provider binary path is not absolute")

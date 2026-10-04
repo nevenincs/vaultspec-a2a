@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 from ..control.config import settings
+from ..control.provider_execution import native_execution_refusal_reason
 from ..utils import kill_pid_tree_async
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
@@ -178,7 +179,10 @@ def _metadata_extra(metadata: Mapping[str, object] | None) -> dict[str, object]:
 def provider_execution_command(
     command: list[str], *, supervise: bool = False
 ) -> list[str]:
-    """Wrap a POSIX provider/tool command in the configured identity boundary."""
+    """Admit a native command, then apply the POSIX identity boundary."""
+    reason = native_execution_refusal_reason()
+    if reason is not None:
+        raise ProcessContainmentError(reason)
     launcher = settings.provider_identity_launcher
     uid = settings.provider_agent_uid
     gid = settings.provider_agent_gid
@@ -276,6 +280,8 @@ async def _spawn_acp_process(
     # the returned Process for the shared reaper to reach.
     use_exec = options["use_exec"]
     metadata = options["metadata"]
+    # Refuse native execution before acquiring even a lifetime containment.
+    command = provider_execution_command(command)
     containment = options.get("containment") or ProcessContainment.create()
     spawn_mode = "exec" if sys.platform != "win32" or use_exec else "shell"
     log_extra = _metadata_extra(metadata)
@@ -295,7 +301,6 @@ async def _spawn_acp_process(
     # branches: releasing in each branch's own handler is the split duty that let
     # the equivalent leak survive elsewhere in this codebase.
     try:
-        command = provider_execution_command(command)
         env = _confined_search_env(env)
         if sys.platform == "win32":
             if use_exec:

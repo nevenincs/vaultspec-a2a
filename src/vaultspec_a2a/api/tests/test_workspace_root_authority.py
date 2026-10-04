@@ -318,7 +318,8 @@ async def test_armed_desktop_confines_queries_and_run_admission(
                     "selection": fields["selection"],
                 },
             )
-            assert admitted.status_code == 201, admitted.text
+            assert admitted.status_code == 503, admitted.text
+            assert "OS isolation backend" in admitted.json()["detail"]
 
 
 @pytest.mark.asyncio(loop_scope="function")

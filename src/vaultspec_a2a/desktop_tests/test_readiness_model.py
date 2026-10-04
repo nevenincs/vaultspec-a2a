@@ -6,8 +6,8 @@ schema, seats the database engine, and creates the lazy worker spawner without
 starting a worker. The parent then proves, over a real loopback socket, that the
 unauthenticated liveness boundary discloses only the minimal alive signal (asserted
 byte-for-byte), that the readiness facts are reachable only through the attach
-credential, and that a cold, startable worker reads as gateway-ready yet not
-execution-ready - the cold rung of the cold-to-execution ladder - on both the
+credential, and that a cold worker reads as gateway-ready with execution blocked
+until an OS isolation backend is verified, on both the
 authenticated liveness surface and the service-state verb.
 
 The valid database is seated by the real ``migrate`` entrypoint in a
@@ -25,6 +25,7 @@ import httpx
 from ..control.health import SERVICE_WORKER_PROBE_TIMEOUT_SECONDS
 from ..tests.gateway_boot import (
     armed_gateway_env,
+    desktop_workspace,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -111,12 +112,13 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     assert isinstance(body["generation"], str) and body["generation"]
     assert body["profile"] == "desktop"
     assert body["liveness"] == "alive"
-    assert body["provider_eligibility"] in {"eligible", "ineligible"}
-    # A valid database with a cold, startable worker: gateway-ready, worker
-    # cold, admission deferred - gateway-ready but not execution-ready.
+    assert body["provider_eligibility"] == "ineligible"
+    assert body["eligible_providers"] == []
+    # Attachment is ready, but native execution lacks an OS isolation backend.
     assert body["gateway_readiness"] == "ready"
     assert body["worker_state"] == "cold"
-    assert body["run_admission"] == "deferred"
+    assert body["run_admission"] == "blocked"
+    assert any("OS isolation backend" in reason for reason in body["reasons"])
 
     # --- The service-state verb serves the same readiness projection. ---
     # The production gateway intentionally boots with no worker. On Windows an
@@ -151,7 +153,41 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     assert readiness["gateway_pid"] == gateway_pid
     assert readiness["gateway_readiness"] == "ready"
     assert readiness["worker_state"] == "cold"
-    assert readiness["run_admission"] == "deferred"
+    assert readiness["run_admission"] == "blocked"
+
+    # Each new-run entry refuses before worker startup or capacity/token binding.
+    workspace = desktop_workspace(str(client.base_url))
+    selection = {
+        "schema_version": 1,
+        "provider_id": "codex",
+        "execution_mode": "app_server",
+        "catalog_revision": "unvalidated",
+        "entry_id": "unvalidated",
+    }
+    for stage in ("start", "prepare", "commit"):
+        payload: dict[str, object] = {
+            "stage": stage,
+            "run_id": f"native-isolation-{stage}",
+            "team_preset": "mock-success-single",
+            "message": "synthetic read",
+            "metadata": {"workspace_root": workspace},
+            "selection": selection,
+        }
+        if stage == "commit":
+            payload["reservation_id"] = "unissued-reservation"
+            payload["actor_tokens"] = {
+                "tokens": {"mock-coder-success": "synthetic-actor-token"}
+            }
+        refusal = client.post("/v1/runs", headers=auth, json=payload)
+        assert refusal.status_code == 503, refusal.text
+        assert "OS isolation backend" in refusal.json()["detail"]
+        assert "synthetic-actor-token" not in refusal.text
+    runs = client.get("/v1/runs", headers=auth, params={"workspace_root": workspace})
+    assert runs.status_code == 200
+    assert runs.json()["runs"] == []
+    after = client.get("/health", headers=auth).json()
+    assert after["worker_state"] == "cold"
+    assert after["gateway_readiness"] == "ready"
 
 
 def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(

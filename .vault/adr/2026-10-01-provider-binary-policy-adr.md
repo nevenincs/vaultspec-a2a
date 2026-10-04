@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#provider-binary-policy'
 date: '2026-10-01'
-modified: '2026-10-02'
+modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:e552e38360baddf9d67aa075dead85f610fdde1a6dc49c081b4a4968aa7a4abf'
+body_hash: 'sha256:0852f1657017ebf2a419fb081a1c21159a201d0c26fa64bbe27ca54da61332fc'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -252,6 +252,9 @@ unreconstructable after a checkpoint recovery. Grounding:
   an a2a-owned session store removes the same-machine and retention objections;
   reconsider D2's ceiling rule if upstream minor releases stop carrying behaviour
   changes that invalidate a turn proof.
+
+
+Desktop native execution restriction accepted 2026-10-04: completed-turn binary proof remains necessary, but cannot grant armed desktop native execution while no OS isolation backend is implemented and verified. Desktop native commands and their version probes refuse before child acquisition independently of proof and launcher settings. Development and Compose retain this record's existing binary admission contracts. Grounding: `2026-10-04-workspace-root-authority-desktop-native-admission-adr`.
 
 ## Proposed reconciliation of existing decisions
 

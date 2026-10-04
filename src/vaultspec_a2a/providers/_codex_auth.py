@@ -10,7 +10,7 @@ operator's own copy holding a token the provider has already retired. The next
 login attempt is then refused for reusing a spent token - a logged-out operator
 as the observable symptom of a cleanup.
 
-So the copy is tracked: what was seeded is recorded beside it, and at cleanup a
+So the copy is tracked: its provenance stays in the worker, and at cleanup a
 changed credential is written back to the home it came from, atomically and under
 an inter-process lock, so two runs sharing one login cannot interleave their
 write-backs or lose one to the other.
@@ -22,13 +22,14 @@ import contextlib
 import hashlib
 import json
 import logging
-import shutil
+import os
 import tomllib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..desktop._filesystem_authority import confined_file_descriptor
 from ..utils.atomic_write import atomic_write_text
 from ..utils.file_lock import held_exclusive_lock
 
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CODEX_AUTH_FILENAME",
     "codex_credential_store_mode",
+    "forget_run_credential",
     "seed_run_credential",
     "write_back_refreshed_credential",
 ]
@@ -48,10 +50,8 @@ logger = logging.getLogger(__name__)
 
 CODEX_AUTH_FILENAME = "auth.json"
 
-# What was copied, recorded beside the copy rather than carried in memory: the
-# home outlives the call that built it, cleanup is reached from several paths,
-# and a record on disk is readable by whichever of them gets there.
-_SEED_FILENAME = ".vaultspec-codex-auth-seed.json"
+# The child may replace auth.json, but cannot choose its privileged destination.
+_MAX_RETURNED_AUTH_BYTES = 1024 * 1024
 
 # Serialises write-back across every process sharing one source login. Named
 # next to the credential it guards, because that file - not this service's own
@@ -69,11 +69,30 @@ _DEFAULT_CREDENTIAL_STORE = "auto"
 
 @dataclass(frozen=True, slots=True)
 class CodexAuthSeed:
-    """The login a run home was seeded with, as recorded when it was copied."""
+    """The worker-selected login a run home was seeded with."""
 
     source: Path
     digest: str
     last_refresh: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _SeededHome:
+    seed: CodexAuthSeed
+    root: Path
+    identity: tuple[int, int]
+
+
+_seeded_homes: dict[Path, _SeededHome] = {}
+
+
+def _home_key(home: Path) -> Path:
+    return Path(os.path.abspath(home))
+
+
+def forget_run_credential(run_home: Path) -> None:
+    """Release refresh authority once the owning run has finished cleanup."""
+    _seeded_homes.pop(_home_key(run_home), None)
 
 
 def _digest(payload: bytes) -> str:
@@ -107,7 +126,7 @@ def _refresh_stamp_text(payload: bytes) -> str | None:
     """The ``last_refresh`` string a credential carries, when it carries one."""
     try:
         document: JsonValue = json.loads(payload)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     if not isinstance(document, dict):
         return None
@@ -146,40 +165,6 @@ def _last_refresh(payload: bytes) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
-def _write_seed(run_home: Path, seed: CodexAuthSeed) -> None:
-    (run_home / _SEED_FILENAME).write_text(
-        json.dumps(
-            {
-                "source": str(seed.source),
-                "digest": seed.digest,
-                "last_refresh": seed.last_refresh,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def _read_seed(run_home: Path) -> CodexAuthSeed | None:
-    try:
-        document: JsonValue = json.loads(
-            (run_home / _SEED_FILENAME).read_text(encoding="utf-8")
-        )
-    except (OSError, ValueError):
-        return None
-    if not isinstance(document, dict):
-        return None
-    source = document.get("source")
-    digest = document.get("digest")
-    last_refresh = document.get("last_refresh")
-    if not isinstance(source, str) or not isinstance(digest, str):
-        return None
-    return CodexAuthSeed(
-        source=Path(source),
-        digest=digest,
-        last_refresh=last_refresh if isinstance(last_refresh, str) else None,
-    )
-
-
 def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None:
     """Copy the login from *base_home* into *run_home*, recording what was copied.
 
@@ -189,7 +174,8 @@ def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None
     and nothing downstream distinguishes that from a lane the operator never
     authenticated.
     """
-    source = base_home / CODEX_AUTH_FILENAME
+    forget_run_credential(run_home)
+    source = base_home.resolve() / CODEX_AUTH_FILENAME
     # Absence is the reported case; anything else that goes wrong reading the
     # credential is a broken login home, and the caller unwinds its half-built
     # run home rather than starting a run on a guess about what it holds.
@@ -206,7 +192,16 @@ def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None
         return None
     payload = source.read_bytes()
     destination = run_home / CODEX_AUTH_FILENAME
-    shutil.copy2(source, destination)
+    home = run_home.resolve(strict=True)
+    info = home.stat(follow_symlinks=False)
+    identity = (info.st_dev, info.st_ino)
+    with (
+        confined_file_descriptor(
+            home, (CODEX_AUTH_FILENAME,), write=True, expected_root_identity=identity
+        ) as descriptor,
+        os.fdopen(descriptor, "wb", closefd=False) as copied,
+    ):
+        copied.write(payload)
     # Defensive: pin the credential copy to owner-only regardless of the
     # source's mode (POSIX-effective; a no-op on Windows, where the temp tree is
     # already user-scoped).
@@ -218,7 +213,7 @@ def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None
             stamp.isoformat() if (stamp := _last_refresh(payload)) is not None else None
         ),
     )
-    _write_seed(run_home, seed)
+    _seeded_homes[_home_key(run_home)] = _SeededHome(seed, home, identity)
     return seed
 
 
@@ -254,10 +249,12 @@ def write_back_refreshed_credential(
     consequence of raising here is an unreaped process tree, while the
     consequence of a lost write-back is a login the operator can repair.
     """
-    seed = _read_seed(run_home)
-    if seed is None:
+    home = _home_key(run_home)
+    registered = _seeded_homes.get(home)
+    if registered is None:
         return False
-    refreshed = _refreshed_credential(run_home, seed)
+    seed = registered.seed
+    refreshed = _refreshed_credential(registered.root, registered)
     if refreshed is None:
         return False
     payload, text = refreshed
@@ -285,7 +282,7 @@ def write_back_refreshed_credential(
 
 
 def _refreshed_credential(
-    run_home: Path, seed: CodexAuthSeed
+    run_home: Path, registered: _SeededHome
 ) -> tuple[bytes, str] | None:
     """The credential this run should publish, as bytes and as its text.
 
@@ -294,22 +291,41 @@ def _refreshed_credential(
     holds something that is not the JSON text Codex writes a login as.
     """
     try:
-        payload = (run_home / CODEX_AUTH_FILENAME).read_bytes()
-    except OSError:
+        with (
+            confined_file_descriptor(
+                run_home,
+                (CODEX_AUTH_FILENAME,),
+                expected_root_identity=registered.identity,
+            ) as descriptor,
+            os.fdopen(descriptor, "rb", closefd=False) as returned,
+        ):
+            payload = returned.read(_MAX_RETURNED_AUTH_BYTES + 1)
+    except (OSError, ValueError):
         return None
-    if _digest(payload) == seed.digest:
+    if len(payload) > _MAX_RETURNED_AUTH_BYTES:
+        logger.error("The returned Codex credential exceeds its size limit")
+        return None
+    if _digest(payload) == registered.seed.digest:
         return None
     try:
-        return payload, payload.decode("utf-8")
+        text = payload.decode("utf-8")
     except UnicodeDecodeError:
         # Codex writes its login as JSON text. Bytes that do not decode are not a
         # refresh it made, so they are never published over the operator's login.
         logger.error(
             "The credential left in the run home is not UTF-8 text, so it was not "
             "written back to %s",
-            seed.source,
+            registered.seed.source,
         )
         return None
+    try:
+        document: JsonValue = json.loads(text)
+    except (ValueError, RecursionError):
+        document = None
+    if not isinstance(document, dict):
+        logger.error("The returned Codex credential is not a JSON object")
+        return None
+    return payload, text
 
 
 def _source_overtook_the_run(seed: CodexAuthSeed, payload: bytes) -> bool:

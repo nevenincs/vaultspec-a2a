@@ -14,6 +14,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,7 @@ from ...utils.enums import CodexWebSearchMode
 from .._codex_auth import (
     CODEX_AUTH_FILENAME,
     codex_credential_store_mode,
+    forget_run_credential,
     seed_run_credential,
     write_back_refreshed_credential,
 )
@@ -85,6 +87,157 @@ def test_a_refreshed_credential_is_written_back_on_cleanup(tmp_path: Path) -> No
 
     assert (base_home / CODEX_AUTH_FILENAME).read_bytes() == refreshed
     assert not run_home.exists()
+
+
+def test_child_seed_metadata_cannot_redirect_refresh(tmp_path: Path) -> None:
+    base_home = _base_home(tmp_path)
+    run_home = _run_home(base_home)
+    victim = tmp_path / "worker-state.json"
+    victim.write_bytes(b"private worker state")
+    (run_home / ".vaultspec-codex-auth-seed.json").write_text(
+        json.dumps({"source": str(victim), "digest": "forged", "last_refresh": None}),
+        encoding="utf-8",
+    )
+    refreshed = _refresh_in(run_home, token="rotated", after_seconds=60)
+
+    cleanup_codex_config_home(run_home)
+
+    assert victim.read_bytes() == b"private worker state"
+    assert (base_home / CODEX_AUTH_FILENAME).read_bytes() == refreshed
+
+
+def test_unseeded_home_cannot_claim_a_refresh_destination(tmp_path: Path) -> None:
+    victim = tmp_path / "worker-state.json"
+    victim.write_bytes(b"private worker state")
+    run_home = tmp_path / "unseeded"
+    run_home.mkdir()
+    _refresh_in(run_home, token="forged", after_seconds=60)
+    (run_home / ".vaultspec-codex-auth-seed.json").write_text(
+        json.dumps({"source": str(victim), "digest": "forged", "last_refresh": None}),
+        encoding="utf-8",
+    )
+
+    assert not write_back_refreshed_credential(run_home)
+    assert victim.read_bytes() == b"private worker state"
+
+
+def test_hardlinked_returned_credential_is_not_published(tmp_path: Path) -> None:
+    base_home = _base_home(tmp_path)
+    source = base_home / CODEX_AUTH_FILENAME
+    seeded = source.read_bytes()
+    run_home = _run_home(base_home)
+    shared = run_home / "shared-auth.json"
+    shared.write_bytes(_credential("foreign", refreshed=_BASE + timedelta(seconds=60)))
+    (run_home / CODEX_AUTH_FILENAME).unlink()
+    os.link(shared, run_home / CODEX_AUTH_FILENAME)
+    try:
+        assert not write_back_refreshed_credential(run_home)
+        assert source.read_bytes() == seeded
+    finally:
+        cleanup_codex_config_home(run_home)
+
+
+def test_non_json_returned_credential_is_not_published(tmp_path: Path) -> None:
+    base_home = _base_home(tmp_path)
+    source = base_home / CODEX_AUTH_FILENAME
+    seeded = source.read_bytes()
+    run_home = _run_home(base_home)
+    (run_home / CODEX_AUTH_FILENAME).write_text("arbitrary text", encoding="utf-8")
+    try:
+        assert not write_back_refreshed_credential(run_home)
+        assert source.read_bytes() == seeded
+    finally:
+        cleanup_codex_config_home(run_home)
+
+
+def test_replaced_run_directory_cannot_return_credentials(tmp_path: Path) -> None:
+    base_home = _base_home(tmp_path)
+    source = base_home / CODEX_AUTH_FILENAME
+    seeded = source.read_bytes()
+    run_home = _run_home(base_home)
+    with tempfile.TemporaryDirectory(dir=run_home.parent) as moved_root:
+        moved = Path(moved_root) / "original"
+        run_home.rename(moved)
+        run_home.mkdir()
+        _refresh_in(run_home, token="substituted", after_seconds=60)
+        try:
+            assert not write_back_refreshed_credential(run_home)
+            assert source.read_bytes() == seeded
+        finally:
+            cleanup_codex_config_home(run_home)
+
+
+def test_oversized_returned_credential_is_not_published(tmp_path: Path) -> None:
+    base_home = _base_home(tmp_path)
+    source = base_home / CODEX_AUTH_FILENAME
+    seeded = source.read_bytes()
+    run_home = _run_home(base_home)
+    (run_home / CODEX_AUTH_FILENAME).write_bytes(b" " * (1024 * 1024 + 1))
+    try:
+        assert not write_back_refreshed_credential(run_home)
+        assert source.read_bytes() == seeded
+    finally:
+        cleanup_codex_config_home(run_home)
+
+
+def test_refresh_accepts_a_home_beneath_a_directory_alias(tmp_path: Path) -> None:
+    base_home = _base_home(tmp_path)
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    if os.name == "nt":
+        completed = subprocess.run(
+            [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(alias), str(real)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert alias.is_junction(), completed.stdout
+    else:
+        alias.symlink_to(real, target_is_directory=True)
+    run_home = alias / "run"
+    run_home.mkdir()
+    try:
+        assert seed_run_credential(base_home, run_home) is not None
+        refreshed = _refresh_in(run_home, token="rotated", after_seconds=60)
+        assert write_back_refreshed_credential(run_home)
+        assert (base_home / CODEX_AUTH_FILENAME).read_bytes() == refreshed
+    finally:
+        forget_run_credential(run_home)
+        if os.name == "nt":
+            alias.rmdir()
+        else:
+            alias.unlink()
+
+
+def test_finished_retained_home_has_no_refresh_authority(tmp_path: Path) -> None:
+    from ...testing import settings_override
+
+    base_home = _base_home(tmp_path)
+    run_home = _run_home(base_home)
+    source = base_home / CODEX_AUTH_FILENAME
+    seeded = source.read_bytes()
+    try:
+        with settings_override(codex_config_home_retain=True):
+            cleanup_codex_config_home(run_home)
+        _refresh_in(run_home, token="after-cleanup", after_seconds=60)
+        assert not write_back_refreshed_credential(run_home)
+        assert source.read_bytes() == seeded
+    finally:
+        cleanup_codex_config_home(run_home)
+
+
+def test_deeply_nested_returned_json_is_not_published(tmp_path: Path) -> None:
+    base_home = _base_home(tmp_path)
+    source = base_home / CODEX_AUTH_FILENAME
+    seeded = source.read_bytes()
+    run_home = _run_home(base_home)
+    (run_home / CODEX_AUTH_FILENAME).write_text("[" * 10000 + "]" * 10000)
+    try:
+        assert not write_back_refreshed_credential(run_home)
+        assert source.read_bytes() == seeded
+    finally:
+        cleanup_codex_config_home(run_home)
 
 
 def test_bytes_that_are_not_a_login_are_never_written_back(

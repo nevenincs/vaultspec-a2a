@@ -509,7 +509,11 @@ def _confined_windows_descriptor(path: Path, *, write: bool) -> int:
 
 @contextmanager
 def _confined_windows_parent(
-    root: Path, parts: tuple[str, ...], *, create: bool
+    root: Path,
+    parts: tuple[str, ...],
+    *,
+    create: bool,
+    expected_root_identity: tuple[int, int] | None,
 ) -> Generator[Path]:
     """Pin every ancestor against replacement while opening a Windows leaf."""
     with ExitStack() as leases:
@@ -521,12 +525,18 @@ def _confined_windows_parent(
                 with suppress(FileExistsError):
                     parent.mkdir()
         leases.enter_context(directory_lease(resolve_directory_authority(parent)))
+        _assert_root_identity(root.stat(follow_symlinks=False), expected_root_identity)
         yield parent
 
 
 @contextmanager
 def _confined_posix_parent(
-    root: Path, parts: tuple[str, ...], *, create: bool, shared_gid: int | None
+    root: Path,
+    parts: tuple[str, ...],
+    *,
+    create: bool,
+    shared_gid: int | None,
+    expected_root_identity: tuple[int, int] | None,
 ) -> Generator[int]:
     """Walk directories relative to held descriptors, never following links."""
     if os.name != "posix":
@@ -535,6 +545,8 @@ def _confined_posix_parent(
     flags = search | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     current = os.open(root.anchor, flags)
     try:
+        if len(root.parts) == 1:
+            _assert_root_identity(os.fstat(current), expected_root_identity)
         for index, component in enumerate((*root.parts[1:], *parts[:-1])):
             try:
                 child = os.open(component, flags, dir_fd=current)
@@ -557,9 +569,18 @@ def _confined_posix_parent(
                     raise
             os.close(current)
             current = child
+            if index == len(root.parts) - 2:
+                _assert_root_identity(os.fstat(current), expected_root_identity)
         yield current
     finally:
         os.close(current)
+
+
+def _assert_root_identity(
+    info: os.stat_result, expected: tuple[int, int] | None
+) -> None:
+    if expected is not None and (info.st_dev, info.st_ino) != expected:
+        raise ValueError("confined file root no longer matches its owning directory")
 
 
 def _confined_posix_descriptor(
@@ -598,6 +619,7 @@ def confined_file_descriptor(
     *,
     write: bool = False,
     shared_gid: int | None = None,
+    expected_root_identity: tuple[int, int] | None = None,
 ) -> Generator[int]:
     """Lease one regular, singly linked file beneath an absolute directory.
 
@@ -614,7 +636,9 @@ def confined_file_descriptor(
         ):
             raise ValueError("workspace file cannot name a Win32 alias or data stream")
     if os.name == "nt":
-        with _confined_windows_parent(root, parts, create=write) as parent:
+        with _confined_windows_parent(
+            root, parts, create=write, expected_root_identity=expected_root_identity
+        ) as parent:
             descriptor = _confined_windows_descriptor(parent / parts[-1], write=write)
             try:
                 _confirm_confined_file(descriptor, write=write)
@@ -623,7 +647,11 @@ def confined_file_descriptor(
                 os.close(descriptor)
     else:
         with _confined_posix_parent(
-            root, parts, create=write, shared_gid=shared_gid
+            root,
+            parts,
+            create=write,
+            shared_gid=shared_gid,
+            expected_root_identity=expected_root_identity,
         ) as parent:
             descriptor = _confined_posix_descriptor(
                 parent, parts[-1], write=write, shared_gid=shared_gid

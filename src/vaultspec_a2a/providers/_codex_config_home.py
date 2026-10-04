@@ -49,7 +49,11 @@ from ..thread.errors import ConfigError
 from ..utils.enums import CodexWebSearchMode
 from ..utils.runtime_exec import is_module_invocation
 from ._acp_authoring import AUTHORING_MCP_SERVER_NAME, AUTHORING_STDIO_MODULE
-from ._codex_auth import seed_run_credential, write_back_refreshed_credential
+from ._codex_auth import (
+    forget_run_credential,
+    seed_run_credential,
+    write_back_refreshed_credential,
+)
 from ._config_home_roots import (
     sweep_orphan_homes,
     temp_home_root,
@@ -406,9 +410,7 @@ def build_codex_config_home(
     try:
         _restrict(home)
         if base_home is not None:
-            # The copy is RECORDED, not just made: Codex rotates its refresh
-            # token mid-run and writes the new one here, so cleanup has to know
-            # where this login came from to return it.
+            # The worker keeps the source; the child owns only the copied login.
             seed_run_credential(base_home, home)
         (home / "config.toml").write_text(
             render_codex_config_toml(
@@ -444,7 +446,10 @@ def cleanup_codex_config_home(home: Path | None) -> None:
     """
     if home is None:
         return
-    write_back_refreshed_credential(home)
+    try:
+        write_back_refreshed_credential(home)
+    finally:
+        forget_run_credential(home)
     if settings.codex_config_home_retain:
         logger.debug("Codex config home retained at %s by configuration", home)
         return

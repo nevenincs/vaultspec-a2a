@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:8efb797a06da7ab5759deea04acdb322d1c0fb4ce2a8fc3f586d5e81334a8cce'
+body_hash: 'sha256:5a4df800b7f0e0d087ce8c8c5cfe16c99000466c888d0bb8e97926e8db204deb'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-07-19-observability-lanes-adr]]"
@@ -336,3 +336,22 @@ role identities. Fresh Ruff lint/format and strict Basedpyright pass. All ten
 retirement/deletion cases pass against the final source, including failure retry
 and claim release. The plan keeps its remaining proof prerequisites open. This
 review and its documentation are included in the authorized commit follow-through.
+### final-descriptor-retirement-review | low | verified: descriptor-owned closed-header publication
+
+Type: concurrent implementation refinement. Status: reviewed and verified. The
+last shared-source refinement supersedes reopening the temporary SQLite path:
+it builds the empty version-2 closed header in memory, writes through the
+exclusive mkstemp descriptor, flushes it, checks the descriptor/path identity,
+and atomically replaces the old journal. POSIX closed headers use mode 0640;
+new live journals retain mode 0660. Directory scans use read-only SQLite opens,
+so legacy agent-owned readonly journals remain inspectable. Shared schema
+constants preserve the existing tables and ordinary transaction refusal.
+
+Fresh Ruff lint/format and strict Basedpyright pass for the exact changed
+module, and all ten retirement/deletion tests pass. Full vault checks and diff
+whitespace checks pass. Review finds no newly introduced functional issue in
+this refinement. The owning audit separately classifies the unresolved shared
+journal tampering boundary as medium and installation-wide scan costs and
+isolated credential refresh as low. Those remain open in their owning queue;
+this descriptor check does not establish hostile-agent integrity. Reviewed
+source and the owner's audit/ledger are included in the all-changes commit.

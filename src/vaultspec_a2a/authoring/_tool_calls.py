@@ -11,7 +11,7 @@ import os
 import sqlite3
 import stat
 import tempfile
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -22,6 +22,22 @@ from ._ids import derive_idempotency_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
+
+_OWNER_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS owner ("
+    "id INTEGER PRIMARY KEY CHECK (id = 1), "
+    "version INTEGER NOT NULL, run_id TEXT NOT NULL, scope TEXT NOT NULL)"
+)
+_CALLS_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS calls ("
+    "call_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, "
+    "owned_fields TEXT NOT NULL, key TEXT NOT NULL, "
+    "completed INTEGER NOT NULL DEFAULT 0)"
+)
+_LIFECYCLE_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS lifecycle ("
+    "id INTEGER PRIMARY KEY CHECK (id = 1), refs TEXT NOT NULL)"
+)
 
 
 def tool_call_journal_path(run_id: str, call_scope: str) -> Path:
@@ -135,7 +151,9 @@ async def retire_run_tool_calls(run_id: str, *, directory: Path | None = None) -
             ):
                 continue
             try:
-                async with aiosqlite.connect(path) as db:
+                async with aiosqlite.connect(
+                    path.as_uri() + "?mode=ro", uri=True
+                ) as db:
                     async with db.execute(
                         "SELECT 1 FROM sqlite_master WHERE name = 'owner'"
                     ) as cursor:
@@ -166,21 +184,15 @@ class ToolCallJournal:
         self._owner = (run_id, call_scope)
 
     @asynccontextmanager
-    async def _transaction(
-        self, *, retiring: bool = False
-    ) -> AsyncGenerator[aiosqlite.Connection]:
+    async def _transaction(self) -> AsyncGenerator[aiosqlite.Connection]:
         marker = _closed_run_marker(self.path.parent, self._owner[0])
-        if not retiring and os.path.lexists(marker):
+        if os.path.lexists(marker):
             raise ValueError("authoring run has been retired; replay is closed")
         async with aiosqlite.connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
-            if not retiring and os.path.lexists(marker):
+            if os.path.lexists(marker):
                 raise ValueError("authoring run has been retired; replay is closed")
-            await db.execute(
-                "CREATE TABLE IF NOT EXISTS owner ("
-                "id INTEGER PRIMARY KEY CHECK (id = 1), "
-                "version INTEGER NOT NULL, run_id TEXT NOT NULL, scope TEXT NOT NULL)"
-            )
+            await db.execute(_OWNER_SCHEMA)
             await db.execute(
                 "INSERT OR IGNORE INTO owner (id, version, run_id, scope) "
                 "VALUES (1, 1, ?, ?)",
@@ -188,22 +200,12 @@ class ToolCallJournal:
             )
             async with db.execute("SELECT version, run_id, scope FROM owner") as cursor:
                 owner = await cursor.fetchone()
-            if owner != (1, *self._owner) and not (
-                retiring and owner == (2, *self._owner)
-            ):
+            if owner != (1, *self._owner):
                 raise ValueError("tool call journal version or ownership mismatch")
-            await db.execute(
-                "CREATE TABLE IF NOT EXISTS calls ("
-                "call_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, "
-                "owned_fields TEXT NOT NULL, key TEXT NOT NULL, "
-                "completed INTEGER NOT NULL DEFAULT 0)"
-            )
-            await db.execute(
-                "CREATE TABLE IF NOT EXISTS lifecycle ("
-                "id INTEGER PRIMARY KEY CHECK (id = 1), refs TEXT NOT NULL)"
-            )
+            await db.execute(_CALLS_SCHEMA)
+            await db.execute(_LIFECYCLE_SCHEMA)
             yield db
-            if not retiring and os.path.lexists(marker):
+            if os.path.lexists(marker):
                 raise ValueError("authoring run has been retired; replay is closed")
             await db.commit()
 
@@ -227,20 +229,33 @@ class ToolCallJournal:
         # Older isolated bridges created group-readable files that the service
         # cannot write. After closing replay, replace the owned file atomically
         # with its empty closed header instead of changing that file's owner.
+        # Serialize the small closed database in memory. Keep the exclusive
+        # descriptor through the write instead of reopening a shared pathname.
+        with closing(sqlite3.connect(":memory:")) as closed:
+            for schema in (_OWNER_SCHEMA, _CALLS_SCHEMA, _LIFECYCLE_SCHEMA):
+                closed.execute(schema)
+            # Earlier bridge binaries refuse an unknown owner version too.
+            closed.execute(
+                "INSERT INTO owner (id, version, run_id, scope) VALUES (1, 2, ?, ?)",
+                self._owner,
+            )
+            closed.commit()
+            header = closed.serialize()
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=".retiring-", suffix=".db", dir=self.path.parent
         )
         temporary = Path(temporary_name)
         try:
-            os.close(descriptor)
-            closed = ToolCallJournal(temporary, *self._owner)
-            async with closed._transaction(retiring=True) as db:
-                # Earlier bridge binaries refuse an unknown owner version too.
-                await db.execute("UPDATE owner SET version = 2 WHERE id = 1")
-            with temporary.open("r+b") as file:
+            with os.fdopen(descriptor, "wb") as file:
+                file.write(header)
+                file.flush()
+                if os.name == "posix":
+                    os.fchmod(file.fileno(), 0o640)
                 os.fsync(file.fileno())
-            if os.name == "posix":
-                temporary.chmod(0o660)
+                opened = os.fstat(file.fileno())
+                named = temporary.stat(follow_symlinks=False)
+                if opened.st_ino != named.st_ino or opened.st_dev != named.st_dev:
+                    raise ValueError("authoring retirement file identity changed")
             os.replace(temporary, self.path)
             if os.name == "posix":
                 directory_fd = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)

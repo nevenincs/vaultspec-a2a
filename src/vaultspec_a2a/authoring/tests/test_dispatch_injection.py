@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
     from mcp.types import RequestParamsMeta
 
+    from ...conftest import ExternalPrerequisiteRule
+
 _BEARER = "loop-bearer"
 _CATALOG = {
     "schema_version": "authoring.semantic_tools.v1",
@@ -332,6 +334,61 @@ async def test_concurrent_retries_share_one_envelope(
     assert bodies[0] == bodies[1]
 
 
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_codex_native_turn_supplies_logical_call_identity(
+    engine: tuple[str, _EngineState],
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """The installed Codex model invokes the production bridge with its native ID."""
+    from langchain_core.messages import HumanMessage
+
+    from ...graph.enums import Provider
+    from ...providers._acp_authoring import (
+        AuthoringToolBinding,
+        codex_authoring_mcp_server_spec,
+    )
+    from ...providers.codex_chat_model import CodexChatModel
+    from ...providers.factory import ProviderFactory
+    from ...service_tests._provider_catalog_live import declared_lane_model_value
+
+    external_prerequisite("codex-cli")
+    external_prerequisite("codex-credential")
+    served, reason = await declared_lane_model_value(Provider.CODEX.value, tmp_path)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
+    base_url, state = engine
+    model = ProviderFactory().create(
+        Provider.CODEX, model=served, workspace_root=tmp_path
+    )
+    assert isinstance(model, CodexChatModel)
+    binding = AuthoringToolBinding(
+        snapshot=parse_catalog(_CATALOG),
+        bearer_token=_BEARER,
+        actor_token="actor-tok",
+        engine_base_url=base_url,
+        run_id="native-codex-proof",
+        call_scope="writer",
+    )
+    model = model.with_authoring_mcp_server(codex_authoring_mcp_server_spec(binding))
+    await model.ainvoke(
+        [
+            HumanMessage(
+                content=(
+                    "Call vaultspec-authoring.propose_changeset exactly once with "
+                    "operation create. This is a disposable loopback protocol test. "
+                    "Use no filesystem, terminal or other tools. Then reply done."
+                )
+            )
+        ]
+    )
+    bodies = _execute_bodies(state)
+    assert len(bodies) == 1
+    call_id = _dict(bodies[0]["payload"])["tool_call_id"]
+    assert isinstance(call_id, str) and call_id
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("call_id", [None, "", " ", "call\n", "x" * 161])
 async def test_mutation_without_valid_identity_has_no_engine_side_effect(
@@ -553,9 +610,11 @@ async def test_journal_cannot_be_reused_by_another_owner(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("call_id_source", ["explicit", "codex", "claude"])
 async def test_stdio_process_restart_replays_lost_response(
     engine: tuple[str, _EngineState],
     tmp_path: Path,
+    call_id_source: str,
 ) -> None:
     from mcp.client import Client
     from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -564,6 +623,7 @@ async def test_stdio_process_restart_replays_lost_response(
         ENV_ACTOR_TOKEN,
         ENV_BASE_URL,
         ENV_BEARER,
+        ENV_CALL_ID_SOURCE,
         ENV_CALL_SCOPE,
         ENV_CATALOG_JSON,
         ENV_JOURNAL_PATH,
@@ -581,11 +641,17 @@ async def test_stdio_process_restart_replays_lost_response(
             ENV_ACTOR_TOKEN: "actor-tok",
             ENV_RUN_ID: "stdio-run",
             ENV_CALL_SCOPE: "writer",
+            ENV_CALL_ID_SOURCE: call_id_source,
             ENV_CATALOG_JSON: json.dumps(_CATALOG),
             ENV_JOURNAL_PATH: str(tmp_path / "calls.db"),
         },
     )
-    meta: RequestParamsMeta = {LOGICAL_CALL_ID_META_KEY: "provider-call"}
+    meta_key = {
+        "explicit": LOGICAL_CALL_ID_META_KEY,
+        "codex": "callId",
+        "claude": "claudecode/toolUseId",
+    }[call_id_source]
+    meta = cast("RequestParamsMeta", {meta_key: "provider-call"})
     state.drop_next_response = True
     # pytest's sys-level stderr capture has no native handle for the Windows spawn.
     with (tmp_path / "bridge.log").open("w", encoding="utf-8") as errlog:

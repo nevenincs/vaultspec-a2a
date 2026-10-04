@@ -167,6 +167,7 @@ def build_authoring_mcp_server(
     dispatch: ToolDispatch,
     *,
     server_name: str = "vaultspec-authoring",
+    logical_call_meta_key: str = LOGICAL_CALL_ID_META_KEY,
 ) -> Server:
     """Build a live MCP server advertising the snapshot's tools.
 
@@ -225,14 +226,14 @@ def build_authoring_mcp_server(
         if name not in known:
             return _error(f"unknown authoring tool: {name!r}")
         try:
-            call_id = (params.meta or {}).get(LOGICAL_CALL_ID_META_KEY)
+            call_id = (params.meta or {}).get(logical_call_meta_key)
             if call_id is not None and not isinstance(call_id, str):
                 return _error("logical tool call identity must be a string")
             tool = known[name]
             if call_id is None and (tool.idempotency_required or tool.is_mutating):
                 return _error(
                     "a stable logical tool call identity is required in "
-                    f"_meta[{LOGICAL_CALL_ID_META_KEY!r}]"
+                    f"_meta[{logical_call_meta_key!r}]"
                 )
             if call_id is None:
                 result = await dispatch(name, params.arguments or {})

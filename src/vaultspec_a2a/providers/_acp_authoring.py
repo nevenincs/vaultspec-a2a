@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Literal, override
 from urllib.parse import urlparse
 
 from ..authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER
@@ -47,6 +47,9 @@ from ..protocols.mcp.authoring_stdio import (
 )
 from ..protocols.mcp.authoring_stdio import (
     ENV_BEARER as STDIO_ENV_BEARER,
+)
+from ..protocols.mcp.authoring_stdio import (
+    ENV_CALL_ID_SOURCE as STDIO_ENV_CALL_ID_SOURCE,
 )
 from ..protocols.mcp.authoring_stdio import (
     ENV_CALL_SCOPE as STDIO_ENV_CALL_SCOPE,
@@ -327,6 +330,7 @@ def build_authoring_stdio_mcp_servers(
     binding: AuthoringToolBinding,
     *,
     python_executable: str | None = None,
+    call_id_source: Literal["explicit", "codex", "claude"] = "explicit",
 ) -> list[JsonObject]:
     """Build the ACP ``mcpServers`` list that spawns the per-run stdio bridge.
 
@@ -375,6 +379,8 @@ def build_authoring_stdio_mcp_servers(
             "value": json.dumps(snapshot_to_catalog_payload(binding.snapshot)),
         },
     ]
+    if call_id_source != "explicit":
+        env.append({"name": STDIO_ENV_CALL_ID_SOURCE, "value": call_id_source})
     # Forward the debug startup marker to the subprocess when enabled (the MCP
     # SDK filters arbitrary parent env, so it must ride the explicit env list).
     # Off unless the orchestrator sets it; carries no token (R7).
@@ -419,6 +425,7 @@ def codex_authoring_mcp_server_spec(binding: AuthoringToolBinding) -> JsonObject
     """
     [entry] = build_authoring_stdio_mcp_servers(binding)
     env = _string_environment(entry, "env")
+    env[STDIO_ENV_CALL_ID_SOURCE] = "codex"
     return {
         "name": entry["name"],
         "command": entry["command"],
@@ -483,7 +490,14 @@ def attach_authoring_tools(
     if attach is not None:
         allowed_tools = authoring_allowed_tool_names(binding) if autonomous else None
         if binding.engine_base_url is not None and binding.run_id is not None:
-            mcp_servers = build_authoring_stdio_mcp_servers(binding)
+            mcp_servers = build_authoring_stdio_mcp_servers(
+                binding,
+                call_id_source=(
+                    "claude"
+                    if getattr(model, "provider", None) in {"claude", "zai"}
+                    else "explicit"
+                ),
+            )
         else:
             mcp_servers = build_authoring_mcp_servers(binding)
         return attach(mcp_servers, allowed_tools)

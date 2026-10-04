@@ -24,6 +24,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Literal
 
 from mcp.server.stdio import stdio_server
 from pydantic import Field
@@ -37,12 +38,13 @@ from ...authoring.catalog import (
 )
 from ...control.env_prefix import ENV_PREFIX
 from ...control.settings_base import ProjectSettings, env_name
-from .tools.authoring_bridge import build_authoring_mcp_server
+from .tools.authoring_bridge import LOGICAL_CALL_ID_META_KEY, build_authoring_mcp_server
 
 __all__ = [
     "ENV_ACTOR_TOKEN",
     "ENV_BASE_URL",
     "ENV_BEARER",
+    "ENV_CALL_ID_SOURCE",
     "ENV_CALL_SCOPE",
     "ENV_CATALOG_JSON",
     "ENV_DEBUG_MARKER",
@@ -74,6 +76,7 @@ class AuthoringBridgeSettings(ProjectSettings):
     run_id: str | None = None
     call_scope: str = "bridge"
     journal_path: Path | None = None
+    call_id_source: Literal["explicit", "codex", "claude"] = "explicit"
     server_name: str | None = None
     # The worker's already-fetched catalog snapshot (JSON), so the bridge serves
     # list_tools without its own engine round-trip at spawn and both sides serve
@@ -93,6 +96,7 @@ ENV_ACTOR_TOKEN = env_name(AuthoringBridgeSettings, "actor_token")
 ENV_RUN_ID = env_name(AuthoringBridgeSettings, "run_id")
 ENV_CALL_SCOPE = env_name(AuthoringBridgeSettings, "call_scope")
 ENV_JOURNAL_PATH = env_name(AuthoringBridgeSettings, "journal_path")
+ENV_CALL_ID_SOURCE = env_name(AuthoringBridgeSettings, "call_id_source")
 ENV_SERVER_NAME = env_name(AuthoringBridgeSettings, "server_name")
 ENV_CATALOG_JSON = env_name(AuthoringBridgeSettings, "catalog_json")
 ENV_DEBUG_MARKER = env_name(AuthoringBridgeSettings, "debug_marker")
@@ -144,7 +148,18 @@ async def _amain() -> int:
             call_scope=configured.call_scope,
             journal_path=configured.journal_path,
         )
-        server = build_authoring_mcp_server(snapshot, dispatch, server_name=server_name)
+        server = build_authoring_mcp_server(
+            snapshot,
+            dispatch,
+            server_name=server_name,
+            logical_call_meta_key=(
+                {
+                    "explicit": LOGICAL_CALL_ID_META_KEY,
+                    "codex": "callId",
+                    "claude": "claudecode/toolUseId",
+                }[configured.call_id_source]
+            ),
+        )
         _write_startup_marker(
             f"serving tools={len(snapshot.tools)}", configured.debug_marker
         )

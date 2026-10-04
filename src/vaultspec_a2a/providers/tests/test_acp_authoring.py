@@ -20,6 +20,7 @@ from ...protocols.mcp.authoring_stdio import (
     ENV_ACTOR_TOKEN,
     ENV_BASE_URL,
     ENV_BEARER,
+    ENV_CALL_ID_SOURCE,
     ENV_CALL_SCOPE,
     ENV_CATALOG_JSON,
     ENV_JOURNAL_PATH,
@@ -502,6 +503,22 @@ class TestAttachAuthoringTools:
         assert wired.mcp_servers == build_authoring_stdio_mcp_servers(binding)
         assert "type" not in wired.mcp_servers[0]
         assert wired.mcp_servers[0]["command"]
+
+    @pytest.mark.parametrize("provider", ["claude", "zai", "kimi"])
+    def test_native_identity_source_is_selected_by_provider(
+        self, provider: str
+    ) -> None:
+        model = self._model().model_copy(update={"provider": provider})
+        wired = attach_authoring_tools(model, _stdio_binding(), autonomous=True)
+        assert isinstance(wired, AcpChatModel)
+        environment = wired.mcp_servers[0]["env"]
+        assert isinstance(environment, list)
+        sources = [
+            entry["value"]
+            for entry in environment
+            if isinstance(entry, dict) and entry.get("name") == ENV_CALL_ID_SOURCE
+        ]
+        assert sources == (["claude"] if provider in {"claude", "zai"} else [])
 
     def test_model_without_acp_surface_is_refused_rather_than_passed_through(
         self,

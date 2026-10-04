@@ -140,7 +140,8 @@ def test_render_emits_parseable_mcp_server_block_for_rag() -> None:
     toml = render_codex_config_toml(specs, web_search=CodexWebSearchMode.DISABLED)
     parsed = tomllib.loads(toml)
     rag = parsed["mcp_servers"]["vaultspec-rag"]
-    assert rag["command"] == "uvx"
+    assert Path(rag["command"]).is_absolute()
+    assert Path(rag["command"]).stem.casefold() == "uvx"
     assert rag["args"] == [
         "--python",
         _PYTHON_PIN,
@@ -649,6 +650,7 @@ def test_authoring_bridge_composition_seam_threads_into_codex_config_toml(
         env = bridge["env"]
         assert env["VAULTSPEC_A2A_AUTHORING_BASE_URL"] == "http://127.0.0.1:8767"
         assert env["VAULTSPEC_A2A_AUTHORING_RUN_ID"] == "run:codex-test"
+        assert env["VAULTSPEC_A2A_AUTHORING_CALL_ID_SOURCE"] == "codex"
         assert env["VAULTSPEC_A2A_AUTHORING_BEARER"] == "machine-bearer-xyz"
     finally:
         cleanup_codex_config_home(home)

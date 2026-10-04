@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:d8d4f1ce3fb4f80a2143f802e368a77b8587a03d8fa9e21d7c40dc8b1c86405d'
+body_hash: 'sha256:b15aa4093a842e5cc993e54294cde7a7001c638705d7890f70f7dcba58ffb33f'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-14-a2a-edge-conformance-reference]]"
@@ -54,6 +54,17 @@ Type: operations / storage retention. Status: open follow-up; owner: runtime lif
 ### stdio-bearer-refresh-wiring | low | The stdio bridge omits the existing bearer resolver
 
 Type: reliability / existing sibling debt. Status: open follow-up; owner: authoring integration. `src/vaultspec_a2a/protocols/mcp/authoring_stdio.py` constructs its client without the worker catalog fetcher's bearer resolver. This is outside retry identity remediation and was not changed. An engine bearer rotation therefore remains an agent-visible bridge failure; it is a definite rejection rather than permission to mint a fresh mutation identity.
+
+### native-provider-identity-mapping | medium | Native logical metadata was ignored
+
+Type: integration / replay identity. Status: implementation corrected, completed native-provider turn proof pending. Owner: provider integration. S01 consumes Codex `_meta.callId` only on the Codex launch and Claude/Z.ai `_meta["claudecode/toolUseId"]` only on their ACP launch. Other providers require the explicit namespaced key. Native identity is retained in the journal and command envelope without request counters, progress tokens, payload hashes or retry UUIDs. The Codex upstream `codex-rs/core/src/mcp_tool_call.rs::build_mcp_tool_call_request_meta` uses its native call_id; the installed Claude binary contains the native metadata key. These support the mapping but do not certify native provider resume semantics.
+
+Real stdio lost-response/restart tests passed for all three metadata sources. The attempted real Codex turn skipped because the current served catalog selector is absent. S01 remains open pending native proof; the user was asked for a subscription-model selection preference while independent work continues. Focused authoring/replay coverage passed 24 tests; provider source-selection and trusted launch correction passed four tests. Ruff lint/format and full project type checks passed. Review verdict: PENDING for native capability evidence, with no high or critical source issue in the mapping diff.
+
+### trusted-launch-test-contract-drift | low | The config test expected unresolved uvx
+
+Type: verification / sibling contract drift. Status: resolved. The broader config run passed 108 tests and failed one stale literal `uvx` assertion after trusted launch began emitting an absolute executable. The corrected test checks absolute authority and the uvx executable identity. The focused rerun passed. Native metadata selection is also asserted in the rendered Codex config and ACP provider attachment tests.
+
 
 ## Verification
 

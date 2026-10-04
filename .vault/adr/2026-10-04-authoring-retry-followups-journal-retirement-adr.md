@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:f5ae735d45a4af1b74953a318ebaeb6b38172b45ab675a5fc65972926be39002'
+body_hash: 'sha256:322c310d64342946e6230145c02caebc6932c715d7f9da6b3e14b6a9115a3603'
 related:
   - "[[2026-10-04-a2a-edge-conformance-authoring-retry-audit]]"
   - "[[2026-10-01-run-continuation-adr]]"
@@ -40,6 +40,8 @@ Use a deterministic credential-free marker in each configured authoring journal 
 Close the run and durably flush its marker before reclaiming rows. Verify each candidate's run/scope owner and deterministic filename, then atomically replace its owned database with a compact empty closed owner header. This also permits retirement of legacy agent-owned files that the service can read but cannot write. New isolated journal files are created by the service with explicit group read/write access before handing them to the agent. Existing linked or multiply-linked candidates are refused or skipped, and foreign run data is left alone. The run marker fences new role paths; unsupported owner version 2 fences existing paths for earlier bridge binaries. Keep source-version handling explicit, without translating unsupported ownership.
 
 Implementation review on 2026-10-04 replaced an initial coordinator hook with manifest-driven cleanup because a hook failure could retain the deletion claim and bypass bounded abandonment. The accepted retention and closed-identity constraints are unchanged.
+
+Final review refinement on 2026-10-04: construct the small closed SQLite header in memory using the journal's shared schema definitions, and write through the originally created exclusive descriptor. Flush and verify named/descriptor identity before atomic replacement. Do not reopen the temporary shared pathname for writes. Candidate SQLite inspection is read-only; closed POSIX headers grant the agent group read access without write access. S03 was reopened for the temporary-path finding and closed after its correction, repeat retirement/deletion checks and the actual Linux identity proof passed. Hostile mutation of the shared directory itself remains a separate audited authority gap; these checks establish the cooperative bridge lifecycle boundary.
 
 ## Rationale
 

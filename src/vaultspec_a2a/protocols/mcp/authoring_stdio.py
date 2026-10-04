@@ -43,8 +43,10 @@ __all__ = [
     "ENV_ACTOR_TOKEN",
     "ENV_BASE_URL",
     "ENV_BEARER",
+    "ENV_CALL_SCOPE",
     "ENV_CATALOG_JSON",
     "ENV_DEBUG_MARKER",
+    "ENV_JOURNAL_PATH",
     "ENV_RUN_ID",
     "ENV_SERVER_NAME",
     "AuthoringBridgeSettings",
@@ -70,6 +72,8 @@ class AuthoringBridgeSettings(ProjectSettings):
     bearer: str | None = Field(default=None, repr=False)
     actor_token: str | None = Field(default=None, repr=False)
     run_id: str | None = None
+    call_scope: str = "bridge"
+    journal_path: Path | None = None
     server_name: str | None = None
     # The worker's already-fetched catalog snapshot (JSON), so the bridge serves
     # list_tools without its own engine round-trip at spawn and both sides serve
@@ -87,6 +91,8 @@ ENV_BASE_URL = env_name(AuthoringBridgeSettings, "base_url")
 ENV_BEARER = env_name(AuthoringBridgeSettings, "bearer")
 ENV_ACTOR_TOKEN = env_name(AuthoringBridgeSettings, "actor_token")
 ENV_RUN_ID = env_name(AuthoringBridgeSettings, "run_id")
+ENV_CALL_SCOPE = env_name(AuthoringBridgeSettings, "call_scope")
+ENV_JOURNAL_PATH = env_name(AuthoringBridgeSettings, "journal_path")
 ENV_SERVER_NAME = env_name(AuthoringBridgeSettings, "server_name")
 ENV_CATALOG_JSON = env_name(AuthoringBridgeSettings, "catalog_json")
 ENV_DEBUG_MARKER = env_name(AuthoringBridgeSettings, "debug_marker")
@@ -131,7 +137,12 @@ async def _amain() -> int:
         else:
             snapshot = await fetch_catalog(client)
         dispatch = make_tool_dispatch(
-            client, run_id=run_id, actor_token=actor_token, snapshot=snapshot
+            client,
+            run_id=run_id,
+            actor_token=actor_token,
+            snapshot=snapshot,
+            call_scope=configured.call_scope,
+            journal_path=configured.journal_path,
         )
         server = build_authoring_mcp_server(snapshot, dispatch, server_name=server_name)
         _write_startup_marker(

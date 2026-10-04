@@ -167,6 +167,11 @@ class StateLayout:
         return self._stores / "checkpoints.db"
 
     @property
+    def authoring_calls_dir(self) -> Path:
+        """Durable logical tool-call identities, partitioned by run and role."""
+        return self._stores / "authoring-calls"
+
+    @property
     def logs_dir(self) -> Path:
         """Process logs and runtime locks."""
         return self.home / "runtime"
@@ -220,6 +225,7 @@ class StateLayout:
         return (
             self.database_path,
             self.checkpoint_path,
+            self.authoring_calls_dir,
             self.logs_dir,
             self.discovery_path,
             self.handoff_credential_path,

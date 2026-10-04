@@ -20,7 +20,9 @@ from ...protocols.mcp.authoring_stdio import (
     ENV_ACTOR_TOKEN,
     ENV_BASE_URL,
     ENV_BEARER,
+    ENV_CALL_SCOPE,
     ENV_CATALOG_JSON,
+    ENV_JOURNAL_PATH,
     ENV_RUN_ID,
     ENV_SERVER_NAME,
 )
@@ -256,11 +258,21 @@ class TestConfigHomeAuthoringEntry:
             ENV_BEARER: "SECRET-BEARER",
             ENV_ACTOR_TOKEN: "SECRET-ACTOR",
             ENV_RUN_ID: "run-777",
+            ENV_CALL_SCOPE: binding.call_scope,
+            ENV_JOURNAL_PATH: spawn_env[ENV_JOURNAL_PATH],
             ENV_SERVER_NAME: AUTHORING_MCP_SERVER_NAME,
             ENV_CATALOG_JSON: json.dumps(snapshot_to_catalog_payload(binding.snapshot)),
         }
         assert set(home_env) == set(expected_values)
         assert spawn_env == expected_values
+        from pathlib import Path
+
+        from ...control.config import settings
+
+        journal = Path(spawn_env[ENV_JOURNAL_PATH])
+        assert journal.is_absolute()
+        assert journal.parent == settings.state_layout.authoring_calls_dir
+        assert journal.suffix == ".db"
         # The handed catalog round-trips back to the run's snapshot.
         assert (
             parse_catalog(

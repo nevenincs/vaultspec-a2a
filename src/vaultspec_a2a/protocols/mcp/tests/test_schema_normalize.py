@@ -278,7 +278,9 @@ async def test_served_tools_carry_json_schema_object_over_real_mcp() -> None:
 
     snapshot = parse_catalog(_CATALOG)
 
-    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _dispatch(
+        name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+    ) -> dict[str, Any]:
         return {"tool": name, "arguments": arguments, "disposition": "dispatched"}
 
     server = build_authoring_mcp_server(snapshot, _dispatch)

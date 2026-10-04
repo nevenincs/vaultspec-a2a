@@ -15,15 +15,19 @@ execute``. Turning a snapshot into MCP tool registrations lives in
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from ._envelope import AuthoringResponse
-from ._ids import derive_idempotency_key
+from ._errors import AuthoringTransportError
+from ._ids import derive_idempotency_key, validate_id
+from ._tool_calls import ToolCallJournal, tool_call_journal_path
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable
+    from pathlib import Path
 
     from ._envelope import Denial
     from .client import AuthoringClient
@@ -33,6 +37,7 @@ __all__ = [
     "CATALOG_SCHEMA_VERSION",
     "AgentTool",
     "CatalogSnapshot",
+    "ToolDispatch",
     "execute_agent_tool",
     "fetch_catalog",
     "make_tool_dispatch",
@@ -42,6 +47,27 @@ __all__ = [
 
 CATALOG_SCHEMA_VERSION = "authoring.semantic_tools.v1"
 _CATALOG_PATH = "/v1/agent-tools"
+_OWNED_FIELDS_BY_COMMAND: dict[str, tuple[str, ...]] = {
+    "create_proposal": ("session_id", "changeset_id"),
+    "append_draft": ("changeset_id", "expected_revision", "session_id"),
+    "replace_draft": ("changeset_id", "expected_revision", "session_id"),
+    "validate_proposal": ("changeset_id", "expected_revision", "session_id"),
+    "submit_for_review": ("changeset_id", "expected_revision", "session_id"),
+    "cancel_proposal": ("changeset_id", "expected_revision", "session_id"),
+    "request_apply": ("changeset_id", "approval_id"),
+}
+
+
+class ToolDispatch(Protocol):
+    """A logical identity accompanies the model-visible arguments separately."""
+
+    def __call__(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        tool_call_id: str | None = None,
+    ) -> Awaitable[dict[str, Any]]: ...
 
 
 @dataclass(frozen=True)
@@ -320,13 +346,17 @@ def make_tool_dispatch(
     run_id: str,
     actor_token: str,
     snapshot: CatalogSnapshot,
-) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
+    call_scope: str = "bridge",
+    journal_path: Path | None = None,
+) -> ToolDispatch:
     """Build the dispatcher the authoring MCP server routes tool calls through.
 
     Each call resolves the command from the catalog, issues the run-scoped
     execute, and returns the engine ``data`` payload (or a denial rendered as a
     value). Idempotency keys are derived from stable run-local material so a
-    replayed call dedupes at the engine. Unknown tools fail loudly.
+    replayed call dedupes at the engine. Mutations require a caller-supplied
+    logical identity, retained with their original lifecycle references before
+    delivery. Unknown tools and conflicting replays fail loudly.
 
     Proposal-lifecycle injection: the model never sees ``session_id`` /
     ``changeset_id`` / ``expected_revision`` / ``approval_id`` (they are absent
@@ -349,33 +379,81 @@ def make_tool_dispatch(
     """
     from .session import AuthoringSession
 
+    if journal_path is None:
+        journal_path = tool_call_journal_path(run_id, call_scope)
+    journal = ToolCallJournal(journal_path, run_id, call_scope)
     session = AuthoringSession(client, run_id)
-    lifecycle: dict[str, str | None] = {
-        "changeset_id": None,
-        "revision": None,
-        "approval_id": None,
-    }
 
-    async def dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def dispatch(
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        tool_call_id: str | None = None,
+    ) -> dict[str, Any]:
         tool = snapshot.get(name)
         if tool is None:
             raise ValueError(f"tool {name!r} is not in the run's catalog snapshot")
+        if tool_call_id is None and (tool.idempotency_required or tool.is_mutating):
+            raise ValueError("a stable logical tool call identity is required")
+        if tool_call_id is not None:
+            validate_id(tool_call_id, field="logical tool call identity")
         command = resolve_tool_command(tool, arguments)
-        arguments = dict(arguments)  # never mutate the caller's dict
-        await _apply_injection(command, arguments, session, lifecycle, run_id)
-        idempotency_key = derive_idempotency_key(run_id, command, uuid4().hex)
-        result = await execute_agent_tool(
-            client,
-            run_id=run_id,
-            command=command,
-            tool_call_id=uuid4().hex,
-            name=name,
-            tool_input=arguments,
-            idempotency_key=idempotency_key,
-            actor_token=actor_token,
-        )
+        # Round-trip also detaches nested inputs before an asynchronous journal write.
+        serialized = json.dumps(arguments, sort_keys=True, allow_nan=False)
+        arguments = json.loads(serialized)
+        call_id = tool_call_id or uuid4().hex
+        retained = tool.idempotency_required or tool.is_mutating
+        idempotency_key = derive_idempotency_key(run_id, call_scope, command, call_id)
+        if retained:
+            fingerprint = derive_idempotency_key(
+                json.dumps([name, command, serialized])
+            )
+
+            async def build(
+                lifecycle: dict[str, str | None],
+            ) -> tuple[dict[str, str | None], str]:
+                await _apply_injection(command, arguments, session, lifecycle, run_id)
+                owned = {
+                    field: arguments.get(field)
+                    for field in _OWNED_FIELDS_BY_COMMAND.get(command, ())
+                }
+                key = derive_idempotency_key(
+                    run_id,
+                    call_scope,
+                    command,
+                    call_id,
+                    json.dumps(owned, sort_keys=True),
+                )
+                return owned, key
+
+            owned, idempotency_key = await journal.prepare(call_id, fingerprint, build)
+            _inject_owned_fields(arguments, **owned)
+        try:
+            result = await execute_agent_tool(
+                client,
+                run_id=run_id,
+                command=command,
+                tool_call_id=call_id,
+                name=name,
+                tool_input=arguments,
+                idempotency_key=idempotency_key,
+                actor_token=actor_token,
+            )
+        except AuthoringTransportError as exc:
+            # These are definite request/identity refusals. I/O errors, server
+            # failures and conflicts leave delivery ambiguous and retain the key.
+            if retained and exc.status_code in {400, 401, 403, 404, 422}:
+                await journal.complete(call_id, {}, rejected=True)
+            raise
+        if retained:
+            updates: dict[str, str | None] = {}
+            if isinstance(result, AuthoringResponse):
+                _track(result, updates)
+            await journal.complete(
+                call_id,
+                {key: value for key, value in updates.items() if value is not None},
+            )
         if isinstance(result, AuthoringResponse):
-            _track(result, lifecycle)
             data = result.data
             return (
                 cast("dict[str, Any]", data)

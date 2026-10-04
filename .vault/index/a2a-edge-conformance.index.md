@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#a2a-edge-conformance'
 date: '2026-07-22'
-modified: '2026-09-03'
+modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:d3e2a8203830a5fa45a63ad5d2d495699b789492b226c6a741b8e8cff5790e1d'
+body_hash: 'sha256:f62d913e5c69b602b7033e1268cd622bbc16a60cfc005fd54bd4ac86096f1028'
 related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
@@ -35,6 +35,7 @@ related:
   - '[[2026-07-19-a2a-edge-conformance-ledger]]'
   - '[[2026-07-19-a2a-edge-conformance-plan]]'
   - '[[2026-09-03-a2a-edge-conformance-verb-mapping-reference]]'
+  - '[[2026-10-04-a2a-edge-conformance-authoring-retry-audit]]'
 ---
 
 # `a2a-edge-conformance` feature index
@@ -60,6 +61,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-15-a2a-edge-conformance-w05-review-audit` - `a2a-edge-conformance` audit: `W05 code review and program verdict`
 - `2026-07-17-a2a-edge-conformance-audit` - `a2a-edge-conformance` audit: `w05-p16 review`
 - `2026-07-19-a2a-edge-conformance-active-run-discovery-audit` - `a2a-edge-conformance` audit: `active run discovery`
+- `2026-10-04-a2a-edge-conformance-authoring-retry-audit` - `a2a-edge-conformance` audit: `Authoring tool retry identity security remediation`
 
 ### exec
 

@@ -30,11 +30,9 @@ from ....utils.version import package_version
 from .schema_normalize import normalize_tool_input_schema
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from mcp.server.context import ServerRequestContext
 
-    from ....authoring.catalog import AgentTool, CatalogSnapshot
+    from ....authoring.catalog import AgentTool, CatalogSnapshot, ToolDispatch
 
 __all__ = [
     "build_authoring_mcp_server",
@@ -49,6 +47,10 @@ McpToolSpec = dict[str, Any]
 # The catalog risk tier that maps to the protocol's `destructiveHint`. The other
 # tiers are `read_only` and `mutating`; only this one claims destruction.
 _DANGEROUS_TIER = "dangerous"
+
+# A provider retains this identity across retries and reconnects. JSON-RPC ids
+# and progress tokens are connection/request-local and cannot substitute for it.
+LOGICAL_CALL_ID_META_KEY = "vaultspec.dev/tool-call-id"
 
 # Fields the run dispatcher injects run-scoped (make_tool_dispatch), hidden from
 # each tool's advertised schema/guidance so the model never sees them - it must
@@ -113,7 +115,7 @@ def _annotations_for(tool: AgentTool) -> types.ToolAnnotations:
     """Express the catalog's risk vocabulary as MCP tool annotations.
 
     The catalog already knows whether a tool mutates, whether the engine gates
-    it behind human approval, and whether it is idempotent. MCP 2.0 has a
+    it behind human approval. MCP 2.0 has a
     standard field for exactly that, so before this the information was carried
     only in the private ``_engine`` key - readable by this repository and by
     nothing else. A client deciding whether to auto-approve a call had to guess
@@ -132,11 +134,15 @@ def _annotations_for(tool: AgentTool) -> types.ToolAnnotations:
     reaches an open set of external entities, and these tools address the
     engine's own vault - but "unset" is an honest absence here rather than a
     claim in either direction.
+
+    A mutating tool's idempotency requirement is a caller obligation. Separate
+    logical calls may repeat the same input and have additional effects, so only
+    read-only tools advertise safe duplicate execution.
     """
     return types.ToolAnnotations(
         read_only_hint=not tool.is_mutating,
         destructive_hint=tool.risk_tier == _DANGEROUS_TIER,
-        idempotent_hint=tool.idempotency_required,
+        idempotent_hint=not tool.is_mutating,
     )
 
 
@@ -158,7 +164,7 @@ def _warn_on_non_conforming_names(tools: list[types.Tool]) -> None:
 
 def build_authoring_mcp_server(
     snapshot: CatalogSnapshot,
-    dispatch: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+    dispatch: ToolDispatch,
     *,
     server_name: str = "vaultspec-authoring",
 ) -> Server:
@@ -197,7 +203,7 @@ def build_authoring_mcp_server(
         for spec in build_tool_specs(snapshot)
     ]
     _warn_on_non_conforming_names(tools)
-    known = {tool.name for tool in snapshot.tools}
+    known = {tool.name: tool for tool in snapshot.tools}
 
     def _error(message: str) -> types.CallToolResult:
         return types.CallToolResult(
@@ -219,7 +225,21 @@ def build_authoring_mcp_server(
         if name not in known:
             return _error(f"unknown authoring tool: {name!r}")
         try:
-            result = await dispatch(name, params.arguments or {})
+            call_id = (params.meta or {}).get(LOGICAL_CALL_ID_META_KEY)
+            if call_id is not None and not isinstance(call_id, str):
+                return _error("logical tool call identity must be a string")
+            tool = known[name]
+            if call_id is None and (tool.idempotency_required or tool.is_mutating):
+                return _error(
+                    "a stable logical tool call identity is required in "
+                    f"_meta[{LOGICAL_CALL_ID_META_KEY!r}]"
+                )
+            if call_id is None:
+                result = await dispatch(name, params.arguments or {})
+            else:
+                result = await dispatch(
+                    name, params.arguments or {}, tool_call_id=call_id
+                )
         except Exception as exc:
             return _error(f"authoring tool {name!r} failed: {exc}")
         return types.CallToolResult(

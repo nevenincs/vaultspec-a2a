@@ -114,7 +114,9 @@ async def test_agent_sees_authoring_tools_over_real_mcp() -> None:
 
     snapshot = parse_catalog(_LIVE_CATALOG)
 
-    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _dispatch(
+        name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+    ) -> dict[str, Any]:
         return {"tool": name, "arguments": arguments, "disposition": "dispatched"}
 
     server = build_authoring_mcp_server(snapshot, _dispatch)
@@ -141,7 +143,9 @@ async def test_call_tool_routes_to_dispatch_over_real_mcp() -> None:
     snapshot = parse_catalog(_LIVE_CATALOG)
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _dispatch(
+        name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+    ) -> dict[str, Any]:
         calls.append((name, arguments))
         return {"tool": name, "disposition": "dispatched"}
 
@@ -171,7 +175,9 @@ async def test_unknown_tool_returns_agent_visible_error_over_real_mcp() -> None:
     snapshot = parse_catalog(_LIVE_CATALOG)
     dispatched: list[str] = []
 
-    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _dispatch(
+        name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+    ) -> dict[str, Any]:
         dispatched.append(name)
         return {"tool": name}
 
@@ -195,7 +201,9 @@ async def test_dispatch_failure_returns_agent_visible_error_over_real_mcp() -> N
 
     snapshot = parse_catalog(_LIVE_CATALOG)
 
-    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _dispatch(
+        name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+    ) -> dict[str, Any]:
         raise RuntimeError("engine refused the call")
 
     server = build_authoring_mcp_server(snapshot, _dispatch)
@@ -223,7 +231,9 @@ async def test_tool_annotations_reach_the_client_over_real_mcp() -> None:
 
     snapshot = parse_catalog(_LIVE_CATALOG)
 
-    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _dispatch(
+        name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+    ) -> dict[str, Any]:
         return {"tool": name}
 
     server = build_authoring_mcp_server(snapshot, _dispatch)
@@ -241,7 +251,7 @@ async def test_tool_annotations_reach_the_client_over_real_mcp() -> None:
         # read_only_hint is the exact inverse of the catalog's own mutation
         # decision, so a tier change moves both together or neither.
         assert tool.annotations.read_only_hint is (not source.is_mutating)
-        assert tool.annotations.idempotent_hint is source.idempotency_required
+        assert tool.annotations.idempotent_hint is (not source.is_mutating)
         assert tool.annotations.destructive_hint is (source.risk_tier == "dangerous")
 
     # The bridge's safety story is that it carries no write tool; that must be
@@ -279,7 +289,9 @@ def test_non_conforming_engine_tool_name_is_reported(
         ],
     }
 
-    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _dispatch(
+        name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+    ) -> dict[str, Any]:
         return {"tool": name}
 
     with caplog.at_level("WARNING"):
@@ -300,7 +312,9 @@ def test_conforming_engine_tool_names_are_not_reported(
     the test above.
     """
 
-    async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _dispatch(
+        name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+    ) -> dict[str, Any]:
         return {"tool": name}
 
     with caplog.at_level("WARNING"):

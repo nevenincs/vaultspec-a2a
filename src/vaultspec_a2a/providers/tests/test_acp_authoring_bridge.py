@@ -79,7 +79,9 @@ class _AuthoringHttpServer:
         return f"http://127.0.0.1:{self.port}/mcp"
 
     def _app(self) -> Starlette:
-        async def _dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        async def _dispatch(
+            name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+        ) -> dict[str, Any]:
             # The MCP SDK exposes an Any-valued dict here. Revalidate it before
             # it crosses into the closed provider JSON envelope.
             validated_arguments = TypeAdapter[JsonObject](JsonObject).validate_python(

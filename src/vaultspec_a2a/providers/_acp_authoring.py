@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, override
 from urllib.parse import urlparse
 
 from ..authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER
+from ..authoring._tool_calls import tool_call_journal_path
 from ..authoring.catalog import snapshot_to_catalog_payload
 from ..protocols.mcp.authoring_stdio import (
     ENV_ACTOR_TOKEN as STDIO_ENV_ACTOR_TOKEN,
@@ -48,10 +49,16 @@ from ..protocols.mcp.authoring_stdio import (
     ENV_BEARER as STDIO_ENV_BEARER,
 )
 from ..protocols.mcp.authoring_stdio import (
+    ENV_CALL_SCOPE as STDIO_ENV_CALL_SCOPE,
+)
+from ..protocols.mcp.authoring_stdio import (
     ENV_CATALOG_JSON as STDIO_ENV_CATALOG_JSON,
 )
 from ..protocols.mcp.authoring_stdio import (
     ENV_DEBUG_MARKER as STDIO_ENV_DEBUG_MARKER,
+)
+from ..protocols.mcp.authoring_stdio import (
+    ENV_JOURNAL_PATH as STDIO_ENV_JOURNAL_PATH,
 )
 from ..protocols.mcp.authoring_stdio import (
     ENV_RUN_ID as STDIO_ENV_RUN_ID,
@@ -223,6 +230,7 @@ class AuthoringToolBinding:
     server_url: str | None = None
     engine_base_url: str | None = None
     run_id: str | None = None
+    call_scope: str = "bridge"
 
     def __post_init__(self) -> None:
         self._validate_transport()
@@ -349,11 +357,14 @@ def build_authoring_stdio_mcp_servers(
     # launched command, never the args signature the admission key rides on.
     bridge_argv = module_command(AUTHORING_STDIO_MODULE)
     command = python_executable or bridge_argv[0]
+    journal_path = tool_call_journal_path(binding.run_id, binding.call_scope)
     env: list[JsonObject] = [
         {"name": STDIO_ENV_BASE_URL, "value": binding.engine_base_url},
         {"name": STDIO_ENV_BEARER, "value": binding.bearer_token},
         {"name": STDIO_ENV_ACTOR_TOKEN, "value": binding.actor_token},
         {"name": STDIO_ENV_RUN_ID, "value": binding.run_id},
+        {"name": STDIO_ENV_CALL_SCOPE, "value": binding.call_scope},
+        {"name": STDIO_ENV_JOURNAL_PATH, "value": str(journal_path)},
         {"name": STDIO_ENV_SERVER_NAME, "value": AUTHORING_MCP_SERVER_NAME},
         # Hand the run's already-fetched catalog snapshot so the bridge serves
         # list_tools immediately without an engine round-trip at spawn, and both

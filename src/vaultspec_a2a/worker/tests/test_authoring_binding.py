@@ -104,6 +104,7 @@ class TestAuthoringBindingProvider:
         assert binding is not None
         # A stdio-transport binding: engine origin + run_id = thread_id, no HTTP url.
         assert binding.engine_base_url == _ENGINE_URL
+        assert binding.call_scope == "vaultspec-coder"
         assert binding.run_id == "t1"
         assert binding.server_url is None
         assert binding.tool_names == ("read_context", "propose_changeset")

@@ -109,6 +109,7 @@ class AuthoringBindingProvider:
             actor_token=actor_token,
             engine_base_url=self._engine_base_url,
             run_id=thread_id,
+            call_scope=agent_id,
         )
 
     async def _fetch_catalog(self, bearer: str, actor_token: str):

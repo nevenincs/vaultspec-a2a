@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:8a0b7d4a143451f4122d00f821a89a4b705754d09a759064e24486b11538c8e5'
+body_hash: 'sha256:4ef616fa2f648dd77f05c71a9476b2ea1bc51fb9013d5fa1f1980ea80a9178e0'
 related:
   - "[[2026-10-04-authoring-retry-followups-plan]]"
 ---
@@ -68,6 +68,11 @@ related:
 - `S04` `verify:` `focused Ruff lint format 14 files and full project ty` -> `pass`
 - `S04` `verify:` `integrated actual implementation review and classified rolling audit update` -> `pass`
 - `S04` `verify:` `vault authoring-retry-followups conformance` -> `pass`
+- `S02` `M` `src/vaultspec_a2a/worker/authoring_binding.py`
+- `S02` `verify:` `ordinary stdio protected refresh in 168-test affected suite` -> `pass`
+- `S02` `verify:` `isolated production builder launcher private refresh Linux proof` -> `pass`
+- `S02` `verify:` `stable retry envelopes through relay rotation and restart` -> `pass`
+- `S02` `verify:` `final integrated implementation review and classified audit queue update` -> `pass`
 
 ## Notes
 
@@ -77,3 +82,4 @@ related:
 - `S03` S03 reopened on final review's temporary-path reopen finding; corrected by descriptor-preserving serialized header and re-reviewed before this closure.
 - `S01` Runtime authentication failures are conditional missing prerequisites; both live checks authenticated on this host. Candidate certification does not widen served binary proof gates.
 - `S04` Corrupt historical shared-file cleanup reports failure while private closure remains durable; recorded low availability/index follow-up. Source proof retained as `artifacts/validation/linux_authoring_parent_authority.py;` SHA-256 97fdb39c755e0c64b9e80293d372627b7efb3e8baba668a4288230130678d27a. Scope excludes concurrent peer work.
+- `S02` The previously deferred isolated case is now implemented and committed in S04 c0e1202d. The parent owns protected discovery and engine refresh; no broadening of agent filesystem authority.

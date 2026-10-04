@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:3d4299834b88c13227b501eaca8afa03183de25bd5dd7e4533c7179b32891a8c'
+body_hash: 'sha256:364887ed3a6c9bcd787effe92e8deb1bb171936974e1077384f3f48171c201fc'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-14-a2a-edge-conformance-reference]]"
@@ -150,6 +150,8 @@ Applicable final evidence: two separately selected native service checks passed,
 The relay/configuration run passed 60 tests. The broader affected command covering dispatch, client re-resolution, engine discovery, stdio refresh, retirement, MCP, provider attachment, binding, worker app and token lifecycle passed 168 tests (six unrelated service checks deselected by the default marker policy). After adding the post-discovery authorization check, the relay suite passed ten tests; after correcting the delayed producer type, dispatch plus relay passed 31 tests (the two native checks were intentionally excluded from this local run and retain their separately passing evidence). Focused Ruff lint/format on 14 changed Python files passed; full uv run --no-sync ty check src dev docs scripts packaging passed after the harness correction. git diff --check passed.
 
 The retained actual Linux helper artifacts/validation/linux_authoring_parent_authority.py, SHA-256 97fdb39c755e0c64b9e80293d372627b7efb3e8baba668a4288230130678d27a, passed in worker image sha256:4ee1d3e8c92120ad22c204dea2bab0760eaace8df2415ad51c229622a5fb9e84 with current source mounted readonly, service UID 1001, actual provider launcher and agent UID/GID 1002. It proves rotation followed by a lost execute response, parent/child reconstruction, three equal command bodies, private journal/discovery/marker denial for the agent, forged shared-file non-authority, explicit corrupt historical cleanup failure followed by successful retry, and stale-child refusal after both retirement and token revocation. A machine-readable result and exact Docker invocation are retained in the same target-bound security collection. Historical shared cleanup failure is reported as a queued limitation, never passed as successful reclamation.
+
+Completion checkpoint: S01 is committed in 321761d0 and S04 in c0e1202d. S02's deferred isolated-refresh work is covered by S04 and its final ledger checkpoint. All four plan Steps are checked. The authoring-retry-followups vault conformance suite reports zero errors and zero warnings, including complete execution mapping. The retained machine-readable evidence is artifacts/validation/authoring_parent_authority_results.json (SHA-256 8ccc919a64da1f7a0c63b693a9c9c4c2bcc990486833485aa50ff769a0d4d183); source proof was read back through the artifact owner after persistence. The final PASS remains scoped to this implemented plan, with the classified low historical cleanup/index follow-ups queued.
 
 ## Recommendations
 

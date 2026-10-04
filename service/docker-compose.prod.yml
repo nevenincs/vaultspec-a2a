@@ -8,7 +8,7 @@
 #   docker compose -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml up --build
 #
 # Gateway: http://localhost:18000 (headless FastAPI — REST/SSE + health)
-# Jaeger UI: http://localhost:16686
+# Jaeger UI (host-local only): http://127.0.0.1:16686
 
 services:
   gateway:
@@ -112,10 +112,9 @@ services:
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.16.0
     restart: unless-stopped
     ports:
-      - '${JAEGER_OTLP_PORT:-4317}:4317'
-      - '4318:4318'
-      - '${JAEGER_UI_PORT:-16686}:16686'
-      - '13133:13133'
+      # Trace metadata is sensitive; only the local query UI is published.
+      # OTLP ingestion and health probes stay inside the Compose network.
+      - '127.0.0.1:${JAEGER_UI_PORT:-16686}:16686'
     environment:
       COLLECTOR_OTLP_ENABLED: 'true'
     healthcheck:

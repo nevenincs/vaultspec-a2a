@@ -132,7 +132,7 @@ def _wait_for_health_field(
 
 
 # ---------------------------------------------------------------------------
-# Structural assertions — parse real YMLs, no Docker required
+# Configuration assertions — real YMLs and Compose CLI, no daemon required
 # ---------------------------------------------------------------------------
 
 
@@ -196,6 +196,63 @@ def test_prod_jaeger_service_present() -> None:
     """Prod compose includes a Jaeger service for OTLP tracing."""
     doc = _load_compose(PROD_COMPOSE)
     assert "jaeger" in doc["services"], "prod compose must declare a jaeger service"
+
+
+def test_prod_jaeger_publishes_only_host_local_ui() -> None:
+    """Collectors and health must not be reachable through production host ports."""
+    doc = _load_compose(PROD_COMPOSE)
+    jaeger = doc["services"]["jaeger"]
+    assert jaeger["ports"] == ["127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"]
+    assert "http://localhost:13133/status" in jaeger["healthcheck"]["test"]
+    for name in ("gateway", "worker"):
+        service = doc["services"][name]
+        assert service["environment"]["OTEL_EXPORTER_OTLP_ENDPOINT"] == (
+            "http://jaeger:4317"
+        )
+        assert service["depends_on"]["jaeger"]["condition"] == "service_healthy"
+    overlay = _load_compose(PROD_POSTGRES_COMPOSE)
+    assert "jaeger" not in overlay["services"]
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("ui_port", ["", "26686"])
+def test_resolved_prod_jaeger_boundary(postgres: bool, ui_port: str) -> None:
+    """Compose interpolation and overlay merging preserve the telemetry boundary."""
+    argv = [
+        _resolve_docker(),
+        "compose",
+        "--env-file",
+        os.devnull,
+        "-f",
+        str(PROD_COMPOSE),
+    ]
+    if postgres:
+        argv.extend(["-f", str(PROD_POSTGRES_COMPOSE)])
+    result = subprocess.run(
+        [*argv, "config", "--format", "json"],
+        env={
+            **os.environ,
+            "VAULTSPEC_A2A_INTERNAL_TOKEN": "compose-boundary-test",
+            "POSTGRES_PASSWORD": "compose-boundary-test",
+            "JAEGER_UI_PORT": ui_port,
+            "JAEGER_OTLP_PORT": "24317",
+        },
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    services = json.loads(result.stdout)["services"]
+    ports = services["jaeger"]["ports"]
+    assert len(ports) == 1
+    assert ports[0]["target"] == 16686
+    assert ports[0]["host_ip"] == "127.0.0.1"
+    assert ports[0]["published"] == (ui_port or "16686")
+    for name in ("gateway", "worker"):
+        assert services[name]["environment"]["OTEL_EXPORTER_OTLP_ENDPOINT"] == (
+            "http://jaeger:4317"
+        )
 
 
 def test_integration_jaeger_service_present() -> None:

@@ -74,6 +74,15 @@ just stack-prod-status
 just stack-prod-down
 ```
 
+The Jaeger UI is available only on the host at <http://127.0.0.1:16686>
+(`JAEGER_UI_PORT` changes the port). OTLP ingestion on ports 4317/4318 and the
+health endpoint on port 13133 remain inside the Compose network; production
+does not use `JAEGER_OTLP_PORT`. Gateway and worker export to `http://jaeger:4317`.
+For remote telemetry access, use an authenticated TLS proxy with access controls
+and resource limits instead of publishing Jaeger directly. Use Docker Engine
+28.0.0 or newer: older engines can expose loopback-published ports to peers on
+the same network segment.
+
 For PostgreSQL, also set `POSTGRES_PASSWORD`. The `database-*` recipes validate
 the combined production configuration but start and manage only PostgreSQL:
 

@@ -210,7 +210,11 @@ class TestOnTerminalCreateValidation:
         config = _make_config(workspace_root=str(tmp_path))
         resp = await on_terminal_create(
             rpc_id=1,
-            params={"command": "curl", "args": ["http://example.com"]},
+            params={
+                "sessionId": acp_session_context.session_id,
+                "command": "curl",
+                "args": ["http://example.com"],
+            },
             ctx=acp_session_context,
             config=config,
         )
@@ -230,7 +234,11 @@ class TestOnTerminalCreateValidation:
         config = _make_config(workspace_root=str(tmp_path))
         resp = await on_terminal_create(
             rpc_id=1,
-            params={"command": "python", "args": ["script.py; rm -rf /"]},
+            params={
+                "sessionId": acp_session_context.session_id,
+                "command": "python",
+                "args": ["script.py; rm -rf /"],
+            },
             ctx=acp_session_context,
             config=config,
         )
@@ -250,7 +258,12 @@ class TestOnTerminalCreateValidation:
         config = _make_config(workspace_root=str(tmp_path))
         resp = await on_terminal_create(
             rpc_id=1,
-            params={"command": "python", "args": [], "cwd": "/etc"},
+            params={
+                "sessionId": acp_session_context.session_id,
+                "command": "python",
+                "args": [],
+                "cwd": "/etc",
+            },
             ctx=acp_session_context,
             config=config,
         )
@@ -271,6 +284,7 @@ class TestOnTerminalCreateValidation:
         resp = await on_terminal_create(
             rpc_id=1,
             params={
+                "sessionId": acp_session_context.session_id,
                 "command": "python",
                 "args": [],
                 "env": [{"name": "1INVALID", "value": "x"}],

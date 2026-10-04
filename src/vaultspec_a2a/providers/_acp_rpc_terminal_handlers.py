@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from ..utils.async_cleanup import complete_cleanup
 from ..workspace.environment import resolve_env_vars
+from ._acp_client_requests import AcpSessionRequest, AcpTerminalRequest
 from ._acp_types import (
     AcpModelConfig,
     AcpRpcId,
@@ -37,6 +38,7 @@ __all__ = [
     "on_terminal_output",
     "on_terminal_release",
     "on_terminal_wait_for_exit",
+    "release_owned_terminal",
 ]
 
 logger = logging.getLogger(__name__)
@@ -196,8 +198,8 @@ async def on_terminal_create(
     environment so the subprocess inherits PATH and other required vars.
     """
     try:
-        if ctx.closing:
-            raise RuntimeError("ACP session is closing")
+        request = AcpSessionRequest.model_validate(params)
+        request.require_active_session(ctx)
         command, args = _terminal_command_args(params)
         resolved_cwd = _terminal_cwd(params, config)
 
@@ -216,8 +218,7 @@ async def on_terminal_create(
             [command, *args], terminal_env, str(resolved_cwd), use_exec=True
         )
         try:
-            if ctx.closing:
-                raise RuntimeError("ACP session closed while creating terminal")
+            request.require_active_session(ctx)
             terminal_id = uuid4().hex[:8]
             ctx.terminals[terminal_id] = process
         except BaseException:
@@ -259,8 +260,16 @@ def _resolve_terminal(
     ``terminal/release`` is deliberately NOT a caller: releasing a terminal that
     is already gone is idempotent success, not an invalid-params refusal.
     """
-    terminal_id_value = params.get("terminalId")
-    terminal_id = terminal_id_value if isinstance(terminal_id_value, str) else ""
+    try:
+        request = AcpTerminalRequest.model_validate(params)
+        request.require_active_session(ctx)
+    except ValueError as exc:
+        return None, {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "error": {"code": AcpErrorCode.INVALID_PARAMS, "message": str(exc)},
+        }
+    terminal_id = request.terminal_id
     process = ctx.terminals.get(terminal_id)
     if process is not None:
         return process, {}
@@ -402,8 +411,21 @@ async def on_terminal_release(
     _config: AcpModelConfig,
 ) -> JsonObject:
     """Handle terminal/release RPC."""
-    terminal_id_value = params.get("terminalId")
-    terminal_id = terminal_id_value if isinstance(terminal_id_value, str) else ""
+    try:
+        request = AcpTerminalRequest.model_validate(params)
+        request.require_active_session(ctx)
+    except ValueError as exc:
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "error": {"code": AcpErrorCode.INVALID_PARAMS, "message": str(exc)},
+        }
+    await release_owned_terminal(request.terminal_id, ctx)
+    return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
+
+
+async def release_owned_terminal(terminal_id: str, ctx: AcpSessionContext) -> None:
+    """Reap a locally owned terminal, including after partial setup or closure."""
     process = ctx.terminals.get(terminal_id)
     if process is not None:
 
@@ -414,4 +436,3 @@ async def on_terminal_release(
                 del ctx.terminals[terminal_id]
 
         await complete_cleanup(_release())
-    return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}

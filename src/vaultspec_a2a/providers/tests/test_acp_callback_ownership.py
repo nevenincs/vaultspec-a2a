@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
 from ...workspace.concurrency import git_workspace_mutex
-from .._acp_rpc_handlers import on_fs_write_text_file
+from .._acp_rpc_handlers import (
+    on_fs_write_text_file,
+    on_terminal_create,
+    on_terminal_kill,
+    on_terminal_output,
+    on_terminal_release,
+    on_terminal_wait_for_exit,
+)
+from .._acp_rpc_terminal_handlers import release_owned_terminal
 from .._acp_types import AcpModelConfig, AcpSessionContext
 
 if TYPE_CHECKING:
@@ -71,6 +80,184 @@ async def test_write_requires_a_bound_and_supplied_session(
     )
     assert "error" in response and "result" not in response
     assert not (tmp_path / "created.txt").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("session", [None, "", "foreign", False, 0, [], {}, "x" * 513])
+async def test_invalid_session_cannot_create_a_terminal(
+    tmp_path: Path, acp_session_context: AcpSessionContext, session: JsonValue
+) -> None:
+    script = tmp_path / "create_marker.py"
+    script.write_text(
+        "from pathlib import Path\nPath('started.txt').write_text('started')\n",
+        encoding="utf-8",
+    )
+    response = await on_terminal_create(
+        1,
+        {"sessionId": session, "command": sys.executable, "args": [str(script)]},
+        acp_session_context,
+        _config(tmp_path),
+    )
+    assert "error" in response and "result" not in response
+    assert acp_session_context.terminals == {}
+    assert not (tmp_path / "started.txt").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["missing", "unbound", "closed"])
+async def test_terminal_creation_requires_an_open_negotiated_session(
+    tmp_path: Path, acp_session_context: AcpSessionContext, mode: str
+) -> None:
+    params: JsonObject = {"command": sys.executable, "args": ["--version"]}
+    if mode != "missing":
+        params["sessionId"] = acp_session_context.session_id
+    if mode == "unbound":
+        acp_session_context.session_id = None
+    elif mode == "closed":
+        acp_session_context.closing = True
+    response = await on_terminal_create(
+        1, params, acp_session_context, _config(tmp_path)
+    )
+    assert "error" in response and "result" not in response
+    assert acp_session_context.terminals == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_id", [None, "", False, 0, [], {}])
+async def test_terminal_addressing_requires_a_nonempty_string_id(
+    tmp_path: Path, acp_session_context: AcpSessionContext, terminal_id: JsonValue
+) -> None:
+    for handler in (
+        on_terminal_output,
+        on_terminal_wait_for_exit,
+        on_terminal_kill,
+        on_terminal_release,
+    ):
+        response = await handler(
+            1,
+            {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+            acp_session_context,
+            _config(tmp_path),
+        )
+        assert "error" in response and "result" not in response
+
+
+async def _create_owned_terminal(root: Path, ctx: AcpSessionContext) -> str:
+    script = root / "owned_terminal.py"
+    script.write_text(
+        "import sys, time\n"
+        "sys.stdout.buffer.write(b'owned-output\\n')\n"
+        "sys.stdout.buffer.flush()\ntime.sleep(120)\n",
+        encoding="utf-8",
+    )
+    response = await on_terminal_create(
+        1,
+        {"sessionId": ctx.session_id, "command": sys.executable, "args": [str(script)]},
+        ctx,
+        _config(root),
+    )
+    result = response.get("result")
+    assert isinstance(result, dict), response
+    terminal_id = result.get("terminalId")
+    assert isinstance(terminal_id, str)
+    return terminal_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "missing",
+        "foreign",
+        "null",
+        "boolean",
+        "number",
+        "oversized",
+        "unbound",
+        "closed",
+    ],
+)
+async def test_every_terminal_callback_refuses_unowned_session_without_side_effects(
+    tmp_path: Path, acp_session_context: AcpSessionContext, mode: str
+) -> None:
+    terminal_id = await _create_owned_terminal(tmp_path, acp_session_context)
+    process = acp_session_context.terminals[terminal_id]
+    owner_session = acp_session_context.session_id
+    params: JsonObject = {"terminalId": terminal_id}
+    if mode != "missing":
+        sessions: dict[str, JsonValue] = {
+            "foreign": "foreign-session",
+            "null": None,
+            "boolean": False,
+            "number": 1,
+            "oversized": "x" * 513,
+            "unbound": owner_session,
+            "closed": owner_session,
+        }
+        params["sessionId"] = sessions[mode]
+    if mode == "unbound":
+        acp_session_context.session_id = None
+    elif mode == "closed":
+        acp_session_context.closing = True
+    try:
+        async with asyncio.timeout(2):
+            for handler in (
+                on_terminal_output,
+                on_terminal_wait_for_exit,
+                on_terminal_kill,
+                on_terminal_release,
+            ):
+                response = await handler(
+                    2, params, acp_session_context, _config(tmp_path)
+                )
+                assert "error" in response and "result" not in response
+                assert acp_session_context.terminals.get(terminal_id) is process
+                assert process.returncode is None
+        assert process.stdout is not None
+        assert await asyncio.wait_for(process.stdout.readline(), timeout=5) == (
+            b"owned-output\n"
+        )
+    finally:
+        # Local cleanup owes no protocol authority, including partial setup.
+        await release_owned_terminal(terminal_id, acp_session_context)
+    assert process.returncode is not None
+    assert terminal_id not in acp_session_context.terminals
+
+
+@pytest.mark.asyncio
+async def test_release_uses_the_receiving_contexts_registry(
+    tmp_path: Path,
+    acp_session_context: AcpSessionContext,
+    echo_context: AcpSessionContext,
+) -> None:
+    echo_context.session_id = "sibling-session"
+    first_id = await _create_owned_terminal(tmp_path, acp_session_context)
+    sibling_id = await _create_owned_terminal(tmp_path, echo_context)
+    first = acp_session_context.terminals.pop(first_id)
+    sibling = echo_context.terminals.pop(sibling_id)
+    acp_session_context.terminals["same-id"] = first
+    echo_context.terminals["same-id"] = sibling
+    try:
+        refused = await on_terminal_release(
+            2,
+            {"sessionId": echo_context.session_id, "terminalId": "same-id"},
+            acp_session_context,
+            _config(tmp_path),
+        )
+        assert "error" in refused
+        assert first.returncode is None and sibling.returncode is None
+        released = await on_terminal_release(
+            3,
+            {"sessionId": acp_session_context.session_id, "terminalId": "same-id"},
+            acp_session_context,
+            _config(tmp_path),
+        )
+        assert released["result"] == {}
+        assert first.returncode is not None and sibling.returncode is None
+        assert echo_context.terminals["same-id"] is sibling
+    finally:
+        await release_owned_terminal("same-id", acp_session_context)
+        await release_owned_terminal("same-id", echo_context)
 
 
 @pytest.mark.asyncio

@@ -22,7 +22,13 @@ from .._acp_rpc_handlers import (
     _read_workspace_text,
     on_fs_read_text_file,
     on_fs_write_text_file,
+    on_terminal_create,
+    on_terminal_kill,
+    on_terminal_output,
+    on_terminal_release,
+    on_terminal_wait_for_exit,
 )
+from .._acp_rpc_terminal_handlers import release_owned_terminal
 from .._acp_session import initialize_session, setup_session
 from .._acp_types import AcpModelConfig, AcpSessionContext
 from ._acp_frames import read_acp_frame
@@ -338,8 +344,39 @@ agent({ name: 'read-contract-peer' })
         sessionId: 'foreign-session', path: 'foreign.txt', content: 'foreign write'
       });
     } catch (error) { foreignWriteRefused = error.code === -32603; }
+    const terminal = await client.request(methods.client.terminal.create, {
+      sessionId: params.sessionId, command: 'python', args: ['--version']
+    });
+    const terminalParams = {
+      sessionId: params.sessionId, terminalId: terminal.terminalId
+    };
+    const terminalExit = await client.request(
+      methods.client.terminal.waitForExit, terminalParams
+    );
+    let foreignTerminalRefused = true;
+    for (const method of [methods.client.terminal.output,
+      methods.client.terminal.waitForExit, methods.client.terminal.kill,
+      methods.client.terminal.release]) {
+      try {
+        await client.request(method, {...terminalParams, sessionId: 'foreign'});
+        foreignTerminalRefused = false;
+      } catch (error) { foreignTerminalRefused &&= error.code === -32602; }
+    }
+    const terminalOutput = await client.request(
+      methods.client.terminal.output, terminalParams
+    );
+    const terminalOutputSeen = terminalOutput.output.startsWith('Python ');
+    await client.request(methods.client.terminal.kill, terminalParams);
+    await client.request(methods.client.terminal.waitForExit, terminalParams);
+    const released = await client.request(
+      methods.client.terminal.release, terminalParams
+    );
+    const repeated = await client.request(
+      methods.client.terminal.release, terminalParams
+    );
     return {stopReason: 'end_turn',
-      _meta: {first, empty, foreignRefused, write, foreignWriteRefused}};
+      _meta: {first, empty, foreignRefused, write, foreignWriteRefused,
+        terminalExit, foreignTerminalRefused, terminalOutputSeen, released, repeated}};
   })
   .connect(ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
 """
@@ -350,7 +387,11 @@ agent({ name: 'read-contract-peer' })
             "role": "reader",
             "description": "ACP SDK contract reader",
             "persona": {"system_prompt": "Read"},
-            "capabilities": {"filesystem_read": True, "filesystem_write": True},
+            "capabilities": {
+                "filesystem_read": True,
+                "filesystem_write": True,
+                "terminal": True,
+            },
         }
     )
     process = await asyncio.create_subprocess_exec(
@@ -382,6 +423,11 @@ agent({ name: 'read-contract-peer' })
             {
                 "fs/read_text_file": on_fs_read_text_file,
                 "fs/write_text_file": on_fs_write_text_file,
+                "terminal/create": on_terminal_create,
+                "terminal/output": on_terminal_output,
+                "terminal/wait_for_exit": on_terminal_wait_for_exit,
+                "terminal/kill": on_terminal_kill,
+                "terminal/release": on_terminal_release,
             },
         )
     )
@@ -413,12 +459,20 @@ agent({ name: 'read-contract-peer' })
                             "foreignRefused": True,
                             "write": {},
                             "foreignWriteRefused": True,
+                            "terminalExit": {"exitCode": 0, "signal": None},
+                            "foreignTerminalRefused": True,
+                            "terminalOutputSeen": True,
+                            "released": {},
+                            "repeated": {},
                         },
                     },
                 }
                 assert (tmp_path / "sdk-written.txt").read_text() == "owner write"
                 assert not (tmp_path / "foreign.txt").exists()
+                assert not context.terminals
     finally:
+        for terminal_id in tuple(context.terminals):
+            await release_owned_terminal(terminal_id, context)
         process.stdin.close()
         try:
             await asyncio.wait_for(process.wait(), timeout=5)

@@ -84,7 +84,11 @@ async def test_terminal_child_contained_and_reaped_whole(
 
     resp = await on_terminal_create(
         1,
-        {"command": sys.executable, "args": [str(script)]},
+        {
+            "sessionId": acp_session_context.session_id,
+            "command": sys.executable,
+            "args": [str(script)],
+        },
         acp_session_context,
         config,
     )
@@ -107,7 +111,10 @@ async def test_terminal_child_contained_and_reaped_whole(
 
         # terminal/kill reaps the whole terminal subtree via the containment.
         await on_terminal_kill(
-            2, {"terminalId": terminal_id}, acp_session_context, config
+            2,
+            {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+            acp_session_context,
+            config,
         )
 
         deadline = time.monotonic() + 10.0
@@ -134,7 +141,10 @@ async def test_unknown_terminal_refusal_is_one_contract_across_handlers(
     """
     config = _make_config(str(tmp_path))
     assert acp_session_context.terminals == {}
-    params: JsonObject = {"terminalId": "ghost-7f3a"}
+    params: JsonObject = {
+        "terminalId": "ghost-7f3a",
+        "sessionId": acp_session_context.session_id,
+    }
 
     kill = await on_terminal_kill(11, params, acp_session_context, config)
     output = await on_terminal_output(12, params, acp_session_context, config)
@@ -162,15 +172,14 @@ async def test_missing_terminal_id_param_is_refused_not_raised(
 ) -> None:
     """A request carrying no ``terminalId`` at all is refused on the same path."""
     config = _make_config(str(tmp_path))
-    response = await on_terminal_output(21, {}, acp_session_context, config)
-    assert response == {
-        "jsonrpc": "2.0",
-        "id": 21,
-        "error": {
-            "code": AcpErrorCode.INVALID_PARAMS,
-            "message": "Unknown terminal: ",
-        },
-    }
+    response = await on_terminal_output(
+        21, {"sessionId": acp_session_context.session_id}, acp_session_context, config
+    )
+    assert response["id"] == 21 and "result" not in response
+    error = response.get("error")
+    assert isinstance(error, dict)
+    assert error["code"] == AcpErrorCode.INVALID_PARAMS
+    assert "terminalId" in str(error["message"])
 
 
 @pytest.mark.asyncio
@@ -184,7 +193,10 @@ async def test_release_of_an_unknown_terminal_stays_idempotent(
     """
     config = _make_config(str(tmp_path))
     response = await on_terminal_release(
-        31, {"terminalId": "ghost"}, acp_session_context, config
+        31,
+        {"sessionId": acp_session_context.session_id, "terminalId": "ghost"},
+        acp_session_context,
+        config,
     )
     assert response == {"jsonrpc": "2.0", "id": 31, "result": {}}
 
@@ -205,7 +217,11 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     script.write_text("import sys\nsys.stdout.write('resolved-marker')\n", "utf-8")
     created = await on_terminal_create(
         41,
-        {"command": sys.executable, "args": [str(script)]},
+        {
+            "sessionId": acp_session_context.session_id,
+            "command": sys.executable,
+            "args": [str(script)],
+        },
         acp_session_context,
         config,
     )
@@ -216,7 +232,10 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     assert terminal_id in acp_session_context.terminals
 
     exited = await on_terminal_wait_for_exit(
-        42, {"terminalId": terminal_id}, acp_session_context, config
+        42,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     assert exited == {
         "jsonrpc": "2.0",
@@ -225,7 +244,10 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     }
 
     output = await on_terminal_output(
-        43, {"terminalId": terminal_id}, acp_session_context, config
+        43,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     # The whole v1 result, not a field probe: an extra or renamed key is exactly
     # the kind of drift a subset assertion would wave through.
@@ -240,20 +262,29 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     }
 
     killed = await on_terminal_kill(
-        44, {"terminalId": terminal_id}, acp_session_context, config
+        44,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     assert killed == {"jsonrpc": "2.0", "id": 44, "result": {}}
     # kill stops the command but does NOT release the terminal, so the id stays
     # addressable and a second kill is still answered rather than refused.
     assert terminal_id in acp_session_context.terminals
     again = await on_terminal_kill(
-        45, {"terminalId": terminal_id}, acp_session_context, config
+        45,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     assert again == {"jsonrpc": "2.0", "id": 45, "result": {}}
 
     # Only release ends addressability.
     released = await on_terminal_release(
-        46, {"terminalId": terminal_id}, acp_session_context, config
+        46,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     assert released == {"jsonrpc": "2.0", "id": 46, "result": {}}
     assert terminal_id not in acp_session_context.terminals
@@ -265,7 +296,10 @@ async def _create_terminal(
     """Spawn a real allowlisted terminal child running ``body`` and return its id."""
     script.write_text(body, encoding="utf-8")
     created = await on_terminal_create(
-        1, {"command": sys.executable, "args": [str(script)]}, ctx, config
+        1,
+        {"sessionId": ctx.session_id, "command": sys.executable, "args": [str(script)]},
+        ctx,
+        config,
     )
     created_result = created.get("result")
     assert isinstance(created_result, dict)
@@ -293,7 +327,10 @@ async def test_exit_status_is_absent_while_the_command_is_still_running(
     )
     try:
         output = await on_terminal_output(
-            51, {"terminalId": terminal_id}, acp_session_context, config
+            51,
+            {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+            acp_session_context,
+            config,
         )
         assert output == {
             "jsonrpc": "2.0",
@@ -305,7 +342,10 @@ async def test_exit_status_is_absent_while_the_command_is_still_running(
         assert "exitStatus" not in result
     finally:
         await on_terminal_release(
-            52, {"terminalId": terminal_id}, acp_session_context, config
+            52,
+            {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+            acp_session_context,
+            config,
         )
 
 
@@ -326,7 +366,10 @@ async def test_a_nonzero_exit_code_is_reported_exactly_not_collapsed(
         "import sys\nsys.exit(7)\n",
     )
     exited = await on_terminal_wait_for_exit(
-        61, {"terminalId": terminal_id}, acp_session_context, config
+        61,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     assert exited == {
         "jsonrpc": "2.0",
@@ -334,13 +377,19 @@ async def test_a_nonzero_exit_code_is_reported_exactly_not_collapsed(
         "result": {"exitCode": 7, "signal": None},
     }
     output = await on_terminal_output(
-        62, {"terminalId": terminal_id}, acp_session_context, config
+        62,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     output_result = output.get("result")
     assert isinstance(output_result, dict)
     assert output_result["exitStatus"] == {"exitCode": 7, "signal": None}
     await on_terminal_release(
-        63, {"terminalId": terminal_id}, acp_session_context, config
+        63,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
 
 
@@ -373,7 +422,10 @@ async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
     seen = ""
     while time.monotonic() < deadline and "pre-kill-marker" not in seen:
         live = await on_terminal_output(
-            70, {"terminalId": terminal_id}, acp_session_context, config
+            70,
+            {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+            acp_session_context,
+            config,
         )
         live_result = live.get("result")
         assert isinstance(live_result, dict)
@@ -381,14 +433,20 @@ async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
     assert seen == "pre-kill-marker"
 
     killed = await on_terminal_kill(
-        71, {"terminalId": terminal_id}, acp_session_context, config
+        71,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     assert killed == {"jsonrpc": "2.0", "id": 71, "result": {}}
     assert process.returncode is not None, "kill must stop the command"
     assert terminal_id in acp_session_context.terminals
 
     output = await on_terminal_output(
-        72, {"terminalId": terminal_id}, acp_session_context, config
+        72,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     output_result = output.get("result")
     assert isinstance(output_result, dict)
@@ -406,18 +464,27 @@ async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
         assert isinstance(exit_status["signal"], str)
 
     waited = await on_terminal_wait_for_exit(
-        73, {"terminalId": terminal_id}, acp_session_context, config
+        73,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     assert waited == {"jsonrpc": "2.0", "id": 73, "result": exit_status}
 
     released = await on_terminal_release(
-        74, {"terminalId": terminal_id}, acp_session_context, config
+        74,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     assert released == {"jsonrpc": "2.0", "id": 74, "result": {}}
     assert terminal_id not in acp_session_context.terminals
     # Released, the id takes the shared refusal path again.
     after = await on_terminal_output(
-        75, {"terminalId": terminal_id}, acp_session_context, config
+        75,
+        {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+        acp_session_context,
+        config,
     )
     error = after.get("error")
     assert isinstance(error, dict)

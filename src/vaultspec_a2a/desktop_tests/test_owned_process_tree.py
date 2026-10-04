@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
+import pytest_asyncio
 
 from ..lifecycle.discovery import is_pid_alive
 from ..providers._acp_rpc_handlers import (
@@ -51,6 +52,7 @@ from ..utils.process import ProcessContainment
 from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
 # A "provider" that launches three long-lived children modelling the authoring,
@@ -171,13 +173,32 @@ def _terminal_config(workspace_root: str) -> AcpModelConfig:
     )
 
 
-class _TerminalCtx:
-    def __init__(self) -> None:
-        self.stdin_lock = asyncio.Lock()
-        self.terminals: dict[str, Any] = {}
-        self.interrupt_exc: list[Any] = []
-        self.chunk_queue: asyncio.Queue[Any] = asyncio.Queue()
-        self.closing = False
+@pytest_asyncio.fixture
+async def terminal_session_context(tmp_path: Path) -> AsyncIterator[AcpSessionContext]:
+    process = await spawn_acp_process(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        dict(os.environ),
+        str(tmp_path),
+        use_exec=True,
+    )
+    assert process.stdin is not None and process.stdout is not None
+    ctx = AcpSessionContext(
+        process=process,
+        stdin=process.stdin,
+        stdout=process.stdout,
+        response_futures={},
+        chunk_queue=asyncio.Queue(),
+        prompt_done=asyncio.Event(),
+        prompt_id_ref=[],
+        interrupt_exc=[],
+        session_id="owned-tree-session",
+    )
+    try:
+        yield ctx
+    finally:
+        for terminal in tuple(ctx.terminals.values()):
+            await kill_process_tree(terminal)
+        await kill_process_tree(process)
 
 
 _TERMINAL_GRANDCHILD_SCRIPT = (
@@ -189,17 +210,22 @@ _TERMINAL_GRANDCHILD_SCRIPT = (
 
 
 @pytest.mark.asyncio
-async def test_terminal_child_tree_contained_and_reaped(tmp_path: Path) -> None:
+async def test_terminal_child_tree_contained_and_reaped(
+    tmp_path: Path, terminal_session_context: AcpSessionContext
+) -> None:
     config = _terminal_config(str(tmp_path))
-    ctx = _TerminalCtx()
+    ctx = terminal_session_context
     script = tmp_path / "terminal_grandchild.py"
     script.write_text(_TERMINAL_GRANDCHILD_SCRIPT, encoding="utf-8")
-    session_ctx = cast("AcpSessionContext", ctx)
 
     resp = await on_terminal_create(
         1,
-        {"command": sys.executable, "args": [str(script)]},
-        session_ctx,
+        {
+            "sessionId": ctx.session_id,
+            "command": sys.executable,
+            "args": [str(script)],
+        },
+        ctx,
         config,
     )
     terminal_id = cast("dict[str, Any]", resp["result"])["terminalId"]
@@ -215,7 +241,12 @@ async def test_terminal_child_tree_contained_and_reaped(tmp_path: Path) -> None:
     try:
         assert is_pid_alive(grandchild_pid)
         # Graceful terminal/kill reaps the whole terminal subtree via containment.
-        await on_terminal_kill(2, {"terminalId": terminal_id}, session_ctx, config)
+        await on_terminal_kill(
+            2,
+            {"sessionId": ctx.session_id, "terminalId": terminal_id},
+            ctx,
+            config,
+        )
         _await_gone([grandchild_pid])
     finally:
         await _reap_pids([grandchild_pid])

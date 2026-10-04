@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:31bd43c483c7960c54832bffa2829679a0a2a2193d7a4751f88ac17ffab07ab6'
+body_hash: 'sha256:1fd0c1daf5f54a4522d76641f6b2af8bd32774f0ba90beb6a9d80e1ac53f6efe'
 related:
   - "[[2026-10-04-acp-callback-ownership-plan]]"
 ---
@@ -36,3 +36,20 @@ related:
 - `S01` `verify:` `scoped Basedpyright` -> `pass`
 - `S01` `verify:` `independent candidate and corrective review` -> `pass`
 - `S01` `by:` `root`
+- `S02` `M` `src/vaultspec_a2a/providers/_acp_client_requests.py`
+- `S02` `M` `src/vaultspec_a2a/providers/_acp_rpc_terminal_handlers.py`
+- `S02` `M` `src/vaultspec_a2a/providers/_acp_teardown.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_acp_callback_ownership.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_acp_fs_read_limits.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_acp_security.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_resource_lifetimes.py`
+- `S02` `M` `src/vaultspec_a2a/providers/tests/test_terminal_containment.py`
+- `S02` `M` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`
+- `S02` `M` `.vault/audit/2026-10-04-acp-callback-ownership-audit.md`
+- `S02` `verify:` `Windows terminal ownership lifecycle and security 112 tests` -> `pass`
+- `S02` `verify:` `native Linux terminal ownership lifecycle and security 104 tests` -> `pass`
+- `S02` `verify:` `installed SDK real callback wire and terminal grandchild two service tests` -> `pass`
+- `S02` `verify:` `full Ruff lint and format and Ty` -> `pass`
+- `S02` `verify:` `scoped Basedpyright six files` -> `pass`
+- `S02` `verify:` `independent terminal candidate review` -> `pass`
+- `S02` `by:` `root`

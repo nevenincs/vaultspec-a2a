@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:d73ab1b63b56f6b63750a8a6114e080cc26243056d99c603d1a5978226e2bc55'
+body_hash: 'sha256:0c0a4845b99b64540ebb01102ff82e7b4ee7014ab4374d3842a58fb422811742'
 related:
   - "[[2026-10-04-acp-callback-ownership-plan]]"
   - "[[2026-10-04-acp-read-remediation-audit]]"
@@ -108,3 +108,78 @@ read/write traffic: one passed, owner file lands and foreign write is refused.
 Docker Compose identity/filesystem boundary: three passed. Full Ruff lint/format
 and Ty passed; scoped Basedpyright reported zero errors/warnings/notes. Independent
 candidate review found no surviving S01 bypass after the two confirmed repairs.
+
+## S02 terminal authority and review
+
+### terminal-session-ownership | medium | every terminal callback requires the receiving session
+
+Status: resolved; type: protocol/authority validation. The original production
+handlers admitted terminal creation and addressing without session validation.
+Strict AcpSessionRequest guards creation before command/path/environment work and
+again after awaited spawn, before registration. AcpTerminalRequest validates the
+session and a nonempty string terminalId before output, wait, kill, or release
+can look up the receiving context's registry. Invalid, absent, foreign, unbound,
+and closing sessions return error envelopes without spawning, consuming pipes,
+killing processes, or removing registrations. Two genuine contexts sharing one
+terminal id prove a foreign request cannot select the sibling registry. Owner
+calls preserve unknown-id refusal, release idempotence, exit-status objects,
+post-kill addressability, and subtree reaping. No compatibility alias was added.
+The independent read-only candidate review found no surviving authority bypass
+or introduced lifecycle regression across dispatch, facade, and teardown paths.
+
+### teardown-protocol-admission-conflict | medium | internal cleanup needs no live RPC admission
+
+Status: resolved; type: lifecycle compatibility risk identified before repair.
+Production teardown marks the context closing and previously synthesized a
+release request without sessionId. Enforcing the public guard there would leak
+children. The existing cancellation-joined cleanup body now lives in
+release_owned_terminal; public release validates first, while teardown calls the
+local helper directly. A real partial-setup context with no session id proves
+both provider and terminal processes are reaped and the registry emptied.
+Existing cancellation, exited-root descendants, foreign-process preservation,
+and process-tree proofs remain applicable and pass.
+
+### terminal-proof-session-fixtures | low | existing direct terminal proofs lacked required protocol identity
+
+Status: resolved; type: verification/contract drift. Existing containment and
+security callers now send the actual context's negotiated id. The desktop tree
+proof uses a real AcpSessionContext backed by a production-spawned process instead
+of a cast substitute context. Initial verification caught four keyword-form
+security calls missed by the first migration and an async fixture declared with
+the synchronous decorator; both were repaired. Missing terminalId now asserts
+invalid params, while a valid unknown terminal keeps its established refusal.
+
+### terminal-proof-newline-portability | low | Windows text output changed the expected marker bytes
+
+Status: resolved; type: introduced verification portability. Eight initial proof
+failures came from text-mode CRLF translation. The actual child now writes the
+specified LF marker through sys.stdout.buffer. Exact byte assertions remain;
+no output expectation or runtime policy was weakened.
+
+### terminal-output-retention-and-native-reachability | low | broader v1 evidence remains with the migration plan
+
+Status: open, pre-existing; type: protocol/resource and verification debt.
+S02 does not change outputByteLimit handling or consuming output reads. The
+accepted v1 output-retention repair remains owned by
+2026-08-02-llm-context-provider-abstraction-plan P01.S02. Exact native supported
+adapter callbacks remain P02.S05, and the earlier High reachability finding stays
+open unless its independent owner supplies native execution evidence. The real
+SDK peer below proves protocol transport and callback behavior, not a model's
+native-tool routing. No new authority defect was discovered in this candidate.
+
+Verification uses uv run --no-sync --frozen --no-default-groups --group tooling.
+Windows pytest callback-ownership, terminal-containment, resource-lifetimes,
+ACP-security, desktop-native-execution, and the owned terminal tree proof:
+112 passed, one existing service test deselected. WSL Ubuntu callback-ownership,
+terminal-containment, resource-lifetimes, and ACP-security with native /tmp
+basetemp, no artificial identity launcher: 104 passed, one service deselected.
+Pinned Node 26.8.1, installed ACP SDK 1.6.0, production initialize/setup_session
+and stdio dispatch: SDK read/write/create/wait/output/kill/release traffic and
+real terminal-grandchild service proof: two passed, 81 ordinary tests deselected.
+SDK traffic refuses foreign read/write and all four terminal-addressing methods;
+owner terminal output and exit status succeed, kill retains addressability, and
+repeated release succeeds. Full ruff check ., ruff format --check . (1982 files),
+and ty check passed. Scoped basedpyright on the three implementation files,
+ownership/read-wire tests, and desktop tree proof: zero errors/warnings/notes.
+Docker filesystem proofs from S01 are reused because S02 changes no filesystem
+containment code. Hook presence remains false after the S01 commit.

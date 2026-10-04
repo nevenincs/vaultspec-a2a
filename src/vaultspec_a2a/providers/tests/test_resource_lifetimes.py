@@ -45,6 +45,7 @@ def _context(process: asyncio.subprocess.Process) -> AcpSessionContext:
         prompt_done=asyncio.Event(),
         prompt_id_ref=[],
         interrupt_exc=[],
+        session_id="owned-session",
     )
 
 
@@ -166,7 +167,10 @@ async def test_cancelled_terminal_release_finishes_before_removing_ownership(
     acp_session_context.terminals["owned"] = process
     release = asyncio.create_task(
         on_terminal_release(
-            1, {"terminalId": "owned"}, acp_session_context, model._config
+            1,
+            {"sessionId": acp_session_context.session_id, "terminalId": "owned"},
+            acp_session_context,
+            model._config,
         )
     )
     try:
@@ -236,7 +240,11 @@ async def test_release_after_root_exit_reaps_descendant_and_preserves_foreign_pr
     try:
         created = await on_terminal_create(
             1,
-            {"command": sys.executable, "args": [str(script)]},
+            {
+                "sessionId": acp_session_context.session_id,
+                "command": sys.executable,
+                "args": [str(script)],
+            },
             acp_session_context,
             model._config,
         )
@@ -253,7 +261,10 @@ async def test_release_after_root_exit_reaps_descendant_and_preserves_foreign_pr
         assert terminal.returncode == 0
         assert pid_is_live(descendant)
         await on_terminal_release(
-            2, {"terminalId": terminal_id}, acp_session_context, model._config
+            2,
+            {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
+            acp_session_context,
+            model._config,
         )
         assert terminal_id not in acp_session_context.terminals
         assert not pid_is_live(descendant)
@@ -284,12 +295,16 @@ async def test_session_cleanup_reaps_terminal_created_during_cancel(
     model = AcpChatModel(command=[sys.executable], workspace_root=str(tmp_path))
     model._active_session_id = "cleanup-session"
     ctx = _context(process)
+    ctx.session_id = "cleanup-session"
     stdout = asyncio.create_task(process_stdout_loop(ctx, model._config, {}))
     stderr = asyncio.create_task(model._read_stderr_loop(ctx))
 
     async def _create() -> None:
         response = await on_terminal_create(
-            2, {"command": sys.executable, "args": ["-q"]}, ctx, model._config
+            2,
+            {"sessionId": ctx.session_id, "command": sys.executable, "args": ["-q"]},
+            ctx,
+            model._config,
         )
         assert "result" in response
 
@@ -308,6 +323,26 @@ async def test_session_cleanup_reaps_terminal_created_during_cancel(
             await kill_process_tree(terminal)
         await kill_process_tree(process)
         await cancel_owned_tasks((stdout, stderr, creation))
+
+
+@pytest.mark.asyncio
+async def test_partial_session_cleanup_reaps_terminals_without_protocol_authority(
+    tmp_path: Path,
+) -> None:
+    process = await _spawn(tmp_path, "import time; time.sleep(120)")
+    terminal = await _spawn(tmp_path, "import time; time.sleep(120)")
+    model = AcpChatModel(command=[sys.executable], workspace_root=str(tmp_path))
+    ctx = _context(process)
+    ctx.session_id = None
+    ctx.terminals["owned"] = terminal
+    try:
+        await asyncio.wait_for(model._cleanup_session(ctx, None, None), timeout=20)
+        assert ctx.closing and not ctx.terminals
+        assert process.returncode is not None and terminal.returncode is not None
+        assert not pid_is_live(process.pid) and not pid_is_live(terminal.pid)
+    finally:
+        await kill_process_tree(terminal)
+        await kill_process_tree(process)
 
 
 @pytest.mark.asyncio

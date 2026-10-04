@@ -29,3 +29,9 @@ class AcpSessionRequest(BaseModel):
             raise ValueError("ACP session is closing")
         if ctx.session_id is None or self.session_id != ctx.session_id:
             raise ValueError("ACP sessionId does not match the active session")
+
+
+class AcpTerminalRequest(AcpSessionRequest):
+    """A session-owned request addressing one terminal by its opaque id."""
+
+    terminal_id: str = Field(alias="terminalId", min_length=1)

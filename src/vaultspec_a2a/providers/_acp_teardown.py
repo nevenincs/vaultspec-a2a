@@ -13,7 +13,7 @@ from ..utils.enums import AcpRequestId
 from ._acp_auth import runtime_log_extra
 from ._acp_model_state import AcpModelState
 from ._acp_request import await_response, issue_request
-from ._acp_rpc_handlers import on_terminal_release
+from ._acp_rpc_terminal_handlers import release_owned_terminal
 from ._acp_types import AcpSessionContext
 from ._cleanup import cancel_owned_tasks, run_independent_cleanups
 from ._subprocess import kill_process_tree
@@ -40,8 +40,8 @@ async def cleanup_session(
             *(
                 (
                     f"acp-terminal-{terminal_id}",
-                    lambda terminal_id=terminal_id: on_terminal_release(
-                        0, {"terminalId": terminal_id}, ctx, state.config
+                    lambda terminal_id=terminal_id: release_owned_terminal(
+                        terminal_id, ctx
                     ),
                 )
                 for terminal_id in tuple(ctx.terminals)

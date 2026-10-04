@@ -11,13 +11,13 @@ import asyncio
 import logging
 import re
 import signal
-from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
 
 from ..utils.async_cleanup import complete_cleanup
 from ..workspace.environment import resolve_env_vars
-from ._acp_client_requests import AcpSessionRequest, AcpTerminalRequest
+from ._acp_client_requests import AcpTerminalCreateRequest, AcpTerminalRequest
+from ._acp_terminal_output import MAX_TERMINAL_OUTPUT_BYTES, AcpTerminalOutput
 from ._acp_types import (
     AcpModelConfig,
     AcpRpcId,
@@ -198,7 +198,7 @@ async def on_terminal_create(
     environment so the subprocess inherits PATH and other required vars.
     """
     try:
-        request = AcpSessionRequest.model_validate(params)
+        request = AcpTerminalCreateRequest.model_validate(params)
         request.require_active_session(ctx)
         command, args = _terminal_command_args(params)
         resolved_cwd = _terminal_cwd(params, config)
@@ -220,6 +220,14 @@ async def on_terminal_create(
         try:
             request.require_active_session(ctx)
             terminal_id = uuid4().hex[:8]
+            byte_limit = (
+                MAX_TERMINAL_OUTPUT_BYTES
+                if request.output_byte_limit is None
+                else min(request.output_byte_limit, MAX_TERMINAL_OUTPUT_BYTES)
+            )
+            ctx.terminal_outputs[terminal_id] = AcpTerminalOutput.capture(
+                process, byte_limit
+            )
             ctx.terminals[terminal_id] = process
         except BaseException:
             await _kill_process_tree(process)
@@ -352,22 +360,14 @@ async def on_terminal_output(
     process, refusal = _resolve_terminal(rpc_id, params, ctx)
     if process is None:
         return refusal
-    stdout_data = b""
-    stderr_data = b""
-    if process.stdout:
-        with suppress(TimeoutError):
-            stdout_data = await asyncio.wait_for(
-                process.stdout.read(65536), timeout=0.5
-            )
-    if process.stderr:
-        with suppress(TimeoutError):
-            stderr_data = await asyncio.wait_for(
-                process.stderr.read(65536), timeout=0.5
-            )
+    output = ctx.terminal_outputs[str(params["terminalId"])]
+    if output.process is not process:
+        raise RuntimeError("Terminal output does not belong to the resolved process")
+    if process.returncode is not None:
+        await output.settle()
     output_result: JsonObject = {
-        "output": stdout_data.decode("utf-8", errors="replace")
-        + stderr_data.decode("utf-8", errors="replace"),
-        "truncated": False,
+        "output": output.output,
+        "truncated": output.truncated,
     }
     # The optional exitStatus is present only once the command has completed,
     # and is the v1 status OBJECT rather than a bare return code.
@@ -389,6 +389,9 @@ async def on_terminal_wait_for_exit(
     timeout = min(
         _number(params.get("timeout") or 60.0, field="timeout"), _MAX_TERMINAL_TIMEOUT
     )
+    output = ctx.terminal_outputs[str(params["terminalId"])]
+    if output.process is not process:
+        raise RuntimeError("Terminal output does not belong to the resolved process")
     try:
         await asyncio.wait_for(process.wait(), timeout=timeout)
     except TimeoutError:
@@ -397,6 +400,7 @@ async def on_terminal_wait_for_exit(
             "id": rpc_id,
             "error": {"code": -32603, "message": "Timeout waiting for exit"},
         }
+    await output.settle()
     # The wait returned, so the process has exited and the status is never None;
     # the fallback keeps the response well-formed rather than raising on a path
     # that exists to report an outcome.
@@ -431,8 +435,14 @@ async def release_owned_terminal(terminal_id: str, ctx: AcpSessionContext) -> No
 
         async def _release() -> None:
             # An exited root can still own live descendants and native handles.
-            await _kill_process_tree(process)
+            try:
+                await _kill_process_tree(process)
+            finally:
+                output = ctx.terminal_outputs.get(terminal_id)
+                if output is not None:
+                    await output.close()
             if ctx.terminals.get(terminal_id) is process:
                 del ctx.terminals[terminal_id]
+                ctx.terminal_outputs.pop(terminal_id, None)
 
         await complete_cleanup(_release())

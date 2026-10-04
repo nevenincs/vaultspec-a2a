@@ -213,9 +213,11 @@ async def test_every_terminal_callback_refuses_unowned_session_without_side_effe
                 assert "error" in response and "result" not in response
                 assert acp_session_context.terminals.get(terminal_id) is process
                 assert process.returncode is None
-        assert process.stdout is not None
-        assert await asyncio.wait_for(process.stdout.readline(), timeout=5) == (
-            b"owned-output\n"
+        async with asyncio.timeout(5):
+            while not acp_session_context.terminal_outputs[terminal_id].output:
+                await asyncio.sleep(0.01)
+        assert acp_session_context.terminal_outputs[terminal_id].output == (
+            "owned-output\n"
         )
     finally:
         # Local cleanup owes no protocol authority, including partial setup.
@@ -237,6 +239,10 @@ async def test_release_uses_the_receiving_contexts_registry(
     sibling = echo_context.terminals.pop(sibling_id)
     acp_session_context.terminals["same-id"] = first
     echo_context.terminals["same-id"] = sibling
+    first_output = acp_session_context.terminal_outputs.pop(first_id)
+    sibling_output = echo_context.terminal_outputs.pop(sibling_id)
+    acp_session_context.terminal_outputs["same-id"] = first_output
+    echo_context.terminal_outputs["same-id"] = sibling_output
     try:
         refused = await on_terminal_release(
             2,
@@ -255,9 +261,14 @@ async def test_release_uses_the_receiving_contexts_registry(
         assert released["result"] == {}
         assert first.returncode is not None and sibling.returncode is None
         assert echo_context.terminals["same-id"] is sibling
+        assert not acp_session_context.terminal_outputs
+        assert echo_context.terminal_outputs["same-id"] is sibling_output
+        assert all(task.done() for task in first_output._tasks)
     finally:
         await release_owned_terminal("same-id", acp_session_context)
         await release_owned_terminal("same-id", echo_context)
+    assert not echo_context.terminal_outputs
+    assert all(task.done() for task in sibling_output._tasks)
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ from ..control.workspace import (
     require_admitted_workspace_root,
 )
 from ..team.team_config import AgentConfig
+from ._acp_terminal_output import AcpTerminalOutput
 from ._json_contract import JsonObject
 from ._subprocess import STDERR_TAIL_LINES, redact_secrets
 
@@ -306,6 +307,7 @@ class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
     effects_may_have_occurred: bool = False
     background_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
+    terminal_outputs: dict[str, AcpTerminalOutput] = field(default_factory=dict)
     closing: bool = False
     stderr_event_count: int = 0
     # The child's own account of what went wrong, redacted at capture and bounded

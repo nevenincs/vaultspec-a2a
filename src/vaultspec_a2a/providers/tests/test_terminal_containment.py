@@ -103,9 +103,12 @@ async def test_terminal_child_contained_and_reaped_whole(
     assert isinstance(containment, ProcessContainment)
     assert containment.assigned is True
 
-    assert process.stdout is not None
-    line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
-    grandchild_pid = int(line.strip())
+    async with asyncio.timeout(10):
+        while not acp_session_context.terminal_outputs[terminal_id].output.strip():
+            await asyncio.sleep(0.01)
+    grandchild_pid = int(
+        acp_session_context.terminal_outputs[terminal_id].output.strip()
+    )
     try:
         assert is_pid_alive(grandchild_pid)
 
@@ -415,9 +418,7 @@ async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
     )
     process = acp_session_context.terminals[terminal_id]
 
-    # Read the marker through the handler BEFORE the kill. The handler drains the
-    # live pipe, so this is where the running terminal's output is observable;
-    # retaining it across the kill is the separate output-retention contract.
+    # Observe the retained marker before kill, then require the same snapshot.
     deadline = time.monotonic() + 10.0
     seen = ""
     while time.monotonic() < deadline and "pre-kill-marker" not in seen:
@@ -429,7 +430,8 @@ async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
         )
         live_result = live.get("result")
         assert isinstance(live_result, dict)
-        seen += str(live_result["output"])
+        seen = str(live_result["output"])
+        await asyncio.sleep(0.01)
     assert seen == "pre-kill-marker"
 
     killed = await on_terminal_kill(
@@ -450,6 +452,7 @@ async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
     )
     output_result = output.get("result")
     assert isinstance(output_result, dict)
+    assert output_result["output"] == "pre-kill-marker"
     assert output_result["truncated"] is False
     # A killed command has completed, so the status is present and describes how
     # it died. Which of the two fields carries that is platform-dependent, so the

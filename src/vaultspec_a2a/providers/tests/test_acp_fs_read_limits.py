@@ -366,6 +366,16 @@ agent({ name: 'read-contract-peer' })
       methods.client.terminal.output, terminalParams
     );
     const terminalOutputSeen = terminalOutput.output.startsWith('Python ');
+    const again = await client.request(methods.client.terminal.output, terminalParams);
+    const stableOutput = JSON.stringify(again) === JSON.stringify(terminalOutput);
+    const zero = await client.request(methods.client.terminal.create, {
+      sessionId: params.sessionId, command: 'python', args: ['--version'],
+      outputByteLimit: 0
+    });
+    const zeroParams = {sessionId: params.sessionId, terminalId: zero.terminalId};
+    await client.request(methods.client.terminal.waitForExit, zeroParams);
+    const zeroOutput = await client.request(methods.client.terminal.output, zeroParams);
+    await client.request(methods.client.terminal.release, zeroParams);
     await client.request(methods.client.terminal.kill, terminalParams);
     await client.request(methods.client.terminal.waitForExit, terminalParams);
     const released = await client.request(
@@ -376,7 +386,8 @@ agent({ name: 'read-contract-peer' })
     );
     return {stopReason: 'end_turn',
       _meta: {first, empty, foreignRefused, write, foreignWriteRefused,
-        terminalExit, foreignTerminalRefused, terminalOutputSeen, released, repeated}};
+        terminalExit, foreignTerminalRefused, terminalOutputSeen, stableOutput,
+        zeroOutput, released, repeated}};
   })
   .connect(ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
 """
@@ -462,6 +473,12 @@ agent({ name: 'read-contract-peer' })
                             "terminalExit": {"exitCode": 0, "signal": None},
                             "foreignTerminalRefused": True,
                             "terminalOutputSeen": True,
+                            "stableOutput": True,
+                            "zeroOutput": {
+                                "output": "",
+                                "truncated": True,
+                                "exitStatus": {"exitCode": 0, "signal": None},
+                            },
                             "released": {},
                             "repeated": {},
                         },

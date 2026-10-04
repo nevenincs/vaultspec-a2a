@@ -35,6 +35,7 @@ from ..providers._acp_rpc_handlers import (
     on_terminal_create,
     on_terminal_kill,
 )
+from ..providers._acp_rpc_terminal_handlers import release_owned_terminal
 from ..providers._acp_types import AcpModelConfig, AcpSessionContext
 from ..providers._subprocess import kill_process_tree, spawn_acp_process
 from ..tests.gateway_boot import (
@@ -196,8 +197,8 @@ async def terminal_session_context(tmp_path: Path) -> AsyncIterator[AcpSessionCo
     try:
         yield ctx
     finally:
-        for terminal in tuple(ctx.terminals.values()):
-            await kill_process_tree(terminal)
+        for terminal_id in tuple(ctx.terminals):
+            await release_owned_terminal(terminal_id, ctx)
         await kill_process_tree(process)
 
 
@@ -234,10 +235,10 @@ async def test_terminal_child_tree_contained_and_reaped(
     assert isinstance(containment, ProcessContainment)
     assert containment.assigned is True
 
-    assert process.stdout is not None
-    grandchild_pid = int(
-        (await asyncio.wait_for(process.stdout.readline(), timeout=10.0)).strip()
-    )
+    async with asyncio.timeout(10):
+        while not ctx.terminal_outputs[terminal_id].output.strip():
+            await asyncio.sleep(0.01)
+    grandchild_pid = int(ctx.terminal_outputs[terminal_id].output.strip())
     try:
         assert is_pid_alive(grandchild_pid)
         # Graceful terminal/kill reaps the whole terminal subtree via containment.

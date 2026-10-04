@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:be34b757b0e77275ad16659a8e5f5af2c2de87c9fba9915ef335d03f4447ba1c'
+body_hash: 'sha256:57bb18e9bffe3762b6a855806d79d5dabd409eae16ce1c041f90496d8654c55c'
 related:
   - "[[2026-08-02-llm-context-provider-abstraction-plan]]"
 ---
@@ -123,6 +123,17 @@ one mixed-line-ending docstring in service_tests/conftest.py; bounded Ruff
 format normalized it with no tracked Git content diff. Final full formatting
 passes. Concurrent native deployment and engine work remains outside this commit.
 
+### terminal-output-remediation | low | All four retained-output defects remediated
+
+2026-10-05 implementation and integrated review of P01.S02, based on verification checkpoint 2465a34e. Type: resource bounds and ACP interoperability; status: fixed. Strict `AcpTerminalCreateRequest` rejects negative, boolean, floating, string and out-of-uint64 caps before subprocess acquisition. The final retained-output budget is bounded to 0..1 MiB. Both real pipes drain continuously under terminal ownership, independently from cancellable RPC tasks. Separate incremental decoders preserve UTF-8 across reads; the combined bounded tail removes oldest complete characters and reports sticky truncation. Snapshots do not consume output, kill preserves it, and release joins the drain owners. Source: `src/vaultspec_a2a/providers/_acp_client_requests.py`, `src/vaultspec_a2a/providers/_acp_terminal_output.py`, `src/vaultspec_a2a/providers/_acp_rpc_terminal_handlers.py`, `src/vaultspec_a2a/providers/_acp_types.py`.
+
+Original trigger substitution through the same real handlers: zero returns zero bytes; cap four returns only Z from A-emoji-Z; negative/string/bool are refused; absent/null retain the complete legitimate marker. The 65,536-byte boundary returns a valid 65,536-byte tail without replacements, and repeated snapshots are equal. The same real 32 MiB stdout producer now exits normally within the wait deadline, writes its completion marker, has zero unread buffered bytes and no paused read transport. Dedicated tests additionally complete 32 MiB on each pipe without output polling, clamp uint64 maximum to the server budget, preserve live and post-kill markers, flush malformed/incomplete input within the byte budget, and bound settlement when an exited root has a live descendant retaining pipes. All owned children and output records are reaped.
+
+### terminal-output-review-fixture | low | Shared-ID ownership test now moves both owned registries
+
+2026-10-05 independent candidate review finding. Type: test/lifecycle correctness; status: confirmed, corrected and verified in this pass. The existing same-ID test moved real process entries while abandoning the new output entries under old IDs, so release skipped its output-owner join. Both entries now move together; assertions prove receiving-context output removal, sibling preservation and completed drain tasks after both releases. Source: `src/vaultspec_a2a/providers/tests/test_acp_callback_ownership.py`. Desktop terminal fixture cleanup now calls the same complete owner release, and session cleanup checks both registries. The reviewer inspected the concrete corrections and found no further issue. No production bypass or regression was reported.
+
+Integrated review verdict: PASS for P01.S02 and completed P01 behavior, with parent-owned final verification below. P02.S05 supported-adapter native callback routing and the command-description interoperability follow-up remain queued; their earlier validation is unchanged. Semantic code discovery was attempted again, found a stopped RAG service, and used targeted module/analogue reads with the accepted linked decisions. No shared index/service changes were made.
 ## Recommendations
 
 Repair the four retained-output manifestations together within P01.S02's existing
@@ -151,6 +162,12 @@ Pinned Node 26.8.1 was prepended only for child SDK/adapter tests.
   teardown and file-read schema: zero errors/warnings/notes.
 - Final full Ruff formatting: 1987 files formatted, no diagnostics.
 
-Validation is complete for the supplied remaining ACP candidates. The migration
+At checkpoint 2465a34e, validation was complete for the supplied remaining ACP candidates. The migration
 is not complete: P01.S02, P02.S05 and integrated P03.S06 remain open. No new source
 fix or closure of the historical High boundary is claimed by this audit.
+
+### P01.S02 implementation verification, 2026-10-05
+
+All commands retain the frozen uv tooling profile above. Final Windows focused terminal/output/ownership/resource-lifetime suite plus desktop terminal containment: 82 passed. Complete filesystem and installed SDK wire suite: 75 passed (the earlier combined run reported 76 including the same desktop test). Ubuntu frozen Python 3.13 environment, actual POSIX process groups, same four focused files: 81 passed. Total current applicable evidence: 157 distinct Windows tests and 81 Linux tests; no skip or mock introduced. SDK 1.6.0 over pinned Node 26.8.1 proves repeated output snapshots and explicit zero cap through negotiated production stdio dispatch. Current catalog-selected Claude native turn proof remains the earlier independently recorded evidence and does not stand in for callback traffic.
+
+Final Basedpyright on all eleven changed source/test files: zero errors, warnings or notes. Full Ty, full Ruff lint, full Ruff formatting (1993 files) and git diff whitespace checks pass. Initial test import typo and formatting diagnostics were corrected before these final results. Managed original-trigger substitute and retained observed-fixed.json confirm remediation; historical failing reproduction remains preserved. The independent reviewer found one Low fixture issue, confirmed its correction, and no production bypass/regression. The retained artifact collection includes verify-fixed.py and observed-fixed.json under artifacts/05_findings/terminal-output-retention/validation_artifacts. P01.S02 closes only after these findings, checks and ledger are recorded; P02.S05 and P03.S06 remain open.

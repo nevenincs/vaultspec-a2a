@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 
 from ...testing import forfeits_purity
+from .._acp_rpc_terminal_handlers import release_owned_terminal
 from .._acp_types import AcpSessionContext
 from .._factory_commands import claude_acp_entry
 
@@ -66,6 +67,7 @@ _IMPURE_FILES = frozenset(
         "test_acp_vault_deny.py",
         "test_acp_fs_read_limits.py",
         "test_acp_callback_ownership.py",
+        "test_acp_terminal_output.py",
         "test_capsule_acp_resolution.py",
         "test_claude_binary_identity.py",
         "test_catalog_registration_live.py",
@@ -197,7 +199,12 @@ async def acp_session_context(
     child can safely serve the module while every mutable session field remains
     function-scoped and loop-local.
     """
-    yield _fresh_acp_session_context(_acp_child_streams)
+    context = _fresh_acp_session_context(_acp_child_streams)
+    try:
+        yield context
+    finally:
+        for terminal_id in tuple(context.terminals):
+            await release_owned_terminal(terminal_id, context)
 
 
 @pytest_asyncio.fixture

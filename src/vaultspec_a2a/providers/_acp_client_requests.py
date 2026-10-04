@@ -35,3 +35,11 @@ class AcpTerminalRequest(AcpSessionRequest):
     """A session-owned request addressing one terminal by its opaque id."""
 
     terminal_id: str = Field(alias="terminalId", min_length=1)
+
+
+class AcpTerminalCreateRequest(AcpSessionRequest):
+    """Validate the optional ACP uint64 output cap before process acquisition."""
+
+    output_byte_limit: int | None = Field(
+        default=None, alias="outputByteLimit", ge=0, le=2**64 - 1
+    )

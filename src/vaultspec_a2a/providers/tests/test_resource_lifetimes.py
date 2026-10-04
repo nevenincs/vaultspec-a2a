@@ -256,7 +256,12 @@ async def test_release_after_root_exit_reaps_descendant_and_preserves_foreign_pr
         assert terminal.stdin is not None and terminal.stdout is not None
         terminal.stdin.write(b"start\n")
         await terminal.stdin.drain()
-        descendant = int(await asyncio.wait_for(terminal.stdout.readline(), timeout=10))
+        async with asyncio.timeout(10):
+            while not acp_session_context.terminal_outputs[terminal_id].output.strip():
+                await asyncio.sleep(0.01)
+        descendant = int(
+            acp_session_context.terminal_outputs[terminal_id].output.strip()
+        )
         await asyncio.wait_for(terminal.wait(), timeout=10)
         assert terminal.returncode == 0
         assert pid_is_live(descendant)
@@ -314,6 +319,7 @@ async def test_session_cleanup_reaps_terminal_created_during_cancel(
     try:
         await asyncio.wait_for(model._cleanup_session(ctx, stdout, stderr), timeout=25)
         assert not ctx.terminals
+        assert not ctx.terminal_outputs
         assert creation.done()
         assert stdout.done() and stderr.done()
         assert process.returncode is not None

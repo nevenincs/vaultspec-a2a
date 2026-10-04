@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from .._acp_protocol import handle_session_update
+from .._acp_protocol import _native_command_snapshot, handle_session_update
 from .._acp_types import (
     AcpSessionContext,
     NativeCommandDisposition,
@@ -218,3 +218,57 @@ def test_session_catalog_count_is_bounded() -> None:
     assert len(ctx.native_command_catalogs) == 16
     with pytest.raises(ValueError, match="catalog limit"):
         ctx.native_commands_for("session-16")
+
+
+@pytest.mark.parametrize("length", [0, 512, 1024, 1025, 80_000])
+def test_long_display_strings_preserve_command_identity_and_retention_budget(
+    length: int,
+) -> None:
+    snapshot = _native_command_snapshot(
+        {
+            "availableCommands": [
+                {
+                    "name": "compact",
+                    "description": "🙂" * length,
+                    "input": {"hint": "x" * length},
+                },
+                {"name": "status", "description": "Status."},
+            ]
+        }
+    )
+    assert set(snapshot) == {"compact", "status"}
+    command = snapshot["compact"]
+    assert command.disposition is NativeCommandDisposition.SUPPORTED
+    assert command.description == (
+        "🙂" * length if length <= 1024 else "🙂" * 1023 + "…"
+    )
+    assert command.input_hint == ("x" * length if length <= 512 else "x" * 511 + "…")
+    assert snapshot["status"].description == "Status."
+
+
+@pytest.mark.parametrize("value", [None, True, 1025, ["description"], {}])
+def test_display_shortening_does_not_coerce_malformed_metadata(
+    value: JsonValue,
+) -> None:
+    for field in ("description", "hint"):
+        command: JsonObject = {"name": "compact", "description": "Compact."}
+        if field == "description":
+            command[field] = value
+        else:
+            command["input"] = {field: value}
+        with pytest.raises(ValueError, match="is invalid"):
+            _native_command_snapshot({"availableCommands": [command]})
+
+
+def test_long_display_does_not_relax_identity_or_duplicate_checks() -> None:
+    malformed: list[list[JsonValue]] = [
+        [{"name": " compact", "description": "d" * 2000}],
+        [{"name": "n" * 129, "description": "d" * 2000}],
+        [
+            {"name": "compact", "description": "d" * 2000},
+            {"name": "compact", "description": "another"},
+        ],
+    ]
+    for commands in malformed:
+        with pytest.raises(ValueError):
+            _native_command_snapshot({"availableCommands": commands})

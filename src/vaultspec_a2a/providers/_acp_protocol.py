@@ -119,8 +119,12 @@ def _bounded_command_display_text(
     value: JsonValue | None, *, field: str, maximum: int
 ) -> str:
     """Return one protocol display string without applying identity rules."""
-    if not isinstance(value, str) or len(value) > maximum:
+    if not isinstance(value, str):
         raise ValueError(f"available command {field} is invalid")
+    if len(value) > maximum:
+        # Display metadata cannot invalidate an otherwise exact command identity.
+        # Mark shortening explicitly while retaining the local text budget.
+        return value[: maximum - 1] + "…"
     return value
 
 

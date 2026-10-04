@@ -5,7 +5,7 @@ tags:
 date: '2026-08-02'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:de914cecd46916fe94663bfd93b6adad69fbbbf0908d84923cacd54ae050f87c'
+body_hash: 'sha256:d5f4c79725c7f8ea52b02214d6620e7b9b580a91b9cb2803b7700f6d516baa26'
 related:
   - "[[2026-08-02-llm-context-provider-abstraction-plan]]"
 ---
@@ -50,8 +50,16 @@ related:
 - `S02` `verify:` `Full Ruff lint format Ty and eleven-file Basedpyright zero diagnostics` -> `pass`
 - `S02` `verify:` `Independent integrated review and confirmed Low fixture correction` -> `pass`
 - `S02` `by:` `root`
+- `S06` `M` `src/vaultspec_a2a/providers/_acp_protocol.py`
+- `S06` `M` `src/vaultspec_a2a/providers/tests/test_acp_command_advertisements.py`
+- `S06` `M` `.vault/audit/2026-10-04-llm-context-provider-abstraction-audit.md`
+- `S06` `verify:` `Command advertisement and native command suite 34 tests` -> `pass`
+- `S06` `verify:` `Real Claude adapter retains 54 commands with bounded display metadata` -> `pass`
+- `S06` `verify:` `Full Ruff lint format Ty scoped Basedpyright and whitespace checks` -> `pass`
+- `S06` `verify:` `Independent integrated command advertisement review no new defect` -> `pass`
 
 ## Notes
 
 - `S01` Delivered by acp-read-remediation and acp-callback-ownership approved follow-on plans. Output retention P01.S02 and native supported-adapter traffic P02.S05 remain open.
 - `S06` Verification checkpoint only; P01.S02 output defects and P02.S05 native callback route remain open, so S06 is not closed.
+- `S06` Direct display-metadata correction and audit checkpoint only; P02.S05 native callback route and P03.S06 overall qualification remain open under the existing native isolation owner.

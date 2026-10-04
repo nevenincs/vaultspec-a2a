@@ -27,18 +27,19 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..control.state_layout import seal_state_home
 from ..database.checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
     install_checkpoint_schema_identity,
 )
 from ..database.migrate import migration_script_location, run_migrations
 from ..database.migrations import backfill_teamstate_sdd_fields
+from .profile import DesktopProfileError, ensure_private_state
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from .contract import MigrationRange
+    from .profile import DesktopStatePaths
 
 __all__ = [
     "MigrationStage",
@@ -305,11 +306,22 @@ def _failed_result(
 
 
 async def _run_mutations_bounded(
-    started: float, database_path: Path, checkpoint_path: Path, target_head: str
+    started: float, state: DesktopStatePaths, target_head: str
 ) -> MigrationResult:
     """Run the mutation core and fold every expected failure into the result."""
     try:
-        stores = await _apply_mutations(database_path, checkpoint_path, target_head)
+        stores = await _apply_mutations(
+            state.database_path, state.checkpoint_path, target_head
+        )
+        ensure_private_state(state)
+    except DesktopProfileError as exc:
+        return _failed_result(
+            started,
+            MigrationStage.PRECONDITION,
+            type(exc).__name__,
+            target_head=target_head,
+            detail="Desktop state requires owner-only access and unlinked paths.",
+        )
     except StoreLockedError as exc:
         return _failed_result(
             started,
@@ -373,7 +385,16 @@ async def migrate_stores(
             ),
         )
     state = derive_state_paths(app_home)
-    seal_state_home(state.app_home)
+    try:
+        ensure_private_state(state)
+    except DesktopProfileError as exc:
+        return _failed_result(
+            started,
+            MigrationStage.PRECONDITION,
+            type(exc).__name__,
+            target_head=target_head,
+            detail="Desktop state requires owner-only access and unlinked paths.",
+        )
     if expect_from is not None:
         observed = _read_revision(state.database_path)
         if observed != expect_from:
@@ -387,9 +408,7 @@ async def migrate_stores(
                     f"{expect_from!r}"
                 ),
             )
-    return await _run_mutations_bounded(
-        started, state.database_path, state.checkpoint_path, target_head
-    )
+    return await _run_mutations_bounded(started, state, target_head)
 
 
 async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
@@ -406,7 +425,15 @@ async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
 
     started = time.monotonic()
     state = derive_state_paths(app_home)
-    seal_state_home(state.app_home)
+    try:
+        ensure_private_state(state)
+    except DesktopProfileError as exc:
+        return _failed_result(
+            started,
+            MigrationStage.PRECONDITION,
+            type(exc).__name__,
+            detail="Desktop state requires owner-only access and unlinked paths.",
+        )
     observed = _read_revision(state.database_path)
     if observed is not None:
         return _failed_result(
@@ -424,6 +451,4 @@ async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
         return _failed_result(
             started, MigrationStage.PRECONDITION, type(exc).__name__, detail=str(exc)
         )
-    return await _run_mutations_bounded(
-        started, state.database_path, state.checkpoint_path, target_head
-    )
+    return await _run_mutations_bounded(started, state, target_head)

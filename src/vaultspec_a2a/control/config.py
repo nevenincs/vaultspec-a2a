@@ -287,6 +287,12 @@ class Settings(DomainSettingsConfig, InfraConfig):
         version control is not a2a's concern.
         """
         home = self.a2a_home
+        if self.desktop_profile_armed and (
+            directory == home or directory.is_relative_to(home)
+        ):
+            from ..desktop.profile import derive_state_paths, ensure_private_state
+
+            ensure_private_state(derive_state_paths(home))
         if directory == home or directory.is_relative_to(home):
             seal_state_home(home)
         elif directory.is_relative_to(self.project_root):

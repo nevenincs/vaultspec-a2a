@@ -28,6 +28,7 @@ __all__ = [
     "credential_file_is_owner_restricted",
     "harden_credential_path",
     "owner_only_mode",
+    "path_is_owner_restricted",
     "restrict_windows_file",
     "unfollowed_read_flags",
     "windows_file_is_restricted",
@@ -146,7 +147,9 @@ def restrict_windows_file(path: Path) -> None:
         kernel32.LocalFree(descriptor)
 
 
-def _restricted_dacl_principals(dacl: ctypes.c_void_p) -> set[str] | None:
+def _restricted_dacl_principals(
+    dacl: ctypes.c_void_p, *, allow_inherited: bool = False
+) -> set[str] | None:
     """Read allowed principals, rejecting inherited or non-allow ACEs."""
     if os.name != "nt":
         return None
@@ -166,7 +169,7 @@ def _restricted_dacl_principals(dacl: ctypes.c_void_p) -> set[str] | None:
         if not advapi32.GetAce(dacl, index, ctypes.byref(ace)):
             raise ctypes.WinError(ctypes.get_last_error())
         header = ctypes.cast(ace, ctypes.POINTER(_AceHeader)).contents
-        if header.ace_type != 0 or header.ace_flags & 0x10:
+        if header.ace_type != 0 or (header.ace_flags & 0x10 and not allow_inherited):
             return None
         ace_address = ace.value
         if ace_address is None:
@@ -184,11 +187,14 @@ def _restricted_dacl_principals(dacl: ctypes.c_void_p) -> set[str] | None:
     return principals
 
 
-def windows_file_is_restricted(path: Path) -> bool:
+def windows_file_is_restricted(path: Path, *, allow_inherited: bool = False) -> bool:
     """Return whether *path* has exactly the private publication DACL.
 
     Stays read-only, using native ACL APIs. Every ACE must be a non-inherited
-    allow for the current user, SYSTEM, or administrators.
+    allow for the current user, SYSTEM, or administrators. The owner must also
+    belong to that set, since an owner can replace a restrictive DACL.
+    ``allow_inherited`` also accepts private ACEs inherited by new SQLite side
+    files from an already restricted parent.
     """
     if os.name != "nt":
         return True
@@ -196,11 +202,12 @@ def windows_file_is_restricted(path: Path) -> bool:
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     descriptor = ctypes.c_void_p()
     dacl = ctypes.c_void_p()
+    owner = ctypes.c_void_p()
     result = advapi32.GetNamedSecurityInfoW(
         str(path),
         1,  # SE_FILE_OBJECT
-        0x00000004,  # DACL_SECURITY_INFORMATION
-        None,
+        0x00000005,  # OWNER + DACL_SECURITY_INFORMATION
+        ctypes.byref(owner),
         None,
         ctypes.byref(dacl),
         None,
@@ -209,13 +216,24 @@ def windows_file_is_restricted(path: Path) -> bool:
     if result:
         raise OSError(result, ctypes.FormatError(result), path)
     try:
-        if not dacl.value:
+        if not dacl.value or not owner.value:
             return False
-        return _restricted_dacl_principals(dacl) == {
+        allowed = {
             windows_current_user_sid(),
             "S-1-5-18",
             "S-1-5-32-544",
         }
+        rendered = ctypes.c_wchar_p()
+        if not advapi32.ConvertSidToStringSidW(owner, ctypes.byref(rendered)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            return (
+                rendered.value in allowed
+                and _restricted_dacl_principals(dacl, allow_inherited=allow_inherited)
+                == allowed
+            )
+        finally:
+            kernel32.LocalFree(rendered)
     finally:
         kernel32.LocalFree(descriptor)
 
@@ -237,16 +255,32 @@ def harden_credential_path(path: Path) -> None:
 
     Covers both files and directories, because callers protect both - a
     credential file, and the state directory whose databases must not be
-    readable beside it. Fails closed on Windows if the applied DACL does not read
-    back as owner-restricted, so a caller never trusts a path it could not
-    actually protect.
+    readable beside it. Reads back the effective permissions on both platforms,
+    so a filesystem that ignores permission changes cannot silently pass.
     """
+    if path.is_symlink() or path.is_junction():
+        raise OSError(f"refusing to restrict a linked path: {path}")
     if os.name == "posix":
         os.chmod(path, owner_only_mode(path))
-        return
-    restrict_windows_file(path)
-    if not windows_file_is_restricted(path):
-        raise OSError(f"could not apply an owner-restricted DACL to {path}")
+    elif os.name == "nt":
+        restrict_windows_file(path)
+    else:
+        raise OSError(f"owner-restricted access is unsupported on {os.name}")
+    if not path_is_owner_restricted(path):
+        raise OSError(f"could not apply owner-restricted access to {path}")
+
+
+def path_is_owner_restricted(path: Path) -> bool:
+    """Check a real file or directory's effective private permissions."""
+    if path.is_symlink() or path.is_junction():
+        return False
+    info = path.stat(follow_symlinks=False)
+    if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+        return False
+    if os.name == "posix":
+        mode = 0o700 if stat.S_ISDIR(info.st_mode) else 0o600
+        return info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == mode
+    return os.name == "nt" and windows_file_is_restricted(path, allow_inherited=True)
 
 
 def credential_file_is_owner_restricted(path: Path) -> bool:

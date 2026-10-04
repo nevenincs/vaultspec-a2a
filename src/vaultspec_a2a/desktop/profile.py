@@ -24,8 +24,8 @@ this module reuses them rather than restating asset paths.
 
 from __future__ import annotations
 
-import logging
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
@@ -40,9 +40,8 @@ __all__ = [
     "DesktopProfileError",
     "DesktopStatePaths",
     "derive_state_paths",
+    "ensure_private_state",
 ]
-
-logger = logging.getLogger(__name__)
 
 
 class DesktopProfileError(ValueError):
@@ -373,6 +372,70 @@ def _validate_app_home(app_home: Path) -> None:
         )
 
 
+def _restrict_state_path(
+    path: Path, *, directory: bool, ephemeral: bool = False
+) -> None:
+    """Refuse aliases before changing permissions on sensitive state."""
+    from ._platform_acl import harden_credential_path
+
+    try:
+        if path.is_symlink() or path.is_junction():
+            raise OSError("linked state paths are not private")
+        if directory:
+            path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        else:
+            try:
+                info = path.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            if ephemeral and stat.S_ISREG(info.st_mode) and info.st_nlink == 0:
+                return
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise OSError("state files must be regular files without hard links")
+        try:
+            harden_credential_path(path)
+        except FileNotFoundError:
+            if not ephemeral:
+                raise
+            # SQLite removes side files when its last connection closes. A
+            # replacement inherits privacy from the already restricted parent.
+            return
+    except OSError as exc:
+        raise DesktopProfileError(
+            f"cannot protect desktop state path {path}: {exc}. "
+            "Choose an application home on a filesystem supporting owner-only "
+            "access and remove linked state paths before starting the desktop."
+        ) from exc
+
+
+def ensure_private_state(state: DesktopStatePaths) -> None:
+    """Fail closed before opening desktop databases or their SQLite side files.
+
+    The private parent protects future side files; existing files also need
+    hardening because Windows files can retain explicit, permissive ACLs.
+    """
+    # Refuse a linked home before the seal can write through it.
+    if state.app_home.is_symlink() or state.app_home.is_junction():
+        raise DesktopProfileError(
+            f"desktop application home is linked: {state.app_home}; "
+            "choose a real directory with owner-only access."
+        )
+    try:
+        seal_state_home(state.app_home)
+    except OSError as exc:
+        raise DesktopProfileError(
+            f"cannot prepare desktop application home {state.app_home}: {exc}; "
+            "choose a writable filesystem supporting owner-only access."
+        ) from exc
+    for directory in dict.fromkeys(state.provisioned_directories):
+        _restrict_state_path(directory, directory=True)
+    for database in (state.database_path, state.checkpoint_path):
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            _restrict_state_path(
+                Path(f"{database}{suffix}"), directory=False, ephemeral=bool(suffix)
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class DesktopProfile:
     """One armed desktop profile binding a mutable app home and immutable capsule.
@@ -426,7 +489,7 @@ class DesktopProfile:
     def ensure(self) -> None:
         """Create the provisioned mutable-state directories beneath the app home.
 
-        Idempotent: existing directories are left untouched. Only directories with
+        Idempotent: existing state is rechecked and restricted. Only directories with
         a live consumer are created; the reserved directories are left for their
         consuming phases so ``ensure`` never seeds dead empty state. Called once
         the profile is armed and about to seat live state.
@@ -439,21 +502,9 @@ class DesktopProfile:
         ``-wal`` and ``-shm`` beside each database, and the write-ahead log holds
         recently committed rows, so hardening the files alone would leave the most
         recent data readable.
-        """
-        from ._platform_acl import harden_credential_path
 
-        seal_state_home(self.app_home)
-        for directory in self.state.provisioned_directories:
-            directory.mkdir(parents=True, exist_ok=True)
-            # Best effort: a filesystem that cannot express owner-only access
-            # (a network share, a mount without ACL support) must not stop the
-            # profile from arming — the store still has to work there.
-            try:
-                harden_credential_path(directory)
-            except OSError:
-                logger.warning(
-                    "Could not restrict %s to its owner; the databases beneath it "
-                    "may be readable by other local users.",
-                    directory,
-                    exc_info=True,
-                )
+        Raises:
+            DesktopProfileError: If owner-only access cannot be applied and
+                verified, or a sensitive state path is linked.
+        """
+        ensure_private_state(self.state)

@@ -18,10 +18,13 @@ def run(*args: str) -> str:
     ).stdout.strip()
 
 
-def qualify(ref: str) -> None:
+def qualify(ref: str) -> str:
     """Build an archived revision and prove isolation in a disposable container."""
     revision = run("git", "rev-parse", "--verify", f"{ref}^{{commit}}")
-    with tempfile.TemporaryDirectory(prefix="worker-qualification-") as temporary:
+    # storage-anchor-ok: disposable source archive and image qualification inputs.
+    with tempfile.TemporaryDirectory(  # storage-anchor-ok
+        prefix="worker-qualification-"
+    ) as temporary:
         directory = Path(temporary)
         archive = directory / "source.tar"
         run("git", "archive", "--format=tar", f"--output={archive}", revision)
@@ -72,6 +75,7 @@ def qualify(ref: str) -> None:
             if container:
                 run("docker", "rm", "--force", container)
         print(f"Qualified worker {image} from {revision}", flush=True)
+        return image
 
 
 def main() -> None:

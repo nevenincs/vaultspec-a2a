@@ -104,3 +104,27 @@ docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-comp
 
 See [`.env.example`](../.env.example) for supported settings and the
 [operator reference](../docs/operations.rst) for lifecycle ownership.
+
+### Released container images
+
+Changes go through the PR merge gate. Post-merge Full Validation also builds
+the committed production worker and runs its MCP identity-isolation proof.
+Maintainers start a release through the existing cut workflow:
+
+```console
+gh workflow run release-please.yml --ref main
+```
+
+The release lane builds Linux AMD64 gateway and worker images from the same
+release tag. It proves the worker before pushing to
+`ghcr.io/nevenincs/vaultspec-a2a-gateway` and
+`ghcr.io/nevenincs/vaultspec-a2a-worker`, then attaches an attested
+`container-release.json` containing the source commit and immutable image
+digests. The release remains a draft until both container publication and the
+existing archive cohort succeed. Registry build tags are candidates; use the
+digests in a published release receipt for deployment.
+
+GitHub Actions needs package-write and attestation permissions. Existing GHCR
+packages must grant this repository access. Publishing does not restart any
+service. No production destination is currently configured; deployment host
+enrollment and promotion setup remain required.

@@ -992,3 +992,7 @@ ci-merge:
 [group('check')]
 ci-worker-image:
     uv run --isolated --no-project python -m dev.container_release
+
+[group('release')]
+release-containers:
+    uv run --isolated --no-project python -m dev.container_publish

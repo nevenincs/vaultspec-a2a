@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:60a5ce24fca5e2bc7fba7e5fd76fe9186fc66e3eb9e082ac7dff8582fe1368a4'
+body_hash: 'sha256:e2fc59742770140ec4596bd86c7ff54bcabdf3699606046f1b241c851d875653'
 related:
   - "[[2026-10-04-container-release-plan]]"
 ---
@@ -34,6 +34,19 @@ Type: reproducibility limitation, pre-existing. prod.Dockerfile uses mutable bas
 ### s01-review | low | Qualification step reviewed with passing evidence
 
 Type: review checkpoint. PASS for S01 working-tree changes: full-validation invokes a just recipe on the requested source ref, and release health inherits that job. The helper archives the commit, builds the production worker, copies the same-source proof and propagates both Docker command and container exit failures. Docker Desktop Linux execution against e97c7adc passed identity, fresh-cache MCP and descendant cleanup checks. Ruff, ty, CI contract, actionlint and six workflow tests passed. Review limitation: no GitHub run has exercised the new job yet. Cached image layers remain under normal runner Docker cache management; no global pruning is performed.
+
+
+### attestation-ref | high | Pin receipt provenance to the main workflow ref
+
+Type: security, found and fixed during S02/S03 review. A workflow path alone permits attestations from another branch at that path. Container publication now runs only from refs/heads/main, and receipt verification requires --source-ref refs/heads/main in both publishing and the promotion draft. The source commit inside the signed receipt binds the separately archived release tag. Review after correction: PASS for this boundary.
+
+### production-runner | high | Deployment runner access requires a destination decision
+
+Type: operational/security prerequisite, open for S03. A production host registered with ordinary Linux/X64 labels could receive unrelated CI jobs. The draft uses a production runner group whose access must be restricted to the main promotion workflow. Repository owner type is User, so an organization-owned restricted runner group is not currently available. Do not enroll a production host as a general repository runner. Host/platform and its access method are pending owner input; the draft deployment workflow is not ready to merge or run.
+
+### s02-review | low | Image publication passes local contract checks
+
+Type: review checkpoint. PASS for local S02 implementation; external execution remains unproven. Reviewed tagged-source archive, exact worker image proof before push, temporary Docker credential directory, immutable same-repository digest validation, main-only receipt attestation, existing-draft requirement and final release dependency on containers. Nineteen focused tests, Ruff, ty, actionlint and CI-contract checks pass. No GHCR push, GitHub attestation or release upload was executed locally. A real authorized release run must establish registry permissions and attestation availability.
 
 
 ## Recommendations

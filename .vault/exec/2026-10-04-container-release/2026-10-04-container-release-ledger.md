@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:7201f5d51723955a54d46584131b3cfae701ac5a111b3d6c446a3aaa02addf8f'
+body_hash: 'sha256:a7669f19466410bdfc1167928dc46d1e06f7bd8665974da700fe09eb918baa59'
 related:
   - "[[2026-10-04-container-release-plan]]"
 ---
@@ -49,3 +49,20 @@ related:
 - `S01` `verify:` `pytest dev/tests/test_release_workflow_contract.py (6 tests)` -> `pass`
 - `S01` `verify:` `python -m dev.ci_contract` -> `pass`
 - `S01` `verify:` `python -m dev.container_release --ref e97c7adca6dc02d78162815404eb9f62ac124f55` -> `pass`
+- `S02` `A` `dev/container_publish.py`
+- `S02` `A` `dev/tests/test_container_publish.py`
+- `S02` `M` `dev/container_release.py`
+- `S02` `M` `.github/workflows/release.yml`
+- `S02` `M` `Justfile`
+- `S02` `M` `dev/tests/test_release_workflow_contract.py`
+- `S02` `M` `service/README.md`
+- `S02` `A` `.vault/adr/2026-10-04-container-release-adr.md`
+- `S02` `verify:` `ruff changed Python` -> `pass`
+- `S02` `verify:` `ty changed Python` -> `pass`
+- `S02` `verify:` `pytest container receipt and release workflow contracts (19 tests)` -> `pass`
+- `S02` `verify:` `actionlint release.yml and test.yml` -> `pass`
+- `S02` `verify:` `python -m dev.ci_contract` -> `pass`
+
+## Notes
+
+- `S02` GHCR push and receipt attestation require a real release workflow run; no external publication performed.

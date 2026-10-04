@@ -101,7 +101,7 @@ def test_release_proves_tag_and_publishes_complete_cohort_last() -> None:
         "id-token": "write",
         "attestations": "write",
     }
-    assert jobs["publish"]["needs"] == ["build", "provenance"]
+    assert jobs["publish"]["needs"] == ["build", "provenance", "containers"]
     assert jobs["publish"]["permissions"] == {"contents": "write"}
 
     steps = jobs["publish"]["steps"]
@@ -159,3 +159,34 @@ def test_release_health_requires_production_worker_isolation() -> None:
     )
     assert proof.get("continue-on-error", False) is False
     assert proof.get("if") is None
+
+
+def test_image_publication_is_qualified_and_receipt_is_attested() -> None:
+    jobs = _workflow("release.yml")["jobs"]
+    containers = jobs["containers"]
+    assert containers["needs"] == "health"
+    assert containers.get("continue-on-error", False) is False
+    assert containers["permissions"]["packages"] == "write"
+    steps = containers["steps"]
+    build = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("run") == "just release-containers"
+    )
+    attest = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("with", {}).get("subject-path") == "container-release.json"
+    )
+    verify = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("run", "").startswith("gh attestation verify")
+    )
+    upload = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("run", "").startswith("gh release upload")
+    )
+    assert build < attest < verify < upload
+    assert "containers" in jobs["publish"]["needs"]

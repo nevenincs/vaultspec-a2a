@@ -768,6 +768,7 @@ async def setup_session(
             f"ACP {method} succeeded without a sessionId",
             code=AcpErrorCode.INTERNAL_ERROR,
         )
+    ctx.session_id = session_id
     if is_strict_claude_session(config):
         logger.info(
             "ACP Claude managed-policy resolution is adapter controlled",

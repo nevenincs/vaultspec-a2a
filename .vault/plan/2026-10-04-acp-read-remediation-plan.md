@@ -9,7 +9,7 @@ related:
   - '[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:b132f9c4c17424dc57861cf8b50422a96d2ee194745ffca14c0fb4780867ec58'
+body_hash: 'sha256:7932da8f99d7703fe7aafea54153cfd68a5d1b60c7ef7d4d4688c30f4e306da6'
 ---
 
 # `acp-read-remediation` plan
@@ -40,7 +40,7 @@ hunk staging where files are shared.
 ## Steps
 
 - [x] `S01` - Resolve current validation failures in real engine peers and worker admission tests; `src/vaultspec_a2a/authoring/tests, src/vaultspec_a2a/worker/tests`.
-- [ ] `S02` - Implement ACP v1 filesystem session and line semantics with an independent UTF-8 byte cap; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests/test_acp_fs_read_limits.py, src/vaultspec_a2a/control/infra_config.py`.
+- [x] `S02` - Implement ACP v1 filesystem session and line semantics with an independent UTF-8 byte cap; `src/vaultspec_a2a/providers/_acp_fs_read.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/_acp_types.py, src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/control/infra_config.py, src/vaultspec_a2a/service_tests/test_compose_provider_service_state_isolation.py`.
 - [ ] `S03` - Complete integrated verification and reconcile the rolling audit queue; `.vault/audit, .vault/exec, .vault/plan, src/vaultspec_a2a/providers/tests`.
 
 ## Parallelization

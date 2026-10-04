@@ -498,7 +498,7 @@ async def test_privileged_callback_refuses_static_symlink_escape(
 
     response = await on_fs_read_text_file(
         1,
-        {"path": "escape/service.token"},
+        {"path": "escape/service.token", "sessionId": acp_session_context.session_id},
         acp_session_context,
         _config(workspace_root=str(bound)),
     )
@@ -526,7 +526,7 @@ async def test_privileged_callback_refuses_replaced_workspace_root(
 
     response = await on_fs_read_text_file(
         1,
-        {"path": "service.token"},
+        {"path": "service.token", "sessionId": acp_session_context.session_id},
         acp_session_context,
         _config(workspace_root=str(admitted)),
     )
@@ -569,7 +569,7 @@ async def test_privileged_read_stays_on_opened_parent_during_symlink_swap(
     monkeypatch.setattr(os, "open", swapping_open)
     response = await on_fs_read_text_file(
         1,
-        {"path": "safe/data.txt"},
+        {"path": "safe/data.txt", "sessionId": acp_session_context.session_id},
         acp_session_context,
         _config(workspace_root=str(bound)),
     )

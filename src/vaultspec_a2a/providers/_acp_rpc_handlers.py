@@ -19,6 +19,7 @@ from langgraph.errors import GraphBubbleUp
 
 from ..control.config import settings
 from ..graph.acp_options import option_id_of, valid_option_ids
+from ._acp_fs_read import AcpFileReadRange, AcpFileReadRequest, read_text_lines
 from ._acp_rpc_terminal_handlers import on_terminal_create as on_terminal_create
 from ._acp_rpc_terminal_handlers import on_terminal_kill as on_terminal_kill
 from ._acp_rpc_terminal_handlers import on_terminal_output as on_terminal_output
@@ -54,11 +55,22 @@ def _required_string(params: JsonObject, field: str) -> str:
     return value
 
 
-def _integer(value: object, *, field: str) -> int:
-    """Convert a JSON numeric/string integer field without accepting booleans."""
-    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-        raise ValueError(f"ACP field {field!r} must be an integer")
-    return int(value)
+def _non_negative_integer(value: object, *, field: str) -> int:
+    """Parse a file range without truncating fractions or accepting booleans."""
+    message = f"ACP field {field!r} must be a non-negative integer"
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float, str))
+        or (isinstance(value, float) and not value.is_integer())
+    ):
+        raise ValueError(message)
+    try:
+        parsed = int(value)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if parsed < 0:
+        raise ValueError(message)
+    return parsed
 
 
 def sandbox_path(path: str, config: AcpModelConfig) -> Path:
@@ -174,16 +186,18 @@ def _required_posix_function(name: str) -> Any:
 
 
 def _read_workspace_text(
-    path: str, config: AcpModelConfig, *, offset: int, limit: int
+    path: str, config: AcpModelConfig, *, line: int | None, limit: int | None
 ) -> str:
     """Read one workspace file, anchored against symlink replacement in Compose."""
+    ranges = AcpFileReadRange(line=line, limit=limit)
+    maximum = _non_negative_integer(
+        settings.acp_fs_read_max_bytes, field="acp_fs_read_max_bytes"
+    )
     anchor_root, run_root_parts = _secure_workspace_anchor(config)
     if not _secure_callback_enabled():
         file_path = sandbox_path(path, config)
         with file_path.open(encoding="utf-8", errors="ignore") as handle:
-            if offset:
-                handle.seek(offset)
-            return handle.read(limit)
+            return read_text_lines(handle, ranges, maximum)
 
     workspace_root = anchor_root.joinpath(*run_root_parts)
     parts = _descriptor_relative_parts(path, workspace_root)
@@ -201,9 +215,7 @@ def _read_workspace_text(
     finally:
         os.close(parent_fd)
     with os.fdopen(file_fd, encoding="utf-8", errors="ignore") as handle:
-        if offset:
-            handle.seek(offset)
-        return handle.read(limit)
+        return read_text_lines(handle, ranges, maximum)
 
 
 def _write_workspace_text(path: str, content: str, config: AcpModelConfig) -> None:
@@ -707,36 +719,28 @@ async def on_request_permission(
 async def on_fs_read_text_file(
     rpc_id: AcpRpcId,
     params: JsonObject,
-    _ctx: AcpSessionContext,
+    ctx: AcpSessionContext,
     config: AcpModelConfig,
 ) -> JsonObject:
     """Handle fs/read_text_file RPC.
 
-    Supports optional ``offset`` (byte offset) and ``limit`` (byte count)
-    params for partial reads, avoiding loading entire large files into memory.
+    Requires the active session and supports one-based ``line`` selection
+    and ``limit`` in lines, with an independent UTF-8 response byte cap.
     Uses asyncio.to_thread so blocking I/O does not stall the event loop.
     """
     try:
-        path = _required_string(params, "path")
-        offset = _integer(params.get("offset") or 0, field="offset")
-        limit: int | None = (
-            _integer(params["limit"], field="limit")
-            if params.get("limit") is not None
-            else None
-        )
-
-        # Cap reads at _FS_READ_MAX_BYTES.  When the caller also
-        # supplies a limit, honour whichever is smaller.
-        effective_limit = settings.acp_fs_read_max_bytes
-        if limit is not None:
-            effective_limit = min(limit, settings.acp_fs_read_max_bytes)
+        if "offset" in params:
+            raise ValueError("ACP field 'offset' is unsupported; use 'line'")
+        request = AcpFileReadRequest.model_validate(params)
+        if ctx.session_id is None or request.session_id != ctx.session_id:
+            raise ValueError("ACP sessionId does not match the active session")
 
         text = await asyncio.to_thread(
             _read_workspace_text,
-            path,
+            request.path,
             config,
-            offset=offset,
-            limit=effective_limit,
+            line=request.line,
+            limit=request.limit,
         )
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": text}}
     except Exception as exc:

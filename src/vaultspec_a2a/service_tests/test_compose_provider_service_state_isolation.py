@@ -193,10 +193,9 @@ async def main():
     if process.returncode != 0:
         raise RuntimeError(stderr.decode(errors='replace'))
     result = json.loads(stdout.decode())
-    callback_read = await handlers.on_fs_read_text_file(
-        2, {{'path': 'agent-created.txt'}}, None, Config()
+    result['callback_read'] = handlers._read_workspace_text(
+        'agent-created.txt', Config(), line=None, limit=None
     )
-    result['callback_read'] = callback_read['result']['content']
     callback_update = await handlers.on_fs_write_text_file(
         3, {{'path': 'agent-created.txt', 'content': 'callback-update'}}, None, Config()
     )
@@ -326,7 +325,7 @@ from pathlib import Path
 
 from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.providers import _acp_rpc_handlers as handlers
-from vaultspec_a2a.providers._subprocess import _provider_execution_command
+from vaultspec_a2a.providers._subprocess import provider_execution_command
 from vaultspec_a2a.utils.process import ProcessContainmentError
 
 class Config:
@@ -362,22 +361,26 @@ def run_root_race(path, flags, *args, **kwargs):
     return real_open(path, flags, *args, **kwargs)
 
 handlers.os.open = run_root_race
-root_component_escape = asyncio.run(handlers.on_fs_read_text_file(
-    0, {'path': 'root-race-secret.txt'}, None, Config()
-))
-assert 'error' in root_component_escape
-assert 'service-secret' not in str(root_component_escape)
+try:
+    handlers._read_workspace_text(
+        'root-race-secret.txt', Config(), line=None, limit=None
+    )
+except (ValueError, OSError):
+    pass
+else:
+    raise AssertionError('replaced run-root component was not refused')
 handlers.os.open = real_open
 
 replaced = managed / 'replaced'
 replaced.symlink_to(protected, target_is_directory=True)
 (protected / 'service.token').write_text('service-secret', encoding='utf-8')
 Config.workspace_root = str(replaced)
-root_escape = asyncio.run(handlers.on_fs_read_text_file(
-    0, {'path': 'service.token'}, None, Config()
-))
-assert 'error' in root_escape
-assert 'service-secret' not in str(root_escape)
+try:
+    handlers._read_workspace_text('service.token', Config(), line=None, limit=None)
+except ValueError:
+    pass
+else:
+    raise AssertionError('replaced run root was not refused')
 Config.workspace_root = str(bound)
 
 safe = bound / 'safe'
@@ -396,10 +399,8 @@ def read_race(path, flags, *args, **kwargs):
     return real_open(path, flags, *args, **kwargs)
 
 handlers.os.open = read_race
-read = asyncio.run(handlers.on_fs_read_text_file(
-    1, {'path': 'safe/data.txt'}, None, Config()
-))
-assert read['result']['content'] == 'workspace-data'
+read = handlers._read_workspace_text('safe/data.txt', Config(), line=None, limit=None)
+assert read == 'workspace-data'
 handlers.os.open = real_open
 safe.unlink()
 parked.rename(safe)
@@ -449,7 +450,7 @@ assert not (protected / 'child.txt').exists()
 settings.provider_agent_uid = 1002
 settings.provider_agent_gid = None
 try:
-    _provider_execution_command(['python', 'provider.py'])
+    provider_execution_command(['python', 'provider.py'])
 except ProcessContainmentError:
     partial_failed_closed = True
 else:

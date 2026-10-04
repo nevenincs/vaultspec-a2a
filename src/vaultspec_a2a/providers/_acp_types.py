@@ -293,6 +293,7 @@ class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
     prompt_done: asyncio.Event
     prompt_id_ref: list[int]
     interrupt_exc: list[BaseException]
+    session_id: str | None = None
     prompt_stop_reason: str | None = None
     prompt_usage: AcpUsageMetadata | None = None
     effects_may_have_occurred: bool = False

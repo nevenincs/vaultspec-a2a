@@ -198,7 +198,10 @@ class TestNonVaultAndReadsPermitted:
         config = _make_config(str(tmp_path))
         result = await on_fs_read_text_file(
             1,
-            {"path": ".vault/research/doc.md"},
+            {
+                "path": ".vault/research/doc.md",
+                "sessionId": acp_session_context.session_id,
+            },
             acp_session_context,
             config,
         )

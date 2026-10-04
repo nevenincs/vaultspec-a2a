@@ -64,6 +64,7 @@ _IMPURE_FILES = frozenset(
         "test_acp_model_selection.py",
         "test_acp_turn_deadline.py",
         "test_acp_vault_deny.py",
+        "test_acp_fs_read_limits.py",
         "test_capsule_acp_resolution.py",
         "test_claude_binary_identity.py",
         "test_catalog_registration_live.py",
@@ -149,6 +150,7 @@ def _fresh_acp_session_context(child: _AcpChildStreams) -> AcpSessionContext:
         prompt_done=asyncio.Event(),
         prompt_id_ref=[],
         interrupt_exc=[],
+        session_id="test-acp-session",
     )
 
 

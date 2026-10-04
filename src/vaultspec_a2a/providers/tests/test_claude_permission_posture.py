@@ -344,6 +344,7 @@ async def test_unattended_session_is_pinned_away_from_an_ambient_mode(
 
     result = await task
     assert result.agent_modes["currentModeId"] == AUTONOMOUS_PERMISSION_MODE
+    assert echo_context.session_id == result.session_id == _SESSION_ID
 
 
 @pytest.mark.asyncio

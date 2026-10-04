@@ -918,6 +918,7 @@ class InfraConfig(ProjectSettings):
     )
     acp_fs_read_max_bytes: int = Field(
         default=10_485_760,
+        ge=0,
         description="Maximum file read size (bytes) surfaced through ACP tool calls.",
     )
     acp_rpc_timeout_seconds: float = Field(

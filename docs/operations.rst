@@ -2,7 +2,8 @@ Operator reference
 ==================
 
 Use the project-locked Just facade to route product operations, named host
-processes, and Docker Compose (Compose) stacks to their owning implementation.
+processes, and development Docker Compose (Compose) fixtures to their owning
+implementation. Production uses native binaries and has no Docker dependency.
 
 Command discovery
 -----------------
@@ -134,8 +135,8 @@ within its managed ``workspaces/`` tree, but new run start, prepare and commit
 requests return HTTP 503 until a verified OS isolation backend is available.
 Authenticated readiness reports ``run_admission = blocked`` with that reason.
 Native provider, terminal and MCP launches also refuse. Existing run queries,
-cancellation and lifecycle operations remain available. Development and Compose
-retain their existing execution behavior.
+cancellation and lifecycle operations remain available. Native development
+processes retain their existing execution behavior.
 
 **Relative paths.** Every path setting accepts an absolute path or one relative
 to the project root - never to the working directory, so two processes of one
@@ -284,19 +285,21 @@ Square brackets mark optional arguments; don't type the brackets.
 The registry is distinct from :mod:`vaultspec_a2a.thread` application
 lifecycle, caller-owned foreground execution, and Compose-owned stacks.
 
-Compose-owned stacks
---------------------
+Compose-owned development fixtures
+----------------------------------
 
-Docker Compose exclusively owns multi-service stack lifecycle.
+Docker Compose owns the Jaeger and VidaiMock development/test fixtures.
+Gateway and worker run natively through the process registry or test harness;
+there is no production application Compose stack.
 
 #. Run ``just doctor-check`` to verify Docker support.
-#. Inspect the development configuration, then start its isolated Compose
+#. Inspect the integration fixture configuration, then start its isolated Compose
    project:
 
    .. code-block:: console
 
-      just stack-dev-config
-      just stack-dev-up
+      just stack-integration-config
+      just stack-integration-up
 
 .. list-table::
    :header-rows: 1
@@ -307,35 +310,22 @@ Docker Compose exclusively owns multi-service stack lifecycle.
      - Start
      - Status
      - Stop
-   * - Development
-     - ``dev-config``
-     - ``dev-up``
-     - ``dev-status``
-     - ``dev-down``
    * - Integration
-     - ``integration-config``
-     - ``integration-up``
-     - ``integration-status``
-     - ``integration-down``
-   * - Database
-     - ``database-config``
-     - ``database-up``
-     - ``database-status``
-     - ``database-down``
-   * - Production
-     - ``prod-config``
-     - ``prod-up``
-     - ``prod-status``
-     - ``prod-down``
+     - ``stack-integration-config``
+     - ``stack-integration-up``
+     - ``stack-integration-status``
+     - ``stack-integration-down``
    * - Infrastructure
-     - ``infrastructure-config``
-     - ``infrastructure-up``
-     - ``infrastructure-status``
-     - ``infrastructure-down``
+     - ``stack-infrastructure-config``
+     - ``stack-infrastructure-up``
+     - ``stack-infrastructure-status``
+     - ``stack-infrastructure-down``
 
-The database family starts PostgreSQL from the production configuration plus
-its database overlay. The infrastructure family starts Jaeger. Don't register
-Compose services as named host processes.
+Prefix the table's recipe names with ``just``. The integration family starts
+Jaeger and VidaiMock; the infrastructure family starts only Jaeger in a separate
+project. Both use ``service/docker-compose.integration.yml``. Their published
+ports bind to loopback. With default ports, run only one fixture project at a
+time. Don't register fixture containers as named host processes.
 
 Scratchpad convention
 ---------------------

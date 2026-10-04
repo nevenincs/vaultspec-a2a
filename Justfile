@@ -2,7 +2,7 @@
 #  vaultspec-a2a development harness
 #
 #  Every entry point is a FLAT HYPHENATED recipe named `<verb>-<thing>` -
-#  `just check-type`, `just test-unit`, `just stack-dev-up`. There is no
+#  `just check-type`, `just test-unit`, `just stack-integration-up`. There is no
 #  `target` argument anywhere, and no `mod` submodule tree: the thing a recipe
 #  acts on is part of its name, so `just --list` is the complete surface and
 #  tab completion reaches every one of them. Run `just` for the annotated
@@ -98,10 +98,7 @@ safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling py
 
 # The bounded Docker Compose projects. Each is pinned to its own project name
 # so one stack can never tear another's containers down.
-compose_dev := creds + " compose -- docker compose --project-name vaultspec-a2a-dev -f service/docker-compose.dev.yml"
 compose_integration := creds + " compose -- docker compose --project-name vaultspec-a2a-integration -f service/docker-compose.integration.yml"
-compose_database := creds + " compose -- docker compose --project-name vaultspec-a2a-database -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml"
-compose_prod := creds + " compose -- docker compose --project-name vaultspec-a2a-prod -f service/docker-compose.prod.yml"
 compose_infrastructure := creds + " compose -- docker compose --project-name vaultspec-a2a-infrastructure -f service/docker-compose.integration.yml"
 
 # List every recipe, grouped by consequence.
@@ -524,6 +521,11 @@ test-parallel:
 test-service:
     {{creds}} live-tests -- {{dev}} test service
 
+# Certify native services against development-only trace and mock fixtures.
+[group('test')]
+test-native-integration:
+    {{dev}} test native-integration
+
 # Run one service suite under the same credentials and pytest owner.
 [group('test')]
 test-service-path path:
@@ -611,15 +613,10 @@ test-collect-all *ARGS:
 build-package:
     {{dev}} build package
 
-# Build the local development container images.
+# Build the development-only VidaiMock fixture image.
 [group('build')]
 build-docker:
     {{dev}} build docker
-
-# Build the production gateway and worker container images.
-[group('build')]
-build-docker-prod:
-    {{dev}} build docker-prod
 
 # Remove generated package, documentation, and Python cache artifacts.
 [group('build')]
@@ -736,26 +733,6 @@ service-worker-up NAME="dev" *ARGS="":
 service-engine-up NAME REPO BUILD_REPO WORKSPACE *ARGS:
     {{procs}} up engine-dev {{ NAME }} --repo {{ REPO }} --build-repo {{ BUILD_REPO }} --workspace {{ WORKSPACE }} {{ ARGS }}
 
-# Validate the development stack configuration.
-[group('dev')]
-stack-dev-config: doctor-docker
-    {{compose_dev}} config
-
-# Start the development stack.
-[group('dev')]
-stack-dev-up: doctor-docker
-    {{compose_dev}} up -d --build --wait
-
-# Stop and remove the development stack.
-[group('dev')]
-stack-dev-down: doctor-docker
-    {{compose_dev}} down --remove-orphans
-
-# Show development stack status.
-[group('dev')]
-stack-dev-status: doctor-docker
-    {{compose_dev}} ps
-
 # Validate the deterministic integration stack configuration.
 [group('dev')]
 stack-integration-config: doctor-docker
@@ -775,46 +752,6 @@ stack-integration-down: doctor-docker
 [group('dev')]
 stack-integration-status: doctor-docker
     {{compose_integration}} ps
-
-# Validate the PostgreSQL-backed stack configuration.
-[group('dev')]
-stack-database-config: doctor-docker
-    {{compose_database}} config
-
-# Start only the PostgreSQL service in its isolated Compose project.
-[group('dev')]
-stack-database-up: doctor-docker
-    {{compose_database}} up -d --wait postgres
-
-# Stop and remove the isolated PostgreSQL Compose project.
-[group('dev')]
-stack-database-down: doctor-docker
-    {{compose_database}} down --remove-orphans
-
-# Show PostgreSQL stack status.
-[group('dev')]
-stack-database-status: doctor-docker
-    {{compose_database}} ps
-
-# Validate the production stack configuration.
-[group('dev')]
-stack-prod-config: doctor-docker
-    {{compose_prod}} config
-
-# Start the production stack.
-[group('dev')]
-stack-prod-up: doctor-docker
-    {{compose_prod}} up -d --build --wait
-
-# Stop and remove the production stack.
-[group('dev')]
-stack-prod-down: doctor-docker
-    {{compose_prod}} down --remove-orphans
-
-# Show production stack status.
-[group('dev')]
-stack-prod-status: doctor-docker
-    {{compose_prod}} ps
 
 # Validate the integration file used by the isolated infrastructure project.
 [group('dev')]
@@ -987,16 +924,3 @@ ci:
 [group('check')]
 ci-merge:
     uv run --isolated --no-project python -m dev ci merge
-
-# Build committed production source and execute the worker identity proof.
-[group('check')]
-ci-worker-image:
-    uv run --isolated --no-project python -m dev.container_release
-
-[group('release')]
-release-containers:
-    uv run --isolated --no-project python -m dev.container_publish
-
-[group('release')]
-deploy-containers:
-    uv run --isolated --no-project python -m dev.container_deploy

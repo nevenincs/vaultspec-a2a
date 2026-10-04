@@ -234,8 +234,8 @@ class InfraConfig(ProjectSettings):
     provider_identity_launcher: Path | None = Field(
         default=None,
         description=(
-            "Compose/Linux launcher that drops every provider and tool child to "
-            "the configured agent identity. Unset outside the isolated worker."
+            "External launcher that drops provider and tool children to the "
+            "configured agent identity. This alone does not prove OS isolation."
         ),
     )
     provider_agent_uid: int | None = Field(
@@ -247,15 +247,6 @@ class InfraConfig(ProjectSettings):
         default=None,
         ge=1,
         description="Unprivileged GID selected by provider_identity_launcher.",
-    )
-    managed_workspace_permissions: bool = Field(
-        default=False,
-        description=(
-            "Compose only: let the container entrypoint take ownership of a "
-            "managed workspace volume and share it with the agent identity. "
-            "Leave false for an operator-prepared mount, which the entrypoint "
-            "then only validates."
-        ),
     )
     project_root: Path = Field(
         default_factory=resolve_project_root,
@@ -297,7 +288,7 @@ class InfraConfig(ProjectSettings):
             "ACP adapter), absolute or relative to the project root; a leading "
             "~ is not expanded. When set, the provider factory resolves the default "
             "Node executable and ACP entry point ONLY from this root, with no "
-            "checkout or PATH fallback. Unset for the Compose/dev profiles, where "
+            "checkout or PATH fallback. Unset for source development, where "
             "resolution is checkout-relative as before."
         ),
     )
@@ -316,7 +307,7 @@ class InfraConfig(ProjectSettings):
             "set, the profile is armed: the database, checkpoint, workspace, and "
             "A2A-home paths derive ONLY from this application home (via the "
             "desktop profile authority), never from the launch directory. Must be "
-            "an absolute path. Unset for the Compose/dev profiles, whose path "
+            "an absolute path. Unset for source development, whose path "
             "resolution is unchanged."
         ),
     )

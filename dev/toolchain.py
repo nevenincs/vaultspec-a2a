@@ -776,6 +776,21 @@ TEST = Verb(
             (_pytest("-m", "service"),),
         ),
         Target(
+            "native-integration",
+            "Native execution, cancellation, traces and fixture boundaries.",
+            (
+                _pytest(
+                    "-m",
+                    "service",
+                    "--require-prerequisite=docker",
+                    "src/vaultspec_a2a/service_tests/test_lifecycle.py",
+                    "src/vaultspec_a2a/service_tests/test_cancel_health_trace.py",
+                    "src/vaultspec_a2a/service_tests/test_worker_attach_provenance.py",
+                    "src/vaultspec_a2a/service_tests/test_development_fixture_boundary.py",
+                ),
+            ),
+        ),
+        Target(
             "all",
             "Every collected test, without the default marker exclusion.",
             (_pytest("-m", ""),),
@@ -862,7 +877,7 @@ BUILD = Verb(
         ),
         Target(
             "docker",
-            "Build the local development container images.",
+            "Build the development-only VidaiMock fixture image.",
             (
                 Cmd(
                     (
@@ -884,55 +899,8 @@ BUILD = Verb(
                         "docker",
                         "compose",
                         "-f",
-                        "service/docker-compose.dev.yml",
+                        "service/docker-compose.integration.yml",
                         "build",
-                    )
-                ),
-            ),
-        ),
-        Target(
-            "docker-prod",
-            "Build the production gateway and worker container images.",
-            (
-                Cmd(
-                    (
-                        "uv",
-                        "run",
-                        "--no-sync",
-                        "--frozen",
-                        "--no-default-groups",
-                        "--group",
-                        "tooling",
-                        "python",
-                        "-m",
-                        "dev.doctor",
-                        "docker",
-                    )
-                ),
-                Cmd(
-                    (
-                        "docker",
-                        "build",
-                        "-t",
-                        "vaultspec-a2a-gateway",
-                        "-f",
-                        "service/docker/prod.Dockerfile",
-                        "--target",
-                        "gateway",
-                        ".",
-                    )
-                ),
-                Cmd(
-                    (
-                        "docker",
-                        "build",
-                        "-t",
-                        "vaultspec-a2a-worker",
-                        "-f",
-                        "service/docker/prod.Dockerfile",
-                        "--target",
-                        "worker",
-                        ".",
                     )
                 ),
             ),

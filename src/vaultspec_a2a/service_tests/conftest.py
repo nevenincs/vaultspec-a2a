@@ -28,7 +28,7 @@ def service_stack(
     request: pytest.FixtureRequest,
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> ServiceStack:
-    """Start the compose-backed deterministic stack once per test session.
+    """Start native services with deterministic Docker fixtures once per session.
 
     Docker is an external prerequisite, so its absence is reported under the
     repository's one rule rather than as a fixture error: an honest skip here,

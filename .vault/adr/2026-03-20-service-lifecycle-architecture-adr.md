@@ -10,8 +10,8 @@ related:
   - "[[2026-03-31-docs-vault-migration-research]]"
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
-modified: '2026-07-19'
-body_hash: 'sha256:8d6398c33cc4c55026556b81657694c460f90a4c4572e7cf0cf157c98b60c852'
+modified: '2026-10-04'
+body_hash: 'sha256:538bd593479ac83a7aee13c42453746f839d6617b8525f274b896c6cd3fa6b96'
 ---
 # `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)
 
@@ -398,3 +398,7 @@ starts cleanly and Jaeger confirms distributed traces from a real team operation
 | ADR-017 (Containerization) | Confirms — Docker Compose IS production | Compliant |
 | ADR-031 (Worker Process) | Unchanged — gateway/worker process separation preserved | Compliant |
 | ADR-038 (CLI/Justfile Separation) | Extends — formalises the production deployment model | Compliant |
+
+### Production scope correction, 2026-10-04
+
+The owner's native-production directive in 2026-10-04-container-release-native-production-adr supersedes this record's application Docker/Compose production deployment clauses and production-stack certification work. Gateway and worker ship and run as native binaries. Compose ownership now applies only to development/test Jaeger and VidaiMock fixtures. Native process registry and lifecycle ownership remain in force. Earlier production topology and compliance rows above are historical, not deployment instructions.

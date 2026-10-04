@@ -14,7 +14,13 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-from dev.credentials import ENV_FILE_VARIABLE, SCOPES, read_env_file, resolve
+from dev.credentials import (
+    ENV_FILE_VARIABLE,
+    SCOPES,
+    missing_required,
+    read_env_file,
+    resolve,
+)
 from vaultspec_a2a.control.config import Settings
 from vaultspec_a2a.control.settings_base import (
     ENV_FILE_ENV,
@@ -117,3 +123,19 @@ def test_the_test_suite_is_handed_no_settings_file(tmp_path: Path) -> None:
     )
     assert ENV_FILE_VARIABLE not in child
     assert _SETTING not in child
+
+
+def test_development_fixtures_need_no_application_credentials() -> None:
+    """Starting trace/mock fixtures neither requires nor imports service secrets."""
+    scope = SCOPES["compose"]
+    child = resolve(
+        scope,
+        {},
+        {
+            "POSTGRES_PASSWORD": "synthetic-password",
+            "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-token",
+            "VIDAIMOCK_PORT": "18100",
+        },
+    )
+    assert missing_required(scope, child) == []
+    assert child == {"VIDAIMOCK_PORT": "18100"}

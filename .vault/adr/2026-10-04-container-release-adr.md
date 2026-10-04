@@ -1,18 +1,18 @@
 ---
 tags:
-  - '#adr'
-  - '#container-release'
+  - "#adr"
+  - "#container-release"
 date: '2026-10-04'
-modified: '2026-10-04'
-body_schema: 'body-v2'
-body_hash: 'sha256:db43b882ca26914086e697ab3adc926b4b85b91c038b62fb033d20d8ff9b70d7'
 related:
   - "[[2026-10-04-container-release-audit]]"
   - "[[2026-09-30-release-standard-adr]]"
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
+superseded_by: '2026-10-04-container-release-native-production-adr'
+modified: '2026-10-04'
+body_schema: 'body-v2'
+body_hash: 'sha256:85e169f21ffeb0c7d92f5fda8393766da2ebb1d532edf41951ee261d36e9c1c3'
 ---
-
-# `container-release` adr: `publish paired Compose images and promote immutable release digests` | (**status:** `accepted`)
+# `container-release` adr: `publish paired Compose images and promote immutable release digests` | (**status:** `superseded`)
 
 ## Problem Statement
 

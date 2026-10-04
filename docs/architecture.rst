@@ -54,7 +54,8 @@ Repository control-surface ownership
 
 Each control surface has one owner so local development, automation, and
 continuous integration (CI) don't make conflicting lifecycle or configuration
-decisions. Docker Compose (Compose) owns coordinated multi-service stacks.
+decisions. Docker Compose (Compose) owns only development/test Jaeger and
+VidaiMock fixtures. Production gateway and worker run as native binaries.
 
 .. list-table::
    :header-rows: 1
@@ -75,9 +76,9 @@ decisions. Docker Compose (Compose) owns coordinated multi-service stacks.
    * - Named host processes
      - Process registry
      - Owns identity, allocation, liveness, and lifecycle.
-   * - Multi-service stacks
+   * - Development/test fixtures
      - Compose
-     - Owns coordinated stack state and teardown.
+     - Owns Jaeger/VidaiMock fixture state and teardown.
    * - Dependencies and tools
      - ``uv.lock``
      - Selects resolved dependency and tool versions.

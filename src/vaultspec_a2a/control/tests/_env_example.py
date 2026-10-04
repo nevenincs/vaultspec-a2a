@@ -51,8 +51,9 @@ DOCUMENTED_BUT_NOT_READ = {
     "LANGCHAIN_TRACING_V2": "langsmith SDK",
     # Documented as deliberately absent: the agent scrub strips it.
     "ANTHROPIC_API_KEY": "documented absence",
-    # Substituted by the Postgres Compose profile, never read by the service.
-    "POSTGRES_PASSWORD": "docker compose",
+    # Substituted by the development fixture Compose file, not the service.
+    "JAEGER_OTLP_PORT": "development fixture docker compose",
+    "JAEGER_UI_PORT": "development fixture docker compose",
     # Named in the port table as the place a Postgres port is embedded.
     "DATABASE_URL": "port table prose",
 }

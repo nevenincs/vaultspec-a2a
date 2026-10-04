@@ -55,7 +55,7 @@ dependencies = [
 ]
 
   [project.optional-dependencies]
-  # The locked PostgreSQL/Compose server profile. PostgreSQL-dependent checks use a
+  # The locked PostgreSQL server profile. PostgreSQL-dependent checks use a
   # task-owned environment, then run without mutating or resolving it during pytest:
   #   $env:UV_PROJECT_ENVIRONMENT = "$PWD/tmp/s04-server-env"
   #   uv sync --locked --no-default-groups --extra server --group tooling
@@ -211,11 +211,11 @@ packages = ["src/vaultspec_a2a"]
 #     resolved from installed package resources (see database/migrate.py).
 #   - team/presets/{agents,teams}/**  — product agent and team presets; mock and
 #     deterministic certification variants remain available only in source and
-#     Compose certification environments.
+#     native integration test environments.
 #   - context/presets/**  — bundled authoring rule corpus.
 #
 # Excluded: all test harnesses and certification-only preset assets. Source-run
-# and Compose certification still use these files from the checkout.
+# native integration tests still use these files from the checkout.
 #
 # `testing/` is test-EXECUTION machinery (declared resources, machine-global
 # leases, xdist grouping, session admission). Its only importers are the test
@@ -250,7 +250,7 @@ exclude = [
   # provider-condition probe, and the in-process scenarios that drive a tool
   # call, a supervised permission pause, and a cancellation window - so they
   # belong with the other certification variants: available in source and
-  # Compose, absent from a product wheel. The agent halves are listed beside
+  # native integration tests, absent from a product wheel. The agent halves are listed beside
   # their teams because a scenario agent is no more shippable than the scenario
   # that names it.
   "src/vaultspec_a2a/team/presets/teams/deterministic-failure.toml",

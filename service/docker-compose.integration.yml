@@ -1,120 +1,15 @@
-# Deterministic certification stack for issue #17.
-# Usage:
-#   just stack-integration-up
-#   just stack-integration-status
-#
-# Stack:
-#   gateway + worker + VidaiMock + Jaeger
+# Development and test fixtures for native gateway and worker processes.
+# Usage: just stack-integration-up
+# No application services or production dependencies are defined here.
 
 services:
-  gateway:
-    # Docker's default stop grace is 10s, which is SHORTER than the service's own
-    # shutdown budget (VAULTSPEC_A2A_SHUTDOWN_TOTAL_TIMEOUT_SECONDS, 15s by
-    # default): the container was SIGKILLed mid-drain, before the lifespan could
-    # close the database and flush telemetry. This must stay above that budget.
-    stop_grace_period: ${A2A_STOP_GRACE_PERIOD:-30s}
-    build:
-      context: ..
-      dockerfile: service/docker/prod.Dockerfile
-      target: gateway
-    restart: unless-stopped
-    ports:
-      - '${VAULTSPEC_A2A_PORT:-18000}:18000'
-    volumes:
-      - db-data:/app/data
-      - gateway-state:/app/gateway-state
-    environment:
-      VAULTSPEC_A2A_ENVIRONMENT: 'production'
-      VAULTSPEC_A2A_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_A2A_DATABASE_BACKEND: sqlite
-      VAULTSPEC_A2A_CHECKPOINT_BACKEND: sqlite
-      # Discovery and bearer handoff stay outside worker-visible database state.
-      VAULTSPEC_A2A_HOME: '/app/gateway-state'
-      VAULTSPEC_A2A_WORKSPACE_ROOT: '/app/data/workspaces'
-      VAULTSPEC_A2A_WORKER_URL: 'http://worker:18001'
-      VAULTSPEC_A2A_AUTO_SPAWN_WORKER: 'false'
-      VAULTSPEC_A2A_INTERNAL_TOKEN: 'vaultspec-integration-token'
-      VAULTSPEC_A2A_MOCK_API_BASE: 'http://vidaimock:8100'
-      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
-      OTEL_EXPORTER_OTLP_INSECURE: 'true'
-    depends_on:
-      jaeger:
-        condition: service_healthy
-      vidaimock:
-        condition: service_healthy
-      worker:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'python',
-          '-c',
-          "import json, socket, sys, urllib.request; data = json.load(urllib.request.urlopen('http://' + socket.gethostname() + ':18000/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-  worker:
-    # Docker's default stop grace is 10s, which is SHORTER than the service's own
-    # shutdown budget (VAULTSPEC_A2A_SHUTDOWN_TOTAL_TIMEOUT_SECONDS, 15s by
-    # default): the container was SIGKILLed mid-drain, before the lifespan could
-    # close the database and flush telemetry. This must stay above that budget.
-    stop_grace_period: ${A2A_STOP_GRACE_PERIOD:-30s}
-    build:
-      context: ..
-      dockerfile: service/docker/prod.Dockerfile
-      target: worker
-    restart: unless-stopped
-    volumes:
-      - db-data:/app/data
-      - worker-state:/app/worker-state
-    cap_drop: ['ALL']
-    cap_add: ['SETUID', 'SETGID']
-    environment:
-      VAULTSPEC_A2A_ENVIRONMENT: 'production'
-      VAULTSPEC_A2A_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_A2A_DATABASE_BACKEND: sqlite
-      VAULTSPEC_A2A_CHECKPOINT_BACKEND: sqlite
-      # Worker discovery state is isolated from the gateway bearer handoff.
-      VAULTSPEC_A2A_HOME: '/app/worker-state'
-      VAULTSPEC_A2A_WORKSPACE_ROOT: '/app/data/workspaces'
-      VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER: '/usr/local/bin/vaultspec-agent-launch'
-      VAULTSPEC_A2A_PROVIDER_AGENT_UID: '1002'
-      VAULTSPEC_A2A_PROVIDER_AGENT_GID: '1002'
-      VAULTSPEC_A2A_MANAGED_WORKSPACE_PERMISSIONS: 'true'
-      VAULTSPEC_A2A_GATEWAY_URL: 'http://gateway:18000'
-      VAULTSPEC_A2A_INTERNAL_TOKEN: 'vaultspec-integration-token'
-      VAULTSPEC_A2A_MOCK_API_BASE: 'http://vidaimock:8100'
-      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
-      OTEL_EXPORTER_OTLP_INSECURE: 'true'
-    depends_on:
-      jaeger:
-        condition: service_healthy
-      vidaimock:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'python',
-          '-c',
-          "import os, socket, urllib.request; tok = os.environ['VAULTSPEC_A2A_INTERNAL_TOKEN']; req = urllib.request.Request('http://' + socket.gethostname() + ':18001/health', headers={'Authorization': 'Bearer ' + tok}); urllib.request.urlopen(req)",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
   vidaimock:
     build:
       context: ..
       dockerfile: service/docker/vidaimock.Dockerfile
     restart: unless-stopped
     ports:
-      - '${VIDAIMOCK_PORT:-8100}:8100'
+      - '127.0.0.1:${VIDAIMOCK_PORT:-8100}:8100'
     healthcheck:
       test:
         [
@@ -143,8 +38,3 @@ services:
       timeout: 2s
       retries: 10
       start_period: 5s
-
-volumes:
-  db-data:
-  gateway-state:
-  worker-state:

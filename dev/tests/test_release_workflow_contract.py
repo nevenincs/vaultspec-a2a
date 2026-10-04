@@ -101,7 +101,7 @@ def test_release_proves_tag_and_publishes_complete_cohort_last() -> None:
         "id-token": "write",
         "attestations": "write",
     }
-    assert jobs["publish"]["needs"] == ["build", "provenance", "containers"]
+    assert jobs["publish"]["needs"] == ["build", "provenance"]
     assert jobs["publish"]["permissions"] == {"contents": "write"}
 
     steps = jobs["publish"]["steps"]
@@ -146,47 +146,59 @@ def test_merge_gate_accepts_an_explicit_release_ref() -> None:
     assert checkout["with"]["ref"] == "${{ inputs.ref || github.sha }}"
 
 
-def test_release_health_requires_production_worker_isolation() -> None:
-    """A release cannot bypass the image-level service identity proof."""
+def test_release_qualifies_native_artifacts_without_container_publication() -> None:
+    """Shipping the native runtime must not require an application Docker image."""
     release = _workflow("release.yml")
-    assert release["jobs"]["health"]["uses"] == "./.github/workflows/test.yml"
-    validation = _workflow("test.yml")
-    worker = validation["jobs"]["worker-image"]
-    assert worker.get("if") is None
-    assert worker.get("continue-on-error", False) is False
+    assert set(release["jobs"]) == {"health", "build", "provenance", "publish"}
+    build_steps = release["jobs"]["build"]["steps"]
+    lifecycle = next(
+        step
+        for step in build_steps
+        if step.get("run") == "bash scripts/prove_artifact_lifecycle.sh"
+    )
+    assert lifecycle.get("if") is None
+    assert lifecycle.get("continue-on-error", False) is False
+    assert not (WORKFLOWS / "deploy-containers.yml").exists()
+    for path in WORKFLOWS.glob("*.yml"):
+        workflow = _workflow(path.name)
+        permissions = workflow.get("permissions", {})
+        assert permissions.get("packages") != "write", path.name
+        for job in workflow["jobs"].values():
+            assert job.get("permissions", {}).get("packages") != "write", path.name
+            for step in job.get("steps", []):
+                command = step.get("run", "")
+                assert not re.search(
+                    r"\bjust (?:ci-worker-image|release-containers|"
+                    r"deploy-containers)\b",
+                    command,
+                ), path.name
+
+
+def test_full_validation_preserves_native_certification() -> None:
+    """Keep the native product gate after retiring application Compose checks."""
+    jobs = _workflow("test.yml")["jobs"]
+    assert "compose-regression" not in jobs
+    assert "worker-image" not in jobs
+    integration = jobs["native-integration"]
+    assert integration["needs"] == "test"
+    assert integration.get("if") is None
+    assert integration.get("continue-on-error", False) is False
+    native_proof = next(
+        step
+        for step in integration["steps"]
+        if step.get("run") == "just test-native-integration"
+    )
+    assert native_proof.get("if") is None
+    assert native_proof.get("continue-on-error", False) is False
+    desktop = jobs["desktop-certification"]
+    assert desktop["needs"] == "test"
+    assert desktop.get("continue-on-error", False) is False
+    assert desktop.get("if") is None
     proof = next(
-        step for step in worker["steps"] if step.get("run") == "just ci-worker-image"
+        step
+        for step in desktop["steps"]
+        if "just test-service-path src/vaultspec_a2a/desktop_tests/"
+        in step.get("run", "")
     )
     assert proof.get("continue-on-error", False) is False
     assert proof.get("if") is None
-
-
-def test_image_publication_is_qualified_and_receipt_is_attested() -> None:
-    jobs = _workflow("release.yml")["jobs"]
-    containers = jobs["containers"]
-    assert containers["needs"] == "health"
-    assert containers.get("continue-on-error", False) is False
-    assert containers["permissions"]["packages"] == "write"
-    steps = containers["steps"]
-    build = next(
-        i
-        for i, step in enumerate(steps)
-        if step.get("run") == "just release-containers"
-    )
-    attest = next(
-        i
-        for i, step in enumerate(steps)
-        if step.get("with", {}).get("subject-path") == "container-release.json"
-    )
-    verify = next(
-        i
-        for i, step in enumerate(steps)
-        if step.get("run", "").startswith("gh attestation verify")
-    )
-    upload = next(
-        i
-        for i, step in enumerate(steps)
-        if step.get("run", "").startswith("gh release upload")
-    )
-    assert build < attest < verify < upload
-    assert "containers" in jobs["publish"]["needs"]

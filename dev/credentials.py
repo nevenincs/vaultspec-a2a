@@ -153,20 +153,10 @@ SCOPES: Final[dict[str, Scope]] = {
         settings_file=True,
     ),
     "compose": Scope(
-        summary="Renders or runs a Docker Compose project.",
-        # `service/docker-compose.prod*.yml` interpolate both of these. Compose
-        # substitutes an unset variable with the empty string and warns, which
-        # for a database password means a Postgres that either refuses every
-        # connection or accepts anonymous ones. Neither is a state to discover
-        # later.
-        required=("POSTGRES_PASSWORD", "VAULTSPEC_A2A_INTERNAL_TOKEN"),
-        # Exactly what the Compose files interpolate. A container's own
-        # settings are declared in the Compose file's `environment:` block, so
-        # nothing else here reaches one.
+        summary="Runs development-only Jaeger and VidaiMock fixtures.",
         optional=(
             "JAEGER_OTLP_PORT",
             "JAEGER_UI_PORT",
-            "VAULTSPEC_A2A_PORT",
             "VIDAIMOCK_PORT",
         ),
     ),

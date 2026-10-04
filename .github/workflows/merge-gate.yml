@@ -2,7 +2,7 @@ name: Merge Gate
 
 # The pull-request critical path is intentionally Linux-only and delegates its
 # complete contract to `just ci-merge`. Full artifact, desktop, provider, and
-# Compose certification runs after merge in test.yml.
+# native service certification with development fixtures runs after merge in test.yml.
 #
 # ONLY TRUSTED AUTHORS REACH THE FLEET. A pull request runs its jobs on the
 # self-hosted fleet only when its author is the owner or a collaborator, or once

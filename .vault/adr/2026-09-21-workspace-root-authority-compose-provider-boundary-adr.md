@@ -12,7 +12,7 @@ supersedes:
   - '2026-09-21-workspace-root-authority-adr'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:57ed157c34e4fdbe776efd4363ae47ab5bf1c37a1741488cf6caf87b3c66a4d8'
+body_hash: 'sha256:670fa488e9cc2fbbfe7dd10b2d1b1026ffe492ecd477e7e0778ed29d17d8a7f3'
 ---
 
 # `workspace-root-authority` adr: `Compose provider execution is isolated from service state` | (**status:** `accepted`)
@@ -206,3 +206,7 @@ It supersedes only this record's original unrestricted desktop-project exception
 The original 2026-09-21 Compose decision and its process-isolation obligations
 remain authoritative; desktop previously required no project migration under
 that decision, and now requires projects within its lifecycle-derived tree.
+
+### Application container retirement, 2026-10-04
+
+The owner's later explicit native-production directive in 2026-10-04-container-release-native-production-adr retires the application Compose topology and its packaged identity launcher. The preceding claim that Compose deployment obligations remain authoritative is limited by this later ruling: these are historical obligations for the retired profile, not a requirement to ship application containers. Workspace authority and private-service-state protection remain binding; native isolation must be established by native execution evidence, not the retired Docker proof.

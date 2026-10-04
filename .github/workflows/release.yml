@@ -399,51 +399,9 @@ jobs:
         with:
           subject-path: ${{ steps.subjects.outputs.paths }}
 
-  containers:
-    name: Publish qualified Compose images
-    if: ${{ github.ref == 'refs/heads/main' }}
-    needs: health
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 90
-    permissions:
-      contents: write
-      packages: write
-      id-token: write
-      attestations: write
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Checkout release tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Set up uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          prune-cache: false
-          enable-cache: false
-          version: "0.11.29"
-      - name: Set up just
-        uses: taiki-e/install-action@6012bba2f8e3e666a2b212f8823c06831704ce92 # just
-        with:
-          tool: just@1.38.0
-      - name: Build, prove and push service images
-        run: just release-containers
-      - name: Attest the immutable image receipt
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
-        with:
-          subject-path: container-release.json
-      - name: Verify receipt provenance
-        run: gh attestation verify container-release.json --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-ref refs/heads/main
-      - name: Attach the verified receipt
-        run: gh release upload "$RELEASE_TAG" container-release.json --clobber --repo "$GITHUB_REPOSITORY"
-
   publish:
     name: Publish to the release
-    needs: [build, provenance, containers]
+    needs: [build, provenance]
     runs-on: [self-hosted, Linux, X64]
     env:
       CI_EXEC_BUDGET_MINUTES: 15

@@ -29,7 +29,7 @@ Install these host prerequisites:
 - [Just](https://just.systems/man/en/packages.html) 1.31 or later
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - [Node.js](https://nodejs.org/) matching `.node-version`, with npm, for Claude and Z.ai ACP workflows
-- Docker, only for container workflows
+- Docker, only for development/test Jaeger and VidaiMock fixtures
 
 The project requires Python 3.13 or later and currently selects the Python 3.13
 series.
@@ -128,7 +128,8 @@ Focused guides and references:
 The [architecture guide](docs/architecture.rst) is the canonical ownership map.
 Just routes commands, while `vaultspec-a2a` owns product behavior. The process
 registry owns named host processes, and Docker Compose (Compose) owns
-multi-service stacks. Vaultspec Core owns its provider projections and managed
+development/test fixtures. Production runs as native binaries. Vaultspec Core
+owns its provider projections and managed
 Git-ignore block. Repair, synchronization, and upgrades are explicit mutations;
 bypassing an owner creates conflicting state.
 

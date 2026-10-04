@@ -1,59 +1,38 @@
-# Service containers
+# Development service fixtures
 
-This directory contains the headless gateway, worker, telemetry, mock-provider,
-and database container definitions. It does not contain or start a user
-interface.
+Production uses native binaries and has no Docker dependency. This directory
+contains Docker support only for Jaeger trace debugging and the VidaiMock
+test provider. Gateway and worker run as native processes.
 
-## Docker Compose profiles
+## Native development services
 
-| File | Role |
-| --- | --- |
-| `docker-compose.dev.yml` | Gateway and worker with shared SQLite storage |
-| `docker-compose.integration.yml` | Gateway, worker, VidaiMock, and Jaeger certification stack |
-| `docker-compose.prod.yml` | Gateway, worker, and Jaeger with shared SQLite storage |
-| `docker-compose.prod.postgres.yml` | Overlay that adds PostgreSQL and switches both application services to it |
-
-Run every command from the repository root. Use `just doctor-check` to check Docker,
-then validate a Docker Compose (Compose) configuration before starting it.
-
-## Development stack
+Run commands from the repository root. The named host-process registry owns
+the gateway and worker:
 
 ```console
-just stack-dev-config
-just stack-dev-up
-just stack-dev-status
-just stack-dev-down
+just service-gateway-up
+just service-worker-up
+just service-list
 ```
 
-The gateway is published at <http://localhost:18000>. The worker remains on the
-Compose network and is not published to the host.
+Use the endpoints and registrations reported by the registry; stop a process
+with `just service-kill NAME`. Every engine-facing `/v1` request requires the
+gateway bearer. Its owner-restricted `service.token` handoff is beside
+`service.json` in the configured state home. The separate
+`VAULTSPEC_A2A_INTERNAL_TOKEN` is for gateway-to-worker traffic.
 
-Every engine-facing `/v1` request requires the gateway bearer. In the supplied
-Compose profiles, accepted workspaces are canonical descendants of
-`/app/data/workspaces`; foreign, ancestor, and symlink-escaping roots are
-refused before project configuration is read. Provider and tool processes run
-as a separate `agentuser` identity. They can read and write admitted projects,
-but cannot read the service-owned SQLite database or token handoff. Gateway and
-worker discovery state also use separate volumes. The worker safely upgrades
-existing files in shipped named volumes for shared GID 1002 access. Operators
-adding bind mounts must place them beneath the configured workspace root, set
-`VAULTSPEC_A2A_MANAGED_WORKSPACE_PERMISSIONS=false`, and prepare their contents for
-group 1002 access; startup validates the root rather than recursively changing
-host files. This remains a trusted single-control-plane profile, not a
-tenant-isolation boundary.
+See [`.env.example`](../.env.example) for supported settings and the
+[operator reference](../docs/operations.rst) for authentication, state paths,
+and native lifecycle ownership.
 
-HTTP trace URL attributes omit query strings, fragments, and URL user
-information. Handlers still receive the original query parameters. Trace paths,
-server addresses, and run/thread identifiers remain sensitive diagnostic data.
+## Integration fixtures
 
-Set `VAULTSPEC_A2A_GATEWAY_TOKEN` in the repository-root `.env` to pin the
-gateway bearer. If it is unset, the gateway generates one and writes it to the
-owner-restricted `service.token` handoff beside `service.json` in the
-gateway-only `VAULTSPEC_A2A_HOME` volume. Send it as
-`Authorization: Bearer <token>`; the separate `VAULTSPEC_A2A_INTERNAL_TOKEN` is
-only for gateway-to-worker traffic and is removed from provider environments.
+`docker-compose.integration.yml` defines only VidaiMock and Jaeger. The
+integration harness starts gateway and worker natively and uses these
+containers as development/test dependencies.
 
-## Integration stack
+Run `just test-native-integration` to exercise native lifecycle, cancellation,
+health, trace, and worker attachment checks with the development fixtures.
 
 ```console
 just stack-integration-config
@@ -62,80 +41,43 @@ just stack-integration-status
 just stack-integration-down
 ```
 
-The stack publishes the gateway at <http://localhost:18000>, VidaiMock at
-<http://localhost:8100>, and the Jaeger user interface (UI) at
-<http://127.0.0.1:16686>. Jaeger's UI and OTLP gRPC collector are bound to
-127.0.0.1; host certification exports to `http://127.0.0.1:4317`.
-`JAEGER_UI_PORT` and `JAEGER_OTLP_PORT` change those host ports without changing
-the bind address. Container exporters still use `http://jaeger:4317`; OTLP HTTP
-and health remain inside the Compose network. These restrictions also apply to
-the infrastructure recipes, which use this same profile. Use Docker Engine
-28.0.0 or newer and an authenticated TLS proxy with access controls and resource
-limits for remote telemetry access.
+VidaiMock is available at <http://127.0.0.1:8100>, and the Jaeger user interface
+at <http://127.0.0.1:16686>. Native processes export OTLP gRPC traces to
+`http://127.0.0.1:4317`. `VIDAIMOCK_PORT`, `JAEGER_UI_PORT`, and
+`JAEGER_OTLP_PORT` change the host ports while retaining loopback binding.
+OTLP HTTP and Jaeger's health endpoint remain inside the Compose network.
 
-## Production-image stack
+## Trace debugging
 
-Set a non-empty `VAULTSPEC_A2A_INTERNAL_TOKEN` in the repository-root `.env`, then
-run the SQLite-backed production images:
+For Jaeger without VidaiMock, use the separate infrastructure project:
 
 ```console
-just stack-prod-config
-just stack-prod-up
-just stack-prod-status
-just stack-prod-down
+just stack-infrastructure-config
+just stack-infrastructure-up
+just stack-infrastructure-status
+just stack-infrastructure-down
 ```
 
-The Jaeger UI is available only on the host at <http://127.0.0.1:16686>
-(`JAEGER_UI_PORT` changes the port). OTLP ingestion on ports 4317/4318 and the
-health endpoint on port 13133 remain inside the Compose network; production
-does not use `JAEGER_OTLP_PORT`. Gateway and worker export to `http://jaeger:4317`.
-For remote telemetry access, use an authenticated TLS proxy with access controls
-and resource limits instead of publishing Jaeger directly. Use Docker Engine
-28.0.0 or newer: older engines can expose loopback-published ports to peers on
-the same network segment.
+The infrastructure recipes use the same Compose definition but start only
+Jaeger. Use either fixture project at a time with the default ports, or assign
+different ports when running both. Configure native trace exporters through
+the settings in `.env.example`.
 
-For PostgreSQL, also set `POSTGRES_PASSWORD`. The `database-*` recipes validate
-the combined production configuration but start and manage only PostgreSQL:
+HTTP trace URL attributes omit query strings, fragments, and URL user
+information. Trace paths, server addresses, and run/thread identifiers remain
+sensitive diagnostic data.
 
-```console
-just stack-database-config
-just stack-database-up
-just stack-database-status
-just stack-database-down
-```
+## Native releases
 
-To run the complete PostgreSQL-backed application stack, combine the base file
-and overlay in one isolated Compose project:
-
-```console
-docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml config
-docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml up -d --build --wait
-docker compose --project-name vaultspec-a2a-prod-postgres -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml down --remove-orphans
-```
-
-See [`.env.example`](../.env.example) for supported settings and the
-[operator reference](../docs/operations.rst) for lifecycle ownership.
-
-### Released container images
-
-Changes go through the PR merge gate. Post-merge Full Validation also builds
-the committed production worker and runs its MCP identity-isolation proof.
-Maintainers start a release through the existing cut workflow:
+Changes go through the PR merge gate. Maintainers start a release through the
+existing cut workflow:
 
 ```console
 gh workflow run release-please.yml --ref main
 ```
 
-The release lane builds Linux AMD64 gateway and worker images from the same
-release tag. It proves the worker before pushing to
-`ghcr.io/nevenincs/vaultspec-a2a-gateway` and
-`ghcr.io/nevenincs/vaultspec-a2a-worker`, then attaches an attested
-`container-release.json` containing the source commit and immutable image
-digests. The release remains a draft until both container publication and the
-existing archive cohort succeed. Registry build tags are candidates; use the
-digests in a published release receipt for deployment.
-
-GitHub Actions needs package-write and attestation permissions. Existing GHCR
-packages must grant this repository access. Publishing does not restart any
-service. No production destination is currently configured; deployment host
-enrollment and promotion setup remain required.
+Release qualification builds native archives, proves that each frozen runtime
+starts, serves, and stops, and verifies archive provenance before publishing
+the complete release. There are no gateway or worker images to publish or
+deploy. The consumer owns installation and process lifecycle; the accepted
+Dashboard contract uses a native binary.

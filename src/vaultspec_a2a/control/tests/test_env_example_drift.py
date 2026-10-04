@@ -57,10 +57,6 @@ _DOCUMENTED_OVERRIDES = {
     "VAULTSPEC_A2A_DATABASE_BACKEND": "the Postgres profile",
     "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "the Postgres profile",
     "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": "the Postgres profile",
-    "VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER": "the Compose worker image's value",
-    "VAULTSPEC_A2A_PROVIDER_AGENT_UID": "the Compose worker image's value",
-    "VAULTSPEC_A2A_PROVIDER_AGENT_GID": "the Compose worker image's value",
-    "VAULTSPEC_A2A_INSTALL_ROOT": "the container image's install root",
     "VAULTSPEC_A2A_MOCK_API_BASE": "the integration profile's VidaiMock address",
     "VAULTSPEC_A2A_ENGINE_SERVE_CMD": "unset, the launcher runs this same template",
     "OTEL_SERVICE_VERSION": "a sample service identity",
@@ -72,7 +68,7 @@ _DOCUMENTED_OVERRIDES = {
     "NO_COLOR": "an opt-in switch shown switched on",
 }
 
-#: Where a setting can be read: shipped code, the container entrypoints, and
+#: Where a setting can be read: shipped code, service fixture tooling, and
 #: the repository tooling. Tests are excluded, because a setting only a test
 #: reads is still one the product ignores.
 _READER_ROOTS = ("src/vaultspec_a2a", "service", "dev")

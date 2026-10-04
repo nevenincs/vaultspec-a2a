@@ -1,4 +1,4 @@
-"""Cancel, health, and trace certification against the real compose stack."""
+"""Certify native cancellation and health with real development trace fixtures."""
 
 from __future__ import annotations
 

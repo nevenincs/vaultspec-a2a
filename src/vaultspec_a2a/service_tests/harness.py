@@ -261,7 +261,7 @@ def sweep_stale_runtime_dirs(
 
 @dataclass(slots=True)
 class ServiceStack:
-    """Owns the docker-compose integration stack for a single test session."""
+    """Owns native services and their Docker development fixtures for a session."""
 
     project_name: str
     ports: dict[str, int]

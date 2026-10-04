@@ -29,6 +29,7 @@ from ._env_example import (
     DOCUMENTED_BUT_NOT_READ,
     ENV_EXAMPLE,
     INTEGRATION_EXAMPLE,
+    assignments,
     documented,
     service_section,
 )
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
 # Settings that belong to the packaged desktop profile, whose launcher sets its
 # state root, capsule assets and settlement receiver. None is meaningful for a
-# Compose deployment, so the service example documents their absence instead.
+# native development session, so the example documents their absence instead.
 _DESKTOP_ONLY = frozenset(
     {
         "VAULTSPEC_A2A_DESKTOP_APP_HOME",
@@ -46,14 +47,6 @@ _DESKTOP_ONLY = frozenset(
         "VAULTSPEC_A2A_DESKTOP_SETTLEMENT_URL",
     }
 )
-
-# Compose's worker image owns these values. The example must describe them even
-# though host and desktop profiles leave the execution boundary unset.
-_COMPOSE_PROVIDER_IDENTITY_DEFAULTS = {
-    "VAULTSPEC_A2A_PROVIDER_IDENTITY_LAUNCHER": "/usr/local/bin/vaultspec-agent-launch",
-    "VAULTSPEC_A2A_PROVIDER_AGENT_UID": "1002",
-    "VAULTSPEC_A2A_PROVIDER_AGENT_GID": "1002",
-}
 
 
 def _declared_env_names(field_name: str) -> Iterator[str]:
@@ -177,13 +170,20 @@ def test_the_integration_example_names_only_settings_the_service_reads() -> None
     assert named <= admitted, sorted(named - admitted)
 
 
-def test_compose_provider_identity_defaults_aredocumented() -> None:
-    """The service identity contract stays visible in the operator example."""
-    text = documented()
-
-    assert not _DESKTOP_ONLY.intersection(_COMPOSE_PROVIDER_IDENTITY_DEFAULTS)
-    for name, default in _COMPOSE_PROVIDER_IDENTITY_DEFAULTS.items():
-        assert f"{name}={default}" in text
+def test_external_provider_identity_is_documented_as_optional() -> None:
+    """Copying the example must not select a retired container launcher or UID."""
+    lines = assignments(service_section())
+    for field in (
+        "provider_identity_launcher",
+        "provider_agent_uid",
+        "provider_agent_gid",
+    ):
+        assert Settings.model_fields[field].default is None
+        names = set(field_env_names(Settings, field))
+        documented_lines = [line for line in lines if line.name in names]
+        assert len(documented_lines) == 1, field
+        assert documented_lines[0].commented, field
+        assert documented_lines[0].value == "", field
 
 
 def test_the_exclusions_are_named_in_the_file() -> None:

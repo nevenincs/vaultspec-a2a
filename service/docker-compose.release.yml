@@ -1,8 +1,0 @@
-# Apply last, after the production file and any host-owned database overlay.
-services:
-  gateway:
-    build: !reset null
-    image: ${A2A_GATEWAY_IMAGE:?A2A_GATEWAY_IMAGE must be an immutable digest}
-  worker:
-    build: !reset null
-    image: ${A2A_WORKER_IMAGE:?A2A_WORKER_IMAGE must be an immutable digest}

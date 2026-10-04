@@ -42,6 +42,10 @@ group 1002 access; startup validates the root rather than recursively changing
 host files. This remains a trusted single-control-plane profile, not a
 tenant-isolation boundary.
 
+HTTP trace URL attributes omit query strings, fragments, and URL user
+information. Handlers still receive the original query parameters. Trace paths,
+server addresses, and run/thread identifiers remain sensitive diagnostic data.
+
 Set `VAULTSPEC_A2A_GATEWAY_TOKEN` in the repository-root `.env` to pin the
 gateway bearer. If it is unset, the gateway generates one and writes it to the
 owner-restricted `service.token` handoff beside `service.json` in the

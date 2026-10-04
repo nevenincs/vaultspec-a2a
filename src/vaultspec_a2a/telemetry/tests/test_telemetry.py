@@ -4,9 +4,9 @@ MANDATE: InMemorySpanExporter is BANNED. It is a fake that intercepts spans
 before they reach a real OTLP backend, allowing tests to "pass" while the
 actual export pipeline is never exercised.
 
-Tests that need to verify span attributes MUST use the persistent local Jaeger
-instance (via the local_jaeger_otlp_endpoint/local_jaeger_query_url fixtures)
-and are marked @pytest.mark.requires_jaeger. Run them with: just test-tracing
+Span attribute certification uses a real OTLP-to-Jaeger round trip in
+service_tests/test_telemetry_request_privacy.py, run with pytest -m service.
+The tests below exercise OTel API behavior without intercepting exported spans.
 """
 
 from __future__ import annotations

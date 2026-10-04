@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:0a16f9e687b639ea70c72f2e7ebed1500cd8905f833c84991ec50b9bea1f2460'
+body_hash: 'sha256:55759fdaf7c578fcab6e510358fd9feebe26a80556642b10bb617a23448759f2'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-07-19-observability-lanes-adr]]"
@@ -396,3 +396,85 @@ packet testing was not run; the boundary is established by real Docker
 publication inventory under the default NAT bridge and Engine at least 28.
 Semantic search remained index_unverifiable; discovery used Core decision
 listing/search and targeted source reads after confirming failed indexing.
+### telemetry-url-query-minimization | low | fixed: exported URLs omit private query data
+
+Type: privacy/data minimization. Status: implemented and verified; independent
+candidate review pending. This addresses the earlier full-URL investigation
+under the user's continue-fixing authorization. Middleware records query data
+from Starlette's request URL, and the SDK exporter forwards it to Jaeger.
+Actual gateway queries include workspace roots and filter/pagination values.
+Gateway and worker both register the same middleware, with no duplicate HTTP
+URL writer in that path and no automatic FastAPI instrumentation. Supported
+credential-bearing query authentication was not established: the finding is
+query metadata disclosure, not proven credential exfiltration.
+
+The narrow correction sanitizes only the emitted url.full value through the
+existing immutable URL API, omitting every query and fragment and removing
+userinfo from the authority. It preserves authority spelling, IPv6 brackets,
+port representation and request path. The request, W3C carrier, server fields,
+status and response behavior are untouched. No repository consumer requires
+query content in this attribute. Accepted service-lifecycle and observability
+lane decisions retain tracing without requiring private query export; this
+bounded correction to the existing safety contract requires no new costly
+decision or durable plan. Module and operator documentation now describe the
+specific guarantee; paths, run IDs, arbitrary WebSocket attributes and exception
+text are not covered by a universal no-secrets claim.
+
+The new service test runs the real middleware in fresh subprocesses with the
+project's real SDK/exporter configuration and queries an isolated Jaeger started
+from the integration profile. It uses no fake or in-memory exporter. Baseline
+ordinary and IPv6 query requests reproduced the unsafe exported attribute;
+an initial invalid userinfo Host-header case exercised upstream fallback rather
+than a supported credential URL and was replaced by a valid leading-zero IPv6
+port compatibility case. After the correction all four real-backend cases pass:
+normal URL, repeated/encoded/unknown query keys and workspace-root data, ordinary
+IPv6 pagination, and preserved leading-zero IPv6 authority spelling. Handlers
+receive the complete original query. Exported spans retain method, route,
+server address/port, status and exact W3C parent trace/span identities. Synthetic
+query and Authorization canaries are absent from the retrieved traces. Fixture
+teardown succeeds, with no remaining request-privacy containers.
+
+All 39 existing telemetry tests pass, including response errors, excluded paths,
+propagation and SDK configuration. Focused Ruff lint/format, Ty and strict
+Basedpyright pass for the three affected Python files. The production nesting,
+repository storage-anchor and TYPE_CHECKING runtime-use gates pass; diff checks
+pass. Integration fix 7aa6f179 and its separate live evidence remain unchanged.
+Semantic code discovery remained unavailable; Core decision search/listing and
+focused source reads supplied grounding.
+
+### telemetry-test-prerequisite-drift | low | resolved: real-backend test instructions
+
+Type: documentation/verification contract. Status: resolved. The telemetry unit
+test header named missing local Jaeger fixtures and an unused requires_jaeger
+marker. It now points to the real service certification test and pytest -m
+service. Unit API tests still do not inspect intercepted spans. This repair
+preserves the repository's ban on in-memory exporters.
+
+### concurrent-vault-markdown-warnings | low | queued to active desktop decision owners
+
+Type: documentation/maintenance. Status: concurrent open work. The whole-vault
+check emitted two extra-blank-line warnings in the desktop-product-profile and
+provider-binary-policy ADRs while those owners were actively editing them. It
+reported no errors. The production-telemetry-boundary feature check passes with
+zero errors and warnings. Those unrelated records remain with their owning
+workspace/native-admission pass; they are not staged for this correction.
+### telemetry-query-candidate-review | low | PASS: privacy correction preserves behavior
+
+Type: actual implementation review. Status: complete. This closes the pending
+review checkpoint in telemetry-url-query-minimization. A fresh read-only
+reviewer independently traced the exported URL, shared gateway/worker
+registrations, duplicate-emitter absence, immutable replacement behavior and
+parser representations. It found no concrete surviving query disclosure or
+request behavior regression. The final README wording was included in review.
+
+Verification coverage: four exporter cases directly establish query removal,
+handler preservation, ancestry, IPv6 and authority formatting; userinfo and
+fragment stripping have source-level coverage. Ordinary HTTP fragments are
+not sent to the service and its current host parser does not retain userinfo,
+so those branches are defensive rather than a claimed supported credential
+flow. No runtime bypass was established. Arbitrary path content and caller
+WebSocket/exception values remain outside this URL-only guarantee. These
+limits are retained instead of inferring a universal secret-free trace policy.
+All applicable scoped gates pass. Both this query fix and the earlier integration
+publication fix complete implementation, review, classification and audit updates;
+ongoing unrelated desktop/provider/authoring work stays with its active owners.

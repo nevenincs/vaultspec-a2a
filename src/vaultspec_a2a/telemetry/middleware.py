@@ -15,8 +15,9 @@ OpenTelemetry instrumentation from day one. This module provides:
   a WebSocket JSON frame) so downstream consumers can reconstruct the trace.
   Context propagation over WebSockets requires manual injection.
 
-Credential safety: no secrets are read, logged, or emitted as span
-attributes by this module.
+HTTP URL attributes omit user information, query strings, and fragments.
+Request headers and bodies are not recorded. Paths and caller-supplied
+WebSocket attributes remain diagnostic data.
 """
 
 from __future__ import annotations
@@ -85,7 +86,7 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
     Recorded span attributes (OTel Semantic Conventions v1.23+):
         http.request.method: GET, POST, etc.
         http.route: Full request path.
-        url.full: Full request URL.
+        url.full: Request URL without user information, query, or fragment.
         http.response.status_code: Response status code.
         server.address: Server hostname.
 
@@ -136,7 +137,17 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
             ) as span:
                 # use OTel semantic conventions v1.23+ attribute names.
                 span.set_attribute("http.request.method", request.method)
-                span.set_attribute("url.full", str(request.url))
+                url = request.url
+                span.set_attribute(
+                    "url.full",
+                    str(
+                        url.replace(
+                            netloc=url.netloc.rsplit("@", 1)[-1],
+                            query="",
+                            fragment="",
+                        )
+                    ),
+                )
                 span.set_attribute("http.route", request.url.path)
                 span.set_attribute("server.address", request.url.hostname or "")
                 if request.url.port:

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:e2fc59742770140ec4596bd86c7ff54bcabdf3699606046f1b241c851d875653'
+body_hash: 'sha256:422949ceddd7608e710abb72b026bb149cef50da29d19fc6b0c97b5892bbcca7'
 related:
   - "[[2026-10-04-container-release-plan]]"
 ---
@@ -30,11 +30,9 @@ Type: missing automation. release.yml gates archive publishing on test.yml and p
 
 Type: reproducibility limitation, pre-existing. prod.Dockerfile uses mutable base tags including uv:latest. A source revision alone cannot identify binary bytes. Promotion must consume published digests; pinning every base image is separate follow-up work.
 
-
 ### s01-review | low | Qualification step reviewed with passing evidence
 
 Type: review checkpoint. PASS for S01 working-tree changes: full-validation invokes a just recipe on the requested source ref, and release health inherits that job. The helper archives the commit, builds the production worker, copies the same-source proof and propagates both Docker command and container exit failures. Docker Desktop Linux execution against e97c7adc passed identity, fresh-cache MCP and descendant cleanup checks. Ruff, ty, CI contract, actionlint and six workflow tests passed. Review limitation: no GitHub run has exercised the new job yet. Cached image layers remain under normal runner Docker cache management; no global pruning is performed.
-
 
 ### attestation-ref | high | Pin receipt provenance to the main workflow ref
 
@@ -48,6 +46,9 @@ Type: operational/security prerequisite, open for S03. A production host registe
 
 Type: review checkpoint. PASS for local S02 implementation; external execution remains unproven. Reviewed tagged-source archive, exact worker image proof before push, temporary Docker credential directory, immutable same-repository digest validation, main-only receipt attestation, existing-draft requirement and final release dependency on containers. Nineteen focused tests, Ruff, ty, actionlint and CI-contract checks pass. No GHCR push, GitHub attestation or release upload was executed locally. A real authorized release run must establish registry permissions and attestation availability.
 
+### s03-draft-verification | medium | Deployment draft remains pending target selection
+
+Type: verification gap. The uncommitted S03 draft includes dev/container_deploy.py, deploy-containers.yml, docker-compose.release.yml and the Justfile recipe. Real Docker Compose config validation confirms the release overlay removes both build definitions and preserves SETUID/SETGID containment. CI contract, actionlint and ty passed. No host enrollment, service mutation, private-registry pull, attestation download or end-to-end promotion has been exercised. Finish target/access selection before revising, completing and committing S03. Do not treat the draft runner group as a configured deployment target.
 
 ## Recommendations
 

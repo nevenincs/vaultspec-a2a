@@ -11,7 +11,7 @@ related:
   - '[[2026-10-04-container-release-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:b281aa1a6396b9d24b62faa258c4a9f946865083f9e577b3132485c997868935'
+body_hash: 'sha256:47d718cb3db925b5700299a8518e5425ccab8b795f1031933dc5aba818635932'
 ---
 
 # Container release plan
@@ -26,7 +26,7 @@ The owner explicitly requested CI and automated image release as the session's e
 
 - [x] `S01` - Qualify the production worker image in post-merge and release health CI with an isolated build and executable identity proof; `dev/container_release.py, Justfile, .github/workflows/test.yml, dev/tests/test_release_workflow_contract.py`.
 - [x] `S02` - Publish qualified immutable images through the existing release authority after settling registry and artifact contracts; `.github/workflows/release.yml, dev/container_release.py, release workflow contract tests`.
-- [ ] `S03` - Automate promotion to the confirmed deployment target and document setup, verification and recovery; `deployment workflow, service Compose configuration, service documentation and rolling audit`.
+- [ ] `S03` - Finish promotion after the owner supplies a deployment host and compatible access method; current restricted runner-group workflow is a draft; `.github/workflows/deploy-containers.yml, dev/container_deploy.py, service/docker-compose.release.yml, Justfile, service/README.md and rolling audit`.
 
 ## Parallelization
 

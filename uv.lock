@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 resolution-markers = [
     "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
@@ -3285,6 +3285,7 @@ wheels = [
 name = "vaultspec-a2a"
 version = "0.4.0"
 source = { editable = "." }
+default-groups = []
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
@@ -3292,6 +3293,8 @@ dependencies = [
     { name = "anyio" },
     { name = "click" },
     { name = "fastapi" },
+    { name = "h11" },
+    { name = "httpcore" },
     { name = "httpx" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
@@ -3434,6 +3437,8 @@ requires-dist = [
     { name = "asyncpg", marker = "extra == 'server'", specifier = ">=0.30.0" },
     { name = "click", specifier = ">=8.1" },
     { name = "fastapi", specifier = ">=0.133.1" },
+    { name = "h11", specifier = ">=0.16.0,<1" },
+    { name = "httpcore", specifier = "==1.0.9" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-core", specifier = ">=1.6.6,<2" },
     { name = "langchain-openai", specifier = ">=1.6.7,<2" },

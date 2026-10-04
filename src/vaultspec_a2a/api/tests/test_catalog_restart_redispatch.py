@@ -219,9 +219,9 @@ class _RestartCase:
 
 def _prepare_restart_case(tmp_path: Path) -> _RestartCase:
     app_home = tmp_path / "app-home"
-    workspace = tmp_path / "workspace"
+    workspace = app_home / "workspaces" / "project"
     app_home.mkdir()
-    workspace.mkdir()
+    workspace.mkdir(parents=True)
     attach = "attach-restart-proof-0123456789abcdef"
     seed_credentials(
         app_home,

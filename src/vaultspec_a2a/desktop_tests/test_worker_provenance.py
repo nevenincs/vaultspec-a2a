@@ -34,6 +34,7 @@ from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     armed_gateway_env,
     await_gateway_ready,
+    desktop_workspace,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -153,7 +154,7 @@ def _armed_gateway_on_worker_port(
 
 
 def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
-    workspace = str(Path.cwd())
+    workspace = desktop_workspace(base)
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",

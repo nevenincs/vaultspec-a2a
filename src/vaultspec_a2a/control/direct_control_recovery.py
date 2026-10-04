@@ -59,6 +59,7 @@ from .recovery import (
     seed_recovery_attempts,
     settle_recovery_attempt,
 )
+from .workspace import WorkspaceUnavailableError
 
 if TYPE_CHECKING:
     import httpx
@@ -246,6 +247,10 @@ async def _reconstruct_dispatch(
         dispatch = restore_accepted_dispatch(accepted, dispatch_id=dispatch_id)
     except ActorCredentialsRequiredError as exc:
         return _Refusal(FailureType.CREDENTIALS_REQUIRED, str(exc))
+    except WorkspaceUnavailableError:
+        return _Refusal(
+            FailureType.NO_ACTIVE_PROJECT, "accepted project is unavailable"
+        )
     except ValueError as exc:
         return _Refusal(FailureType.INCOMPATIBLE_STATE, str(exc))
     expected_action = {

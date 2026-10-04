@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:b15aa4093a842e5cc993e54294cde7a7001c638705d7890f70f7dcba58ffb33f'
+body_hash: 'sha256:e0df32af648fe40fc1136a037f82fc9a12e6a072d291443fa475c93667d13c93'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-14-a2a-edge-conformance-reference]]"
@@ -64,7 +64,6 @@ Real stdio lost-response/restart tests passed for all three metadata sources. Th
 ### trusted-launch-test-contract-drift | low | The config test expected unresolved uvx
 
 Type: verification / sibling contract drift. Status: resolved. The broader config run passed 108 tests and failed one stale literal `uvx` assertion after trusted launch began emitting an absolute executable. The corrected test checks absolute authority and the uvx executable identity. The focused rerun passed. Native metadata selection is also asserted in the rendered Codex config and ACP provider attachment tests.
-
 
 ## Verification
 

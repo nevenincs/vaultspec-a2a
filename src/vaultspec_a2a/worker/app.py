@@ -395,6 +395,13 @@ def _start_dispatch_task(
 
 async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchResponse:
     """Admit one gateway dispatch and schedule it in the worker task group."""
+    if req.action != "cancel" and req.workspace_root is not None:
+        from ..control.workspace import require_admitted_workspace_root
+
+        try:
+            require_admitted_workspace_root(req.workspace_root)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     _require_dispatch_receipt(req)
     executor: Executor = app.state.executor
     tg = app.state.task_group

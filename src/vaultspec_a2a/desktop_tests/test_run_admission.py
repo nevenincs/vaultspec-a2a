@@ -30,7 +30,6 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -40,6 +39,7 @@ from ..tests.gateway_boot import (
     FIRST_DEMAND_TIMEOUT,
     LOOPBACK_TIMEOUT,
     armed_gateway_env,
+    desktop_workspace,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -52,6 +52,7 @@ from ._catalog import catalog_selection
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Generator
+    from pathlib import Path
 
 _ATTACH = "attach-credential-admission-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-admission-fedcba0987654321"
@@ -132,7 +133,7 @@ def _armed_gateway(
         # Warming at arm time is also what the product should do - a run start
         # is not the place to discover the catalog for the first time.
         base, auth = gateway
-        catalog_selection(base, auth, str(Path.cwd()))
+        catalog_selection(base, auth, desktop_workspace(base))
         if warm_first_demand:
             _warm_first_demand(base, auth)
         yield gateway
@@ -174,7 +175,7 @@ def _prepare(
     Blocks inside the gateway until the single-flight worker start reaches
     readiness, so parallel calls model concurrent first demand.
     """
-    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
+    workspace = str((metadata or {}).get("workspace_root") or desktop_workspace(base))
     with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
         resp = client.post(
             "/v1/runs",
@@ -208,7 +209,7 @@ def _commit(
     """Fire one authenticated commit binding tokens under *reservation_id*."""
     roles = options.roles if options is not None else None
     metadata = options.metadata if options is not None else None
-    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
+    workspace = str((metadata or {}).get("workspace_root") or desktop_workspace(base))
     with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
         resp = client.post(
             "/v1/runs",
@@ -258,7 +259,7 @@ def _release(
     a weaker request, it is a DIFFERENT one, and the broker refuses to release a
     reservation it cannot recognise.
     """
-    workspace = str((metadata or {}).get("workspace_root") or Path.cwd())
+    workspace = str((metadata or {}).get("workspace_root") or desktop_workspace(base))
     with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
         resp = client.post(
             "/v1/runs",
@@ -580,13 +581,11 @@ def test_pre_durability_commit_failure_restores_reservation_for_release(
     """A real post-authorization conflict restores the prepared authority."""
     owner_run_id = "run-nickname-owner"
     failed_run_id = "run-pre-durability-failure"
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    metadata = {
-        "workspace_root": str(workspace),
-        "nickname": "post-authorization-conflict",
-    }
     with _armed_gateway(tmp_path) as (base, auth):
+        metadata = {
+            "workspace_root": desktop_workspace(base),
+            "nickname": "post-authorization-conflict",
+        }
         owner_status, owner_prepared = _prepare(
             base, auth, run_id=owner_run_id, metadata=metadata
         )

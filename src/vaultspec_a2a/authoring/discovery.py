@@ -1,14 +1,7 @@
-"""Engine discovery via the service.json contract (attach-never-own).
+"""Engine attachment from protected discovery and authenticated health.
 
-Resolves a live dashboard engine (base URL + machine bearer) from the engine's
-own discovery file, applying the reference discipline verbatim: a present file
-is trusted only when its heartbeat is fresh AND a real ``GET /health`` returns
-200. A stale or crashed file (the documented 20-hour-stale specimen) is skipped,
-never owned. There is one candidate: the configured ``engine_service_json``,
-which defaults to the record the engine publishes inside the project a2a serves
-(``.vault/data/engine-data/service.json``).
-
-The bearer is read out of the file and never logged.
+Record reading and freshness checks remain shared with gateway lifecycle classification.
+Only the engine-specific resolver grants authoring endpoint authority.
 """
 
 from __future__ import annotations
@@ -20,34 +13,23 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, override
 
-import httpx
-
 from ..utils.coercion import coerce_object_mapping
+from ._engine_trust import prove_engine_identity, read_engine_record
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
 __all__ = [
-    "DESKTOP_RECORD_VERSION",
     "HEARTBEAT_STALE_MS",
     "EngineEndpoint",
     "heartbeat_is_fresh",
-    "parse_discovery_record",
     "read_service_json",
     "resolve_engine",
     "resolve_engine_with_retry",
     "service_json_candidates",
 ]
 
-
-# The versioned desktop record's identifying version and profile. The producer
-# authority for this shape is ``lifecycle.discovery``; it is mirrored here (the
-# lower, shared reader module — importing lifecycle would cycle) so this reader
-# recognises a versioned record instead of misreading it as a malformed legacy
-# one.
-DESKTOP_RECORD_VERSION = 1
-_DESKTOP_PROFILE = "desktop"
 
 # Consumer staleness window: a heartbeat older than this is treated as a crash,
 # not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
@@ -120,88 +102,6 @@ def heartbeat_is_fresh(info: Mapping[str, object], now_ms: int) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
-class DiscoveryRecordView:
-    """A shape-agnostic view of a discovery record: legacy or versioned desktop.
-
-    ``bearer_token`` is the inline machine bearer of a legacy record; a versioned
-    desktop record is secret-free, so its ``bearer_token`` is always ``None`` and
-    its owner-restricted attach credential is named only by
-    ``credential_reference`` (a filesystem path, never a value).
-    """
-
-    port: int
-    host: str
-    versioned: bool
-    bearer_token: str | None
-    credential_reference: str | None
-
-    @property
-    def base_url(self) -> str:
-        """Return the loopback origin the record advertises."""
-        return f"http://{self.host}:{self.port}"
-
-
-def _coerce_port(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value
-
-
-def _parse_versioned_record(info: Mapping[str, object]) -> DiscoveryRecordView | None:
-    endpoint = coerce_object_mapping(info.get("endpoint"))
-    if endpoint is None:
-        return None
-    port = _coerce_port(endpoint.get("port"))
-    if port is None:
-        return None
-    host = endpoint.get("host")
-    reference = info.get("credential_reference")
-    return DiscoveryRecordView(
-        port=port,
-        host=host if isinstance(host, str) and host else "127.0.0.1",
-        versioned=True,
-        bearer_token=None,
-        credential_reference=(
-            reference if isinstance(reference, str) and reference else None
-        ),
-    )
-
-
-def _parse_legacy_record(info: Mapping[str, object]) -> DiscoveryRecordView | None:
-    port = _coerce_port(info.get("port"))
-    if port is None:
-        return None
-    token = info.get("service_token")
-    reference = info.get("handoff_reference")
-    return DiscoveryRecordView(
-        port=port,
-        host="127.0.0.1",
-        versioned=False,
-        bearer_token=token if isinstance(token, str) and token else None,
-        credential_reference=(
-            reference if isinstance(reference, str) and reference else None
-        ),
-    )
-
-
-def parse_discovery_record(info: Mapping[str, object]) -> DiscoveryRecordView | None:
-    """Parse a discovery record dict into a view, preferring the versioned shape.
-
-    A record carrying the known desktop ``version`` and ``desktop`` profile is
-    read as versioned (secret-free, endpoint nested under ``endpoint``); anything
-    else is read as the legacy R8 record (top-level ``port`` and inline
-    ``service_token``). Fail-closed: a record without a valid integer port yields
-    ``None`` rather than a partially trusted view.
-    """
-    if (
-        info.get("version") == DESKTOP_RECORD_VERSION
-        and info.get("profile") == _DESKTOP_PROFILE
-    ):
-        return _parse_versioned_record(info)
-    return _parse_legacy_record(info)
-
-
-@dataclass(frozen=True, slots=True)
 class EngineEndpoint:
     """A resolved, liveness-confirmed engine origin and its machine bearer."""
 
@@ -217,9 +117,8 @@ class EngineEndpoint:
 def service_json_candidates() -> list[Path]:
     """Return the ordered service.json candidate paths this process consults.
 
-    The configured ``engine_service_json`` is the one candidate: the engine
-    publishes its record per workspace, and the setting defaults to that record
-    inside the project a2a serves. Exported so every reader of
+    The configured ``engine_service_json`` is the one candidate, defaulting to
+    external per-project engine state. Exported so every reader of
     the discovery file shares this ordering rather than restating it — a
     caller that only classifies freshness (never resolves a live endpoint)
     still needs the same candidate list.
@@ -232,29 +131,23 @@ def service_json_candidates() -> list[Path]:
 def resolve_engine(*, liveness_timeout: float = 3.0) -> EngineEndpoint | None:
     """Return a live :class:`EngineEndpoint`, or ``None`` if none is reachable.
 
-    Non-raising by contract: an unreadable file, a stale heartbeat, a malformed
-    record, or a refused ``/health`` probe are all skipped so a caller can poll
-    this on a loop without guarding every failure mode. A versioned, secret-free
-    desktop record is now parsed rather than misread as malformed, and skipped
-    for engine resolution because it carries no inline machine bearer; the
-    engine's own record remains the legacy inline-token shape, so this path is
-    unchanged for it.
+    Repository-controlled, linked, public, legacy, stale, or unproven records
+    are unavailable. This same boundary applies during bearer re-resolution.
     """
+    from ..control.config import settings
+
     now_ms = int(time.time() * 1000)
+    roots = (settings.project_root,)
+    if settings.workspace_root is not None:
+        roots += (settings.workspace_root,)
     for path in service_json_candidates():
-        info = read_service_json(path)
-        if info is None or not heartbeat_is_fresh(info, now_ms):
+        record = read_engine_record(path, workspace_roots=roots, now_ms=now_ms)
+        if record is None:
             continue
-        view = parse_discovery_record(info)
-        if view is None or view.bearer_token is None:
-            continue
-        base_url = f"http://127.0.0.1:{view.port}"
-        try:
-            resp = httpx.get(f"{base_url}/health", timeout=liveness_timeout)
-        except httpx.HTTPError:
-            continue
-        if resp.status_code == 200:
-            return EngineEndpoint(base_url=base_url, bearer_token=view.bearer_token)
+        if prove_engine_identity(record, timeout=liveness_timeout):
+            return EngineEndpoint(
+                base_url=record.base_url, bearer_token=record.bearer_token
+            )
     return None
 
 

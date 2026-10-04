@@ -334,7 +334,7 @@ def certified_gateway(
     # verb requires the active project, and the catalog it revalidates against is
     # served per workspace, so the handle and the runs it drives must name the
     # same one.
-    workspace_root = workdir / "workspace"
+    workspace_root = app_home / "workspaces" / "project"
     workspace_root.mkdir(parents=True, exist_ok=True)
     seed_credentials(app_home, attach=attach_token, ownership=ownership_capability)
     seat_valid_database(app_home)

@@ -10,10 +10,11 @@ related:
   - "[[2026-09-21-open-issue-remediation-audit]]"
 supersedes:
   - '2026-09-21-workspace-root-authority-adr'
-modified: '2026-10-01'
+modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:a24e0e84719d691fb8ded06bd851383efeb8a89b796d0e2111b5dd41073097cb'
+body_hash: 'sha256:57ed157c34e4fdbe776efd4363ae47ab5bf1c37a1741488cf6caf87b3c66a4d8'
 ---
+
 # `workspace-root-authority` adr: `Compose provider execution is isolated from service state` | (**status:** `accepted`)
 
 ## Problem Statement
@@ -57,15 +58,16 @@ working directory.
   and argv.
 
 The supported desktop profile remains a local, single-user dashboard product.
-Its authenticated user may select arbitrary existing project directories. This
-decision does not add tenant isolation or confine desktop roots. Compose remains
-a trusted single-administrator control plane, but it no longer equates
-administrator authority with model-process authority.
+The later desktop workspace boundary decision replaces this record's original
+arbitrary-project exception with the lifecycle-derived managed workspace tree.
+Compose remains a trusted single-administrator control plane, but it no longer
+equates administrator authority with model-process authority.
 
 ## Constraints
 
-- Desktop keeps authenticated arbitrary-project selection and receives no new
-  container or UID contract.
+- Desktop workspace selection follows
+  `2026-10-04-workspace-root-authority-desktop-workspace-boundary-adr` and receives
+  no new container or UID contract from this Compose decision.
 - Compose remains a single-administrator profile; this decision does not claim
   tenant isolation.
 - The worker must retain database and checkpoint authority while no provider,
@@ -83,7 +85,7 @@ First, Compose run admission accepts only canonical descendants of the
 configured `VAULTSPEC_WORKSPACE_ROOT`. It rejects the root's ancestors and any
 path whose canonical resolution escapes through a symlink. Every
 workspace-bearing execution and catalog route uses the same helper. Desktop
-keeps arbitrary existing absolute roots after attach authentication.
+workspace admission follows the later desktop workspace boundary decision.
 
 Second, gateway discovery state and `service.token` move to an owner-only,
 gateway-only mount that is absent from the worker filesystem. The worker keeps
@@ -125,8 +127,8 @@ is the independent boundary for provider-native tools and terminal execution.
 A canonical Compose root check closes the confirmed privileged-callback route,
 while a distinct capability-free execution identity closes absolute-path access
 from provider-native and terminal tools. Neither layer substitutes for the
-other. Keeping this profile-specific preserves the desktop product's arbitrary
-project contract. A dedicated execution service could be stronger, but the UID,
+other. Keeping Compose process isolation profile-specific preserves the desktop
+product's separate execution identity contract. A dedicated execution service could be stronger, but the UID,
 mode, mount, and fail-closed launcher contract establishes the required boundary
 inside the existing worker topology with a smaller compatibility surface.
 
@@ -177,10 +179,10 @@ following:
    green. Failure to install or apply the launcher boundary refuses provider
    execution rather than falling back to the worker identity.
 
-Existing shipped workspace paths remain compatible. Custom Compose project
-mounts must move beneath `VAULTSPEC_WORKSPACE_ROOT` and grant the documented
-agent identity access. Desktop clients and arbitrary desktop project locations
-do not migrate.
+Existing shipped Compose workspace paths remain compatible. Custom Compose
+project mounts must move beneath `VAULTSPEC_WORKSPACE_ROOT` and grant the
+documented agent identity access. Desktop project migration is governed by
+`2026-10-04-workspace-root-authority-desktop-workspace-boundary-adr`.
 
 ## Consequences
 
@@ -195,3 +197,12 @@ database authority, and the operator remains responsible for provider binaries,
 mounted project content, and bearer distribution. The narrower claim is that a
 served model/provider tree cannot read Compose service state merely because it
 runs work in an admitted project.
+
+## Amendment: desktop workspace authority, 2026-10-04
+
+The user's explicit desktop finding remediation authorizes the managed workspace
+allowlist in `2026-10-04-workspace-root-authority-desktop-workspace-boundary-adr`.
+It supersedes only this record's original unrestricted desktop-project exception.
+The original 2026-09-21 Compose decision and its process-isolation obligations
+remain authoritative; desktop previously required no project migration under
+that decision, and now requires projects within its lifecycle-derived tree.

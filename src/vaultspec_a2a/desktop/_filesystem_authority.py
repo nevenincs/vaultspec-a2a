@@ -1,4 +1,4 @@
-"""Private native filesystem authority for capsule publication."""
+"""Native directory leases, capsule publication and confined file I/O."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import os
 import stat
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, Protocol, cast
@@ -56,6 +56,8 @@ _FILE_SHARE_WRITE = 0x00000002
 _FILE_SHARE_DELETE = 0x00000004
 _CREATE_NEW = 1
 _OPEN_EXISTING = 3
+_OPEN_ALWAYS = 4
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
 _FILE_ATTRIBUTE_NORMAL = 0x00000080
 _FILE_ATTRIBUTE_DIRECTORY = 0x00000010
 _FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
@@ -466,6 +468,179 @@ def create_private_file(authority: DirectoryAuthority, name: str) -> BinaryIO:
     if os.name == "nt":
         return _create_windows_private_file(authority, name)
     return _create_posix_private_file(authority, name)
+
+
+def _confined_windows_descriptor(path: Path, *, write: bool) -> int:
+    """Open the leaf itself without following reparses or truncating its target."""
+    if os.name != "nt":
+        raise OSError(errno.ENOSYS, "Windows file opening is unavailable")
+    import msvcrt
+
+    library = _windows_library()
+    handle_value = _create_file_w(library)(
+        str(path),
+        (_FILE_GENERIC_WRITE | _FILE_READ_ATTRIBUTES) if write else _FILE_GENERIC_READ,
+        _FILE_SHARE_READ | _FILE_SHARE_WRITE,
+        None,
+        _OPEN_ALWAYS if write else _OPEN_EXISTING,
+        _FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if handle_value in {None, ctypes.c_void_p(-1).value}:
+        raise _last_windows_error(path)
+    handle = cast("int", handle_value)
+    try:
+        information = _ByHandleFileInformation()
+        get_information = library.GetFileInformationByHandle
+        get_information.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+        get_information.restype = ctypes.c_int
+        if not get_information(handle, ctypes.byref(information)):
+            raise _last_windows_error(path)
+        if information.attributes & (
+            _FILE_ATTRIBUTE_DIRECTORY | _FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            raise ValueError("workspace file must be a regular file without reparses")
+        flags = os.O_WRONLY if write else os.O_RDONLY
+        return msvcrt.open_osfhandle(handle, flags | os.O_BINARY)
+    except BaseException:
+        _close_handle(library)(handle)
+        raise
+
+
+@contextmanager
+def _confined_windows_parent(
+    root: Path, parts: tuple[str, ...], *, create: bool
+) -> Generator[Path]:
+    """Pin every ancestor against replacement while opening a Windows leaf."""
+    with ExitStack() as leases:
+        parent = Path(root.anchor)
+        for index, component in enumerate((*root.parts[1:], *parts[:-1])):
+            leases.enter_context(directory_lease(resolve_directory_authority(parent)))
+            parent /= component
+            if create and index >= len(root.parts) - 1:
+                with suppress(FileExistsError):
+                    parent.mkdir()
+        leases.enter_context(directory_lease(resolve_directory_authority(parent)))
+        yield parent
+
+
+@contextmanager
+def _confined_posix_parent(
+    root: Path, parts: tuple[str, ...], *, create: bool, shared_gid: int | None
+) -> Generator[int]:
+    """Walk directories relative to held descriptors, never following links."""
+    if os.name != "posix":
+        raise OSError(errno.ENOSYS, "descriptor traversal requires POSIX")
+    search = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY))
+    flags = search | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    current = os.open(root.anchor, flags)
+    try:
+        for index, component in enumerate((*root.parts[1:], *parts[:-1])):
+            try:
+                child = os.open(component, flags, dir_fd=current)
+            except FileNotFoundError:
+                if not create or index < len(root.parts) - 1:
+                    raise
+                with suppress(FileExistsError):
+                    os.mkdir(component, mode=0o770, dir_fd=current)
+                child = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    dir_fd=current,
+                )
+                try:
+                    if shared_gid is not None:
+                        os.fchown(child, -1, shared_gid)
+                        os.fchmod(child, 0o2770)
+                except BaseException:
+                    os.close(child)
+                    raise
+            os.close(current)
+            current = child
+        yield current
+    finally:
+        os.close(current)
+
+
+def _confined_posix_descriptor(
+    parent: int, leaf: str, *, write: bool, shared_gid: int | None
+) -> int:
+    if os.name != "posix":
+        raise OSError(errno.ENOSYS, "descriptor opening requires POSIX")
+    flags = (os.O_WRONLY if write else os.O_RDONLY) | os.O_NOFOLLOW | os.O_CLOEXEC
+    # A FIFO or device must be refused without blocking or consuming its data.
+    flags |= os.O_NONBLOCK
+    created = False
+    if write:
+        try:
+            descriptor = os.open(
+                leaf, flags | os.O_CREAT | os.O_EXCL, 0o660, dir_fd=parent
+            )
+            created = True
+        except FileExistsError:
+            descriptor = os.open(leaf, flags, dir_fd=parent)
+    else:
+        descriptor = os.open(leaf, flags, dir_fd=parent)
+    try:
+        if created and shared_gid is not None:
+            os.fchown(descriptor, -1, shared_gid)
+            os.fchmod(descriptor, 0o660)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+@contextmanager
+def confined_file_descriptor(
+    root: Path,
+    parts: tuple[str, ...],
+    *,
+    write: bool = False,
+    shared_gid: int | None = None,
+) -> Generator[int]:
+    """Lease one regular, singly linked file beneath an absolute directory.
+
+    Validation and I/O use the same file object. Writes truncate only after
+    validation; neither a swapped link nor a hard link grants sibling authority.
+    """
+    if not root.is_absolute() or not parts:
+        raise ValueError("confined file requires an absolute root and a relative leaf")
+    for component in (*root.parts[1:], *parts):
+        if component in {"", ".", ".."} or Path(component).name != component:
+            raise ValueError("workspace file requires single relative components")
+        if os.name == "nt" and (
+            ":" in component or component.rstrip(" .") != component
+        ):
+            raise ValueError("workspace file cannot name a Win32 alias or data stream")
+    if os.name == "nt":
+        with _confined_windows_parent(root, parts, create=write) as parent:
+            descriptor = _confined_windows_descriptor(parent / parts[-1], write=write)
+            try:
+                _confirm_confined_file(descriptor, write=write)
+                yield descriptor
+            finally:
+                os.close(descriptor)
+    else:
+        with _confined_posix_parent(
+            root, parts, create=write, shared_gid=shared_gid
+        ) as parent:
+            descriptor = _confined_posix_descriptor(
+                parent, parts[-1], write=write, shared_gid=shared_gid
+            )
+            try:
+                _confirm_confined_file(descriptor, write=write)
+                yield descriptor
+            finally:
+                os.close(descriptor)
+
+
+def _confirm_confined_file(descriptor: int, *, write: bool) -> None:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise ValueError("workspace file must be regular and have exactly one link")
+    if write:
+        os.ftruncate(descriptor, 0)
 
 
 def open_shared_read_descriptor(path: Path) -> int:

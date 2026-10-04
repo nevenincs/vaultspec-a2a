@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from ..control.thread_service import require_admitted_workspace_root
+from ..control.workspace import require_admitted_workspace_root
 from ..thread.constants import MAX_WORKSPACE_ROOT_LENGTH
 
 __all__ = ["require_existing_workspace_root"]

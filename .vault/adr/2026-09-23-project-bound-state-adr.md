@@ -3,16 +3,15 @@ tags:
   - '#adr'
   - '#project-bound-state'
 date: '2026-09-23'
-modified: '2026-09-24'
+modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:ecbab74cb6fa62f3b3b66198cb49cfa7e74af4c017dff126a429b54f88f9754d'
+body_hash: 'sha256:fe7fa6d1b11fefd7dec5872f04414a486fff254e8a97a4516608d4e200ad63fa'
 related:
   - "[[2026-09-23-project-bound-state-reference]]"
   - "[[2026-08-04-canonical-homes-adr]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
   - "[[2026-07-15-dev-process-registry-adr]]"
 ---
-
 # `project-bound-state` adr: `project-bound state and one settings authority` | (**status:** `accepted`)
 
 Accepted 2026-09-23 on the user's direct instruction in session: a2a variables carry one
@@ -121,6 +120,8 @@ in or be written to the user profile without an explicit override.
   state in `~/.vaultspec-a2a` and `~/.vaultspec/procs` is moved out of the user profile when this
   change lands. No a2a code path reads or writes the profile to do so; it is a one-time operator
   action recorded in the ledger.
+
+**Amendment 2026-10-04 (D5 and security-test exception to D6).** Authorized by the user's instruction to fix workspace-controlled engine discovery. `2026-10-04-engine-discovery-security-adr` refines D5: workspace-local and legacy engine records no longer authorize authoring attachment; engine discovery reads protected external state and authenticates the producer before disclosing credentials. A2A-owned storage and other D4 commitments are unchanged. The discovery trust tests alone may create disposable private state outside repositories to exercise the actual provenance checks; ordinary test artifacts retain D6's project-bound layout.
 
 ## Rationale
 

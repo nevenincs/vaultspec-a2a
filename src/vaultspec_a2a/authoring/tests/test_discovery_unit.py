@@ -9,7 +9,6 @@ redirected through the official ``engine_service_json`` setting.
 from __future__ import annotations
 
 import json
-import os
 import time
 from typing import TYPE_CHECKING, override
 
@@ -17,8 +16,13 @@ import pytest
 
 from ...control.config import settings
 from ...testing import settings_override
-from ...testing.tests._support.listeners import health_listener
 from ..discovery import EngineEndpoint, resolve_engine
+from ._engine_peer import (
+    TEST_BEARER,
+    engine_health_listener,
+    health_proof,
+    write_engine_record,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -79,7 +83,7 @@ def test_absent_candidate_is_skipped(
 
 
 def test_retry_resolves_after_a_transient_stall_window(
-    tmp_path: Path, set_service_json: Callable[[Path], None]
+    secure_engine_dir: Path, set_service_json: Callable[[Path], None]
 ) -> None:
     """A stalling engine (503 then 200 on a real listener) resolves on retry.
 
@@ -97,8 +101,17 @@ def test_retry_resolves_after_a_transient_stall_window(
 
     class _StallingHealth(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            assert isinstance(self.server, ThreadingHTTPServer)
             hits["count"] += 1
             self.send_response(503 if hits["count"] <= 2 else 200)
+            self.send_header(
+                "x-vaultspec-engine-proof",
+                health_proof(
+                    self.server.server_port,
+                    TEST_BEARER,
+                    self.headers.get("x-vaultspec-engine-challenge", ""),
+                ),
+            )
             self.end_headers()
 
         @override
@@ -109,32 +122,22 @@ def test_retry_resolves_after_a_transient_stall_window(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        service_json = tmp_path / "service.json"
-        service_json.write_text(
-            json.dumps(
-                {
-                    "port": server.server_address[1],
-                    "service_token": "tok",
-                    "pid": os.getpid(),
-                    "last_heartbeat": int(time.time() * 1000),
-                }
-            ),
-            encoding="utf-8",
-        )
+        service_json = secure_engine_dir / "service.json"
+        write_engine_record(service_json, server.server_port)
         set_service_json(service_json)
 
         # The one-shot probe lands in the stall window and misses this
         # candidate (hedged like the sibling tests: the machine-global
         # fallback candidate may or may not resolve on a dev machine).
         one_shot = resolve_engine(liveness_timeout=0.5)
-        assert one_shot is None or one_shot.bearer_token != "tok"
+        assert one_shot is None
         hits["count"] = 0  # reset the window for the retry variant
 
         endpoint = resolve_engine_with_retry(
             attempts=4, delay_seconds=0.05, liveness_timeout=0.5
         )
         assert isinstance(endpoint, EngineEndpoint)
-        assert endpoint.bearer_token == "tok"
+        assert endpoint.bearer_token == TEST_BEARER
         assert hits["count"] == 3  # two stalled probes, third succeeded
     finally:
         server.shutdown()
@@ -158,7 +161,7 @@ def test_retry_returns_none_when_the_engine_stays_unreachable(
     assert time.monotonic() - started < 5.0
 
 
-_REJECT_MARKER_TOKEN = "reject-me-heartbeat-token"
+_REJECT_MARKER_TOKEN = "reject-me-heartbeat-token-0123456789abcdef0123456789abcdef"
 
 
 @pytest.mark.parametrize(
@@ -172,7 +175,7 @@ _REJECT_MARKER_TOKEN = "reject-me-heartbeat-token"
     ids=["stale", "future-iso", "garbage", "future-numeric"],
 )
 def test_a_bad_heartbeat_is_rejected_even_against_a_live_engine(
-    tmp_path: Path,
+    secure_engine_dir: Path,
     set_service_json: Callable[[Path], None],
     last_heartbeat: object,
     why: str,
@@ -187,29 +190,23 @@ def test_a_bad_heartbeat_is_rejected_even_against_a_live_engine(
     (never a machine-global fallback that happened to be live) makes the
     assertion exact.
     """
-    with health_listener() as port:
-        record = tmp_path / "service.json"
-        record.write_text(
-            json.dumps(
-                {
-                    "port": port,
-                    "service_token": _REJECT_MARKER_TOKEN,
-                    "last_heartbeat": last_heartbeat,
-                }
-            ),
-            encoding="utf-8",
-        )
+    with engine_health_listener(_REJECT_MARKER_TOKEN) as port:
+        record = secure_engine_dir / "service.json"
+        write_engine_record(record, port, _REJECT_MARKER_TOKEN)
+        info = json.loads(record.read_text(encoding="utf-8"))
+        info["last_heartbeat"] = last_heartbeat
+        record.write_text(json.dumps(info), encoding="utf-8")
         set_service_json(record)
 
         result = resolve_engine(liveness_timeout=1.0)
 
         # If the bad heartbeat were accepted, the live listener would resolve
         # THIS record's marker token. It must not - the record is rejected.
-        assert result is None or result.bearer_token != _REJECT_MARKER_TOKEN, why
+        assert result is None, why
 
 
 def test_a_fresh_heartbeat_against_the_same_live_engine_does_resolve(
-    tmp_path: Path, set_service_json: Callable[[Path], None]
+    secure_engine_dir: Path, set_service_json: Callable[[Path], None]
 ) -> None:
     """Contrast control: the identical record with a fresh heartbeat resolves.
 
@@ -218,18 +215,9 @@ def test_a_fresh_heartbeat_against_the_same_live_engine_does_resolve(
     must resolve the marker token, proving the only difference that blocks the
     stale/malformed cases above is the heartbeat gate itself.
     """
-    with health_listener() as port:
-        record = tmp_path / "service.json"
-        record.write_text(
-            json.dumps(
-                {
-                    "port": port,
-                    "service_token": _REJECT_MARKER_TOKEN,
-                    "last_heartbeat": int(time.time() * 1000),
-                }
-            ),
-            encoding="utf-8",
-        )
+    with engine_health_listener(_REJECT_MARKER_TOKEN) as port:
+        record = secure_engine_dir / "service.json"
+        write_engine_record(record, port, _REJECT_MARKER_TOKEN)
         set_service_json(record)
 
         result = resolve_engine(liveness_timeout=1.0)

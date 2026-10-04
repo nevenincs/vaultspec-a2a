@@ -25,17 +25,18 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 from .env_prefix import ENV_PREFIX
 
 __all__ = [
     "DEFAULT_HOME",
-    "ENGINE_DISCOVERY_RECORD",
     "HANDOFF_CREDENTIAL",
     "SEAL_FILE",
     "StateLayout",
     "UnsafeStateHomeError",
+    "engine_discovery_path",
     "seal_state_home",
     "state_layout",
 ]
@@ -46,9 +47,18 @@ DEFAULT_HOME = Path(".vault") / "data" / "agents"
 #: The discovery record's file name at the root of a state home.
 DISCOVERY_RECORD = "service.json"
 
-#: Where the vaultspec engine publishes its own discovery record, relative to
-#: the project root it serves.
-ENGINE_DISCOVERY_RECORD = Path(".vault") / "data" / "engine-data" / DISCOVERY_RECORD
+#: External per-project discovery namespace owned by the engine producer.
+ENGINE_DISCOVERY_RECORD = Path(".vaultspec-engine") / "discovery"
+
+
+def engine_discovery_path(project_root: Path) -> Path:
+    """Locate protected engine state without trusting workspace discovery files."""
+    identity = os.path.normcase(str(project_root.resolve())).encode("utf-8")
+    project_key = sha256(identity).hexdigest()
+    # storage-anchor-ok: external producer state is owned by the engine, not A2A.
+    engine_home = Path.home()  # storage-anchor-ok
+    return engine_home / ENGINE_DISCOVERY_RECORD / project_key / DISCOVERY_RECORD
+
 
 #: The bearer handoff credential's file name beside the discovery record.
 HANDOFF_CREDENTIAL = "service.token"

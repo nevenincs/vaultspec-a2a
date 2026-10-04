@@ -21,7 +21,9 @@ import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...authoring._tool_calls import ToolCallJournal, tool_call_journal_path
 from ...conftest import materialize_schema
+from ...testing import settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
@@ -178,6 +180,48 @@ async def test_delete_is_idempotent_under_retry(
     assert first.deleted is True
     assert second.deleted is False
     assert second.not_found is True
+
+
+@pytest.mark.asyncio
+async def test_authoring_retirement_failure_retries_without_losing_the_saga(
+    session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+) -> None:
+    """A failed replay-store item retains DELETING and releases the pass claim."""
+    with settings_override(a2a_home=tmp_path / "state", workspace_root=None):
+        run_id = "t-authoring-retirement"
+        path = tool_call_journal_path(run_id, "writer")
+        journal = ToolCallJournal(path, run_id, "writer")
+
+        async def build(
+            refs: dict[str, str | None],
+        ) -> tuple[dict[str, str | None], str]:
+            return {}, "idk:retained"
+
+        await journal.prepare("original-call", "original-input", build)
+        misplaced = path.with_name("wrong-owner-name.db")
+        path.rename(misplaced)
+        async with session_factory() as session:
+            await _create_terminal_thread(session, run_id)
+            await session.commit()
+        async with session_factory() as session:
+            result = await delete_thread_service(session, run_id)
+        assert not result.deleted and result.cleanup_incomplete
+        async with session_factory() as session:
+            thread = await get_thread(session, run_id)
+            assert thread is not None and thread.status == ThreadStatus.DELETING.value
+            saga = await session.get(ThreadDeletionSagaModel, run_id)
+            assert saga is not None and saga.claimed_at is None
+        with pytest.raises(ValueError, match="retired"):
+            await journal.prepare("original-call", "original-input", build)
+        assert not path.exists()
+        misplaced.rename(path)
+        async with session_factory() as session:
+            retry = await delete_thread_service(session, run_id)
+        assert retry.deleted and not retry.cleanup_incomplete
+        with pytest.raises(ValueError, match="retired"):
+            await ToolCallJournal(path, run_id, "writer").prepare(
+                "original-call", "original-input", build
+            )
 
 
 @pytest.mark.asyncio

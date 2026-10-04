@@ -13,6 +13,8 @@ import pathlib
 import re
 from typing import TYPE_CHECKING, Any, cast
 
+import yaml
+
 from ...control.config import Settings
 from ...control.infra_config import InfraConfig
 from ...control.settings_base import field_env_names
@@ -36,6 +38,20 @@ def _compose_files() -> list[pathlib.Path]:
     files = sorted(_SERVICE.glob("docker-compose*.yml"))
     assert files, f"no Compose files found under {_SERVICE}"
     return files
+
+
+class _ComposeLoader(yaml.SafeLoader):
+    """Read Compose's build reset without enabling arbitrary YAML constructors."""
+
+
+_ComposeLoader.add_constructor("!reset", yaml.SafeLoader.construct_yaml_null)
+
+
+def _compose_config(path: pathlib.Path) -> dict[str, Any]:
+    return cast(
+        "dict[str, Any]",
+        yaml.load(path.read_text(encoding="utf-8"), Loader=_ComposeLoader),
+    )
 
 
 def test_every_compose_file_sets_only_declared_settings() -> None:
@@ -102,12 +118,10 @@ def test_every_composed_service_outlives_its_own_shutdown_budget() -> None:
     The two numbers live in different files, which is exactly why the relation
     between them is asserted rather than commented.
     """
-    import yaml
-
     budget = Settings().shutdown_total_timeout_seconds
     checked = 0
     for path in _compose_files():
-        composed = yaml.safe_load(path.read_text(encoding="utf-8"))
+        composed = _compose_config(path)
         for name in _SHUTDOWN_SERVICES:
             service = composed.get("services", {}).get(name)
             if service is None or "stop_grace_period" not in service:
@@ -253,13 +267,11 @@ def test_every_served_healthcheck_probes_the_container_by_its_own_hostname() -> 
     own hostname resolves to the address its peers use, so the probe fails exactly
     when they would.
     """
-    import yaml
-
     probes: list[tuple[str, str, str]] = []
     for path in _compose_files():
         composed = cast(
             "Mapping[str, Mapping[str, Mapping[str, Any]]]",
-            yaml.safe_load(path.read_text(encoding="utf-8")),
+            _compose_config(path),
         )
         for name in _SHUTDOWN_SERVICES:
             service: Mapping[str, Any] = composed.get("services", {}).get(name) or {}

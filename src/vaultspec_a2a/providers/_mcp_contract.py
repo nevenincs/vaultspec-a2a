@@ -105,9 +105,11 @@ _probe_lock = asyncio.Lock()
 def _probe_environment(env: Mapping[str, str] | None) -> dict[str, str]:
     """Keep run configuration, but never use workspace executable search paths."""
     result = dict(env if env is not None else os.environ)
+    # storage-anchor-ok: launch search inherits the host authority, not workspace env.
+    host_path = os.environ.get("PATH", os.defpath)  # storage-anchor-ok
     result["PATH"] = os.pathsep.join(
         directory
-        for directory in os.environ.get("PATH", os.defpath).split(os.pathsep)
+        for directory in host_path.split(os.pathsep)
         if os.path.isabs(directory)
     )
     for key in ("VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"):

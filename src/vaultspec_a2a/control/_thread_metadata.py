@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..ipc.schemas import canonical_project_root
 from ..utils.coercion import coerce_object_mapping
+from .workspace import require_admitted_workspace_root
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -53,7 +52,6 @@ def workspace_root_from_metadata(metadata: Mapping[str, object]) -> str | None:
     if not isinstance(root, str):
         return None
     try:
-        canonical = canonical_project_root(root)
-        return canonical if Path(canonical).is_dir() else None
+        return str(require_admitted_workspace_root(root))
     except ValueError:
         return None

@@ -33,9 +33,9 @@ from .settings_base import (
     resolve_against,
 )
 from .state_layout import (
-    ENGINE_DISCOVERY_RECORD,
     StateLayout,
     UnsafeStateHomeError,
+    engine_discovery_path,
     seal_state_home,
     state_layout,
 )
@@ -287,6 +287,12 @@ class Settings(DomainSettingsConfig, InfraConfig):
         version control is not a2a's concern.
         """
         home = self.a2a_home
+        if self.desktop_profile_armed and (
+            directory == home or directory.is_relative_to(home)
+        ):
+            from ..desktop.profile import derive_state_paths, ensure_private_state
+
+            ensure_private_state(derive_state_paths(home))
         if directory == home or directory.is_relative_to(home):
             seal_state_home(home)
         elif directory.is_relative_to(self.project_root):
@@ -315,7 +321,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         """The vaultspec engine's discovery record a2a attaches through."""
         if self.engine_service_json is not None:
             return self.engine_service_json
-        return self.project_root / ENGINE_DISCOVERY_RECORD
+        return engine_discovery_path(self.project_root)
 
     @property
     def gateway_url_configured(self) -> bool:

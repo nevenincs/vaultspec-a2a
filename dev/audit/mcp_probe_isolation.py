@@ -143,7 +143,8 @@ def main() -> None:
         _stall(Path(sys.argv[2]), sys.argv[3])
         return
     assert os.getuid() == 0, "run only as root in a disposable worker container"
-    root = Path(tempfile.mkdtemp(prefix="mcp-isolation-"))
+    # storage-anchor-ok: disposable worker proof state, never application storage.
+    root = Path(tempfile.mkdtemp(prefix="mcp-isolation-"))  # storage-anchor-ok
     root.chmod(0o755)
     secret = root / "service-state"
     secret.write_text("worker-only sentinel")

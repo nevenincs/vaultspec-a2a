@@ -8,6 +8,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-10-01-run-continuation-adr]]'
   - '[[2026-08-02-control-action-leases-adr]]'
+  - '[[2026-10-04-authoring-retry-followups-journal-retirement-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
 body_hash: 'sha256:9cb7a190a8c74c7f0c8f0090c9ead916fca2cf762b50df8c97a3881fd6306e2d'

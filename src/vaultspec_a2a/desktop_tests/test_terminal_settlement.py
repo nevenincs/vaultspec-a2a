@@ -29,7 +29,6 @@ import threading
 import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, override
 
 import httpx
@@ -41,6 +40,7 @@ from ..desktop.credentials import (
 from ..desktop.profile import derive_state_paths
 from ..tests.gateway_boot import (
     armed_gateway_env,
+    desktop_workspace,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -53,6 +53,7 @@ from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
+    from pathlib import Path
 
 _ATTACH = "attach-credential-settlement-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-settlement-fedcba0987654321"
@@ -288,7 +289,7 @@ def _assert_terminal_settlement(
 def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
     """Prepare then commit one mock run; return the commit response body."""
     run_id = "run-terminal-settlement"
-    workspace = str(Path.cwd())
+    workspace = desktop_workspace(base)
     # Resolved ONCE: prepare and commit describe the same run, so the commit is
     # only recognised as that run's commit while its selection matches.
     selection = catalog_selection(base, auth, workspace)

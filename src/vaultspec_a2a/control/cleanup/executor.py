@@ -3,7 +3,7 @@
 The deletion saga captures a durable manifest of cleanup work; this module
 turns that manifest into real store effects. It builds the manifest from a
 thread and its artifacts, and executes each item against the store it targets -
-the LangGraph checkpoint store or the workspace filesystem.
+the LangGraph checkpoint store, workspace files, or authoring replay journals.
 
 Two properties matter here and are enforced by construction:
 
@@ -25,6 +25,10 @@ import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ...authoring._tool_calls import (
+    retire_run_tool_calls,
+    tool_call_journal_directories,
+)
 from ...thread.enums import CleanupKind
 from .._thread_metadata import dispatchable_workspace_root
 from ..repositories import (
@@ -125,10 +129,9 @@ def build_cleanup_manifest(
 ) -> list[CleanupItem]:
     """Capture the immutable cleanup manifest for a thread being deleted.
 
-    The manifest lists the checkpoint (when a checkpoint store is available) and
-    each contained artifact file. Escaping artifact paths are refused here and
-    never enter the manifest, so the durable plan can only ever remove files the
-    thread owns.
+    The manifest lists the checkpoint (when available), each contained artifact
+    file, and run-owned replay state in the configured journal directories.
+    Escaping artifact paths are refused here and never enter the manifest.
     """
     items: list[CleanupItem] = []
     if include_checkpoint:
@@ -139,6 +142,18 @@ def build_cleanup_manifest(
                 target=thread.id,
             )
         )
+    for index, directory in enumerate(tool_call_journal_directories()):
+        if directory.exists():
+            # File-backed replay state uses the existing artifact cleanup kind;
+            # its key selects compaction rather than a workspace-file unlink.
+            items.append(
+                CleanupItem(
+                    kind=CleanupKind.ARTIFACT_FILE,
+                    key=f"authoring-replay:{index}",
+                    target=thread.id,
+                    root=str(directory),
+                )
+            )
     workspace_root = _workspace_root_from_thread(thread)
     if workspace_root is None:
         return items
@@ -222,6 +237,21 @@ async def execute_cleanup_item(
     """
     if item.kind is CleanupKind.CHECKPOINT:
         return await _execute_checkpoint_item(item, checkpointer)
+    if item.key.startswith("authoring-replay:"):
+        try:
+            if item.root is None:
+                raise ValueError("authoring replay cleanup has no store root")
+            await retire_run_tool_calls(item.target, directory=pathlib.Path(item.root))
+        except Exception as exc:
+            logger.warning(
+                "Authoring replay cleanup failed for thread %s",
+                item.target,
+                exc_info=True,
+            )
+            return CleanupItemResult(
+                item.key, CleanupItemState.FAILED, detail=_short_detail(exc)
+            )
+        return CleanupItemResult(item.key, CleanupItemState.DONE)
     return _execute_artifact_item(item)
 
 

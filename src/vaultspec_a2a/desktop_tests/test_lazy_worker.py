@@ -29,13 +29,13 @@ import itertools
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 
 from ..tests.gateway_boot import (
     armed_gateway_env,
+    desktop_workspace,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -47,6 +47,7 @@ from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
+    from pathlib import Path
 
 _ATTACH = "attach-credential-lazyworker-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-lazyworker-fedcba0987654321"
@@ -88,7 +89,7 @@ def _start_run(
     Each call blocks inside the gateway until the single-flight worker start
     reaches readiness, so parallel calls model concurrent first demand.
     """
-    workspace = str(Path.cwd())
+    workspace = desktop_workspace(base)
     with httpx.Client(base_url=base, timeout=60.0) as client:
         resp = client.post(
             "/v1/runs",
@@ -161,7 +162,7 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         # Resolve the catalog once before the race. Parallel catalog refreshes
         # would add an unrelated cold-start load to this worker-spawn proof.
         selection: dict[str, object] = catalog_selection(
-            base, auth["Authorization"], str(Path.cwd())
+            base, auth["Authorization"], desktop_workspace(base)
         )
         assert _worker_state(base, auth) == "cold"
         assert _SPAWN_LINE not in log_path.read_text(encoding="utf-8", errors="replace")

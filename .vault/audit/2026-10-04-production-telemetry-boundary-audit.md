@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:5cfeb0f781745ca6c1a0e445ba14ff741b69357d02e4f5473a92b39220003b58'
+body_hash: 'sha256:db2296aba3962eef38f593de9459b0f0cca7fa7c5d6ee5c604ef89bba1cd4428'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-07-19-observability-lanes-adr]]"
@@ -193,3 +193,117 @@ probe has a five-second Git subprocess deadline; full static analysis and tests
 were running concurrently. A subsequent vault check completed. No protection
 check was disabled, no dependency source modified, and no unverified write used.
 Final validation results are appended after their actual completion.
+### broad-verification-recovery | medium | resolved: discovered integration failures repaired
+
+Type: testing and environment integration. Status: resolved for the surfaced
+failures; the entire unit run is still in progress. A broad provider/authoring/
+desktop/workspace cohort initially reported 1514 passed, 21 failed, eight
+existing platform skips, 69 service deselections. Three Codex factory failures
+correctly rejected ambient Codex 0.160.0 outside its completed-turn range. The
+CI-pinned official 0.159.2 executable was provisioned only in temporary tooling
+and rerunning those cases passed; no eligibility proof was loosened. The old
+uvx command assertion was repaired by its owning probe workstream to assert the
+trusted absolute executable. The MCP readiness failure passed when rerun free
+of the prior heavy concurrent load. Authoring peers were updated by their owner
+to the authenticated connection contract. The combined authoring/retry/MCP
+regression run passed 41 tests; the four Codex/path cases passed independently.
+
+The full unit gate exposed armed-desktop acceptance and catalog restart fixtures
+placing their project beside app-home rather than in its managed workspaces
+tree. Those fixtures now create app-home/workspaces/project. All eleven related
+contract, deletion, streaming and restart cases pass, preserving production
+workspace refusal. The new release overlay uses Compose's valid !reset tag;
+two static deployment checks had a generic YAML reader that could not parse it.
+Their safe loader now recognizes that null reset while retaining shutdown and
+hostname assertions; all seven checks pass.
+
+### tooling-contract-drift-followup | low | resolved: runtime shapes and storage exceptions checked
+
+Type: verification and maintenance. Status: resolved. Strict typing failures in
+new receipt validation, dynamically keyed open MCP metadata, and stdio refresh
+roots were repaired with validated object types. Refresh roots remain required,
+nonempty, absolute strings before constructing Path objects. Five real stdio
+refresh cases pass. Discovered storage-anchor exceptions now document their
+actual authorities: private producer fixtures outside repositories, engine-
+owned external state, host-controlled executable search, and disposable build,
+qualification, promotion and isolation-proof material. No application storage
+was redirected into system temp. The gate and 37 tooling regression cases pass.
+The previously passing 165 harness cases remain applicable.
+
+The dependency advisory gate passes for 111 Node and 189 Python packages.
+npm audit signatures verifies all 106 installed package signatures and fifteen
+attestations after the ACP bump. The commit hook remains intentionally absent.
+No deployment, registry publication, or Git push was executed by this pass.
+### desktop-fixture-root-migration | medium | resolved: real desktop certification uses managed projects
+
+Type: integration verification. Status: resolved. The full unit run finished
+with 5436 passed, 21 failed, nine fixture errors, nineteen existing prerequisite
+or platform skips, 289 deselections and five warnings. The fixture errors and
+remaining desktop failures used the former arbitrary-working-directory contract.
+The shared test bootstrap now records each explicitly armed gateway's managed
+project path; desktop certification helpers request that project instead of
+Path.cwd(). Projects are created under the lifecycle-derived workspaces tree,
+and production admission and refusal logic are unchanged. Existing tests continue
+to exercise first-demand races, reservations, cleanup, ownership, pairing,
+settlement and worker adoption over real processes and sockets.
+
+The seven affected desktop modules passed 23 cases in one run. One introduced
+fixture-order regression created app-home before its fresh-home bootstrap. The
+conflict case now creates project metadata inside the armed context; its rerun
+passes. Together these provide passing evidence for all 24 distinct desktop
+cases. Pairing independently passed both cases. The earlier eleven acceptance
+and restart checks, seven deployment checks, and one export-declaration check
+cover every failed or errored case from the full run after repair. The full run
+is retained as failure history; it is not reported as an all-green invocation.
+
+### duplicate-test-export | low | resolved: helper imports retain a single declaration home
+
+Type: introduced architecture/test regression. Status: resolved. The initial
+fixture repair republished desktop_workspace from the ordinary desktop catalog
+module. The existing export-home guard rejected that extra owner. All callers
+now import the helper from tests.gateway_boot, and the catalog module offers
+only its own catalog_selection function. The unchanged guard passes. No
+exemption or weakened check was added.
+
+### new-retirement-checkpoint-style | low | resolved: private use and nesting checks repaired
+
+Type: concurrent implementation/static verification. Status: resolved. The new
+retirement coordinator used a private class method across its class boundary;
+its single-journal operation is now public retire. Sequential cursor use moves
+the missing-owner-table decision outside the cursor context, retaining behavior
+while satisfying the existing nesting limit. Source format and import repairs
+were applied using project tools; no gate threshold was increased.
+
+Review of the integrated fixes found no security-boundary relaxation. The
+original production Jaeger remedy retains loopback-only UI and internal OTLP.
+The workspace, engine-connection and descriptor-open decisions remain enforced.
+Open native desktop isolation, native callback reachability, sibling callback
+session debt and provider proof prerequisites stay with their existing audit
+owners; these fixes do not establish missing authority or fabricated live proof.
+
+Current passing evidence: 168 tooling tests; package sdist/wheel build; six docs
+tests and warning-free Sphinx build; configured Ty and strict Basedpyright;
+whole-tree Ruff lint/format and unchanged nesting gate; dependency advisory and
+registry-signature audits. Final lint/vault/inventory results are checked before
+committing all reviewed current changes as explicitly requested.
+### final-manual-gates | low | passed for the reviewed integrated candidate
+
+Type: final verification and implementation review. Status: PASS for the
+implemented fixes and repaired failures. The final python -m dev lint all
+invocation exits zero, including Ruff, format, all configured Ty platforms,
+strict Basedpyright, guarded-import checks, nesting, import loadability,
+reachability, symbol/export consumption, deptry, TOML, workflow policy,
+actionlint and shell checks. The final vault check all reports zero errors and
+zero warnings after owning-verb hygiene and index updates. git diff --check
+passes. Ten fresh retirement/deletion cases pass, covering compaction, old/new
+role fencing and retry of incomplete deletion. The active commit hook is absent.
+
+The user expressly authorized committing all current changes. The final
+inventory contains only source, declared lockfiles, configuration, tests and
+governed audit/decision/plan records. Temporary Node/Codex tooling, test runtime
+state, build outputs and credentials are excluded. Existing open Steps retain
+their statuses; no native desktop sandbox or missing completed-turn capability
+is reported as implemented. Scope and gate evidence above distinguish the
+original failed full invocation from the passing affected reruns. No additional
+full run is required to repeat unchanged passing cases under the repository's
+proportionate evidence-reuse rule.

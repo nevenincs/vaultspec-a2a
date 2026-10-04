@@ -41,6 +41,7 @@ from ._thread_metadata import workspace_root_from_metadata
 from .accepted_input import AcceptedActionInput, restore_accepted_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .workspace import canonical_workspace_root, require_admitted_workspace_root
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -503,9 +504,14 @@ async def _restore_reconciling_dispatch(
         dispatch = restore_accepted_dispatch(
             accepted, dispatch_id=authority.action_receipt_id
         )
-        if dispatch.model_assignment != frozen_map or str(
-            dispatch.workspace_root
-        ) != str(workspace_root):
+        if (
+            dispatch.model_assignment != frozen_map
+            or dispatch.workspace_root is None
+            or canonical_workspace_root(
+                require_admitted_workspace_root(dispatch.workspace_root)
+            )
+            != canonical_workspace_root(require_admitted_workspace_root(workspace_root))
+        ):
             raise ValueError(
                 "accepted execution authority differs from thread metadata"
             )

@@ -19,6 +19,7 @@ from ...database.checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
 )
 from ...tests._checkpoint_seeding import real_checkpoint
+from .._platform_acl import path_is_owner_restricted
 from ..migration import (
     MigrationStage,
     StoreName,
@@ -73,6 +74,12 @@ class TestMigrateStores:
         assert result.status == "succeeded"
         assert result.target_head == packaged.head
         assert result.failed_stage is None
+        for path in (
+            *state.provisioned_directories,
+            state.database_path,
+            state.checkpoint_path,
+        ):
+            assert path_is_owner_restricted(path)
         outcomes = {outcome.store: outcome for outcome in result.stores}
         assert outcomes[StoreName.PRIMARY].status is StoreStatus.MIGRATED
         assert outcomes[StoreName.PRIMARY].from_revision is None
@@ -209,6 +216,8 @@ class TestInitializeFreshStores:
 
         first = await initialize_fresh_stores(home)
         assert first.status == "succeeded"
+        assert path_is_owner_restricted(state.database_path)
+        assert path_is_owner_restricted(state.checkpoint_path)
         assert _primary_revision(state.database_path) == packaged.head
 
         second = await initialize_fresh_stores(home)

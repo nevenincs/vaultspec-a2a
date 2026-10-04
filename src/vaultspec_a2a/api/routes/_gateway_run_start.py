@@ -34,6 +34,10 @@ from ...control.thread_service import (
     process_metadata,
     successor_seed_transcript,
 )
+from ...control.workspace import (
+    canonical_workspace_root,
+    require_admitted_workspace_root,
+)
 from ...database import (
     get_thread,
 )
@@ -212,11 +216,14 @@ async def _require_settled_predecessor(
         raise HTTPException(status_code=409, detail="predecessor run is not settled")
     try:
         metadata = ThreadMetadata.model_validate_json(predecessor.thread_metadata or "")
+        predecessor_root = require_admitted_workspace_root(metadata.workspace_root)
     except ValueError as exc:
         raise HTTPException(
             status_code=409, detail="predecessor run has no readable workspace"
         ) from exc
-    if metadata.workspace_root != str(workspace_root):
+    if canonical_workspace_root(predecessor_root) != canonical_workspace_root(
+        workspace_root
+    ):
         raise HTTPException(
             status_code=409, detail="predecessor run belongs to another workspace"
         )

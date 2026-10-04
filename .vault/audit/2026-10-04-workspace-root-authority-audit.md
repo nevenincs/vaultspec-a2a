@@ -1,0 +1,173 @@
+---
+tags:
+  - '#audit'
+  - '#workspace-root-authority'
+date: '2026-10-04'
+modified: '2026-10-04'
+body_schema: 'body-v2'
+body_hash: 'sha256:de8644cfd5fcb0cec3078d13b1c1ee649b4d5f2b3181a5c8f2656aaba6adb2f9'
+related:
+  - "[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]"
+---
+
+# `workspace-root-authority` audit: `Desktop workspace capability boundary`
+
+## Scope
+
+The user requested remediation of the high-severity desktop attach workspace finding on 2026-10-04. This direct implementation pass covers initial admission, workspace queries, stored dispatch roots, and privileged provider filesystem callbacks. No plan is needed for this bounded change. Discovery used named modules and targeted searches after project-locked semantic code search returned `index_unverifiable`; server diagnostics reported failed indexing jobs.
+
+## Findings
+
+### desktop-root-selection | high | Armed admission exposes separate capability planes
+
+Type: security / authorization. Status: confirmed, remediation in progress. `src/vaultspec_a2a/control/thread_service.py:126` returns any existing canonical directory when the desktop profile is armed. `src/vaultspec_a2a/control/config.py:181` already seats the desktop workspace boundary at application-home `workspaces/`, but admission ignores it. `src/vaultspec_a2a/providers/_acp_rpc_handlers.py:159` repeats that exemption. A real subprocess with an armed desktop accepted both its application home and its managed project; this reproduces the reported admission failure without reading credentials.
+
+### stored-root-policy | high | Saved roots bypass current workspace admission policy
+
+Type: security / authorization. Status: confirmed, remediation in progress. `src/vaultspec_a2a/control/_thread_metadata.py:56` accepts stored roots using canonicalization and directory existence alone. Resume, recovery, reconciliation, and cleanup share this reader, so old roots must be rechecked against the active policy before dispatch or filesystem effects.
+
+### desktop-authority-contract | medium | Accepted decision retains unrestricted desktop selection
+
+Type: contract drift. Status: decision reconciliation in progress. The accepted Compose provider-boundary decision explicitly preserves arbitrary desktop directories. The user's remediation calls for an allowlist or lifecycle-bound capability. The existing derived desktop workspace tree provides the allowlist without adding a wire protocol; document the compatibility change and reconcile the prior desktop exception.
+
+### unavailable-project-classification | medium | Earlier workspace validation changed recovery refusal semantics
+
+Type: correctness / error contract. Status: fixed. The compatibility run found that early rejection in `restore_accepted_dispatch` changed deleted-project recovery from `no_active_project` to `incompatible_state`. `WorkspaceUnavailableError` now distinguishes directory availability from authority refusal, and direct recovery retains its original unavailable-project classification. The existing `test_unavailable_project_refuses_graph_action_but_allows_cancel` and recovery package checks pass after correction; cancellation remains available.
+
+### desktop-native-process-authority | high | Native tools retain the desktop user's filesystem identity
+
+Type: security / isolation. Status: deferred, existing limitation outside this workspace-selection fix. `src/vaultspec_a2a/providers/_subprocess.py:184` leaves the command unchanged without a configured identity launcher. `src/vaultspec_a2a/providers/_acp_rpc_terminal_handlers.py:126` permits interpreter commands; a script can name an absolute sibling state path independently of its validated cwd. The managed-root check closes the reported selection and privileged-callback route but does not establish OS read isolation. Follow-up requires a separate desktop process authority decision and native-tool proof.
+
+### desktop-callback-open-race | medium | Desktop pathname validation precedes filesystem open
+
+Type: security / validation-to-use. Status: deferred, existing limitation outside this workspace-selection fix. `src/vaultspec_a2a/providers/_acp_rpc_handlers.py:200` uses pathname resolution followed by `file_path.open` when secure callbacks are disabled; the desktop default has no identity launcher. A process able to replace a workspace directory between those operations can redirect the later open. Static candidate and file symlink escapes are rejected by the current fix. Follow-up should decide portable handle-anchored desktop I/O and prove concurrent replacement without relying on identity assumptions.
+
+### saved-windows-aliases | medium | Admission normalization changed saved-run comparisons
+
+Type: compatibility / workspace identity. Status: fixed after independent candidate review. The reviewer verified that IPC requests preserve a Windows extended prefix while the candidate removed it. Raw comparison in predecessor continuation and restart reconciliation then rejected a saved root that still named an allowed project. Parent tracing also found that changing the emitted spelling would change the existing discovery selector hash in `src/vaultspec_a2a/database/thread_repository.py:192`. Shared admission now preserves the original IPC mint while authority comparisons normalize drive and UNC prefixes. Providers consume the normalized allowed root; successor and reconciliation compare normalized roots. Real SQLite tests cover old saved aliases, successor validation, restored action receipts, and active-run discovery without changing stored rows.
+
+### desktop-root-selection-resolution | high | Caller-selected roots are confined to the trusted desktop tree
+
+Type: security / authorization. Status: fixed for the reported workspace-selection path. Initial and query admission, saved metadata, frozen accepted dispatches, worker admission, and provider cwd/filesystem roots use `src/vaultspec_a2a/control/workspace.py`. Desktop authority derives from the application's `workspaces/` tree even when the mutable workspace setting is absent or points elsewhere. The boundary cannot redirect to another directory. State, credentials, ancestor roots, foreign projects, traversal and candidate symlink escapes are refused. The real subprocess reproducer now prints application home REJECTED and managed project ACCEPTED; a real ACP callback returns no state sentinel but returns the admitted project sentinel. This resolves the original desktop-root-selection and stored-root-policy findings. The independent review found no additional finding-scope bypass.
+
+### desktop-authority-contract-resolution | medium | Prior desktop exception is reconciled with the authorized allowlist
+
+Type: contract drift. Status: fixed. `2026-10-04-workspace-root-authority-desktop-workspace-boundary-adr` records the user-authorized decision. The prior accepted Compose record now delegates only its desktop root exception to that decision and retains its original Compose process isolation obligations and history. Desktop projects must reside within application-home `workspaces/`; an outside-project symlink grants no authority.
+
+### concurrent-acp-range-tests | medium | Existing untracked range tests target an earlier callback interface
+
+Type: integration verification / concurrent contract drift. Status: observed, deferred to the owner of the concurrent ACP read change. While this pass was running, `_read_workspace_text` changed from byte offsets to ACP line selection, then added session-id validation. The existing untracked `providers/tests/test_acp_fs_read_limits.py` still supplied `offset` and omitted the session id in the observed run: 24 failed, 62 passed when run with desktop callback and ACP security tests. This fix's callbacks tests were adapted to the current real interface and active session; its bounded security checks pass. This pass did not rewrite the concurrent range implementation or its test expectations. That owner must reconcile and verify the range suite after its interface changes settle.
+
+### desktop-callback-replacement-proof | medium | Real replacement reaches private state before anchored I/O
+
+Type: security / validation-to-use. Status: confirmed by independent pre-patch investigation on 2026-10-04. A disposable real Windows desktop tree and a background directory/symlink swap returned a synthetic private-state sentinel through `_read_workspace_text` after 35 attempts and 60 directory swaps. The admitted project control also worked. No real credentials were read. The caller-controlled path reaches both read and write pathname sinks; callback protection must be independent of the identity launcher.
+
+### desktop-hardlink-callback-authority | medium | Opened workspace aliases can name private file objects
+
+Type: security / filesystem object authority. Status: fixed in the candidate, final review pending. A hard link has an admitted workspace pathname while sharing a sibling private file object. The new confined-descriptor helper validates the opened object is regular and singly linked before reads or truncation. Real hard-link regressions refuse reads and writes and preserve the original synthetic state contents. This is an alternate object representation at the same callback authority boundary.
+
+### vault-write-second-resolution | medium | Repeated path resolution can change write eligibility
+
+Type: security / policy validation-to-use. Status: fixed in the candidate, final review pending. The RPC handler checks vault-write eligibility before the helper independently resolves the path. Replacement between resolutions could change a non-vault path into an admitted vault path. The helper now checks the actual canonical components it will open and raises a typed internal refusal; the handler preserves the existing `forbidden_actor` value response. Final no-follow opening does not re-resolve those components into a different target.
+
+### concurrent-acp-range-tests-resolution | medium | Concurrent ACP owner repaired the read contract and tests
+
+Type: integration verification / contract drift. Status: resolved for the observed follow-up. The concurrent ACP plan remains its implementation owner. The current focused range suite passed 74 tests with one native/POSIX marker deselected on Windows. After integrating anchored callback I/O, Windows provider/read/vault tests and Linux native tests pass; final command evidence is recorded below. No concurrent ACP implementation was reverted or replaced.
+
+### desktop-native-launch-feasibility | high | Native isolation still lacks a proven compatible backend
+
+Type: security / isolation. Status: unresolved, user compatibility choice requested. Independent production shared-spawn reproduction on Windows read an absolute private synthetic-state file and a legitimate workspace file with desktop armed and no identity launcher. Process groups and Windows Job Objects only enforce lifetime. A standalone native Windows `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE)` / `CreateProcessAsUserW` probe with Everyone and Users restricting SIDs launched but both an ordinary system command and the private-read probe exited `0xc0000142` (DLL initialization failure). This is not evidence of effective read denial or compatible native execution. AppContainer requires an explicit file/IPC/network access contract; official Microsoft IPC guidance documents loopback exemption requirements. POSIX identity launchers are currently Compose-only. No speculative sandbox was installed and no current native launch behavior was changed. The user was asked whether desktop execution should fail closed until a validated backend exists or remain available with this issue open. S02 remains open until that answer and the applicable proof.
+
+Sources: `src/vaultspec_a2a/providers/_subprocess.py:178`, `src/vaultspec_a2a/providers/_acp_rpc_terminal_handlers.py:215`, `src/vaultspec_a2a/providers/_mcp_contract.py:412`; https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasusera ; https://learn.microsoft.com/en-us/windows/apps/develop/communication/interprocess-communication .
+
+### callback-write-only-permissions | medium | Candidate unnecessarily required read permission for writes
+
+Type: compatibility / filesystem access contract. Status: confirmed and corrected after independent candidate review. The candidate used `O_RDWR` / `GENERIC_READ|GENERIC_WRITE` for writes although the previous callback needed only write access. A real POSIX file set to mode 0200 reproduced the regression: ordinary reading was denied and the candidate callback raised PermissionError while opening it for writing. Confined writes now request `O_WRONLY` or native write plus metadata access, retain validation before truncation, and preserve the established write permission contract. The new real-permission regression is rerun with final verification.
+
+### windows-callback-creation-aliases | medium | New Win32 names bypassed vault component denial
+
+Type: security / authorization. Status: confirmed by native reproduction and corrected after independent candidate review. A fresh `new/.vault./decision.md` callback write produced `new/.vault/decision.md` before correction: Path.resolve preserved the missing component while native creation normalized it. The validator now rejects trailing-dot/space components and alternate data streams before any directory mutation; vault eligibility also recognizes Win32 normalized vault components and returns the established `forbidden_actor` result. Six real Windows RPC cases cover `.vault.`, `.vault `, `.. `, `.. .`, `...`, and `name.` without creating any filesystem entry. A separate traversal-name probe did not establish an outside-project write; do not infer an unverified root escape. Its awkward temporary directories were safely removed one verified empty directory at a time.
+
+### posix-callback-filename-compatibility | low | Publication-name restrictions rejected literal backslashes
+
+Type: compatibility / filenames. Status: confirmed from source and corrected after independent candidate review. Reusing `_validate_relative_name` imposed Windows separator restrictions on POSIX root and file names. The confined-file validator now applies platform path-component semantics; the publication API keeps its existing contract. A real Linux project directory and leaf containing literal backslashes support both callback reads and writes.
+
+### posix-callback-search-permissions | low | Root traversal demanded directory listing authority
+
+Type: compatibility / availability. Status: confirmed from source and corrected for the verified Linux backend after independent candidate review. Opening every ancestor O_RDONLY required read permission beyond pathname search. The walker now uses available O_PATH or O_SEARCH handles for existing directories and read-capable handles only for newly created directories whose group/mode must be set. A real unprivileged Linux test beneath an 0111 ancestor proves directory listing is refused while admitted callback reads/writes work. Compose group-sharing creation still produces directory 02770 and file 0660 with the configured GID. Current Apple source defines O_SEARCH as execute/search-only; macOS execution was not available on this host, so no native macOS result is claimed. Platforms exposing neither search flag retain the secure read-capable fallback and may still refuse search-only layouts.
+
+Sources: https://man7.org/linux/man-pages/man2/open.2.html ; https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/sys/fcntl.h .
+
+### desktop-callback-open-race-resolution | medium | Anchored file handles close the demonstrated desktop replacement route
+
+Type: security / validation-to-use. Status: fixed for the verified Windows and POSIX callback backends. `src/vaultspec_a2a/desktop/_filesystem_authority.py:591` provides confined file descriptors using Windows ancestor leases plus a no-reparse leaf handle, or POSIX directory-descriptor traversal with no-follow opens. The callback uses the validated opened object for actual I/O, and writes truncate only after regular/single-link validation. The identity-launcher exception no longer controls callback safety. Real concurrent directory and leaf replacement tests complete without returning the private-state sentinel or modifying its contents, while admitted project read/write controls work. The independent reviewer found no additional surviving symlink replacement route; all confirmed candidate findings are classified and corrected above.
+
+### desktop-followup-pass-status | low | Callback and ACP follow-ups complete; native isolation decision is pending
+
+Type: execution / verification status. Status: callback implementation/review/queue updates complete; whole plan PENDING. S01 is verified for the Windows and standard POSIX backends. The concurrent ACP verification gap is resolved. S02 remains open: the native child read route still reproduces and no verified compatible desktop OS isolation backend exists. The pending user choice determines whether unsupported desktop execution must be refused or kept available with the high finding open. No unsupported sandbox or disabling gate was applied while that answer is pending. Native macOS callback execution and packaged provider certification are not claimed; Linux execution supplies the real POSIX backend evidence and Linux/darwin static checks pass. Source remains uncommitted because the shared handler includes concurrent ACP changes and the earlier workspace fix; committing the whole file would absorb others' work.
+
+## Recommendations
+
+Record an explicit desktop workspace authority decision under the user's remediation authorization, then enforce one shared profile boundary at all affected entry points. Preserve configured Compose containment and unconfigured development behavior. Require real-filesystem malicious cases and admitted project controls, followed by independent candidate review and final check evidence.
+
+### Final review and verification, 2026-10-04
+
+Outcome: fixed for the reported desktop workspace-selection boundary. Independent read-only candidate review raised one medium compatibility finding; parent verification confirmed and corrected it, including the durable selector representation. Parent reviewed the final source, direct callers, changed conditions, unavailable-project and cancellation paths. Implementation, review, severity/type/status classification, decision reconciliation, and audit queue updates are complete. The two preexisting desktop isolation findings and the concurrent range-suite verification remain open under their entries above.
+
+Modified source and tests:
+
+- `src/vaultspec_a2a/control/workspace.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/control/_thread_metadata.py`
+- `src/vaultspec_a2a/control/accepted_input.py`
+- `src/vaultspec_a2a/control/infra_config.py`
+- `src/vaultspec_a2a/providers/_acp_types.py`
+- `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`
+- `src/vaultspec_a2a/worker/app.py`
+- `src/vaultspec_a2a/api/workspace.py`
+- `src/vaultspec_a2a/api/tests/test_workspace_root_authority.py`
+- `src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py`
+- `src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py`
+- `src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py`
+- `src/vaultspec_a2a/control/direct_control_recovery.py`
+- `src/vaultspec_a2a/api/routes/_gateway_run_start.py`
+- `src/vaultspec_a2a/control/dispatch.py`
+
+The new shared workspace policy is the smallest complete existing-profile enforcement strategy: all affected callers reuse one lifecycle-derived boundary rather than adding wire fields, a new capability store, or per-route path lists. Existing admitted project I/O, default development roots, configured Compose roots, current recovery refusal types, cancellation, saved aliases, and selector spelling remain covered.
+
+Gate 1 — diff, syntax/import and quality:
+
+- Fresh imports of `providers._acp_types` and `control.accepted_input`: pass.
+- `git diff --check -- src/vaultspec_a2a/control/workspace.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/control/_thread_metadata.py src/vaultspec_a2a/control/accepted_input.py src/vaultspec_a2a/control/infra_config.py src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_rpc_handlers.py src/vaultspec_a2a/worker/app.py src/vaultspec_a2a/api/workspace.py src/vaultspec_a2a/api/tests/test_workspace_root_authority.py src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/control/direct_control_recovery.py src/vaultspec_a2a/api/routes/_gateway_run_start.py src/vaultspec_a2a/control/dispatch.py`: pass.
+- `uv run --no-sync ruff check src/vaultspec_a2a/control/workspace.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/control/_thread_metadata.py src/vaultspec_a2a/control/accepted_input.py src/vaultspec_a2a/control/infra_config.py src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_rpc_handlers.py src/vaultspec_a2a/worker/app.py src/vaultspec_a2a/api/workspace.py src/vaultspec_a2a/api/tests/test_workspace_root_authority.py src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/control/direct_control_recovery.py src/vaultspec_a2a/api/routes/_gateway_run_start.py src/vaultspec_a2a/control/dispatch.py`: pass; strict typing reported zero errors/warnings/notes.
+- `uv run --no-sync ruff format --check src/vaultspec_a2a/control/workspace.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/control/_thread_metadata.py src/vaultspec_a2a/control/accepted_input.py src/vaultspec_a2a/control/infra_config.py src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_rpc_handlers.py src/vaultspec_a2a/worker/app.py src/vaultspec_a2a/api/workspace.py src/vaultspec_a2a/api/tests/test_workspace_root_authority.py src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/control/direct_control_recovery.py src/vaultspec_a2a/api/routes/_gateway_run_start.py src/vaultspec_a2a/control/dispatch.py`: pass; strict typing reported zero errors/warnings/notes.
+- `uv run --no-sync ty check src/vaultspec_a2a/control/workspace.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/control/_thread_metadata.py src/vaultspec_a2a/control/accepted_input.py src/vaultspec_a2a/control/infra_config.py src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_rpc_handlers.py src/vaultspec_a2a/worker/app.py src/vaultspec_a2a/api/workspace.py src/vaultspec_a2a/api/tests/test_workspace_root_authority.py src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/control/direct_control_recovery.py src/vaultspec_a2a/api/routes/_gateway_run_start.py src/vaultspec_a2a/control/dispatch.py`: pass; strict typing reported zero errors/warnings/notes.
+- `uv run --no-sync basedpyright src/vaultspec_a2a/control/workspace.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/control/_thread_metadata.py src/vaultspec_a2a/control/accepted_input.py src/vaultspec_a2a/control/infra_config.py src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_rpc_handlers.py src/vaultspec_a2a/worker/app.py src/vaultspec_a2a/api/workspace.py src/vaultspec_a2a/api/tests/test_workspace_root_authority.py src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/control/direct_control_recovery.py src/vaultspec_a2a/api/routes/_gateway_run_start.py src/vaultspec_a2a/control/dispatch.py`: pass; strict typing reported zero errors/warnings/notes.
+- `uv run --no-sync ty check --python-platform linux src/vaultspec_a2a/control/workspace.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/control/_thread_metadata.py src/vaultspec_a2a/control/accepted_input.py src/vaultspec_a2a/control/infra_config.py src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_rpc_handlers.py src/vaultspec_a2a/worker/app.py src/vaultspec_a2a/api/workspace.py src/vaultspec_a2a/api/tests/test_workspace_root_authority.py src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/control/direct_control_recovery.py src/vaultspec_a2a/api/routes/_gateway_run_start.py src/vaultspec_a2a/control/dispatch.py`: pass; strict typing reported zero errors/warnings/notes.
+- `uv run --no-sync ty check --python-platform darwin src/vaultspec_a2a/control/workspace.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/control/_thread_metadata.py src/vaultspec_a2a/control/accepted_input.py src/vaultspec_a2a/control/infra_config.py src/vaultspec_a2a/providers/_acp_types.py src/vaultspec_a2a/providers/_acp_rpc_handlers.py src/vaultspec_a2a/worker/app.py src/vaultspec_a2a/api/workspace.py src/vaultspec_a2a/api/tests/test_workspace_root_authority.py src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/control/direct_control_recovery.py src/vaultspec_a2a/api/routes/_gateway_run_start.py src/vaultspec_a2a/control/dispatch.py`: pass; strict typing reported zero errors/warnings/notes.
+
+Gate 2 — original trigger and alternate malicious representations:
+
+A fresh actual subprocess constructs settings from `VAULTSPEC_A2A_DESKTOP_APP_HOME`, creates a managed project and calls the production facade. Before the fix it accepted application home and managed project. After the fix it rejects application home and accepts managed project. The real-filesystem regression suite additionally rejects credentials/state directories, ancestors, foreign projects, candidate symlinks, redirected allowlist roots, parent traversal, and Windows extended-prefix aliases of forbidden roots. A real ACP callback with its active session returns an error containing the workspace authority refusal and no private-state sentinel; its legitimate control returns project content.
+
+Gate 3 — legitimate controls and nearest package checks:
+
+- `uv run --no-sync pytest src/vaultspec_a2a/control/tests/test_active_project_identity.py src/vaultspec_a2a/control/tests/test_stored_workspace_root_agreement.py src/vaultspec_a2a/control/tests/test_accepted_input_recovery.py src/vaultspec_a2a/control/tests/test_direct_control_recovery_current.py src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py src/vaultspec_a2a/control/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_project_confinement.py src/vaultspec_a2a/providers/tests/test_acp_security.py src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/worker/tests/test_app.py src/vaultspec_a2a/worker/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/api/tests/test_workspace_root_authority.py src/vaultspec_a2a/database/tests/test_workspace_identity_seam.py src/vaultspec_a2a/api/tests/test_run_continuation_lineage.py::test_successor_requires_settled_parent_and_discloses_durable_link -q --show-capture=no`: 220 passed, 3 existing Linux-only descriptor tests skipped on Windows, 76.90 seconds. No new skips were introduced. Desktop authorization logic and callback controls ran on the real Windows filesystem; Linux descriptor I/O was not changed by this patch and was not executed on this host.
+- Existing recovery and live successor flows pass, including deleted-project refusal and cancellation. Saved Windows aliases retain restart receipts and active-run discovery. Configured Compose and unrestricted unconfigured development admission controls pass.
+- A broader concurrent ACP range test run had 24 failures described in `concurrent-acp-range-tests`; that untracked suite targets the separately changing read-range protocol. Its failure is an external integration gap, not evidence that workspace authority was bypassed. This pass does not claim an all-repository green suite or live packaged Linux/macOS certification.
+
+Records changed: this audit, the new desktop workspace boundary ADR, the scoped amendment to the accepted Compose provider-boundary ADR, and the generated workspace-root-authority feature index. Core validation is run read-only after the final audit update. The patch remains uncommitted to preserve the other active edits in this shared worktree; no unrelated files were reverted, staged, or committed, and no remote action was taken.
+
+### Follow-up implementation review and verification, 2026-10-04
+
+Authorized by the user's request to tackle the remaining known issues. Independent pre-patch investigation proved both open security routes with real synthetic-state controls. The parent implemented the callback boundary; one fresh read-only candidate review found a Windows creation alias issue and three compatibility issues. Parent confirmed the vault alias and write-only regression by execution, checked the other concrete source-backed regressions, corrected all four, and reran affected checks. Review verdict: PASS for implemented callback/read integration on Windows/Linux; PENDING for the complete plan because native process authority remains unresolved.
+
+Modified implementation scope: `src/vaultspec_a2a/desktop/_filesystem_authority.py`, `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`, and `src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py`. The common native lease implementation is reused; no new dependencies, wire fields, provider adapters, user credential values, mocks, new skips, or unrelated cleanup were introduced.
+
+Gate 1: `uv run --no-sync ruff check` and `ruff format --check`, `ty check`, `basedpyright`, and `git diff --check --` on those three files all pass; Basedpyright reports zero errors/warnings/notes. `ty check --python-platform linux` and `--python-platform darwin` also pass. Current source imports are exercised by the actual native tests.
+
+Gate 2: production callbacks reject concurrent directory/leaf symlink replacement, hard-linked state, six Windows creation aliases, forbidden workspace roots, and POSIX FIFO objects without blocking. No private synthetic-state content is returned and private files retain their contents. Before correction a real missing-directory `.vault.` write produced a vault file; final RPC controls now return `forbidden_actor` and create no entries. Before correction a mode-0200 legitimate write raised PermissionError; final control succeeds without acquiring read access.
+
+Gate 3: the final Windows command `uv run --no-sync pytest src/vaultspec_a2a/providers/tests/test_desktop_workspace_boundary.py src/vaultspec_a2a/providers/tests/test_project_confinement.py src/vaultspec_a2a/providers/tests/test_acp_security.py src/vaultspec_a2a/providers/tests/test_acp_vault_deny.py src/vaultspec_a2a/providers/tests/test_acp_fs_read_limits.py src/vaultspec_a2a/desktop/tests/test_filesystem_authority.py -q --show-capture=no` reports 186 passed, 3 existing Linux-only skips, 1 marker deselection. The same six modules under WSL Ubuntu using the existing locked Linux project environment report 186 passed, no skips/deselections (`UV_PROJECT_ENVIRONMENT=/tmp/vaultspec-acp-security-20261004 uv run --no-sync pytest ... -q --show-capture=no --override-ini=addopts= --basetemp=/tmp/workspace-authority-final-reviewed-20261004`). Passing controls cover line/session/UTF-8 byte caps, admitted aliases, nested file creation, actual writes, vault denials, real permissions, group sharing, and existing descriptor contracts.
+
+Governance: `uv run --no-sync vaultspec-core vault check all --feature workspace-root-authority --json` and owning plan check pass. An earlier MCP health result reported plan prose/stamp warnings despite the populated file; the authoritative locked CLI and owning plan check report clean. No speculative repair or unrelated framework change was made. The plan and ledger retain the open native-isolation prerequisite and the shared-worktree commit exception. No remote action was taken.

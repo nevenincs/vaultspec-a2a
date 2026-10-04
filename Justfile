@@ -996,3 +996,7 @@ ci-worker-image:
 [group('release')]
 release-containers:
     uv run --isolated --no-project python -m dev.container_publish
+
+[group('release')]
+deploy-containers:
+    uv run --isolated --no-project python -m dev.container_deploy

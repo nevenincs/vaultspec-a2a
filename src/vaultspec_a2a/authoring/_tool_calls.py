@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import stat
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, cast
 
 import aiosqlite
 
+from ..desktop._filesystem_authority import path_is_link_like
 from ._ids import derive_idempotency_key
 
 if TYPE_CHECKING:
@@ -52,7 +54,101 @@ def tool_call_journal_path(run_id: str, call_scope: str) -> Path:
         chown(directory, -1, gid, follow_symlinks=False)
         directory.chmod(0o2770, follow_symlinks=False)
     identity = derive_idempotency_key(json.dumps([run_id, call_scope]))
-    return directory / (identity.removeprefix("idk:") + ".db")
+    path = directory / (identity.removeprefix("idk:") + ".db")
+    if settings.provider_identity_launcher is not None and not os.path.lexists(
+        _closed_run_marker(directory, run_id)
+    ):
+        # SQLite's default file mode omits group write. Create the empty file
+        # as the service before handing it to the isolated bridge, so both
+        # identities can transact and the service can retire it later.
+        try:
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o660)
+        except FileExistsError:
+            if path_is_link_like(path) or path.stat().st_nlink != 1:
+                raise ValueError("authoring journal must be an unlinked regular file")
+        else:
+            try:
+                os.fchmod(descriptor, 0o660)
+            finally:
+                os.close(descriptor)
+    return path
+
+
+def _closed_run_marker(directory: Path, run_id: str) -> Path:
+    identity = derive_idempotency_key(json.dumps([run_id]))
+    return directory / (identity.removeprefix("idk:") + ".closed")
+
+
+def tool_call_journal_directories() -> tuple[Path, ...]:
+    """Return existing storage locations without creating or sharing them."""
+    from ..control.config import settings
+
+    directories = [settings.state_layout.authoring_calls_dir]
+    if settings.workspace_root is not None:
+        directories.append(settings.workspace_root / ".vaultspec-authoring-calls")
+    return tuple(directories)
+
+
+async def retire_run_tool_calls(run_id: str, *, directory: Path | None = None) -> None:
+    """Close replay only after the control plane durably elected run deletion.
+
+    Keep the small run marker and closed owner headers. Removing them would
+    allow a stale subprocess to create a fresh journal for the deleted run.
+    """
+    directories = (
+        (directory,) if directory is not None else tool_call_journal_directories()
+    )
+    for directory in directories:
+        if not directory.exists():
+            continue
+        if path_is_link_like(directory) or not directory.is_dir():
+            raise ValueError("authoring journal directory is not a real directory")
+        marker = _closed_run_marker(directory, run_id)
+        try:
+            descriptor = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o660)
+        except FileExistsError:
+            pass
+        else:
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            if os.name == "posix":
+                directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+        failures: list[Exception] = []
+        for path in directory.glob("*.db"):
+            if (
+                path_is_link_like(path)
+                or not path.is_file()
+                or path.stat().st_nlink != 1
+            ):
+                continue
+            try:
+                async with aiosqlite.connect(path) as db:
+                    async with db.execute(
+                        "SELECT 1 FROM sqlite_master WHERE name = 'owner'"
+                    ) as cursor:
+                        owner_table = await cursor.fetchone()
+                    if owner_table is None:
+                        continue
+                    async with db.execute(
+                        "SELECT run_id, scope FROM owner WHERE id = 1"
+                    ) as cursor:
+                        owner = await cursor.fetchone()
+                if owner is None or owner[0] != run_id:
+                    continue
+                identity = derive_idempotency_key(json.dumps([run_id, owner[1]]))
+                if path.name != identity.removeprefix("idk:") + ".db":
+                    raise ValueError("authoring journal filename ownership mismatch")
+                await ToolCallJournal(path, run_id, owner[1]).retire()
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                failures.append(exc)
+        if failures:
+            raise failures[0]
 
 
 class ToolCallJournal:
@@ -63,9 +159,16 @@ class ToolCallJournal:
         self._owner = (run_id, call_scope)
 
     @asynccontextmanager
-    async def _transaction(self) -> AsyncGenerator[aiosqlite.Connection]:
+    async def _transaction(
+        self, *, retiring: bool = False
+    ) -> AsyncGenerator[aiosqlite.Connection]:
+        marker = _closed_run_marker(self.path.parent, self._owner[0])
+        if not retiring and os.path.lexists(marker):
+            raise ValueError("authoring run has been retired; replay is closed")
         async with aiosqlite.connect(self.path) as db:
             await db.execute("BEGIN IMMEDIATE")
+            if not retiring and os.path.lexists(marker):
+                raise ValueError("authoring run has been retired; replay is closed")
             await db.execute(
                 "CREATE TABLE IF NOT EXISTS owner ("
                 "id INTEGER PRIMARY KEY CHECK (id = 1), "
@@ -78,7 +181,9 @@ class ToolCallJournal:
             )
             async with db.execute("SELECT version, run_id, scope FROM owner") as cursor:
                 owner = await cursor.fetchone()
-            if owner != (1, *self._owner):
+            if owner != (1, *self._owner) and not (
+                retiring and owner == (2, *self._owner)
+            ):
                 raise ValueError("tool call journal version or ownership mismatch")
             await db.execute(
                 "CREATE TABLE IF NOT EXISTS calls ("
@@ -91,7 +196,20 @@ class ToolCallJournal:
                 "id INTEGER PRIMARY KEY CHECK (id = 1), refs TEXT NOT NULL)"
             )
             yield db
+            if not retiring and os.path.lexists(marker):
+                raise ValueError("authoring run has been retired; replay is closed")
             await db.commit()
+
+    async def retire(self) -> None:
+        if not os.path.lexists(_closed_run_marker(self.path.parent, self._owner[0])):
+            raise ValueError("authoring run must be closed before journal retirement")
+        async with self._transaction(retiring=True) as db:
+            await db.execute("DELETE FROM calls")
+            await db.execute("DELETE FROM lifecycle")
+            # Earlier bridge binaries refuse an unknown owner version too.
+            await db.execute("UPDATE owner SET version = 2 WHERE id = 1")
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("VACUUM")
 
     async def prepare(
         self,

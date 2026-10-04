@@ -38,6 +38,7 @@ from ..submitter import (
     PhaseAuthoringSpec,
     engine_scope_token,
 )
+from ._engine_peer import reply_health_proof
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -87,6 +88,11 @@ def _make_handler(state: _RecordedEngine) -> type[JsonReplyHandler]:
     # BaseHTTPRequestHandler is listed again, redundantly - see
     # testing/http_handlers.py's docstring for why.
     class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:
+            reply_health_proof(self, _BEARER)
+
         def do_POST(self) -> None:
             length = int(self.headers.get("Content-Length", "0") or "0")
             raw = self.rfile.read(length) if length else b"{}"

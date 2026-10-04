@@ -82,6 +82,7 @@ __all__ = [
     "armed_gateway_env",
     "await_gateway_ready",
     "clean_subprocess_environment",
+    "desktop_workspace",
     "gateway_script",
     "reap_gateway",
     "seat_valid_database",
@@ -378,7 +379,21 @@ def armed_gateway_env(
     env["VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS"] = f"{WORKER_READY_TIMEOUT:g}"
     if extra:
         env.update(extra)
+    _DESKTOP_WORKSPACES[gateway_port] = app_home / "workspaces" / "project"
     return env
+
+
+_DESKTOP_WORKSPACES: dict[int, Path] = {}
+
+
+def desktop_workspace(base: str) -> str:
+    """Create the project registered by this test-owned desktop gateway boot."""
+    port = httpx.URL(base).port
+    if port is None or port not in _DESKTOP_WORKSPACES:
+        raise ValueError("No desktop workspace was registered for this gateway")
+    workspace = _DESKTOP_WORKSPACES[port]
+    workspace.mkdir(parents=True, exist_ok=True)
+    return str(workspace)
 
 
 def spawn_gateway(

@@ -19,6 +19,8 @@ from urllib.parse import quote
 
 import httpx
 
+from ._connection_proof import EngineConnectionError, authenticated_client
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
     from types import TracebackType
@@ -131,13 +133,11 @@ class AuthoringClient:
         self._actor_token = actor_token
         self._timeout = timeout
         self._owns_client = client is None
-        self._client = client or httpx.AsyncClient(
-            base_url=self._base_url,
-            timeout=httpx.Timeout(timeout, connect=5.0),
+        self._client = client or authenticated_client(
+            self._base_url, bearer_token, timeout
         )
-        # Optional re-resolution of the ENGINE machine bearer. When set, an outer
-        # bearer-gate 401 (the engine rotated its bearer, e.g. it restarted
-        # mid-run and republished service.json) triggers a single re-read of the
+        # Optional re-resolution of the ENGINE machine bearer. A connection proof
+        # failure or outer 401 after an engine restart triggers a single re-read of the
         # engine origin and one retry, so a long run outlives a bearer rotation
         # instead of dying on the stale token. None keeps the caller-supplied
         # bearer fixed (no retry). The origin SWAP on re-resolution is effective
@@ -196,7 +196,7 @@ class AuthoringClient:
     async def _reresolve_machine_bearer(self) -> None:
         """Re-read the engine origin and swap in the fresh machine bearer.
 
-        Called on an outer bearer-gate 401 when a ``bearer_resolver`` is set.
+        Called on an outer 401 or connection proof failure when a resolver is set.
         Fails loud (typed :class:`AuthoringError`) when the origin cannot be
         re-resolved: an unreadable service.json means the engine is genuinely
         unreachable, not merely rotated.
@@ -209,8 +209,9 @@ class AuthoringClient:
         )
         if endpoint is None:
             raise AuthoringError(
-                "engine unreachable while re-resolving the machine bearer after a "
-                "401; its service.json is not readable (the engine may be down)"
+                "engine unreachable while re-resolving the machine bearer after an "
+                "authentication failure; private discovery is unavailable "
+                "(the engine may be down)"
             )
         self._base_url = endpoint.base_url.rstrip("/")
         self._bearer_token = endpoint.bearer_token
@@ -221,15 +222,14 @@ class AuthoringClient:
         # require guarding this rebuild.
         if self._owns_client:
             await self._client.aclose()
-            self._client = httpx.AsyncClient(
-                base_url=self._base_url,
-                timeout=httpx.Timeout(self._timeout, connect=5.0),
+            self._client = authenticated_client(
+                self._base_url, self._bearer_token, self._timeout
             )
 
     async def _send(
         self, do_request: Callable[[], Awaitable[AuthoringResponse | Denial]]
     ) -> AuthoringResponse | Denial:
-        """Run *do_request*, re-resolving the machine bearer once on a rotation.
+        """Run *do_request*, re-resolving once on proof failure or bearer rotation.
 
         A single outer bearer-gate 401 with a ``bearer_resolver`` configured is
         treated as a rotated engine bearer (e.g. the engine restarted mid-run):
@@ -239,6 +239,11 @@ class AuthoringClient:
         call, so the retry runs against the freshly resolved bearer and origin.
         """
         try:
+            return await do_request()
+        except EngineConnectionError:
+            if self._bearer_resolver is None:
+                raise
+            await self._reresolve_machine_bearer()
             return await do_request()
         except AuthoringTransportError as exc:
             if self._bearer_resolver is None or not exc.is_machine_bearer_rejection:

@@ -64,6 +64,12 @@ from ..protocols.mcp.authoring_stdio import (
     ENV_JOURNAL_PATH as STDIO_ENV_JOURNAL_PATH,
 )
 from ..protocols.mcp.authoring_stdio import (
+    ENV_REFRESH_RECORD as STDIO_ENV_REFRESH_RECORD,
+)
+from ..protocols.mcp.authoring_stdio import (
+    ENV_REFRESH_ROOTS_JSON as STDIO_ENV_REFRESH_ROOTS_JSON,
+)
+from ..protocols.mcp.authoring_stdio import (
     ENV_RUN_ID as STDIO_ENV_RUN_ID,
 )
 from ..protocols.mcp.authoring_stdio import (
@@ -381,6 +387,21 @@ def build_authoring_stdio_mcp_servers(
     ]
     if call_id_source != "explicit":
         env.append({"name": STDIO_ENV_CALL_ID_SOURCE, "value": call_id_source})
+    from ..control.config import settings
+
+    if settings.provider_identity_launcher is None:
+        roots = [str(settings.project_root)]
+        if settings.workspace_root is not None:
+            roots.append(str(settings.workspace_root))
+        env.extend(
+            [
+                {
+                    "name": STDIO_ENV_REFRESH_RECORD,
+                    "value": str(settings.engine_discovery_path),
+                },
+                {"name": STDIO_ENV_REFRESH_ROOTS_JSON, "value": json.dumps(roots)},
+            ]
+        )
     # Forward the debug startup marker to the subprocess when enabled (the MCP
     # SDK filters arbitrary parent env, so it must ride the explicit env list).
     # Off unless the orchestrator sets it; carries no token (R7).

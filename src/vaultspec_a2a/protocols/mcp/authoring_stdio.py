@@ -23,14 +23,16 @@ import asyncio
 import json
 import os
 import sys
+from functools import partial
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 from mcp.server.stdio import stdio_server
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from ...authoring import AuthoringClient
+from ...authoring._bridge_refresh import resolve_bridge_engine
 from ...authoring.catalog import (
     fetch_catalog,
     make_tool_dispatch,
@@ -49,6 +51,8 @@ __all__ = [
     "ENV_CATALOG_JSON",
     "ENV_DEBUG_MARKER",
     "ENV_JOURNAL_PATH",
+    "ENV_REFRESH_RECORD",
+    "ENV_REFRESH_ROOTS_JSON",
     "ENV_RUN_ID",
     "ENV_SERVER_NAME",
     "AuthoringBridgeSettings",
@@ -77,6 +81,8 @@ class AuthoringBridgeSettings(ProjectSettings):
     call_scope: str = "bridge"
     journal_path: Path | None = None
     call_id_source: Literal["explicit", "codex", "claude"] = "explicit"
+    refresh_record: Path | None = None
+    refresh_roots_json: str | None = None
     server_name: str | None = None
     # The worker's already-fetched catalog snapshot (JSON), so the bridge serves
     # list_tools without its own engine round-trip at spawn and both sides serve
@@ -97,6 +103,8 @@ ENV_RUN_ID = env_name(AuthoringBridgeSettings, "run_id")
 ENV_CALL_SCOPE = env_name(AuthoringBridgeSettings, "call_scope")
 ENV_JOURNAL_PATH = env_name(AuthoringBridgeSettings, "journal_path")
 ENV_CALL_ID_SOURCE = env_name(AuthoringBridgeSettings, "call_id_source")
+ENV_REFRESH_RECORD = env_name(AuthoringBridgeSettings, "refresh_record")
+ENV_REFRESH_ROOTS_JSON = env_name(AuthoringBridgeSettings, "refresh_roots_json")
 ENV_SERVER_NAME = env_name(AuthoringBridgeSettings, "server_name")
 ENV_CATALOG_JSON = env_name(AuthoringBridgeSettings, "catalog_json")
 ENV_DEBUG_MARKER = env_name(AuthoringBridgeSettings, "debug_marker")
@@ -132,7 +140,32 @@ async def _amain() -> int:
         return 2
 
     handed = configured.catalog_json
-    async with AuthoringClient(base_url, bearer, actor_token=actor_token) as client:
+    resolver = None
+    if configured.refresh_record is not None:
+        try:
+            roots = json.loads(configured.refresh_roots_json or "null")
+        except ValueError:
+            print("authoring stdio bridge: invalid refresh authority", file=sys.stderr)
+            return 2
+        if not isinstance(roots, list) or not roots:
+            print("authoring stdio bridge: invalid refresh authority", file=sys.stderr)
+            return 2
+        root_paths: list[Path] = []
+        for root in cast("list[object]", roots):
+            if not isinstance(root, str) or not Path(root).is_absolute():
+                print(
+                    "authoring stdio bridge: invalid refresh authority", file=sys.stderr
+                )
+                return 2
+            root_paths.append(Path(root))
+        resolver = partial(
+            resolve_bridge_engine,
+            configured.refresh_record,
+            tuple(root_paths),
+        )
+    async with AuthoringClient(
+        base_url, bearer, actor_token=actor_token, bearer_resolver=resolver
+    ) as client:
         # Serve list_tools from the worker's handed snapshot when present (no
         # engine round-trip at spawn); the engine is reached only at execute time
         # via the dispatch. Fall back to fetching when no snapshot was handed.
@@ -148,9 +181,19 @@ async def _amain() -> int:
             call_scope=configured.call_scope,
             journal_path=configured.journal_path,
         )
+        # Refresh rebuilds the client. Keep its single-consumer contract even
+        # when an MCP client issues several requests on the same connection.
+        dispatch_lock = asyncio.Lock()
+
+        async def serialized_dispatch(
+            name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
+        ) -> dict[str, Any]:
+            async with dispatch_lock:
+                return await dispatch(name, arguments, tool_call_id=tool_call_id)
+
         server = build_authoring_mcp_server(
             snapshot,
-            dispatch,
+            serialized_dispatch,
             server_name=server_name,
             logical_call_meta_key=(
                 {

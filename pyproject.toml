@@ -17,6 +17,9 @@ dependencies = [
   "typing-extensions>=4.16.0",
   "fastapi>=0.133.1",
   "httpx>=0.28.1",
+  # Connection authentication depends on the documented trace event contract.
+  "httpcore==1.0.9",
+  "h11>=0.16.0,<1",
   "langchain-core>=1.6.6,<2",
   "langchain-openai>=1.6.7,<2",
   # The graph layer uses 1.2 node options (timeout, error_handler,

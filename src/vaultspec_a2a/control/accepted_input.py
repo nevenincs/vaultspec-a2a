@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from ..ipc.schemas import DispatchRequest
 from ..thread.executable_graph import FrozenGraphDefinition
+from .workspace import require_admitted_workspace_root
 
 _TRANSPORT_FIELDS = frozenset({"dispatch_id", "graph_action_receipt", "actor_tokens"})
 _INPUT_FIELDS = frozenset(DispatchRequest.model_fields) - _TRANSPORT_FIELDS
@@ -63,7 +64,7 @@ def restore_accepted_dispatch(
         raise ActorCredentialsRequiredError(
             "accepted execution requires fresh actor credentials"
         )
-    return DispatchRequest.model_validate(
+    dispatch = DispatchRequest.model_validate(
         {
             **accepted.dispatch,
             "dispatch_id": dispatch_id,
@@ -71,6 +72,9 @@ def restore_accepted_dispatch(
             "actor_tokens": None,
         }
     )
+    if dispatch.action != "cancel" and dispatch.workspace_root is not None:
+        require_admitted_workspace_root(dispatch.workspace_root)
+    return dispatch
 
 
 def dispatch_matches_accepted_input(

@@ -224,13 +224,11 @@ class InfraConfig(ProjectSettings):
     workspace_root: Path | None = Field(
         default=None,
         description=(
-            "Optional label for the workspace this process serves. It sites NO "
-            "agent: agent working directories come from the per-run "
-            "metadata.workspace_root the caller supplies, and the only readers of "
-            "this field pass it as the 'workspace' label on a dev process-registry "
-            "record. Unset by default, because the former './workspaces' default "
-            "advertised a managed store that is never created and never used; the "
-            "armed desktop profile seats its own derived workspace tree here."
+            "Managed workspace admission boundary. Per-run metadata.workspace_root "
+            "must identify an existing canonical directory within it. Unset "
+            "development profiles permit caller-selected directories. The armed "
+            "desktop profile derives its authority from application-home workspaces; "
+            "attach authentication never grants access to sibling service state."
         ),
     )
     provider_identity_launcher: Path | None = Field(
@@ -353,7 +351,8 @@ class InfraConfig(ProjectSettings):
         default=None,
         description=(
             "The vaultspec engine's discovery record, read to attach to it. "
-            "Unset: the engine's record inside the project's .vault/data."
+            "Must be owner-restricted, outside repositories, and versioned. "
+            "Unset: ~/.vaultspec-engine/discovery/<project-key>/service.json."
         ),
     )
     engine_serve_cmd: str | None = Field(

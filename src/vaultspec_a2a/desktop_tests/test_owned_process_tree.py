@@ -24,8 +24,7 @@ import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
@@ -39,6 +38,7 @@ from ..providers._acp_types import AcpModelConfig, AcpSessionContext
 from ..providers._subprocess import kill_process_tree, spawn_acp_process
 from ..tests.gateway_boot import (
     armed_gateway_env,
+    desktop_workspace,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -49,6 +49,9 @@ from ..tests.gateway_boot import (
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment
 from ._catalog import catalog_selection
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # A "provider" that launches three long-lived children modelling the authoring,
 # projected-project, and harness MCP descendants, prints their pids, then sleeps.
@@ -278,7 +281,7 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     )
     try:
         # First demand spawns the gateway-owned worker inside its containment.
-        _workspace = str(Path.cwd())
+        _workspace = desktop_workspace(base)
         with httpx.Client(base_url=base, timeout=60.0) as client:
             start = client.post(
                 "/v1/runs",

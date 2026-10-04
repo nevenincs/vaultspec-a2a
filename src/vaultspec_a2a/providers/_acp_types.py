@@ -16,6 +16,11 @@ from pathlib import Path
 from langchain_core.messages import UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 
+from ..control.workspace import (
+    canonical_workspace_root,
+    configured_workspace_boundary,
+    require_admitted_workspace_root,
+)
 from ..team.team_config import AgentConfig
 from ._json_contract import JsonObject
 from ._subprocess import STDERR_TAIL_LINES, redact_secrets
@@ -154,6 +159,8 @@ def require_workspace_root(value: str | None, *, surface: str) -> Path:
             "derived from the serving process."
         )
         raise ValueError(msg)
+    if configured_workspace_boundary() is not None:
+        return canonical_workspace_root(require_admitted_workspace_root(value))
     return Path(value)
 
 

@@ -2,18 +2,63 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
+from fastapi import HTTPException
 
+from ...context.metadata import ThreadMetadata
 from ...control.config import settings
+from ...control.state_layout import state_layout
+from ...database import create_thread
+from ...testing import settings_override
+from ...tests._write_authority import make_test_write_authority
+from ...thread.enums import ThreadStatus
+from ..routes._gateway_run_start import _require_settled_predecessor
 from .conftest import async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 _TOKEN = "workspace-authority-token-0123456789abcdef"
+
+
+@pytest.mark.asyncio
+async def test_saved_project_aliases_remain_valid_for_successors(
+    session_factory: Any, tmp_path: Path
+) -> None:
+    home = tmp_path / "desktop"
+    managed = state_layout(home).workspaces_root
+    project = managed / "project"
+    other = managed / "other"
+    project.mkdir(parents=True)
+    other.mkdir()
+    aliases = [str(project / ".." / "project")]
+    if os.name == "nt":
+        aliases.append("\\\\?\\" + str(project))
+    with settings_override(desktop_app_home=home):
+        async with session_factory() as db:
+            for index, alias in enumerate(aliases):
+                predecessor_id = f"old-project-alias-{index}"
+                await create_thread(
+                    db,
+                    thread_id=predecessor_id,
+                    status=ThreadStatus.COMPLETED,
+                    team_preset="mock-success-single",
+                    metadata=ThreadMetadata(workspace_root=alias).model_dump_json(),
+                    write_authority=make_test_write_authority(),
+                )
+                await db.commit()
+                await _require_settled_predecessor(
+                    db, predecessor_id, project.resolve()
+                )
+                with pytest.raises(HTTPException, match="another workspace") as error:
+                    await _require_settled_predecessor(
+                        db, predecessor_id, other.resolve()
+                    )
+                assert error.value.status_code == 409
 
 
 def _secured_app(session_factory: Any, checkpointer: Any) -> Any:
@@ -216,32 +261,64 @@ async def test_configured_unarmed_profile_confines_every_workspace_route(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_armed_desktop_preserves_arbitrary_existing_roots(
+async def test_armed_desktop_confines_queries_and_run_admission(
     session_factory: Any,
     checkpointer: Any,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    managed = tmp_path / "managed"
-    foreign = tmp_path / "foreign"
     desktop_home = tmp_path / "desktop-home"
-    managed.mkdir()
+    managed = state_layout(desktop_home).workspaces_root / "project"
+    foreign = tmp_path / "foreign"
+    managed.mkdir(parents=True)
     foreign.mkdir()
-    desktop_home.mkdir()
-    monkeypatch.setattr(settings, "desktop_app_home", desktop_home)
-    monkeypatch.setattr(settings, "workspace_root", managed)
 
     app = _secured_app(session_factory, checkpointer)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {_TOKEN}"},
-    ) as client:
-        response = await client.get(
-            "/v1/provider-catalog", params={"workspace_root": str(foreign)}
-        )
-
-    assert response.status_code == 200, response.text
+    with settings_override(desktop_app_home=desktop_home):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://gateway.test",
+            headers={"Authorization": f"Bearer {_TOKEN}"},
+        ) as client:
+            for route in ("/v1/provider-catalog", "/v1/presets", "/v1/runs"):
+                allowed = await client.get(
+                    route, params={"workspace_root": str(managed)}
+                )
+                assert allowed.status_code == 200, allowed.text
+                for forbidden in (foreign, desktop_home, tmp_path):
+                    refused = await client.get(
+                        route, params={"workspace_root": str(forbidden)}
+                    )
+                    assert refused.status_code == 422, refused.text
+                    assert "configured workspace root" in refused.json()["detail"]
+            fields = await async_catalog_run_fields(client, workspace_root=str(managed))
+            for stage in ("start", "prepare", "commit"):
+                refused = await client.post(
+                    "/v1/runs",
+                    json={
+                        "stage": stage,
+                        "reservation_id": "unsafe-reservation"
+                        if stage == "commit"
+                        else None,
+                        "run_id": f"desktop-{stage}-refused",
+                        "team_preset": "mock-success-single",
+                        "message": "start" if stage != "prepare" else "",
+                        "metadata": {"workspace_root": str(desktop_home)},
+                        "selection": fields["selection"],
+                    },
+                )
+                assert refused.status_code == 422, refused.text
+                assert "configured workspace root" in refused.json()["detail"]
+            admitted = await client.post(
+                "/v1/runs",
+                json={
+                    "run_id": "desktop-admitted-project",
+                    "team_preset": "mock-success-single",
+                    "message": "start",
+                    "metadata": {"workspace_root": str(managed)},
+                    "selection": fields["selection"],
+                },
+            )
+            assert admitted.status_code == 201, admitted.text
 
 
 @pytest.mark.asyncio(loop_scope="function")

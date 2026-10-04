@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#desktop-product-profile'
 date: '2026-07-22'
-modified: '2026-09-19'
+modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:4ce19e332990bb2164629f6fb45e91c26061df0ef4b45c585343fbcbe0d14eb3'
+body_hash: 'sha256:5a2454f1037749e36c69d4c8206866ed2bc4ce411727aeb3a603fa2ebad64353'
 related:
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-07-18-desktop-product-profile-certification-audit]]'
@@ -21,6 +21,7 @@ related:
   - '[[2026-09-06-desktop-product-profile-s60-atomic-provider-containment-rereview-audit]]'
   - '[[2026-09-06-desktop-product-profile-s60-atomic-provider-containment-review-audit]]'
   - '[[2026-09-06-desktop-product-profile-s60-lifecycle-closure-review-audit]]'
+  - '[[2026-10-04-desktop-product-profile-sensitive-state-security-audit]]'
 ---
 
 # `desktop-product-profile` feature index
@@ -43,6 +44,7 @@ Auto-generated index of all documents tagged with `#desktop-product-profile`.
 - `2026-09-06-desktop-product-profile-s60-atomic-provider-containment-rereview-audit` - `desktop-product-profile` audit: `S60 atomic provider containment rereview`
 - `2026-09-06-desktop-product-profile-s60-atomic-provider-containment-review-audit` - `desktop-product-profile` audit: `S60 atomic provider containment formal review`
 - `2026-09-06-desktop-product-profile-s60-lifecycle-closure-review-audit` - `desktop-product-profile` audit: `S60 lifecycle closure review`
+- `2026-10-04-desktop-product-profile-sensitive-state-security-audit` - `desktop-product-profile` audit: `Sensitive desktop state permission remediation`
 
 ### exec
 

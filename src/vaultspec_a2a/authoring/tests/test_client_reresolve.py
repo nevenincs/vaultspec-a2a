@@ -16,28 +16,30 @@ bearer never silently degrades into an infinite quiet retry.
 
 from __future__ import annotations
 
-import json
+import os
 import threading
-import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 
 from ...testing import settings_override
 from ...testing.tests._support.http_handlers import JsonReplyHandler
 from .. import AuthoringClient
+from .._connection_proof import EngineConnectionError
 from .._envelope import AuthoringResponse
 from .._errors import AuthoringError, AuthoringTransportError
 from ..discovery import resolve_engine
+from ._engine_peer import engine_health_listener, health_proof, write_engine_record
+from .test_engine_discovery_security import attacker_listener
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
-_BOOT_BEARER = "boot-bearer-token"
-_ROTATED_BEARER = "rotated-bearer-token"
+_BOOT_BEARER = "boot-bearer-token-0123456789abcdef0123456789abcdef"
+_ROTATED_BEARER = "rotated-bearer-token-0123456789abcdef0123456789abcdef"
 
 
 @dataclass
@@ -46,6 +48,7 @@ class _EngineState:
 
     current_bearer: str
     reject_actor: bool = False
+    close_after_response: bool = False
     requests: list[dict[str, str | None]] = field(default_factory=list)
 
 
@@ -53,9 +56,31 @@ def _make_handler(state: _EngineState) -> type[JsonReplyHandler]:
     # BaseHTTPRequestHandler is listed again, redundantly - see
     # testing/http_handlers.py's docstring for why.
     class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        @override
+        def end_headers(self) -> None:
+            if state.close_after_response and self.path != "/health":
+                self.send_header("Connection", "close")
+                self.close_connection = True
+            super().end_headers()
+
         def do_GET(self) -> None:
+            assert isinstance(self.server, ThreadingHTTPServer)
             if self.path == "/health":
-                self._reply(200, {"status": "ok"})
+                self.send_response(200)
+                self.send_header(
+                    "x-vaultspec-engine-proof",
+                    health_proof(
+                        self.server.server_port,
+                        state.current_bearer,
+                        self.headers.get("x-vaultspec-engine-challenge", ""),
+                    ),
+                )
+                self.send_header("Content-Length", "0")
+                self.send_header("x-vaultspec-engine-pid", str(os.getpid()))
+                self.send_header("x-vaultspec-engine-started-ms", "1")
+                self.end_headers()
                 return
             self._reply(404, {"error": "not found"})
 
@@ -102,23 +127,14 @@ class _LiveEngine:
 
 
 def _write_service_json(path: Path, port: int, bearer: str) -> None:
-    path.write_text(
-        json.dumps(
-            {
-                "port": port,
-                "service_token": bearer,
-                "last_heartbeat": int(time.time() * 1000),
-            }
-        ),
-        encoding="utf-8",
-    )
+    write_engine_record(path, port, bearer)
 
 
 @pytest.fixture
 def live_engine() -> Iterator[_LiveEngine]:
     state = _EngineState(current_bearer=_BOOT_BEARER)
     server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
-    port = server.server_address[1]
+    port = server.server_port
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     engine = _LiveEngine(
@@ -135,14 +151,14 @@ def live_engine() -> Iterator[_LiveEngine]:
 
 
 @pytest.fixture
-def service_json(live_engine: _LiveEngine, tmp_path: Path) -> Iterator[Path]:
+def service_json(live_engine: _LiveEngine, secure_engine_dir: Path) -> Iterator[Path]:
     """A real discovery file for ``resolve_engine`` pinned through settings.
 
     The configured record is discovery's only candidate, so the real
     ``resolve_engine`` reads this file and confirms liveness against the live
     loopback engine - the production path, not a stand-in.
     """
-    path = tmp_path / "service.json"
+    path = secure_engine_dir / "service.json"
     _write_service_json(path, live_engine.port, _BOOT_BEARER)
     with settings_override(engine_service_json=path):
         yield path
@@ -201,6 +217,79 @@ async def test_inner_actor_token_401_is_not_retried(
     assert not exc.value.is_machine_bearer_rejection
     # No re-resolve, no retry: a single request reached the engine.
     assert len(live_engine.state.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_does_not_disclose_actor_to_an_unproven_listener(
+    live_engine: _LiveEngine, service_json: Path
+) -> None:
+    """A forged replacement record cannot redirect the retry's retained actor token."""
+    live_engine.state.current_bearer = _ROTATED_BEARER
+    with attacker_listener() as (port, requests):
+        write_engine_record(service_json, port, _ROTATED_BEARER)
+        async with AuthoringClient(
+            live_engine.base_url,
+            _BOOT_BEARER,
+            actor_token="per-run-actor-token",
+            bearer_resolver=resolve_engine,
+        ) as client:
+            with pytest.raises(AuthoringError, match="re-resolving"):
+                await client.post_command(
+                    "/v1/sessions", "create_session", {}, idempotency_key="retry"
+                )
+        assert len(requests) == 1
+        assert "Authorization" not in requests[0]
+        assert "x-authoring-actor-token" not in requests[0]
+        assert "per-run-actor-token" not in str(requests)
+    assert len(live_engine.state.requests) == 0
+
+
+@pytest.mark.asyncio
+async def test_port_takeover_after_discovery_cannot_receive_credentials(
+    secure_engine_dir: Path,
+) -> None:
+    """Discovery and authoring use different sockets; the latter must prove itself."""
+    record = secure_engine_dir / "service.json"
+    with engine_health_listener() as port:
+        write_engine_record(record, port)
+        with settings_override(engine_service_json=record):
+            endpoint = resolve_engine()
+        assert endpoint is not None
+    with attacker_listener(port=port) as (_, requests):
+        async with AuthoringClient(
+            endpoint.base_url, endpoint.bearer_token, actor_token="genuine-run-actor"
+        ) as client:
+            with pytest.raises(EngineConnectionError, match="proof was rejected"):
+                await client.post_command(
+                    "/v1/sessions", "create_session", {}, idempotency_key="takeover"
+                )
+        assert len(requests) == 1
+        assert "Authorization" not in requests[0]
+        assert "x-authoring-actor-token" not in requests[0]
+        assert "genuine-run-actor" not in str(requests)
+        assert endpoint.bearer_token not in str(requests)
+
+
+@pytest.mark.asyncio
+async def test_reconnect_after_authenticated_command_rejects_port_takeover(
+    live_engine: _LiveEngine,
+) -> None:
+    """A proven pooled connection does not license a new connection to its port."""
+    live_engine.state.close_after_response = True
+    async with AuthoringClient(
+        live_engine.base_url, _BOOT_BEARER, actor_token="genuine-run-actor"
+    ) as client:
+        first = await client.post_bare("/v1/sessions", {"scope": "repo"})
+        assert isinstance(first, AuthoringResponse)
+        live_engine.stop()
+        with attacker_listener(port=live_engine.port) as (_, requests):
+            with pytest.raises(EngineConnectionError, match="proof was rejected"):
+                await client.post_command(
+                    "/v1/sessions", "create_session", {}, idempotency_key="reconnect"
+                )
+            assert len(requests) == 1
+            assert "Authorization" not in requests[0]
+            assert "x-authoring-actor-token" not in requests[0]
 
 
 @pytest.mark.asyncio

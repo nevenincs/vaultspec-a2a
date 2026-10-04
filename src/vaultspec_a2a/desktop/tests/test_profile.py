@@ -16,7 +16,7 @@ from ...providers._factory_commands import (
     capsule_claude_executable,
     capsule_node_executable,
 )
-from .._platform_acl import windows_file_is_restricted
+from .._platform_acl import path_is_owner_restricted
 from ..profile import (
     DesktopProfile,
     DesktopProfileError,
@@ -204,10 +204,8 @@ def test_ensure_restricts_the_state_directories_to_their_owner(
 
     profile.ensure()
 
-    # The general predicate, not the credential-file one: that predicate requires
-    # a regular file by design and reports every directory unrestricted.
     for directory in profile.state.provisioned_directories:
-        assert windows_file_is_restricted(directory), (
+        assert path_is_owner_restricted(directory), (
             f"{directory} is not owner-restricted"
         )
 

@@ -1,9 +1,8 @@
-"""Prove the discovery reader parses both legacy and versioned records.
+"""Prove legacy and desktop records cannot grant engine attachment authority.
 
-The engine resolver must keep resolving a legacy inline-token record unchanged
-while a versioned, secret-free desktop record is recognised (not misread as
-malformed) and skipped for engine resolution because it carries no inline
-bearer. A real loopback ``/health`` server backs the resolution assertions; the
+Neither legacy nor secret-free desktop records grant engine attachment authority.
+A real loopback ``/health`` server
+backs the resolution assertions; the
 discovery override is set through its official environment variable, not a
 patched internal. No mock, monkeypatch, stub, skip, or expected failure is used.
 """
@@ -20,12 +19,7 @@ import pytest
 from ...control.config import settings
 from ...testing import settings_override
 from ...testing.tests._support.listeners import health_listener
-from ..discovery import (
-    DESKTOP_RECORD_VERSION,
-    EngineEndpoint,
-    parse_discovery_record,
-    resolve_engine,
-)
+from ..discovery import resolve_engine
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -45,7 +39,7 @@ def set_service_json() -> Iterator[Callable[[Path], None]]:
 
 def _versioned_record(port: int, *, credential_reference: str) -> dict[str, object]:
     return {
-        "version": DESKTOP_RECORD_VERSION,
+        "version": 1,
         "profile": "desktop",
         "generation": "gen-1",
         "protocol": {"min": 1, "max": 1},
@@ -57,44 +51,10 @@ def _versioned_record(port: int, *, credential_reference: str) -> dict[str, obje
     }
 
 
-def test_parses_versioned_record_as_secret_free() -> None:
-    """A versioned record parses with no bearer and only a credential path."""
-    view = parse_discovery_record(_versioned_record(8200, credential_reference="/c/a"))
-    assert view is not None
-    assert view.versioned is True
-    assert view.port == 8200
-    assert view.bearer_token is None
-    assert view.credential_reference == "/c/a"
-    assert view.base_url == "http://127.0.0.1:8200"
-
-
-def test_parses_legacy_record_with_inline_bearer() -> None:
-    """A legacy R8 record parses with its inline machine bearer."""
-    view = parse_discovery_record(
-        {"port": 8201, "service_token": "tok", "last_heartbeat": 1}
-    )
-    assert view is not None
-    assert view.versioned is False
-    assert view.port == 8201
-    assert view.bearer_token == "tok"
-
-
-def test_record_without_port_is_fail_closed() -> None:
-    """A record missing a valid integer port yields no view."""
-    assert parse_discovery_record({"service_token": "tok"}) is None
-    assert parse_discovery_record({"port": "not-an-int"}) is None
-    assert (
-        parse_discovery_record(
-            {"version": DESKTOP_RECORD_VERSION, "profile": "desktop", "endpoint": {}}
-        )
-        is None
-    )
-
-
-def test_legacy_record_still_resolves_the_engine(
+def test_legacy_record_cannot_resolve_the_engine(
     tmp_path: Path, set_service_json: Callable[[Path], None]
 ) -> None:
-    """The engine path is unchanged: a legacy record with a live health resolves."""
+    """A legacy record does not grant engine endpoint authority."""
     with health_listener() as port:
         path = tmp_path / "service.json"
         path.write_text(
@@ -110,9 +70,7 @@ def test_legacy_record_still_resolves_the_engine(
         )
         set_service_json(path)
         endpoint = resolve_engine(liveness_timeout=0.5)
-        assert isinstance(endpoint, EngineEndpoint)
-        assert endpoint.bearer_token == "tok-legacy"
-        assert endpoint.base_url == f"http://127.0.0.1:{port}"
+        assert endpoint is None
 
 
 def test_versioned_record_is_not_resolved_as_an_engine(

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:08e6a69f68ffffcdf87b9a7842c45b52f3d6d5532b4e59eb8a357b87c1bddf3a'
+body_hash: 'sha256:5cfeb0f781745ca6c1a0e445ba14ff741b69357d02e4f5473a92b39220003b58'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-07-19-observability-lanes-adr]]"
@@ -151,3 +151,45 @@ or included in that commit.
 Retain the production publication and internal-export regression checks.
 Apply the integration follow-up under its own verified scope. Investigate URL
 privacy before proposing a costly redaction or telemetry-schema decision.
+## Authorized dependency and validation follow-through, 2026-10-04
+
+The user requested committing all current changes, fixing failures, and bumping
+ACP. Existing provider-binary and client-wire decisions cover this maintenance.
+
+### acp-current-release | low | resolved: adapter and lockfile updated
+
+Type: dependency maintenance. Status: resolved. The official npm registry latest
+stable is 0.85.1. The exact @agentclientprotocol/claude-agent-acp pin and npm
+lockfile were updated from 0.84.0 to 0.85.1 using pinned Node 26.8.1/npm 11.19.0.
+Seven installed packages changed; npm reports zero vulnerabilities. The lock now
+supplies ACP SDK 1.6.0 and Claude SDK 0.3.286. Its installed Windows executable
+reports Claude Code 2.1.286. The CI helper's stale 2.1.207 expectation now matches
+2.1.286, and the real helper succeeds. This is CI binary identification, without
+adding any provider admission or completed-turn proof. Claude and ZAI remain
+unproven in the served eligibility declaration. No real model turn is claimed.
+The real adapter handshake and installed SDK callback service tests both passed
+after the update: two passed, 74 deselected.
+
+### integrated-static-drift | low | resolved: concrete gate failures repaired
+
+Type: verification and maintenance. Status: resolved. The owning ACP migration
+fixed its overlong SDK test lines and synchronous-context-manager use under
+async with. Windows ACL helpers now reject non-Windows invocation before using
+Windows-only ctypes attributes, restoring cross-platform typing. Removed unused
+public exports for the engine layout constant and workspace helper. Removed the
+obsolete discovery view parser and its three implementation-only tests after
+confirming no production consumers. Shared reading/freshness and real rejection
+tests remain. Corrected a subsequent real-peer formatting change. Whole-tree
+Ty platform checks and Basedpyright pass with zero diagnostics; unused-symbol
+and unconsumed-export gates also pass. The engine connection proof validates
+that HTTPcore supplies an AsyncNetworkStream before proving it, making the
+explicit pinned runtime dependency and its fail-closed contract concrete.
+
+### core-under-concurrent-load | low | resolved: audit write retried after Git timeout
+
+Type: verification environment. Status: recovered. The first guarded audit write
+failed with Cannot verify Git protection for local settings. Core's protection
+probe has a five-second Git subprocess deadline; full static analysis and tests
+were running concurrently. A subsequent vault check completed. No protection
+check was disabled, no dependency source modified, and no unverified write used.
+Final validation results are appended after their actual completion.

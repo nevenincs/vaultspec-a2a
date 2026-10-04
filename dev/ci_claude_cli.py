@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
-CLAUDE_CLI_VERSION = "2.1.207"
+CLAUDE_CLI_VERSION = "2.1.286"
 
 
 def main() -> None:

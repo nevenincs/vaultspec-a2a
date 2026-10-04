@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:02681cf3456e32334a52526e2552b5231dce461b956c75bdfc1b3ef97e6f036a'
+body_hash: 'sha256:8a0b7d4a143451f4122d00f821a89a4b705754d09a759064e24486b11538c8e5'
 related:
   - "[[2026-10-04-authoring-retry-followups-plan]]"
 ---
@@ -50,6 +50,24 @@ related:
 - `S01` `verify:` `final full project ty` -> `pass`
 - `S01` `verify:` `actual implementation review and rolling classified audit update` -> `pass`
 - `S01` `by:` `codex`
+- `S04` `A` `src/vaultspec_a2a/authoring/_relay_client.py`
+- `S04` `A` `src/vaultspec_a2a/worker/authoring_relay.py`
+- `S04` `A` `src/vaultspec_a2a/authoring/tests/test_authoring_relay.py`
+- `S04` `M` `src/vaultspec_a2a/authoring/_connection_proof.py`
+- `S04` `M` `src/vaultspec_a2a/authoring/_tool_calls.py`
+- `S04` `M` `src/vaultspec_a2a/protocols/mcp/authoring_stdio.py`
+- `S04` `M` `src/vaultspec_a2a/providers/_acp_authoring.py`
+- `S04` `M` `src/vaultspec_a2a/worker/app.py`
+- `S04` `M` `src/vaultspec_a2a/worker/executor.py`
+- `S04` `M` `src/vaultspec_a2a/worker/authoring_binding.py`
+- `S04` `M` `.vault/adr/2026-10-04-authoring-retry-followups-journal-retirement-adr.md`
+- `S04` `verify:` `actual worker relay and restarted concurrent MCP children 10 tests` -> `pass`
+- `S04` `verify:` `dispatch plus relay after delayed producer type correction 31 tests` -> `pass`
+- `S04` `verify:` `affected authoring MCP provider worker retirement suite 168 tests` -> `pass`
+- `S04` `verify:` `real Linux UID isolation rotation lost response private closure and revocation` -> `pass`
+- `S04` `verify:` `focused Ruff lint format 14 files and full project ty` -> `pass`
+- `S04` `verify:` `integrated actual implementation review and classified rolling audit update` -> `pass`
+- `S04` `verify:` `vault authoring-retry-followups conformance` -> `pass`
 
 ## Notes
 
@@ -58,3 +76,4 @@ related:
 - `S03` Implementation entered peer commits 3f4a8f6a and f9f2ae89; this checkpoint corrects Windows fsync and records final applicable verification. Shared-store hostile-agent integrity and flat-scan costs remain recorded lower-severity follow-ups.
 - `S03` S03 reopened on final review's temporary-path reopen finding; corrected by descriptor-preserving serialized header and re-reviewed before this closure.
 - `S01` Runtime authentication failures are conditional missing prerequisites; both live checks authenticated on this host. Candidate certification does not widen served binary proof gates.
+- `S04` Corrupt historical shared-file cleanup reports failure while private closure remains durable; recorded low availability/index follow-up. Source proof retained as `artifacts/validation/linux_authoring_parent_authority.py;` SHA-256 97fdb39c755e0c64b9e80293d372627b7efb3e8baba668a4288230130678d27a. Scope excludes concurrent peer work.

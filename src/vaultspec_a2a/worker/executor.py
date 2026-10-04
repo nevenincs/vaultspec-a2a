@@ -364,6 +364,11 @@ class Executor(SettlementMixin):
         return self._token_store
 
     @property
+    def catalog_store(self) -> RunCatalogStore:
+        """Active run catalogs shared with the worker's authoring relay."""
+        return self._catalog_store
+
+    @property
     def graph_count(self) -> int:
         """Number of compiled graphs currently held."""
         return self._graph_lifecycle.graph_count

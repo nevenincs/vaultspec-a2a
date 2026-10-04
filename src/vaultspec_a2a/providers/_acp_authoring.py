@@ -70,6 +70,9 @@ from ..protocols.mcp.authoring_stdio import (
     ENV_REFRESH_ROOTS_JSON as STDIO_ENV_REFRESH_ROOTS_JSON,
 )
 from ..protocols.mcp.authoring_stdio import (
+    ENV_RELAY_URL as STDIO_ENV_RELAY_URL,
+)
+from ..protocols.mcp.authoring_stdio import (
     ENV_RUN_ID as STDIO_ENV_RUN_ID,
 )
 from ..protocols.mcp.authoring_stdio import (
@@ -240,6 +243,7 @@ class AuthoringToolBinding:
     engine_base_url: str | None = None
     run_id: str | None = None
     call_scope: str = "bridge"
+    relay_url: str | None = None
 
     def __post_init__(self) -> None:
         self._validate_transport()
@@ -258,6 +262,18 @@ class AuthoringToolBinding:
 
     def _validate_transport(self) -> None:
         """Require a loopback HTTP or complete stdio transport."""
+        if self.relay_url is not None:
+            parsed = urlparse(self.relay_url)
+            if (
+                parsed.scheme != "http"
+                or parsed.hostname != "127.0.0.1"
+                or parsed.port is None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+                or parsed.username
+            ):
+                raise ValueError("authoring relay requires an explicit loopback origin")
         if self.server_url is not None and not _is_loopback(self.server_url):
             raise ValueError(
                 f"authoring MCP server_url {self.server_url!r} is not a loopback "
@@ -367,14 +383,16 @@ def build_authoring_stdio_mcp_servers(
     # launched command, never the args signature the admission key rides on.
     bridge_argv = module_command(AUTHORING_STDIO_MODULE)
     command = python_executable or bridge_argv[0]
-    journal_path = tool_call_journal_path(binding.run_id, binding.call_scope)
+    from ..control.config import settings
+
+    if settings.provider_identity_launcher is not None and binding.relay_url is None:
+        raise ValueError(
+            "isolated authoring bridge requires worker-owned relay authority"
+        )
     env: list[JsonObject] = [
-        {"name": STDIO_ENV_BASE_URL, "value": binding.engine_base_url},
-        {"name": STDIO_ENV_BEARER, "value": binding.bearer_token},
         {"name": STDIO_ENV_ACTOR_TOKEN, "value": binding.actor_token},
         {"name": STDIO_ENV_RUN_ID, "value": binding.run_id},
         {"name": STDIO_ENV_CALL_SCOPE, "value": binding.call_scope},
-        {"name": STDIO_ENV_JOURNAL_PATH, "value": str(journal_path)},
         {"name": STDIO_ENV_SERVER_NAME, "value": AUTHORING_MCP_SERVER_NAME},
         # Hand the run's already-fetched catalog snapshot so the bridge serves
         # list_tools immediately without an engine round-trip at spawn, and both
@@ -387,9 +405,17 @@ def build_authoring_stdio_mcp_servers(
     ]
     if call_id_source != "explicit":
         env.append({"name": STDIO_ENV_CALL_ID_SOURCE, "value": call_id_source})
-    from ..control.config import settings
-
-    if settings.provider_identity_launcher is None:
+    if binding.relay_url is not None:
+        env.append({"name": STDIO_ENV_RELAY_URL, "value": binding.relay_url})
+    else:
+        journal_path = tool_call_journal_path(binding.run_id, binding.call_scope)
+        env.extend(
+            [
+                {"name": STDIO_ENV_BASE_URL, "value": binding.engine_base_url},
+                {"name": STDIO_ENV_BEARER, "value": binding.bearer_token},
+                {"name": STDIO_ENV_JOURNAL_PATH, "value": str(journal_path)},
+            ]
+        )
         roots = [str(settings.project_root)]
         if settings.workspace_root is not None:
             roots.append(str(settings.workspace_root))
@@ -494,11 +520,11 @@ def attach_authoring_tools(
     In autonomous (headless) mode ONLY, and only on the ACP lane, the exact
     bridged tool names are auto-permitted so the CLI can invoke them without a
     local prompt — a recorded approval policy, never a wildcard, and never for
-    human-in-loop runs, which keep their prompts. Codex carries no equivalent
-    per-tool local-prompt surface to permit (its headless posture is the model's
-    own ``approval_policy = "never"``), so ``autonomous`` is inert there. The real
-    human gate stays the engine review lane; the .vault deny policy still blocks
-    fs writes.
+    human-in-loop runs, which keep their prompts. The Codex renderer approves
+    exactly the declared authoring catalog tools in its run-local configuration
+    under the model's ``approval_policy = "never"``; ``autonomous`` does not
+    change that configuration. The human gate stays the engine review lane;
+    the .vault deny policy still blocks fs writes.
 
     This is the composer for the builders above; it holds no orchestration state
     and touches nothing but the model's own surface, which is why it lives beside

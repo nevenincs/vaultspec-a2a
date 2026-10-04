@@ -20,13 +20,18 @@ class EngineConnectionError(AuthoringError):
 
 
 async def _prove_stream(
-    stream: httpcore.AsyncNetworkStream, *, port: int, bearer: str
+    stream: httpcore.AsyncNetworkStream,
+    *,
+    port: int,
+    bearer: str,
+    proof_path: str,
+    proof_domain: str | None,
 ) -> None:
     challenge = secrets.token_hex(32)
     protocol = h11.Connection(h11.CLIENT, max_incomplete_event_size=16_384)
     request = h11.Request(
         method=b"GET",
-        target=b"/health",
+        target=proof_path.encode("ascii"),
         headers=[
             (b"host", f"127.0.0.1:{port}".encode("ascii")),
             (CHALLENGE_HEADER.encode("ascii"), challenge.encode("ascii")),
@@ -66,9 +71,14 @@ async def _prove_stream(
         if pid <= 0 or started <= 0:
             raise ValueError("invalid lifecycle")
         identity = TrustedEngineRecord(port, pid, started, bearer)
-        expected = hmac.new(
-            bearer.encode("ascii"), identity.proof_message(challenge), hashlib.sha256
-        ).hexdigest()
+        message = (
+            identity.proof_message(challenge)
+            if proof_domain is None
+            else (
+                f"{proof_domain}:1\n{port}\n{pid}\n{started}\n{proof_path}\n{challenge}"
+            ).encode("ascii")
+        )
+        expected = hmac.new(bearer.encode("utf-8"), message, hashlib.sha256).hexdigest()
     except (ValueError, UnicodeError) as exc:
         raise EngineConnectionError("engine connection identity is invalid") from exc
     proof = headers.get(PROOF_HEADER, "")
@@ -77,7 +87,12 @@ async def _prove_stream(
 
 
 def authenticated_client(
-    base_url: str, bearer: str, timeout: float
+    base_url: str,
+    bearer: str,
+    timeout: float,
+    *,
+    proof_path: str = "/health",
+    proof_domain: str | None = None,
 ) -> httpx.AsyncClient:
     """Gate every new connection, including reconnects; reused streams stay proven.
 
@@ -90,6 +105,12 @@ def authenticated_client(
         raise EngineConnectionError(
             "authoring requires an explicit loopback engine port"
         )
+    if (
+        not proof_path.startswith("/")
+        or not proof_path.isascii()
+        or any(ord(character) < 33 or ord(character) > 126 for character in proof_path)
+    ):
+        raise EngineConnectionError("authoring connection proof path is invalid")
 
     async def trace(event: str, info: dict[str, object]) -> None:
         if event != "connection.connect_tcp.complete":
@@ -99,7 +120,13 @@ def authenticated_client(
             raise EngineConnectionError("engine connection stream is unavailable")
         try:
             with anyio.fail_after(5.0):
-                await _prove_stream(stream, port=origin.port or 0, bearer=bearer)
+                await _prove_stream(
+                    stream,
+                    port=origin.port or 0,
+                    bearer=bearer,
+                    proof_path=proof_path,
+                    proof_domain=proof_domain,
+                )
         except (h11.RemoteProtocolError, h11.LocalProtocolError) as exc:
             with anyio.CancelScope(shield=True):
                 await stream.aclose()

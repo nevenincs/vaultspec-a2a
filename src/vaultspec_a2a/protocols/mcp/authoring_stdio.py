@@ -1,18 +1,14 @@
 """Per-run stdio MCP bridge for the engine authoring tools.
 
 Spawned by the CLI as ``python -m vaultspec_a2a.protocols.mcp.authoring_stdio``.
-The process reconstructs the run's engine dispatch from its environment and
-serves the bridged propose/read tools over stdio. Neither session-injected
-transport surfaces to the model on the current stack — the registration-scope
-matrix found only user-global home-config servers surface, over both stdio and
-the loopback HTTP bridge (``build_authoring_mcp_servers``) — so stdio here is the
-bridge's spawned-subprocess transport, not a surfacing lever. The engine edge is
-unchanged: this process still speaks to the engine over loopback HTTP via
-:class:`AuthoringClient` under the calling role's actor token, so it is an
-orchestration-internal transport swap, not an engine-contract change.
+The process serves the run's handed proposal/read catalog over stdio. Production
+children relay calls to the worker over authenticated loopback HTTP. The worker
+owns engine credentials, refresh and private replay state. An explicitly
+configured direct transport remains available to standalone callers.
 
-Token hygiene: the machine bearer and actor token arrive by environment,
-are held only for this process's lifetime, and are NEVER written to stdout (the
+Token hygiene: the role actor token arrives by environment; a standalone direct
+caller also hands its machine bearer. These credentials are held only for this
+process's lifetime, and are NEVER written to stdout (the
 MCP JSON-RPC channel) or stderr. stdout carries only MCP protocol frames; the
 only stderr output is a value-free diagnostic when required env is absent.
 """
@@ -23,6 +19,7 @@ import asyncio
 import json
 import os
 import sys
+from contextlib import AsyncExitStack
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -33,6 +30,7 @@ from pydantic_settings import SettingsConfigDict
 
 from ...authoring import AuthoringClient
 from ...authoring._bridge_refresh import resolve_bridge_engine
+from ...authoring._relay_client import AuthoringRelayClient
 from ...authoring.catalog import (
     fetch_catalog,
     make_tool_dispatch,
@@ -53,6 +51,7 @@ __all__ = [
     "ENV_JOURNAL_PATH",
     "ENV_REFRESH_RECORD",
     "ENV_REFRESH_ROOTS_JSON",
+    "ENV_RELAY_URL",
     "ENV_RUN_ID",
     "ENV_SERVER_NAME",
     "AuthoringBridgeSettings",
@@ -83,6 +82,7 @@ class AuthoringBridgeSettings(ProjectSettings):
     call_id_source: Literal["explicit", "codex", "claude"] = "explicit"
     refresh_record: Path | None = None
     refresh_roots_json: str | None = None
+    relay_url: str | None = None
     server_name: str | None = None
     # The worker's already-fetched catalog snapshot (JSON), so the bridge serves
     # list_tools without its own engine round-trip at spawn and both sides serve
@@ -105,6 +105,7 @@ ENV_JOURNAL_PATH = env_name(AuthoringBridgeSettings, "journal_path")
 ENV_CALL_ID_SOURCE = env_name(AuthoringBridgeSettings, "call_id_source")
 ENV_REFRESH_RECORD = env_name(AuthoringBridgeSettings, "refresh_record")
 ENV_REFRESH_ROOTS_JSON = env_name(AuthoringBridgeSettings, "refresh_roots_json")
+ENV_RELAY_URL = env_name(AuthoringBridgeSettings, "relay_url")
 ENV_SERVER_NAME = env_name(AuthoringBridgeSettings, "server_name")
 ENV_CATALOG_JSON = env_name(AuthoringBridgeSettings, "catalog_json")
 ENV_DEBUG_MARKER = env_name(AuthoringBridgeSettings, "debug_marker")
@@ -131,7 +132,9 @@ async def _amain() -> int:
     run_id = configured.run_id
     server_name = configured.server_name or _DEFAULT_SERVER_NAME
 
-    if not (base_url and bearer and actor_token and run_id):
+    if not (actor_token and run_id) or not (
+        configured.relay_url or (base_url and bearer)
+    ):
         # R7: name the failure, never the values.
         print(
             "authoring stdio bridge: missing required engine env vars",
@@ -163,24 +166,41 @@ async def _amain() -> int:
             configured.refresh_record,
             tuple(root_paths),
         )
-    async with AuthoringClient(
-        base_url, bearer, actor_token=actor_token, bearer_resolver=resolver
-    ) as client:
+    async with AsyncExitStack() as stack:
         # Serve list_tools from the worker's handed snapshot when present (no
         # engine round-trip at spawn); the engine is reached only at execute time
         # via the dispatch. Fall back to fetching when no snapshot was handed.
-        if handed:
+        if configured.relay_url:
+            if not handed:
+                print("authoring stdio bridge: missing relay catalog", file=sys.stderr)
+                return 2
             snapshot = parse_catalog(json.loads(handed))
+            relay = await stack.enter_async_context(
+                AuthoringRelayClient(
+                    configured.relay_url, actor_token, run_id, configured.call_scope
+                )
+            )
+            dispatch = relay.dispatch
         else:
-            snapshot = await fetch_catalog(client)
-        dispatch = make_tool_dispatch(
-            client,
-            run_id=run_id,
-            actor_token=actor_token,
-            snapshot=snapshot,
-            call_scope=configured.call_scope,
-            journal_path=configured.journal_path,
-        )
+            assert base_url and bearer
+            client = await stack.enter_async_context(
+                AuthoringClient(
+                    base_url, bearer, actor_token=actor_token, bearer_resolver=resolver
+                )
+            )
+            snapshot = (
+                parse_catalog(json.loads(handed))
+                if handed
+                else await fetch_catalog(client)
+            )
+            dispatch = make_tool_dispatch(
+                client,
+                run_id=run_id,
+                actor_token=actor_token,
+                snapshot=snapshot,
+                call_scope=configured.call_scope,
+                journal_path=configured.journal_path,
+            )
         # Refresh rebuilds the client. Keep its single-consumer contract even
         # when an MCP client issues several requests on the same connection.
         dispatch_lock = asyncio.Lock()

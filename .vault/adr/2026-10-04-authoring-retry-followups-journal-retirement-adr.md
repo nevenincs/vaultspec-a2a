@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:322c310d64342946e6230145c02caebc6932c715d7f9da6b3e14b6a9115a3603'
+body_hash: 'sha256:375f71e849969823536e5063863a7769d3b44724ab3f61ab199ce741b2f1ca47'
 related:
   - "[[2026-10-04-a2a-edge-conformance-authoring-retry-audit]]"
   - "[[2026-10-01-run-continuation-adr]]"
@@ -42,6 +42,8 @@ Close the run and durably flush its marker before reclaiming rows. Verify each c
 Implementation review on 2026-10-04 replaced an initial coordinator hook with manifest-driven cleanup because a hook failure could retain the deletion claim and bypass bounded abandonment. The accepted retention and closed-identity constraints are unchanged.
 
 Final review refinement on 2026-10-04: construct the small closed SQLite header in memory using the journal's shared schema definitions, and write through the originally created exclusive descriptor. Flush and verify named/descriptor identity before atomic replacement. Do not reopen the temporary shared pathname for writes. Candidate SQLite inspection is read-only; closed POSIX headers grant the agent group read access without write access. S03 was reopened for the temporary-path finding and closed after its correction, repeat retirement/deletion checks and the actual Linux identity proof passed. Hostile mutation of the shared directory itself remains a separate audited authority gap; these checks establish the cooperative bridge lifecycle boundary.
+
+Placement refinement, 2026-10-04, authorized by the user's instruction to continue the remaining follow-ups: `2026-10-04-authoring-retry-followups-parent-authority-adr` moves production provider replay authority to the worker's private journal directory and executes child calls through its runtime relay. The earlier shared-directory implementation above remains historical; new isolated launches do not provision or reuse shared journals. Existing shared files remain eligible for explicit deletion cleanup, while an active legacy run without an established private journal refuses mutation rather than importing untrusted identity. Retention, marker lifetime, closed owner version and durable deletion outcomes are unchanged.
 
 ## Rationale
 

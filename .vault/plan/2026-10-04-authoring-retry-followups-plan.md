@@ -12,7 +12,7 @@ related:
   - '[[2026-10-04-authoring-retry-followups-parent-authority-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:e15644a14d2c4775c1a93d87c4bd950588f3a03cd3898a648406aaf316c0f05f'
+body_hash: 'sha256:0360fa4511ba68a2e3846113c07566bb60d2dbc97d30b58faa7624324e4ca508'
 ---
 
 # `authoring-retry-followups` plan
@@ -30,7 +30,7 @@ Approved extension 2026-10-04: the user instructed continued implementation of a
 - [x] `S01` - Consume the Codex native logical identity and establish the remaining provider proof boundary; `protocols/mcp, providers/_acp_authoring.py and providers/_codex_config_home.py with corresponding native certification and configuration tests`.
 - [ ] `S02` - Wire stdio bearer refresh to explicitly handed protected discovery and verify rotation; `new authoring/_bridge_refresh.py, protocols/mcp/authoring_stdio.py, providers/_acp_authoring.py and process tests`.
 - [x] `S03` - Reclaim authoring journal entries at durable run deletion while preserving closed identity; `authoring/_tool_calls.py, control/cleanup/executor.py, journal and deletion tests and retention decision`.
-- [ ] `S04` - Execute provider authoring calls through worker-owned runtime authority and private replay state; `new worker/authoring_relay.py and authoring/_relay_client.py, worker lifespan and binding, stdio provider handoff, connection proof and real protocol platform tests`.
+- [x] `S04` - Execute provider authoring calls through worker-owned runtime authority and private replay state; `new worker/authoring_relay.py and authoring/_relay_client.py, worker lifespan and binding, stdio provider handoff, connection proof and real protocol platform tests`.
 
 ## Parallelization
 

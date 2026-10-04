@@ -40,6 +40,36 @@ _LIFECYCLE_SCHEMA = (
 )
 
 
+def private_tool_call_journal_path(run_id: str, call_scope: str) -> Path:
+    """Keep replay authority private even when provider identity is isolated."""
+    from ..control.config import settings
+
+    directory = settings.prepare_state_dir(settings.state_layout.authoring_calls_dir)
+    if path_is_link_like(directory) or not directory.is_dir():
+        raise ValueError("authoring journal directory is not a real directory")
+    identity = derive_idempotency_key(json.dumps([run_id, call_scope]))
+    path = directory / (identity.removeprefix("idk:") + ".db")
+    workspace = settings.workspace_root
+    if workspace is not None and not os.path.lexists(path):
+        legacy = workspace / ".vaultspec-authoring-calls"
+        if os.path.lexists(legacy / path.name) or os.path.lexists(
+            _closed_run_marker(legacy, run_id)
+        ):
+            raise ValueError(
+                "legacy shared replay state cannot authorize a private run"
+            )
+    if os.path.lexists(path) and (
+        path_is_link_like(path) or not path.is_file() or path.stat().st_nlink != 1
+    ):
+        raise ValueError("authoring journal must be an unlinked regular file")
+    if os.name == "posix":
+        metadata = directory.stat()
+        if metadata.st_uid != os.getuid():
+            raise ValueError("private authoring journal must be owned by the service")
+        directory.chmod(0o700)
+    return path
+
+
 def tool_call_journal_path(run_id: str, call_scope: str) -> Path:
     """Anchor bridge subprocess state in the parent's configured state home."""
     from ..control.config import settings

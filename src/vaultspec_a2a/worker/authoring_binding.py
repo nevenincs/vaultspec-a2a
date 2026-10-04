@@ -101,6 +101,7 @@ class AuthoringBindingProvider:
             # already hold their own reference and complete on the cached read.
             self._fetch_locks.pop(thread_id, None)
 
+        from ..control.config import settings
         from ..providers._acp_authoring import AuthoringToolBinding
 
         return AuthoringToolBinding(
@@ -110,6 +111,7 @@ class AuthoringBindingProvider:
             engine_base_url=self._engine_base_url,
             run_id=thread_id,
             call_scope=agent_id,
+            relay_url=f"http://127.0.0.1:{settings.worker_port}",
         )
 
     async def _fetch_catalog(self, bearer: str, actor_token: str):

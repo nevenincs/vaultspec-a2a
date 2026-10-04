@@ -56,6 +56,8 @@ from ..utils import (
 )
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from ._dispatch_contract import CAPACITY_DRAINING, CAPACITY_THREAD_ACTIVE
+from .authoring_relay import AuthoringRelay
+from .authoring_relay import router as authoring_router
 from .dispatch_ids import DispatchIdAdmission
 from .executor import Executor
 from .ipc import WorkerBridge
@@ -221,6 +223,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         executor = Executor(checkpointer, bridge)
 
         app.state.executor = executor
+        app.state.authoring_relay = AuthoringRelay(
+            executor.token_store, executor.catalog_store
+        )
         app.state.bridge = bridge
 
         # A worker booted on a band port (worker-dev)
@@ -460,6 +465,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
     # One process-local, restart-cleared suppression window.  Endpoint admission
     # is synchronous, so duplicate IDs cannot both cross into the task group.
     app.state.dispatch_ids = DispatchIdAdmission()
+    app.include_router(authoring_router)
 
     # Instrument incoming requests so the worker's spans participate
     # in distributed traces started by the gateway (W3C traceparent extraction).

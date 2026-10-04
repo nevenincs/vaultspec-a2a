@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:b98f0a8ab5809beee11400ea179e2fa6a430ed8f4aebe979cce0defe75f4177c'
+body_hash: 'sha256:08e6a69f68ffffcdf87b9a7842c45b52f3d6d5532b4e59eb8a357b87c1bddf3a'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-07-19-observability-lanes-adr]]"
@@ -120,6 +120,31 @@ Basedpyright passed; 74 targeted tests passed. The original failure report is
 retained above as history. Concurrent feature source remains in the shared
 checkout for its owning commits; this pass commits only the production Jaeger
 configuration, regression coverage, documentation, audit, and index.
+
+### final-shared-checkout-verification | medium | new ACP test drift belongs to the active migration
+
+Type: integration/verification. Status: queued under S02 of
+`2026-10-04-acp-read-remediation-plan`, which is actively changing the read
+contract from offset to line. After the original failures were repaired and
+full-tree Ty/Basedpyright passed, the current read helper began requiring
+line. Two direct calls in `src/vaultspec_a2a/providers/tests/test_acp_fs_read_limits.py:128`
+and `:139` still pass offset; latest Ty reports four diagnostics there. The
+migration's tests also retain old offset expectations and need their complete
+contract update, not a compatibility shim. No S02 status or implementation was
+changed by this review. Its existing sequential plan owns the remaining work.
+
+The reconciling-dispatch workspace helper initially lacked an import during
+concurrent editing. It is now imported once, preserving workspace authority;
+review found no altered refusal path. Three real redispatch/refusal suites
+passed 24 tests. Together with the 74 engine/discovery/replay tests above,
+98 targeted tests passed. Latest whole-tree Ruff lint/format, vault conformance,
+and annotation checks passed. Full type-check completion for the newest shared
+checkout awaits the S02 test migration; earlier passing evidence is retained
+as history rather than presented as certification of newer code.
+
+Production commit d4d4084b contains exactly the five scoped Jaeger files. The
+active commit hook remains absent as requested. No unrelated work was reverted
+or included in that commit.
 
 ## Recommendations
 

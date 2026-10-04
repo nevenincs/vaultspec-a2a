@@ -5,7 +5,7 @@ tags:
 date: '2026-09-24'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:507c7300e89ede37ce6820010d8462605d4c553270d906929e0bfef7c64903f3'
+body_hash: 'sha256:90f394b1dc34deffcf3ed4638092ba5ae9af2b492fb838a7fb0d92eba443fb70'
 related:
   - "[[2026-09-24-architecture-review-research]]"
   - "[[2026-07-15-graph-agent-framework-harness-adr]]"
@@ -793,3 +793,22 @@ The Medium sibling write/terminal session-ownership debt and High
 `acp-client-enforcement-unreached` remain open under the older migration plan.
 Callback contract verification does not establish Claude native-tool enforcement
 and does not close the larger migration plan.
+
+## Later ACP callback ownership resolution, 2026-10-04
+
+### acp-callback-session-authority-resolved | medium | read, write, and terminal RPCs validate the receiving session
+
+Status: resolved for callback session identity; type: protocol/authority debt.
+2026-10-04-acp-callback-ownership-plan S01 and S02, commits 14747a0d and 9532ab35,
+complete the sibling session validation left after the read-cap remediation.
+Strict canonical sessionId validation rejects malformed, absent, foreign,
+unbound, and closing requests. Writes recheck after acquiring the workspace
+mutex; terminal creation rechecks after awaited spawn. All terminal-addressing
+methods validate before process lookup; local teardown still reaps partial setup
+without protocol admission. Independent reviews and real filesystem, process,
+SDK stdio, Windows/Linux, and Docker evidence live in the callback ownership
+audit. No new authority bypass or lifecycle regression remained at final review.
+This resolves callback identity and the older ACP v1 plan P01.S01. It does not
+close acp-client-enforcement-unreached, requested terminal byte-retention debt
+(P01.S02), or supported-adapter native callback proof (P02.S05). Their existing
+findings and owning workstreams remain authoritative.

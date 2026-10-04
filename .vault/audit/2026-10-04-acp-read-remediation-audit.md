@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:4aac655fbebe6c2cff184b786b1275af64b5c80b4bb5adde9cc672f1c3dcc388'
+body_hash: 'sha256:61704c737a1407b3383f7b61857d5b8bcbab492a01dffbd5206b3f07bb1d9bac'
 related:
   - "[[2026-10-04-acp-read-remediation-plan]]"
 ---
@@ -219,3 +219,19 @@ preserved and excluded from this pass's commits. With pinned Node 26.8.1,
 reran the installed-SDK callback test, real adapter migration-surface handshake,
 and complete permission-posture file with `-m 'service or not service' -q`:
 34 passed. No additional source fix was needed.
+
+## Later callback ownership resolution, 2026-10-04
+
+### sibling-session-authority-resolved | medium | write and terminal admission now enforce the negotiated session
+
+Status: resolved; type: protocol/authority debt. The later approved
+2026-10-04-acp-callback-ownership-plan closes the sibling-session-authority-debt
+entry recorded above. Commit 14747a0d guards filesystem writes before path work
+and after the workspace mutex; commit 9532ab35 guards all five terminal callbacks
+and preserves unbound/closing internal cleanup through a local release helper.
+Read ownership uses the same strict session guard. The callback ownership audit
+retains the independent reviews and real Windows, Linux, SDK stdio, Docker, and
+process-tree evidence. Owner writes and terminal workflows pass; foreign and
+malformed session requests fail before their side effects. The remaining native
+callback reachability finding and terminal output retention remain in the older
+migration plan; these callback fixes do not supply native model-tool evidence.

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:1fd0c1daf5f54a4522d76641f6b2af8bd32774f0ba90beb6a9d80e1ac53f6efe'
+body_hash: 'sha256:5b692bccf2d825b80e41f99bda59aefbd55ac8d79e8ce72f44b895e85ad4c3bd'
 related:
   - "[[2026-10-04-acp-callback-ownership-plan]]"
 ---
@@ -53,3 +53,12 @@ related:
 - `S02` `verify:` `scoped Basedpyright six files` -> `pass`
 - `S02` `verify:` `independent terminal candidate review` -> `pass`
 - `S02` `by:` `root`
+- `S03` `M` `.vault/audit/2026-10-04-acp-callback-ownership-audit.md`
+- `S03` `M` `.vault/audit/2026-10-04-acp-read-remediation-audit.md`
+- `S03` `M` `.vault/audit/2026-09-24-architecture-review-audit.md`
+- `S03` `M` `.vault/plan/2026-08-02-llm-context-provider-abstraction-plan.md`
+- `S03` `M` `.vault/exec/2026-08-02-llm-context-provider-abstraction/2026-08-02-llm-context-provider-abstraction-ledger.md`
+- `S03` `verify:` `integrated callback review and classified rolling audit queue` -> `pass`
+- `S03` `verify:` `callback feature vault health and scoped implementation commit gate` -> `pass`
+- `S03` `verify:` `commit hook remains absent after terminal commit` -> `pass`
+- `S03` `by:` `root`

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:0c0a4845b99b64540ebb01102ff82e7b4ee7014ab4374d3842a58fb422811742'
+body_hash: 'sha256:1e4fe35d8b08dad1ed5ef6bdf67a9f961a16bb53dc22f2b1029d126fa4b8a873'
 related:
   - "[[2026-10-04-acp-callback-ownership-plan]]"
   - "[[2026-10-04-acp-read-remediation-audit]]"
@@ -183,3 +183,31 @@ and ty check passed. Scoped basedpyright on the three implementation files,
 ownership/read-wire tests, and desktop tree proof: zero errors/warnings/notes.
 Docker filesystem proofs from S01 are reused because S02 changes no filesystem
 containment code. Hook presence remains false after the S01 commit.
+
+## S03 integrated audit checkpoint
+
+Final integrated verdict: PASS. Independent source review found no surviving
+callback session-authority bypass or introduced terminal lifecycle regression;
+parent-owned Windows, Linux, SDK, process-tree, and strict quality evidence above
+satisfies required verification. The original Medium callback-session-authority
+finding is resolved in both S01 (14747a0d) and S02 (9532ab35). The read guard from
+the earlier remediation, write admission after the real workspace mutex, and all
+terminal entrypoints now share the negotiated-session boundary. Every surfaced
+issue in this pass has severity, type, status, and an owner in this rolling audit.
+S03 reconciles the earlier read and architecture records by appending later
+resolutions without rewriting their historical findings. The older ACP v1 plan
+P01.S01 now has complete read-pagination and session-identity evidence; remaining
+output retention and native supported-adapter callback evidence retain P01.S02
+and P02.S05 ownership. Neither the SDK peer nor a handshake closes that native
+model-tool routing gap. Concurrent desktop fail-closed execution work remains
+its independent owner's evidence and commit. This plan closes callback ownership.
+
+### callback-vault-scaffold-hygiene | info | initial annotations and whitespace needed Core repair
+
+Status: resolved; type: documentation/tooling hygiene. Initial scaffold annotation
+removal left transient body-hash/blank-line diagnostics. The feature-scoped owning
+Core checks repaired them before S01. Final callback feature health and explicit
+commit-gate checks have no blocking diagnostics. No vault metadata or progress
+checkboxes were hand-edited. The user's hook removal remains in effect after
+both implementation commits. Concurrent source and vault changes remain outside
+these scoped commits.

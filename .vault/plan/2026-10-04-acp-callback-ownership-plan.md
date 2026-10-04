@@ -9,7 +9,7 @@ related:
   - '[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:f2456554c0351e30fea696df07a81b1f886a7706edf78163d35eaf3b912a72d6'
+body_hash: 'sha256:8d6f2b8ccd4a8c420c03a8aad687efadb8b866747b26c4f62a6fdf9350d7875a'
 ---
 
 # `acp-callback-ownership` plan
@@ -31,7 +31,7 @@ retention retain their earlier plan ownership; this pass does not redesign them.
 
 - [x] `S01` - Enforce active session identity before filesystem writes and preserve read ownership through one shared guard; `src/vaultspec_a2a/providers/_acp_client_requests.py, src/vaultspec_a2a/providers/_acp_fs_read.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/service_tests/test_compose_provider_service_state_isolation.py`.
 - [x] `S02` - Enforce terminal session ownership on creation and every addressing callback while preserving internal teardown; `src/vaultspec_a2a/providers/_acp_rpc_terminal_handlers.py, src/vaultspec_a2a/providers/_acp_teardown.py, src/vaultspec_a2a/providers/tests, src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`.
-- [ ] `S03` - Reconcile integrated review evidence and the rolling audit ownership queue; `.vault/audit, .vault/exec, .vault/plan`.
+- [x] `S03` - Reconcile integrated review evidence and the rolling audit ownership queue; `.vault/audit, .vault/exec, .vault/plan`.
 
 ## Parallelization
 

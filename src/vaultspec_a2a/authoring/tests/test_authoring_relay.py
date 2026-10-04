@@ -43,7 +43,7 @@ from .test_engine_discovery_security import attacker_listener
 from .test_stdio_refresh import _BOOT, _handler, _Rotation
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
 _ACTOR = "relay-writer-actor"
@@ -52,9 +52,9 @@ _ACTOR = "relay-writer-actor"
 @asynccontextmanager
 async def running_relay(
     tokens: RunTokenStore, catalogs: RunCatalogStore
-) -> AsyncIterator[tuple[Any, str]]:
+) -> AsyncGenerator[tuple[Any, str]]:
     @asynccontextmanager
-    async def lifespan(app: Any) -> AsyncIterator[None]:
+    async def lifespan(app: Any) -> AsyncGenerator[None]:
         app.state.authoring_relay = AuthoringRelay(tokens, catalogs)
         yield
 

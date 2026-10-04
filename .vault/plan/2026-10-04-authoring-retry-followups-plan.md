@@ -13,7 +13,7 @@ related:
   - '[[2026-10-04-authoring-retry-followups-run-index-adr]]'
 modified: '2026-10-04'
 body_schema: body-v2
-body_hash: 'sha256:ebf6741bb5ac3ba67259092f512a0657611ac57aa1e75327ff2ef5df703bf61e'
+body_hash: 'sha256:0e6668d9324d037242f9301aeadee78bf97ace91ebd2c2127cd99104cb8613cb'
 ---
 
 # `authoring-retry-followups` plan
@@ -30,6 +30,8 @@ Approved extension 2026-10-04: the user rejected leaving the recorded degraded c
 
 During S05 verification the authenticated Codex Luna turn returned without invoking the authoring tool and claimed it was unavailable; an unchanged repeat passed. S06 applies the existing declared-surface contract to the actual Codex thread before turn/start, using the installed app-server's mcpServerStatus/list schema. The user's instruction to fix surfaced degradation authorizes this bounded reliability correction. Preserve binary proof gates and independent authentication skips; never convert a missing tool into an authentication skip.
 
+Approved extension 2026-10-04: the user instructed this session to carry on with the concurrent authoring work. Integrated verification found 20 strict typing diagnostics and a nesting gate failure after S05/S06. S07 repairs these within the settled replay, relay and readiness contracts, adds focused refusal regression coverage, and completes full applicable checks plus the rolling audit checkpoint. No dependency, engine API, provider admission or retention policy change is authorized by this correction.
+
 ## Steps
 
 - [x] `S01` - Consume the Codex native logical identity and establish the remaining provider proof boundary; `protocols/mcp, providers/_acp_authoring.py and providers/_codex_config_home.py with corresponding native certification and configuration tests`.
@@ -38,6 +40,7 @@ During S05 verification the authenticated Codex Luna turn returned without invok
 - [x] `S04` - Execute provider authoring calls through worker-owned runtime authority and private replay state; `new worker/authoring_relay.py and authoring/_relay_client.py, worker lifespan and binding, stdio provider handoff, connection proof and real protocol platform tests`.
 - [x] `S05` - Index run-owned replay journals and reclaim corrupt owned data without cross-run scan failures; `new authoring/_journal_index.py, authoring/_tool_calls.py, control/cleanup/executor.py, real journal/relay/deletion tests and retained Linux corruption/crash proof`.
 - [x] `S06` - Verify the declared Codex authoring tools on the thread before starting its native model turn; `providers/codex_chat_model.py, new providers/_codex_authoring_ready.py, providers/tests/test_codex_authoring_ready.py, providers/tests/test_codex_chat_model.py and native certification tests`.
+- [x] `S07` - Repair integrated strict typing and nesting failures after the authoring follow-up merge; `authoring/_journal_index.py, authoring/tests/test_tool_call_retirement.py, authoring/tests/test_authoring_relay.py, authoring/tests/test_dispatch_injection.py, providers/_codex_authoring_ready.py and providers/tests/test_codex_authoring_ready.py with matching verification and audit records`.
 
 ## Parallelization
 

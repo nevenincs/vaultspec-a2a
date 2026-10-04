@@ -16,7 +16,7 @@ from ..desktop._filesystem_authority import path_is_link_like
 from ._ids import derive_idempotency_key
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 _STORE = (
     "CREATE TABLE store (id INTEGER PRIMARY KEY CHECK (id=1), "
@@ -107,7 +107,7 @@ class JournalIndex:
         flush_directory(path.parent)
 
     @asynccontextmanager
-    async def _transaction(self) -> AsyncIterator[aiosqlite.Connection]:
+    async def _transaction(self) -> AsyncGenerator[aiosqlite.Connection]:
         path = self._path()
         self._publish(path)
         async with aiosqlite.connect(path) as db:

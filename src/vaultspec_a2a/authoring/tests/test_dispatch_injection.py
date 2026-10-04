@@ -520,10 +520,12 @@ async def _replay_native_bridge(
         env=environment,
     )
     key = "callId" if source == "codex" else "claudecode/toolUseId"
+    metadata: RequestParamsMeta = {}
+    metadata[key] = call_id
     with (tmp_path / "native-replay.log").open("w", encoding="utf-8") as errlog:
         async with Client(stdio_client(params, errlog=errlog)) as client:
             result = await client.call_tool(
-                "propose_changeset", {"operation": "create"}, meta={key: call_id}
+                "propose_changeset", {"operation": "create"}, meta=metadata
             )
             assert not result.is_error
 

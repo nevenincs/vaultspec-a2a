@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:f2f8eed2413ff0ee1d6d67f5b9d1a423ac776873a6424832e5a4589f7f4c9d8d'
+body_hash: 'sha256:3258b4a763d2375517ba70a1afe28f5db5c3694a5d28da96467b2dc4e1e2d13b'
 related:
   - "[[2026-10-04-authoring-retry-followups-plan]]"
 ---
@@ -107,6 +107,26 @@ related:
 - `S06` `verify:` `uv run --no-sync ty check src dev docs scripts packaging` -> `pass`
 - `S06` `verify:` `git diff --check` -> `pass`
 - `S06` `by:` `vaultspec-standard-executor`
+- `S07` `M` `src/vaultspec_a2a/authoring/_journal_index.py`
+- `S07` `M` `src/vaultspec_a2a/authoring/tests/test_authoring_relay.py`
+- `S07` `M` `src/vaultspec_a2a/authoring/tests/test_dispatch_injection.py`
+- `S07` `M` `src/vaultspec_a2a/authoring/tests/test_tool_call_retirement.py`
+- `S07` `M` `src/vaultspec_a2a/providers/_codex_authoring_ready.py`
+- `S07` `M` `src/vaultspec_a2a/providers/tests/test_codex_authoring_ready.py`
+- `S07` `M` `.vault/plan/2026-10-04-authoring-retry-followups-plan.md`
+- `S07` `M` `.vault/audit/2026-10-04-a2a-edge-conformance-authoring-retry-audit.md`
+- `S07` `M` `.vault/index/authoring-retry-followups.index.md`
+- `S07` `verify:` `initial full dev lint all strict typing 20 diagnostics and nesting` -> `fail`
+- `S07` `verify:` `integrated baseline pytest journal relay dispatch deletion cleanup Codex scope (178 passed, four existing service deselections)` -> `pass`
+- `S07` `verify:` `focused pytest retirement relay dispatch readiness (50 passed, two existing native deselections, old timeout fixture failed)` -> `fail`
+- `S07` `verify:` `final pytest test_codex_authoring_ready.py (ten real subprocess scenarios)` -> `pass`
+- `S07` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev lint all` -> `pass`
+- `S07` `verify:` `actual S07 diff review and classified rolling audit update` -> `pass`
+- `S07` `by:` `codex`
+- `S07` `verify:` `uv run --no-sync --frozen vaultspec-core vault check all --limit 8 --no-hints (one error and 11 warnings in concurrent workstreams; classified in rolling audit)` -> `fail`
+- `S07` `verify:` `uv run --no-sync --frozen vaultspec-core vault check all --feature authoring-retry-followups --no-hints` -> `pass`
+- `S07` `verify:` `uv run --no-sync --frozen vaultspec-core vault check all --feature a2a-edge-conformance --no-hints` -> `pass`
+- `S07` `verify:` `git diff --check assigned S07 source and vault files` -> `pass`
 
 ## Notes
 
@@ -117,3 +137,5 @@ related:
 - `S01` Runtime authentication failures are conditional missing prerequisites; both live checks authenticated on this host. Candidate certification does not widen served binary proof gates.
 - `S04` Corrupt historical shared-file cleanup reports failure while private closure remains durable; recorded low availability/index follow-up. Source proof retained as `artifacts/validation/linux_authoring_parent_authority.py;` SHA-256 97fdb39c755e0c64b9e80293d372627b7efb3e8baba668a4288230130678d27a. Scope excludes concurrent peer work.
 - `S02` The previously deferred isolated case is now implemented and committed in S04 c0e1202d. The parent owns protected discovery and engine refresh; no broadening of agent filesystem authority.
+- `S07` Earlier failed readiness evidence remains recorded; corrected ten-case rerun supersedes the old timeout fixture failure. Retained native and Linux evidence applies to unchanged replay and authority contracts; concurrent deployment files are excluded.
+- `S07` The regenerated feature index corrects the accepted run-index ADR status. Authoring and source-audit conformance are clean; the whole-vault snapshot remains pending with owners of the other active records.

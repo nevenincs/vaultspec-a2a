@@ -289,7 +289,7 @@ async def test_processes_racing_index_publication_preserve_all_owners(
         "  calls.tool_call_journal_path(run,'writer'),run,'writer')\n"
         " asyncio.run(journal.prepare('call','input',build))\n"
     )
-    processes = []
+    processes: list[asyncio.subprocess.Process] = []
     ready = [tmp_path / f"ready-{number}" for number in range(4)]
     with settings_override(a2a_home=state, workspace_root=None):
         path = tool_call_journal_path("process-0", "writer")

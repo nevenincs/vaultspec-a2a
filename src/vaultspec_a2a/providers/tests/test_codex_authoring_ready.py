@@ -50,11 +50,15 @@ for line in sys.stdin:
             tools, status = {}, 'starting'
         if scenario == 'missing-tool':
             tools.pop(names[0])
+        if scenario == 'malformed-tool':
+            tools[names[0]] = {'name': [names[0]], 'inputSchema': {}}
         if scenario == 'failed':
             status = 'failed'
         server = {'name': 'vaultspec-authoring', 'runtimeStatus': status,
                   'tools': tools, 'toolsError': None, 'authStatus': 'unsupported'}
         result = {'data': [server], 'nextCursor': None}
+        if scenario == 'duplicate':
+            result['data'].append(server)
         if scenario == 'absent':
             result['data'] = []
         if scenario == 'page' and params['cursor'] is None:
@@ -84,6 +88,8 @@ for line in sys.stdin:
         ("starting", None),
         ("page", None),
         ("missing-tool", "inventory is incomplete"),
+        ("malformed-tool", "inventory is incomplete"),
+        ("duplicate", "repeated the authoring server"),
         ("failed", "failed startup"),
         ("absent", "did not load"),
         ("cursor-cycle", "invalid MCP cursor"),
@@ -117,7 +123,9 @@ async def test_turn_requires_its_actual_authoring_surface(
                 str(names),
             ],
             workspace_root=str(tmp_path),
-            timeout=0.5 if failure == "timeout" else 5,
+            # The timeout case must reach the inventory loop, rather than time
+            # out while a real interpreter is still completing initialization.
+            timeout=5,
         ).with_authoring_mcp_server(codex_authoring_mcp_server_spec(binding))
         if failure == "timeout":
             with pytest.raises(TimeoutError):

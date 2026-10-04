@@ -41,12 +41,11 @@ async def verify_authoring_ready(
                 if not isinstance(data, list):
                     raise _CodexProtocolError("Codex omitted MCP server inventory")
                 for item in data:
-                    if isinstance(item, dict) and item.get("name") == name:
-                        if server is not None:
-                            raise _CodexProtocolError(
-                                "Codex repeated the authoring server"
-                            )
-                        server = item
+                    if not isinstance(item, dict) or item.get("name") != name:
+                        continue
+                    if server is not None:
+                        raise _CodexProtocolError("Codex repeated the authoring server")
+                    server = item
                 cursor = response.get("nextCursor")
                 if cursor is None:
                     break
@@ -65,9 +64,10 @@ async def verify_authoring_ready(
             if not isinstance(tools, dict):
                 raise _CodexProtocolError("Codex omitted the authoring tool inventory")
             actual = {
-                item.get("name")
+                tool_name
                 for item in tools.values()
-                if isinstance(item, dict) and isinstance(item.get("name"), str)
+                if isinstance(item, dict)
+                and isinstance(tool_name := item.get("name"), str)
             }
             if not set(expected).issubset(actual):
                 raise _CodexProtocolError(

@@ -32,6 +32,7 @@ __all__ = [
     "DispatchResponse",
     "ExecutionStateProjectionPayload",
     "ExecutionTaskProjectionPayload",
+    "HeartbeatRequest",
     "canonical_project_root",
     "to_dispatch_action",
 ]
@@ -158,21 +159,23 @@ class DispatchRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dispatch_id: str = Field(default_factory=lambda: uuid4().hex)
+    dispatch_id: str = Field(
+        default_factory=lambda: uuid4().hex, min_length=1, max_length=128
+    )
     action: Literal["ingest", "resume", "cancel"] = Field(
         description="'ingest' | 'resume' | 'cancel'"
     )
-    thread_id: str
+    thread_id: str = Field(min_length=1, max_length=128)
     graph_action_receipt: GraphActionReceipt | None = None
     graph_definition: FrozenGraphDefinition | None = None
-    agent_id: str = DEFAULT_SUPERVISOR_ID
+    agent_id: str = Field(default=DEFAULT_SUPERVISOR_ID, min_length=1, max_length=128)
     # For ingest: user message content
-    content: str | None = None
+    content: str | None = Field(default=None, max_length=65536)
     # For resume: permission response option
     # (str for tool perms, dict for plan approval)
     option_id: str | dict[str, object] | None = None
     # For initial thread creation
-    team_preset: str | None = None
+    team_preset: str | None = Field(default=None, max_length=128)
     # The run's active project. Optional on the model because a cancel names no
     # project and a resume rejoins a graph that already holds one; an ingest
     # without it is refused below. Whatever spelling a construction site holds,
@@ -191,7 +194,7 @@ class DispatchRequest(BaseModel):
     # forwarded to the worker so it retrieves the authoritative batch from the
     # engine read route. a2a never parses it; None when not
     # feedback-driven.
-    feedback_batch_id: str | None = None
+    feedback_batch_id: str | None = Field(default=None, max_length=256)
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)
@@ -302,6 +305,18 @@ class DispatchRequest(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+
+class HeartbeatRequest(BaseModel):
+    """Bound the worker liveness projection before updating gateway state."""
+
+    type: Literal["heartbeat"] = "heartbeat"
+    worker_id: str = Field(default="", max_length=128)
+    active_threads: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
+        default_factory=list, max_length=1024
+    )
+    timestamp: str | None = Field(default=None, max_length=128)
+    uptime_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class DispatchResponse(BaseModel):

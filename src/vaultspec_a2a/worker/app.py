@@ -39,6 +39,7 @@ from vaultspec_core.config import ConfigurationError
 
 from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
+from ..ipc.body_limit import BoundedHttpBodyMiddleware, worker_body_limit
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
 from ..lifecycle.registration import deregister_serve, register_serve
@@ -455,6 +456,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
 
     # Instrument incoming requests so the worker's spans participate
     # in distributed traces started by the gateway (W3C traceparent extraction).
+    app.add_middleware(cast("Any", BoundedHttpBodyMiddleware), limit=worker_body_limit)
     app.add_middleware(cast("Any", TelemetryMiddleware))
 
     @app.post(

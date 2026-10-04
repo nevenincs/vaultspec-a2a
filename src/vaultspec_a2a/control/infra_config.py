@@ -877,12 +877,14 @@ class InfraConfig(ProjectSettings):
     )
     internal_max_http_body_bytes: int = Field(
         default=1_048_576,
+        ge=1,
         description=(
-            "Maximum HTTP body accepted on internal /dispatch and /events endpoints."
+            "Maximum HTTP write body on worker and unversioned gateway routes (bytes)."
         ),
     )
     internal_event_batch_body_multiplier: int = Field(
         default=4,
+        ge=1,
         description=(
             "How much larger a worker event BATCH may be than a single internal "
             "body, since a batch carries many events in one request."

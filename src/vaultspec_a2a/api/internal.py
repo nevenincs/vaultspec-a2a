@@ -28,7 +28,9 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPBearer
+from pydantic import ValidationError
 
 from ..control._worker_health import worker_liveness
 from ..control.config import settings
@@ -37,6 +39,7 @@ from ..control.event_handlers import (
     relay_event,
 )
 from ..graph.enums import ServerEventType
+from ..ipc.schemas import HeartbeatRequest
 from ..thread.snapshots import is_terminal_event, normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer
 from ._replay_writer_seat import seated_replay_writer
@@ -406,7 +409,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     sending a WebSocket frame.  The payload format matches
     ``WorkerEventEnvelope``.
     """
-    # Reject oversized payloads (1 MB) on internal HTTP path.
+    # The application middleware also counts actual streamed bytes before parsing.
     content_length = request.headers.get("content-length")
     try:
         if (
@@ -515,16 +518,20 @@ async def receive_worker_heartbeat(request: Request) -> dict[str, str]:
     Updates ``app.state`` so the gateway can monitor worker
     liveness without a persistent WebSocket connection.
     """
-    body: dict[str, Any] = await request.json()
+    raw = await request.json()
+    try:
+        body = HeartbeatRequest.model_validate(raw)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(), body=raw) from exc
     worker_liveness(request.app.state).record_contact(
-        active_threads=body.get("active_threads", [])
+        active_threads=body.active_threads
     )
     logger.debug(
         "Worker heartbeat (HTTP): %d active threads",
-        len(body.get("active_threads", [])),
+        len(body.active_threads),
         extra={
-            "message_type": str(body.get("type", "")),
-            "active_thread_count": len(body.get("active_threads", [])),
+            "message_type": body.type,
+            "active_thread_count": len(body.active_threads),
             "transport": "http",
         },
     )

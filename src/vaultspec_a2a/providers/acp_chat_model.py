@@ -23,10 +23,7 @@ from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
 )
-from langchain_core.language_models.chat_models import (
-    BaseChatModel,
-    generate_from_stream,
-)
+from langchain_core.language_models.chat_models import generate_from_stream
 from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
@@ -97,6 +94,7 @@ from ._mcp_contract import verify_harness_mcp_contract
 from ._native_role import prepare_acp_role, require_native_workspace, role_environment
 from ._prompt_render import render_prompt_blocks
 from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
+from ._stream_lifetime import ProcessChatModel
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import AcpError
@@ -111,7 +109,7 @@ __all__ = ["AcpChatModel"]
 logger = logging.getLogger(__name__)
 
 
-class AcpChatModel(BaseChatModel):
+class AcpChatModel(ProcessChatModel):
     """A custom LangChain ChatModel that wraps ACP-compatible CLI agents."""
 
     command: list[str] = Field(
@@ -312,7 +310,7 @@ class AcpChatModel(BaseChatModel):
         return updated
 
     @override
-    async def _astream(
+    async def _provider_astream(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
@@ -843,10 +841,11 @@ class AcpChatModel(BaseChatModel):
     ) -> ChatResult:
         """Collect _astream chunks into a ChatResult."""
         chunks: list[ChatGenerationChunk] = []
-        async for chunk in self._astream(
-            messages, stop=stop, run_manager=run_manager, **kwargs
-        ):
-            chunks.append(chunk)
+        async with aclosing(
+            self._astream(messages, stop=stop, run_manager=run_manager, **kwargs)
+        ) as stream:
+            async for chunk in stream:
+                chunks.append(chunk)
         return generate_from_stream(iter(chunks))
 
     @override

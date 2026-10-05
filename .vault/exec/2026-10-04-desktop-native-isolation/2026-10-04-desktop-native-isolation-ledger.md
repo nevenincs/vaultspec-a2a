@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:919f3e5cf12c6db5219b5ee7a5fbd894dc37b146d4ead5affb55f53e0c6139b4'
+body_hash: 'sha256:9b1db85012b5bb43964ad3ae72b3ddd251531a62c5c44668c115631b3844b23f'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -175,6 +175,26 @@ related:
 - `S09` `verify:` `git diff --check` -> `pass`
 - `S09` `verify:` `fresh independent candidate plus parent integrated review and queue updates` -> `pass`
 - `S09` `by:` `vaultspec-high-executor`
+- `S10` `A` `src/vaultspec_a2a/providers/_stream_lifetime.py`
+- `S10` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S10` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S10` `A` `packaging/tests/native_provider_lifecycle.py`
+- `S10` `M` `packaging/README.md`
+- `S10` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S10` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S10` `verify:` `genuine native Codex lifecycle controls10` -> `pass`
+- `S10` `verify:` `beta closer cancellation baseline` -> `fail`
+- `S10` `verify:` `beta closer cancellation corrected` -> `pass`
+- `S10` `verify:` `normal frozen build and source plus frozen genuine Codex turns` -> `pass`
+- `S10` `verify:` `native role context Windows9` -> `pass`
+- `S10` `verify:` `native role context Linux8 plus mounted MCP timeout` -> `fail`
+- `S10` `verify:` `genuine MCP Linux scratch rerun1` -> `pass`
+- `S10` `verify:` `nearest Codex ACP model callback tests104` -> `pass`
+- `S10` `verify:` `Ruff lint format four Python files` -> `pass`
+- `S10` `verify:` `strict Basedpyright four Python files` -> `pass`
+- `S10` `verify:` `Ty Linux Windows macOS four Python files` -> `pass`
+- `S10` `verify:` `git diff --check` -> `pass`
+- `S10` `verify:` `one-cycle corrective candidate and final integrated review with findings queued` -> `pass`
 
 ## Notes
 
@@ -200,3 +220,6 @@ related:
 - `S09` Read-only/runtime preflight checkpoint, not Step close or target admission. DNI-019 confirmed: CLI loggedIn=false versus ACP authenticated. Persistent managed preflight helper/log retained. Selected Linux OAuth export still absent; actual authenticated positive turn/actor/cancellation/policy qualification pending.
 - `S09` DNI-019 confirmed, incomplete positive noncompletion OAuth proof; local export absent. Retained actual preflight log SHA2561c086fd1b0b4f53f5494f947c4b1ff1f104dcf7910acb5d23e23e7477d27b80b. S09 stays unchecked and no eligible target changes; remaining modifications are durable open-Step evidence/checkpoint only.
 - `S09` Earlier real Claude turn failed at weekly quota; authenticated source is proved but no Claude completed-turn claim. Credential source authorized by latest user instruction, no refresh token transferred. Cert prerequisite split into S09; unfinished DNI-008/DNI-019 qualification continues S10, desktop refusal unchanged. DNI-021 stale-auth health queued S10 and DNI-013 abrupt-loss recovery remains open. Semantic discovery unavailable; named-source fallback used.
+- `S10` Two existing service tests deselected by default marker policy; genuine native lifecycle controls independently establish changed cleanup.
+- `S10` Linux MCP distribution copy timed out on mounted Windows filesystem; isolated failed test passes using owned Linux scratch after explicit parent setup.
+- `S10` DNI-023 bound Runnable closure qualification remains S12; Claude weekly capacity prevents real ACP work evidence; admission remains refused.

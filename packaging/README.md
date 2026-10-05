@@ -73,3 +73,14 @@ system/DNS-only/child hostname lookup, an HTTPS checksum download using the stag
 certificate bundle, read-only resolver and certificate data, and detached-child
 cleanup. Network controls require access to nodejs.org;
 they do not establish provider login or turn eligibility.
+
+The separate `packaging/tests/native_provider_lifecycle.py` controls require a
+genuine Linux Codex package and an already selected login in addition to those
+artifact inputs. Set `VAULTSPEC_A2A_TEST_LINUX_CODEX_TREE`,
+`VAULTSPEC_A2A_TEST_CODEX_HOME` and `VAULTSPEC_A2A_TEST_CODEX_MODEL` explicitly.
+The model must come from that provider's actual catalog. These controls perform
+real work and check immediate process and temporary-home cleanup after completed
+streams, early close, cancellation, interruption, concurrent turns and beta event
+streams. Invoke the file explicitly with the locked test environment; keep login
+material outside the repository. Passing these controls does not establish full
+gateway/actor integration or eligibility on another target.

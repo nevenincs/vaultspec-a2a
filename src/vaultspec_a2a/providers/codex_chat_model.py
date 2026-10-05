@@ -18,7 +18,8 @@ the ChatGPT-session auth mode.
 import asyncio
 import logging
 import re
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, override
@@ -27,7 +28,6 @@ from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
 )
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -86,6 +86,7 @@ from ._mcp_contract import verify_harness_mcp_contract
 from ._native_role import require_native_workspace
 from ._project_scope import RunProjectScope
 from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
+from ._stream_lifetime import ProcessChatModel
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .binary_version import probe_binary_version
 from .conditions import ProviderCondition
@@ -118,7 +119,7 @@ class _TurnStreamState:
     effects_may_have_occurred: bool = False
 
 
-class CodexChatModel(BaseChatModel):
+class CodexChatModel(ProcessChatModel):
     """Chat model backed by a ``codex app-server`` JSON-RPC-over-stdio subprocess.
 
     Each generation spawns a fresh ``codex app-server``, performs the
@@ -400,10 +401,11 @@ class CodexChatModel(BaseChatModel):
     ) -> ChatResult:
         """Accumulate the streamed chunks into a single ``ChatResult``."""
         generation: ChatGenerationChunk | None = None
-        async for chunk in self._astream(
-            messages, stop=stop, run_manager=run_manager, **kwargs
-        ):
-            generation = chunk if generation is None else generation + chunk
+        async with aclosing(
+            self._astream(messages, stop=stop, run_manager=run_manager, **kwargs)
+        ) as stream:
+            async for chunk in stream:
+                generation = chunk if generation is None else generation + chunk
 
         message = generation.message if generation else AIMessageChunk(content="")
         final = AIMessage(
@@ -546,13 +548,13 @@ class CodexChatModel(BaseChatModel):
         )
 
     @override
-    async def _astream(
+    async def _provider_astream(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: object,
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    ) -> AsyncGenerator[ChatGenerationChunk]:
         """Drive one Codex turn, streaming assistant-message deltas."""
         prompt = _messages_to_prompt(messages)
         if not prompt.strip():
@@ -709,10 +711,11 @@ class CodexChatModel(BaseChatModel):
             active_turn = _ActiveCodexTurn(client)
             self._active_turns[active_key] = active_turn
             try:
-                async for chunk in self._consume_turn(
-                    client, thread_id, active_turn=active_turn
-                ):
-                    yield chunk
+                async with aclosing(
+                    self._consume_turn(client, thread_id, active_turn=active_turn)
+                ) as stream:
+                    async for chunk in stream:
+                        yield chunk
             finally:
                 if self._active_turns.get(active_key) is active_turn:
                     self._active_turns.pop(active_key, None)
@@ -870,7 +873,7 @@ class CodexChatModel(BaseChatModel):
         thread_id: str,
         *,
         active_turn: _ActiveCodexTurn | None = None,
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    ) -> AsyncGenerator[ChatGenerationChunk]:
         """Yield delta chunks until the turn completes, raising on failure.
 
         Only frames scoped to *thread_id* are honored so a stray sub-thread

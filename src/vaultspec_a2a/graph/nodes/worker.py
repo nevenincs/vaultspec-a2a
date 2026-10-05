@@ -911,7 +911,12 @@ def create_worker_node(
                 getattr(effective_model, "provider", None)
             ),
         )
+        from ...providers._native_role import bind_model_native_workspace
         from ...providers._runtime_identity import bind_model_runtime_identity
+
+        effective_model = bind_model_native_workspace(
+            effective_model, workspace=settings["workspace_root"]
+        )
 
         effective_model = bind_model_runtime_identity(
             effective_model,

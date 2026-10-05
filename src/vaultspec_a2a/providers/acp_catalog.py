@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Final, TypedDict, Unpack, cast
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ..desktop.native_isolation import NativeLaunchAuthority
 from ._acp_auth import is_auth_required_error
 from ._catalog_fields import (
     display_text,
@@ -441,6 +442,7 @@ class _DiscoverAcpCatalogRequired(TypedDict):
 
 
 class _DiscoverAcpCatalogOptions(_DiscoverAcpCatalogRequired, total=False):
+    native_authority: NativeLaunchAuthority | None
     use_exec: bool
     timeout: float
     metadata: Mapping[str, object] | None
@@ -469,7 +471,12 @@ async def discover_acp_catalog(
     if not command:
         raise ValueError("command must not be empty")
     process = await spawn_acp_process(
-        list(command), dict(env), cwd, use_exec=use_exec, metadata=metadata
+        list(command),
+        dict(env),
+        cwd,
+        use_exec=use_exec,
+        metadata=metadata,
+        native_authority=options.get("native_authority"),
     )
     output_budget = OutputBudget(_protocol_error)
     stderr_task = asyncio.create_task(

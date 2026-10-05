@@ -10,6 +10,7 @@ which provider a command resolves to no longer loads a model stack to answer.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, replace
@@ -22,11 +23,14 @@ if TYPE_CHECKING:
 
     from langchain_core.language_models import BaseChatModel
 
+    from ..desktop.native_isolation import NativeLaunchAuthority
     from ..team.team_config import AgentConfig
 
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
+from ..utils.async_cleanup import complete_cleanup
+from ..utils.process import ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
 from ._claude_tool_policy import claude_bypass_declined_meta
 from ._factory_commands import (
@@ -36,6 +40,12 @@ from ._factory_commands import (
     _classify_codex_command,
     _classify_kimi_command,
     _kimi_home_env,
+)
+from ._native_role import (
+    capture_native_workspace,
+    prepare_acp_role,
+    prepare_native_version_probe,
+    role_environment,
 )
 from .acp_catalog import discover_acp_catalog
 from .antigravity_catalog import discover_antigravity_catalog
@@ -169,7 +179,12 @@ class ProviderCatalogRegistration:
 
 
 def binary_proof_reason(
-    provider: Provider, executable: str, authority: str
+    provider: Provider,
+    executable: str,
+    authority: str,
+    *,
+    native_authority: NativeLaunchAuthority | None = None,
+    workspace_root: Path | None = None,
 ) -> ProviderRuntimeUnavailableReason | None:
     """Check the same resolved launcher that this lane would hand to its child."""
     proof = PROVEN_TURN_LANES.get(provider)
@@ -180,8 +195,22 @@ def binary_proof_reason(
     )
     if proof.binary != expected_binary:
         return ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE
+    if native_authority is None and settings.desktop_profile_armed:
+        try:
+            with prepare_native_version_probe(
+                capture_native_workspace(workspace_root)
+            ) as prepared:
+                return binary_proof_reason(
+                    provider, executable, authority, native_authority=prepared
+                )
+        except (OSError, ValueError, ProcessContainmentError):
+            return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
     try:
-        reported = probe_binary_version(executable)
+        reported = (
+            probe_binary_version(executable)
+            if native_authority is None
+            else probe_binary_version(executable, native_authority=native_authority)
+        )
     except BinaryVersionProbeError:
         return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
     if not lane_proof_accepts_version(proof, reported, authority):
@@ -191,6 +220,9 @@ def binary_proof_reason(
 
 def codex_binary_proof_reason(
     command: list[str] | None = None,
+    *,
+    native_authority: NativeLaunchAuthority | None = None,
+    workspace_root: Path | None = None,
 ) -> ProviderRuntimeUnavailableReason | None:
     """Probe the service-path Codex launcher selected by the factory."""
     if Provider.CODEX not in PROVEN_TURN_LANES:
@@ -199,7 +231,13 @@ def codex_binary_proof_reason(
         command, _ = _classify_codex_command()
     if not os.path.isabs(command[0]):
         return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
-    return binary_proof_reason(Provider.CODEX, command[0], "service_path")
+    return binary_proof_reason(
+        Provider.CODEX,
+        command[0],
+        "service_path",
+        native_authority=native_authority,
+        workspace_root=workspace_root,
+    )
 
 
 def _claude_binary_proof_reason(
@@ -212,7 +250,9 @@ def _claude_binary_proof_reason(
         resolved = pin_claude_executable(resolve_env_vars(workspace_root))
     except ProviderRuntimeUnavailableError as exc:
         return exc.reason or ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE
-    return binary_proof_reason(provider, str(resolved.path), resolved.authority)
+    return binary_proof_reason(
+        provider, str(resolved.path), resolved.authority, workspace_root=workspace_root
+    )
 
 
 def require_binary_proof(reason: ProviderRuntimeUnavailableReason | None) -> None:
@@ -310,26 +350,33 @@ async def _discover_claude_catalog(
     use_exec = metadata["acp_backend"] == "binary"
     if use_exec:
         env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
-    discovered = await discover_acp_catalog(
-        tuple(command),
-        env=env,
-        cwd=str(workspace_root),
-        key=key,
-        use_exec=use_exec,
-        metadata={
-            "provider": Provider.CLAUDE.value,
-            **metadata,
-            "cli_runtime_authority": cli_resolution.authority,
-            "cli_executable": str(cli_resolution.path),
-            "auth_mode": auth_mode,
-        },
-        # The probe opens a real session, so it opens it under the same
-        # permission posture a served turn gets. Leaving the bypass capability
-        # granted here would qualify a lane nobody runs - and where the CLI
-        # refuses the flag the capability arms, it would report the lane
-        # unavailable for a reason that is this probe's own doing.
-        session_meta=claude_bypass_declined_meta(),
-    )
+    scope = capture_native_workspace(workspace_root)
+    async with prepare_acp_role(
+        scope, environment=env, provider=Provider.CLAUDE.value
+    ) as native:
+        if native is not None:
+            env.update(role_environment(native))
+        discovered = await discover_acp_catalog(
+            tuple(command),
+            env=env,
+            cwd=str(workspace_root),
+            key=key,
+            use_exec=use_exec,
+            metadata={
+                "provider": Provider.CLAUDE.value,
+                **metadata,
+                "cli_runtime_authority": cli_resolution.authority,
+                "cli_executable": str(cli_resolution.path),
+                "auth_mode": auth_mode,
+            },
+            # The probe opens a real session, so it opens it under the same
+            # permission posture a served turn gets. Leaving the bypass capability
+            # granted here would qualify a lane nobody runs - and where the CLI
+            # refuses the flag the capability arms, it would report the lane
+            # unavailable for a reason that is this probe's own doing.
+            session_meta=claude_bypass_declined_meta(),
+            native_authority=native,
+        )
     normalized = ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
     return replace(normalized, transport=_transport_evidence(normalized))
 
@@ -350,12 +397,38 @@ async def _discover_codex_catalog(
     env = resolve_env_vars(workspace_root)
     if settings.codex_home:
         env["CODEX_HOME"] = settings.codex_home
-    discovered = await discover_codex_catalog(
-        tuple(command),
-        env=env,
-        cwd=str(workspace_root),
-        key=key,
-    )
+    scope = capture_native_workspace(workspace_root)
+    home = None
+    try:
+        native = None
+        if scope is not None:
+            from pathlib import Path
+
+            from ..utils.enums import CodexWebSearchMode
+            from ._codex_config_home import build_codex_config_home
+
+            base = (
+                Path(settings.codex_home)
+                if settings.codex_home
+                else Path.home() / ".codex"
+            )  # storage-anchor-ok
+            home = build_codex_config_home(
+                [], base, web_search=CodexWebSearchMode.DISABLED
+            )
+            native = scope.for_home(home)
+            env["CODEX_HOME"] = str(home)
+        discovered = await discover_codex_catalog(
+            tuple(command),
+            env=env,
+            cwd=str(workspace_root),
+            key=key,
+            native_authority=native,
+        )
+    finally:
+        if home is not None:
+            from ._codex_config_home import cleanup_codex_config_home
+
+            await complete_cleanup(asyncio.to_thread(cleanup_codex_config_home, home))
     normalized = ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
     return replace(normalized, transport=_transport_evidence(normalized))
 
@@ -613,7 +686,9 @@ def _create_codex_model(
     from .codex_chat_model import CodexChatModel
 
     command, command_meta = _classify_codex_command()
-    require_binary_proof(codex_binary_proof_reason(command))
+    require_binary_proof(
+        codex_binary_proof_reason(command, workspace_root=workspace_root)
+    )
     # Codex auth is file-based; no secret env is injected.
     codex_controls: dict[str, str] = {}
     for control_id, value in selected_controls.items():
@@ -666,7 +741,9 @@ def _create_claude_model(
         raise ProviderRuntimeUnavailableError(str(exc)) from exc
     cli = _require_claude_cli(workspace_root)
     require_binary_proof(
-        binary_proof_reason(Provider.CLAUDE, str(cli.path), cli.authority)
+        binary_proof_reason(
+            Provider.CLAUDE, str(cli.path), cli.authority, workspace_root=workspace_root
+        )
     )
 
     env_vars, auth_mode = claude_auth_env()
@@ -716,7 +793,9 @@ def _create_zai_model(
         raise ProviderRuntimeUnavailableError(str(exc)) from exc
     cli = _require_claude_cli(workspace_root)
     require_binary_proof(
-        binary_proof_reason(Provider.ZAI, str(cli.path), cli.authority)
+        binary_proof_reason(
+            Provider.ZAI, str(cli.path), cli.authority, workspace_root=workspace_root
+        )
     )
     env_vars = _build_zai_env(
         zai_base_url=settings.zai_base_url,
@@ -942,7 +1021,7 @@ class ProviderFactory:
             ProviderCatalogRegistration(
                 codex,
                 lambda: _discover_codex_catalog(codex, discovery_root),
-                codex_binary_proof_reason,
+                lambda: codex_binary_proof_reason(workspace_root=discovery_root),
             ),
             ProviderCatalogRegistration(
                 kimi, lambda: _discover_kimi_catalog(kimi, discovery_root)

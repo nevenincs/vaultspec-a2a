@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ..desktop.native_isolation import NativeLaunchAuthority
     from ._json_contract import JsonObject, JsonValue
 
 from ..utils import package_version
@@ -549,6 +550,7 @@ class _DiscoverCodexCatalogRequired(TypedDict):
 
 
 class _DiscoverCodexCatalogOptions(_DiscoverCodexCatalogRequired, total=False):
+    native_authority: NativeLaunchAuthority | None
     timeout: float
     metadata: Mapping[str, object] | None
 
@@ -568,6 +570,7 @@ async def discover_codex_catalog(
         options["cwd"],
         use_exec=False,
         metadata=metadata,
+        native_authority=options.get("native_authority"),
     )
     output_budget = OutputBudget(_protocol_error)
     rpc = _CatalogRpc(process, options.get("timeout", 30.0), output_budget)

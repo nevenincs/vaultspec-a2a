@@ -15,7 +15,8 @@ Architecture:
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, Never, override
 
 from langchain_core.callbacks import (
@@ -31,6 +32,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
+from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
 from ..team.team_config import AgentConfig
 from ..workspace.environment import resolve_env_vars
 from ._acp_auth import runtime_log_extra
@@ -92,6 +94,7 @@ from ._acp_types import (
 from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject
 from ._mcp_contract import verify_harness_mcp_contract
+from ._native_role import prepare_acp_role, require_native_workspace, role_environment
 from ._prompt_render import render_prompt_blocks
 from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
 from ._subprocess import kill_process_tree as _kill_process_tree
@@ -215,6 +218,8 @@ class AcpChatModel(BaseChatModel):
 
     _state: AcpModelState = PrivateAttr()
     _runtime_identity: RuntimeIdentityBinding | None = PrivateAttr(default=None)
+    _native_workspace: NativeWorkspaceAuthority | None = PrivateAttr(default=None)
+    _native_authority: NativeLaunchAuthority | None = PrivateAttr(default=None)
 
     def with_runtime_identity(self, binding: RuntimeIdentityBinding) -> "AcpChatModel":
         """Return a run-bound copy without mutating the compiled model."""
@@ -222,8 +227,16 @@ class AcpChatModel(BaseChatModel):
         updated._runtime_identity = binding
         return updated
 
+    def with_native_workspace(
+        self, authority: NativeWorkspaceAuthority
+    ) -> "AcpChatModel":
+        """Bind one invocation without serializing native filesystem grants."""
+        updated = self.model_copy()
+        updated._native_workspace = authority
+        return updated
+
     def __getattr__(self, name: str) -> Any:
-        if name == "_runtime_identity":
+        if name in {"_runtime_identity", "_native_workspace", "_native_authority"}:
             private = self.__pydantic_private__
             if private is not None and name in private:
                 return private[name]
@@ -305,16 +318,19 @@ class AcpChatModel(BaseChatModel):
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    ) -> AsyncGenerator[ChatGenerationChunk]:
         """Streams responses from the ACP subprocess."""
-        async for chunk in self._stream_request(
-            messages,
-            stop=stop,
-            run_manager=run_manager,
-            native_command=None,
-            **kwargs,
-        ):
-            yield chunk
+        async with aclosing(
+            self._stream_request(
+                messages,
+                stop=stop,
+                run_manager=run_manager,
+                native_command=None,
+                **kwargs,
+            )
+        ) as request:
+            async for chunk in request:
+                yield chunk
 
     async def _stream_request(
         self,
@@ -324,19 +340,22 @@ class AcpChatModel(BaseChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None,
         native_command: NativeCommandRequest | None,
         **kwargs: Any,
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    ) -> AsyncGenerator[ChatGenerationChunk]:
         """Own one provider session and refuse concurrent use explicitly."""
         del stop, kwargs
         if self._state.session.session_busy:
             raise AcpSessionBusyError("the provider session is already busy")
         self._state.session.session_busy = True
         try:
-            async for chunk in self._astream_session(
-                messages,
-                run_manager=run_manager,
-                native_command=native_command,
-            ):
-                yield chunk
+            async with aclosing(
+                self._astream_session(
+                    messages,
+                    run_manager=run_manager,
+                    native_command=native_command,
+                )
+            ) as session:
+                async for chunk in session:
+                    yield chunk
         finally:
             self._state.session.session_busy = False
 
@@ -346,6 +365,8 @@ class AcpChatModel(BaseChatModel):
         )
         env = resolve_env_vars(_ws_path)
         env.update(self.env_vars)
+        if self._native_authority is not None:
+            env.update(role_environment(self._native_authority))
         # The served turn and catalog probe use the same profile-scoped CLI
         # authority. Kimi runs its own CLI.
         if self._state.config.acp_family == "claude" and self.command:
@@ -379,9 +400,17 @@ class AcpChatModel(BaseChatModel):
         # makes the declaration trustworthy. Probed before any config home or
         # workspace projection is written, so a refusal leaves nothing to clean up,
         # and memoized per launch identity so the cost lands once per process.
-        await verify_harness_mcp_contract(self._state.config.mcp_servers, env=env)
+        await verify_harness_mcp_contract(
+            self._state.config.mcp_servers,
+            env=env,
+            native_authority=self._native_authority,
+        )
 
-        # The CLI runs in the operator's REAL config home (no redirect - the
+        # Unisolated profiles use the operator's config home; prepared native
+        # roles use only their fresh home and an already selected credential
+        # channel. The default subscription file store remains unavailable
+        # there until its identity and refresh-return behavior is qualified.
+        # For unisolated profiles, the
         # no-auth contract requires the child to resolve exactly the login an
         # interactive `claude` resolves). The declared-surface invariant rides
         # the SESSION itself: setup_session advertises the declared servers in
@@ -454,9 +483,13 @@ class AcpChatModel(BaseChatModel):
         else:
             cli = identity_path(self.command[0], field="CLI executable path")
             node = None
-        cli_version = await asyncio.to_thread(probe_binary_version, cli)
+        cli_version = await asyncio.to_thread(
+            probe_binary_version, cli, native_authority=self._native_authority
+        )
         node_version = (
-            await asyncio.to_thread(probe_binary_version, node)
+            await asyncio.to_thread(
+                probe_binary_version, node, native_authority=self._native_authority
+            )
             if node is not None
             else None
         )
@@ -493,7 +526,36 @@ class AcpChatModel(BaseChatModel):
         *,
         run_manager: AsyncCallbackManagerForLLMRun | None,
         native_command: NativeCommandRequest | None,
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    ) -> AsyncGenerator[ChatGenerationChunk]:
+        """Prepare one role before any independent probe or provider acquisition."""
+        workspace = require_workspace_root(
+            self.workspace_root, surface="native ACP role preparation"
+        )
+        require_native_workspace(self._native_workspace, workspace)
+        environment = resolve_env_vars(workspace)
+        environment.update(self.env_vars)
+        async with prepare_acp_role(
+            self._native_workspace, environment=environment, provider=self.provider
+        ) as authority:
+            self._native_authority = authority
+            try:
+                async with aclosing(
+                    self._astream_prepared_session(
+                        messages, run_manager=run_manager, native_command=native_command
+                    )
+                ) as prepared:
+                    async for chunk in prepared:
+                        yield chunk
+            finally:
+                self._native_authority = None
+
+    async def _astream_prepared_session(
+        self,
+        messages: list[BaseMessage],
+        *,
+        run_manager: AsyncCallbackManagerForLLMRun | None,
+        native_command: NativeCommandRequest | None,
+    ) -> AsyncGenerator[ChatGenerationChunk]:
         """Run one ordinary prompt or one negotiated native command."""
         # Rendered through the seam the Codex lane shares: a conversation says
         # who spoke and what a tool answered, and it has to say the same thing on
@@ -519,7 +581,10 @@ class AcpChatModel(BaseChatModel):
             resolved = pin_claude_executable(env)
             require_binary_proof(
                 binary_proof_reason(
-                    Provider(self.provider), str(resolved.path), resolved.authority
+                    Provider(self.provider),
+                    str(resolved.path),
+                    resolved.authority,
+                    native_authority=self._native_authority,
                 )
             )
 
@@ -547,6 +612,7 @@ class AcpChatModel(BaseChatModel):
                     handshake_step="spawn",
                     timeout_seconds=settings.acp_startup_timeout_seconds,
                 ),
+                native_authority=self._native_authority,
             )
 
             if process.stdin is None or process.stdout is None:
@@ -624,10 +690,9 @@ class AcpChatModel(BaseChatModel):
             # Independent cleanup: a failure in any one release must not skip
             # the rest. MCP surfacing writes nothing to the workspace or the
             # config home, so the session tree is the only thing to release;
-            # the CLI's own transcript lives in the operator's real config home
-            # (like any interactive session) and is not ours to move. That
-            # states ownership, not lifetime: the CLI's own transcript lives in
-            # its operator-owned config tree and this project never cleans it up.
+            # unisolated CLI transcript stays in the operator's config tree.
+            # A prepared native role's surrounding owner removes its fresh home
+            # only after this session cleanup finishes.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task

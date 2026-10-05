@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:3f9feb5fad5c625a4fb19b7884a3492b1b0078ec29fffc316a1cb2ba3f7c871d'
+body_hash: 'sha256:5936e8e110772f420849063d1184eb5bd9d17f380c386ba559d00d068a5df3a2'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-desktop-native-isolation-audit]]"
@@ -58,6 +58,14 @@ Locked Linux foundation/environment/runtime suites pass 18 tests with static hel
 ### S05 real independent MCP transport works with the explicit isolated carrier
 
 The final Linux test `src/vaultspec_a2a/providers/tests/test_native_launch_context.py:test_genuine_mcp_handshake_uses_isolated_runtime_context` uses the genuine registry-selected vaultspec-rag distribution and its production server entry point. The test-only producer copies its resolved Python standard library/site packages and supplies only external shared-library mappings to the static-helper capsule. MCP SDK 2.2.0 forwards the trusted wrapper cwd and merges its six default host environment fields; the isolated bootstrap ignores role startup hooks, and the helper clears inherited environment before applying the role packet. Actual initialize and list-tools match the registry's read-only declaration. Replacing the selected workspace then refuses before cached surface reuse. Final Linux context population passes 5 tests (28.95 seconds), with no mock server or skipped target claim. This proves transport integration, not authenticated provider work or a release capsule. The initial producer's redundant internal-library mapping was refused by the unchanged canonical/protected-target contract and corrected only in test assembly.
+
+### S06 scoped role preparation preserves only already selected credential channels
+
+Accepted harness provisioning distinguishes default operator subscription discovery from explicitly selected oauth_token settings mode. Binary policy unconditionally scrubs ANTHROPIC_API_KEY and preserves host-managed policy while suppressing user/project/local setting sources. The existing worker-owned Codex seed/refresh lifecycle is reusable. Claude has no proved equivalent identity-preserving file-store transfer/refresh mechanism, so S06 does not copy operator Claude credentials or enable a new authentication fallback. A prepared fresh home carries only the already selected environment channel and strict session settings; absent selected channel and present /etc/claude-code managed policy refuse. This fits the existing selected-channel and unsupported-target constraints; default file/keychain support needs later bounded proof before implementation or eligibility.
+
+The available Linux research host has no Claude/Codex credential file, no exported CLAUDE_CODE_OAUTH_TOKEN and no /etc/claude-code directory. Only metadata/presence was checked; no operator credential contents were read or transferred from Windows. Synthetic selected-channel controls prove home binding/private-state denial and cleanup, not real authentication. Primary documentation describes CLAUDE_CONFIG_DIR relocation and Linux subscription-file auth, and organisation managed settings under /etc/claude-code; those live documents do not establish compatibility of an untested pinned CLI or justify dropping managed policy. Sources: https://code.claude.com/docs/en/authentication; https://code.claude.com/docs/en/env-vars; https://code.claude.com/docs/en/managed-settings.
+
+Fresh candidate review surfaced suspended async-generator cleanup ordering. Explicit closure propagates through all yielding wrappers before prepared-home removal; asynchronous removal is joined. The final Linux role/foundation tests pass 13, including actual static-helper version probing from an empty home and genuine model startup refusal with no leaked home. Authenticated stream/cancel/early-close behavior remains S08. Release packaging is separated into S07 because the product composes a2a inside a larger immutable capsule; helper/dependency placement must follow that actual composition rather than assume the binary parent is the full runtime root.
 
 ## Sources
 

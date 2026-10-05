@@ -40,6 +40,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
+from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
 from ..team.team_config import AgentConfig
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
@@ -82,6 +83,7 @@ from ._codex_protocol import (
 )
 from ._json_contract import JsonObject, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
+from ._native_role import require_native_workspace
 from ._project_scope import RunProjectScope
 from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
 from ._subprocess import kill_process_tree, spawn_acp_process
@@ -182,6 +184,15 @@ class CodexChatModel(BaseChatModel):
         default_factory=dict
     )
     _runtime_identity: RuntimeIdentityBinding | None = PrivateAttr(default=None)
+    _native_workspace: NativeWorkspaceAuthority | None = PrivateAttr(default=None)
+
+    def with_native_workspace(
+        self, authority: NativeWorkspaceAuthority
+    ) -> "CodexChatModel":
+        """Bind one invocation without retaining its later role home on the model."""
+        updated = self.model_copy()
+        updated._native_workspace = authority
+        return updated
 
     def with_runtime_identity(
         self, binding: RuntimeIdentityBinding
@@ -192,7 +203,11 @@ class CodexChatModel(BaseChatModel):
         return updated
 
     async def _persist_runtime_identity(
-        self, initialize_result: JsonObject, provider_thread_id: str
+        self,
+        initialize_result: JsonObject,
+        provider_thread_id: str,
+        *,
+        native_authority: NativeLaunchAuthority | None = None,
     ) -> None:
         """Record the first app-server thread before starting its model turn."""
         binding = self._runtime_identity
@@ -209,7 +224,9 @@ class CodexChatModel(BaseChatModel):
                 "Codex initialize omitted a versioned server identity"
             )
         cli = identity_path(self.command_target, field="Codex CLI executable path")
-        cli_version = await asyncio.to_thread(probe_binary_version, cli)
+        cli_version = await asyncio.to_thread(
+            probe_binary_version, cli, native_authority=native_authority
+        )
         if match.group(1) != cli_version:
             raise _CodexProtocolError(
                 "Codex initialize version disagrees with the resolved launcher"
@@ -542,6 +559,7 @@ class CodexChatModel(BaseChatModel):
             raise ValueError("CodexChatModel received no prompt content")
 
         workspace = self._workspace()
+        require_native_workspace(self._native_workspace, workspace)
         env = self._build_env(workspace)
         # Per-run isolated CODEX_HOME: ALWAYS emit a worker-owned config.toml,
         # carrying exactly the declared read-only servers when any are armed,
@@ -551,30 +569,41 @@ class CodexChatModel(BaseChatModel):
         # The home is built INSIDE the try so a spawn failure cannot leak the
         # copied credential; it is cleaned up in the finally regardless of where
         # the turn fails.
-        # Fail loud before the home is emitted: the declared tool names become
+        # Verify inside the cleanup scope after role preparation: independent
+        # probes need the same selected home and filesystem authority. The
+        # declared tool names become
         # this lane's ``enabled_tools`` allowlist, so a server that no longer
         # serves one of them would leave Codex permitted to call a tool that does
         # not exist. The ACP lane applies the identical check at its own spawn
         # seam; one registry, one contract, both transports. The launch spec
         # carries no version constraint by design - this check is what makes the
         # declaration trustworthy - and it is memoized per launch identity.
-        await verify_harness_mcp_contract(
-            codex_mcp_server_specs(
-                self.harness_mcp_servers, project_root=self.workspace_root
-            ),
-            env=env,
-        )
-
         codex_config_home: Path | None = None
         client: _CodexAppServerClient | None = None
         process: asyncio.subprocess.Process | None = None
         try:
+            codex_config_home = self._build_codex_config_home()
+            native_authority = (
+                self._native_workspace.for_home(codex_config_home)
+                if self._native_workspace is not None
+                else None
+            )
+            env["CODEX_HOME"] = str(codex_config_home)
+            await verify_harness_mcp_contract(
+                codex_mcp_server_specs(
+                    self.harness_mcp_servers, project_root=self.workspace_root
+                ),
+                env=env,
+                native_authority=native_authority,
+            )
             if self.version_proof_required:
                 from .factory import codex_binary_proof_reason, require_binary_proof
 
-                require_binary_proof(codex_binary_proof_reason(self.command))
-            codex_config_home = self._build_codex_config_home()
-            env["CODEX_HOME"] = str(codex_config_home)
+                require_binary_proof(
+                    codex_binary_proof_reason(
+                        self.command, native_authority=native_authority
+                    )
+                )
             metadata = {
                 "provider": self.provider,
                 "command_executable": self.command_executable,
@@ -587,6 +616,7 @@ class CodexChatModel(BaseChatModel):
                 str(workspace),
                 use_exec=False,
                 metadata=metadata,
+                native_authority=native_authority,
             )
             client = _CodexAppServerClient(
                 process,
@@ -625,7 +655,9 @@ class CodexChatModel(BaseChatModel):
                 "id",
                 context="thread/start result thread",
             )
-            await self._persist_runtime_identity(initialize_result, thread_id)
+            await self._persist_runtime_identity(
+                initialize_result, thread_id, native_authority=native_authority
+            )
 
             await verify_authoring_ready(
                 client,

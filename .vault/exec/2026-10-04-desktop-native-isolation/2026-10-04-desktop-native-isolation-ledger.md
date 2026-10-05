@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:81c0d1cf00dcb4062fd47d38a371237a356fd265211eef72450e2122a2df9a1a'
+body_hash: 'sha256:9e3e4d0be142094ea565525bf988f53829fdb26529c0c929114dc57969eea933'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -102,6 +102,25 @@ related:
 - `S05` `verify:` `Linux isolated genuine MCP initial test producer noncanonical internal target` -> `fail`
 - `S05` `verify:` `Linux isolated genuine MCP after producer correction --basetemp=/tmp/desktop-isolation-s05-20261005-5 (1 passed)` -> `pass`
 - `S05` `verify:` `git diff --check` -> `pass`
+- `S06` `M` `src/vaultspec_a2a/desktop/native_isolation.py`
+- `S06` `A` `src/vaultspec_a2a/providers/_native_role.py`
+- `S06` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S06` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S06` `M` `src/vaultspec_a2a/providers/acp_catalog.py`
+- `S06` `M` `src/vaultspec_a2a/providers/codex_catalog.py`
+- `S06` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S06` `M` `src/vaultspec_a2a/graph/nodes/worker.py`
+- `S06` `A` `src/vaultspec_a2a/providers/tests/test_native_role.py`
+- `S06` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S06` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S06` `M` `.vault/plan/2026-10-04-desktop-native-isolation-plan.md`
+- `S06` `verify:` `Linux role and native foundation 13 real tests` -> `pass`
+- `S06` `verify:` `Windows role model-selection MCP 36 tests` -> `pass`
+- `S06` `verify:` `Windows proof and catalog 26 tests` -> `pass`
+- `S06` `verify:` `Ruff lint and formatting nine files` -> `pass`
+- `S06` `verify:` `Strict Basedpyright nine files` -> `pass`
+- `S06` `verify:` `Ty Windows Linux Darwin nine files` -> `pass`
+- `S06` `verify:` `git diff whitespace` -> `pass`
 
 ## Notes
 
@@ -119,3 +138,5 @@ related:
 - `S03` Windows/macOS and unqualified Linux targets retain native execution refusal; platform-specific backend integration is explicitly bounded.
 - `S04` Fresh read-only candidate review surfaced bootstrap environment, decoded authority traversal and host-dependent helper issues; all confirmed and corrected. Windows/macOS and unqualified Linux eligibility remain refused; release artifact and genuine authenticated turns remain S05-S06.
 - `S05` Desktop production execution remains refused; S06 worker/auth/packaging and S07 authenticated provider/artifact qualification remain open. Initial test-only dependency map failed runtime validation and was corrected without weakening the runtime.
+- `S06` Five existing live catalog tests deselected by repository selection; no new doubles or skips.
+- `S06` Authenticated provider early-close and cancellation remain S08; default Claude stores, managed-policy preservation and production closure are unqualified and refused.

@@ -112,6 +112,53 @@ def _decode_record(value: str) -> object:
 
 
 @dataclass(frozen=True, slots=True)
+class NativeWorkspaceAuthority:
+    """Capture the trusted worker's project and runtime before role preparation."""
+
+    app_home: DirectoryAuthority
+    capsule: DirectoryAuthority
+    workspace: DirectoryAuthority
+
+    @classmethod
+    def issue(
+        cls, *, app_home: Path, capsule: Path, workspace: Path
+    ) -> NativeWorkspaceAuthority:
+        authority = cls(
+            app_home=resolve_directory_authority(app_home),
+            capsule=resolve_directory_authority(capsule),
+            workspace=resolve_directory_authority(workspace),
+        )
+        authority.validate()
+        return authority
+
+    def validate(self) -> None:
+        """Keep captured identities and the managed project boundary authoritative."""
+        for root in (self.app_home, self.capsule, self.workspace):
+            assert_directory_authority(root)
+        state = derive_state_paths(self.app_home.path)
+        for root in (state.workspaces_root, state.temp_homes_dir):
+            if resolve_directory_authority(root).path != root:
+                raise ValueError("native managed roots must not redirect")
+        if not self.workspace.path.is_relative_to(state.workspaces_root):
+            raise ValueError("native workspace is outside the managed tree")
+        if self.capsule.path.is_relative_to(self.app_home.path) or (
+            self.app_home.path.is_relative_to(self.capsule.path)
+        ):
+            raise ValueError("native runtime and mutable state must be separate")
+
+    def for_home(self, home: Path) -> NativeLaunchAuthority:
+        """Add exactly one prepared home without recapturing the selected roots."""
+        authority = NativeLaunchAuthority(
+            self.app_home,
+            self.capsule,
+            self.workspace,
+            resolve_directory_authority(home),
+        )
+        authority.validate()
+        return authority
+
+
+@dataclass(frozen=True, slots=True)
 class NativeLaunchAuthority:
     """The selected project, role home and runtime, bound to directory identities.
 
@@ -128,33 +175,17 @@ class NativeLaunchAuthority:
     def issue(
         cls, *, app_home: Path, capsule: Path, workspace: Path, home: Path
     ) -> NativeLaunchAuthority:
-        authority = cls(
-            app_home=resolve_directory_authority(app_home),
-            capsule=resolve_directory_authority(capsule),
-            workspace=resolve_directory_authority(workspace),
-            home=resolve_directory_authority(home),
-        )
-        authority.validate()
-        return authority
+        return NativeWorkspaceAuthority.issue(
+            app_home=app_home, capsule=capsule, workspace=workspace
+        ).for_home(home)
 
     def validate(self) -> None:
         """Refuse changed identities, redirected roots and grants to other planes."""
-        for root in (self.app_home, self.capsule, self.workspace, self.home):
-            assert_directory_authority(root)
-        state = derive_state_paths(self.app_home.path)
-        for root in (state.workspaces_root, state.temp_homes_dir):
-            if resolve_directory_authority(root).path != root:
-                raise ValueError("native managed roots must not redirect")
-        if not self.workspace.path.is_relative_to(state.workspaces_root):
-            raise ValueError("native workspace is outside the managed tree")
-        if self.home.path == state.temp_homes_dir or not self.home.path.is_relative_to(
-            state.temp_homes_dir
-        ):
+        NativeWorkspaceAuthority(self.app_home, self.capsule, self.workspace).validate()
+        assert_directory_authority(self.home)
+        homes = derive_state_paths(self.app_home.path).temp_homes_dir
+        if self.home.path == homes or not self.home.path.is_relative_to(homes):
             raise ValueError("native auth home must be one selected role home")
-        if self.capsule.path.is_relative_to(self.app_home.path) or (
-            self.app_home.path.is_relative_to(self.capsule.path)
-        ):
-            raise ValueError("native runtime and mutable state must be separate")
 
     def canonical_cwd(self, value: str) -> str:
         path = Path(value).resolve(strict=True)

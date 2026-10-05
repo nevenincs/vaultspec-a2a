@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:23a5e10e4d547ca4a741556d7e8c654a1b4757b21d0cc0d8e25b3b7187a65764'
+body_hash: 'sha256:495efbe6e44e8a7c8e1c50d4427eec4d69a18e59005262f9c96d21cc209123f6'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-workspace-root-authority-audit]]"
@@ -114,6 +114,28 @@ PASS for S05; verification coverage DNI-007 resolved. Shared provider acquisitio
 Low / test-producer correctness; resolved DNI-009. Initial isolated MCP assembly redundantly mapped capsule-contained dependencies, including lexical parent traversals emitted by ldd. Production canonical/protected-target checks correctly refused before launch. Test assembly now normalizes external target paths and leaves already-copied internal libraries in the read-only capsule. The same genuine handshake passes without weakening runtime validation. Build-time dependency inspection remains test setup, never launch authority.
 
 High / implementation prerequisite; DNI-008 remains open S06-S07. Production worker issuance, credential-home identity/policy preservation, release assets and actual provider-turn qualification are not complete. No served eligibility or admission is restored.
+
+### S06 candidate review | medium | role-home cleanup ordering corrected
+
+Lifecycle / process containment; resolved DNI-010. The fresh read-only reviewer found that an async-generator forwarding wrapper could leave its inner ACP session suspended when a consumer closes a stream. Removing the surrounding role home then precedes the provider's reap. All three yielding wrappers now explicitly close their inner generators through aclosing: _astream, _stream_request and _astream_session. Prepared session cleanup completes before private grant release and home cleanup; asynchronous home removal is joined through complete_cleanup. Parent review of the actual final forwarding chain confirms the correction. The startup-refusal controls drive both real model implementations and verify no new home survives. Authenticated streaming, early-close and repeated-cancellation qualification remain S08 evidence requirements; source review is not a claim that those provider controls have run.
+
+### S06 parent review | medium | constructor and catalog version probes lacked prepared context
+
+Integration / availability; resolved DNI-011. Model construction and catalog version callbacks initially carried a workspace but had no role-home grant, so future isolated version acquisition would still refuse missing authority. Factory proof now prepares an empty worker-owned version-probe home from the admitted project, carries explicit native authority and removes that home afterward. A genuine static helper --version control returns 0.11.1 through isolation; the home is empty before execution and absent afterward. Missing/stale workspace and unsupported platform paths retain typed refusal. Unarmed factory proof preserves its original one-argument callback contract.
+
+### S06 verification correction | low | direct settings mutation omitted state seating
+
+Test setup / resolved DNI-012. The first startup-cleanup control changed desktop_app_home directly on the existing singleton without changing a2a_home. The sanctioned settings_override deliberately bypasses Settings construction, while production's _seat_desktop_profile validator seats a2a_home beneath the declared app home. Existing real child-construction coverage proves that validator behavior. Native for_home correctly refused the mismatched Codex home before child acquisition and cleanup removed it. The test now supplies the full seated profile instead of accepting that ValueError or weakening authority validation. Linux final role/foundation population passes 13 tests; Windows role/model-selection/MCP population passes 36. Initial four existing monkeypatched proof tests failed because an optional None keyword changed their callback shape; unarmed proof keeps the established call contract and final proof/catalog population passes 26, with five existing live selections deselected. No new mock, fake provider/server or skip was introduced.
+
+### S06 final review | low | worker-bound role preparation verified within declared channels
+
+PASS for S06. Worker composition now captures immutable app/runtime/project identities on an invocation copy before runtime-identity binding. Model, catalog, terminal, MCP and version paths carry the selected role's context; adding a home does not recapture a replaced project. Grants remain private model attributes and are absent from serialization. ACP prepares a fresh home only for the already selected Claude OAuth export or Z.ai token channel; the default subscription file store and other providers remain unqualified and refused. Existing Codex source-bound auth preparation and refresh return are preserved. Claude managed-policy directory presence, including redirected or unreadable presence, refuses rather than dropping host-managed policy. Windows/macOS role preparation remains refused.
+
+Verification: final Linux 13 real role/foundation tests pass, Windows 36 role/model/MCP tests pass, proof/catalog 26 pass with five existing live tests deselected, final Ruff lint/format, strict Basedpyright and Ty Windows/Linux/macOS pass for all nine owned files, and whitespace passes. Earlier nearest Windows home/desktop coverage passed 49 tests after async cleanup changes. A fresh candidate review plus parent review of its corrective final diff found no surviving concrete filesystem bypass in the S06 implementation. Genuine authenticated model/catalog turns are not claimed.
+
+Low / operational recovery; open DNI-013. Abrupt worker loss can leave the new vaultspec-native-home prefix beneath accounted app-state tmp/homes. Normal error/cancellation cleanup owns removal. Do not reuse the existing age-only orphan sweep for live native homes; lifecycle recovery with actual ownership evidence is follow-up work, and no rotated credential recovery is promised. The accepted default subscription file-store, host-managed policy preservation, release closure and real turn qualification remain high implementation prerequisite DNI-008, owned by S07-S08.
+
+Plan sequencing correction: S06 owns worker/model/catalog/version context and selected-channel role preparation; S07 now owns release runtime closure assembly and actual frozen artifact controls; S08 owns authenticated target/lane qualification and any eligibility restoration. The approved scope has eight sequential checkpoints. Earlier S06-S07 qualification references continue through S08; no eligibility changed.
 
 ## Review trail
 

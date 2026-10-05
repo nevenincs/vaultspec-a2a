@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-04'
 body_schema: 'body-v2'
-body_hash: 'sha256:d175d7a739e7b26a43d4d9b08424ce58fddbcf40dadaef1cd22dc9f164cf23c3'
+body_hash: 'sha256:be9892c91ba65475c21c42ce9ecc8eac13db9131087228dd8504a847eb26ffdd'
 related:
   - "[[2026-09-23-project-bound-state-adr]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
@@ -51,6 +51,10 @@ Type: verification/type contract. Status: open in the concurrent MCP workstream.
 
 Type: verification. Status: pending external gate repairs. Final package pytest: 228 passed, 21 service cases deselected. Focused takeover/reconnect/retry cohort: 6 passed. Ruff lint and format, Ty over authoring, and Basedpyright over the discovery/connection/client cohort pass. Real producer default rendezvous and separate Node dev namespace match, and a default-path authenticated catalog request succeeds. All 13 real-engine live authoring cases pass. Core checks for this feature: zero errors and warnings after owning-verb hygiene repair. The original exploit and both confirmed candidate-review issues are remediated in the working tree; security workflow outcome is blocked solely from unresolved required full-gate evidence, not a claim of verified closure.
 
+### workflow-gate-resolution | low | Authorized CI follow-up clears the remaining full-gate blocker
+
+Type: CI contract/verification. Status: resolved. The owner authorized continuation after the prior blocked report. Dashboard's runner-policy workflow now uses the required Dashboard name prefix and runs on pull requests, consistent with the existing rule that only release automation runs on pushes. Its same-repository PR guard, self-hosted placement, pinned checkout, read-only permissions and runner-placement checker remain enforced. Review of the actual two-line patch found no new security or compatibility issue. `pytest dev/guards/test_ci_lanes.py`: 24 passed. Full `just check-all`: exit 0, including all 186 guard tests. The earlier workflow and final-verification entries are historical blocked observations; the current security-fix outcome is fixed.
+
 ## Recommendations
 
 The engine-discovery-security decision must settle trusted record provenance and authenticated endpoint selection while preserving shared gateway parsing. Capture final verification and candidate-review findings here before reporting completion.
@@ -60,3 +64,5 @@ The engine-discovery-security decision must settle trusted record provenance and
 Working-tree candidate, Windows, 2026-10-04. Pre-refinement nearest authoring/lifecycle/storage/health suite: 395 passed, 20 deselected. Final authoring package after connection refinement: 225 passed, 20 deselected (then an additional reconnect regression added). Ruff, Ty and Basedpyright cover the touched production modules and authoring tests. Actual rebuilt Rust engine under an isolated git fixture: protected discovery succeeds and all 13 live authoring tests pass with `-m service --require-prerequisite=loopback-stack`, no infrastructure skip. The regression and syntax/type checks are rerun after final changes. Reviewer findings were validated and repaired in one candidate-review cycle. Semantic discovery was unavailable (`index_unverifiable`); owning Core search/cross-reference and targeted source reads supplied decision coverage. POSIX permission paths are source-reviewed; runtime checks here execute on Windows.
 
 Final update: package-wide `basedpyright src/vaultspec_a2a/authoring` now passes with zero errors; the concurrent metadata typing issue was repaired by its owning workstream. Its earlier audit entry records a transient verification failure, now resolved. Final authoring package run passed 228 tests with 21 deselected service cases. The six retry/takeover/reconnect cases pass after the final client error-message maintenance. Dashboard's 12 touched Rust serve integration cases pass, all owning-crate integration test targets pass, and Vitest's 4 live-setup cases pass. Required full completion remains blocked by the two unchanged Dashboard CI-policy guards.
+
+Follow-up completion, 2026-10-04: the coordinated candidate now passes every applicable verification gate. Dashboard `just check-all` passes actionlint, CI contract, configuration lint, Rust fmt/workspace clippy, frontend lint/format/tsc and auxiliary scans, plus 186 dev guards. A2A current authoring suite: 236 passed, 21 service cases deselected; Ruff lint/format, Ty and package-wide Basedpyright pass. A fresh isolated real-engine run selected all 13 live authoring tests with `--require-prerequisite=loopback-stack`; all passed, with no skips. The original repository-discovery exploit and port takeover/reconnect regressions remain covered by the passing authoring suite. Prior Rust owning-crate and touched-launcher test evidence is reused because this follow-up changes only CI workflow configuration. Review and classified audit updates are complete. Outcome: fixed; no remaining in-scope blocker. POSIX behavior remains source-reviewed, while actual runtime verification used Windows.

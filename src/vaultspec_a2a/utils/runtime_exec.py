@@ -48,6 +48,7 @@ DISPATCHABLE_MODULES = frozenset(
     {
         "vaultspec_a2a.worker",
         "vaultspec_a2a.protocols.mcp.authoring_stdio",
+        "vaultspec_a2a.desktop._linux_launcher",
         "vaultspec_core",
     }
 )

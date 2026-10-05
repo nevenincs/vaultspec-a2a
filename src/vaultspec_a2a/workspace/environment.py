@@ -14,6 +14,7 @@ __all__ = [
     "resolve_env_vars",
     "resolve_venv",
     "scrub_agent_environment",
+    "scrub_infrastructure_environment",
 ]
 
 
@@ -59,6 +60,27 @@ def resolve_venv(workspace_path: Path) -> Path | None:
     return None
 
 
+def scrub_infrastructure_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    """Remove service authority while preserving explicitly supplied provider auth."""
+    forbidden = frozenset(
+        {
+            "DATABASE_URL",
+            "CHECKPOINT_DATABASE_URL",
+            "SQLALCHEMY_DATABASE_URI",
+            "PGPASSWORD",
+            "POSTGRES_PASSWORD",
+            "SERVICE_TOKEN",
+            "GATEWAY_TOKEN",
+            "INTERNAL_TOKEN",
+        }
+    )
+    return {
+        name: value
+        for name, value in environment.items()
+        if name.upper() not in forbidden and not name.upper().startswith("VAULTSPEC_")
+    }
+
+
 def scrub_agent_environment(environment: Mapping[str, str]) -> dict[str, str]:
     """Remove infrastructure and ambient provider credentials before role additions."""
     scrub_keys = frozenset(
@@ -70,18 +92,6 @@ def scrub_agent_environment(environment: Mapping[str, str]) -> dict[str, str]:
             "AWS_SECRET_ACCESS_KEY",
             "AZURE_OPENAI_API_KEY",
             "ZHIPU_API_KEY",
-            # Generic database/service spellings are scrubbed independently of
-            # the VAULTSPEC_* family. Operators and container platforms often
-            # inject these aliases alongside the canonical settings; a lower-
-            # trust provider child must not inherit either spelling.
-            "DATABASE_URL",
-            "CHECKPOINT_DATABASE_URL",
-            "SQLALCHEMY_DATABASE_URI",
-            "PGPASSWORD",
-            "POSTGRES_PASSWORD",
-            "SERVICE_TOKEN",
-            "GATEWAY_TOKEN",
-            "INTERNAL_TOKEN",
             "LANGCHAIN_API_KEY",
             "LANGSMITH_API_KEY",
             "LANGCHAIN_TRACING_V2",
@@ -117,9 +127,8 @@ def scrub_agent_environment(environment: Mapping[str, str]) -> dict[str, str]:
     )
     env = {
         k: v
-        for k, v in environment.items()
+        for k, v in scrub_infrastructure_environment(environment).items()
         if k.upper() not in scrub_keys
-        and not k.upper().startswith("VAULTSPEC_")
         and not (
             k.upper().startswith("CLAUDE_CODE_")
             and k.upper() not in claude_code_allowlist

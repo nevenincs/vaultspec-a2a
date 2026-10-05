@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#desktop-native-isolation'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:b2a79fdd69dd4dea8f0f0613d831df599e08ead88c7bef677dfecc04452a2554'
+body_hash: 'sha256:9fe2c5d2841d249c3c4e2f851a496cf64e3718261541d487a4a5493ca358ed4f'
 related:
   - '[[2026-10-04-desktop-native-isolation-audit]]'
   - '[[2026-10-04-desktop-native-isolation-ledger]]'
@@ -23,7 +23,7 @@ Auto-generated index of all documents tagged with `#desktop-native-isolation`.
 
 ### adr
 
-- `2026-10-05-desktop-native-isolation-linux-namespace-backend-adr` - `desktop-native-isolation` adr: `linux namespace backend` | (**status:** `{proposed|accepted|rejected|superseded|deprecated}`)
+- `2026-10-05-desktop-native-isolation-linux-namespace-backend-adr` - `desktop-native-isolation` adr: `Linux namespace backend with proof-gated native admission` | (**status:** `accepted`)
 
 ### audit
 

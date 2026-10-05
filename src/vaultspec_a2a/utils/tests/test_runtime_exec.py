@@ -41,6 +41,17 @@ def test_module_command_refuses_unlisted_module() -> None:
         module_command("os")
 
 
+def test_isolated_module_command_really_runs_without_project_imports() -> None:
+    result = subprocess.run(
+        module_command("vaultspec_core", "--version", isolated=True),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip()
+
+
 def test_is_module_invocation_accepts_exactly_both_authority_shapes() -> None:
     """The admission key matches the source and frozen shapes and nothing else."""
     module = "vaultspec_a2a.protocols.mcp.authoring_stdio"

@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#desktop-native-isolation'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:50120957b90d3cab1d2ebaf30215d9ed85d43319208686d317bcf083dcf0935a'
+body_hash: 'sha256:c0a33241b5eecd45a121e23eb7e4e182f9e148c26abba1b2b38178e2957ebf1c'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-workspace-root-authority-audit]]"
@@ -76,6 +76,26 @@ Implementation prerequisite; open DNI-003, S03-S05. Correcting restricted-token 
 PASS for the Linux implementation prerequisite; this is not native/provider eligibility. The managed selective-mount probe and retained actual output prove synthetic private absolute/symlink/host-proc denial, selected role-home read, project write, read-only runtime, normal piped Node child exit 13, loopback HTTP 200 and removal of detached setsid descendants after the retained sandbox owner is killed. Runtime versions and persistent artifact locators are recorded in `2026-10-04-desktop-native-isolation-native-backend-primitives-research`. Review confirms no whole-host or application-home bind, private host process namespace is absent, and the evidence does not claim real provider auth/turn or a shipped runtime closure.
 
 Low / verification coverage; open S04-S05: production needs descriptor-bound mount acquisition, capsule-owned helper/dependencies, all launch entry points and actual lane/target proof. Linux dependency discovery via ldd is research setup only and must not become runtime authority. Windows restricted-token pipes fail at both low and medium integrity; AppContainer also requires compatible LOCAL pipe naming and loopback transport. Windows/macOS remain refused. The distinct backend ADR was compared once against current accepted coverage; returned refinement/shared-artifact links preserve the native-admission and binary-proof rulings. Input truncation limits automated comparison, so scoped source/decision reading remains authoritative. No older ruling is superseded: the new decision authorizes implementation while conditional refusal remains binding.
+
+### S04 candidate review | high | trusted bootstrap separation corrected
+
+Security / pre-isolation execution; resolved DNI-004. The draft argv-only launcher inherited role cwd/environment. An actual disposable regression showed a project sitecustomize hook reading a synthetic private sentinel before isolation while the provider never started. The launch API now returns command, clean bootstrap environment and trusted capsule cwd together; source execution uses isolated Python mode. Bounded opaque role environment is applied through sealed anonymous helper arguments. A real compiled preload constructor runs inside the namespace and observes denial; the project Python startup hook never runs in the wrapper. Large ordinary options remain intact. NULs, invalid names, duplicate fields and oversized packets fail explicitly. Persistent baseline: artifacts/desktop-native-isolation/linux-bootstrap-baseline.py, SHA256 89532b4742cc818ae16271d59054c75fed66a268be888ce7c2201d536a13c7d2.
+
+### S04 candidate review | high | encoded authority canonicalization corrected
+
+Security / path validation; resolved DNI-005. Decoded absolute root paths could contain parent traversal while passing lexical managed-root and filesystem identity checks. Decoded roots now must equal existing canonical paths before constructing authority. A real sibling private directory with its actual identity is rejected through a managed-prefix parent traversal. Valid selected project/home round trips and stale-directory refusal remain supported.
+
+### S04 candidate review | medium | helper bootstrap closure corrected
+
+Portability / runtime closure; resolved DNI-006. Read-only inspection confirmed the initial ELF helper used host interpreter/libraries before namespace mounts existed. Build assembly and runtime enforce a static ELF with no interpreter or dynamic segment, validate unprivileged regular inputs before version execution and attest opened helper bytes. Genuine pinned upstream bubblewrap 0.11.1 was compiled statically with libcap in a temporary build tree; actual namespace controls pass. The dynamic system helper is refused before staging. Producer and exact input/helper hashes are recorded in the research trail. Release packaging remains S05; the test artifact is not a shipped capsule.
+
+### S04 review | low | foundation verified, production qualification remains open
+
+Verification / implementation prerequisite; open DNI-003 in S05-S06. Linux foundation/environment/runtime dispatch suites pass 18 real tests with the selected static helper; the added retained-owner/detached-descendant control is recorded in final verification. Private absolute/symlink/host-proc reads fail, no directory grants leak, project writes and selected synthetic auth work, runtime is read-only, piped child exits 13 and relay HTTP returns 200. Windows nearest suites pass 28 tests covering authority/parsers, unsupported platforms, native refusal, normal runtime/environment and genuine MCP credential filtering. Windows is not a backend proof. One fresh candidate review surfaced the three confirmed issues above, now corrected. Its initial finalization failed at the security service; a defensive read-only continuation completed without payloads, edits or duplicate tests. Locked standalone CPython lacks memfd/seal wrappers; typed libc ABI calls perform the actual sealed descriptor operation. No production caller or eligibility is introduced. Closed admission remains binding.
+
+### S04 final verification | low | retained-owner cleanup proven
+
+PASS for S04 foundation. Final Linux native suite passes 9 tests, including the actual production launch wrapper and a Node child that creates a detached descendant. The test identifies that descendant by its unique control argv and retained /proc identity, kills only the exact owned sandbox process and observes descendant termination. This extends the earlier 18-test combined foundation/environment/dispatch run; no source changes were made to the previously passing ordinary environment or dispatch paths. Windows nearest suites pass 28 tests; the new portable unsupported-platform case is checked separately. Ruff lint/format, strict Basedpyright, Ty Windows/Linux/macOS, diff whitespace and feature Vault checks pass. All three candidate findings are resolved and recorded; release closure assembly, all child entry points and real authenticated provider-turn qualification remain open S05-S06. No eligibility is restored.
 
 ## Review trail
 

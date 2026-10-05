@@ -3,9 +3,9 @@ tags:
   - '#research'
   - '#desktop-native-isolation'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:f9fe9b91c36ebda402a6ba2216ea4a5e98eecd034ee138e93d5c651228e11d9f'
+body_hash: 'sha256:f7df8202edde6efdf36da4420a976aed04005ebe2864fba70819fbc16b86d772'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-desktop-native-isolation-audit]]"
@@ -46,6 +46,14 @@ Upstream libuv commit `2cadaa40167050baf7c6905ac897e6fb57afb2c6` (2026-07-13, PR
 ### Remaining proof gaps determine the allowed implementation scope
 
 No actual isolated model turn, shipped capsule/helper closure, Windows ARM64 or Linux ARM64 qualification, or macOS boundary has been proved. Claude's subscription auth currently depends on the real user config home and requires a role-scoped preparation contract. Linux namespace policy is viable on the available research host; that does not establish supported-host availability. Unsupported or unproved targets remain refused. Production Docker is excluded by `2026-10-04-container-release-native-production-adr`.
+
+### S04 bootstrap proof requires self-contained helper and separated role startup
+
+An actual project Python startup hook in the draft wrapper read a synthetic private sentinel before namespaces; the provider never started. The revised API separates trusted command/environment/cwd from role data, uses isolated Python mode from source and bounded opaque environment chunks. The helper starts clean; role variables travel in sealed anonymous arguments. A genuine compiled project preload constructor runs in the target and observes private-file denial, while project sitecustomize never executes in the wrapper. This corrects the boundary without granting provider eligibility.
+
+The copied system bubblewrap bootstraps from host interpreter/libraries. Production now requires static ELF with no interpreter/dynamic segment. Genuine upstream v0.11.1 was compiled with /usr/bin/cc -static -O2, static libcap 2.75 and require_userns enabled; optional SELinux support was not compiled in. The development archive was extracted into a temporary build tree without global package installation/configuration changes. Upstream source archive SHA256 fb6ebf0264dfe9fb88777d352deeedf5aecf2e36e78da148157036b647f86e0f; libcap archive SHA256 74fa71aa089d90d720722f6278314b90b72fa2e1631aea5dc32b770d0324ce86; helper SHA256 acb396d2eef44125ee6d0898460e99f45ecf850e8f535aac247e2519785b6591. Persistent producer: artifacts/desktop-native-isolation/build-static-test-helper.py, SHA256 356ea5b790bb4944af8b30a74652dce3847499efc5405d2b7e863f10185e4d43. Persistent bootstrap baseline: artifacts/desktop-native-isolation/linux-bootstrap-baseline.py, SHA256 89532b4742cc818ae16271d59054c75fed66a268be888ce7c2201d536a13c7d2. Both live in the existing target-bound security artifact directory. The producer is test evidence, not release qualification.
+
+Locked Linux foundation/environment/runtime suites pass 18 tests with static helper, Node 22.23.1 and Python 3.13.14. Standalone CPython omits os.memfd_create and seal constants; typed libc calls use Linux UAPI flags and actual target execution proves their transport. The source-to-helper argument descriptor is consumed/closed before target execution. Primary grounding: https://raw.githubusercontent.com/containers/bubblewrap/v0.11.1/bubblewrap.c; https://raw.githubusercontent.com/containers/bubblewrap/v0.11.1/meson.build; https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/memfd.h; https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/fcntl.h. Node 22 evidence does not qualify the repository Node 26.8.1 engine or a real provider turn.
 
 ## Sources
 

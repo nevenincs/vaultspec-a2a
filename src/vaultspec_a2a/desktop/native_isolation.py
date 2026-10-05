@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
+import base64
 import errno
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..utils.process import ProcessContainmentError
-from ..utils.runtime_exec import module_command
+from ..utils.runtime_exec import is_frozen, module_command
 from ..workspace.environment import scrub_infrastructure_environment
 from ._filesystem_authority import (
     DirectoryAuthority,
@@ -25,6 +28,7 @@ from ._filesystem_authority import (
     directory_lease,
     resolve_directory_authority,
 )
+from ._linux_helper import anonymous_arguments, require_static_helper
 from .profile import derive_state_paths
 
 if TYPE_CHECKING:
@@ -32,6 +36,10 @@ if TYPE_CHECKING:
 
 _MANIFEST = "isolation/runtime.json"
 _MAX_METADATA_BYTES = 64 * 1024
+_MAX_ENVIRONMENT_BYTES = 512 * 1024
+_ENVIRONMENT_PREFIX = "VAULTSPEC_A2A_NATIVE_PACKET_"
+_PACKET_CHUNK_BYTES = 32768
+_MAX_PACKET_CHUNKS = 22
 
 
 class _StrictRecord(BaseModel):
@@ -47,6 +55,8 @@ class _RootRecord(_StrictRecord):
         path = Path(self.path)
         if not path.is_absolute() or "\0" in self.path:
             raise ValueError("native authority requires an absolute directory")
+        if path.resolve(strict=True) != path:
+            raise ValueError("native authority requires a canonical directory")
         return DirectoryAuthority(path=path, identity=(self.device, self.inode))
 
 
@@ -55,6 +65,10 @@ class _LaunchRecord(_StrictRecord):
     capsule: _RootRecord
     workspace: _RootRecord
     home: _RootRecord
+
+
+class _EnvironmentRecord(_StrictRecord):
+    values: dict[str, str] = Field(max_length=2048)
 
 
 class RuntimeFile(_StrictRecord):
@@ -177,20 +191,99 @@ class NativeLaunchAuthority:
         return authority
 
 
-def linux_isolated_command(
-    authority: NativeLaunchAuthority, command: list[str], *, cwd: str
-) -> list[str]:
-    """Render the trusted launcher; this alone never grants served eligibility."""
+def _validate_environment(environment: Mapping[str, str]) -> None:
+    for name, value in environment.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError("native environment requires valid variable names")
+        if "\0" in value or len(value.encode("utf-8")) > 65536:
+            raise ValueError("native environment value is invalid or too large")
+
+
+def _validate_command(command: list[str]) -> None:
+    if not command or len(command) > 512 or any("\0" in arg for arg in command):
+        raise ValueError("native launch requires a bounded command without NULs")
+
+
+def _bootstrap_environment() -> dict[str, str]:
+    # Never inherit role-controlled loader hooks, Python paths or startup homes.
+    environment = {"LANG": "C.UTF-8"}
+    if is_frozen():
+        bundle = getattr(sys, "_MEIPASS", None)
+        if not isinstance(bundle, str):
+            raise ProcessContainmentError("frozen native launcher lacks its bundle")
+        environment["LD_LIBRARY_PATH"] = str(Path(bundle).resolve(strict=True))
+    return environment
+
+
+def decode_launch_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    """Decode opaque role data after the trusted interpreter has started."""
+    count = environment.get(_ENVIRONMENT_PREFIX + "COUNT", "")
+    if not re.fullmatch(r"[1-9][0-9]?", count) or int(count) > _MAX_PACKET_CHUNKS:
+        raise ValueError("native environment packet has an invalid chunk count")
+    pieces: list[str] = []
+    for index in range(int(count)):
+        value = environment.get(_ENVIRONMENT_PREFIX + str(index))
+        if value is None or len(value) > _PACKET_CHUNK_BYTES:
+            raise ValueError("native environment packet is incomplete or oversized")
+        pieces.append(value)
+    raw = base64.b64decode("".join(pieces), validate=True)
+    if len(raw) > _MAX_ENVIRONMENT_BYTES:
+        raise ValueError("native environment packet exceeds its bound")
+    try:
+        parsed = json.loads(raw, object_pairs_hook=_unique_object)
+    except RecursionError as exc:
+        raise ValueError("native environment packet is too deeply nested") from exc
+    record = _EnvironmentRecord.model_validate(parsed)
+    _validate_environment(record.values)
+    return record.values
+
+
+@dataclass(frozen=True, slots=True)
+class NativeLaunch:
+    """An inseparable trusted bootstrap command, environment and working directory."""
+
+    command: tuple[str, ...]
+    environment: Mapping[str, str]
+    cwd: str
+
+
+def linux_isolated_launch(
+    authority: NativeLaunchAuthority,
+    command: list[str],
+    *,
+    cwd: str,
+    environment: Mapping[str, str],
+) -> NativeLaunch:
+    """Render a clean bootstrap; this alone never grants served eligibility."""
     if sys.platform != "linux":
         raise ProcessContainmentError("native namespace isolation requires Linux")
     authority.validate()
-    if not command:
-        raise ValueError("native launch requires a command")
-    return module_command(
+    _validate_command(command)
+    _validate_environment(environment)
+    raw = _EnvironmentRecord(values=dict(environment)).model_dump_json().encode("utf-8")
+    if len(raw) > _MAX_ENVIRONMENT_BYTES:
+        raise ValueError("native environment packet exceeds its bound")
+    encoded = base64.b64encode(raw).decode("ascii")
+    chunks = [
+        encoded[offset : offset + _PACKET_CHUNK_BYTES]
+        for offset in range(0, len(encoded), _PACKET_CHUNK_BYTES)
+    ]
+    bootstrap_env = _bootstrap_environment()
+    bootstrap_env[_ENVIRONMENT_PREFIX + "COUNT"] = str(len(chunks))
+    bootstrap_env.update(
+        (_ENVIRONMENT_PREFIX + str(index), chunk) for index, chunk in enumerate(chunks)
+    )
+    argv = module_command(
         "vaultspec_a2a.desktop._linux_launcher",
         authority.encode(),
         authority.canonical_cwd(cwd),
         *command,
+        isolated=True,
+    )
+    return NativeLaunch(
+        command=tuple(argv),
+        environment=MappingProxyType(bootstrap_env),
+        cwd=str(authority.capsule.path),
     )
 
 
@@ -265,8 +358,8 @@ def exec_linux_isolated(
         raise ProcessContainmentError("native namespace isolation requires Linux")
     authority.validate()
     selected_cwd = authority.canonical_cwd(cwd)
-    if not command:
-        raise ValueError("native launch requires a command")
+    _validate_command(command)
+    _validate_environment(environment)
     with ExitStack() as stack:
         # Recheck leased identities before any mount. Only the three grants are
         # inherited; the validation anchor and all unrelated FDs stay closed.
@@ -282,8 +375,7 @@ def exec_linux_isolated(
             _decode_record(metadata.decode("utf-8"))
         )
         helper_fd = _attested_file(stack, authority.capsule, closure.helper)
-        if os.read(helper_fd, 4) != b"\x7fELF":
-            raise ValueError("native helper must be a pinned ELF executable")
+        require_static_helper(helper_fd)
         helper_mode = os.fstat(helper_fd).st_mode
         if helper_mode & (stat.S_ISUID | stat.S_ISGID):
             raise ValueError("native helper cannot have privileged mode bits")
@@ -359,7 +451,16 @@ def exec_linux_isolated(
             XDG_DATA_HOME=str(authority.home.path / ".local" / "share"),
             TMPDIR="/tmp",
         )
-        argv.extend(["--chdir", selected_cwd, "--", *command])
+        argv.append("--clearenv")
+        for name, value in env.items():
+            argv.extend(["--setenv", name, value])
+        argv.extend(["--chdir", selected_cwd])
+        # Credentials and role hooks are data for post-isolation target exec;
+        # they must never become the host helper's loader environment or argv.
+        args_fd = anonymous_arguments(argv[1:])
+        stack.callback(os.close, args_fd)
+        grant_fds.append(args_fd)
+        os.set_inheritable(args_fd, True)
         for value in os.listdir("/proc/self/fd"):
             descriptor = int(value)
             if descriptor <= 2 or descriptor in grant_fds:
@@ -369,4 +470,8 @@ def exec_linux_isolated(
             except OSError as exc:
                 if exc.errno != errno.EBADF:
                     raise
-        os.execve(helper_fd, argv, env)
+        os.execve(
+            helper_fd,
+            ["bubblewrap", "--args", str(args_fd), "--", *command],
+            {"LANG": "C.UTF-8"},
+        )

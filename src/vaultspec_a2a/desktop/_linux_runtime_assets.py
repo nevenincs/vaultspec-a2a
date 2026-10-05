@@ -8,6 +8,7 @@ import stat
 import subprocess
 from typing import TYPE_CHECKING
 
+from ._linux_helper import require_static_helper
 from .native_isolation import LinuxRuntimeClosure, RuntimeFile, RuntimeMount
 
 if TYPE_CHECKING:
@@ -24,15 +25,25 @@ def stage_linux_isolation_assets(
     discovers libraries or invokes an installer on the user's machine.
     """
     source_helper = helper.resolve(strict=True)
+    metadata = source_helper.stat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or metadata.st_mode & (stat.S_ISUID | stat.S_ISGID)
+    ):
+        raise ValueError(
+            "native helper build input must be an unprivileged regular file"
+        )
     with source_helper.open("rb") as stream:
-        if stream.read(4) != b"\x7fELF":
-            raise ValueError("native helper build input must be ELF")
+        require_static_helper(stream.fileno())
     version = subprocess.run(
         [str(source_helper), "--version"],
         check=True,
         capture_output=True,
         text=True,
         timeout=15,
+        env={"LANG": "C.UTF-8"},
+        cwd=capsule,
     ).stdout.strip()
     if version != "bubblewrap 0.11.1":
         raise ValueError("native helper build input must be bubblewrap 0.11.1")

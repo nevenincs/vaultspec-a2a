@@ -72,7 +72,7 @@ def self_command(*args: str) -> list[str]:
     return [sys.executable, "-m", CLI_MODULE, *args]
 
 
-def module_command(module: str, *args: str) -> list[str]:
+def module_command(module: str, *args: str, isolated: bool = False) -> list[str]:
     """Argv that runs allowlisted *module* as ``__main__`` in this closure.
 
     The freeze-safe replacement for ``[sys.executable, "-m", module, *args]``.
@@ -87,7 +87,8 @@ def module_command(module: str, *args: str) -> list[str]:
         )
     if is_frozen():
         return [sys.executable, RUN_MODULE_VERB, module, *args]
-    return [sys.executable, "-m", module, *args]
+    flags = ["-I", "-m"] if isolated else ["-m"]
+    return [sys.executable, *flags, module, *args]
 
 
 def is_module_invocation(args: object, module: str) -> bool:

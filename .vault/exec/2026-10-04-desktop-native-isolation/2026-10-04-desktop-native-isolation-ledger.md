@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:81c0e6b8b665443ac3cc519cd16b88cefffc6fa2712228b422eedac0ae232a96'
+body_hash: 'sha256:fb40a8cc40a35f01f3efc19e1118e76f57bdbacd3dbf505240161efc609abe9b'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -57,6 +57,26 @@ related:
 - `S03` `verify:` `Windows restricted-token normal Node pipe compatibility` -> `fail`
 - `S03` `verify:` `actual research and decision compatibility review` -> `pass`
 - `S03` `verify:` `one configured ADR placement comparison` -> `pass`
+- `S04` `M` `src/vaultspec_a2a/desktop/native_isolation.py`
+- `S04` `M` `src/vaultspec_a2a/desktop/_linux_launcher.py`
+- `S04` `A` `src/vaultspec_a2a/desktop/_linux_helper.py`
+- `S04` `M` `src/vaultspec_a2a/desktop/_linux_runtime_assets.py`
+- `S04` `M` `src/vaultspec_a2a/desktop/tests/test_native_isolation.py`
+- `S04` `M` `src/vaultspec_a2a/utils/runtime_exec.py`
+- `S04` `M` `src/vaultspec_a2a/utils/tests/test_runtime_exec.py`
+- `S04` `M` `src/vaultspec_a2a/workspace/environment.py`
+- `S04` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S04` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S04` `M` `.vault/adr/2026-10-05-desktop-native-isolation-linux-namespace-backend-adr.md`
+- `S04` `verify:` `locked Linux pytest native isolation foundation (9 tests, static helper)` -> `pass`
+- `S04` `verify:` `locked Linux pytest foundation/runtime dispatch/environment (18 tests before added cleanup control)` -> `pass`
+- `S04` `verify:` `uv run --no-sync pytest native foundation/runtime dispatch/environment/desktop refusal/MCP security (28 tests)` -> `pass`
+- `S04` `verify:` `uv run --no-sync ruff check owned files` -> `pass`
+- `S04` `verify:` `uv run --no-sync ruff format --check owned files` -> `pass`
+- `S04` `verify:` `uv run --no-sync basedpyright owned files` -> `pass`
+- `S04` `verify:` `uv run --no-sync ty check owned files for Windows/Linux/Darwin` -> `pass`
+- `S04` `verify:` `git diff --check` -> `pass`
+- `S04` `verify:` `vault feature check desktop-native-isolation` -> `pass`
 
 ## Notes
 
@@ -72,3 +92,4 @@ related:
 - `S03` Linux proof uses genuine Node22.23.1/Python3.14.4/bubblewrap0.11.1 on available WSL research host; WSL is not a Windows product prerequisite.
 - `S03` Synthetic auth is not provider authentication. Packaged helper closure, actual provider turns and target qualification remain S04-S05.
 - `S03` Windows/macOS and unqualified Linux targets retain native execution refusal; platform-specific backend integration is explicitly bounded.
+- `S04` Fresh read-only candidate review surfaced bootstrap environment, decoded authority traversal and host-dependent helper issues; all confirmed and corrected. Windows/macOS and unqualified Linux eligibility remain refused; release artifact and genuine authenticated turns remain S05-S06.

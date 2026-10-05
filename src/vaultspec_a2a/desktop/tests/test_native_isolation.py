@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import http.server
 import json
 import os
@@ -10,14 +11,20 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import override
+from uuid import uuid4
 
 import pytest
 
 from ...utils.process import ProcessContainmentError
 from .._linux_runtime_assets import stage_linux_isolation_assets
-from ..native_isolation import NativeLaunchAuthority, linux_isolated_command
+from ..native_isolation import (
+    NativeLaunchAuthority,
+    decode_launch_environment,
+    linux_isolated_launch,
+)
 from ..profile import derive_state_paths
 
 
@@ -49,7 +56,7 @@ def _install_runtime(authority: NativeLaunchAuthority) -> Path:
     paths = set(re.findall(r"(/[^\s()]+)", dependencies))
     stage_linux_isolation_assets(
         authority.capsule.path,
-        helper=Path("/usr/bin/bwrap"),
+        helper=Path(os.environ["VAULTSPEC_A2A_TEST_LINUX_ISOLATION_HELPER"]),
         files={path: Path(path) for path in paths},
     )
     return target
@@ -98,13 +105,26 @@ def test_authority_metadata_refuses_ambiguous_or_unbounded_input(
     for malformed in (ambiguous, "x" * 65537, "[" * 2000 + "]" * 2000):
         with pytest.raises(ValueError):
             NativeLaunchAuthority.decode(malformed)
+    private = authority.app_home.path / "synthetic-private"
+    private.mkdir()
+    metadata = private.stat()
+    redirected = json.loads(encoded)
+    redirected["workspace"] = {
+        "path": str(authority.workspace.path.parent / ".." / private.name),
+        "device": metadata.st_dev,
+        "inode": metadata.st_ino,
+    }
+    with pytest.raises(ValueError, match="canonical"):
+        NativeLaunchAuthority.decode(json.dumps(redirected))
 
 
 def test_native_grants_preserve_work_and_deny_other_planes(tmp_path: Path) -> None:
     authority = _authority(tmp_path)
     if sys.platform != "linux":
         with pytest.raises(ProcessContainmentError, match="requires Linux"):
-            linux_isolated_command(authority, [sys.executable], cwd=str(tmp_path))
+            linux_isolated_launch(
+                authority, [sys.executable], cwd=str(tmp_path), environment={}
+            )
         return
     node = _install_runtime(authority)
     private = authority.app_home.path / "credentials"
@@ -210,11 +230,16 @@ request.on('error', e => { out.loopback = e.code; console.log(JSON.stringify(out
     }
     descriptor = os.open(private, os.O_RDONLY | os.O_DIRECTORY)
     try:
+        launch = linux_isolated_launch(
+            authority,
+            [str(node), str(script)],
+            cwd=str(authority.workspace.path),
+            environment=env,
+        )
         completed = subprocess.run(
-            linux_isolated_command(
-                authority, [str(node), str(script)], cwd=str(authority.workspace.path)
-            ),
-            env=env,
+            launch.command,
+            env=launch.environment,
+            cwd=launch.cwd,
             pass_fds=(descriptor,),
             capture_output=True,
             text=True,
@@ -243,19 +268,25 @@ def test_changed_helper_is_refused_before_provider_work(tmp_path: Path) -> None:
     authority = _authority(tmp_path)
     if sys.platform != "linux":
         with pytest.raises(ProcessContainmentError, match="requires Linux"):
-            linux_isolated_command(authority, [sys.executable], cwd=str(tmp_path))
+            linux_isolated_launch(
+                authority, [sys.executable], cwd=str(tmp_path), environment={}
+            )
         return
     node = _install_runtime(authority)
     helper = authority.capsule.path / "isolation" / "bin" / "bubblewrap"
     with helper.open("r+b") as stream:
         stream.write(b"changed-helper")
     marker = authority.workspace.path / "started"
+    launch = linux_isolated_launch(
+        authority,
+        [str(node), "-e", "require('fs').writeFileSync('started','unsafe')"],
+        cwd=str(authority.workspace.path),
+        environment={},
+    )
     completed = subprocess.run(
-        linux_isolated_command(
-            authority,
-            [str(node), "-e", "require('fs').writeFileSync('started','unsafe')"],
-            cwd=str(authority.workspace.path),
-        ),
+        launch.command,
+        env=launch.environment,
+        cwd=launch.cwd,
         capture_output=True,
         text=True,
         check=False,
@@ -264,3 +295,187 @@ def test_changed_helper_is_refused_before_provider_work(tmp_path: Path) -> None:
     assert completed.returncode != 0
     assert "differs from its pinned closure" in completed.stderr
     assert not marker.exists()
+
+
+def test_role_startup_hooks_execute_only_after_isolation(tmp_path: Path) -> None:
+    authority = _authority(tmp_path)
+    if sys.platform != "linux":
+        with pytest.raises(ProcessContainmentError, match="requires Linux"):
+            linux_isolated_launch(
+                authority, [sys.executable], cwd=str(tmp_path), environment={}
+            )
+        return
+    node = _install_runtime(authority)
+    private = authority.app_home.path / "synthetic-private"
+    private.write_text("synthetic-only", encoding="utf-8")
+    python_marker = authority.workspace.path / "python-hook"
+    (authority.workspace.path / "sitecustomize.py").write_text(
+        "from pathlib import Path\n"
+        + f"Path({str(python_marker)!r}).write_text('ran-before-isolation')\n",
+        encoding="utf-8",
+    )
+    loader_marker = authority.workspace.path / "loader-hook"
+    source = authority.workspace.path / "startup.c"
+    source.write_text(
+        "#include <stdio.h>\n"
+        "__attribute__((constructor)) static void observe(void) {\n"
+        + f'FILE *private_file = fopen({json.dumps(str(private))}, "r");\n'
+        + f'FILE *marker = fopen({json.dumps(str(loader_marker))}, "a");\n'
+        + 'if (marker) { fputs(private_file ? "permitted\\n" : "denied\\n", marker); '
+        + "fclose(marker); } if (private_file) fclose(private_file); }\n",
+        encoding="utf-8",
+    )
+    library = authority.workspace.path / "startup.so"
+    subprocess.run(
+        ["/usr/bin/cc", "-shared", "-fPIC", str(source), "-o", str(library)],
+        capture_output=True,
+        check=True,
+        timeout=15,
+    )
+    environment = {
+        "PYTHONPATH": str(authority.workspace.path),
+        "LD_PRELOAD": str(library),
+        "LD_LIBRARY_PATH": str(authority.workspace.path),
+        "ORDINARY_OPTION": "preserved" * 6000,
+    }
+    launch = linux_isolated_launch(
+        authority,
+        [str(node), "-e", "console.log(process.env.ORDINARY_OPTION.length)"],
+        cwd=str(authority.workspace.path),
+        environment=environment,
+    )
+    assert decode_launch_environment(launch.environment) == environment
+    completed = subprocess.run(
+        launch.command,
+        env=launch.environment,
+        cwd=launch.cwd,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "54000"
+    assert not python_marker.exists()
+    assert loader_marker.read_text(encoding="utf-8").splitlines() == ["denied"]
+    for command, env in (
+        ([str(node), "bad\0--bind"], {}),
+        ([str(node)], {"OPTION": "bad\0--bind"}),
+        ([str(node)], {"INVALID=NAME": "value"}),
+    ):
+        with pytest.raises(ValueError):
+            linux_isolated_launch(
+                authority, command, cwd=str(authority.workspace.path), environment=env
+            )
+
+
+def test_role_environment_packet_refuses_ambiguous_or_unbounded_data() -> None:
+    prefix = "VAULTSPEC_A2A_NATIVE_PACKET_"
+    for raw in (
+        b'{"values":{"OPTION":"safe","OPTION":"changed"}}',
+        b'{"values":{"OPTION":false}}',
+        b'{"values":{"OPTION":"bad\\u0000value"}}',
+        b"[" * 2000 + b"]" * 2000,
+    ):
+        packet = {
+            prefix + "COUNT": "1",
+            prefix + "0": base64.b64encode(raw).decode("ascii"),
+        }
+        with pytest.raises(ValueError):
+            decode_launch_environment(packet)
+    for packet in (
+        {prefix + "COUNT": "23"},
+        {prefix + "COUNT": "1"},
+        {prefix + "COUNT": "1", prefix + "0": "x" * 32769},
+    ):
+        with pytest.raises(ValueError):
+            decode_launch_environment(packet)
+
+
+def test_dynamic_helper_is_refused_before_build_input_execution(tmp_path: Path) -> None:
+    authority = _authority(tmp_path)
+    if sys.platform != "linux":
+        with pytest.raises(ProcessContainmentError, match="requires Linux"):
+            linux_isolated_launch(
+                authority, [sys.executable], cwd=str(tmp_path), environment={}
+            )
+        return
+    with pytest.raises(ValueError, match=r"static|dynamic"):
+        stage_linux_isolation_assets(
+            authority.capsule.path, helper=Path("/usr/bin/bwrap"), files={}
+        )
+    assert not (authority.capsule.path / "isolation").exists()
+
+
+def test_owner_death_removes_a_detached_native_descendant(tmp_path: Path) -> None:
+    authority = _authority(tmp_path)
+    if sys.platform != "linux":
+        with pytest.raises(ProcessContainmentError, match="requires Linux"):
+            linux_isolated_launch(
+                authority, [sys.executable], cwd=str(tmp_path), environment={}
+            )
+        return
+    node = _install_runtime(authority)
+    nonce = "native-detached-control-" + uuid4().hex
+    script = authority.workspace.path / "lifetime.js"
+    script.write_text(
+        "const cp = require('child_process'), fs = require('fs');\n"
+        "const child = cp.spawn(process.execPath,\n"
+        "  ['-e', 'setInterval(() => {}, 1000)', process.argv[2]],\n"
+        "  {detached:true, stdio:'ignore'});\n"
+        "fs.writeFileSync('descendant-ready', String(child.pid));\n"
+        "setInterval(() => {}, 1000);\n",
+        encoding="utf-8",
+    )
+    launch = linux_isolated_launch(
+        authority,
+        [str(node), str(script), nonce],
+        cwd=str(authority.workspace.path),
+        environment={},
+    )
+    owner = subprocess.Popen(
+        launch.command,
+        env=launch.environment,
+        cwd=launch.cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        ready = authority.workspace.path / "descendant-ready"
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            assert owner.poll() is None
+            time.sleep(0.05)
+        assert ready.exists()
+        descendants: list[tuple[Path, int]] = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            try:
+                arguments = (entry / "cmdline").read_bytes().split(b"\0")
+                if nonce.encode() in arguments and b"-e" in arguments:
+                    descendants.append((entry, entry.stat().st_ino))
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                continue
+        assert len(descendants) == 1
+        owner.kill()
+        owner.wait(timeout=5)
+        path, identity = descendants[0]
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                if path.stat().st_ino != identity:
+                    break
+                state = (path / "stat").read_text().rsplit(")", 1)[1].split()[0]
+                if state == "Z":
+                    break
+            except (FileNotFoundError, ProcessLookupError):
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("isolated detached descendant survived its retained owner")
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=5)

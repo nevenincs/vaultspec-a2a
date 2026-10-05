@@ -5,7 +5,11 @@ from __future__ import annotations
 import os
 import sys
 
-from .native_isolation import NativeLaunchAuthority, exec_linux_isolated
+from .native_isolation import (
+    NativeLaunchAuthority,
+    decode_launch_environment,
+    exec_linux_isolated,
+)
 
 
 def main() -> None:
@@ -15,7 +19,7 @@ def main() -> None:
         NativeLaunchAuthority.decode(sys.argv[1]),
         sys.argv[3:],
         cwd=sys.argv[2],
-        environment=os.environ,
+        environment=decode_launch_environment(os.environ),
     )
 
 

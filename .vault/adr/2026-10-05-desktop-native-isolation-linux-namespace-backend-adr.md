@@ -5,7 +5,7 @@ tags:
 date: '2026-10-05'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:b878c5744bcd8c9982a13837dcc4e1afee0897730a887f52f399f5807c4948bd'
+body_hash: 'sha256:b792d3acef678e007958c5b10b8dcff610915a5a4db36b0a66a03eb2dce9974c'
 related:
   - "[[2026-10-04-desktop-native-isolation-native-backend-primitives-research]]"
   - "[[2026-10-04-workspace-root-authority-desktop-native-admission-adr]]"
@@ -42,6 +42,8 @@ Windows, macOS and any unverified Linux target remain refused. Implementation do
 ## Implementation
 
 We will implement a native Linux namespace backend driven by a worker-owned path-bound launch authority and a verified capsule helper/runtime closure. Shared spawn and independent probes must use that context; provider auth preparation exposes only the selected role material. Readiness and admission retain refusal until target-specific qualification passes. Wrapper/FD transport details may change within the constraints; no caller-selected string becomes a filesystem grant.
+
+S04 refinement: require a static unprivileged ELF helper without interpreter or dynamic segment, so host library resolution cannot precede capsule mounts. Validate that contract before build-time helper version execution. Trusted bootstrap uses its own environment and capsule cwd; role cwd/environment are target data, and source wrapper uses Python isolated mode. Sealed anonymous arguments keep role credentials out of helper argv. These details implement the existing pinned-closure/trusted-context constraints without changing eligibility or deployment prerequisites.
 
 ## Rationale
 

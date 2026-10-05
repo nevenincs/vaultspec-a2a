@@ -11,7 +11,7 @@ import re
 import stat
 import sys
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
@@ -243,7 +243,7 @@ class NativeLaunch:
     """An inseparable trusted bootstrap command, environment and working directory."""
 
     command: tuple[str, ...]
-    environment: Mapping[str, str]
+    environment: Mapping[str, str] = field(repr=False)
     cwd: str
 
 

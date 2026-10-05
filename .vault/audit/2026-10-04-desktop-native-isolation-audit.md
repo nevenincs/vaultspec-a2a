@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:c0a33241b5eecd45a121e23eb7e4e182f9e148c26abba1b2b38178e2957ebf1c'
+body_hash: 'sha256:23a5e10e4d547ca4a741556d7e8c654a1b4757b21d0cc0d8e25b3b7187a65764'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-workspace-root-authority-audit]]"
@@ -96,6 +96,24 @@ Verification / implementation prerequisite; open DNI-003 in S05-S06. Linux found
 ### S04 final verification | low | retained-owner cleanup proven
 
 PASS for S04 foundation. Final Linux native suite passes 9 tests, including the actual production launch wrapper and a Node child that creates a detached descendant. The test identifies that descendant by its unique control argv and retained /proc identity, kills only the exact owned sandbox process and observes descendant termination. This extends the earlier 18-test combined foundation/environment/dispatch run; no source changes were made to the previously passing ordinary environment or dispatch paths. Windows nearest suites pass 28 tests; the new portable unsupported-platform case is checked separately. Ruff lint/format, strict Basedpyright, Ty Windows/Linux/macOS, diff whitespace and feature Vault checks pass. All three candidate findings are resolved and recorded; release closure assembly, all child entry points and real authenticated provider-turn qualification remain open S05-S06. No eligibility is restored.
+
+### S05 candidate review | low | isolated MCP transport control required
+
+Verification / coverage; pending DNI-007 in S05. Fresh read-only candidate review found no concrete surviving carrier, authority, cache, callback or lifetime defect. It correctly observed that cached unisolated MCP plus armed refusal did not prove an isolated MCP handshake. MCP SDK 2.2.0 merges trusted host default HOME/LOGNAME/PATH/SHELL/TERM/USER into the supplied wrapper environment and forwards cwd. Isolated Python startup and the helper's clean exec environment prevent role startup hooks, but actual production MCP transport evidence is required. The executor is assembling the genuine registry-selected vaultspec-rag Python runtime into a test capsule; this remains build-time test setup and must not become runtime package acquisition.
+
+### S06 preparation research | high | Claude credential and managed-policy contract needs bounded refinement
+
+Implementation prerequisite / decision coverage; open DNI-008 in S06-S07. Accepted default Claude auth resolves the selected operator subscription login and injects no newly selected credential; only declared oauth_token mode allows settings-token injection. Existing strict MCP/settings policy suppresses user/project/local sources while preserving host organisation-managed policy. A new scoped home must not silently change login identity, re-enable suppressed settings, discard managed policy or claim keychain/file-store parity. Codex already has worker-owned source-bound auth copy/refresh; Claude has no equivalent proved lifecycle. Record a desktop-only bounded identity-preserving preparation contract and supported-store proof before implementing that path. Unsupported stores and unqualified lanes remain refused.
+
+Plan sequencing refinement: S05 now isolates shared launch transport and probes; S06 owns worker/model/catalog context issuance, role preparation and release closure; S07 owns final real-turn/artifact qualification. The existing approved scope is split for reviewable checkpoints; earlier audit references to S05-S06 qualification now continue through S07.
+
+### S05 final review | low | shared launch authority and genuine MCP transport verified
+
+PASS for S05; verification coverage DNI-007 resolved. Shared provider acquisition carries command, bootstrap environment and trusted cwd together, retains authority on the actual admitted session process and forwards it to terminal descendants. Independent MCP and version probes validate explicit root identity before cached proof. Armed desktop refusal remains first and unconditional. Final Linux context suite passes 5 real tests, including genuine production vaultspec-rag initialize/list-tools through the MCP SDK, project-terminal write/private-state denial and stale-directory refusal after a cached surface. Test assembly copies the actual registry-selected production Python distribution; it neither supplies a fake server nor downloads packages during a child launch. Windows context suite passes 5, nearest MCP/callback/resource suites pass 71 and nearest binary/refusal/terminal/subprocess suites pass 21 with one existing service test deselected; that service coverage was run explicitly, 6 passing real process/Job containment tests. Earlier Linux nearest binary and cached-MCP checks pass 7 including the then-current 3 context tests. Final Ruff lint/format, strict Basedpyright and Ty Windows/Linux/macOS pass for all 9 owned source files. Parent review of the final diff and test-producer correction confirms the fresh candidate's covered launch/cache/callback invariants; no surviving concrete bypass or regression was reported.
+
+Low / test-producer correctness; resolved DNI-009. Initial isolated MCP assembly redundantly mapped capsule-contained dependencies, including lexical parent traversals emitted by ldd. Production canonical/protected-target checks correctly refused before launch. Test assembly now normalizes external target paths and leaves already-copied internal libraries in the read-only capsule. The same genuine handshake passes without weakening runtime validation. Build-time dependency inspection remains test setup, never launch authority.
+
+High / implementation prerequisite; DNI-008 remains open S06-S07. Production worker issuance, credential-home identity/policy preservation, release assets and actual provider-turn qualification are not complete. No served eligibility or admission is restored.
 
 ## Review trail
 

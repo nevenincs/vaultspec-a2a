@@ -71,13 +71,15 @@ from ._harness_mcp_registry import (
     registry_launch_divergence,
     withheld_harness_tools,
 )
-from ._subprocess import provider_execution_command, redact_secrets
+from ._provider_execution import provider_execution_launch
+from ._subprocess import redact_secrets
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from mcp.types import CallToolResult
 
+    from ..desktop.native_isolation import NativeLaunchAuthority
     from ._json_contract import JsonValue
 
 __all__ = [
@@ -238,6 +240,7 @@ class _StdioLaunch:
     command: str
     args: Sequence[str]
     env: Mapping[str, str] | None = None
+    cwd: str | None = None
 
     def description(self) -> str:
         """Return the probed launch command as a single readable string."""
@@ -249,6 +252,7 @@ class _StdioLaunch:
             command=self.command,
             args=list(self.args),
             env=dict(self.env) if self.env is not None else None,
+            cwd=self.cwd,
         )
 
 
@@ -362,6 +366,7 @@ class _VerifyDeclaredToolContractOptions(
     env: Mapping[str, str] | None
     timeout: float
     readiness_tool: str | None
+    native_authority: NativeLaunchAuthority | None
 
 
 async def verify_declared_tool_contract(
@@ -412,11 +417,19 @@ async def verify_declared_tool_contract(
     withheld = options.get("withheld", ())
     timeout = options.get("timeout", CONTRACT_PROBE_TIMEOUT_SECONDS)
     readiness_tool = options.get("readiness_tool")
-    execution = provider_execution_command([command, *args], supervise=True)
+    prepared = provider_execution_launch(
+        [command, *args],
+        environment=_probe_environment(options.get("env")),
+        cwd=None,
+        native_authority=options.get("native_authority"),
+        supervise=True,
+    )
+    execution = prepared.command
     stdio_launch = _StdioLaunch(
         command=execution[0],
         args=execution[1:],
-        env=_probe_environment(options.get("env")),
+        env=prepared.environment,
+        cwd=prepared.cwd,
     )
     key = (
         execution[0],
@@ -524,6 +537,7 @@ async def verify_harness_mcp_contract(
     *,
     env: Mapping[str, str] | None = None,
     timeout: float = CONTRACT_PROBE_TIMEOUT_SECONDS,
+    native_authority: NativeLaunchAuthority | None = None,
 ) -> None:
     """Verify every registry-known server among *mcp_servers* against its contract.
 
@@ -572,4 +586,5 @@ async def verify_harness_mcp_contract(
             env=env,
             timeout=timeout,
             readiness_tool=_READINESS_TOOLS.get(name),
+            native_authority=native_authority,
         )

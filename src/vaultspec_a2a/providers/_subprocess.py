@@ -19,14 +19,16 @@ import re
 import subprocess
 import sys
 from contextlib import suppress
-from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
-from ..control.config import settings
-from ..control.provider_execution import native_execution_refusal_reason
+from ..desktop.native_isolation import NativeLaunchAuthority
 from ..utils import kill_pid_tree_async
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
+from ._provider_execution import (
+    provider_execution_command as provider_execution_command,
+)
+from ._provider_execution import provider_execution_launch
 
 if TYPE_CHECKING:
     from collections import deque
@@ -37,6 +39,7 @@ __all__ = [
     "drain_stderr_into",
     "kill_process_tree",
     "process_containment",
+    "process_native_authority",
     "provider_execution_command",
     "redact_secrets",
     "spawn_acp_process",
@@ -60,6 +63,7 @@ class _SpawnRequired(TypedDict):
 
 class _SpawnOptions(_SpawnRequired, total=False):
     containment: ProcessContainment | None
+    native_authority: NativeLaunchAuthority | None
 
 
 _SECRET_PATTERN = re.compile(
@@ -134,6 +138,7 @@ async def drain_stderr_into(
 # reaper can reach it from a bare ``Process`` handle without changing the
 # spawn/kill signatures the chat models already call.
 _CONTAINMENT_ATTR = "_vaultspec_containment"
+_NATIVE_AUTHORITY_ATTR = "_vaultspec_native_authority"
 
 
 def attach_process_containment(
@@ -176,35 +181,14 @@ def _metadata_extra(metadata: Mapping[str, object] | None) -> dict[str, object]:
     return {key: value for key, value in metadata.items() if value is not None}
 
 
-def provider_execution_command(
-    command: list[str], *, supervise: bool = False
-) -> list[str]:
-    """Admit a native command, then apply the POSIX identity boundary."""
-    reason = native_execution_refusal_reason()
-    if reason is not None:
-        raise ProcessContainmentError(reason)
-    launcher = settings.provider_identity_launcher
-    uid = settings.provider_agent_uid
-    gid = settings.provider_agent_gid
-    configured = (launcher is not None, uid is not None, gid is not None)
-    if not any(configured):
-        return command
-    if sys.platform == "win32":
-        raise ProcessContainmentError(
-            "provider identity launcher is configured on unsupported Windows"
-        )
-    if not all(configured):
-        raise ProcessContainmentError(
-            "provider identity boundary requires launcher, agent UID, and agent GID"
-        )
-    assert launcher is not None and uid is not None and gid is not None
-    launcher_path = Path(launcher)
-    if not launcher_path.is_absolute() or not launcher_path.is_file():
-        raise ProcessContainmentError(
-            f"provider identity launcher is unavailable: {launcher_path}"
-        )
-    supervision = ["--supervise"] if supervise else []
-    return [str(launcher_path), *supervision, str(uid), str(gid), "--", *command]
+def process_native_authority(
+    process: asyncio.subprocess.Process,
+) -> NativeLaunchAuthority | None:
+    """Read trusted authority retained on the admitted session process."""
+    authority = getattr(process, _NATIVE_AUTHORITY_ATTR, None)
+    if authority is not None and not isinstance(authority, NativeLaunchAuthority):
+        raise ProcessContainmentError("provider process has invalid native authority")
+    return authority
 
 
 def _confined_search_env(env: dict[str, str]) -> dict[str, str]:
@@ -231,10 +215,18 @@ async def spawn_acp_process(
     *,
     use_exec: bool = False,
     metadata: Mapping[str, object] | None = None,
+    native_authority: NativeLaunchAuthority | None = None,
 ) -> asyncio.subprocess.Process:
     """Acquire a contained subprocess, reaping it if the caller is cancelled."""
     spawn_task = asyncio.create_task(
-        _spawn_acp_process(command, env, cwd, use_exec=use_exec, metadata=metadata)
+        _spawn_acp_process(
+            command,
+            env,
+            cwd,
+            use_exec=use_exec,
+            metadata=metadata,
+            native_authority=native_authority,
+        )
     )
     try:
         return await asyncio.shield(spawn_task)
@@ -281,7 +273,15 @@ async def _spawn_acp_process(
     use_exec = options["use_exec"]
     metadata = options["metadata"]
     # Refuse native execution before acquiring even a lifetime containment.
-    command = provider_execution_command(command)
+    native_authority = options.get("native_authority")
+    launch = provider_execution_launch(
+        command, environment=env, cwd=cwd, native_authority=native_authority
+    )
+    command = list(launch.command)
+    assert launch.environment is not None
+    env = dict(launch.environment)
+    assert launch.cwd is not None
+    cwd = launch.cwd
     containment = options.get("containment") or ProcessContainment.create()
     spawn_mode = "exec" if sys.platform != "win32" or use_exec else "shell"
     log_extra = _metadata_extra(metadata)
@@ -354,6 +354,8 @@ async def _spawn_acp_process(
     # the equivalent seating as part of exec.
     await _admit_provider_process(process, containment, log_extra=log_extra)
     attach_process_containment(process, containment)
+    if native_authority is not None:
+        setattr(process, _NATIVE_AUTHORITY_ATTR, native_authority)
     logger.info(
         "ACP subprocess spawned",
         extra={**log_extra, "process_pid": process.pid},

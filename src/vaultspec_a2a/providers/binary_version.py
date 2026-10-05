@@ -6,8 +6,14 @@ import re
 import subprocess
 from functools import cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..control.provider_execution import native_execution_refusal_reason
+from ..utils.process import ProcessContainmentError
+from ._provider_execution import provider_execution_launch
+
+if TYPE_CHECKING:
+    from ..desktop.native_isolation import NativeLaunchAuthority
 
 __all__ = [
     "BinaryVersionProbeError",
@@ -63,18 +69,30 @@ def _launch_identity(path: Path) -> tuple[int, ...]:
 
 
 @cache
-def _reported_version(executable: str, identity: tuple[int, ...]) -> str | None:
+def _reported_version(
+    executable: str,
+    identity: tuple[int, ...],
+    native_authority: NativeLaunchAuthority | None,
+) -> str | None:
     """Run one launch identity once, including failed reports."""
     del identity
     try:
-        completed = subprocess.run(
+        launch = provider_execution_launch(
             [executable, "--version"],
+            environment=None,
+            cwd=None,
+            native_authority=native_authority,
+        )
+        completed = subprocess.run(
+            launch.command,
+            env=launch.environment,
+            cwd=launch.cwd,
             capture_output=True,
             text=True,
             timeout=_PROBE_TIMEOUT_SECONDS,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, ProcessContainmentError, subprocess.SubprocessError):
         return None
     if completed.returncode != 0:
         return None
@@ -83,7 +101,9 @@ def _reported_version(executable: str, identity: tuple[int, ...]) -> str | None:
     return ".".join(map(str, version)) if version is not None else None
 
 
-def probe_binary_version(executable: Path | str) -> str:
+def probe_binary_version(
+    executable: Path | str, *, native_authority: NativeLaunchAuthority | None = None
+) -> str:
     """Return a resolved launcher's version or refuse an unverifiable identity.
 
     The path and file stat are the launch identity. A Scoop shim also includes
@@ -100,7 +120,18 @@ def probe_binary_version(executable: Path | str) -> str:
         identity = _launch_identity(path)
     except (OSError, UnicodeError) as exc:
         raise BinaryVersionProbeError("provider binary is unavailable") from exc
-    result = _reported_version(str(path), identity)
+    try:
+        provider_execution_launch(
+            [str(path), "--version"],
+            environment=None,
+            cwd=None,
+            native_authority=native_authority,
+        )
+    except (OSError, ValueError, ProcessContainmentError) as exc:
+        raise BinaryVersionProbeError(
+            "provider execution authority is unavailable"
+        ) from exc
+    result = _reported_version(str(path), identity, native_authority)
     if result is None:
         raise BinaryVersionProbeError("provider binary version is unavailable")
     return result

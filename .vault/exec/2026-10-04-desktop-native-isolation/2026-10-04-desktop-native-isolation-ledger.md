@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:fb40a8cc40a35f01f3efc19e1118e76f57bdbacd3dbf505240161efc609abe9b'
+body_hash: 'sha256:81c0d1cf00dcb4062fd47d38a371237a356fd265211eef72450e2122a2df9a1a'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -77,6 +77,31 @@ related:
 - `S04` `verify:` `uv run --no-sync ty check owned files for Windows/Linux/Darwin` -> `pass`
 - `S04` `verify:` `git diff --check` -> `pass`
 - `S04` `verify:` `vault feature check desktop-native-isolation` -> `pass`
+- `S05` `A` `src/vaultspec_a2a/providers/_provider_execution.py`
+- `S05` `M` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S05` `M` `src/vaultspec_a2a/providers/_mcp_contract.py`
+- `S05` `M` `src/vaultspec_a2a/providers/_acp_rpc_terminal_handlers.py`
+- `S05` `M` `src/vaultspec_a2a/providers/binary_version.py`
+- `S05` `A` `src/vaultspec_a2a/providers/tests/test_native_launch_context.py`
+- `S05` `M` `src/vaultspec_a2a/desktop/native_isolation.py`
+- `S05` `A` `src/vaultspec_a2a/providers/tests/_native_mcp_capsule.py`
+- `S05` `M` `src/vaultspec_a2a/control/provider_execution.py`
+- `S05` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S05` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S05` `M` `.vault/plan/2026-10-04-desktop-native-isolation-plan.md`
+- `S05` `verify:` `uv run --no-sync ruff check S05 owned 9 source paths` -> `pass`
+- `S05` `verify:` `uv run --no-sync ruff format --check S05 owned 9 source paths` -> `pass`
+- `S05` `verify:` `uv run --no-sync basedpyright S05 owned 9 source paths (0 errors)` -> `pass`
+- `S05` `verify:` `uv run --no-sync ty check --python-platform win32/linux/darwin S05 owned 9 paths` -> `pass`
+- `S05` `verify:` `Windows uv run --no-sync pytest native launch context (5 passed)` -> `pass`
+- `S05` `verify:` `Windows nearest MCP/callback/resource population (71 passed)` -> `pass`
+- `S05` `verify:` `Windows nearest binary/refusal/terminal/subprocess population (21 passed 1 existing service deselected)` -> `pass`
+- `S05` `verify:` `Windows pytest -m service provider and terminal containment (6 passed)` -> `pass`
+- `S05` `verify:` `WSL locked uv pytest native launch context --basetemp=/tmp/desktop-isolation-s05-20261005-6 (5 passed)` -> `pass`
+- `S05` `verify:` `Linux preceding context/binary/cached-MCP population (7 passed)` -> `pass`
+- `S05` `verify:` `Linux isolated genuine MCP initial test producer noncanonical internal target` -> `fail`
+- `S05` `verify:` `Linux isolated genuine MCP after producer correction --basetemp=/tmp/desktop-isolation-s05-20261005-5 (1 passed)` -> `pass`
+- `S05` `verify:` `git diff --check` -> `pass`
 
 ## Notes
 
@@ -93,3 +118,4 @@ related:
 - `S03` Synthetic auth is not provider authentication. Packaged helper closure, actual provider turns and target qualification remain S04-S05.
 - `S03` Windows/macOS and unqualified Linux targets retain native execution refusal; platform-specific backend integration is explicitly bounded.
 - `S04` Fresh read-only candidate review surfaced bootstrap environment, decoded authority traversal and host-dependent helper issues; all confirmed and corrected. Windows/macOS and unqualified Linux eligibility remain refused; release artifact and genuine authenticated turns remain S05-S06.
+- `S05` Desktop production execution remains refused; S06 worker/auth/packaging and S07 authenticated provider/artifact qualification remain open. Initial test-only dependency map failed runtime validation and was corrected without weakening the runtime.

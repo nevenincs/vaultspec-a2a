@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:f7df8202edde6efdf36da4420a976aed04005ebe2864fba70819fbc16b86d772'
+body_hash: 'sha256:3f9feb5fad5c625a4fb19b7884a3492b1b0078ec29fffc316a1cb2ba3f7c871d'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-desktop-native-isolation-audit]]"
@@ -54,6 +54,10 @@ An actual project Python startup hook in the draft wrapper read a synthetic priv
 The copied system bubblewrap bootstraps from host interpreter/libraries. Production now requires static ELF with no interpreter/dynamic segment. Genuine upstream v0.11.1 was compiled with /usr/bin/cc -static -O2, static libcap 2.75 and require_userns enabled; optional SELinux support was not compiled in. The development archive was extracted into a temporary build tree without global package installation/configuration changes. Upstream source archive SHA256 fb6ebf0264dfe9fb88777d352deeedf5aecf2e36e78da148157036b647f86e0f; libcap archive SHA256 74fa71aa089d90d720722f6278314b90b72fa2e1631aea5dc32b770d0324ce86; helper SHA256 acb396d2eef44125ee6d0898460e99f45ecf850e8f535aac247e2519785b6591. Persistent producer: artifacts/desktop-native-isolation/build-static-test-helper.py, SHA256 356ea5b790bb4944af8b30a74652dce3847499efc5405d2b7e863f10185e4d43. Persistent bootstrap baseline: artifacts/desktop-native-isolation/linux-bootstrap-baseline.py, SHA256 89532b4742cc818ae16271d59054c75fed66a268be888ce7c2201d536a13c7d2. Both live in the existing target-bound security artifact directory. The producer is test evidence, not release qualification.
 
 Locked Linux foundation/environment/runtime suites pass 18 tests with static helper, Node 22.23.1 and Python 3.13.14. Standalone CPython omits os.memfd_create and seal constants; typed libc calls use Linux UAPI flags and actual target execution proves their transport. The source-to-helper argument descriptor is consumed/closed before target execution. Primary grounding: https://raw.githubusercontent.com/containers/bubblewrap/v0.11.1/bubblewrap.c; https://raw.githubusercontent.com/containers/bubblewrap/v0.11.1/meson.build; https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/memfd.h; https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/fcntl.h. Node 22 evidence does not qualify the repository Node 26.8.1 engine or a real provider turn.
+
+### S05 real independent MCP transport works with the explicit isolated carrier
+
+The final Linux test `src/vaultspec_a2a/providers/tests/test_native_launch_context.py:test_genuine_mcp_handshake_uses_isolated_runtime_context` uses the genuine registry-selected vaultspec-rag distribution and its production server entry point. The test-only producer copies its resolved Python standard library/site packages and supplies only external shared-library mappings to the static-helper capsule. MCP SDK 2.2.0 forwards the trusted wrapper cwd and merges its six default host environment fields; the isolated bootstrap ignores role startup hooks, and the helper clears inherited environment before applying the role packet. Actual initialize and list-tools match the registry's read-only declaration. Replacing the selected workspace then refuses before cached surface reuse. Final Linux context population passes 5 tests (28.95 seconds), with no mock server or skipped target claim. This proves transport integration, not authenticated provider work or a release capsule. The initial producer's redundant internal-library mapping was refused by the unchanged canonical/protected-target contract and corrected only in test assembly.
 
 ## Sources
 

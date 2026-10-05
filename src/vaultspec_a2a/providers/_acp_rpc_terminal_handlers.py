@@ -26,7 +26,7 @@ from ._acp_types import (
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object_list
 from ._subprocess import kill_process_tree as _kill_process_tree
-from ._subprocess import spawn_acp_process
+from ._subprocess import process_native_authority, spawn_acp_process
 from .acp_exceptions import AcpErrorCode
 
 __all__ = [
@@ -215,7 +215,11 @@ async def on_terminal_create(
         # then apply any agent-supplied overrides from the RPC params.
         terminal_env = _terminal_environment(params, resolved_cwd)
         process = await spawn_acp_process(
-            [command, *args], terminal_env, str(resolved_cwd), use_exec=True
+            [command, *args],
+            terminal_env,
+            str(resolved_cwd),
+            use_exec=True,
+            native_authority=process_native_authority(ctx.process),
         )
         try:
             request.require_active_session(ctx)

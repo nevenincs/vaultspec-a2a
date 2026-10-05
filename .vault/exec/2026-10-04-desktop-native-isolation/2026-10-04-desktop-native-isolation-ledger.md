@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:1ac37044dcbf8349de764fb5c91d601cdc5cfa3ca1b7763ce903d07b4f0028be'
+body_hash: 'sha256:919f3e5cf12c6db5219b5ee7a5fbd894dc37b146d4ead5affb55f53e0c6139b4'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -156,6 +156,25 @@ related:
 - `S08` `verify:` `Ty win32/linux/darwin five files` -> `pass`
 - `S08` `verify:` `One fresh candidate review plus parent final integrated diff review` -> `pass`
 - `S08` `verify:` `git diff --check` -> `pass`
+- `S09` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S09` `verify:` `Genuine frozen Claude2.1.286 version and credential-free CLI login-status control` -> `pass`
+- `S09` `verify:` `Genuine source/frozen ACP catalog session transport and owned-descendant cleanup` -> `pass`
+- `S09` `verify:` `Catalog authentication axis agrees with real credential-free CLI login status` -> `fail`
+- `S09` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S09` `M` `.vault/plan/2026-10-04-desktop-native-isolation-plan.md`
+- `S09` `verify:` `Independent pinned-package/caller authentication evidence investigation` -> `pass`
+- `S09` `M` `scripts/build_linux_isolation.py`
+- `S09` `M` `packaging/tests/native_isolation_artifact.py`
+- `S09` `M` `packaging/README.md`
+- `S09` `verify:` `locked normal Linux frozen certificate-s09-final assembly and version/help/allowlist smoke` -> `pass`
+- `S09` `verify:` `real source/frozen artifact controls 11 tests` -> `pass`
+- `S09` `verify:` `real production certificate selector controls 6 tests` -> `pass`
+- `S09` `verify:` `genuine Codex host/isolated account and source/frozen completed turns with unchanged Windows login` -> `pass`
+- `S09` `verify:` `source native-home/active-turn cleanup and frozen process reaping` -> `pass`
+- `S09` `verify:` `Ruff lint/format, Basedpyright and Ty Windows/Linux/macOS on two Python files` -> `pass`
+- `S09` `verify:` `git diff --check` -> `pass`
+- `S09` `verify:` `fresh independent candidate plus parent integrated review and queue updates` -> `pass`
+- `S09` `by:` `vaultspec-high-executor`
 
 ## Notes
 
@@ -178,3 +197,6 @@ related:
 - `S07` Network DNS control fails `EAI_AGAIN` inside namespace while host succeeds; DNI-016 remains S08 and is not counted as passed provider qualification.
 - `S07` Real auth/turn, actor IPC, consumer adoption and unverified target proofs remain S08; no eligibility or release changed.
 - `S08` DNI-016 resolver prerequisite resolved; persistent artifacts/desktop-native-isolation/s08-resolver-verification.md SHA256 157388474a8c28ec320108aeb9c4462c6de94590f871df91cd7e316c2ee3aa1b. Initial build argument/Windows guard/HTTPS homepage test setup failures corrected and audited. S09 OAuth export remains absent; no authenticated provider or new target admission claimed.
+- `S09` Read-only/runtime preflight checkpoint, not Step close or target admission. DNI-019 confirmed: CLI loggedIn=false versus ACP authenticated. Persistent managed preflight helper/log retained. Selected Linux OAuth export still absent; actual authenticated positive turn/actor/cancellation/policy qualification pending.
+- `S09` DNI-019 confirmed, incomplete positive noncompletion OAuth proof; local export absent. Retained actual preflight log SHA2561c086fd1b0b4f53f5494f947c4b1ff1f104dcf7910acb5d23e23e7477d27b80b. S09 stays unchecked and no eligible target changes; remaining modifications are durable open-Step evidence/checkpoint only.
+- `S09` Earlier real Claude turn failed at weekly quota; authenticated source is proved but no Claude completed-turn claim. Credential source authorized by latest user instruction, no refresh token transferred. Cert prerequisite split into S09; unfinished DNI-008/DNI-019 qualification continues S10, desktop refusal unchanged. DNI-021 stale-auth health queued S10 and DNI-013 abrupt-loss recovery remains open. Semantic discovery unavailable; named-source fallback used.

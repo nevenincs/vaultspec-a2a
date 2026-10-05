@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import shutil
+import ssl
 import subprocess
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
@@ -22,6 +25,51 @@ from vaultspec_a2a.desktop.native_isolation import (
     linux_isolated_launch,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+@pytest.mark.parametrize(
+    "mutation", ["valid", "missing", "empty", "symlink", "hardlink", "oversized"]
+)
+def test_certificate_build_input_requires_the_frozen_regular_bundle(
+    tmp_path: Path, mutation: str
+) -> None:
+    producer = runpy.run_path(
+        str(Path(__file__).resolve().parents[2] / "scripts/build_linux_isolation.py")
+    )
+    select = cast("Callable[[Path], Path]", producer["certificate_bundle"])
+    bundle = tmp_path / "_internal/certifi/cacert.pem"
+    bundle.parent.mkdir(parents=True)
+    source = (
+        Path(os.environ["VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE"])
+        / "_internal/certifi/cacert.pem"
+    )
+    if mutation == "missing":
+        with pytest.raises(FileNotFoundError):
+            select(tmp_path)
+        return
+    if mutation == "empty":
+        bundle.write_bytes(b"")
+    elif mutation == "oversized":
+        bundle.write_bytes(b"\n" * (1024 * 1024 + 1))
+    elif mutation == "symlink":
+        alternate = tmp_path / "alternate.pem"
+        shutil.copyfile(source, alternate)
+        bundle.symlink_to(alternate)
+    else:
+        shutil.copyfile(source, bundle)
+        if mutation == "hardlink":
+            (tmp_path / "alternate.pem").hardlink_to(bundle)
+    if mutation == "valid":
+        assert select(tmp_path) == bundle
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(cafile=str(bundle))
+        assert context.cert_store_stats()["x509_ca"] > 0
+    else:
+        with pytest.raises(ValueError, match="bounded regular file"):
+            select(tmp_path)
 
 
 def _artifact(tmp_path: Path) -> tuple[NativeLaunchAuthority, Path, Path]:
@@ -110,7 +158,16 @@ def test_frozen_component_preserves_work_and_denies_private_state(
 
 @pytest.mark.parametrize(
     "mutation",
-    ["missing", "helper", "source", "outside", "resolver", "resolver-child", "etc"],
+    [
+        "missing",
+        "helper",
+        "source",
+        "outside",
+        "resolver",
+        "resolver-child",
+        "etc",
+        "certificate",
+    ],
 )
 def test_frozen_component_refuses_invalid_assets_before_target(
     tmp_path: Path, mutation: str
@@ -127,6 +184,14 @@ def test_frozen_component_refuses_invalid_assets_before_target(
         record = json.loads(manifest.read_text())
         record["helper"]["source"] = "../isolation/bin/bubblewrap"
         manifest.write_text(json.dumps(record))
+    elif mutation == "certificate":
+        record = json.loads(manifest.read_text())
+        certificate = next(
+            item
+            for item in record["files"]
+            if item["target"] == "/etc/ssl/certs/ca-certificates.crt"
+        )
+        (binary.parent / certificate["source"]).write_bytes(b"changed")
     elif mutation in {"resolver", "resolver-child", "etc"}:
         record = json.loads(manifest.read_text())
         record["files"][0]["target"] = {
@@ -162,6 +227,10 @@ const cp=require('child_process'), https=require('https');
   try{fs.writeFileSync('/etc/resolv.conf','changed')}
   catch(e){readonly=e.code==='EROFS'};
   const resolver=fs.readFileSync('/etc/resolv.conf','utf8');
+  const certificate=fs.readFileSync('/etc/ssl/certs/ca-certificates.crt');
+  let certificateReadonly=false;
+  try{fs.writeFileSync('/etc/ssl/certs/ca-certificates.crt','changed')}
+  catch(e){certificateReadonly=e.code==='EROFS'};
   const absent=['/etc/passwd','/etc/shadow','/mnt/wsl/resolv.conf',
     '/run/systemd/resolve/resolv.conf'].every(p=>!fs.existsSync(p));
   const leaked=fs.readdirSync('/proc/self/fd').some(fd=>{
@@ -169,7 +238,8 @@ const cp=require('child_process'), https=require('https');
     catch(e){return false}
   });
   const download=await new Promise((resolve,reject)=>{
-    const request=https.get('https://nodejs.org/dist/v26.8.1/SHASUMS256.txt',response=>{
+    const request=https.get('https://nodejs.org/dist/v26.8.1/SHASUMS256.txt',
+      {ca:certificate},response=>{
       let body=''; response.setEncoding('utf8');
       response.on('data',chunk=>{
         body+=chunk;
@@ -184,7 +254,8 @@ const cp=require('child_process'), https=require('https');
     request.setTimeout(15000,()=>request.destroy(new Error('https timeout')));
   });
   console.log(JSON.stringify({lookup:!!lookup.address,records:records.length>0,
-    child:child.status,readonly,resolver:resolver.startsWith('nameserver '),
+    child:child.status,readonly,certificateReadonly,
+    resolver:resolver.startsWith('nameserver '),
     absent,leaked,...download}));
 })().catch(e=>{console.error(e.code||e.message);process.exitCode=1});
 """
@@ -208,6 +279,7 @@ const cp=require('child_process'), https=require('https');
         "records": True,
         "child": 0,
         "readonly": True,
+        "certificateReadonly": True,
         "resolver": True,
         "absent": True,
         "leaked": False,

@@ -12,7 +12,7 @@ related:
   - '[[2026-10-05-desktop-native-isolation-linux-namespace-backend-adr]]'
 modified: '2026-10-05'
 body_schema: body-v2
-body_hash: 'sha256:15a946874ba4549a40d28585ae4b6b75de31ede212d1d844d02be655badf22b7'
+body_hash: 'sha256:66b7acbc9cd49b7917cce9a626e66928e8a6eccc1917f72041e009ee0af8be13'
 ---
 
 # `desktop-native-isolation` plan
@@ -35,7 +35,8 @@ The user requested the remaining known security fixes, then explicitly instructe
 - [x] `S06` - Prepare worker-owned role authority and carry it through provider model and catalog callers; `native workspace capture after worker composition, selected-channel ACP home preparation and cleanup, existing Codex home ownership, model/catalog/version context, real lifecycle tests. Unsupported or unqualified stores and targets retain refusal`.
 - [x] `S07` - Package and verify the qualified Linux runtime closure; `declared helper and dependency inputs, frozen launcher dispatch and build assets, release assembly and real artifact controls. No runtime package acquisition or unproved eligibility`.
 - [x] `S08` - Supply bounded trusted Linux resolver runtime data and verify the legitimate network control; `Linux backend authority and sealed runtime-data descriptors, resolver-source trust and parsing, scoped backend ADR refinement, source and real frozen DNS/private-state controls, no all-/etc grant or CI resolver fallback`.
-- [ ] `S09` - Qualify actual desktop provider turns and restore only verified target eligibility; `control/provider_execution.py, provider readiness and binary proof, desktop admission/health, real Claude OAuth Linux artifact turn, actor IPC, cleanup, unsupported-target refusal, docs and integrated audit`.
+- [x] `S09` - Package the required certificate trust data and verify genuine native provider work; `scripts/build_linux_isolation.py, pinned dependency certificate bundle and artifact data manifest, source and actual frozen Codex account/turn controls, certificate immutability/private-state controls, packaging documentation and integrated audit`.
+- [ ] `S10` - Complete target qualification and restore only verified desktop eligibility; `control/provider_execution.py, provider readiness and binary proof, truthful independent ACP authentication evidence and its cache/health callers, desktop admission/health, actual Linux artifact provider turns using existing selected Windows logins, actor IPC, streaming/cancellation cleanup, unsupported-target refusal, docs and integrated audit`.
 
 ## Parallelization
 

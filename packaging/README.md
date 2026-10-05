@@ -37,10 +37,14 @@ does not assert the current registration or availability of those runners.
 
 `scripts/build_binary.py` builds a static bubblewrap 0.11.1 helper from
 hash-pinned upstream bubblewrap and libcap 2.75 sources, then stages the helper,
-licenses and explicit ELF dependencies under the onedir's `isolation/`.
+licenses, explicit ELF dependencies and the frozen Certifi certificate bundle
+under the onedir's `isolation/`.
 The Linux build host needs a C compiler, make and a static C-library toolchain.
 Sources are fetched during assembly, never during a provider launch. The shipped
 manifest attests the staged bytes; a changed or missing input refuses execution.
+The certificate bundle comes from the locked dependency in the actual onedir,
+is validated during assembly and is mounted read-only at
+`/etc/ssl/certs/ca-certificates.crt`. No host certificate directory is mounted.
 
 The frozen launcher locates that exact component directory beneath its captured
 capsule root. The capsule still holds the separate Node/npm assets. A2A's frozen
@@ -56,7 +60,8 @@ be root-owned regular files with one link and safe permissions; only the explici
 systemd, NetworkManager and WSL resolver aliases in the implementation are accepted.
 The WSL alias supports the research host and adds no production WSL requirement.
 Missing, unsafe, changing or unsupported resolver settings refuse execution without
-a fallback resolver. Custom hosts/NSS, proxy and CA policy still need qualification.
+a fallback resolver. Custom hosts/NSS, proxy and additional CA policy still need
+qualification.
 
 The explicit `packaging/tests/native_isolation_artifact.py` controls run after a
 real Linux build. Set `VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE` to the onedir and
@@ -64,6 +69,7 @@ real Linux build. Set `VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE` to the onedir and
 dependencies must have been supplied to assembly. Invoke the file directly with
 the locked test environment. These controls exercise relocated frozen execution,
 project I/O, synthetic role access, private-state denial, artifact refusal,
-system/DNS-only/child hostname lookup, an HTTPS checksum download, read-only resolver
-data and detached-child cleanup. Network controls require access to nodejs.org;
+system/DNS-only/child hostname lookup, an HTTPS checksum download using the staged
+certificate bundle, read-only resolver and certificate data, and detached-child
+cleanup. Network controls require access to nodejs.org;
 they do not establish provider login or turn eligibility.

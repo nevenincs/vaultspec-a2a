@@ -12,6 +12,8 @@ import hashlib
 import os
 import re
 import shutil
+import ssl
+import stat
 import subprocess
 import sys
 import tarfile
@@ -28,6 +30,27 @@ _BWRAP_HASH = "fb6ebf0264dfe9fb88777d352deeedf5aecf2e36e78da148157036b647f86e0f"
 _LIBCAP_URL = "https://www.kernel.org/pub/linux/libs/security/linux-privs/libcap2/libcap-2.75.tar.xz"
 _LIBCAP_HASH = "de4e7e064c9ba451d5234dd46e897d7c71c96a9ebf9a0c445bc04f4742d83632"
 _MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
+_CERTIFICATE_TARGET = "/etc/ssl/certs/ca-certificates.crt"
+
+
+def certificate_bundle(runtime: Path) -> Path:
+    """Select public roots from the locked dependency already in the onedir."""
+    bundle = runtime.resolve(strict=True) / "_internal/certifi/cacert.pem"
+    metadata = bundle.stat(follow_symlinks=False)
+    if (
+        bundle.resolve(strict=True) != bundle
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or not 0 < metadata.st_size <= 1024 * 1024
+    ):
+        raise ValueError("frozen certificate bundle must be a bounded regular file")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_verify_locations(cafile=str(bundle))
+    if not context.cert_store_stats()["x509_ca"]:
+        raise ValueError(
+            "frozen certificate bundle contains no certificate authorities"
+        )
+    return bundle
 
 
 def _source(url: str, digest: str, path: Path) -> None:
@@ -146,6 +169,9 @@ def main() -> None:
     args = parser.parse_args()
     runtime = args.runtime.resolve(strict=True)
     files = external_dependencies(runtime, args.executable)
+    if _CERTIFICATE_TARGET in files:
+        raise ValueError("native ELF dependency overlaps the certificate bundle")
+    files[_CERTIFICATE_TARGET] = certificate_bundle(runtime)
     work = args.work.resolve()
     work.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="native-build-", dir=work) as directory:

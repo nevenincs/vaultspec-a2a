@@ -108,7 +108,10 @@ def test_frozen_component_preserves_work_and_denies_private_state(
     assert "vaultspec-a2a" in version.stdout.lower()
 
 
-@pytest.mark.parametrize("mutation", ["missing", "helper", "source", "outside"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing", "helper", "source", "outside", "resolver", "resolver-child", "etc"],
+)
 def test_frozen_component_refuses_invalid_assets_before_target(
     tmp_path: Path, mutation: str
 ) -> None:
@@ -124,6 +127,14 @@ def test_frozen_component_refuses_invalid_assets_before_target(
         record = json.loads(manifest.read_text())
         record["helper"]["source"] = "../isolation/bin/bubblewrap"
         manifest.write_text(json.dumps(record))
+    elif mutation in {"resolver", "resolver-child", "etc"}:
+        record = json.loads(manifest.read_text())
+        record["files"][0]["target"] = {
+            "resolver": "/etc/resolv.conf",
+            "resolver-child": "/etc/resolv.conf/child",
+            "etc": "/etc",
+        }[mutation]
+        manifest.write_text(json.dumps(record))
     else:
         original = Path(os.environ["VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE"])
         binary = original / "vaultspec-a2a"
@@ -134,6 +145,78 @@ def test_frozen_component_refuses_invalid_assets_before_target(
     )
     assert result.returncode != 0
     assert not (authority.workspace.path / "must-not-run").exists()
+
+
+def test_frozen_dns_https_and_resolver_file_boundary(tmp_path: Path) -> None:
+    authority, binary, node = _artifact(tmp_path)
+    script = """
+const fs=require('fs'), dns=require('dns').promises;
+const cp=require('child_process'), https=require('https');
+(async()=>{
+  const lookup=await dns.lookup('nodejs.org');
+  const records=await dns.resolve4('nodejs.org');
+  const child=cp.spawnSync(process.execPath,['-e',
+    "require('dns').lookup('nodejs.org',(e,a)=>process.exit(e||!a?1:0))"],
+    {timeout:15000});
+  let readonly=false;
+  try{fs.writeFileSync('/etc/resolv.conf','changed')}
+  catch(e){readonly=e.code==='EROFS'};
+  const resolver=fs.readFileSync('/etc/resolv.conf','utf8');
+  const absent=['/etc/passwd','/etc/shadow','/mnt/wsl/resolv.conf',
+    '/run/systemd/resolve/resolv.conf'].every(p=>!fs.existsSync(p));
+  const leaked=fs.readdirSync('/proc/self/fd').some(fd=>{
+    try{return fs.readlinkSync('/proc/self/fd/'+fd).includes('memfd:')}
+    catch(e){return false}
+  });
+  const download=await new Promise((resolve,reject)=>{
+    const request=https.get('https://nodejs.org/dist/v26.8.1/SHASUMS256.txt',response=>{
+      let body=''; response.setEncoding('utf8');
+      response.on('data',chunk=>{
+        body+=chunk;
+        if(body.length>65536) request.destroy(new Error('download bound'));
+      });
+      response.on('end',()=>resolve({status:response.statusCode,
+        manifest:body.includes(
+          '3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d  '
+          +'node-v26.8.1-linux-x64.tar.xz')}));
+    });
+    request.on('error',reject);
+    request.setTimeout(15000,()=>request.destroy(new Error('https timeout')));
+  });
+  console.log(JSON.stringify({lookup:!!lookup.address,records:records.length>0,
+    child:child.status,readonly,resolver:resolver.startsWith('nameserver '),
+    absent,leaked,...download}));
+})().catch(e=>{console.error(e.code||e.message);process.exitCode=1});
+"""
+    command = [str(node), "-e", script]
+    source_launch = linux_isolated_launch(
+        authority, command, cwd=str(authority.workspace.path), environment={}
+    )
+    # Source closure uses the root layout; the relocated artifact uses a2a/.
+    shutil.copytree(binary.parent / "isolation", authority.capsule.path / "isolation")
+    source = subprocess.run(
+        source_launch.command,
+        cwd=source_launch.cwd,
+        env=dict(source_launch.environment),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    frozen = _run(authority, binary, command)
+    expected = {
+        "lookup": True,
+        "records": True,
+        "child": 0,
+        "readonly": True,
+        "resolver": True,
+        "absent": True,
+        "leaked": False,
+        "status": 200,
+        "manifest": True,
+    }
+    for result in (source, frozen):
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == expected
 
 
 def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:34ccf6f44f060cf7c219ce1396ff08caa950d561e9cc04dbb654a09c22d26e4d'
+body_hash: 'sha256:8cba4093a9fdcd4072b0df071d53a2445119a71a7f7aabb38fc57a306cb81fe4'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-desktop-native-isolation-audit]]"
@@ -78,6 +78,16 @@ Read-only current consumer evidence: packaging/assemble-build-spec.py and produc
 ### S08 actual DNS control identifies a missing runtime-data boundary
 
 Actual Node26.8.1 lookup of nodejs.org succeeds on the host and fails EAI_AGAIN through the real isolated frozen artifact. ELF attestation and loopback relay proof do not establish resolver/TLS/provider-data compatibility. Runtime must obtain only explicitly trusted necessary data through a bounded authority, not all of /etc or build-host resolver bytes. The retained probe and actual output are in artifacts/desktop-native-isolation/frozen-dns-control.py and frozen-dns-control.log. This is a reproduced availability prerequisite, not a claimed new confidentiality bypass. The user's selected subsequent auth channel is a Claude OAuth export on Linux; credentials remain local and no token is requested in chat.
+
+### S08 resolver boundary research
+
+The genuine Node26.8.1 host lookup succeeds while its relocated frozen namespace returns EAI_AGAIN (retained frozen-dns-control.py/log). Independent read-only investigation locates the missing runtime data at exec_linux_isolated. Compared bounded raw copy, parsed immutable snapshot and proxy: select parsed snapshot at the trusted launcher per actual spawn; a proxy requires a separate lifecycle contract, while worker-time capture unnecessarily changes serialized authority and version-cache identity. No caller DNS source/data fields are added.
+
+Acquire fixed /etc/resolv.conf through root-owned nonfollowing directory FDs and one finite resolver-specific alias, validate regular single-link leaf metadata before/after bounded reading and close source FDs before helper exec. Existing generic confined_file_descriptor symlink/hard-link refusal remains binding. WSL research source is root-owned /etc/resolv.conf alias to root-owned regular /mnt/wsl/resolv.conf; /mnt/wsl is root-owned sticky1777. Permit that exact sticky parent only for this alias, never arbitrary writable parents. Direct and finite systemd/NetworkManager aliases do not permit source discovery or fallback. Preserve selected loopback stub and ordered DNS settings; reject unsupported directives/options, scope identifiers and ambiguous syntax rather than activating ignored lines or omitting policy. No complete NSS/hosts/proxy/CA parity is claimed.
+
+Pinned bubblewrap0.11.1 source implements --ro-bind-data by copying and read-only mounting then closing the input FD. Refactor existing sealed argument memfd for raw bytes, without terminal NUL. Reserve /etc/resolv.conf against ancestor/descendant manifest targets. Source and rebuilt artifact controls cover system/DNS-only/child lookup, HTTPS, resolver immutability, private-state/source-directory absence and retained-owner cleanup. Real selected Claude OAuth remains S09, currently export absent.
+
+Primary locators: https://raw.githubusercontent.com/containers/bubblewrap/v0.11.1/bubblewrap.c; https://man7.org/linux/man-pages/man5/resolv.conf.5.html; https://raw.githubusercontent.com/bminor/glibc/release/2.39/master/resolv/res_init.c; https://nodejs.org/download/release/v26.8.1/docs/api/dns.html. Configured amendment crossref judged the scoped draft with partial corpus/input coverage; returned admission/binary/Compose/native-production decisions were reconciled. Compose-only identity obligations are retired for native application production; callback/private-state obligations remain. No binary proof, managed-policy or auth-channel contract changes. Authorization basis: explicit all-known-issues and continued missing-native-capability implementation scope, already recorded in the accepted backend ADR/approved plan; no new deployment or public caller authority.
 
 ## Sources
 

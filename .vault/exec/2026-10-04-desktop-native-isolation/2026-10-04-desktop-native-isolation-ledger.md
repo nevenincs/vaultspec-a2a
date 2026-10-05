@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:b124fd6c8f3dee097a79731885a85a3088d95133a6151f130fbf036487f0482b'
+body_hash: 'sha256:1ac37044dcbf8349de764fb5c91d601cdc5cfa3ca1b7763ce903d07b4f0028be'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -137,6 +137,25 @@ related:
 - `S07` `verify:` `Strict Basedpyright and Ty three platforms four Python files` -> `pass`
 - `S07` `verify:` `PyInstaller spec syntax and git whitespace` -> `pass`
 - `S07` `verify:` `Read-only candidate review and final parent review` -> `pass`
+- `S08` `A` `src/vaultspec_a2a/desktop/_linux_resolver.py`
+- `S08` `M` `src/vaultspec_a2a/desktop/_linux_helper.py`
+- `S08` `M` `src/vaultspec_a2a/desktop/native_isolation.py`
+- `S08` `A` `src/vaultspec_a2a/desktop/tests/test_linux_resolver.py`
+- `S08` `M` `packaging/tests/native_isolation_artifact.py`
+- `S08` `M` `packaging/README.md`
+- `S08` `M` `.vault/adr/2026-10-05-desktop-native-isolation-linux-namespace-backend-adr.md`
+- `S08` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S08` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S08` `verify:` `Linux final parser/role/foundation pytest 37 tests` -> `pass`
+- `S08` `verify:` `Windows parser/role/refusal pytest 37 tests` -> `pass`
+- `S08` `verify:` `Actual final frozen artifact pytest 10 controls with source/frozen DNS and HTTPS` -> `pass`
+- `S08` `verify:` `Actual Linux build_binary portable/version/help/unlisted dispatch smoke` -> `pass`
+- `S08` `verify:` `Three changed production files byte-match freeze snapshot` -> `pass`
+- `S08` `verify:` `Ruff check and format five Python files` -> `pass`
+- `S08` `verify:` `Basedpyright strict five files zero errors` -> `pass`
+- `S08` `verify:` `Ty win32/linux/darwin five files` -> `pass`
+- `S08` `verify:` `One fresh candidate review plus parent final integrated diff review` -> `pass`
+- `S08` `verify:` `git diff --check` -> `pass`
 
 ## Notes
 
@@ -158,3 +177,4 @@ related:
 - `S06` Authenticated provider early-close and cancellation remain S08; default Claude stores, managed-policy preservation and production closure are unqualified and refused.
 - `S07` Network DNS control fails `EAI_AGAIN` inside namespace while host succeeds; DNI-016 remains S08 and is not counted as passed provider qualification.
 - `S07` Real auth/turn, actor IPC, consumer adoption and unverified target proofs remain S08; no eligibility or release changed.
+- `S08` DNI-016 resolver prerequisite resolved; persistent artifacts/desktop-native-isolation/s08-resolver-verification.md SHA256 157388474a8c28ec320108aeb9c4462c6de94590f871df91cd7e316c2ee3aa1b. Initial build argument/Windows guard/HTTPS homepage test setup failures corrected and audited. S09 OAuth export remains absent; no authenticated provider or new target admission claimed.

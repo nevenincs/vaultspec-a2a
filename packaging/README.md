@@ -49,10 +49,21 @@ each additional trusted ELF through repeated `--isolation-executable PATH`
 arguments when building A2A. Actual provider authentication, actor IPC, network
 compatibility and completed-turn evidence remain required before desktop admission.
 
+Each Linux launch acquires the host-selected `/etc/resolv.conf` through trusted,
+nonfollowing descriptors and supplies only validated DNS settings as a sealed,
+read-only child file. The source directory is absent from the child. Sources must
+be root-owned regular files with one link and safe permissions; only the explicit
+systemd, NetworkManager and WSL resolver aliases in the implementation are accepted.
+The WSL alias supports the research host and adds no production WSL requirement.
+Missing, unsafe, changing or unsupported resolver settings refuse execution without
+a fallback resolver. Custom hosts/NSS, proxy and CA policy still need qualification.
+
 The explicit `packaging/tests/native_isolation_artifact.py` controls run after a
 real Linux build. Set `VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE` to the onedir and
 `VAULTSPEC_A2A_TEST_LINUX_NODE` to the declared Node executable, whose ELF
 dependencies must have been supplied to assembly. Invoke the file directly with
 the locked test environment. These controls exercise relocated frozen execution,
-project I/O, synthetic role access, private-state denial, artifact refusal and
-detached-child cleanup; they do not establish provider login or turn eligibility.
+project I/O, synthetic role access, private-state denial, artifact refusal,
+system/DNS-only/child hostname lookup, an HTTPS checksum download, read-only resolver
+data and detached-child cleanup. Network controls require access to nodejs.org;
+they do not establish provider login or turn eligibility.

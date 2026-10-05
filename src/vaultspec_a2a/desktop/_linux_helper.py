@@ -51,18 +51,23 @@ def require_static_helper(descriptor: int) -> None:
 
 def anonymous_arguments(arguments: list[str]) -> int:
     """Return a sealed memfd; bubblewrap consumes and closes it before target exec."""
+    return anonymous_data(b"\0".join(arg.encode("utf-8") for arg in arguments) + b"\0")
+
+
+def anonymous_data(data: bytes) -> int:
+    """Return immutable anonymous bytes without granting their host source."""
     native_libc = ctypes.CDLL(None, use_errno=True)
     create_memfd = native_libc.memfd_create
     create_memfd.argtypes = [ctypes.c_char_p, ctypes.c_uint]
     create_memfd.restype = ctypes.c_int
     # Linux UAPI MFD_CLOEXEC | MFD_ALLOW_SEALING. Some locked standalone CPython
     # builds omit os.memfd_create and the equivalent fcntl constants.
-    descriptor = create_memfd(b"native-isolation-arguments", 0x0001 | 0x0002)
+    descriptor = create_memfd(b"native-isolation-data", 0x0001 | 0x0002)
     if descriptor < 0:
         raise OSError(ctypes.get_errno(), "native argument memfd creation failed")
     try:
         with os.fdopen(os.dup(descriptor), "wb") as stream:
-            stream.write(b"\0".join(arg.encode("utf-8") for arg in arguments) + b"\0")
+            stream.write(data)
         os.lseek(descriptor, 0, os.SEEK_SET)
         seal_memfd = native_libc.fcntl
         seal_memfd.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int]

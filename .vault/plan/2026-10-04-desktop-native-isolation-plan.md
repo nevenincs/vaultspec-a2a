@@ -12,7 +12,7 @@ related:
   - '[[2026-10-05-desktop-native-isolation-linux-namespace-backend-adr]]'
 modified: '2026-10-05'
 body_schema: body-v2
-body_hash: 'sha256:50a8de92a0ec2dc6a9f5169bdb6da49b9fec6b74b24b3a33768f1c157990202b'
+body_hash: 'sha256:15a946874ba4549a40d28585ae4b6b75de31ede212d1d844d02be655badf22b7'
 ---
 
 # `desktop-native-isolation` plan
@@ -34,7 +34,8 @@ The user requested the remaining known security fixes, then explicitly instructe
 - [x] `S05` - Carry explicit Linux launch authority through shared native execution and independent probes; `shared provider launch transport, independent MCP/version probe context and cache binding, session-owned terminal authority, focused real process/protocol tests. Desktop eligibility remains refused`.
 - [x] `S06` - Prepare worker-owned role authority and carry it through provider model and catalog callers; `native workspace capture after worker composition, selected-channel ACP home preparation and cleanup, existing Codex home ownership, model/catalog/version context, real lifecycle tests. Unsupported or unqualified stores and targets retain refusal`.
 - [x] `S07` - Package and verify the qualified Linux runtime closure; `declared helper and dependency inputs, frozen launcher dispatch and build assets, release assembly and real artifact controls. No runtime package acquisition or unproved eligibility`.
-- [ ] `S08` - Qualify actual desktop provider turns and restore only verified target eligibility; `control/provider_execution.py, provider readiness and binary proof, desktop admission/health, native artifact/runtime tests, docs, integrated review and audit`.
+- [x] `S08` - Supply bounded trusted Linux resolver runtime data and verify the legitimate network control; `Linux backend authority and sealed runtime-data descriptors, resolver-source trust and parsing, scoped backend ADR refinement, source and real frozen DNS/private-state controls, no all-/etc grant or CI resolver fallback`.
+- [ ] `S09` - Qualify actual desktop provider turns and restore only verified target eligibility; `control/provider_execution.py, provider readiness and binary proof, desktop admission/health, real Claude OAuth Linux artifact turn, actor IPC, cleanup, unsupported-target refusal, docs and integrated audit`.
 
 ## Parallelization
 

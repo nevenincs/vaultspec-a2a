@@ -28,7 +28,8 @@ from ._filesystem_authority import (
     directory_lease,
     resolve_directory_authority,
 )
-from ._linux_helper import anonymous_arguments, require_static_helper
+from ._linux_helper import anonymous_arguments, anonymous_data, require_static_helper
+from ._linux_resolver import RESOLVER_TARGET, host_resolver_data
 from .profile import derive_state_paths
 
 if TYPE_CHECKING:
@@ -351,6 +352,8 @@ def _runtime_target(value: str, authority: NativeLaunchAuthority) -> str:
     )
     if any(Path(value).is_relative_to(root) for root in protected):
         raise ValueError("runtime mapping overlaps a protected authority")
+    if path.is_relative_to(RESOLVER_TARGET) or RESOLVER_TARGET.is_relative_to(path):
+        raise ValueError("runtime mapping overlaps the trusted resolver")
     return value
 
 
@@ -464,6 +467,10 @@ def exec_linux_isolated(
             descriptor = _attested_file(stack, authority.capsule, record, prefix=prefix)
             grant_fds.append(descriptor)
             argv.extend(["--ro-bind-fd", str(descriptor), target])
+        resolver_fd = anonymous_data(host_resolver_data())
+        stack.callback(os.close, resolver_fd)
+        grant_fds.append(resolver_fd)
+        argv.extend(["--ro-bind-data", str(resolver_fd), str(RESOLVER_TARGET)])
         for descriptor in grant_fds:
             os.set_inheritable(descriptor, True)
         # bubblewrap consumes and closes every bind FD before target exec. The

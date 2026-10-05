@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:ae86b9832f46de0ca501c1482ee063225e5959bd67a7bdc19443e74525b38937'
+body_hash: 'sha256:b1b8152e930df6502e88fb5f91608b8dedd23b6d610568c01f676395ff0430ea'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-workspace-root-authority-audit]]"
@@ -156,6 +156,28 @@ High / implementation prerequisite; DNI-008 remains open S08. Real login/turn, f
 ### S08 network control | high | isolated DNS resolution fails the legitimate control
 
 Availability / provider runtime closure; open DNI-016, S08. A genuine Node26.8.1 lookup of nodejs.org succeeds on the host but returns EAI_AGAIN through the same real relocated frozen artifact. The current empty filesystem exposes ELF inputs but no host resolver configuration. This must be resolved with an explicit trusted, bounded runtime-data contract; do not grant all of /etc, copy CI resolver settings as universal runtime policy or reopen provider eligibility based on loopback HTTP alone. TLS and other provider data remain qualification requirements. Persistent probe: artifacts/desktop-native-isolation/frozen-dns-control.py, SHA256 21e7821c64f8c37fe463036d50a0106fc9354ee2eb002d90ef4222fd9bcc5f77, with retained actual output in frozen-dns-control.log. No credential or authenticated provider was involved. The user selected Claude OAuth export on Linux for subsequent real qualification.
+
+### S08 sequencing | low | reproduced network prerequisite isolated from final qualification
+
+Planning / resolved. Split the reproduced DNS prerequisite into S08 and preserve genuine authenticated-turn/admission work as S09. Step identifiers remain stable and existing approved scope is unchanged. Existing S08 qualification references now continue through S09. The user selected Claude OAuth export on Linux; a fresh metadata-only host check still reports that export absent. Do not transfer another login identity, log tokens or count synthetic material as authentication. Independent resolver/CLI/runtime work continues while local export setup remains required for the final authenticated control.
+
+### S08 final review | high | legitimate DNS control restored without host filesystem authority
+
+Availability / runtime-data closure; resolved DNI-016 for the bounded DNS prerequisite. Trusted exec_linux_isolated acquires only fixed root-owned /etc/resolv.conf or one finite validated resolver alias through retained nonfollowing FDs. It checks leaf/link metadata before acquisition and after reading, bounds input, validates regular single-link sources and parses only supported values. Unknown aliases, directives/options, ambiguous lines, scoped IPs and oversized settings refuse without fallback. The exact root-owned sticky WSL alias supports this research host; generic file/symlink/hard-link confinement is unchanged. Data is a sealed anonymous read-only child /etc/resolv.conf mount; host source descriptors close before helper execution, and exact/ancestor/descendant runtime mapping overlaps refuse.
+
+Actual final rebuilt Linuxx64 artifact population passes 10 tests (26.02s). Both source and relocated frozen launchers perform genuine Node26.8.1 system DNS lookup, DNS-only resolution, child lookup and TLS-validated HTTPS retrieval of its official pinned checksum (HTTP200 and known artifact digest). Resolver overwrite returns EROFS; unrelated /etc state and resolver source paths remain absent; no anonymous data FD survives target exec. Existing project I/O, synthetic role selection, absolute/symlink private-state denial, frozen self --version and retained-owner/de­tached-child cleanup remain passing. No real credential was used. Final actual source/role/foundation population passes 37 Linux tests (41.64s), Windows counterpart passes 37 (11.19s); Windows is refusal/parser coverage, not backend qualification. Final Ruff lint/format, strict Basedpyright (0 errors), Ty Windows/Linux/macOS and whitespace pass. Three production source inputs were byte-compared to the final frozen build. A fresh one-cycle read-only candidate review and parent final diff review found no concrete surviving bypass or regression.
+
+### S08 verification correction | low | public homepage redirect was not a transport failure
+
+Test contract / resolved DNI-017. Initial HTTPS probe successfully reached Node's public homepage but received its normal307 redirect, failing an incorrectly specific200 expectation. The control now downloads the already selected official Node26.8.1 checksum resource and validates the known x64 artifact digest plus HTTP200, proving a completed useful TLS request rather than copying the failed result into an expected value. Candidate9 and final10 artifact controls pass. Initial build invocation used the wrong script argument (--distpath rather than --dist); the parser refused before building, then exact declared interface succeeded. These failures were setup issues, not successful qualification.
+
+### S08 portability correction | low | Linux-only directory acquisition needed an explicit guard
+
+Platform compatibility / resolved DNI-018. Initial Windows Ty check correctly reported Linux-only os open flags in the private directory helper. It now explicitly refuses non-Linux before referencing kernel flags. Windows/Linux/macOS type checks pass without suppressions. All unsupported desktop targets still refuse native execution.
+
+### S08 qualification limits | medium | host resolver data does not establish full provider policy
+
+Verification / open DNI-008 in S09. Real supported source on this host is the WSL resolver alias; other allowlisted aliases have grammar/lexical-policy evidence but not production-host qualification. DNS data does not establish full custom NSS/hosts, resolver overrides, managed proxy or custom CA policy. Before any target admission, refuse or separately qualify policy requiring ungranted host files and preserve its selected resolver/auth identity. No default subscription-file/keychain or Claude host-managed-policy parity is claimed. Abrupt-loss native-home ownership recovery remains low operational DNI-013. Latest metadata-only OAuth check remains absent after the user selected that channel; setup question asks only for local configuration and a ready signal. Real authenticated provider work/actor IPC/full closure/consumer adoption are still unproved, and desktop admission remains closed.
 
 ## Review trail
 

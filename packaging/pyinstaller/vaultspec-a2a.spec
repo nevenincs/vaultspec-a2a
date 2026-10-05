@@ -32,6 +32,7 @@ binaries = []
 hiddenimports = [
     "vaultspec_a2a.worker.__main__",
     "vaultspec_a2a.protocols.mcp.authoring_stdio",
+    "vaultspec_a2a.desktop._linux_launcher",
     "vaultspec_core",
     "vaultspec_core.__main__",
 ]

@@ -1,0 +1,211 @@
+"""Explicit artifact checks; invoke after building the actual Linux onedir.
+
+Required inputs: VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE and
+VAULTSPEC_A2A_TEST_LINUX_NODE. The staged manifest must include the latter's
+declared ELF dependencies. These controls do not qualify provider authentication.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import time
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+from vaultspec_a2a.desktop.native_isolation import (
+    NativeLaunchAuthority,
+    linux_isolated_launch,
+)
+from vaultspec_a2a.desktop.profile import derive_state_paths
+
+
+def _artifact(tmp_path: Path) -> tuple[NativeLaunchAuthority, Path, Path]:
+    app_home = tmp_path / "app"
+    capsule = tmp_path / "capsule"
+    state = derive_state_paths(app_home)
+    project = state.workspaces_root / "project"
+    home = state.temp_homes_dir / "artifact-role"
+    project.mkdir(parents=True)
+    home.mkdir(parents=True)
+    capsule.mkdir()
+    authority = NativeLaunchAuthority.issue(
+        app_home=app_home, capsule=capsule, workspace=project, home=home
+    )
+    tree = Path(os.environ["VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE"])
+    component = authority.capsule.path / "a2a"
+    shutil.copytree(tree, component)
+    source = Path(os.environ["VAULTSPEC_A2A_TEST_LINUX_NODE"])
+    node = authority.capsule.path / "node/bin/node"
+    node.parent.mkdir(parents=True)
+    shutil.copyfile(source, node)
+    node.chmod(source.stat().st_mode & 0o777)
+    return authority, component / "vaultspec-a2a", node
+
+
+def _run(
+    authority: NativeLaunchAuthority, binary: Path, command: list[str]
+) -> subprocess.CompletedProcess[str]:
+    launch = linux_isolated_launch(
+        authority, command, cwd=str(authority.workspace.path), environment={}
+    )
+    return subprocess.run(
+        [
+            str(binary),
+            "run-module",
+            "vaultspec_a2a.desktop._linux_launcher",
+            authority.encode(),
+            str(authority.workspace.path),
+            *command,
+        ],
+        cwd=launch.cwd,
+        env=dict(launch.environment),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_frozen_component_preserves_work_and_denies_private_state(
+    tmp_path: Path,
+) -> None:
+    authority, binary, node = _artifact(tmp_path)
+    private = authority.app_home.path / "private-state"
+    private.write_text("synthetic-service-state", encoding="utf-8")
+    alias = authority.workspace.path / "outside-alias"
+    alias.symlink_to(private)
+    (authority.home.path / "auth.json").write_text("selected-synthetic-role")
+    script = (
+        "const fs=require('fs'), cp=require('child_process');"
+        + f"const paths={json.dumps([str(private), str(alias)])};"
+        + "const denied=paths.every(p=>{try{fs.readFileSync(p);return false}"
+        + "catch(e){return e.code==='ENOENT'}});"
+        + "fs.writeFileSync('artifact-project-write','owned');"
+        + "const selected=fs.readFileSync(process.env.HOME+'/auth.json','utf8');"
+        + "let readonly=false;try{fs.writeFileSync(process.execPath,'changed')}"
+        + "catch(e){readonly=e.code==='EROFS'};"
+        + "const child=cp.spawnSync(process.execPath,['-e','process.exit(13)']);"
+        + "console.log(JSON.stringify({denied,selected,readonly,child:child.status}));"
+    )
+    result = _run(authority, binary, [str(node), "-e", script])
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "denied": True,
+        "selected": "selected-synthetic-role",
+        "readonly": True,
+        "child": 13,
+    }
+    assert (authority.workspace.path / "artifact-project-write").read_text() == "owned"
+    assert private.read_text() == "synthetic-service-state"
+    # The genuine frozen runtime can re-enter its own dependency closure inside
+    # the namespace, rather than borrowing the test interpreter or host Python.
+    version = _run(authority, binary, [str(binary), "--version"])
+    assert version.returncode == 0, version.stderr
+    assert "vaultspec-a2a" in version.stdout.lower()
+
+
+@pytest.mark.parametrize("mutation", ["missing", "helper", "source", "outside"])
+def test_frozen_component_refuses_invalid_assets_before_target(
+    tmp_path: Path, mutation: str
+) -> None:
+    authority, binary, node = _artifact(tmp_path)
+    manifest = binary.parent / "isolation/runtime.json"
+    if mutation == "missing":
+        manifest.unlink()
+    elif mutation == "helper":
+        helper = binary.parent / "isolation/bin/bubblewrap"
+        with helper.open("r+b") as stream:
+            stream.write(b"changed")
+    elif mutation == "source":
+        record = json.loads(manifest.read_text())
+        record["helper"]["source"] = "../isolation/bin/bubblewrap"
+        manifest.write_text(json.dumps(record))
+    else:
+        original = Path(os.environ["VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE"])
+        binary = original / "vaultspec-a2a"
+    result = _run(
+        authority,
+        binary,
+        [str(node), "-e", "require('fs').writeFileSync('must-not-run','failure')"],
+    )
+    assert result.returncode != 0
+    assert not (authority.workspace.path / "must-not-run").exists()
+
+
+def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:
+    authority, binary, node = _artifact(tmp_path)
+    nonce = "frozen-descendant-" + uuid4().hex
+    script = authority.workspace.path / "lifetime.js"
+    script.write_text(
+        "const cp=require('child_process'),fs=require('fs');\n"
+        "const child=cp.spawn(process.execPath,\n"
+        "['-e','setInterval(()=>{},1000)',process.argv[2]],\n"
+        "{detached:true,stdio:'ignore'});\n"
+        "fs.writeFileSync('descendant-ready',String(child.pid));\n"
+        "setInterval(()=>{},1000);\n",
+        encoding="utf-8",
+    )
+    launch = linux_isolated_launch(
+        authority,
+        [str(node), str(script), nonce],
+        cwd=str(authority.workspace.path),
+        environment={},
+    )
+    owner = subprocess.Popen(
+        [
+            str(binary),
+            "run-module",
+            "vaultspec_a2a.desktop._linux_launcher",
+            authority.encode(),
+            str(authority.workspace.path),
+            str(node),
+            str(script),
+            nonce,
+        ],
+        cwd=launch.cwd,
+        env=dict(launch.environment),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        ready = authority.workspace.path / "descendant-ready"
+        deadline = time.monotonic() + 15
+        while not ready.exists() and time.monotonic() < deadline:
+            assert owner.poll() is None
+            time.sleep(0.05)
+        assert ready.exists()
+        descendants: list[tuple[Path, int]] = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            try:
+                arguments = (entry / "cmdline").read_bytes().split(b"\0")
+                if nonce.encode() in arguments and b"-e" in arguments:
+                    descendants.append((entry, entry.stat().st_ino))
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                continue
+        assert len(descendants) == 1
+        owner.kill()
+        owner.wait(timeout=5)
+        path, identity = descendants[0]
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                if path.stat().st_ino != identity:
+                    break
+                if (path / "stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                    break
+            except (FileNotFoundError, ProcessLookupError):
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("detached child survived its frozen retained owner")
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=5)

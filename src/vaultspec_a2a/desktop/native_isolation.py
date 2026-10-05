@@ -365,9 +365,9 @@ def _capsule_file(stack: ExitStack, capsule: DirectoryAuthority, name: str) -> i
 
 
 def _attested_file(
-    stack: ExitStack, capsule: DirectoryAuthority, record: RuntimeFile
+    stack: ExitStack, capsule: DirectoryAuthority, record: RuntimeFile, *, prefix: str
 ) -> int:
-    descriptor = _capsule_file(stack, capsule, record.source)
+    descriptor = _capsule_file(stack, capsule, prefix + _relative_source(record.source))
     digest = hashlib.sha256()
     while block := os.read(descriptor, 1024 * 1024):
         digest.update(block)
@@ -375,6 +375,16 @@ def _attested_file(
         raise ValueError("native runtime file differs from its pinned closure")
     os.lseek(descriptor, 0, os.SEEK_SET)
     return descriptor
+
+
+def _runtime_component_prefix(authority: NativeLaunchAuthority) -> str:
+    if not is_frozen():
+        return ""
+    component = Path(sys.executable).resolve(strict=True).parent
+    if not component.is_relative_to(authority.capsule.path):
+        raise ProcessContainmentError("frozen native runtime is outside its capsule")
+    relative = component.relative_to(authority.capsule.path)
+    return "" if relative == Path(".") else relative.as_posix() + "/"
 
 
 def exec_linux_isolated(
@@ -391,6 +401,7 @@ def exec_linux_isolated(
     selected_cwd = authority.canonical_cwd(cwd)
     _validate_command(command)
     _validate_environment(environment)
+    prefix = _runtime_component_prefix(authority)
     with ExitStack() as stack:
         # Recheck leased identities before any mount. Only the three grants are
         # inherited; the validation anchor and all unrelated FDs stay closed.
@@ -398,14 +409,16 @@ def exec_linux_isolated(
             stack.enter_context(directory_lease(root))
             for root in (authority.capsule, authority.workspace, authority.home)
         ]
-        manifest_fd = _capsule_file(stack, authority.capsule, _MANIFEST)
+        manifest_fd = _capsule_file(stack, authority.capsule, prefix + _MANIFEST)
         metadata = os.read(manifest_fd, _MAX_METADATA_BYTES + 1)
         if len(metadata) > _MAX_METADATA_BYTES:
             raise ValueError("native runtime manifest exceeds its bound")
         closure = LinuxRuntimeClosure.model_validate(
             _decode_record(metadata.decode("utf-8"))
         )
-        helper_fd = _attested_file(stack, authority.capsule, closure.helper)
+        helper_fd = _attested_file(
+            stack, authority.capsule, closure.helper, prefix=prefix
+        )
         require_static_helper(helper_fd)
         helper_mode = os.fstat(helper_fd).st_mode
         if helper_mode & (stat.S_ISUID | stat.S_ISGID):
@@ -448,7 +461,7 @@ def exec_linux_isolated(
             if target in targets:
                 raise ValueError("native runtime targets must be unique")
             targets.add(target)
-            descriptor = _attested_file(stack, authority.capsule, record)
+            descriptor = _attested_file(stack, authority.capsule, record, prefix=prefix)
             grant_fds.append(descriptor)
             argv.extend(["--ro-bind-fd", str(descriptor), target])
         for descriptor in grant_fds:

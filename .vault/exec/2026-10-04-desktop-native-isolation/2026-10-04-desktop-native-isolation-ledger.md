@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:9e3e4d0be142094ea565525bf988f53829fdb26529c0c929114dc57969eea933'
+body_hash: 'sha256:b124fd6c8f3dee097a79731885a85a3088d95133a6151f130fbf036487f0482b'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -121,6 +121,22 @@ related:
 - `S06` `verify:` `Strict Basedpyright nine files` -> `pass`
 - `S06` `verify:` `Ty Windows Linux Darwin nine files` -> `pass`
 - `S06` `verify:` `git diff whitespace` -> `pass`
+- `S07` `A` `scripts/build_linux_isolation.py`
+- `S07` `M` `scripts/build_binary.py`
+- `S07` `M` `packaging/pyinstaller/vaultspec-a2a.spec`
+- `S07` `M` `src/vaultspec_a2a/desktop/native_isolation.py`
+- `S07` `A` `packaging/tests/native_isolation_artifact.py`
+- `S07` `M` `packaging/README.md`
+- `S07` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S07` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S07` `verify:` `Locked real Linux default and declared Node frozen builds` -> `pass`
+- `S07` `verify:` `Linux final frozen artifact six real tests` -> `pass`
+- `S07` `verify:` `Linux source native foundation nine tests` -> `pass`
+- `S07` `verify:` `Windows native and dispatch seventeen tests` -> `pass`
+- `S07` `verify:` `Ruff lint and format four Python files` -> `pass`
+- `S07` `verify:` `Strict Basedpyright and Ty three platforms four Python files` -> `pass`
+- `S07` `verify:` `PyInstaller spec syntax and git whitespace` -> `pass`
+- `S07` `verify:` `Read-only candidate review and final parent review` -> `pass`
 
 ## Notes
 
@@ -140,3 +156,5 @@ related:
 - `S05` Desktop production execution remains refused; S06 worker/auth/packaging and S07 authenticated provider/artifact qualification remain open. Initial test-only dependency map failed runtime validation and was corrected without weakening the runtime.
 - `S06` Five existing live catalog tests deselected by repository selection; no new doubles or skips.
 - `S06` Authenticated provider early-close and cancellation remain S08; default Claude stores, managed-policy preservation and production closure are unqualified and refused.
+- `S07` Network DNS control fails `EAI_AGAIN` inside namespace while host succeeds; DNI-016 remains S08 and is not counted as passed provider qualification.
+- `S07` Real auth/turn, actor IPC, consumer adoption and unverified target proofs remain S08; no eligibility or release changed.

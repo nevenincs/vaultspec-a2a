@@ -235,11 +235,44 @@ def main() -> None:
         default=_PROJECT_ROOT / "dist" / "binary",
         help="Distribution output directory (default: dist/binary).",
     )
+    parser.add_argument(
+        "--isolation-executable",
+        type=Path,
+        action="append",
+        default=[],
+        help="Additional trusted Linux capsule ELF input (repeat for each executable).",
+    )
     args = parser.parse_args()
+    if args.isolation_executable and sys.platform != "linux":
+        parser.error("--isolation-executable requires a native Linux build")
     binary = build(args.dist.resolve())
     # Before the smoke gate: a tree the consumer would refuse is not worth
     # proving the dispatch surface of.
     flatten_links(binary.parent)
+    if sys.platform == "linux":
+        result = _run(
+            [
+                sys.executable,
+                str(_PROJECT_ROOT / "scripts" / "build_linux_isolation.py"),
+                "--runtime",
+                str(binary.parent),
+                "--work",
+                str(args.dist.resolve() / "isolation-build"),
+                *[
+                    argument
+                    for executable in args.isolation_executable
+                    for argument in (
+                        "--executable",
+                        str(executable.resolve(strict=True)),
+                    )
+                ],
+            ],
+            cwd=_PROJECT_ROOT,
+        )
+        if result.returncode != 0:
+            raise SystemExit(
+                f"native isolation assembly failed (exit {result.returncode})"
+            )
     assert_portable_paths(binary.parent)
     smoke(binary)
 

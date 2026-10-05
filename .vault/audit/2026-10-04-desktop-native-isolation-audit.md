@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:495efbe6e44e8a7c8e1c50d4427eec4d69a18e59005262f9c96d21cc209123f6'
+body_hash: 'sha256:ae86b9832f46de0ca501c1482ee063225e5959bd67a7bdc19443e74525b38937'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-workspace-root-authority-audit]]"
@@ -136,6 +136,26 @@ Verification: final Linux 13 real role/foundation tests pass, Windows 36 role/mo
 Low / operational recovery; open DNI-013. Abrupt worker loss can leave the new vaultspec-native-home prefix beneath accounted app-state tmp/homes. Normal error/cancellation cleanup owns removal. Do not reuse the existing age-only orphan sweep for live native homes; lifecycle recovery with actual ownership evidence is follow-up work, and no rotated credential recovery is promised. The accepted default subscription file-store, host-managed policy preservation, release closure and real turn qualification remain high implementation prerequisite DNI-008, owned by S07-S08.
 
 Plan sequencing correction: S06 owns worker/model/catalog/version context and selected-channel role preparation; S07 now owns release runtime closure assembly and actual frozen artifact controls; S08 owns authenticated target/lane qualification and any eligibility restoration. The approved scope has eight sequential checkpoints. Earlier S06-S07 qualification references continue through S08; no eligibility changed.
+
+### S07 packaging review | medium | component-relative asset lookup required
+
+Integration / availability; resolved DNI-014. The original root/isolation manifest location does not match a composed frozen A2A under full-capsule/a2a. Frozen execution now derives exactly one prefix from canonical sys.executable.parent, verifies that component is inside the retained capsule and opens its manifest and records through the existing confined descriptor boundary. Source keeps the prior root layout. No ancestor search or caller-selected manifest fallback is introduced. A real relocated Linux binary drives both Node26.8.1 and frozen self-execution; outside-capsule execution refuses before the target marker.
+
+### S07 integrated review | low | packaging claims drifted from actual consumer
+
+Documentation / resolved DNI-015. Scoped read-only consumer inspection establishes that generic Dashboard composition preserves the complete A2A onedir beneath a2a/, while current product-release intentionally omits A2A and resolves it as a separate runtime generation. packaging/README.md now distinguishes that supported composition from actual adoption and removes an unverified current fleet-state assertion. Consumer files and its substantial existing edits were untouched. Supplier publication and target eligibility remain separate gates.
+
+### S07 final review | low | real Linux archive assembly and frozen controls verified
+
+PASS for S07 supplier packaging. Linux build_binary now builds hash-pinned upstream bubblewrap0.11.1/libcap2.75 without global installation, stages the static helper and licenses and resolves trusted produced ELF dependencies at build time only. Explicit additional ELF arguments allow a composer to supply Node/provider inputs. Windows/macOS default build behavior is preserved. The launcher is explicitly hidden-imported. Default frozen assembly and assembly with official Node26.8.1 both pass actual version/help, allowlist refusal and portable-tree checks. Four source inputs were byte-compared against the snapshot used for the build.
+
+Final explicit artifact population passes 6 tests (6.93s): project write, selected synthetic home, absolute/symlink private denial, read-only runtime, genuine piped child13, isolated frozen self --version, missing/modified/parent-traversal/outside-capsule refusal and frozen retained-owner death removing a detached child. Linux source foundation passes 9; Windows native/runtime-dispatch population passes 17. Ruff lint/format, strict Basedpyright and Ty Windows/Linux/macOS pass on four Python files; spec syntax and whitespace pass. One fresh candidate review and final parent diff review found no concrete surviving bypass/regression. Persistent artifact record: artifacts/desktop-native-isolation/s07-artifact-verification.md, SHA256 2045fa6703ea10709d6ee3ea753d9a1375da41ec5ef0031d616a7e013f5008b8.
+
+High / implementation prerequisite; DNI-008 remains open S08. Real login/turn, full provider closure/data, actor IPC and deployed consumer adoption are unproved. Linux ARM64 and Windows/macOS runtime qualification remain open; no admission or release was changed.
+
+### S08 network control | high | isolated DNS resolution fails the legitimate control
+
+Availability / provider runtime closure; open DNI-016, S08. A genuine Node26.8.1 lookup of nodejs.org succeeds on the host but returns EAI_AGAIN through the same real relocated frozen artifact. The current empty filesystem exposes ELF inputs but no host resolver configuration. This must be resolved with an explicit trusted, bounded runtime-data contract; do not grant all of /etc, copy CI resolver settings as universal runtime policy or reopen provider eligibility based on loopback HTTP alone. TLS and other provider data remain qualification requirements. Persistent probe: artifacts/desktop-native-isolation/frozen-dns-control.py, SHA256 21e7821c64f8c37fe463036d50a0106fc9354ee2eb002d90ef4222fd9bcc5f77, with retained actual output in frozen-dns-control.log. No credential or authenticated provider was involved. The user selected Claude OAuth export on Linux for subsequent real qualification.
 
 ## Review trail
 

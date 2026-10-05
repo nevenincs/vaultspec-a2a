@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:5936e8e110772f420849063d1184eb5bd9d17f380c386ba559d00d068a5df3a2'
+body_hash: 'sha256:34ccf6f44f060cf7c219ce1396ff08caa950d561e9cc04dbb654a09c22d26e4d'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-desktop-native-isolation-audit]]"
@@ -66,6 +66,18 @@ Accepted harness provisioning distinguishes default operator subscription discov
 The available Linux research host has no Claude/Codex credential file, no exported CLAUDE_CODE_OAUTH_TOKEN and no /etc/claude-code directory. Only metadata/presence was checked; no operator credential contents were read or transferred from Windows. Synthetic selected-channel controls prove home binding/private-state denial and cleanup, not real authentication. Primary documentation describes CLAUDE_CONFIG_DIR relocation and Linux subscription-file auth, and organisation managed settings under /etc/claude-code; those live documents do not establish compatibility of an untested pinned CLI or justify dropping managed policy. Sources: https://code.claude.com/docs/en/authentication; https://code.claude.com/docs/en/env-vars; https://code.claude.com/docs/en/managed-settings.
 
 Fresh candidate review surfaced suspended async-generator cleanup ordering. Explicit closure propagates through all yielding wrappers before prepared-home removal; asynchronous removal is joined. The final Linux role/foundation tests pass 13, including actual static-helper version probing from an empty home and genuine model startup refusal with no leaked home. Authenticated stream/cancel/early-close behavior remains S08. Release packaging is separated into S07 because the product composes a2a inside a larger immutable capsule; helper/dependency placement must follow that actual composition rather than assume the binary parent is the full runtime root.
+
+### S07 produced artifact verifies nested component isolation, not provider eligibility
+
+The actual Linux x86_64 locked freeze build uses CPython3.13.14/PyInstaller6.22.3 and native C/make. Hash-pinned bubblewrap0.11.1 and libcap2.75 source archives build a static helper, whose source archive is verified before extraction and whose ELF/version is checked before staging. Upstream libcap SHA256 de4e7e064c9ba451d5234dd46e897d7c71c96a9ebf9a0c445bc04f4742d83632 was confirmed against https://www.kernel.org/pub/linux/libs/security/linux-privs/libcap2/sha256sums.asc. Genuine official Node26.8.1 x64 archive SHA256 3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d was confirmed against https://nodejs.org/dist/v26.8.1/SHASUMS256.txt; the web open could not access the Node URL, while native HTTPS fetch returned the checksum. No ambient version was substituted.
+
+Produced binary SHA256 af897eba92bc6ec98fe3ba03bfc7d208542b9d368df8902fc6e8883de8ec4843; static helper 97c9bcab1f008d14baf75565448f3862476228e81e1d56cc4bd726fd0fc5a31f; explicit Node closure manifest cdbb8cc7c71a65cead41743f6724ac714eeda8a1ec88e1073ee823266abbe9a6. Four final producer/source inputs match the build snapshot byte for byte. Six final real artifact controls pass, including nested a2a/ location, frozen self-entry and removal of the detached child when the retained frozen owner dies. Persistent evidence: artifacts/desktop-native-isolation/s07-artifact-verification.md.
+
+Read-only current consumer evidence: packaging/assemble-build-spec.py and product_build.rs preserve whole onedir at optional a2a/ destination; current product-release omits that component and resolves a separate runtime generation. Full-capsule grants remain required for Node/npm. A2A frozen ELF closure alone does not constitute full provider closure; additional trusted ELF arguments are an explicit producer seam, not automatic deployment adoption.
+
+### S08 actual DNS control identifies a missing runtime-data boundary
+
+Actual Node26.8.1 lookup of nodejs.org succeeds on the host and fails EAI_AGAIN through the real isolated frozen artifact. ELF attestation and loopback relay proof do not establish resolver/TLS/provider-data compatibility. Runtime must obtain only explicitly trusted necessary data through a bounded authority, not all of /etc or build-host resolver bytes. The retained probe and actual output are in artifacts/desktop-native-isolation/frozen-dns-control.py and frozen-dns-control.log. This is a reproduced availability prerequisite, not a claimed new confidentiality bypass. The user's selected subsequent auth channel is a Claude OAuth export on Linux; credentials remain local and no token is requested in chat.
 
 ## Sources
 

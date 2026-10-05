@@ -12,7 +12,7 @@ related:
   - '[[2026-10-05-desktop-native-isolation-linux-namespace-backend-adr]]'
 modified: '2026-10-05'
 body_schema: body-v2
-body_hash: 'sha256:64617cb0aa47d3cc01cbce1568186e350320a0f152f8f90d95ec30ceb1c89b86'
+body_hash: 'sha256:50a8de92a0ec2dc6a9f5169bdb6da49b9fec6b74b24b3a33768f1c157990202b'
 ---
 
 # `desktop-native-isolation` plan
@@ -33,7 +33,7 @@ The user requested the remaining known security fixes, then explicitly instructe
 - [x] `S04` - Implement and verify the Linux backend, path-bound authority and build-owned runtime closure; `desktop/native_isolation.py, desktop/_linux_launcher.py, desktop/_linux_helper.py, desktop/_linux_runtime_assets.py, desktop/tests/test_native_isolation.py, utils/runtime_exec.py and its real execution tests, shared infrastructure environment filtering and rolling isolation audit`.
 - [x] `S05` - Carry explicit Linux launch authority through shared native execution and independent probes; `shared provider launch transport, independent MCP/version probe context and cache binding, session-owned terminal authority, focused real process/protocol tests. Desktop eligibility remains refused`.
 - [x] `S06` - Prepare worker-owned role authority and carry it through provider model and catalog callers; `native workspace capture after worker composition, selected-channel ACP home preparation and cleanup, existing Codex home ownership, model/catalog/version context, real lifecycle tests. Unsupported or unqualified stores and targets retain refusal`.
-- [ ] `S07` - Package and verify the qualified Linux runtime closure; `declared helper and dependency inputs, frozen launcher dispatch and build assets, release assembly and real artifact controls. No runtime package acquisition or unproved eligibility`.
+- [x] `S07` - Package and verify the qualified Linux runtime closure; `declared helper and dependency inputs, frozen launcher dispatch and build assets, release assembly and real artifact controls. No runtime package acquisition or unproved eligibility`.
 - [ ] `S08` - Qualify actual desktop provider turns and restore only verified target eligibility; `control/provider_execution.py, provider readiness and binary proof, desktop admission/health, native artifact/runtime tests, docs, integrated review and audit`.
 
 ## Parallelization

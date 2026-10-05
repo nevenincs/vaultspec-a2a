@@ -16,7 +16,7 @@ import psutil
 import pytest
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.language_models.chat_model_stream import AsyncChatModelStream
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 
 from vaultspec_a2a.desktop.native_isolation import (
     NativeLaunchAuthority,
@@ -34,9 +34,10 @@ from vaultspec_a2a.providers.provider_catalog_service import ProviderCatalogServ
 from vaultspec_a2a.testing import armed_environment, settings_override
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 
     from langchain_core.outputs import LLMResult
+    from langchain_core.tracers.schemas import Run
 
 
 _LONG_PROMPT = (
@@ -346,6 +347,139 @@ class _CompletionObserver(AsyncCallbackHandler):
     @override
     async def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         self.completions += 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["config", "types", "listeners", "composed"])
+async def test_public_binding_close_joins_real_provider(
+    inputs: _Inputs, kind: str
+) -> None:
+    model = inputs.model()
+    listener_started: list[str] = []
+
+    def on_start(run: Run) -> None:
+        listener_started.append(run.id.hex)
+
+    if kind == "types":
+        bound = model.with_types(output_type=AIMessage)
+    elif kind == "listeners":
+        bound = model.with_listeners(on_start=on_start)
+    else:
+        bound = model.with_config({"tags": ["binding-control"]})
+        if kind == "composed":
+            bound = (
+                bound.bind()
+                .with_types(output_type=AIMessage)
+                .with_listeners(on_start=on_start)
+            )
+    generation = cast(
+        "AsyncGenerator[AIMessageChunk]",
+        bound.astream([HumanMessage(content=_LONG_PROMPT)]),
+    )
+    async with aclosing(generation) as stream:
+        async with asyncio.timeout(120):
+            while not (await asyncio.wait_for(anext(stream), timeout=60)).content:
+                pass
+        assert model.active_native_control_targets()
+        processes = _processes(inputs)
+        if kind in {"listeners", "composed"}:
+            assert len(listener_started) == 1
+    _released(inputs, model, processes)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_public_binding_closure_joins_cleanup(inputs: _Inputs) -> None:
+    model = inputs.model()
+    stream = model.with_config().astream([HumanMessage(content=_LONG_PROMPT)])
+    try:
+        async with asyncio.timeout(120):
+            while not (await anext(stream)).content:
+                pass
+        assert model.active_native_control_targets()
+        processes = _processes(inputs)
+        task = asyncio.create_task(stream.aclose())
+        asyncio.get_running_loop().call_soon(task.cancel)
+        asyncio.get_running_loop().call_soon(task.cancel)
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=30)
+        _released(inputs, model, processes)
+    finally:
+        await stream.aclose()
+
+
+class _BindingObserver(_CompletionObserver):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tags: list[str] = []
+        self.stop: object = None
+
+    @override
+    async def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list[list[BaseMessage]],
+        **kwargs: Any,
+    ) -> None:
+        self.tags = kwargs["tags"]
+        self.stop = kwargs["invocation_params"]["stop"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invoke", [False, True])
+async def test_public_binding_preserves_work_callbacks_and_merging(
+    inputs: _Inputs, invoke: bool
+) -> None:
+    model = inputs.model()
+    observer = _BindingObserver()
+    bound = model.with_config({"callbacks": [observer], "tags": ["bound-tag"]}).bind(
+        stop=["bound-stop"]
+    )
+    prompt = [HumanMessage(content="Reply with exactly: binding-qualified")]
+    async with asyncio.timeout(120):
+        if invoke:
+            message = await bound.ainvoke(
+                prompt, config={"tags": ["call-tag"]}, stop=["call-stop"]
+            )
+            content = str(message.content)
+            assert isinstance(message, AIMessage)
+            assert message.usage_metadata is not None
+        else:
+            async with aclosing(
+                cast(
+                    "AsyncGenerator[AIMessageChunk]",
+                    bound.astream(
+                        prompt, config={"tags": ["call-tag"]}, stop=["call-stop"]
+                    ),
+                )
+            ) as stream:
+                content = "".join([str(chunk.content) async for chunk in stream])
+    assert "binding-qualified" in content
+    assert observer.completions == 1
+    assert {"bound-tag", "call-tag"}.issubset(observer.tags)
+    assert observer.stop == ["call-stop"]
+    _released(inputs, model)
+
+
+@pytest.mark.asyncio
+async def test_public_binding_preserves_bound_beta_version_and_close(
+    inputs: _Inputs,
+) -> None:
+    model = inputs.model()
+    bound = model.with_config().bind(version="v3")
+    # The omitted call-time version must preserve the already bound choice.
+    stream = await cast(
+        "Awaitable[AsyncChatModelStream]",
+        bound.astream_events([HumanMessage(content=_LONG_PROMPT)]),
+    )
+    assert isinstance(stream, AsyncChatModelStream)
+    async with stream:
+        async with asyncio.timeout(120):
+            async for text in stream.text:
+                if text:
+                    break
+        assert model.active_native_control_targets()
+        processes = _processes(inputs)
+    _released(inputs, model, processes)
 
 
 @pytest.mark.asyncio

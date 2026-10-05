@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:8c6f9368783fd2f872758bb08a46ad9be6d7f8842c0ead3944ee43a2dd712c16'
+body_hash: 'sha256:0f782251d0be5bcf8051516f99d3db1c0e8fe588610a455e38c2ae968a1f868f'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -208,6 +208,25 @@ related:
 - `S11` `verify:` `Ty Linux Windows macOS two Python files` -> `pass`
 - `S11` `verify:` `git diff --check` -> `pass`
 - `S11` `verify:` `formal actual diff cache caller health review and queue updates` -> `pass`
+- `S13` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S13` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S13` `verify:` `actual frozen Linux pinned SDK five zero-prompt selected-login usage controls` -> `pass`
+- `S14` `M` `src/vaultspec_a2a/providers/_stream_lifetime.py`
+- `S14` `M` `packaging/tests/native_provider_lifecycle.py`
+- `S14` `M` `packaging/README.md`
+- `S14` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S14` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S14` `M` `.vault/plan/2026-10-04-desktop-native-isolation-plan.md`
+- `S14` `verify:` `genuine with_config early-close baseline` -> `fail`
+- `S14` `verify:` `genuine public binding lifecycle population eight controls` -> `pass`
+- `S14` `verify:` `genuine final nonempty sync-listener and composed controls two cases` -> `pass`
+- `S14` `verify:` `locked actual binding serialization original id/kwargs control` -> `pass`
+- `S14` `verify:` `nearest Codex model ACP selection callbacks 104 tests` -> `pass`
+- `S14` `verify:` `locked Ruff lint and format two files` -> `pass`
+- `S14` `verify:` `locked strict Basedpyright two files` -> `pass`
+- `S14` `verify:` `locked Ty Windows Linux macOS two files` -> `pass`
+- `S14` `verify:` `git diff --check` -> `pass`
+- `S14` `verify:` `fresh one-cycle candidate and parent integrated actual diff review` -> `pass`
 
 ## Notes
 
@@ -238,3 +257,5 @@ related:
 - `S10` DNI-023 bound Runnable closure qualification remains S12; Claude weekly capacity prevents real ACP work evidence; admission remains refused.
 - `S11` Split independent selected ACP authentication/default-store evidence into S13 before S12; no eligibility change.
 - `S11` Genuine control uses access-only existing Windows login via stdin; original source unchanged.
+- `S13` S13 remains open: actual `get_usage` control and source inspection reject usage success and local eligibility as fresh authentication; positive/invalid stores both have null limits. User-selected Windows source unchanged and all temporary roles removed. This verifies the investigation control, not a production fix or authentication verifier.
+- `S14` S14 closes only the public configuration/type/sync-listener streaming subset; direct typed model bind DNI-023 remains blocked on upstream private nominal type/closure contract and broader Runnable lifetime debt DNI-024 remains source-backed qualification. S13 auth/evidence contract and S12 full target qualification remain open. Selected Windows source unchanged; no refresh tokens or model prompts used for rejected Claude usage verifier.

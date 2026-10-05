@@ -12,7 +12,7 @@ related:
   - '[[2026-10-05-desktop-native-isolation-linux-namespace-backend-adr]]'
 modified: '2026-10-05'
 body_schema: body-v2
-body_hash: 'sha256:b2bd2ea34839bfec8bf7f64470763bf0542d17f6896e9800e76f78742e757142'
+body_hash: 'sha256:5461578ffd50bddaea419c74b7b525aa12cc96372a7143f950b96f2227b190e3'
 ---
 
 # `desktop-native-isolation` plan
@@ -38,6 +38,7 @@ The user requested the remaining known security fixes, then explicitly instructe
 - [x] `S09` - Package the required certificate trust data and verify genuine native provider work; `scripts/build_linux_isolation.py, pinned dependency certificate bundle and artifact data manifest, source and actual frozen Codex account/turn controls, certificate immutability/private-state controls, packaging documentation and integrated audit`.
 - [x] `S10` - Join provider and role cleanup when a live stream closes; `providers/_stream_lifetime.py, codex_chat_model.py and acp_chat_model.py, explicit genuine native provider lifecycle controls, completed streams and early-close cancellation interruption concurrent callback and beta event paths, frozen launcher reaping, rolling review and findings queue`.
 - [x] `S11` - Clear historical provider health after catalog refresh failure; `provider_catalog_service.py failed-refresh and backoff observations, actual authenticated Codex service cache failure and recovery controls, rolling audit`.
+- [x] `S14` - Join owned provider cleanup through public configuration type and listener bindings; `providers/_stream_lifetime.py public binding composition, genuine with_config with_types sync-listener and cancellation controls, preservation of kwargs/config callbacks completed work and v3 resource behavior, explicit typed bind upstream blocker and broader Runnable debt, rolling audit and retained S13 research checkpoint`.
 - [ ] `S13` - Make ACP authentication reflect independently verified selected provider evidence; `provider-owned no-prompt selected-login verifier and factory composition, ACP catalog success authentication, actual positive invalid absent and ordinary default-store compatibility controls, rolling audit`.
 - [ ] `S12` - Complete target qualification and restore only verified desktop eligibility; `control/provider_execution.py, provider readiness and binary proof, desktop admission and health, actual Linux artifact provider turns using existing selected Windows logins, actor IPC, full frozen worker integration, unsupported-target refusal, consumer adoption evidence, docs and integrated audit`.
 

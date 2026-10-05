@@ -88,3 +88,8 @@ The same file also drives the real catalog factory through authenticated
 discovery, an owned invalid-executable refresh failure, backoff and recovery.
 It checks that stale enumeration survives while historical login and transport
 health are cleared until a fresh successful observation.
+Public configuration, type and synchronous-listener binding controls also check
+joined early closure and cancellation, callbacks, argument/configuration merging
+and beta event-resource behavior. Direct model `bind()` and other Runnable
+wrappers still need separate qualification; these controls do not qualify every
+LangChain streaming surface.

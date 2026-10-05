@@ -12,7 +12,7 @@ related:
   - '[[2026-10-05-desktop-native-isolation-linux-namespace-backend-adr]]'
 modified: '2026-10-05'
 body_schema: body-v2
-body_hash: 'sha256:ffdda64cf7eb9b2c991c133aab513955956260290973e3d6fe2fede921bc20c1'
+body_hash: 'sha256:b2bd2ea34839bfec8bf7f64470763bf0542d17f6896e9800e76f78742e757142'
 ---
 
 # `desktop-native-isolation` plan
@@ -37,7 +37,8 @@ The user requested the remaining known security fixes, then explicitly instructe
 - [x] `S08` - Supply bounded trusted Linux resolver runtime data and verify the legitimate network control; `Linux backend authority and sealed runtime-data descriptors, resolver-source trust and parsing, scoped backend ADR refinement, source and real frozen DNS/private-state controls, no all-/etc grant or CI resolver fallback`.
 - [x] `S09` - Package the required certificate trust data and verify genuine native provider work; `scripts/build_linux_isolation.py, pinned dependency certificate bundle and artifact data manifest, source and actual frozen Codex account/turn controls, certificate immutability/private-state controls, packaging documentation and integrated audit`.
 - [x] `S10` - Join provider and role cleanup when a live stream closes; `providers/_stream_lifetime.py, codex_chat_model.py and acp_chat_model.py, explicit genuine native provider lifecycle controls, completed streams and early-close cancellation interruption concurrent callback and beta event paths, frozen launcher reaping, rolling review and findings queue`.
-- [ ] `S11` - Make ACP authentication and failed-refresh health reflect independent provider evidence; `provider-owned no-prompt selected-login verifier and its factory composition, ACP catalog success authentication, provider catalog health/cache transitions, actual positive invalid absent and default-store compatibility controls, rolling audit`.
+- [x] `S11` - Clear historical provider health after catalog refresh failure; `provider_catalog_service.py failed-refresh and backoff observations, actual authenticated Codex service cache failure and recovery controls, rolling audit`.
+- [ ] `S13` - Make ACP authentication reflect independently verified selected provider evidence; `provider-owned no-prompt selected-login verifier and factory composition, ACP catalog success authentication, actual positive invalid absent and ordinary default-store compatibility controls, rolling audit`.
 - [ ] `S12` - Complete target qualification and restore only verified desktop eligibility; `control/provider_execution.py, provider readiness and binary proof, desktop admission and health, actual Linux artifact provider turns using existing selected Windows logins, actor IPC, full frozen worker integration, unsupported-target refusal, consumer adoption evidence, docs and integrated audit`.
 
 ## Parallelization

@@ -8,6 +8,7 @@ import runpy
 import shutil
 from contextlib import aclosing
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
@@ -22,8 +23,15 @@ from vaultspec_a2a.desktop.native_isolation import (
     NativeWorkspaceAuthority,
 )
 from vaultspec_a2a.providers._codex_protocol import _CodexProtocolError
+from vaultspec_a2a.providers._provider_catalog_cache import DEFAULT_FAILURE_TTL
 from vaultspec_a2a.providers.codex_chat_model import CodexChatModel
-from vaultspec_a2a.testing import settings_override
+from vaultspec_a2a.providers.provider_catalog import (
+    AuthenticationState,
+    CatalogStatus,
+    HealthState,
+)
+from vaultspec_a2a.providers.provider_catalog_service import ProviderCatalogService
+from vaultspec_a2a.testing import armed_environment, settings_override
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -363,3 +371,62 @@ async def test_beta_stream_completion_preserves_resource_and_callbacks(
         _released(inputs, model)
     assert observer.completions == 1
     _released(inputs, model)
+
+
+@pytest.mark.asyncio
+async def test_failed_live_catalog_refresh_clears_historical_authentication(
+    inputs: _Inputs,
+) -> None:
+    # The public factory resolves the real selected CLI from its service PATH.
+    # A broken owned executable then forces a real OS acquisition failure.
+    service = ProviderCatalogService(ttl=timedelta(milliseconds=20))
+    workspace = str(inputs.authority.workspace.path)
+    with (
+        armed_environment(PATH=str(inputs.cli.parent)),
+        settings_override(install_root=inputs.authority.capsule.path),
+    ):
+        healthy = next(
+            item
+            for item in await service.records(workspace)
+            if item.provider_id == "codex"
+        )
+        assert healthy.health.authentication is AuthenticationState.AUTHENTICATED
+        assert healthy.catalog.state.status is CatalogStatus.AVAILABLE
+        assert healthy.catalog.models
+        await asyncio.sleep(0.06)
+        backup = inputs.cli.with_name("codex-catalog-genuine-backup")
+        assert inputs.cli.resolve().is_relative_to(inputs.authority.capsule.path)
+        assert not backup.exists()
+        mode = inputs.cli.stat().st_mode
+        inputs.cli.rename(backup)
+        try:
+            inputs.cli.write_bytes(b"invalid executable qualification control\n")
+            inputs.cli.chmod(mode)
+            for _ in range(2):
+                failed = next(
+                    item
+                    for item in await service.records(workspace)
+                    if item.provider_id == "codex"
+                )
+                assert failed.catalog.state.status is CatalogStatus.STALE
+                assert failed.catalog.state.revision == healthy.catalog.state.revision
+                assert failed.catalog.models == healthy.catalog.models
+                assert failed.health.authentication is AuthenticationState.UNKNOWN
+                assert failed.health.configured is HealthState.UNKNOWN
+                assert failed.health.transport is HealthState.UNKNOWN
+                assert not failed.health.selectable
+        finally:
+            inputs.cli.unlink(missing_ok=True)
+            backup.rename(inputs.cli)
+        await asyncio.sleep(DEFAULT_FAILURE_TTL.total_seconds() + 0.1)
+        recovered = next(
+            item
+            for item in await service.records(workspace)
+            if item.provider_id == "codex"
+        )
+        assert recovered.catalog.state.status is CatalogStatus.AVAILABLE
+        assert recovered.catalog.state.checked_at > healthy.catalog.state.checked_at
+        assert recovered.catalog.models
+        assert recovered.health.authentication is AuthenticationState.AUTHENTICATED
+        assert recovered.health.configured is HealthState.AVAILABLE
+        assert recovered.health.transport is HealthState.AVAILABLE

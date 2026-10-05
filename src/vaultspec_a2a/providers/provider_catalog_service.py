@@ -203,6 +203,13 @@ class ProviderCatalogService:
             refresh_failed = True
             snapshot = scope.cache.peek(key)
 
+        if refresh_failed:
+            # Keep the cached enumeration, but discard evidence from an earlier
+            # successful discovery until this lane is observed successfully again.
+            scope.authentication.pop(key, None)
+            scope.configured.pop(key, None)
+            scope.transport.pop(key, None)
+
         authentication = scope.authentication.get(key, AuthenticationState.UNKNOWN)
         configured = scope.configured.get(key, HealthState.UNKNOWN)
         transport = scope.transport.get(key, HealthState.UNKNOWN)

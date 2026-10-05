@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:804874017e3077e78a08adc63884db2479d3d93484a6ab8ee83f627f2c705bca'
+body_hash: 'sha256:800eea7dc55cd254e706c44c19bac3fd792efae11d37e5e6d7070a7372b8ddc7'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-desktop-native-isolation-audit]]"
@@ -130,6 +130,12 @@ Selected custom bearer/helper, profiles, cloud backends and persisted enterprise
 Locked LangChain1.6.6 BaseChatModel public astream and streaming _agenerate_with_cache retain hidden provider generators without explicit early close. ProcessChatModel delegates all framework normalization/callback/cache/usage behavior and records the actual generator under a per-invocation AsyncExitStack, with ContextVar binding only around each anext and reset before yields. Model identity plus current task prevent concurrent/child context cross-ownership. ACP and Codex direct generator chains explicitly close their inner generators.
 
 The beta producer also bypasses public astream. Owning _aiter_v2_events handles producer-side release; actual closer cancellation still reproduced retained home state because AsyncChatModelStream.aclose awaits its own unshielded linked future. A nominal subclass views the same pinned live resource dictionary and joins super.aclose through complete_cleanup. Production startup, projections and end callbacks remain delegated rather than recreated. Real negative and corrected controls use genuine Codex0.159.2 and an already selected current-user Windows access-only login; no source refresh token is copied or modified. Scope is direct production model and beta resource; RunnableBinding outer-forwarding qualification remains S12.
+
+### S13 continued exact selected-login research
+
+The existing read-only investigator narrows Windows plaintext qualification: credential-manager flag defaults false, but its resolver can be primed by startup's effective backend configuration. Checking only a fixed local file is insufficient. Exact pinned Windows source locators: wJn203521326, z203520767, Z203521199, Ae203521430 and backend initialization204663733/217103006. Effective settings include plugin/user/project/local/flag/managed sources, legacy snapshots and helper filtering (Li201360490, fzt201873901, B7n201914214, Xn202302527, ih204277492). Explicit/federation profiles can supersede stored login; implicit user_oauth yields only when both user:inference and accessToken exist (AS/ft203424957, Wc204269343, $Bt204318912, c8n204269133). Gateway/cloud routes and persisted gateway restoration are independent of token presence (Ie202200635, Ng202201736).
+
+A store bearer401 is not a definitive login failure: cK204307389 and Sl204314413 can adopt a newer selected token or perform provider-owned locked refresh. Qualified access-only export avoids that ambiguity. Verifier composition must bind the actual finalized backend/method/route/selected token, and must return UNKNOWN for unresolved contexts rather than read an assumed plaintext identity or inject a new default export. No provider command, credential file, network call or edit was performed by the investigator. Authentication compatibility remains open S13; health-only S11 proceeds independently.
 
 ## Sources
 

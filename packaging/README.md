@@ -84,3 +84,7 @@ streams, early close, cancellation, interruption, concurrent turns and beta even
 streams. Invoke the file explicitly with the locked test environment; keep login
 material outside the repository. Passing these controls does not establish full
 gateway/actor integration or eligibility on another target.
+The same file also drives the real catalog factory through authenticated
+discovery, an owned invalid-executable refresh failure, backoff and recovery.
+It checks that stale enumeration survives while historical login and transport
+health are cleared until a fresh successful observation.

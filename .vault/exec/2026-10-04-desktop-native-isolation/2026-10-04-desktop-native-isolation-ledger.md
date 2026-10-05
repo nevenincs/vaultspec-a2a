@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:9b1db85012b5bb43964ad3ae72b3ddd251531a62c5c44668c115631b3844b23f'
+body_hash: 'sha256:8c6f9368783fd2f872758bb08a46ad9be6d7f8842c0ead3944ee43a2dd712c16'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -195,6 +195,19 @@ related:
 - `S10` `verify:` `Ty Linux Windows macOS four Python files` -> `pass`
 - `S10` `verify:` `git diff --check` -> `pass`
 - `S10` `verify:` `one-cycle corrective candidate and final integrated review with findings queued` -> `pass`
+- `S11` `M` `src/vaultspec_a2a/providers/provider_catalog_service.py`
+- `S11` `M` `packaging/tests/native_provider_lifecycle.py`
+- `S11` `M` `packaging/README.md`
+- `S11` `M` `.vault/audit/2026-10-04-desktop-native-isolation-audit.md`
+- `S11` `M` `.vault/research/2026-10-04-desktop-native-isolation-native-backend-primitives-research.md`
+- `S11` `verify:` `actual factory authenticated Codex failure control baseline` -> `fail`
+- `S11` `verify:` `actual factory Codex failure backoff recovery control1` -> `pass`
+- `S11` `verify:` `nearest catalog cache bounds tests66` -> `pass`
+- `S11` `verify:` `Ruff lint format two Python files` -> `pass`
+- `S11` `verify:` `Basedpyright two Python files` -> `pass`
+- `S11` `verify:` `Ty Linux Windows macOS two Python files` -> `pass`
+- `S11` `verify:` `git diff --check` -> `pass`
+- `S11` `verify:` `formal actual diff cache caller health review and queue updates` -> `pass`
 
 ## Notes
 
@@ -223,3 +236,5 @@ related:
 - `S10` Two existing service tests deselected by default marker policy; genuine native lifecycle controls independently establish changed cleanup.
 - `S10` Linux MCP distribution copy timed out on mounted Windows filesystem; isolated failed test passes using owned Linux scratch after explicit parent setup.
 - `S10` DNI-023 bound Runnable closure qualification remains S12; Claude weekly capacity prevents real ACP work evidence; admission remains refused.
+- `S11` Split independent selected ACP authentication/default-store evidence into S13 before S12; no eligibility change.
+- `S11` Genuine control uses access-only existing Windows login via stdin; original source unchanged.

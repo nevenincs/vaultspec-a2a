@@ -5,7 +5,7 @@ tags:
 date: '2026-10-04'
 modified: '2026-10-05'
 body_schema: 'body-v2'
-body_hash: 'sha256:8c1ecfba4f4eece2e95a850b40748e89341b680e83e8adf0ad3a0c3b90c2daef'
+body_hash: 'sha256:e71622834bb0c3c6c0d72ee6e7753ad3e932bfd57f505128fa32a7b94e2d3759'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
   - "[[2026-10-04-workspace-root-authority-audit]]"
@@ -246,6 +246,20 @@ Final locked Ruff lint/format, strict Basedpyright and Ty Linux/Windows/macOS pa
 Final normal freeze/smoke passes and all three provider source files exactly match its snapshot. Genuine source and frozen-launcher Codex turns complete requested work and reaping. Binary SHA256f2b6d89c6c48ca3061a85a3bc0da047d12264b4cbd0c71129f5b1332bdada7d8; manifest SHA2560c7b693ca7661fa3a7c52fea05a7de6451e4ec2d962167857ac5c90ee42ff669. Persistent verification artifacts/desktop-native-isolation/s10-stream-verification.md SHA256c86067e8f4bffa886c45ffa10cf41b67973b1a4005bc5ca4806f2409057452c5; permanent actual output windows-codex-permanent-lifecycle-final.log SHA256a2683b65f1e9e252567684d6c9bd031d932ac9322a9d21ec93dca6c534bb864b; frozen output windows-codex-stream-frozen-final.log SHA256aaa358ce4d8abb9b5cf12de8d2b24b97b0cfedea2b6f53906779bfb2d7af4607. Auth-free executable helpers are retained alongside those logs. Fresh one-cycle review and parent final diff/caller/state review find no surviving concrete issue within direct model and beta resource scope.
 
 Open queue: DNI-019/DNI-021 authentication/refresh health S11; DNI-008 full worker/actor/target/binary/consumer qualification S12; DNI-023 outer RunnableBinding closure source-backed but not runtime-confirmed S12; low DNI-013 abrupt-loss role-home recovery remains owned follow-up. Claude authenticated ACP real work is blocked by observed weekly provider capacity and has no turn/stream proof. Armed desktop eligibility and unqualified target/store refusals remain unchanged. No claim that the full plan is complete.
+
+### S11 actual catalog refresh control | low | stale authentication reproduced through genuine factory
+
+Health evidence correctness / confirmed DNI-021. A real ProviderCatalogService with its standard ProviderFactory first discovers and advertises authenticated/available Codex0.159.2 using the already selected access-only login. The actual owned qualification executable is then replaced with a bounded invalid executable, producing a real kernel acquisition failure after cache expiry. The service preserves the original revision and model list as STALE but still returns AUTHENTICATED, reproducing the source finding without a fake factory, provider, catalog or patched clock. Original executable is restored in finally; Windows source remains unchanged. Negative log artifacts/desktop-native-isolation/windows-codex-health-baseline.log records this exact failure. Correction clears prior authentication/configuration/transport maps only after an actual failed refresh or its backoff observation, preserving cached enumeration and normal warm hits.
+
+Plan checkpoint refinement separates independent findings: S11 now owns failed-refresh health and actual failure/recovery controls; inserted S13 before S12 owns truthful ACP authentication and ordinary/default selected-login compatibility. Accepted authorization and boundaries are unchanged. S10 remains closed; no new eligibility or auth-channel selection is granted.
+
+### S11 final integrated review | low | failed refresh clears obsolete health and recovery restores fresh facts
+
+PASS for S11; health correctness / resolved DNI-021. The production service discards historical authentication/configuration/transport evidence on actual discovery failure and backoff, retaining the authentic cached revision/models with STALE status. A fresh successful discovery repopulates the maps normally. Parent formal actual diff/caller/cache/health review confirms both exception branches feed the same correction, warm successful results bypass it, per-workspace/per-lane keys remain isolated and arbitrary provider error text is still excluded. No new concrete defect was found in this pass.
+
+Actual public ProviderCatalogService/ProviderFactory with genuine Codex0.159.2 passes positive discovery, real invalid-executable acquisition failure, repeated backoff and recovered discovery after the ordinary30-second negative TTL, 1pass33.77s. Authentication becomes UNKNOWN during failure, catalog revision/models survive, selectability remains false and authenticated/available facts return after genuine recovery. Owned executable is always restored and the original Windows login source remains unchanged. Persistent final windows-codex-health-final.log and auth-free windows-codex-health-controls.py are retained alongside the prior failing baseline under artifacts/desktop-native-isolation. Nearest catalog/cache/bounds population passes66; locked Ruff lint/format, Basedpyright and Ty Windows/Linux/macOS pass on both owned Python files. Existing test doubles are supplemental regression evidence; the new trigger and recovery use actual provider and OS behavior. No fake provider/factory, patched clock, suppression, skip or dependency change was introduced.
+
+Open queue retained: DNI-019 selected ACP authentication/default-store compatibility S13; high DNI-008 full native worker/actor/target/consumer qualification S12; medium DNI-023 bound Runnable early-close qualification S12; low DNI-013 abrupt-loss role recovery follow-up. Shared provider code/frozen launcher and S10 genuine lifecycle evidence are unchanged and reused. No armed desktop admission changes.
 
 ## Review trail
 

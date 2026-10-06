@@ -5,16 +5,25 @@ from __future__ import annotations
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from ...desktop._linux_runtime_assets import stage_linux_isolation_assets
 from .._acp_mcp import resolve_harness_mcp_servers
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ...desktop.native_isolation import NativeLaunchAuthority
+
+stage_linux_isolation_assets = cast(
+    "Callable[..., Path]",
+    runpy.run_path(
+        str(Path(__file__).resolve().parents[4] / "scripts/build_linux_isolation.py")
+    )["stage_linux_isolation_assets"],
+)
 
 
 def install_mcp_runtime(authority: NativeLaunchAuthority) -> Path:

@@ -7,25 +7,35 @@ import http.server
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, cast, override
 from uuid import uuid4
 
 import pytest
 
 from ...utils.process import ProcessContainmentError
-from .._linux_runtime_assets import stage_linux_isolation_assets
 from ..native_isolation import (
     NativeLaunchAuthority,
     decode_launch_environment,
     linux_isolated_launch,
 )
 from ..profile import derive_state_paths
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+stage_linux_isolation_assets = cast(
+    "Callable[..., Path]",
+    runpy.run_path(
+        str(Path(__file__).resolve().parents[4] / "scripts/build_linux_isolation.py")
+    )["stage_linux_isolation_assets"],
+)
 
 
 def _authority(tmp_path: Path) -> NativeLaunchAuthority:

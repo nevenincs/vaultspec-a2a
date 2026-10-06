@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:94cd727ab23a1e50c4efd712c5e60b8ac12151f8dc090da9e2191a752aaac0a9'
+body_hash: 'sha256:44740dfcdb307fa0ebee15d3c13b84097a462f7ec1a7070e096777f619a533ed'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -76,7 +76,20 @@ related:
 - `S10` `verify:` `CI pins agree with proof` -> `pass`
 - `S10` `by:` `supervisor`
 - `S10` `verify:` `independent S10 actual diff and correction review` -> `pass`
+- `S11` `D` `src/vaultspec_a2a/desktop/_linux_runtime_assets.py`
+- `S11` `M` `scripts/build_linux_isolation.py`
+- `S11` `M` `src/vaultspec_a2a/desktop/tests/test_native_isolation.py`
+- `S11` `M` `src/vaultspec_a2a/providers/tests/_native_mcp_capsule.py`
+- `S11` `verify:` `Windows native pytest (9 tests)` -> `pass`
+- `S11` `verify:` `Linux clean native filesystem locked full dependency profile pytest (14 tests)` -> `pass`
+- `S11` `verify:` `Ruff lint format and ty focused files` -> `pass`
+- `S11` `verify:` `staging function AST unchanged and build CLI help` -> `pass`
+- `S11` `verify:` `Windows and Linux unreachable-module coverage` -> `pass`
+- `S11` `verify:` `independent S11 review` -> `pass`
+- `S11` `by:` `supervisor`
+- `S11` `verify:` `Linux full lint checks with actionlint and CI contract rerun after temp git init` -> `pass`
 
 ## Notes
 
 - `S09` The combined suite has one unrelated Codex 0.160.0 proof-range failure reproduced on clean baseline 64fb0ea2; recorded in audit.
+- `S11` Initial WSL mounted checkout MCP permission and copy-timeout failures resolved by clean /tmp archive plus patch. Incomplete verification environment replaced with CI full locked dependency profile.

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:02b55c6006cabf152990886eca859138839a46ba942f7c6eef796cfe18896d2b'
+body_hash: 'sha256:d2ce0d32248c9da0364e79b52d14daf193a572e504b150b2d2c95a96068d329b'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -111,6 +111,22 @@ Type: verification and review record. Status: verified. Combined credential/fact
 ### codex-s10-review | low | Independent final review passes
 
 Type: review record. Status: resolved. The fresh read-only reviewer verified the actual S10 diff and predecessor correction, accepted the supervisor's applicable test and static-check evidence, and returned PASS with no remaining findings. The earlier low boundary-input finding is fixed; no new production bypass or regression was found.
+
+### build-only-runtime-module | low | CI rejects unreachable capsule staging in the shipped package
+
+Type: packaging boundary and CI regression. Status: fixed in S11. Full Validation 37436892926 at 5ad00794 failed the zero-findings unreachable-module gate for desktop._linux_runtime_assets, used only by build tooling and tests. Moved stage_linux_isolation_assets into its actual scripts/build_linux_isolation.py consumer, deleted the runtime module, and made both test consumers load that real build script using the existing artifact-test runpy pattern. An AST comparison confirms the staging function is unchanged. No gate exemption, dummy runtime import, or copied test implementation was added.
+
+### s11-linux-verification-environment | low | Mounted checkout and partial dependencies caused local-only verification failures
+
+Type: verification environment. Status: resolved for focused proof. Initial mounted WSL run passed 12 native controls but failed MCP startup because the local environment file lacked Linux 0600 semantics, and timed out copying the MCP runtime through the Windows mount. Initial broad lint also lacked server/docs dependency groups. A clean tracked archive plus the actual patch on Linux /tmp, synchronized with uv sync --locked --no-default-groups --extra server --group all, passed all 14 native isolation and launch-context tests in 15 seconds, including genuine isolated MCP handshake. No credential files were copied or permission checks weakened.
+
+### s11-review | low | Build-tool relocation preserves the native boundary
+
+Type: review and verification record. Status: resolved. Fresh read-only review found no findings: guarded build main remains unexecuted when loaded by tests, consumer paths resolve correctly, and runtime manifest validation is unchanged. Windows native controls passed 9; Linux controls passed 14; focused Ruff lint/format and ty passed; build CLI help, unchanged-function AST comparison and Windows/Linux reachability gates passed. Independent review verdict PASS. Full CI replacement is still to be observed after publication.
+
+### s11-full-lint | low | Complete Linux lint checks pass after environment correction
+
+Type: verification record. Status: resolved. On the clean Linux archive with CI's full locked dependency profile, dev lint all passed Ruff, formatting, baseline/platform/strict type checks, guarded-import use, nesting, relative imports, loadability, reachability, unused symbols, exports, dependencies, TOML and shell checks. Its actionlint step initially rejected the archive because it lacked Git metadata. Initialized a local Git repository in that temporary verification directory and reran dev.actionlint plus dev.ci_contract successfully. No source changes or gate exceptions were needed for either environment correction.
 
 ## Recommendations
 

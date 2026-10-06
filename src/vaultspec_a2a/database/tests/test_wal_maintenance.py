@@ -24,10 +24,7 @@ subprocess.  Nothing here is simulated.
 
 from __future__ import annotations
 
-import os
 import sqlite3
-import subprocess
-import sys
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
@@ -46,6 +43,7 @@ from ..session import (
     inspect_sqlite_database,
     seat_sqlite_posture,
 )
+from ._admin_cli import run_admin
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -461,30 +459,6 @@ def test_incremental_vacuum_reclaims_far_less_than_a_full_vacuum(
 # ---------------------------------------------------------------------------
 
 
-def _run_admin(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run the real administrative CLI against ``database`` in a subprocess.
-
-    A subprocess rather than an in-process call because the verb reads the
-    process-wide settings singleton: configuring a child through its environment
-    exercises the real configuration path, where reaching into the singleton
-    would only prove that the singleton can be overwritten.
-    """
-    env = dict(os.environ)
-    env["VAULTSPEC_A2A_DATABASE_URL"] = f"sqlite+aiosqlite:///{database.as_posix()}"
-    # The blocked-checkpoint proof needs a nonzero wait, not the production
-    # default's five seconds of idle time. The administrative connection must
-    # honor the same setting as every other SQLite connection authority.
-    env["VAULTSPEC_A2A_SQLITE_BUSY_TIMEOUT_MS"] = "50"
-    return subprocess.run(
-        [sys.executable, "-m", "vaultspec_a2a.database.admin", *args],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=300,
-        check=False,
-    )
-
-
 def _seat_wal_mode(database: Path) -> None:
     """Put the migrated database into WAL mode, as the gateway's first connect does.
 
@@ -543,7 +517,7 @@ def test_migrate_fix_reclaims_the_log_and_reports_success(runtime_dir: Path) -> 
     reclaim is proven against it rather than against a quiesced database.
     """
     database = runtime_dir / "reclaim.db"
-    assert _run_admin(database, "migrate").returncode == 0
+    assert run_admin(database, "migrate").returncode == 0
     _seat_wal_mode(database)
 
     holder = sqlite3.connect(str(database), isolation_level=None)
@@ -554,7 +528,7 @@ def test_migrate_fix_reclaims_the_log_and_reports_success(runtime_dir: Path) -> 
         _write_threads(database, 128)
         grown = _wal_bytes(database)
 
-        result = _run_admin(database, "migrate", "--fix")
+        result = run_admin(database, "migrate", "--fix")
         reclaimed = _wal_bytes(database)
     finally:
         holder.close()
@@ -583,7 +557,7 @@ def test_migrate_fix_reports_a_blocked_checkpoint_instead_of_announcing_success(
     nothing at all.
     """
     database = runtime_dir / "blocked.db"
-    assert _run_admin(database, "migrate").returncode == 0
+    assert run_admin(database, "migrate").returncode == 0
     _seat_wal_mode(database)
 
     reader = sqlite3.connect(str(database), isolation_level=None)
@@ -594,7 +568,7 @@ def test_migrate_fix_reports_a_blocked_checkpoint_instead_of_announcing_success(
         _write_threads(database, 128)
 
         pinned_size = _wal_bytes(database)
-        result = _run_admin(database, "migrate", "--fix")
+        result = run_admin(database, "migrate", "--fix")
         size_after = _wal_bytes(database)
     finally:
         reader.close()

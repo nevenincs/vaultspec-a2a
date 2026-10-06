@@ -13,11 +13,17 @@ every table through the real models, and assert on what survives.
 
 from __future__ import annotations
 
+import http.server
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+import pytest
 from sqlalchemy import create_engine, inspect, text
 
+from ...testing.ports import free_port
+from ...testing.tests._support.http_handlers import JsonReplyHandler
+from ...testing.tests._support.listeners import serve_handler
 from ...tests._write_authority import make_test_thread_authority_columns
 from ..admin import _CHECKPOINT_TABLES, _CLEAR_ORDER, _administrative_engine
 from ..models import (
@@ -26,6 +32,7 @@ from ..models import (
     ControlActionModel,
     ThreadModel,
 )
+from ._admin_cli import run_admin
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -169,3 +176,111 @@ def test_foreign_keys_are_enforced_against_a_real_violation(tmp_path: Path) -> N
         assert raised, "deleting a referenced parent was not refused"
     finally:
         engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Destructive verbs refuse while a service holds a configured port
+# ---------------------------------------------------------------------------
+
+
+class _UnauthorizedHandler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
+    """Answers every request 401, as an authenticated gateway answers a probe.
+
+    The destructive-verb guard used to treat any HTTP error as "not running",
+    so a gateway with tokens configured - which refuses an unauthenticated
+    health request - looked stopped and the restore overwrote its live store.
+    """
+
+    def do_GET(self) -> None:
+        """Refuse the request the way an authenticated gateway does."""
+        self._reply(401, {"detail": "unauthorized"})
+
+
+_GATEWAY_PORT_ENV = "VAULTSPEC_A2A_PORT"
+_WORKER_PORT_ENV = "VAULTSPEC_A2A_WORKER_PORT"
+
+
+def _seed_store(directory: Path) -> tuple[Path, str]:
+    """Write a one-row live store and a snapshot of different content beside it.
+
+    Returns the live database path and the snapshot's file name, so a test can
+    tell from the live row afterwards whether a restore ran.
+    """
+    database = directory / "app.db"
+    snapshot = directory / "app.snapshot.seeded"
+    for path, marker in ((database, "live"), (snapshot, "snapshot")):
+        conn = sqlite3.connect(str(path))
+        try:
+            conn.execute("CREATE TABLE marker (value TEXT NOT NULL)")
+            conn.execute("INSERT INTO marker (value) VALUES (?)", (marker,))
+            conn.commit()
+        finally:
+            conn.close()
+    return database, snapshot.name
+
+
+def _marker(database: Path) -> str:
+    """Return the single marker row a seeded store carries."""
+    conn = sqlite3.connect(str(database))
+    try:
+        return str(conn.execute("SELECT value FROM marker").fetchone()[0])
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("held_port_env", [_GATEWAY_PORT_ENV, _WORKER_PORT_ENV])
+def test_restore_refuses_while_an_authenticated_service_holds_a_port(
+    tmp_path: Path, held_port_env: str
+) -> None:
+    """A 401 answer is a running service, not an absent one."""
+    database, snapshot_name = _seed_store(tmp_path)
+    ports = {_GATEWAY_PORT_ENV: str(free_port()), _WORKER_PORT_ENV: str(free_port())}
+
+    with serve_handler(_UnauthorizedHandler) as held_port:
+        ports[held_port_env] = str(held_port)
+        result = run_admin(
+            database, "restore", "--name", snapshot_name, "--yes", env=ports
+        )
+
+    assert result.returncode == 1, result.stderr
+    assert f"listening on port {ports[held_port_env]}" in result.stderr
+    assert _marker(database) == "live"
+
+
+def test_clear_refuses_while_an_authenticated_service_holds_a_port(
+    tmp_path: Path,
+) -> None:
+    """Clearing a store a service holds open is the same hazard as restoring it."""
+    database, _ = _seed_store(tmp_path)
+
+    with serve_handler(_UnauthorizedHandler) as held_port:
+        result = run_admin(
+            database,
+            "clear",
+            "--yes",
+            env={
+                _GATEWAY_PORT_ENV: str(held_port),
+                _WORKER_PORT_ENV: str(free_port()),
+            },
+        )
+
+    assert result.returncode == 1, result.stderr
+    assert f"listening on port {held_port}" in result.stderr
+    assert _marker(database) == "live"
+
+
+def test_restore_proceeds_when_no_service_listens(tmp_path: Path) -> None:
+    """The guard refuses a held port, not every restore."""
+    database, snapshot_name = _seed_store(tmp_path)
+
+    result = run_admin(
+        database,
+        "restore",
+        "--name",
+        snapshot_name,
+        "--yes",
+        env={_GATEWAY_PORT_ENV: str(free_port()), _WORKER_PORT_ENV: str(free_port())},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert _marker(database) == "snapshot"

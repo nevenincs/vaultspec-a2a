@@ -26,6 +26,7 @@ restore --name FILE [--yes]
 
 clear --yes
     Delete every application row, and the checkpoint state, preserving schema.
+    Refuses while a service is listening on a configured port.
 """
 
 from __future__ import annotations
@@ -88,6 +89,29 @@ def _get_db_path() -> Path:
         print("Cannot operate on in-memory database.", file=sys.stderr)
         raise SystemExit(1)
     return db_path
+
+
+def _refuse_while_service_listening() -> None:
+    """Exit before a destructive verb touches a database a service holds open.
+
+    A connect probe rather than an HTTP health request: an authenticated
+    gateway answers an unauthenticated health request with 401, and treating
+    any HTTP error as "not running" let a restore overwrite a live database
+    whenever tokens were configured. Whether a request is answered, refused or
+    unauthorized, an accepted connection is the evidence that something is
+    serving the port.
+    """
+    from ..control.config import settings
+    from ..lifecycle.discovery import port_has_listener
+
+    for port in (settings.port, settings.worker_port):
+        if port_has_listener(port, timeout=2.0):
+            print(
+                f"A service is listening on port {port}.  Stop it first: "
+                "just service-kill <name>",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
 
 
 def _apply_sqlite_pragmas(dbapi_conn: sqlite3.Connection, _record: object) -> None:
@@ -230,24 +254,8 @@ def _action_restore(name: str, yes: bool) -> None:
         raise SystemExit(1)
 
     import sqlite3
-    from urllib import error, request
 
-    from ..control.config import settings
-
-    checks = [
-        (settings.port, "/internal/health"),
-        (settings.worker_port, "/health"),
-    ]
-    for check_port, path in checks:
-        try:
-            request.urlopen(f"http://127.0.0.1:{check_port}{path}", timeout=2.0)
-            print(
-                "Service is running.  Stop it first: just service-kill <name>",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-        except (OSError, error.URLError):
-            pass
+    _refuse_while_service_listening()
 
     db_path = _get_db_path()
     snapshot_path = db_path.parent / name
@@ -313,6 +321,8 @@ def _action_clear(yes: bool) -> None:
     from sqlalchemy import text
 
     from ..control.config import settings
+
+    _refuse_while_service_listening()
 
     # The table names are this module's own constants and never reach here from
     # input, which is what makes interpolating them into the statement safe.

@@ -8,13 +8,15 @@ which is why this is a real ``http.server`` on real loopback rather than a
 substitute for the probe. The code under test performs its own genuine HTTP
 request; only the peer is ours.
 
-:func:`health_listener` is the plain affirmative case, and it is the only thing
-that belongs here. The interesting listeners are the negative ones - a peer that
-accepts a connection and never responds, one that answers 200 with undecodable
-bytes, one that stalls past a retry window - and each of those exists to prove a
-specific failure is handled. They stay beside the test that owns them, because
-their behaviour IS the test's subject rather than a shared fixture; folding them
-in here would leave a helper whose options are a catalogue of unrelated defects.
+:func:`health_listener` is the plain affirmative case, and it is the only
+handler that belongs here. The interesting listeners are the negative ones - a
+peer that accepts a connection and never responds, one that answers 200 with
+undecodable bytes, one that stalls past a retry window - and each of those
+exists to prove a specific failure is handled. Their handlers stay beside the
+test that owns them, because their behaviour IS the test's subject rather than
+a shared fixture; folding them in here would leave a helper whose options are a
+catalogue of unrelated defects. What every listener shares is the mechanical
+lifecycle, which :func:`serve_handler` owns.
 
 The listener binds port zero and holds the socket, so it takes no reservation
 from :mod:`vaultspec_a2a.testing.ports`. That is not an oversight and not a
@@ -34,7 +36,7 @@ from typing import TYPE_CHECKING, Any, override
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-__all__ = ["health_listener"]
+__all__ = ["health_listener", "serve_handler"]
 
 _SHUTDOWN_JOIN_TIMEOUT_S = 5.0
 
@@ -61,15 +63,17 @@ class _HealthHandler(http.server.BaseHTTPRequestHandler):
 
 
 @contextlib.contextmanager
-def health_listener() -> Generator[int]:
-    """Serve ``/health`` on a loopback port for the body, then shut down.
+def serve_handler(
+    handler: type[http.server.BaseHTTPRequestHandler],
+) -> Generator[int]:
+    """Serve *handler* on a loopback port for the body, then shut down.
 
     Yields the port. Threaded, so a caller whose code under test opens more than
     one connection is not serialised behind its own first request, and joined on
     exit so a finished test leaves no thread still bound to the port a later
     test may be handed.
     """
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _HealthHandler)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -78,3 +82,10 @@ def health_listener() -> Generator[int]:
         server.shutdown()
         server.server_close()
         thread.join(timeout=_SHUTDOWN_JOIN_TIMEOUT_S)
+
+
+@contextlib.contextmanager
+def health_listener() -> Generator[int]:
+    """Serve ``/health`` on a loopback port for the body, then shut down."""
+    with serve_handler(_HealthHandler) as port:
+        yield port

@@ -86,6 +86,12 @@ def scrub_agent_environment(environment: Mapping[str, str]) -> dict[str, str]:
     scrub_keys = frozenset(
         {
             "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_BASE_URL",
+            "ZAI_AUTH_TOKEN",
+            "ZAI_API_KEY",
+            "ZAI_BASE_URL",
+            "ZAI_ANTHROPIC_BASE_URL",
             "OPENAI_API_KEY",
             "GEMINI_API_KEY",
             "GOOGLE_API_KEY",

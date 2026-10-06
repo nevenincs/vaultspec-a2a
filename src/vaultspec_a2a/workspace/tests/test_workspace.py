@@ -159,6 +159,10 @@ _SCRUB_ALLOWLISTED_CLAUDE_CODE: dict[str, str] = {
 _SCRUB_ZAI_KEYS: dict[str, str] = {
     "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "zai-token-value",
+    "ZAI_AUTH_TOKEN": "zai-auth-alias",
+    "ZAI_API_KEY": "zai-legacy-alias",
+    "ZAI_BASE_URL": "https://zai.invalid/anthropic",
+    "ZAI_ANTHROPIC_BASE_URL": "https://legacy.invalid/anthropic",
 }
 
 _SCRUB_SAFE_KEYS: dict[str, str] = {"MY_SAFE_VAR": "visible-value"}
@@ -170,7 +174,7 @@ def resolved_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
 
     The parent seeds the child environment with a known value for every key the
     scrub contract concerns — secrets, ``VAULTSPEC_*`` keys, both the allowlisted
-    and non-allowlisted ``CLAUDE_CODE_*`` keys, the Z.ai pass-through pair, and a
+    and non-allowlisted ``CLAUDE_CODE_*`` keys, the Z.ai credential family, and a
     plainly-safe var — then returns the child's resolved-env dict.
     """
     tmp_path = tmp_path_factory.mktemp("scrub-probe")
@@ -267,23 +271,12 @@ class TestCredentialScrubbing:
                 f"got {resolved_env.get(key)!r}"
             )
 
-    def test_zai_gateway_env_vars_are_preserved(
+    def test_zai_gateway_env_vars_are_scrubbed(
         self, resolved_env: dict[str, str]
     ) -> None:
-        """The Z.ai path depends on ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN surviving.
-
-        Z.ai rides the Claude ACP path by injecting these two vars. The provider
-        layer sets them in ``env_vars`` after the base scrub, but the base scrub
-        must not strip them if they are already present in the process
-        environment — this pins that invariant so a future addition to
-        ``scrub_keys`` cannot silently break Z.ai auth. ``ANTHROPIC_API_KEY`` (a
-        distinct name) remains scrubbed; these two are not secrets-by-name here.
-        """
-        for key, value in _SCRUB_ZAI_KEYS.items():
-            assert resolved_env.get(key) == value, (
-                f"Z.ai pass-through {key} should be preserved as {value!r}, "
-                f"got {resolved_env.get(key)!r}"
-            )
+        """Only the selected provider may inject Z.ai auth after the base scrub."""
+        for key in _SCRUB_ZAI_KEYS:
+            assert key not in resolved_env
         # The distinct ANTHROPIC_API_KEY name remains scrubbed.
         assert "ANTHROPIC_API_KEY" not in resolved_env, (
             "ANTHROPIC_API_KEY should remain scrubbed even alongside the Z.ai vars"

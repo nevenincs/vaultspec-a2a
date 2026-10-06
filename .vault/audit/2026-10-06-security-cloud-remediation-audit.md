@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:df792402cb1f41bd7f62cd4ea6c99cf6c2b714142f785a2f0bb5c90530d36e1e'
+body_hash: 'sha256:d980d0176a3c1ee5c5299cc383e0d5a7cd6db1fc2d72a45d4056fc6a69e947eb'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -75,6 +75,26 @@ Type: test compatibility. Status: fixed. Existing unisolated output/ownership/cl
 ### medium-model-selection | low | Requested worker model is unavailable
 
 Type: execution prerequisite. Status: pending user input. The user requested sol 5.1 at xhigh; that model is absent from the agent runtime. An asynchronous question offers gpt-5.6-sol, gpt-6.1-sol or gpt-6-sol at xhigh. No medium remediation worker has been launched under a substituted model. S03-S08 remain open; their source files are untouched.
+
+### ambient-zai-resolution | high | Z.ai ambient credentials isolated to the selected lane
+
+Type: credential disclosure. Status: fixed in S09, superseding the deferred ambient-zai entry. The shared scrubber now removes ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, ZAI_AUTH_TOKEN, ZAI_API_KEY, ZAI_BASE_URL and ZAI_ANTHROPIC_BASE_URL case-insensitively. Existing Settings selection and explicit Z.ai factory overlay preserve selected credentials; absent or blank selected tokens cannot inherit ambient credentials. Real child controls cover Claude, Codex, Kimi, MCP and terminal bases. No provider eligibility was expanded.
+
+### version-probe-credentials | high | Version subprocess bypassed the credential scrubber
+
+Type: credential disclosure. Status: discovered and fixed in S09. Independent bounded investigation found binary_version.py supplied environment=None to both launch preparation paths. Both now receive the scrubbed environment. A real executable refuses ambient credential aliases, requires a safe inherited option and reports its version; the control passes on Windows and Linux. Native isolation retains deliberately selected provider auth without restoring removed aliases.
+
+### zai-contract-drift | low | Tests and comments asserted global Z.ai inheritance
+
+Type: test and documentation contract drift. Status: fixed in S09. Workspace tests now require absence and include all aliases; factory and ACP comments describe explicit selected-provider reinjection. MCP real probe controls include the six aliases and Claude OAuth.
+
+### zai-review | low | S09 implementation review and verification
+
+Type: verification and review record. Status: resolved. Fresh read-only candidate review found no concrete surviving bypass or regression across shared environment, selected Z.ai overlay, catalog, MCP, terminal, version cache and native launch paths. Supervisor verification supplies the checks deliberately not run by the reviewer: Windows combined environment/workspace/Z.ai/version/factory/Claude/settings tests yielded 131 passes and one unrelated baseline failure recorded below; focused Z.ai factory tests passed 6; real MCP security probes passed 3. Linux locked-environment Z.ai controls and isolated version-cache authority control passed 16. Ruff lint, format and ty passed on all seven changed Python files; git diff --check passed. Original pre-fix real-child controls failed, establishing the trigger. Review verdict PASS for S09 with the unrelated environment limitation retained. Cloud finding state unchanged.
+
+### codex-installed-proof-range | low | Installed Codex version blocks an unrelated factory control
+
+Type: verification environment prerequisite. Status: open follow-up. test_factory_applies_exact_codex_model_scoped_controls fails BINARY_OUT_OF_PROOF_RANGE with installed Codex 0.160.0. A detached clean worktree at pre-S09 commit 64fb0ea2 reproduces the same failure using the locked Windows environment. Baseline and patched version probes both report 0.160.0. Restore a binary within existing completed-turn proof coverage, or establish new proof through the authorized eligibility workflow, before using this factory control as passing evidence. No test or eligibility rule was weakened.
 
 ## Recommendations
 

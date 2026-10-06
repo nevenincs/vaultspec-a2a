@@ -563,14 +563,8 @@ class AcpChatModel(ProcessChatModel):
         # instructions arriving as one anonymous voice.
         prompt_blocks: list[JsonObject] = render_prompt_blocks(messages)
 
-        # The child inherits the ambient environment (resolve_env_vars passes it
-        # through, minus this service's own infra tokens) so the spawned CLI
-        # authenticates however the operator ambiently does - a logged-in CLI
-        # session, an API key in the environment, either. This layer implements
-        # NO authentication: it expresses no preference, reads no credential,
-        # and strips none. Provider-specific config (e.g. Z.ai's
-        # ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN retarget) rides self.env_vars
-        # as an additive overlay from ProviderFactory.
+        # Start with a credential-free base, then apply the selected provider's
+        # explicit auth and gateway overlay from ProviderFactory.
         env = await self._acp_environment()
         if self.version_proof_required:
             from ..graph.enums import Provider

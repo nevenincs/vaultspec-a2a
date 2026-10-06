@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from functools import cache
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from ..control.provider_execution import native_execution_refusal_reason
 from ..utils.process import ProcessContainmentError
+from ..workspace.environment import scrub_agent_environment
 from ._provider_execution import provider_execution_launch
 
 if TYPE_CHECKING:
@@ -79,7 +81,7 @@ def _reported_version(
     try:
         launch = provider_execution_launch(
             [executable, "--version"],
-            environment=None,
+            environment=scrub_agent_environment(os.environ),
             cwd=None,
             native_authority=native_authority,
         )
@@ -123,7 +125,7 @@ def probe_binary_version(
     try:
         provider_execution_launch(
             [str(path), "--version"],
-            environment=None,
+            environment=scrub_agent_environment(os.environ),
             cwd=None,
             native_authority=native_authority,
         )

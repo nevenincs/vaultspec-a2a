@@ -12,7 +12,7 @@ related:
   - '[[2026-07-16-authoring-contract-adr]]'
 modified: '2026-10-06'
 body_schema: body-v2
-body_hash: 'sha256:9a7cbe2956ab8dfbe2a1cb7f0b6c7e9d29d8e499ca74613ca2be9fa583cc9814'
+body_hash: 'sha256:f38d0309b00b0440dcbd76b480344efa29ff7ccf13a4708589bd88a54c5abecd'
 ---
 
 # `security-cloud-remediation` plan
@@ -22,6 +22,8 @@ body_hash: 'sha256:9a7cbe2956ab8dfbe2a1cb7f0b6c7e9d29d8e499ca74613ca2be9fa583cc9
 Approved 2026-10-06. The user explicitly requested delegated remediation of all six medium findings from the latest Cloud scan and personal implementation by the supervising agent of the two high findings. Scan `wfr_a27d78305fddc82937095bc549f47029af3090ad05bb73de70a75f3f2881c9f6`, revision `21b6f92ec53c32c1cb3a35f07ca2fb5912201d71`, supplies the initial evidence. Validate each finding against current code before changing it.
 
 Reuse accepted native admission and Linux backend decisions for credential and terminal boundaries, project-bound state for filesystem storage, tool-permission-model for run-owned permission state and native write mediation, and authoring-contract for protected document writes. These are repairs to settled boundaries; do not introduce new provider eligibility, schema architecture or platform support. Escalate a distinct costly choice only if investigation demonstrates it is required. Workers read their governing records and callers before implementation. Existing unrelated plans remain unchanged.
+
+The user's subsequent explicit instruction "fix the leak" on 2026-10-06 authorizes S09, the adjacent ambient Z.ai credential disclosure recorded in the audit. The supervisor owns its implementation under the existing provider credential boundary; it does not wait on the unresolved medium-worker model selection.
 
 ## Steps
 
@@ -33,6 +35,7 @@ Reuse accepted native admission and Linux backend decisions for credential and t
 - [ ] `S06` - Redact ACP stderr before every log and retention sink; `providers/_acp_stderr.py and tests`.
 - [ ] `S07` - Enforce vault write prohibition for Claude native writes; `providers/_claude_tool_policy.py, required mediation seams and tests`.
 - [ ] `S08` - Validate Codex credential refresh before publishing operator auth; `providers/_codex_auth.py, _codex_config_home.py and tests`.
+- [x] `S09` - Remove ambient Z.ai credentials and gateway overrides from shared child environments while preserving selected Z.ai auth; `workspace/environment.py, provider credential and version-probe seams, focused environment/auth and MCP tests`.
 
 ## Parallelization
 

@@ -87,8 +87,8 @@ def _build_zai_env(
     Z.ai rides the Claude ACP path: the wrapper's
     Claude Code CLI honours ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` to
     retarget the Anthropic Messages API at Z.ai's compatible gateway. The base env
-    is scrubbed of ``ANTHROPIC_API_KEY`` (workspace/environment.py) but leaves both
-    of these names untouched, so the provider layer supplies them here. The token
+    removes ambient credentials and gateway overrides, so the selected provider
+    supplies both names explicitly after scrubbing. The token
     is a secret: it is placed in the returned dict but never logged.
     """
     env_vars: dict[str, str] = {}

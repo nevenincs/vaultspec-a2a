@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:b3d9831513924efe05ec5a5e2328f59c7e43b93b17faae27b675c6cdfce5a9de'
+body_hash: 'sha256:55da683e1aafbd5fe923eba4be147368c5eb3a2cdd74b01a16f4bb9ed0156e12'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -45,3 +45,21 @@ related:
 - `S02` `verify:` `Ruff lint format and ty ten terminal Python files` -> `pass`
 - `S02` `verify:` `independent terminal boundary review` -> `pass`
 - `S02` `by:` `supervisor`
+- `S09` `M` `src/vaultspec_a2a/workspace/environment.py`
+- `S09` `M` `src/vaultspec_a2a/workspace/tests/test_workspace.py`
+- `S09` `M` `src/vaultspec_a2a/providers/_factory_commands.py`
+- `S09` `M` `src/vaultspec_a2a/providers/acp_chat_model.py`
+- `S09` `M` `src/vaultspec_a2a/providers/binary_version.py`
+- `S09` `M` `src/vaultspec_a2a/providers/tests/test_mcp_probe_security.py`
+- `S09` `A` `src/vaultspec_a2a/providers/tests/test_zai_auth_environment.py`
+- `S09` `verify:` `Windows combined credential and factory pytest (131 pass; baseline Codex proof-range failure)` -> `fail`
+- `S09` `verify:` `focused Zai factory pytest (6 tests)` -> `pass`
+- `S09` `verify:` `real MCP security pytest (3 tests)` -> `pass`
+- `S09` `verify:` `Linux locked Zai and isolated version authority pytest (16 tests)` -> `pass`
+- `S09` `verify:` `Ruff lint format and ty seven S09 files` -> `pass`
+- `S09` `verify:` `independent candidate review with supervisor verification` -> `pass`
+- `S09` `by:` `supervisor`
+
+## Notes
+
+- `S09` The combined suite has one unrelated Codex 0.160.0 proof-range failure reproduced on clean baseline 64fb0ea2; recorded in audit.

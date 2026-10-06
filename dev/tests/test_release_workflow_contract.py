@@ -183,6 +183,14 @@ def test_full_validation_preserves_native_certification() -> None:
     assert integration["needs"] == "test"
     assert integration.get("if") is None
     assert integration.get("continue-on-error", False) is False
+    assert "docker-rootless" in integration["runs-on"]
+    fixture_tools = next(
+        step
+        for step in integration["steps"]
+        if step.get("run") == "just deps-docker-ci"
+    )
+    assert fixture_tools.get("if") is None
+    assert fixture_tools.get("continue-on-error", False) is False
     native_proof = next(
         step
         for step in integration["steps"]
@@ -190,6 +198,9 @@ def test_full_validation_preserves_native_certification() -> None:
     )
     assert native_proof.get("if") is None
     assert native_proof.get("continue-on-error", False) is False
+    assert integration["steps"].index(fixture_tools) < integration["steps"].index(
+        native_proof
+    )
     desktop = jobs["desktop-certification"]
     assert desktop["needs"] == "test"
     assert desktop.get("continue-on-error", False) is False

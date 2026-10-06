@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:bb34927f21d5789f16cb8658522f0f2c08797ac30b4890f5b46cce727f7d839e'
+body_hash: 'sha256:c731d2c4ef0bbb8c857e5414d5df7b7edcd6f86dfe34c0d897e8af2f450328cb'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -163,6 +163,18 @@ related:
 - `S16` `verify:` `Linux dev deps codex-cli real install` -> `pass`
 - `S16` `verify:` `independent S16 review` -> `pass`
 - `S16` `verify:` `feature vault check` -> `pass`
+- `S17` `M` `.github/workflows/test.yml`
+- `S17` `M` `Justfile`
+- `S17` `M` `dev/toolchain.py`
+- `S17` `A` `dev/ci_docker.py`
+- `S17` `M` `dev/tests/test_release_workflow_contract.py`
+- `S17` `verify:` `actual rootless runner native integration (16)` -> `pass`
+- `S17` `verify:` `actual rootless provisioning final configuration` -> `pass`
+- `S17` `verify:` `canonical dev lint all` -> `pass`
+- `S17` `verify:` `workflow contract tests (11)` -> `pass`
+- `S17` `verify:` `ci-fleet manifest and label tests (34)` -> `pass`
+- `S17` `verify:` `ci-fleet manifest environment load` -> `pass`
+- `S17` `verify:` `independent final S17 review` -> `pass`
 
 ## Notes
 
@@ -172,3 +184,4 @@ related:
 - `S14` Full Linux unit verification is running; remote CI remains to be checked.
 - `S15` Other full-suite failures remain queued in audit; remote CI is running on preceding revision.
 - `S16` Full Linux unit rerun and replacement remote CI remain pending; focused verification does not claim whole-suite success.
+- `S17` Companion ci-fleet/fleet.yml adds docker-rootless to the existing A2A Linux runner; GitHub runner63 label matches. End-to-end replacement GitHub workflow verification pending.

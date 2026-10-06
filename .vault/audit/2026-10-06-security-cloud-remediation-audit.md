@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:57ab4200b46b46e8826bd4a61aa46b7825690f2bd87b3ced2bd4e345e28affa2'
+body_hash: 'sha256:fac6bae82a16b1a7b1c91bbe23753cfa777f3ed04d04cbcb2ed6d1d813259b93'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -191,6 +191,14 @@ Type: verification portability. Status: resolved in S16. Full Validation 3744740
 ### s16-contract-reconciliation | low | Full-suite fixtures now assert current credential and storage contracts
 
 Type: test contract drift. Status: resolved in S16. Authoring stdio tests assert actor-scoped relay credentials and absence of machine bearer/base URL instead of the obsolete direct-gateway binding. The temp-home test asserts exact ownership under configured A2A home, which may itself live under the OS temporary directory. Private native launch-packet environment fields are documented with their decoder owner and included in the existing owned declaration check. Removed the provider_execution_command re-export and imported its actual owner in consumers. Independent review passed without findings. Windows focused verification: 33 passed, 5 existing Linux-only skips. Linux native/factory/identity checks: 78 passed before the runner-path correction; native path correction additionally verified against the provisioned Node. Full suite remains in progress; its outcome is not claimed here.
+
+### native-fixture-runner-capability | medium | Docker-backed test gate selected a runner prohibited from using Docker
+
+Type: CI prerequisite routing. Status: resolved in S17. Full Validation 37451244881 at b13e7884 passed full Linux CI, provider prerequisites and Windows/Linux x64 plus ARM64 desktop tests. The remaining native-integration job had 13 passes and three fixture setup errors: permission denied at the Windows docker_engine pipe. Fleet declares the runner account nonadministrative and explicitly rejects docker-users membership. Preserve that boundary and schedule the portable native gateway/worker lifecycle, cancellation and real Jaeger trace tests on the existing Linux runner with its private rootless daemon. Declare docker-rootless in ci-fleet fleet.yml and register the same label on A2A runner id 63. Windows native desktop coverage remains mandatory. Compose and Buildx were also absent from the rootless image: provision official release binaries with SHA256 verification in job-owned Docker configuration, and reject a non-rootless daemon before using it. Actual unprivileged runner verification passed all 16 integration tests in 54.32 seconds, including live Jaeger traces and teardown. No tests are removed, skipped or weakened.
+
+### docker-config-validation-identity | medium | Rootless preflight initially checked a different Docker configuration
+
+Type: security validation. Status: resolved in S17 after independent review. The first helper validated ambient Docker configuration before changing DOCKER_CONFIG. It now constructs the final job configuration first and uses the identical environment for daemon validation and every plugin command, then exports that configuration to the test step. Real provisioning was rerun successfully on the actual rootless runner. Independent re-review passed. Eleven workflow/placement tests, 34 fleet manifest/label tests and canonical lint passed; the fleet declaration loads successfully with its owning environment loader.
 
 ## Recommendations
 

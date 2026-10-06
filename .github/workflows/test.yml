@@ -247,9 +247,9 @@ jobs:
         run: just test-provider-gates
 
   native-integration:
-    name: "Test: Native services with development fixtures (Windows)"
+    name: "Test: Native services with development fixtures (Linux)"
     needs: test
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: [self-hosted, Linux, X64, docker-rootless]
     timeout-minutes: 121
     steps:
       - name: Checkout repository
@@ -269,5 +269,7 @@ jobs:
           tool: just@1.38.0
       - name: Initialize the worktree
         run: just init
+      - name: Prepare rootless Docker fixture tooling
+        run: just deps-docker-ci
       - name: Certify native lifecycle, cancellation and traces
         run: just test-native-integration

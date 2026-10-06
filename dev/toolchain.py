@@ -274,6 +274,11 @@ DEPS = Verb(
             (dev_module("ci_codex_cli"),),
         ),
         Target(
+            "docker-ci",
+            "Verify rootless Docker and install pinned integration CLI plugins.",
+            (dev_module("ci_docker"),),
+        ),
+        Target(
             "all",
             "Resolve every runtime extra plus the composed 'all' group.",
             (

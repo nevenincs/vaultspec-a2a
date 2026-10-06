@@ -203,6 +203,11 @@ deps-claude-cli:
 deps-codex-cli:
     {{dev}} deps codex-cli
 
+# Verify rootless Docker and install pinned integration CLI plugins.
+[group('setup')]
+deps-docker-ci:
+    {{dev}} deps docker-ci
+
 # Resolve every runtime extra plus the composed all dependency group.
 [group('setup')]
 deps-all:

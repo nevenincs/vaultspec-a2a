@@ -13,7 +13,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-adr]]'
 modified: '2026-10-06'
 body_schema: body-v2
-body_hash: 'sha256:3922112dfb5bcee6c5b670e6e568bd3be42c9a7be44e6694063dcfe3e6c1e01b'
+body_hash: 'sha256:6c8eadb33af33748f51dfde88d99de42e78245cbe263863163244a92e3a3f896'
 ---
 
 # `security-cloud-remediation` plan
@@ -38,6 +38,8 @@ S13 continues the authorized CI repair after run 37444176601 passed lint, depend
 
 S14 continues the same authorized CI repair after the full local run exposed stale success fixtures under the armed desktop profile and a stale generated OpenAPI description. Reuse the accepted desktop-native-admission decision and the existing unarmed broker fixture pattern in desktop_tests/test_run_admission.py. Consolidate that setup into the shared gateway boot helper and use it for independent broker certification and restart tests, retaining real authentication, subprocesses, migrated databases, and existing desktop refusal tests. Regenerate the API artifact from its owning command; no production policy change is authorized or needed.
 
+S17 follows the user's explicit instruction to fix root causes and continue until verification completes. Full Validation b13e7884 passed Linux CI and all desktop architectures, but the Windows native-integration fixture setup failed because its dedicated runner account cannot access Docker. Fleet's accepted account policy explicitly classifies docker-users as administrative; do not grant that capability. Reuse native-production ADR coverage: preserve every native lifecycle/cancellation/trace test and the Windows desktop job, and schedule the portable Docker-backed fixture gate on the existing rootless Linux runner using a declared capability. Provision missing Compose/Buildx plugins with verified pinned release digests in job-owned storage. Fleet declaration and GitHub label must agree before dispatch. This is prerequisite routing under existing policies, not a new deployment architecture.
+
 ## Steps
 
 - [x] `S01` - Scope Claude OAuth to its selected root process and prove cross-provider non-interference; `workspace/environment.py, providers/factory.py and focused credential tests`.
@@ -56,6 +58,7 @@ S14 continues the same authorized CI repair after the full local run exposed sta
 - [x] `S14` - Reconcile broker execution fixtures and generated API artifact with the accepted desktop refusal contract; `Shared gateway boot helpers and affected acceptance/restart tests, generated OpenAPI, focused and full Linux CI verification`.
 - [x] `S15` - Reconcile remaining desktop lifecycle proofs with fail-closed admission and rerun CI; `Shared gateway boot helper and desktop_tests lazy worker, process cleanup, worker pairing, provenance and settlement tests`.
 - [x] `S16` - Repair remaining full-suite environment and declaration contracts without weakening security gates; `Native test helper provisioning, private launch-packet documentation, authoring wiring tests, temporary-home assertion, provider export consumers and explicit CI Codex prerequisite`.
+- [x] `S17` - Run Docker-backed native integration on an explicitly qualified rootless runner and verify every CI job; `Full Validation runner selection, fleet capability declaration and registration, integration prerequisite and real lifecycle trace verification`.
 
 ## Parallelization
 

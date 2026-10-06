@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:44740dfcdb307fa0ebee15d3c13b84097a462f7ec1a7070e096777f619a533ed'
+body_hash: 'sha256:94543514daacd30ec447db563ea410deef677e538cff05da783a3808cba5567e'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -88,6 +88,15 @@ related:
 - `S11` `verify:` `independent S11 review` -> `pass`
 - `S11` `by:` `supervisor`
 - `S11` `verify:` `Linux full lint checks with actionlint and CI contract rerun after temp git init` -> `pass`
+- `S12` `M` `uv.lock`
+- `S12` `verify:` `uv locked full-profile sync` -> `pass`
+- `S12` `verify:` `dependency audit all lock coordinates` -> `pass`
+- `S12` `verify:` `migration pytest (19 tests)` -> `pass`
+- `S12` `verify:` `real Windows template traversal normal render and Alembic revision generation` -> `pass`
+- `S12` `verify:` `semantic lock diff only Mako package` -> `pass`
+- `S12` `by:` `supervisor`
+- `S12` `verify:` `independent Mako lock and compatibility review` -> `pass`
+- `S12` `verify:` `uv lock --check` -> `pass`
 
 ## Notes
 

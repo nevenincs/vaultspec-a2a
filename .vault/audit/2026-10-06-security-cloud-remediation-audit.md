@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d2ce0d32248c9da0364e79b52d14daf193a572e504b150b2d2c95a96068d329b'
+body_hash: 'sha256:d3ba1b3ac5ecb2b18cdbdec28a5a16639254582401a02ea0eb79b0ee08778459'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -127,6 +127,18 @@ Type: review and verification record. Status: resolved. Fresh read-only review f
 ### s11-full-lint | low | Complete Linux lint checks pass after environment correction
 
 Type: verification record. Status: resolved. On the clean Linux archive with CI's full locked dependency profile, dev lint all passed Ruff, formatting, baseline/platform/strict type checks, guarded-import use, nesting, relative imports, loadability, reachability, unused symbols, exports, dependencies, TOML and shell checks. Its actionlint step initially rejected the archive because it lacked Git metadata. Initialized a local Git repository in that temporary verification directory and reran dev.actionlint plus dev.ci_contract successfully. No source changes or gate exceptions were needed for either environment correction.
+
+### mako-advisory | medium | Newly reached dependency gate rejects vulnerable transitive Mako
+
+Type: third-party dependency vulnerability. Status: fixed in S12. Replacement Full Validation 37443284479 passes all lint including the original reachability gate, then fails GHSA-5639-2j2p-m4mx (CVE-2026-102991): Mako <=1.4.1 permits Windows drive-letter template URI traversal; upstream identifies 1.4.2 as patched. Source: https://github.com/advisories/GHSA-5639-2j2p-m4mx, reviewed 2026-10-06. Updated with uv lock --upgrade-package mako==1.4.2; semantic TOML comparison confirms only Mako package version/artifact metadata changes. Existing Dependabot PR95 proposes the same release and remains unmodified. No advisory suppression was added.
+
+### mako-verification | low | Patched transitive template dependency preserves migration behavior
+
+Type: verification record. Status: verified. After uv sync --locked --no-default-groups --extra server --group all on Windows, the real dependency audit passed with no unaccepted advisories across 111 Node and 189 Python coordinates. Migration suite passed 19 tests. A temporary real-filesystem control verifies ordinary template rendering, refusal of drive-letter traversal forms, and actual Alembic ScriptDirectory.generate_revision with the repository template followed by Python AST parsing. An initial direct template smoke invocation lacked Alembic's comma helper; invoking the owning Alembic API corrected the test setup. No application source, migration history or test assertions changed.
+
+### mako-review | low | S12 dependency review passes
+
+Type: review record. Status: resolved. Fresh read-only review found no findings: only Mako release/artifact metadata changes; registry, dependency edges, lock schema and constraints remain unchanged. The reviewer confirmed the upstream patched release and accepted the supplied audit, migration and real rendering evidence. Verdict PASS; replacement CI remains the publication check.
 
 ## Recommendations
 

@@ -13,7 +13,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-adr]]'
 modified: '2026-10-06'
 body_schema: body-v2
-body_hash: 'sha256:26c7ad8a0b315c5f5e6c9e35aec452967dd39231a825a3dbcb4b0e9b0afac6e6'
+body_hash: 'sha256:6199fcf23ffc9041d67043e56e241f700638ca98338cf228451d91707c95cf97'
 ---
 
 # `security-cloud-remediation` plan
@@ -32,6 +32,8 @@ The user additionally requested removing release-specific version numbers from t
 
 The user requested fixing failed CI after the authorized push. S11 addresses Full Validation run 37436892926: build-only desktop._linux_runtime_assets is unreachable from installed entry points. Move capsule staging into repository build tooling and update its real build/test consumers under the existing Linux isolation decision. Preserve the runtime boundary and zero-findings gate. Commit and push the correction under the continuing publication authorization, then inspect replacement CI.
 
+The same CI-fix authorization covers S12 after replacement run 37443284479 passed all lint checks and failed dependency auditing: Mako 1.4.1 is affected by GHSA-5639-2j2p-m4mx, fixed upstream in 1.4.2. Update only the transitive lock entry under existing dependency policy; validate the live audit and Alembic migration compatibility. No new dependency strategy or advisory suppression is introduced.
+
 ## Steps
 
 - [x] `S01` - Scope Claude OAuth to its selected root process and prove cross-provider non-interference; `workspace/environment.py, providers/factory.py and focused credential tests`.
@@ -45,6 +47,7 @@ The user requested fixing failed CI after the authorized push. S11 addresses Ful
 - [x] `S09` - Remove ambient Z.ai credentials and gateway overrides from shared child environments while preserving selected Z.ai auth; `workspace/environment.py, provider credential and version-probe seams, focused environment/auth and MCP tests`.
 - [x] `S10` - Refresh Codex binary proof after a real completed turn and restore factory verification; `providers/lane_admission.py, binary admission and version tests, provider and graph live identity tests, worker identity tests, .github/workflows/test.yml`.
 - [x] `S11` - Move build-only Linux isolation staging out of shipped runtime and restore CI reachability; `desktop/_linux_runtime_assets.py, scripts/build_linux_isolation.py, desktop and provider native isolation test imports`.
+- [x] `S12` - Update vulnerable transitive Mako lock to the patched release and verify CI dependency audit; `uv.lock and focused migration compatibility checks`.
 
 ## Parallelization
 

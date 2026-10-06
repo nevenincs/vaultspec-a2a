@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d3ba1b3ac5ecb2b18cdbdec28a5a16639254582401a02ea0eb79b0ee08778459'
+body_hash: 'sha256:8d20017f72f5b4295668012944bca25a5542a3ecd8f89fa28dc62c271475ecbe'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -139,6 +139,22 @@ Type: verification record. Status: verified. After uv sync --locked --no-default
 ### mako-review | low | S12 dependency review passes
 
 Type: review record. Status: resolved. Fresh read-only review found no findings: only Mako release/artifact metadata changes; registry, dependency edges, lock schema and constraints remain unchanged. The reviewer confirmed the upstream patched release and accepted the supplied audit, migration and real rendering evidence. Verdict PASS; replacement CI remains the publication check.
+
+### factory-settings-authority | low | Harness gate detects two direct factory authority reads
+
+Type: configuration authority and CI regression. Status: fixed in S13. Run 37444176601 passed lint, dependency audit and vault validation, then the harness storage-anchor gate rejected raw ambient Claude OAuth lookup and a multiline Codex default-home lookup whose existing justification marker was misplaced. Claude subscription auth now uses the registered external credential with Core env_value and an explicit process mapping, excluding dotenv and project-store fallback. Surrounding whitespace is normalized by that accessor. Codex catalog and model construction now share resolve_codex_base_home under the existing external-tool credential-home exception; duplicated lookup removed, no gate relaxation.
+
+### s13-review | low | Credential selection and Codex home semantics remain bounded
+
+Type: review and verification record. Status: verified for the scoped repair. Fresh read-only review of the actual diff found no findings and returned PASS. It traced Core's explicit-mapping source behavior and shared configured/default Codex home resolution. Windows auth/factory/home controls passed 117; final storage-anchor tests passed 18 after correcting formatter placement of the existing marker. Ruff lint/format and ty passed on all three changed source files. Linux complete harness passed 157. The complete canonical Linux CI sequence is being run locally before publication.
+
+### preexisting-vault-hygiene | low | Full vault validation reports nonblocking maintenance warnings
+
+Type: documentation metadata hygiene. Status: queued follow-up. Run 37444176601 reports extra blank lines in desktop-product-profile and provider-binary-policy ADRs, and stale body fingerprints in service-lifecycle-architecture ADR, workspace-root-authority-compose-provider-boundary ADR and container-release audit. The full vault check exits successfully; these unrelated documents are not changed by the CI code repair. Reconcile through owning Core maintenance verbs when addressing the documentation queue.
+
+### ci-fixture-contract-drift | medium | Queued: desktop success fixtures conflict with accepted execution refusal
+
+Type: test contract drift. The full Linux CI run now passes lint, dependency audit, vault validation and all 157 harness tests. Unit execution exposed nine acceptance fixture errors and the catalog restart test expecting successful new-run admission under an armed desktop profile. The accepted workspace-root-authority desktop-native-admission decision requires start, prepare and commit to refuse before worker startup even for in-process lanes. Move independent broker execution tests outside the desktop profile while preserving authenticated real subprocesses and explicit desktop refusal coverage. The same run found a stale OpenAPI components artifact, queued for regeneration and review. Interrupted after 1000 passing unit tests to address these failures; this is not full-suite success.
 
 ## Recommendations
 

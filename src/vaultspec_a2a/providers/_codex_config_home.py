@@ -75,6 +75,7 @@ __all__ = [
     "cleanup_codex_config_home",
     "registry_tools_divergence",
     "render_codex_config_toml",
+    "resolve_codex_base_home",
     "resolve_codex_web_search_mode",
     "sweep_orphan_codex_homes",
 ]
@@ -86,6 +87,14 @@ logger = logging.getLogger(__name__)
 
 # TOML bare-key charset; a server name outside it is quoted in the table header.
 _BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def resolve_codex_base_home(configured: str | None) -> Path:
+    """Resolve the operator's credential source for catalog and served turns."""
+    # Codex owns this login directory; a2a reads it to seed a separate run home.
+    if configured:
+        return Path(configured)
+    return Path.home() / ".codex"  # storage-anchor-ok
 
 
 def _toml_str(value: str) -> str:

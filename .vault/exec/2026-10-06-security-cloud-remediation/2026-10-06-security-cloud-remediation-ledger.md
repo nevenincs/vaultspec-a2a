@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:94543514daacd30ec447db563ea410deef677e538cff05da783a3808cba5567e'
+body_hash: 'sha256:eda10fcbba929ebcf0b064b2bc37a9612bafac2d5a65ca132450bbfc5b2410a4'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -97,8 +97,21 @@ related:
 - `S12` `by:` `supervisor`
 - `S12` `verify:` `independent Mako lock and compatibility review` -> `pass`
 - `S12` `verify:` `uv lock --check` -> `pass`
+- `S13` `M` `src/vaultspec_a2a/providers/factory.py`
+- `S13` `M` `src/vaultspec_a2a/providers/_codex_config_home.py`
+- `S13` `M` `src/vaultspec_a2a/providers/codex_chat_model.py`
+- `S13` `M` `.vault/audit/2026-10-06-security-cloud-remediation-audit.md`
+- `S13` `M` `.vault/plan/2026-10-06-security-cloud-remediation-plan.md`
+- `S13` `verify:` `Linux python -m dev test harness (157 tests)` -> `pass`
+- `S13` `verify:` `ruff check and format changed files` -> `pass`
+- `S13` `verify:` `ty check changed files` -> `pass`
+- `S13` `verify:` `Windows storage anchors (18 tests)` -> `pass`
+- `S13` `verify:` `Windows provider auth home factory tests (117 tests)` -> `pass`
+- `S13` `verify:` `independent S13 code review` -> `pass`
+- `S13` `verify:` `Linux full CI unit stage` -> `fail`
 
 ## Notes
 
 - `S09` The combined suite has one unrelated Codex 0.160.0 proof-range failure reproduced on clean baseline 64fb0ea2; recorded in audit.
 - `S11` Initial WSL mounted checkout MCP permission and copy-timeout failures resolved by clean /tmp archive plus patch. Incomplete verification environment replaced with CI full locked dependency profile.
+- `S13` Full CI reached unrelated desktop fixture contract drift and stale OpenAPI artifact; queued for next Step.

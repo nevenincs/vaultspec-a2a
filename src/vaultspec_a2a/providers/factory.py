@@ -17,6 +17,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from vaultspec_core.config import env_value
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
@@ -27,6 +29,7 @@ if TYPE_CHECKING:
     from ..team.team_config import AgentConfig
 
 from ..control.config import settings
+from ..control.env_registry import CREDENTIAL_VARIABLES
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ..utils.async_cleanup import complete_cleanup
@@ -305,7 +308,12 @@ def claude_auth_env() -> tuple[dict[str, str], str]:
     if settings.claude_auth_channel == "subscription_login":
         # Preserve an explicit operator export only at the Claude root seam.
         # The shared environment must never grant this credential to other lanes.
-        token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+        variable = next(
+            variable
+            for variable in CREDENTIAL_VARIABLES["claude_code_oauth_token"]
+            if variable.env_name == "CLAUDE_CODE_OAUTH_TOKEN"
+        )
+        token = env_value(variable, environ=os.environ) or ""
         return (
             {"CLAUDE_CODE_OAUTH_TOKEN": token} if token.strip() else {},
             "subscription_login",
@@ -408,16 +416,13 @@ async def _discover_codex_catalog(
     try:
         native = None
         if scope is not None:
-            from pathlib import Path
-
             from ..utils.enums import CodexWebSearchMode
-            from ._codex_config_home import build_codex_config_home
+            from ._codex_config_home import (
+                build_codex_config_home,
+                resolve_codex_base_home,
+            )
 
-            base = (
-                Path(settings.codex_home)
-                if settings.codex_home
-                else Path.home() / ".codex"
-            )  # storage-anchor-ok
+            base = resolve_codex_base_home(settings.codex_home)
             home = build_codex_config_home(
                 [], base, web_search=CodexWebSearchMode.DISABLED
             )

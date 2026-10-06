@@ -64,6 +64,7 @@ from ._codex_authoring_ready import verify_authoring_ready
 from ._codex_config_home import (
     build_codex_config_home,
     cleanup_codex_config_home,
+    resolve_codex_base_home,
     resolve_codex_web_search_mode,
 )
 from ._codex_permission import (
@@ -363,8 +364,7 @@ class CodexChatModel(ProcessChatModel):
         # refusal to invent a root when the run names none.
         specs = self._compose_mcp_specs()
         base = self.codex_home or settings.codex_home
-        # Codex keeps its own login here; a2a only reads it to seed a run home.
-        base_home = Path(base) if base else Path.home() / ".codex"  # storage-anchor-ok
+        base_home = resolve_codex_base_home(base)
         configured = self.web_search_mode
         if configured is None:
             configured = settings.codex_web_search_mode

@@ -317,6 +317,9 @@ agent({ name: 'read-contract-peer' })
     if (!params.clientCapabilities.fs.readTextFile) {
       throw new Error('missing capability');
     }
+    if (params.clientCapabilities.terminal) {
+      throw new Error('unisolated terminal capability advertised');
+    }
     return {protocolVersion: 1, agentCapabilities: {}, authMethods: []};
   })
   .onRequest('session/new', () => ({
@@ -344,50 +347,18 @@ agent({ name: 'read-contract-peer' })
         sessionId: 'foreign-session', path: 'foreign.txt', content: 'foreign write'
       });
     } catch (error) { foreignWriteRefused = error.code === -32603; }
-    const terminal = await client.request(methods.client.terminal.create, {
-      sessionId: params.sessionId, command: 'python', args: ['--version']
-    });
-    const terminalParams = {
-      sessionId: params.sessionId, terminalId: terminal.terminalId
-    };
-    const terminalExit = await client.request(
-      methods.client.terminal.waitForExit, terminalParams
-    );
-    let foreignTerminalRefused = true;
-    for (const method of [methods.client.terminal.output,
-      methods.client.terminal.waitForExit, methods.client.terminal.kill,
-      methods.client.terminal.release]) {
-      try {
-        await client.request(method, {...terminalParams, sessionId: 'foreign'});
-        foreignTerminalRefused = false;
-      } catch (error) { foreignTerminalRefused &&= error.code === -32602; }
+    let terminalRefused = false;
+    try {
+      await client.request(methods.client.terminal.create, {
+        sessionId: params.sessionId, command: 'python', args: ['--version']
+      });
+    } catch (error) {
+      terminalRefused = error.code === -32603 &&
+        error.message.includes('workspace OS isolation');
     }
-    const terminalOutput = await client.request(
-      methods.client.terminal.output, terminalParams
-    );
-    const terminalOutputSeen = terminalOutput.output.startsWith('Python ');
-    const again = await client.request(methods.client.terminal.output, terminalParams);
-    const stableOutput = JSON.stringify(again) === JSON.stringify(terminalOutput);
-    const zero = await client.request(methods.client.terminal.create, {
-      sessionId: params.sessionId, command: 'python', args: ['--version'],
-      outputByteLimit: 0
-    });
-    const zeroParams = {sessionId: params.sessionId, terminalId: zero.terminalId};
-    await client.request(methods.client.terminal.waitForExit, zeroParams);
-    const zeroOutput = await client.request(methods.client.terminal.output, zeroParams);
-    await client.request(methods.client.terminal.release, zeroParams);
-    await client.request(methods.client.terminal.kill, terminalParams);
-    await client.request(methods.client.terminal.waitForExit, terminalParams);
-    const released = await client.request(
-      methods.client.terminal.release, terminalParams
-    );
-    const repeated = await client.request(
-      methods.client.terminal.release, terminalParams
-    );
     return {stopReason: 'end_turn',
       _meta: {first, empty, foreignRefused, write, foreignWriteRefused,
-        terminalExit, foreignTerminalRefused, terminalOutputSeen, stableOutput,
-        zeroOutput, released, repeated}};
+        terminalRefused}};
   })
   .connect(ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
 """
@@ -470,17 +441,7 @@ agent({ name: 'read-contract-peer' })
                             "foreignRefused": True,
                             "write": {},
                             "foreignWriteRefused": True,
-                            "terminalExit": {"exitCode": 0, "signal": None},
-                            "foreignTerminalRefused": True,
-                            "terminalOutputSeen": True,
-                            "stableOutput": True,
-                            "zeroOutput": {
-                                "output": "",
-                                "truncated": True,
-                                "exitStatus": {"exitCode": 0, "signal": None},
-                            },
-                            "released": {},
-                            "repeated": {},
+                            "terminalRefused": True,
                         },
                     },
                 }

@@ -19,6 +19,7 @@ from .._acp_rpc_handlers import (
 )
 from .._acp_rpc_terminal_handlers import release_owned_terminal
 from .._acp_types import AcpModelConfig, AcpSessionContext
+from ._terminal_process import retain_terminal_process
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -150,17 +151,7 @@ async def _create_owned_terminal(root: Path, ctx: AcpSessionContext) -> str:
         "sys.stdout.buffer.flush()\ntime.sleep(120)\n",
         encoding="utf-8",
     )
-    response = await on_terminal_create(
-        1,
-        {"sessionId": ctx.session_id, "command": sys.executable, "args": [str(script)]},
-        ctx,
-        _config(root),
-    )
-    result = response.get("result")
-    assert isinstance(result, dict), response
-    terminal_id = result.get("terminalId")
-    assert isinstance(terminal_id, str)
-    return terminal_id
+    return await retain_terminal_process(ctx, root, [str(script)])
 
 
 @pytest.mark.asyncio

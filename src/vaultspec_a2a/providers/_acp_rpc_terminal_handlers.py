@@ -14,7 +14,10 @@ import signal
 from pathlib import Path
 from uuid import uuid4
 
+from ..control.provider_execution import native_execution_refusal_reason
+from ..desktop.native_isolation import NativeLaunchAuthority
 from ..utils.async_cleanup import complete_cleanup
+from ..utils.process import ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
 from ._acp_client_requests import AcpTerminalCreateRequest, AcpTerminalRequest
 from ._acp_terminal_output import MAX_TERMINAL_OUTPUT_BYTES, AcpTerminalOutput
@@ -39,6 +42,7 @@ __all__ = [
     "on_terminal_release",
     "on_terminal_wait_for_exit",
     "release_owned_terminal",
+    "terminal_isolation_authority",
 ]
 
 logger = logging.getLogger(__name__)
@@ -184,6 +188,25 @@ def _terminal_environment(params: JsonObject, resolved_cwd: Path) -> dict[str, s
     return terminal_env
 
 
+def terminal_isolation_authority(
+    ctx: AcpSessionContext, config: AcpModelConfig
+) -> NativeLaunchAuthority:
+    """Require the session's OS boundary, never infer isolation from its cwd."""
+    reason = native_execution_refusal_reason()
+    if reason is not None:
+        raise ProcessContainmentError(reason)
+    authority = process_native_authority(ctx.process)
+    if authority is None:
+        raise ProcessContainmentError("ACP terminal requires workspace OS isolation")
+    authority.validate()
+    workspace = require_workspace_root(
+        config.workspace_root, surface="terminal isolation binding"
+    ).resolve(strict=True)
+    if workspace != authority.workspace.path:
+        raise ProcessContainmentError("ACP terminal workspace differs from its binding")
+    return authority
+
+
 async def on_terminal_create(
     rpc_id: AcpRpcId,
     params: JsonObject,
@@ -192,8 +215,8 @@ async def on_terminal_create(
 ) -> JsonObject:
     """Handle terminal/create RPC.
 
-    Validates that the working directory is within the sandbox, logs
-    the command for audit purposes, then spawns the subprocess.
+    Requires the session's workspace OS boundary, validates cwd, then spawns
+    the subprocess within the retained native grants.
     Passes optional ``env`` overrides from params on top of the current
     environment so the subprocess inherits PATH and other required vars.
     """
@@ -202,6 +225,8 @@ async def on_terminal_create(
         request.require_active_session(ctx)
         command, args = _terminal_command_args(params)
         resolved_cwd = _terminal_cwd(params, config)
+        terminal_env = _terminal_environment(params, resolved_cwd)
+        authority = terminal_isolation_authority(ctx, config)
 
         # Audit log for all terminal commands
         logger.info(
@@ -211,15 +236,12 @@ async def on_terminal_create(
             resolved_cwd,
         )
 
-        # Build env: use resolve_env_vars() to scrub API credentials,
-        # then apply any agent-supplied overrides from the RPC params.
-        terminal_env = _terminal_environment(params, resolved_cwd)
         process = await spawn_acp_process(
             [command, *args],
             terminal_env,
             str(resolved_cwd),
             use_exec=True,
-            native_authority=process_native_authority(ctx.process),
+            native_authority=authority,
         )
         try:
             request.require_active_session(ctx)

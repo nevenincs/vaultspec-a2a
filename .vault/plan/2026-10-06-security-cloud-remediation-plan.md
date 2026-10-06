@@ -12,7 +12,7 @@ related:
   - '[[2026-07-16-authoring-contract-adr]]'
 modified: '2026-10-06'
 body_schema: body-v2
-body_hash: 'sha256:7d9e24599fb82061daeced3779482678d9070ede7fd498e71d197ab66dab361f'
+body_hash: 'sha256:9a7cbe2956ab8dfbe2a1cb7f0b6c7e9d29d8e499ca74613ca2be9fa583cc9814'
 ---
 
 # `security-cloud-remediation` plan
@@ -26,7 +26,7 @@ Reuse accepted native admission and Linux backend decisions for credential and t
 ## Steps
 
 - [x] `S01` - Scope Claude OAuth to its selected root process and prove cross-provider non-interference; `workspace/environment.py, providers/factory.py and focused credential tests`.
-- [ ] `S02` - Refuse ACP terminal creation without validated workspace-bound native isolation; `providers/_acp_rpc_terminal_handlers.py, capability negotiation and terminal tests`.
+- [x] `S02` - Refuse ACP terminal creation without validated workspace-bound native isolation; `providers/_acp_rpc_terminal_handlers.py, capability negotiation and terminal tests`.
 - [ ] `S03` - Reject linked state ancestors and SQLite or authoring journal leaves; `control/state_layout.py, config.py, database/session.py, authoring/_tool_calls.py and tests`.
 - [ ] `S04` - Bind permission identities and resolutions to their owning thread; `graph/nodes/_worker_permissions.py, database/permission_repository.py, control/_event_application.py and tests`.
 - [ ] `S05` - Reject linked desktop app-home aliases into protected capsule paths; `desktop/profile.py and tests`.

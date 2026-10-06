@@ -1,10 +1,10 @@
 """Real-process proofs for the ACP terminal RPC surface.
 
-The ``service``-marked test drives ``on_terminal_create`` to spawn a genuine
-allowlisted terminal child (a real Python process that itself spawns a
+The ``service``-marked test retains a genuine
+terminal child (a real Python process that itself spawns a
 grandchild), proves the child is seated in its own containment before it runs,
 and proves ``on_terminal_kill`` reaps the whole terminal subtree through that
-containment.
+containment. Admission is tested separately through the isolated launch seam.
 
 The remaining tests pin the terminal-id resolution contract shared by
 ``terminal/kill``, ``terminal/output`` and ``terminal/wait_for_exit``: one wire
@@ -17,7 +17,6 @@ where a regression in the shared refusal is actually visible.
 from __future__ import annotations
 
 import asyncio
-import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -26,7 +25,6 @@ import pytest
 from ...lifecycle.discovery import is_pid_alive
 from ...utils.process import ProcessContainment
 from .._acp_rpc_handlers import (
-    on_terminal_create,
     on_terminal_kill,
     on_terminal_output,
     on_terminal_release,
@@ -35,6 +33,7 @@ from .._acp_rpc_handlers import (
 from .._acp_types import AcpModelConfig, AcpSessionContext
 from .._subprocess import process_containment
 from ..acp_exceptions import AcpErrorCode
+from ._terminal_process import retain_terminal_process
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,20 +81,9 @@ async def test_terminal_child_contained_and_reaped_whole(
     script = tmp_path / "spawn_grandchild.py"
     script.write_text(_GRANDCHILD_SCRIPT, encoding="utf-8")
 
-    resp = await on_terminal_create(
-        1,
-        {
-            "sessionId": acp_session_context.session_id,
-            "command": sys.executable,
-            "args": [str(script)],
-        },
-        acp_session_context,
-        config,
+    terminal_id = await retain_terminal_process(
+        acp_session_context, tmp_path, [str(script)]
     )
-    response_result = resp.get("result")
-    assert isinstance(response_result, dict)
-    terminal_id = response_result.get("terminalId")
-    assert isinstance(terminal_id, str)
     process = acp_session_context.terminals[terminal_id]
 
     # The terminal child is seated in its own containment before it runs.
@@ -218,20 +206,9 @@ async def test_known_terminal_still_resolves_to_its_live_process(
     config = _make_config(str(tmp_path))
     script = tmp_path / "emit.py"
     script.write_text("import sys\nsys.stdout.write('resolved-marker')\n", "utf-8")
-    created = await on_terminal_create(
-        41,
-        {
-            "sessionId": acp_session_context.session_id,
-            "command": sys.executable,
-            "args": [str(script)],
-        },
-        acp_session_context,
-        config,
+    terminal_id = await retain_terminal_process(
+        acp_session_context, tmp_path, [str(script)]
     )
-    created_result = created.get("result")
-    assert isinstance(created_result, dict)
-    terminal_id = created_result.get("terminalId")
-    assert isinstance(terminal_id, str)
     assert terminal_id in acp_session_context.terminals
 
     exited = await on_terminal_wait_for_exit(
@@ -298,17 +275,7 @@ async def _create_terminal(
 ) -> str:
     """Spawn a real allowlisted terminal child running ``body`` and return its id."""
     script.write_text(body, encoding="utf-8")
-    created = await on_terminal_create(
-        1,
-        {"sessionId": ctx.session_id, "command": sys.executable, "args": [str(script)]},
-        ctx,
-        config,
-    )
-    created_result = created.get("result")
-    assert isinstance(created_result, dict)
-    terminal_id = created_result.get("terminalId")
-    assert isinstance(terminal_id, str) and terminal_id
-    return terminal_id
+    return await retain_terminal_process(ctx, script.parent, [str(script)])
 
 
 @pytest.mark.asyncio

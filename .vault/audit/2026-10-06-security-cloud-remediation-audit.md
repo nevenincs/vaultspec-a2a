@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:2e3e1695243160449f8afe4a32844599e8496a6041de16f5363c5fa8ea91bed1'
+body_hash: 'sha256:df792402cb1f41bd7f62cd4ea6c99cf6c2b714142f785a2f0bb5c90530d36e1e'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -61,6 +61,20 @@ Type: verification and review record. Status: resolved. Independent fresh read-o
 ### claude-live-test-selection | low | Live setup fixtures relied on global OAuth inheritance
 
 Type: test compatibility. Status: fixed in S01 follow-up. Final caller inspection found test_acp_catalog_live.py and test_acp_authoring_bridge.py constructing a raw common environment while assuming Claude OAuth survived. They now use the same explicit claude_auth_env selector as served Claude roots. Focused Ruff lint/format and ty passed; actual live catalog and authoring-bridge service tests passed (4 tests). No production scope expansion or new credential channel.
+
+### terminal-review | low | S02 closes unisolated terminal creation without losing isolated operation
+
+Type: verification and review record. Status: resolved. Independent fresh read-only review traced negotiation, dispatch, creation, shared spawn and Linux namespace acquisition and found no concrete bypass or production regression. Missing authority, cross-workspace authority and replaced filesystem identity refuse; namespace-controlled project writes still succeed while private-state reads fail with ENOENT. The real installed SDK verifies initialize withholds terminal and a direct terminal/create still refuses. Large-output isolated controls verify zero, small and oversized requested caps, including the production server clamp.
+
+Windows focused terminal/security/native-refusal/output/ownership/lifecycle suite initially had 212 passes and one invalid-environment error-order regression. Restoring environment validation before isolation preserves the prior error. Focused security plus new refusal tests then passed 47/47; retained-output tests after final setup adjustment passed 19/19. Explicit SDK and containment service controls passed 2/2. Other original passing results remain applicable. Ruff lint/format and ty passed on all ten changed terminal Python files. A separate Linux environment created with uv sync --locked --python 3.13 --group tooling passed the actual namespace test with the capsule-builder static bubblewrap helper, including final stale-authority and large-output controls. An older Linux environment failed import before tests and was replaced with the locked environment; it supplies no proof. Review verdict PASS for S02; no target eligibility was changed.
+
+### terminal-test-setup | low | Lifecycle controls must start below the newly refused admission boundary
+
+Type: test compatibility. Status: fixed. Existing unisolated output/ownership/cleanup tests created terminals through terminal/create. Their setup now retains real processes using the production spawn and output-capture helpers; they continue exercising real handlers and cleanup without a test bypass of admission. Admission itself is exercised by explicit unisolated refusal, SDK negotiation/refusal and real isolated Linux controls. No mocks, skips or fallback execution added.
+
+### medium-model-selection | low | Requested worker model is unavailable
+
+Type: execution prerequisite. Status: pending user input. The user requested sol 5.1 at xhigh; that model is absent from the agent runtime. An asynchronous question offers gpt-5.6-sol, gpt-6.1-sol or gpt-6-sol at xhigh. No medium remediation worker has been launched under a substituted model. S03-S08 remain open; their source files are untouched.
 
 ## Recommendations
 

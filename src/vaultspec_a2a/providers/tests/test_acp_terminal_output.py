@@ -18,6 +18,7 @@ from .._acp_rpc_terminal_handlers import (
 )
 from .._acp_terminal_output import MAX_TERMINAL_OUTPUT_BYTES
 from ..acp_chat_model import AcpChatModel
+from ._terminal_process import retain_terminal_process
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,22 +36,9 @@ async def _create(
 ) -> str:
     script = root / "producer.py"
     script.write_text(body, encoding="utf-8")
-    created = await on_terminal_create(
-        1,
-        {
-            "sessionId": ctx.session_id,
-            "command": sys.executable,
-            "args": [str(script)],
-            "outputByteLimit": cap,
-        },
-        ctx,
-        config,
-    )
-    result = created.get("result")
-    assert isinstance(result, dict), created
-    terminal_id = result.get("terminalId")
-    assert isinstance(terminal_id, str)
-    return terminal_id
+    assert cap is None or isinstance(cap, int)
+    limit = MAX_TERMINAL_OUTPUT_BYTES if cap is None else cap
+    return await retain_terminal_process(ctx, root, [str(script)], limit)
 
 
 @pytest.mark.asyncio
@@ -114,8 +102,8 @@ async def test_invalid_cap_is_refused_before_spawn(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cap", [0, 4, None, 2**64 - 1])
-async def test_both_pipes_drain_without_output_polling_and_server_cap_applies(
+@pytest.mark.parametrize("cap", [0, 4, None])
+async def test_both_pipes_drain_without_output_polling_and_retain_bounded_output(
     tmp_path: Path, acp_session_context: AcpSessionContext, cap: int | None
 ) -> None:
     ctx = acp_session_context
@@ -141,11 +129,7 @@ async def test_both_pipes_drain_without_output_polling_and_server_cap_applies(
     waited = await on_terminal_wait_for_exit(2, params, ctx, config)
     assert waited.get("result") == {"exitCode": 0, "signal": None}, waited
     assert (tmp_path / "finished").is_file()
-    expected_size = (
-        MAX_TERMINAL_OUTPUT_BYTES
-        if cap is None
-        else min(cap, MAX_TERMINAL_OUTPUT_BYTES)
-    )
+    expected_size = MAX_TERMINAL_OUTPUT_BYTES if cap is None else cap
     result = (await on_terminal_output(3, params, ctx, config))["result"]
     assert isinstance(result, dict)
     assert result["output"] == "x" * expected_size

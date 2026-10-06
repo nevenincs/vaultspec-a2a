@@ -14,7 +14,12 @@ from ...desktop.tests.test_native_isolation import _authority, _install_runtime
 from ...testing import settings_override
 from ...utils.process import ProcessContainmentError
 from .._acp_mcp import resolve_harness_mcp_servers
-from .._acp_rpc_terminal_handlers import on_terminal_create, on_terminal_release
+from .._acp_rpc_terminal_handlers import (
+    on_terminal_create,
+    on_terminal_release,
+    terminal_isolation_authority,
+)
+from .._acp_terminal_output import MAX_TERMINAL_OUTPUT_BYTES
 from .._acp_types import AcpSessionContext
 from .._harness_mcp_registry import declared_harness_tools
 from .._mcp_contract import verify_declared_tool_contract
@@ -93,6 +98,10 @@ async def test_shared_spawn_and_terminals_keep_session_authority(
     )
     try:
         assert process_native_authority(owner) == authority
+        assert (
+            terminal_isolation_authority(ctx, _config(authority.workspace.path))
+            == authority
+        )
         response = await on_terminal_create(
             1,
             {
@@ -125,6 +134,61 @@ async def test_shared_spawn_and_terminals_keep_session_authority(
             ctx,
             _config(authority.workspace.path),
         )
+        for cap in (0, 4, 2**64 - 1):
+            output_script = authority.workspace.path / "large-output.js"
+            output_script.write_text(
+                "process.stdout.write('x'.repeat(2 * 1024 * 1024));\n", encoding="utf-8"
+            )
+            created = await on_terminal_create(
+                3,
+                {
+                    "sessionId": ctx.session_id,
+                    "command": str(node),
+                    "args": [str(output_script)],
+                    "outputByteLimit": cap,
+                    "env": {"ROLE_OPTION": "normal-option"},
+                },
+                ctx,
+                _config(authority.workspace.path),
+            )
+            capped_result = created.get("result")
+            assert isinstance(capped_result, dict), created
+            capped_id = capped_result["terminalId"]
+            assert isinstance(capped_id, str)
+            retained = ctx.terminal_outputs[capped_id]
+            await asyncio.wait_for(retained.process.wait(), timeout=15)
+            await retained.settle()
+            assert retained.process.returncode == 0
+            expected_size = MAX_TERMINAL_OUTPUT_BYTES if cap == 2**64 - 1 else cap
+            assert retained.output == "x" * expected_size
+            assert retained.truncated is True
+            await on_terminal_release(
+                4,
+                {"sessionId": ctx.session_id, "terminalId": capped_id},
+                ctx,
+                _config(authority.workspace.path),
+            )
+        sibling = authority.workspace.path.with_name("sibling")
+        sibling.mkdir()
+        refused = await on_terminal_create(
+            5,
+            {"sessionId": ctx.session_id, "command": str(node), "args": []},
+            ctx,
+            _config(sibling),
+        )
+        assert "differs from its binding" in str(refused.get("error"))
+        assert not ctx.terminals
+        original = authority.workspace.path.with_name("original")
+        authority.workspace.path.rename(original)
+        authority.workspace.path.mkdir()
+        stale = await on_terminal_create(
+            6,
+            {"sessionId": ctx.session_id, "command": str(node), "args": []},
+            ctx,
+            _config(authority.workspace.path),
+        )
+        assert "changed" in str(stale.get("error"))
+        assert not ctx.terminals
     finally:
         for output in ctx.terminal_outputs.values():
             await kill_process_tree(output.process)

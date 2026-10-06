@@ -9,6 +9,7 @@ from typing import TypedDict, Unpack, cast
 
 from ..control.config import settings
 from ..utils.enums import AcpRequestId
+from ..utils.process import ProcessContainmentError
 from ._acp_auth import (
     auth_hint,
     authenticate_rpc,
@@ -18,6 +19,7 @@ from ._acp_auth import (
 from ._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from ._acp_mcp import require_declared_surface, statically_approvable_tool_names
 from ._acp_request import await_response, issue_request
+from ._acp_rpc_terminal_handlers import terminal_isolation_authority
 from ._acp_types import (
     AcpModelConfig,
     AcpResponseFuture,
@@ -398,6 +400,14 @@ async def initialize_session(
     config: AcpModelConfig,
 ) -> InitializeResult:
     """Send ACP initialize request and return capabilities + auth methods."""
+    terminal = False
+    if config.agent_config is not None and config.agent_config.capabilities.terminal:
+        try:
+            terminal_isolation_authority(ctx, config)
+        except (OSError, ValueError, ProcessContainmentError):
+            pass
+        else:
+            terminal = True
     rpc_id = AcpRequestId.INITIALIZE
     future = await issue_request(
         ctx.response_futures,
@@ -420,11 +430,7 @@ async def initialize_session(
                         else False
                     ),
                 },
-                "terminal": (
-                    config.agent_config.capabilities.terminal
-                    if config.agent_config is not None
-                    else False
-                ),
+                "terminal": terminal,
                 # Signal support for terminal-based auth and
                 # terminal output to claude-agent-acp >=0.20.2.  Without
                 # these flags the agent refuses to authenticate via the

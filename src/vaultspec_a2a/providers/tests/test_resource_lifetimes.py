@@ -14,13 +14,14 @@ import pytest
 
 from ...utils._process_tree import kill_pid_tree_async, pid_is_live
 from .._acp_protocol import process_stdout_loop
-from .._acp_rpc_handlers import on_terminal_create, on_terminal_release
+from .._acp_rpc_handlers import on_terminal_release
 from .._acp_types import AcpSessionContext
 from .._cleanup import cancel_owned_tasks, run_independent_cleanups
 from .._codex_app_server_client import _CodexAppServerClient
 from .._codex_config_home import cleanup_codex_config_home
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..acp_chat_model import AcpChatModel
+from ._terminal_process import retain_terminal_process
 from .conftest import _AcpChildStreams, _fresh_acp_session_context
 
 if TYPE_CHECKING:
@@ -238,20 +239,9 @@ async def test_release_after_root_exit_reaps_descendant_and_preserves_foreign_pr
     descendant: int | None = None
     terminal: asyncio.subprocess.Process | None = None
     try:
-        created = await on_terminal_create(
-            1,
-            {
-                "sessionId": acp_session_context.session_id,
-                "command": sys.executable,
-                "args": [str(script)],
-            },
-            acp_session_context,
-            model._config,
+        terminal_id = await retain_terminal_process(
+            acp_session_context, tmp_path, [str(script)]
         )
-        result = created.get("result")
-        assert isinstance(result, dict)
-        terminal_id = result.get("terminalId")
-        assert isinstance(terminal_id, str)
         terminal = acp_session_context.terminals[terminal_id]
         assert terminal.stdin is not None and terminal.stdout is not None
         terminal.stdin.write(b"start\n")
@@ -305,13 +295,7 @@ async def test_session_cleanup_reaps_terminal_created_during_cancel(
     stderr = asyncio.create_task(model._read_stderr_loop(ctx))
 
     async def _create() -> None:
-        response = await on_terminal_create(
-            2,
-            {"sessionId": ctx.session_id, "command": sys.executable, "args": ["-q"]},
-            ctx,
-            model._config,
-        )
-        assert "result" in response
+        await retain_terminal_process(ctx, tmp_path, ["-q"])
 
     creation = asyncio.create_task(_create())
     ctx.background_tasks.add(creation)

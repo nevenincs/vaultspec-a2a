@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#workspace-root-authority'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d613830457f3c17a1dadc29b6267bdcc1dd7bfcf16ff2a6e26577b1e637c38f3'
+body_hash: 'sha256:210de1a66d9dc48f3fb8285d2676f2056175404934b6bca04f8bd3b2d9e9c2a1'
 related:
   - "[[2026-10-04-workspace-root-authority-audit]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
@@ -47,3 +47,7 @@ Refusing unisolated native launch is the narrowest complete available closure of
 ## Consequences
 
 Desktop health and lifecycle remain usable, but native agent runs are unavailable until a verified desktop isolation backend ships. This is an explicit security compatibility restriction, not successful desktop sandbox certification. Development and Compose keep their existing execution contracts. Reconsider when the supported backend and completed native/provider controls exist. Authorization basis: the user requested tackling all remaining known issues and then explicitly instructed continuation after the stricter fail-closed option was presented on 2026-10-04.
+
+## Amendment: ACP terminal isolation, 2026-10-06
+
+The user's explicit instruction to fix the latest scan's two high findings authorizes closure of the unisolated ACP terminal route documented in 2026-10-06-security-cloud-remediation-audit. The earlier default-development exception continues for ordinary provider launch, but no longer permits ACP terminal/create without the session process's validated native launch authority bound to the configured project. A terminal capability declaration alone cannot grant host execution. Initialize advertises terminal support only when that authority exists and validates; create independently revalidates before acquisition. Missing, stale or mismatched authority refuses before child execution. General interpreters remain usable inside the existing isolated runtime, project and selected role-home grants. This adds no target eligibility and no new isolation backend. Output, wait, kill, release and cleanup for retained terminals remain available. The compatibility cost is explicit: unisolated development terminals are unavailable; they do not fall back to same-user execution.

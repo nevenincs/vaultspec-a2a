@@ -70,6 +70,7 @@ async def _decide(
 ) -> str:
     tool_call: JsonObject = {"title": name, "rawInput": raw_input or {}}
     params: JsonObject = {
+        "sessionId": ctx.session_id,
         "toolCall": tool_call,
         "options": list[JsonValue](_OPTIONS),
     }
@@ -220,6 +221,7 @@ async def test_a_floor_read_is_judged_by_the_adapter_locations_too(
         "locations": [{"path": str(outside / "secrets.env")}],
     }
     params: JsonObject = {
+        "sessionId": acp_session_context.session_id,
         "toolCall": tool_call,
         "options": list[JsonValue](_OPTIONS),
     }

@@ -111,6 +111,7 @@ async def _decide(
 ) -> str:
     """Drive the production handler and return the option id it selected."""
     params: JsonObject = {
+        "sessionId": ctx.session_id,
         "toolCall": {"toolCallId": "tc-1", "title": title, "rawInput": raw_input},
         "options": list[JsonValue](options if options is not None else _CLAUDE_OPTIONS),
     }

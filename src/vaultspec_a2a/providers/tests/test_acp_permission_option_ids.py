@@ -59,6 +59,7 @@ async def _outcome(
 ) -> JsonObject:
     """Drive the production handler and return the outcome object it answered with."""
     params: JsonObject = {
+        "sessionId": ctx.session_id,
         "toolCall": {"title": "Edit", "rawInput": {}},
         "options": list[JsonValue](options),
     }
@@ -74,6 +75,7 @@ async def _decide(
     options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
 ) -> str:
     params: JsonObject = {
+        "sessionId": ctx.session_id,
         "toolCall": {"title": "Edit", "rawInput": {}},
         "options": list[JsonValue](options),
     }

@@ -527,6 +527,19 @@ async def on_request_permission(
     # backend happened to fill in.
     locations = lenient_json_object_list(tool_call.get("locations"))
 
+    # Session ownership precedes every rung, exactly as on the filesystem and
+    # terminal callbacks: a request that does not name the active negotiated
+    # session carries no authority for a person or an allowlist to decide.
+    # Refused rather than errored, so the adapter declines the call cleanly.
+    try:
+        AcpSessionRequest.model_validate(params).require_active_session(ctx)
+    except ValueError:
+        logger.warning(
+            "Refused a permission request outside the active ACP session: tool=%s",
+            name,
+        )
+        return _refused_outcome(rpc_id, options)
+
     # Diagnostic (R7: tool name + option ids only, never rawInput/payloads):
     # this handler firing means the SDK's canUseTool rung was reached — i.e. no
     # allow-rule pre-empted the call. Logging it disambiguates which permission

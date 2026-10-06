@@ -13,7 +13,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-adr]]'
 modified: '2026-10-06'
 body_schema: body-v2
-body_hash: 'sha256:6c8eadb33af33748f51dfde88d99de42e78245cbe263863163244a92e3a3f896'
+body_hash: 'sha256:37f301f03abb1ea5d50f2470de2c34d9a90ec68ab2fa7180981e9906170890f2'
 ---
 
 # `security-cloud-remediation` plan
@@ -59,6 +59,7 @@ S17 follows the user's explicit instruction to fix root causes and continue unti
 - [x] `S15` - Reconcile remaining desktop lifecycle proofs with fail-closed admission and rerun CI; `Shared gateway boot helper and desktop_tests lazy worker, process cleanup, worker pairing, provenance and settlement tests`.
 - [x] `S16` - Repair remaining full-suite environment and declaration contracts without weakening security gates; `Native test helper provisioning, private launch-packet documentation, authoring wiring tests, temporary-home assertion, provider export consumers and explicit CI Codex prerequisite`.
 - [x] `S17` - Run Docker-backed native integration on an explicitly qualified rootless runner and verify every CI job; `Full Validation runner selection, fleet capability declaration and registration, integration prerequisite and real lifecycle trace verification`.
+- [x] `S18` - Accept host systemd-resolved ownership only on its fixed DNS aliases and verify isolation across Linux hosts; `desktop/_linux_resolver.py and real resolver/native launch tests, cross-host CI verification`.
 
 ## Parallelization
 

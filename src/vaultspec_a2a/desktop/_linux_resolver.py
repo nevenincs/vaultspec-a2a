@@ -13,10 +13,16 @@ from pathlib import PurePosixPath
 
 RESOLVER_TARGET = PurePosixPath("/etc/resolv.conf")
 _MAX_BYTES = 16384
-_ALIASES = frozenset(
+_ROOT_OWNER = frozenset({0})
+_RESOLVED_ALIASES = frozenset(
     {
         "/run/systemd/resolve/stub-resolv.conf",
         "/run/systemd/resolve/resolv.conf",
+    }
+)
+_ALIASES = frozenset(
+    {
+        *_RESOLVED_ALIASES,
         "/usr/lib/systemd/resolv.conf",
         "/run/NetworkManager/resolv.conf",
         "/mnt/wsl/resolv.conf",
@@ -119,8 +125,29 @@ def parse_resolver(data: bytes) -> ResolverData:
     return ResolverData(tuple(nameservers), search, tuple(options))
 
 
-def _trusted_directory(metadata: os.stat_result, *, sticky_alias: bool) -> None:
-    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0:
+def _resolver_owners(target: PurePosixPath) -> frozenset[int]:
+    if sys.platform != "linux" or str(target) not in _RESOLVED_ALIASES:
+        return _ROOT_OWNER
+    import pwd
+
+    try:
+        owner = pwd.getpwnam("systemd-resolve").pw_uid
+    except KeyError:
+        return _ROOT_OWNER
+    # This service account owns only its fixed runtime directory and DNS files.
+    # A caller running as that account cannot establish an independent owner.
+    if owner != 0 and owner == os.geteuid():
+        raise ValueError("native resolver service owner is the calling identity")
+    return _ROOT_OWNER | {owner}
+
+
+def _trusted_directory(
+    metadata: os.stat_result,
+    *,
+    sticky_alias: bool,
+    owners: frozenset[int] = _ROOT_OWNER,
+) -> None:
+    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid not in owners:
         raise ValueError("native resolver directory is not host-owned")
     if metadata.st_mode & 0o022 and not (
         sticky_alias and metadata.st_mode & stat.S_ISVTX
@@ -142,6 +169,11 @@ def _directory(stack: ExitStack, target: PurePosixPath) -> int:
         parent /= part
         _trusted_directory(
             os.fstat(descriptor),
+            owners=(
+                _resolver_owners(target)
+                if str(parent) == "/run/systemd/resolve"
+                else _ROOT_OWNER
+            ),
             sticky_alias=(
                 str(target) == "/mnt/wsl/resolv.conf" and str(parent) == "/mnt/wsl"
             ),
@@ -170,13 +202,13 @@ def _signature(metadata: os.stat_result) -> tuple[int, ...]:
     )
 
 
-def _read_snapshot(descriptor: int) -> bytes:
+def _read_snapshot(descriptor: int, *, owners: frozenset[int] = _ROOT_OWNER) -> bytes:
     before = os.fstat(descriptor)
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise ValueError("native resolver requires a regular single-link source")
     if before.st_mode & (0o022 | stat.S_ISUID | stat.S_ISGID):
         raise ValueError("native resolver source has unsafe permissions")
-    if before.st_uid != 0:
+    if before.st_uid not in owners:
         raise ValueError("native resolver source is not host-owned")
     if not 0 < before.st_size <= _MAX_BYTES:
         raise ValueError("native resolver source size exceeds its bound")
@@ -221,7 +253,7 @@ def host_resolver_data() -> bytes:
         stack.callback(os.close, descriptor)
         if _signature(leaf) != _signature(os.fstat(descriptor)):
             raise ValueError("native resolver source changed before acquisition")
-        data = _read_snapshot(descriptor)
+        data = _read_snapshot(descriptor, owners=_resolver_owners(target))
         if _signature(leaf) != _signature(
             os.stat(target.name, dir_fd=parent, follow_symlinks=False)
         ) or _signature(metadata) != _signature(

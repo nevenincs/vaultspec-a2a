@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:fac6bae82a16b1a7b1c91bbe23753cfa777f3ed04d04cbcb2ed6d1d813259b93'
+body_hash: 'sha256:2ae586b8c19e24103a7da15b6360329c678b9bd07336d4df8f4702b28238f71f'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -199,6 +199,18 @@ Type: CI prerequisite routing. Status: resolved in S17. Full Validation 37451244
 ### docker-config-validation-identity | medium | Rootless preflight initially checked a different Docker configuration
 
 Type: security validation. Status: resolved in S17 after independent review. The first helper validated ambient Docker configuration before changing DOCKER_CONFIG. It now constructs the final job configuration first and uses the identical environment for daemon validation and every plugin command, then exports that configuration to the test step. Real provisioning was rerun successfully on the actual rootless runner. Independent re-review passed. Eleven workflow/placement tests, 34 fleet manifest/label tests and canonical lint passed; the fleet declaration loads successfully with its owning environment loader.
+
+### systemd-resolver-owner-compatibility | medium | Fixed: trusted service DNS ownership rejected on native Linux
+
+Type: runtime compatibility. Status: resolved in S18. Full Validation 37466091654 failed ten tests (5641 passed): nine rejected the normal systemd-resolve-owned runtime directory/source despite explicitly accepting its fixed aliases. Permit the host-resolved service UID solely for /run/systemd/resolve and its two fixed resolver leaves, retain root ownership on ancestors and the /etc alias, and refuse the service UID when it is the non-root caller. All no-follow, mode, single-link, bounded parsing, race and sealed snapshot controls remain. Native admission remains refused pending qualification.
+
+### resolver-fixture-umask | low | Fixed: ownership negative depended on host umask
+
+Type: test portability. Status: resolved in S18. One negative fixture inherited group-write mode under umask 0002 and failed the earlier mode check instead of its intended owner check. Set its mode explicitly. The offset-read negative uses a real private snapshot with an explicit test-only owner set; actual host snapshot acquisition and sealed-FD proof remain mandatory.
+
+### resolver-decision-drift | medium | Fixed: recorded root-only decision omitted service exception
+
+Type: decision documentation. Independent review found the accepted Linux namespace ADR required root-only DNS ownership. A dated Constraints/Implementation amendment records the exact fixed-alias exception, upstream service declaration, evidence and existing user authorization while preserving the original wording as history. Re-review passed with no remaining findings. Canonical lint and Windows resolver tests (25) pass. All 43 resolver/native isolation/launch/role checks pass on both the actual rootless runner and the failing systemd-resolved Linux host. The latter initially lacked uvx in the operator PATH; rerun used the existing root-owned fleet tool directory, with no test suppression or host permission changes. Final full CI remains to be run after push.
 
 ## Recommendations
 

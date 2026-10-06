@@ -14,6 +14,7 @@ from .._linux_resolver import (
     _alias_target,
     _directory,
     _read_snapshot,
+    _resolver_owners,
     host_resolver_data,
     parse_resolver,
 )
@@ -83,7 +84,9 @@ def test_resolver_alias_policy_has_no_discovery_or_directory_redirection() -> No
             _alias_target(value)
 
 
-def test_real_host_snapshot_is_sealed_and_source_descriptors_close() -> None:
+def test_real_host_snapshot_is_sealed_and_source_descriptors_close(
+    tmp_path: Path,
+) -> None:
     if sys.platform != "linux":
         with pytest.raises(ValueError, match="requires Linux"):
             host_resolver_data()
@@ -92,11 +95,14 @@ def test_real_host_snapshot_is_sealed_and_source_descriptors_close() -> None:
     data = host_resolver_data()
     assert parse_resolver(data).render() == data
     assert set(os.listdir("/proc/self/fd")) == before
-    source = os.open("/etc/resolv.conf", os.O_RDONLY | os.O_CLOEXEC)
+    snapshot = tmp_path / "snapshot"
+    snapshot.write_bytes(data)
+    snapshot.chmod(0o600)
+    source = os.open(snapshot, os.O_RDONLY | os.O_CLOEXEC)
     try:
         os.lseek(source, 1, os.SEEK_SET)
         with pytest.raises(ValueError, match="changed while reading"):
-            _read_snapshot(source)
+            _read_snapshot(source, owners=frozenset({os.geteuid()}))
     finally:
         os.close(source)
     descriptor = anonymous_data(data)
@@ -149,6 +155,7 @@ def test_real_untrusted_source_special_file_and_link_refusal(tmp_path: Path) -> 
         _directory(stack, PurePosixPath(str(target)))
     untrusted = tmp_path / "untrusted"
     untrusted.write_bytes(b"nameserver 127.0.0.53\n")
+    untrusted.chmod(0o644)
     descriptor = os.open(untrusted, os.O_RDONLY)
     try:
         if os.geteuid() != 0:
@@ -156,3 +163,32 @@ def test_real_untrusted_source_special_file_and_link_refusal(tmp_path: Path) -> 
                 _read_snapshot(descriptor)
     finally:
         os.close(descriptor)
+
+
+def test_service_ownership_is_limited_to_fixed_resolved_aliases() -> None:
+    for target in (
+        "/etc/resolv.conf",
+        "/run/systemd/resolv.conf",
+        "/run/systemd/resolve/other.conf",
+        "/run/NetworkManager/resolv.conf",
+        "/mnt/wsl/resolv.conf",
+    ):
+        assert _resolver_owners(PurePosixPath(target)) == {0}
+    if sys.platform != "linux":
+        return
+    import pwd
+
+    try:
+        service = pwd.getpwnam("systemd-resolve")
+    except KeyError:
+        assert _resolver_owners(PurePosixPath("/run/systemd/resolve/resolv.conf")) == {
+            0
+        }
+        return
+    for name in ("resolv.conf", "stub-resolv.conf"):
+        target = PurePosixPath("/run/systemd/resolve") / name
+        if service.pw_uid != 0 and service.pw_uid == os.geteuid():
+            with pytest.raises(ValueError, match="calling identity"):
+                _resolver_owners(target)
+        else:
+            assert _resolver_owners(target) == {0, service.pw_uid}

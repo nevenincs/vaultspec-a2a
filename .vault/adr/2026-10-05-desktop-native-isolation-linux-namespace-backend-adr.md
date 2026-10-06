@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#desktop-native-isolation'
 date: '2026-10-05'
-modified: '2026-10-05'
+modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:5618ec05643a344c855546099c7555d46624bc15faa1ccc04e1afd35c1e3e518'
+body_hash: 'sha256:46551e2fba7469a3b5ac9d748e7ebc11a27fbb1abbf5f6f4fe9f8f48bcaa10f9'
 related:
   - "[[2026-10-04-desktop-native-isolation-native-backend-primitives-research]]"
   - "[[2026-10-04-workspace-root-authority-desktop-native-admission-adr]]"
@@ -41,6 +41,9 @@ Windows, macOS and any unverified Linux target remain refused. Implementation do
 
 The trusted Linux launcher may acquire fixed host /etc/resolv.conf, validate a regular single-link root-owned source through nonfollowing retained descriptors, parse a bounded supported resolver grammar and render a sealed anonymous read-only snapshot at child /etc/resolv.conf. Only finite resolver-specific aliases are supported; shared filesystem confinement remains unchanged. Root-owned sticky /mnt/wsl is permitted solely for the exact /mnt/wsl/resolv.conf alias on the research host, not as a production WSL prerequisite. Refresh the snapshot for each actual launch; no serialized caller source or resolver bytes are accepted. Preserve the selected loopback stub, ordered nameservers and effective supported domain/search/options. Missing, unsafe, changing, malformed or unsupported input refuses; no replacement resolver, host directory/socket mount or unrecognized policy omission is allowed. Reserve the child resolver path against runtime mappings including ancestor/descendant collisions. This authorizes bounded DNS data, not full host NSS/hosts, managed proxies or custom CA parity; those remain explicit qualification gaps.
 
+
+S18 amendment (2026-10-06, security-cloud-remediation): for the two fixed systemd-resolved aliases `/run/systemd/resolve/stub-resolv.conf` and `/run/systemd/resolve/resolv.conf`, the exact `/run/systemd/resolve` directory and the regular single-link leaf may additionally belong to the local `systemd-resolve` service identity, resolved through the host account database. All preceding directories and the `/etc/resolv.conf` alias remain root-owned. Reject a non-root service identity equal to the calling identity. No other alias gains this exception; retain nonfollowing descriptors, unsafe-mode rejection, bounded parsing, race checks and sealed snapshots. This explicitly narrows the original root-only source requirement for the host-managed resolver service.
+
 ## Implementation
 
 We will implement a native Linux namespace backend driven by a worker-owned path-bound launch authority and a verified capsule helper/runtime closure. Shared spawn and independent probes must use that context; provider auth preparation exposes only the selected role material. Readiness and admission retain refusal until target-specific qualification passes. Wrapper/FD transport details may change within the constraints; no caller-selected string becomes a filesystem grant.
@@ -48,6 +51,9 @@ We will implement a native Linux namespace backend driven by a worker-owned path
 S04 refinement: require a static unprivileged ELF helper without interpreter or dynamic segment, so host library resolution cannot precede capsule mounts. Validate that contract before build-time helper version execution. Trusted bootstrap uses its own environment and capsule cwd; role cwd/environment are target data, and source wrapper uses Python isolated mode. Sealed anonymous arguments keep role credentials out of helper argv. These details implement the existing pinned-closure/trusted-context constraints without changing eligibility or deployment prerequisites.
 
 S08 refinement: the reproduced real frozen Node DNS failure requires the bounded resolver exception above. Acquire it inside the trusted launcher after authority/closure validation, without changing path-authority serialization or version-cache identity; close source FDs before helper execution and account for consumption of the sealed data FD. Source and rebuilt artifact DNS-only/system lookups, child lookup and HTTPS controls accompany private-state, immutability and retained-owner controls. The existing all-known-issues/native-backend implementation authorization covers this scoped runtime prerequisite; target admission remains refused through genuine selected OAuth qualification in S09.
+
+
+S18 amendment evidence and authorization: Full Validation run 37466091654 exposed the normal systemd-resolved service ownership on gw-server-linux-runner. The upstream service declares `User=systemd-resolve` and `RuntimeDirectory=systemd/resolve` (https://raw.githubusercontent.com/systemd/systemd/main/units/systemd-resolved.service.in). The user's explicit instruction to continue until CI root causes are fixed authorizes this bounded compatibility repair. The original root-only wording above records the prior constraint; this dated amendment defines its limited exception. Native admission and provider qualification remain unchanged. Independent review identified and reconciled the decision wording drift in security-cloud-remediation S18.
 
 ## Rationale
 

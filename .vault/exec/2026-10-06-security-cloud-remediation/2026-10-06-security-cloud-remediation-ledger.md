@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:c731d2c4ef0bbb8c857e5414d5df7b7edcd6f86dfe34c0d897e8af2f450328cb'
+body_hash: 'sha256:bf94ea35fea9f5e363652c74f1eff508461c6c75bf0eaa8702515a30644d8a5f'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -175,6 +175,15 @@ related:
 - `S17` `verify:` `ci-fleet manifest and label tests (34)` -> `pass`
 - `S17` `verify:` `ci-fleet manifest environment load` -> `pass`
 - `S17` `verify:` `independent final S17 review` -> `pass`
+- `S18` `M` `src/vaultspec_a2a/desktop/_linux_resolver.py`
+- `S18` `M` `src/vaultspec_a2a/desktop/tests/test_linux_resolver.py`
+- `S18` `M` `.vault/adr/2026-10-05-desktop-native-isolation-linux-namespace-backend-adr.md`
+- `S18` `M` `.vault/audit/2026-10-06-security-cloud-remediation-audit.md`
+- `S18` `verify:` `canonical lint` -> `pass`
+- `S18` `verify:` `Windows resolver 25 tests` -> `pass`
+- `S18` `verify:` `rootless Linux 43 native tests` -> `pass`
+- `S18` `verify:` `systemd Linux 43 native tests` -> `pass`
+- `S18` `verify:` `independent source and ADR review` -> `pass`
 
 ## Notes
 

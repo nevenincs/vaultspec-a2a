@@ -18,6 +18,7 @@ import uvicorn
 from fastapi import FastAPI
 from langchain_core.messages import HumanMessage
 
+from ...control.config import settings
 from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     from ...database.checkpoints import Checkpointer
 
 __all__ = [
+    "clarification_graph",
     "loopback_callback_bridge",
     "new_state_graph",
     "park_clarification",
@@ -215,19 +217,27 @@ async def _accept_heartbeat() -> dict[str, str]:
 
 
 @asynccontextmanager
-async def loopback_callback_bridge() -> AsyncGenerator[WorkerBridge]:
+async def loopback_callback_bridge(
+    gateway: FastAPI | None = None,
+) -> AsyncGenerator[WorkerBridge]:
     """Serve worker callbacks on an ephemeral loopback listener.
 
     ``WorkerBridge`` remains normally constructed with its production HTTP
-    client; only the callback destination is local to this focused test.
+    client; only the callback destination is local to this focused test. With
+    no *gateway* the callbacks are accepted and dropped; given the gateway app
+    under test, they reach its real internal routes, so the worker's own frames
+    drive the relay a deployed gateway runs.
     """
-    app = FastAPI()
-    app.add_api_route(
-        "/internal/events/batch",
-        _accept_event_batch,
-        methods=["POST"],
-    )
-    app.add_api_route("/internal/heartbeat", _accept_heartbeat, methods=["POST"])
+    if gateway is None:
+        app = FastAPI()
+        app.add_api_route(
+            "/internal/events/batch",
+            _accept_event_batch,
+            methods=["POST"],
+        )
+        app.add_api_route("/internal/heartbeat", _accept_heartbeat, methods=["POST"])
+    else:
+        app = gateway
 
     server = uvicorn.Server(
         uvicorn.Config(
@@ -257,6 +267,7 @@ async def loopback_callback_bridge() -> AsyncGenerator[WorkerBridge]:
         bridge = WorkerBridge(
             api_url=f"http://127.0.0.1:{port}",
             worker_id="clarification-loop-worker",
+            internal_token=settings.internal_token,
         )
         try:
             yield bridge

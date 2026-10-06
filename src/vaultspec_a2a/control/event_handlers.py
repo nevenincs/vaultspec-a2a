@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from pydantic import TypeAdapter, ValidationError
 
+from ..graph.enums import ServerEventType
 from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
 )
@@ -1108,12 +1109,41 @@ async def _handle_execution_state_event(
         await db.commit()
 
 
+async def _handle_clarification_pause_event(
+    thread_id: str,
+    payload: dict[str, object],
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
+) -> None:
+    """Re-project a clarification pause when the worker reports one may have moved.
+
+    A clarification nudge says the run may have parked, and a resume's
+    application receipt says it may have left the pause. Neither frame is
+    trusted for the answer: both only prompt the checkpoint read that decides.
+    """
+    event_type = payload.get("type")
+    if event_type != ServerEventType.CLARIFICATION_PENDING and not (
+        event_type == "dispatch_applied" and payload.get("action") == "resume"
+    ):
+        return
+    factory = _session_factory(session_factory)
+    if factory is None or checkpointer is None:
+        return
+    from .clarification_service import reconcile_clarification_pause
+
+    async with factory() as db:
+        await reconcile_clarification_pause(
+            db, thread_id=thread_id, checkpointer=checkpointer
+        )
+
+
 async def relay_event(
     thread_id: str,
     payload: dict[str, object],
     **options: Unpack[_TerminalEventOptions],
 ) -> None:
-    """Consolidated relay: run all 4 event handlers in sequence.
+    """Consolidated relay: run every event handler in sequence.
 
     This replaces the 3x duplicated handler call sequence that previously
     appeared in ``_relay_worker_event``, ``receive_worker_event``, and
@@ -1125,7 +1155,8 @@ async def relay_event(
 
     This function handles the DB-side event processing:
     permission journal, progress inference, execution state persistence,
-    and terminal status updates with aggregator GC.
+    the clarification pause projection, and terminal status updates with
+    aggregator GC.
 
     A terminal frame is the one exception to the caller owning the fan-out.
     Whether it may be shown at all is this plane's answer, so the caller hands
@@ -1161,6 +1192,12 @@ async def relay_event(
     )
     if applied_permission_id is not None and aggregator is not None:
         aggregator.resolve_permission(applied_permission_id)
+    await _handle_clarification_pause_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+        checkpointer=checkpointer,
+    )
     # Terminal status update + aggregator GC + drain-gate release.
     await _handle_terminal_event(
         thread_id,

@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#run-continuation'
 date: '2026-10-01'
-modified: '2026-10-02'
+modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:1e6de2f50aeadb7ad67c968aff43870ccf0203417d1f8280ddb02caf47358acf'
+body_hash: 'sha256:da70af0b6204cb5c949890e2be7efc30f3a37d1553cab0af8b21163e993fde33'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -149,6 +149,10 @@ Fixed in P06.S20. Type: test-fixture drift. Two live SSE resume tests created on
 ### stream-test-sqlite-connections-reach-garbage-collector | low | neighboring suites emitted pooled connection warnings
 
 Open. Type: test resource hygiene. The focused eight-module API run passed 64 tests but emitted four SQLAlchemy warnings that an `aiosqlite` adapted connection reached garbage collection while not checked into its pool. The warnings came from neighboring stream and promoted-terminal tests, not the two repaired terminal tests. Trace fixture and app/session shutdown ownership if this persists in integrated CI.
+
+### clarification-park-never-input-required | high | a run parked on a clarification stayed running and queued follow-ups
+
+Fixed in 8a6fbe62; residue open. Type: contract drift against the Constraints of `2026-10-01-run-continuation-adr` (a run parked on input_required refuses, whether the pause is a clarification or a permission request). Only permission, plan-approval and document-approval events elected `INPUT_REQUIRED` (`control/event_handlers.py`), so a clarification park stayed `RUNNING`: `POST /messages` was admitted as a queued continuation, and gateway restart drove the park to `RECONCILING`. P04.S12 closed on `api/tests/test_run_continuation_admission.py:191-264`, which seeds an `INPUT_REQUIRED` row with no permission request, a state production never produced for a clarification. The fix `control/clarification_service.reconcile_clarification_pause` re-projects the pause from checkpoint truth on the relayed clarification nudge, on a resume application receipt and on startup redrive. It elects under the current writer identity, with the witness read before the checkpoint. `test_a_worker_reported_park_reads_input_required_and_refuses_followups` drives a park from a real worker through the real gateway and fails on the prior code. Still open, owned by the codebase-remediation plan (FX.1): a restart proof, and replacing the hand-seeded premise with a real park.
 
 ## Recommendations
 

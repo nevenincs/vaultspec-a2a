@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#acp-callback-ownership'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:1e4fe35d8b08dad1ed5ef6bdf67a9f961a16bb53dc22f2b1029d126fa4b8a873'
+body_hash: 'sha256:76870d7f8a58d728fef96e52146b8fa2319c5c145315f01aaf55263841677d16'
 related:
   - "[[2026-10-04-acp-callback-ownership-plan]]"
   - "[[2026-10-04-acp-read-remediation-audit]]"
@@ -34,6 +34,10 @@ separate and open under the older provider migration plan.
 Status: recorded; type: discovery environment. Locked RAG search returned
 index_unverifiable; service status confirms failed indexing. Targeted source
 inspection and Core ADR listing supplied grounding. No index mutation performed.
+
+### permission-request-session-ownership | medium | session/request_permission was decided whatever session it named
+
+Fixed in 3fa8df3d. Type: security boundary gap against `2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr` (invalid or cross-session input must fail closed). The plan scoped filesystem-write and terminal callbacks; `on_request_permission` (`providers/_acp_rpc_handlers.py`) never called `require_active_session`, so a request naming a missing, foreign, unbound or closing session reached the human rung or the autonomous allowlist. It is now refused before either rung through the shared `AcpSessionRequest` guard. `providers/tests/test_acp_callback_ownership.py` adds the foreign, malformed, missing, unbound and closing cases (11 of which fail on the prior handler) and the owner case. The four permission test helpers now send the `sessionId` every ACP v1 request carries. A lane whose adapter omits it is refused fail-closed; Kimi is not an admitted lane.
 
 ## Recommendations
 

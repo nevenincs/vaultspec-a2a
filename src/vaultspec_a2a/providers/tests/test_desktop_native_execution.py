@@ -16,9 +16,9 @@ from ...testing import settings_override
 from ...utils.process import ProcessContainmentError
 from .._acp_rpc_terminal_handlers import on_terminal_create
 from .._acp_types import AcpSessionContext
+from .._provider_execution import provider_execution_command
 from .._subprocess import (
     kill_process_tree,
-    provider_execution_command,
     spawn_acp_process,
 )
 from ..binary_version import BinaryVersionProbeError, probe_binary_version

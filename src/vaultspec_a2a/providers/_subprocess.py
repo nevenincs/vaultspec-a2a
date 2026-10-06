@@ -25,9 +25,6 @@ from ..desktop.native_isolation import NativeLaunchAuthority
 from ..utils import kill_pid_tree_async
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
-from ._provider_execution import (
-    provider_execution_command as provider_execution_command,
-)
 from ._provider_execution import provider_execution_launch
 
 if TYPE_CHECKING:
@@ -40,7 +37,6 @@ __all__ = [
     "kill_process_tree",
     "process_containment",
     "process_native_authority",
-    "provider_execution_command",
     "redact_secrets",
     "spawn_acp_process",
 ]

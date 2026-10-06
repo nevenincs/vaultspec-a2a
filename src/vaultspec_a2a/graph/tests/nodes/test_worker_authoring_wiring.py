@@ -21,6 +21,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ....authoring import AgentTool, CatalogSnapshot
+from ....control.config import settings
 from ....providers._acp_authoring import (
     AUTHORING_MCP_SERVER_NAME,
     AuthoringToolBinding,
@@ -249,12 +250,18 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     # its own spawn environment at config-parse time. The sibling projection
     # test below asserts the other half - that the real values ARE hoisted.
     assert (
-        env["VAULTSPEC_A2A_AUTHORING_BASE_URL"] == "${VAULTSPEC_A2A_AUTHORING_BASE_URL}"
+        env["VAULTSPEC_A2A_AUTHORING_RELAY_URL"]
+        == "${VAULTSPEC_A2A_AUTHORING_RELAY_URL}"
     )
     # The provider sets run_id to the run's thread_id.
     assert env["VAULTSPEC_A2A_AUTHORING_RUN_ID"] == "${VAULTSPEC_A2A_AUTHORING_RUN_ID}"
-    assert env["VAULTSPEC_A2A_AUTHORING_BEARER"] == "${VAULTSPEC_A2A_AUTHORING_BEARER}"
-    # The real bearer never rides the argv-serialized surface.
+    assert (
+        env["VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN"]
+        == "${VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN}"
+    )
+    assert "VAULTSPEC_A2A_AUTHORING_BEARER" not in env
+    assert "VAULTSPEC_A2A_AUTHORING_BASE_URL" not in env
+    # The machine bearer remains behind the worker's relay boundary.
     assert "machine-bearer-xyz" not in json.dumps(servers)
 
     # The exact allowlist is still threaded so the CLI can invoke the bridged
@@ -264,21 +271,10 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
 
 
 @pytest.mark.asyncio
-async def test_stdio_binding_hoists_secrets_without_touching_the_workspace(
+async def test_stdio_binding_hoists_actor_scope_without_machine_bearer(
     tmp_path: Path,
 ) -> None:
-    """The real spawn projects the bridge into the run workspace as placeholders.
-
-    Drives ``AcpChatModel`` through a real subprocess so the armed-run branch
-    projects the authoring bridge into the run workspace's ``.mcp.json`` and
-    writes the confinement ``settings.local.json`` beside it - the config home
-    is never redirected (the child inherits the operator's real environment).
-    The subprocess reports its OWN cwd files and OWN environment: the projected
-    ``.mcp.json`` must surface the bridge with ${VAR} placeholders and carry NO
-    real token, the settings must enable exactly the declared name, and the real
-    bearer must be present in the spawn env (proving
-    ``config_home_authoring_entry`` is wired live, not dead).
-    """
+    """The real child gets actor-scoped relay access and no workspace projection."""
     from ....providers.acp_chat_model import AcpChatModel
 
     record_file = tmp_path / "config_home.json"
@@ -315,10 +311,15 @@ async def test_stdio_binding_hoists_secrets_without_touching_the_workspace(
     assert recorded["workspace_mcp_json"] is None, (
         "MCP surfacing must not write into the run workspace"
     )
-    # The real bearer is hoisted into the subprocess spawn env, which is where
-    # the CLI expands the ${...} references the session surface carries.
+    # The child receives its role token and relay address, never engine authority.
     spawn_env = recorded["authoring_env"]
-    assert spawn_env["VAULTSPEC_A2A_AUTHORING_BEARER"] == "machine-bearer-xyz"
+    assert "VAULTSPEC_A2A_AUTHORING_BEARER" not in spawn_env
+    assert "VAULTSPEC_A2A_AUTHORING_BASE_URL" not in spawn_env
+    assert "machine-bearer-xyz" not in json.dumps(recorded)
+    assert spawn_env["VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN"] == "actor-token-abc"
+    assert spawn_env["VAULTSPEC_A2A_AUTHORING_RELAY_URL"] == (
+        f"http://127.0.0.1:{settings.worker_port}"
+    )
     assert spawn_env["VAULTSPEC_A2A_AUTHORING_RUN_ID"] == _THREAD_ID
     # Nothing is left behind in the run workspace either, on any path.
     assert not (tmp_path / ".mcp.json").exists()

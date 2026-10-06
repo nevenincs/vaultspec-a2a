@@ -39,10 +39,12 @@ INTEGRATION_EXAMPLE = REPO_ROOT / ".env.integration.example"
 #: are held to the harness by ``dev/tests/test_harness_env_names.py``.
 _HARNESS_HEADING = "# Development harness\n"
 
-#: Names the example documents that the service does not read, each with the
+#: Names the example documents outside service settings, each with the
 #: owner that does. Anything else in the file is a dead or misspelled setting.
 DOCUMENTED_BUT_NOT_READ = {
     "VAULTSPEC_A2A_ENV_FILE": "the settings loader",
+    "VAULTSPEC_A2A_NATIVE_PACKET_COUNT": "native launch environment decoder",
+    "VAULTSPEC_A2A_NATIVE_PACKET_0": "native launch environment decoder chunk family",
     # Read by the langsmith SDK straight from the process environment.
     "LANGSMITH_API_KEY": "langsmith SDK",
     "LANGSMITH_ENDPOINT": "langsmith SDK",

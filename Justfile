@@ -198,6 +198,11 @@ deps-node:
 deps-claude-cli:
     {{dev}} deps claude-cli
 
+# Install the proven Codex CLI for hosted binary-identity tests.
+[group('setup')]
+deps-codex-cli:
+    {{dev}} deps codex-cli
+
 # Resolve every runtime extra plus the composed all dependency group.
 [group('setup')]
 deps-all:

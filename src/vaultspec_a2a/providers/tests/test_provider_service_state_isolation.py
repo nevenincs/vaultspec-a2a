@@ -9,7 +9,7 @@ import pytest
 
 from ...control.config import settings
 from ...utils.process import ProcessContainmentError
-from .._subprocess import provider_execution_command
+from .._provider_execution import provider_execution_command
 
 if TYPE_CHECKING:
     from pathlib import Path

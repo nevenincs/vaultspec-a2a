@@ -103,6 +103,9 @@ jobs:
       - name: Expose the locked Claude CLI required by binary identity tests
         run: just deps-claude-cli
 
+      - name: Install the proven Codex CLI required by binary identity tests
+        run: just deps-codex-cli
+
       - name: Run canonical CI
         run: just ci
 

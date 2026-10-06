@@ -13,7 +13,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-adr]]'
 modified: '2026-10-06'
 body_schema: body-v2
-body_hash: 'sha256:c1a942ff4204289edbcb98a4c81913f7975f5f92334f815914e3759c62c789bd'
+body_hash: 'sha256:3922112dfb5bcee6c5b670e6e568bd3be42c9a7be44e6694063dcfe3e6c1e01b'
 ---
 
 # `security-cloud-remediation` plan
@@ -55,6 +55,7 @@ S14 continues the same authorized CI repair after the full local run exposed sta
 - [x] `S13` - Route Claude ambient auth through its registered process-only accessor and share Codex credential-home resolution; `providers/factory.py, _codex_config_home.py, codex_chat_model.py and auth/home tests`.
 - [x] `S14` - Reconcile broker execution fixtures and generated API artifact with the accepted desktop refusal contract; `Shared gateway boot helpers and affected acceptance/restart tests, generated OpenAPI, focused and full Linux CI verification`.
 - [x] `S15` - Reconcile remaining desktop lifecycle proofs with fail-closed admission and rerun CI; `Shared gateway boot helper and desktop_tests lazy worker, process cleanup, worker pairing, provenance and settlement tests`.
+- [x] `S16` - Repair remaining full-suite environment and declaration contracts without weakening security gates; `Native test helper provisioning, private launch-packet documentation, authoring wiring tests, temporary-home assertion, provider export consumers and explicit CI Codex prerequisite`.
 
 ## Parallelization
 

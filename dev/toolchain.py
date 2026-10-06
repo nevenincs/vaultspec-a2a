@@ -269,6 +269,11 @@ DEPS = Verb(
             (dev_module("ci_claude_cli"),),
         ),
         Target(
+            "codex-cli",
+            "Install the proven Codex CLI for hosted binary-identity tests.",
+            (dev_module("ci_codex_cli"),),
+        ),
+        Target(
             "all",
             "Resolve every runtime extra plus the composed 'all' group.",
             (

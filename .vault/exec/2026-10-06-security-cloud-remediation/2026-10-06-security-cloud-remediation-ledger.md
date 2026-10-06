@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:c72307d727493635023762ed7514242eb4ab5561f19860027a72649d5e55c38d'
+body_hash: 'sha256:bb34927f21d5789f16cb8658522f0f2c08797ac30b4890f5b46cce727f7d839e'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -140,6 +140,29 @@ related:
 - `S15` `verify:` `ruff check changed files` -> `pass`
 - `S15` `verify:` `ty check changed files` -> `pass`
 - `S15` `verify:` `independent S15 re-review` -> `pass`
+- `S16` `M` `.env.example`
+- `S16` `M` `.github/workflows/test.yml`
+- `S16` `M` `Justfile`
+- `S16` `M` `dev/toolchain.py`
+- `S16` `A` `dev/ci_codex_cli.py`
+- `S16` `A` `src/vaultspec_a2a/tests/native_build.py`
+- `S16` `M` `src/vaultspec_a2a/control/tests/_env_example.py`
+- `S16` `M` `src/vaultspec_a2a/control/tests/test_env_example_drift.py`
+- `S16` `M` `src/vaultspec_a2a/desktop/tests/test_native_isolation.py`
+- `S16` `M` `src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py`
+- `S16` `M` `src/vaultspec_a2a/providers/_subprocess.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/_native_mcp_capsule.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_acp_temp_home_root.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_desktop_native_execution.py`
+- `S16` `M` `src/vaultspec_a2a/providers/tests/test_provider_service_state_isolation.py`
+- `S16` `verify:` `dev lint all` -> `pass`
+- `S16` `verify:` `dev test harness (157)` -> `pass`
+- `S16` `verify:` `Windows focused contracts (33 passed)` -> `pass`
+- `S16` `verify:` `Linux native factory identity (78)` -> `pass`
+- `S16` `verify:` `Linux provisioned Node native controls (18)` -> `pass`
+- `S16` `verify:` `Linux dev deps codex-cli real install` -> `pass`
+- `S16` `verify:` `independent S16 review` -> `pass`
+- `S16` `verify:` `feature vault check` -> `pass`
 
 ## Notes
 
@@ -148,3 +171,4 @@ related:
 - `S13` Full CI reached unrelated desktop fixture contract drift and stale OpenAPI artifact; queued for next Step.
 - `S14` Full Linux unit verification is running; remote CI remains to be checked.
 - `S15` Other full-suite failures remain queued in audit; remote CI is running on preceding revision.
+- `S16` Full Linux unit rerun and replacement remote CI remain pending; focused verification does not claim whole-suite success.

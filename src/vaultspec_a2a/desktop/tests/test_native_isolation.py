@@ -19,6 +19,7 @@ from uuid import uuid4
 
 import pytest
 
+from ...tests.native_build import linux_isolation_helper
 from ...utils.process import ProcessContainmentError
 from ..native_isolation import (
     NativeLaunchAuthority,
@@ -52,8 +53,16 @@ def _authority(tmp_path: Path) -> NativeLaunchAuthority:
     )
 
 
+def _node_binary() -> Path:
+    node = shutil.which("node")
+    assert node is not None, (
+        "native isolation tests require the provisioned Node runtime"
+    )
+    return Path(node).resolve(strict=True)
+
+
 def _install_runtime(authority: NativeLaunchAuthority) -> Path:
-    node = Path("/usr/bin/node")
+    node = _node_binary()
     target = authority.capsule.path / "node" / "bin" / "node"
     target.parent.mkdir(parents=True)
     shutil.copyfile(node, target)
@@ -66,7 +75,7 @@ def _install_runtime(authority: NativeLaunchAuthority) -> Path:
     paths = set(re.findall(r"(/[^\s()]+)", dependencies))
     stage_linux_isolation_assets(
         authority.capsule.path,
-        helper=Path(os.environ["VAULTSPEC_A2A_TEST_LINUX_ISOLATION_HELPER"]),
+        helper=linux_isolation_helper(),
         files={path: Path(path) for path in paths},
     )
     return target
@@ -410,9 +419,12 @@ def test_dynamic_helper_is_refused_before_build_input_execution(tmp_path: Path) 
                 authority, [sys.executable], cwd=str(tmp_path), environment={}
             )
         return
+    dynamic_helper = tmp_path / "dynamic-helper"
+    shutil.copyfile(_node_binary(), dynamic_helper)
+    dynamic_helper.chmod(0o755)
     with pytest.raises(ValueError, match=r"static|dynamic"):
         stage_linux_isolation_assets(
-            authority.capsule.path, helper=Path("/usr/bin/bwrap"), files={}
+            authority.capsule.path, helper=dynamic_helper, files={}
         )
     assert not (authority.capsule.path / "isolation").exists()
 

@@ -309,7 +309,11 @@ def test_every_name_the_code_spells_is_declared() -> None:
     example and ``dev/tests/test_harness_env_names.py``, so a name documented
     there counts as declared here.
     """
-    known = declared_names() | set(_HARNESS_NAME.findall(harness_section()))
+    known = (
+        declared_names()
+        | set(DOCUMENTED_BUT_NOT_READ)
+        | set(_HARNESS_NAME.findall(harness_section()))
+    )
     spelled: dict[str, set[str]] = defaultdict(set)
     files = [
         *_shipped_files(_SPELLER_ROOTS, "*"),

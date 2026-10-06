@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from ...tests.native_build import linux_isolation_helper
 from .._acp_mcp import resolve_harness_mcp_servers
 
 if TYPE_CHECKING:
@@ -86,7 +87,7 @@ def install_mcp_runtime(authority: NativeLaunchAuthority) -> Path:
             libraries[str(target)] = target
     stage_linux_isolation_assets(
         authority.capsule.path,
-        helper=Path(os.environ["VAULTSPEC_A2A_TEST_LINUX_ISOLATION_HELPER"]),
+        helper=linux_isolation_helper(),
         files=libraries,
     )
     return executable

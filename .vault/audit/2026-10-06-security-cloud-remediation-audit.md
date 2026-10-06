@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:1892e67a8c65cd731c645e69661d099443c6d1d00c6d353e16576b99ae51f756'
+body_hash: 'sha256:57ab4200b46b46e8826bd4a61aa46b7825690f2bd87b3ced2bd4e345e28affa2'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -183,6 +183,14 @@ Type: test coverage regression. Independent review found that directly invoking 
 ### s15-verification | low | Passed: lifecycle and provenance proofs on Linux and Windows
 
 Type: verification. All 16 affected desktop lifecycle tests pass on Windows. Linux focused runs cover the same behavior, including real provider/terminal descendants, receipt-authorized worker cleanup, broker worker pairing, refused armed provenance, two-owner conflict and settlement retry. Three packaging tests also pass after restoring actual Git history to the native test snapshot. Ruff and strict typing pass. Remaining full-suite failures are separately queued; no green CI claim.
+
+### ci-prerequisite-portability | medium | Native test inputs and Codex prerequisite depended on runner state
+
+Type: verification portability. Status: resolved in S16. Full Validation 37447403496 completed with 25 failures and 5619 passes. In addition to the already tracked lifecycle and declaration drift, native tests assumed /usr/bin/node and /usr/bin/bwrap and an external helper variable. Fixtures now resolve the provisioned Node executable, build the genuine pinned static helper through the production build script, and reject a copied real dynamic Node ELF as a helper before staging. Copying gives the negative input its own inode, avoiding npm's hardlink count being rejected before the intended dynamic-ELF check. Canonical CI explicitly installs Codex using the declared completed-turn proof version and exposes its task-local bin directory. No production admission relaxation or release-specific test literals were added.
+
+### s16-contract-reconciliation | low | Full-suite fixtures now assert current credential and storage contracts
+
+Type: test contract drift. Status: resolved in S16. Authoring stdio tests assert actor-scoped relay credentials and absence of machine bearer/base URL instead of the obsolete direct-gateway binding. The temp-home test asserts exact ownership under configured A2A home, which may itself live under the OS temporary directory. Private native launch-packet environment fields are documented with their decoder owner and included in the existing owned declaration check. Removed the provider_execution_command re-export and imported its actual owner in consumers. Independent review passed without findings. Windows focused verification: 33 passed, 5 existing Linux-only skips. Linux native/factory/identity checks: 78 passed before the runner-path correction; native path correction additionally verified against the provisioned Node. Full suite remains in progress; its outcome is not claimed here.
 
 ## Recommendations
 

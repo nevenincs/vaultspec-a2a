@@ -3,7 +3,7 @@
 Every profile keeps its ephemeral homes inside its own state home, so they are
 accounted for with the rest of a2a's state and a system-wide temporary sweep
 cannot remove a home out from under a live run. Nothing is created in the
-operating system's temporary directory.
+operating system's temporary directory independently of the configured state home.
 
 Both profiles are exercised through the real settings object rather than a
 stand-in, so the test fails if the layout or the seating changes shape.
@@ -11,11 +11,13 @@ stand-in, so the test fails if the layout or the seating changes shape.
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ...control.config import Settings
 from ...desktop.profile import derive_state_paths
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_the_default_profile_keeps_temporary_homes_in_its_state_home() -> None:
@@ -24,8 +26,9 @@ def test_the_default_profile_keeps_temporary_homes_in_its_state_home() -> None:
     root = settings.temp_homes_dir
 
     assert root == settings.a2a_home / "tmp" / "homes"
-    # Read only, to prove the root is not there.
-    assert not root.is_relative_to(Path(tempfile.gettempdir()))  # storage-anchor-ok
+    # The configured state home may itself be under the OS temporary parent,
+    # including in a disposable checkout. Ownership follows the explicit home.
+    assert root.is_relative_to(settings.a2a_home)
 
 
 def test_the_armed_profile_keeps_them_inside_its_application_home(

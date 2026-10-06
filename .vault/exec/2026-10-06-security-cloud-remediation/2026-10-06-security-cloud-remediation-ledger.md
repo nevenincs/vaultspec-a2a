@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:9e2a22e578c49a8528e77130eb0b841c0020bb6c4142e412923e77d5bc7d7da1'
+body_hash: 'sha256:c72307d727493635023762ed7514242eb4ab5561f19860027a72649d5e55c38d'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -125,6 +125,21 @@ related:
 - `S14` `verify:` `independent S14 code review` -> `pass`
 - `S14` `verify:` `Linux python -m dev build all` -> `pass`
 - `S14` `verify:` `Linux base-only telemetry probe` -> `pass`
+- `S15` `M` `src/vaultspec_a2a/tests/gateway_boot.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_lazy_worker.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_owned_process_tree.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_ownership_prerequisites.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_service_state_pairing_echo.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_terminal_settlement.py`
+- `S15` `M` `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`
+- `S15` `M` `.vault/audit/2026-10-06-security-cloud-remediation-audit.md`
+- `S15` `M` `.vault/plan/2026-10-06-security-cloud-remediation-plan.md`
+- `S15` `verify:` `Linux focused desktop lifecycle and provenance tests` -> `pass`
+- `S15` `verify:` `Windows affected desktop lifecycle tests 16 cases` -> `pass`
+- `S15` `verify:` `Linux clean commit packaging tests 3 cases` -> `pass`
+- `S15` `verify:` `ruff check changed files` -> `pass`
+- `S15` `verify:` `ty check changed files` -> `pass`
+- `S15` `verify:` `independent S15 re-review` -> `pass`
 
 ## Notes
 
@@ -132,3 +147,4 @@ related:
 - `S11` Initial WSL mounted checkout MCP permission and copy-timeout failures resolved by clean /tmp archive plus patch. Incomplete verification environment replaced with CI full locked dependency profile.
 - `S13` Full CI reached unrelated desktop fixture contract drift and stale OpenAPI artifact; queued for next Step.
 - `S14` Full Linux unit verification is running; remote CI remains to be checked.
+- `S15` Other full-suite failures remain queued in audit; remote CI is running on preceding revision.

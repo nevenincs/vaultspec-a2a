@@ -60,6 +60,7 @@ from ..desktop._platform_acl import harden_credential_path
 from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
+    create_worker_ipc_credential,
 )
 from ..desktop.profile import derive_state_paths
 from ..testing.children import run_child
@@ -205,6 +206,38 @@ def gateway_script(*, log_level: GatewayLogLevel) -> str:
     the script constants.
     """
     return _GATEWAY_SCRIPT_INFO if log_level == "info" else _GATEWAY_SCRIPT_QUIET
+
+
+def worker_lifecycle_gateway_script() -> str:
+    """Exercise real worker ownership below the run-admission boundary.
+
+    The driver composes the production lifespan and spawner directly. It never
+    admits a desktop run; its subject is worker pairing and lifespan cleanup.
+    """
+    return """
+import asyncio
+import logging
+import sys
+import uvicorn
+from vaultspec_a2a.api.app import _bind_server_shutdown_owner, _lifespan, create_app
+
+logging.basicConfig(level=logging.INFO)
+app = create_app()
+server = uvicorn.Server(uvicorn.Config(
+    app, host="127.0.0.1", port=int(sys.argv[1]), log_level="info", lifespan="off"
+))
+_bind_server_shutdown_owner(app, server)
+
+async def main():
+    async with _lifespan(app):
+        await app.state.worker_spawner.ensure_worker()
+        print(
+            f"lifecycle worker spawned: {app.state.worker_spawner.spawned}", flush=True
+        )
+        await server.serve()
+
+asyncio.run(main())
+"""
 
 
 def _log_tail(log_path: Path | None) -> str:
@@ -413,7 +446,9 @@ def broker_gateway_env(
             ),
             "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
             "VAULTSPEC_A2A_GATEWAY_TOKEN": gateway_token,
-            "VAULTSPEC_A2A_INTERNAL_TOKEN": "broker-test-worker-ipc-0123456789abcdef",
+            "VAULTSPEC_A2A_INTERNAL_TOKEN": create_worker_ipc_credential(
+                state.credentials_dir
+            ),
             "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
         }
     )

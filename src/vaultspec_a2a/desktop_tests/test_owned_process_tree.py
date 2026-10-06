@@ -6,8 +6,8 @@ provider CLI (Claude/Codex), which is not installed in this environment: a real
 Python "provider" launched through the genuine ``spawn_acp_process`` seam takes
 its place and spawns real children modelling the authoring-MCP, projected-project
 -MCP, and harness-MCP descendants (all of which a real provider launches as its
-own children). The terminal children go through the genuine ``on_terminal_create``
-seam, and the gateway-owned worker through a real armed desktop gateway.
+own children). Retained terminal children exercise cleanup below admission;
+the worker lifecycle driver exercises ownership below desktop run admission.
 
 Every leg proves the same invariant on BOTH terminal paths: descendants are
 contained BEFORE work and reaped whole - on graceful termination and on a forced,
@@ -24,29 +24,27 @@ import socket
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 import pytest_asyncio
 
 from ..lifecycle.discovery import is_pid_alive
-from ..providers._acp_rpc_handlers import (
-    on_terminal_create,
-    on_terminal_kill,
-)
+from ..providers._acp_rpc_handlers import on_terminal_kill
 from ..providers._acp_rpc_terminal_handlers import release_owned_terminal
 from ..providers._acp_types import AcpModelConfig, AcpSessionContext
 from ..providers._subprocess import kill_process_tree, spawn_acp_process
+from ..providers.tests._terminal_process import retain_terminal_process
 from ..tests.gateway_boot import (
     armed_gateway_env,
     desktop_workspace,
-    gateway_script,
     reap_gateway,
     seat_valid_database,
     seed_credentials,
     spawn_gateway,
     spawn_until_ready,
+    worker_lifecycle_gateway_script,
 )
 from ..utils import kill_pid_tree_async
 from ..utils.process import ProcessContainment
@@ -150,7 +148,7 @@ async def test_provider_tree_reaped_on_forced_orphaned_terminal() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Run-owned terminal child tree (real on_terminal_create seam)
+# Retained terminal child tree (cleanup below workspace-isolation admission)
 # ---------------------------------------------------------------------------
 
 
@@ -219,17 +217,7 @@ async def test_terminal_child_tree_contained_and_reaped(
     script = tmp_path / "terminal_grandchild.py"
     script.write_text(_TERMINAL_GRANDCHILD_SCRIPT, encoding="utf-8")
 
-    resp = await on_terminal_create(
-        1,
-        {
-            "sessionId": ctx.session_id,
-            "command": sys.executable,
-            "args": [str(script)],
-        },
-        ctx,
-        config,
-    )
-    terminal_id = cast("dict[str, Any]", resp["result"])["terminalId"]
+    terminal_id = await retain_terminal_process(ctx, tmp_path, [str(script)])
     process = ctx.terminals[terminal_id]
     containment = getattr(process, "_vaultspec_containment", None)
     assert isinstance(containment, ProcessContainment)
@@ -262,7 +250,7 @@ _OWNERSHIP = "ownership-capability-ownedtree-fedcba0987654321"
 _PRESET = "mock-success-single"
 
 # The INFO variant, so the gateway's own worker-spawn narration reaches the log.
-_GATEWAY = gateway_script(log_level="info")
+_GATEWAY = worker_lifecycle_gateway_script()
 
 
 def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
@@ -276,13 +264,10 @@ def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
 def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     tmp_path: Path,
 ) -> None:
-    """The gateway-owned worker is spawned contained and reaped on graceful stop.
+    """A worker started through its lifecycle seam is reaped by receipt shutdown.
 
-    A real armed desktop gateway spawns and owns its worker on first demand; an
-    authenticated, receipt-owned administrative shutdown drains and stops the
-    gateway, whose lifespan reaps the worker through its OS containment. The
-    worker port frees BEFORE any force kill, so the containment reap - not the
-    teardown tree-kill - is what fells the worker.
+    The test drives the real spawner below run admission. Desktop run creation
+    still refuses, while receipt-owned shutdown must reap the existing worker.
     """
     app_home = tmp_path / "app-home"
     app_home.mkdir()
@@ -312,7 +297,7 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
         _spawn, log_path=log_path
     )
     try:
-        # First demand spawns the gateway-owned worker inside its containment.
+        # Desktop execution refuses before a worker can be spawned.
         _workspace = desktop_workspace(base)
         with httpx.Client(base_url=base, timeout=60.0) as client:
             start = client.post(
@@ -335,22 +320,18 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
                     },
                 },
             )
-        assert start.status_code == 201, start.text
+        assert start.status_code == 503, start.text
+        assert "OS isolation backend" in start.json()["detail"]
         deadline = time.monotonic() + 30.0
         while not _port_listening(worker_port) and time.monotonic() < deadline:
             time.sleep(0.25)
-        # Port liveness alone: SOMETHING now holds the freshly allocated worker
-        # port that nothing held before the demand. That is all this leg claims -
-        # it is not evidence of WHICH worker answers, which only the reported
-        # pairing evidence establishes. The reap assertion below is the subject.
-        assert _port_listening(worker_port), "first demand must bind the worker port"
+        assert _port_listening(worker_port), "lifecycle driver must start its worker"
 
         # Graceful, receipt-owned administrative shutdown: the handler runs the
         # authenticated ownership-gated stop (an in-process SIGINT), so the
         # gateway begins tearing down before the response flushes and the
         # connection drops - the drop itself proves the gated handler executed
         # (a rejected auth would return a clean 401/403 with the server still up).
-        # The lifespan reaps the worker through its containment on the way down.
         with (
             contextlib.suppress(httpx.HTTPError),
             httpx.Client(base_url=base, timeout=10.0) as client,
@@ -361,20 +342,15 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
             )
             assert resp.status_code == 202, resp.text
 
-        # The gateway exits gracefully and the worker port frees via the
-        # containment reap, both BEFORE any force kill.
+        # The gateway exits gracefully before teardown can force-kill it.
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=30)
         assert proc.poll() is not None, "graceful shutdown must stop the gateway"
         deadline = time.monotonic() + 15.0
         while _port_listening(worker_port) and time.monotonic() < deadline:
             time.sleep(0.25)
-        # The port the gateway pinned for its worker is free again after a
-        # graceful stop, so whatever the gateway spawned onto it is gone. No
-        # squatter could satisfy this: a process the gateway does not own would
-        # still be holding the port here.
         assert not _port_listening(worker_port), (
-            "graceful shutdown must free the gateway's pinned worker port"
+            "graceful shutdown must reap the gateway-owned worker"
         )
     finally:
         reap_gateway(proc)

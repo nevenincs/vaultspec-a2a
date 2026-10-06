@@ -1,11 +1,11 @@
-"""Certify demand-driven worker startup against a real armed desktop gateway.
+"""Certify demand-driven worker startup against a real broker gateway.
 
-A real child interpreter boots the production gateway armed with the desktop
+A real child interpreter boots the production gateway outside the desktop
 profile over a genuinely migrated app home, with auto-spawn enabled so the
 gateway owns and spawns its own worker. The parent then proves, over real
 loopback sockets, that:
 
-- an idle armed gateway starts no worker at boot: the worker port never listens,
+- an idle gateway starts no worker at boot: the worker port never listens,
   the authenticated readiness reads the worker as cold, and the gateway log
   carries no spawn line;
 - concurrent first execution demand (real parallel authenticated run-starts)
@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from ..tests.gateway_boot import (
-    armed_gateway_env,
+    broker_gateway_env,
     desktop_workspace,
     gateway_script,
     reap_gateway,
@@ -54,9 +54,8 @@ _OWNERSHIP = "ownership-capability-lazyworker-fedcba0987654321"
 _PRESET = "mock-success-single"
 _SPAWN_LINE = "Auto-spawning worker on port"
 
-# A real armed desktop gateway booting the *production* lifespan with auto-spawn
-# enabled: create_app runs the armed credential loading, mints the worker-IPC
-# secret, and the gateway owns its worker spawner. The INFO variant is required,
+# A real broker gateway booting the production lifespan with auto-spawn
+# enabled and separate gateway/worker credentials. The INFO variant is required,
 # not incidental: its root logging handler is the only reason the one-shot spawn
 # line asserted on below reaches the captured log at all.
 _GATEWAY = gateway_script(log_level="info")
@@ -74,8 +73,8 @@ def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
 def _worker_state(base: str, headers: dict[str, str]) -> str:
     """Read the authenticated worker lifecycle state from desktop readiness."""
     with httpx.Client(base_url=base, timeout=5.0) as client:
-        body = client.get("/health", headers=headers).json()
-    return body["worker_state"]
+        body = client.get("/v1/service", headers=headers).json()
+    return body["readiness"]["worker_state"]
 
 
 _RUN_SEQ = itertools.count(1)
@@ -119,7 +118,7 @@ def _start_run(
 def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
     tmp_path: Path,
 ) -> None:
-    """Idle armed boot starts no worker; concurrent demand starts exactly one."""
+    """Idle broker boot starts no worker; concurrent demand starts exactly one."""
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
@@ -134,13 +133,11 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         return spawn_gateway(
             script=_GATEWAY,
             gateway_port=gateway_port,
-            env=armed_gateway_env(
+            env=broker_gateway_env(
                 app_home,
                 gateway_port=gateway_port,
                 worker_port=worker_port,
-                # This module admits runs against the in-process mock lane
-                # (see ``_catalog.py``); the gateway must serve one to select.
-                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"},
+                gateway_token=_ATTACH,
             ),
             log_handle=log_handle,
         )
@@ -149,7 +146,7 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         _spawn, log_path=log_path
     )
     try:
-        # --- Idle armed boot: no worker exists. ---
+        # --- Idle broker boot: no worker exists. ---
         # The gateway is up and gateway-ready, yet nothing bound the worker port,
         # readiness reports the cold rung, and no spawn line was logged. Give a
         # brief settle window so a spurious boot spawn would have surfaced.

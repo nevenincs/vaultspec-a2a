@@ -12,7 +12,9 @@ serving real HTTP on the gateway's private worker port, and the two-gateway
 proof pits two complete armed gateways against one REAL spawned worker. The
 squatter is the modeled adversary (a stranger process answering health on the
 port), not a stand-in for any production code. Assertions observe process
-liveness, request logs, and the gateway's admission surface - never internals.
+liveness, request logs, and authenticated worker readiness. The fixture composes
+the real lifespan and worker spawner directly below run admission; every desktop
+prepare still refuses for unavailable native isolation.
 """
 
 from __future__ import annotations
@@ -35,12 +37,12 @@ from ..tests.gateway_boot import (
     armed_gateway_env,
     await_gateway_ready,
     desktop_workspace,
-    gateway_script,
     reap_gateway,
     seat_valid_database,
     seed_credentials,
     spawn_gateway,
     spawn_until_ready,
+    worker_lifecycle_gateway_script,
 )
 from ._catalog import catalog_selection
 from .test_run_admission import _ATTACH, _OWNERSHIP
@@ -48,7 +50,7 @@ from .test_run_admission import _ATTACH, _OWNERSHIP
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-_GATEWAY = gateway_script(log_level="info")
+_GATEWAY = worker_lifecycle_gateway_script()
 
 _SQUATTER = """
 import json
@@ -153,6 +155,15 @@ def _armed_gateway_on_worker_port(
         log_handle.close()
 
 
+def _worker_ready(base: str, auth: str) -> bool:
+    with httpx.Client(base_url=base, timeout=60.0) as client:
+        response = client.get("/v1/service", headers={"Authorization": auth})
+    assert response.status_code == 200, response.text
+    ready = response.json()["worker_ready"]
+    assert isinstance(ready, bool)
+    return ready
+
+
 def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
     workspace = desktop_workspace(base)
     with httpx.Client(base_url=base, timeout=60.0) as client:
@@ -191,7 +202,8 @@ def _assert_refused_without_adoption_or_eviction(
         # Refusal on the admission surface: no reservation is minted off a
         # worker whose provenance the armed profile cannot prove.
         assert status == 503, prepared
-        assert prepared["detail"] == "run admission is not execution-ready"
+        assert "OS isolation backend" in prepared["detail"]
+        assert "lifecycle worker spawned: False" in gw_log.read_text(encoding="utf-8")
 
         # No eviction: the squatter process survives the refusal untouched.
         assert squatter.poll() is None, "squatter must not be evicted"
@@ -272,7 +284,10 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
                 base, f"Bearer {_ATTACH}", "run-provenance-url-echo"
             )
             assert status == 503, prepared
-            assert prepared["detail"] == "run admission is not execution-ready"
+            assert "OS isolation backend" in prepared["detail"]
+            assert "lifecycle worker spawned: False" in log_path.read_text(
+                encoding="utf-8"
+            )
             assert squatter.poll() is None, "squatter must not be evicted"
             requests = request_log.read_text(encoding="utf-8").splitlines()
             assert all(line.startswith("GET /health") for line in requests), requests
@@ -295,16 +310,22 @@ def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
         auth_a,
         _log_a,
     ):
-        # First demand on A spawns A's real worker and reaches readiness.
+        # The lifecycle driver starts A's real worker below run admission.
         status_a, prepared_a = _prepare(base_a, auth_a, "run-provenance-owner")
-        assert status_a == 201, prepared_a
+        assert status_a == 503, prepared_a
+        assert "OS isolation backend" in prepared_a["detail"]
+        assert _worker_ready(base_a, auth_a)
 
         with _armed_gateway_on_worker_port(
             tmp_path, worker_port, home_name="home-b"
         ) as (base_b, auth_b, log_b):
             status_b, prepared_b = _prepare(base_b, auth_b, "run-provenance-thief")
             assert status_b == 503, prepared_b
-            assert prepared_b["detail"] == "run admission is not execution-ready"
+            assert "OS isolation backend" in prepared_b["detail"]
+            assert "lifecycle worker spawned: False" in log_b.read_text(
+                encoding="utf-8"
+            )
+            assert _worker_ready(base_a, auth_a)
 
             # A's worker survived B's attempt: still ANSWERING on the port.
             # This probe carries no internal bearer, so the real worker

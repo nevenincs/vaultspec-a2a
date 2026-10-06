@@ -12,12 +12,13 @@ entirely and cannot evidence it.
 2. **Credential** - the two dashboard-created planes and the per-boot,
    gateway-minted worker interprocess-communication (IPC) secret are all
    owner-restricted files on disk after the boot that consumed them.
-3. **Owned process tree** - the gateway spawns and owns its worker.
+3. **Owned process tree** - the broker profile spawns and owns its worker.
 
-The second certification is the reason this module exists. Holding all three
-prerequisites says nothing about *which* worker is answering on a port. A real
+The second certification uses the broker profile because desktop execution is
+currently refused. Credential possession and addressing still say nothing about
+which worker is answering on a port. A real
 production worker started outside any gateway spawn, holding the very same
-gateway-minted IPC credential, over the same application home, deriving the same
+test-seated IPC credential, over the same application home, deriving the same
 gateway URL, is indistinguishable from the gateway's own worker on every
 prerequisite and on every addressing fact - and is still not this gateway's
 worker. Identity lives only in the pairing evidence the worker reports, so the
@@ -63,6 +64,7 @@ from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     READINESS_TIMEOUT,
     armed_gateway_env,
+    broker_gateway_env,
     desktop_workspace,
     reap_gateway,
     seat_valid_database,
@@ -83,10 +85,10 @@ _CONFLICT_REFUSAL = "refusing to start a second gateway on one application home"
 
 
 @contextmanager
-def _armed_serve(
-    tmp_path: Path, *, auto_spawn: bool
+def _serve(
+    tmp_path: Path, *, auto_spawn: bool, desktop: bool = True
 ) -> Generator[tuple[Path, int, int, str]]:
-    """Boot a real armed desktop gateway through the production ``serve`` verb.
+    """Boot a real gateway through ``serve`` with an explicit execution profile.
 
     Yields ``(app_home, gateway_port, worker_port, base)``. The gateway process
     handle is deliberately not yielded: on Windows the virtual-environment
@@ -102,18 +104,24 @@ def _armed_serve(
     log_handle = log_path.open("wb")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        return subprocess.Popen(
-            [sys.executable, "-m", _CLI_MODULE, "serve"],
-            env=armed_gateway_env(
+        if desktop:
+            env = armed_gateway_env(
                 app_home,
                 gateway_port=gateway_port,
                 worker_port=worker_port,
                 auto_spawn_worker=auto_spawn,
-                # ``test_ownership_prerequisites_never_identify_a_worker`` admits
-                # a run against the in-process mock lane (see ``_catalog.py``);
-                # the gateway must serve one to select.
-                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"},
-            ),
+            )
+        else:
+            env = broker_gateway_env(
+                app_home,
+                gateway_port=gateway_port,
+                worker_port=worker_port,
+                gateway_token=_ATTACH,
+            )
+            env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = str(auto_spawn).lower()
+        return subprocess.Popen(
+            [sys.executable, "-m", _CLI_MODULE, "serve"],
+            env=env,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
         )
@@ -129,7 +137,7 @@ def _armed_serve(
 
 
 def _worker_ipc_secret(app_home: Path) -> str:
-    """Return the gateway-minted worker IPC secret from its real file."""
+    """Return the current worker IPC secret from its real owner-restricted file."""
     credentials_dir = derive_state_paths(app_home).credentials_dir
     return (
         credential_paths(credentials_dir)
@@ -206,7 +214,7 @@ def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
       desktop certification still passes (the gateway boots, the planes stay
       isolated, the secret is still distinct) while this assertion fails.
     """
-    with _armed_serve(tmp_path, auto_spawn=False) as (app_home, _port, _wport, base):
+    with _serve(tmp_path, auto_spawn=False) as (app_home, _port, _wport, base):
         owner = default_owner()
         state, record = classify_app_home(app_home, owner=owner)
         assert state is SingletonState.HELD, (state, record)
@@ -261,10 +269,10 @@ def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
 def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None:
     """Every prerequisite can hold for a worker that is not this gateway's.
 
-    A real armed gateway holds its runtime singleton, its credential planes are
-    owner-restricted, and it has spawned and owns its worker. A second REAL
+    A real broker gateway has separate owner-restricted credentials and has
+    spawned and owns its worker. A second REAL
     production worker is then started outside any gateway spawn, holding the
-    very same gateway-minted IPC credential over the same application home and
+    very same IPC credential over the same application home and
     the same gateway port. It is a genuine worker, not an adversary stand-in.
 
     Discriminating in three independent directions:
@@ -284,11 +292,12 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
       its pairing evidence to anything non-blank, and the first of those two
       flips to an adoptable verdict.
     """
-    with _armed_serve(tmp_path, auto_spawn=True) as (app_home, port, worker_port, base):
-        # Premise: the ownership prerequisites really do hold for this gateway.
-        assert classify_app_home(app_home, owner=default_owner())[0] is (
-            SingletonState.HELD
-        )
+    with _serve(tmp_path, auto_spawn=True, desktop=False) as (
+        app_home,
+        port,
+        worker_port,
+        base,
+    ):
         secret = _worker_ipc_secret(app_home)
         ipc_path = credential_paths(
             derive_state_paths(app_home).credentials_dir

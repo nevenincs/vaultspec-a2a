@@ -37,8 +37,8 @@ from ..control._worker_health import GATEWAY_LIFETIME_ID
 from ..control.config import setting_env
 from ..tests.gateway_boot import armed_gateway_env, reap_gateway
 from .test_ownership_prerequisites import (
-    _armed_serve,
     _prepare,
+    _serve,
     _worker_health,
     _worker_ipc_secret,
 )
@@ -76,7 +76,7 @@ def test_service_state_reports_the_spawning_gateway_for_its_own_worker(
     gateway serves is provably the one the worker reported rather than one it
     recomputed from itself.
     """
-    with _armed_serve(tmp_path, auto_spawn=True) as (
+    with _serve(tmp_path, auto_spawn=True, desktop=False) as (
         app_home,
         _port,
         worker_port,
@@ -138,7 +138,7 @@ def test_service_state_reports_blank_for_a_worker_it_did_not_spawn(
       field to this gateway's identity is exactly the failure that let a foreign
       worker read as correctly paired, and it is caught here and nowhere else.
     """
-    with _armed_serve(tmp_path, auto_spawn=False) as (
+    with _serve(tmp_path, auto_spawn=False, desktop=False) as (
         app_home,
         port,
         worker_port,

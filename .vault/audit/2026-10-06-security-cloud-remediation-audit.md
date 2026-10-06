@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:abd417adf8d7580801082bd47c3f0ceda1ce321debb7975f0bcdebbfca193264'
+body_hash: 'sha256:1892e67a8c65cd731c645e69661d099443c6d1d00c6d353e16576b99ae51f756'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -167,6 +167,22 @@ Type: verification. Independent read-only review of the actual S14 diff found no
 ### s14-platform-verification | low | Passed: Windows desktop boundary and broker admission
 
 Type: verification. Windows test_readiness_model.py and test_run_admission.py pass all nine real-process cases with the final shared helper. Linux build all passes source/wheel build, documentation tests and strict Sphinx generation. The clean base-installation telemetry probe passes for gateway and worker with OTLP absent. The full Linux unit run remains in progress and is not counted as passing evidence.
+
+### s15-desktop-lifecycle-drift | medium | In progress: lifecycle proofs must start below desktop admission
+
+Type: test contract drift. Full Linux unit execution at a7bd3177 found stale desktop lazy-worker, owned-terminal, worker-pairing, provenance and terminal-settlement expectations. Independent review recommends broker profile for execution proofs, retained real subprocesses for terminal cleanup, and explicit production lifespan/spawner composition for armed pairing and cleanup below run admission. Desktop run entries remain refused. Settlement will use a genuine broker-completed durable run and the production settlement handler under desktop settings, retaining real database and HTTP authentication/retry assertions.
+
+### full-unit-followups | medium | Queued: remaining contract and environment failures
+
+Type: verification and test contract drift. Full local run completed with 5609 passed, 28 failed, 33 existing skips, 3 errors. Nine native tests lacked VAULTSPEC_A2A_TEST_LINUX_ISOLATION_HELPER; three component packaging errors came from the archive snapshot lacking Git HEAD (actual objects restored via Git bundle and all three then passed); three Claude identity tests lacked the service CLI PATH; a Codex factory case lacked its proven binary; one storage test incorrectly forbids a checkout under the OS temporary parent. Further source failures: native packet environment family not documented to the drift guard, two authoring wiring expectations still read gateway credentials from an environment now deliberately scrubbed, and _subprocess republishes provider_execution_command from its declaration home. Address these without weakening gates, hardcoding provider releases in tests, or disabling security boundaries. No full-suite success is claimed.
+
+### s15-settlement-review | medium | Fixed: automatic terminal-event settlement coverage retained
+
+Type: test coverage regression. Independent review found that directly invoking the callback helper would miss a removed terminal-event scheduling call. The revised test opens the actual completed broker run's database and checkpoint, drives production _handle_terminal_event under desktop settings, requires one newly owned settlement task and awaits its real HTTP callback. The focused Linux settlement/provenance set passes all seven cases. Read-only re-review PASS, no remaining code findings.
+
+### s15-verification | low | Passed: lifecycle and provenance proofs on Linux and Windows
+
+Type: verification. All 16 affected desktop lifecycle tests pass on Windows. Linux focused runs cover the same behavior, including real provider/terminal descendants, receipt-authorized worker cleanup, broker worker pairing, refused armed provenance, two-owner conflict and settlement retry. Three packaging tests also pass after restoring actual Git history to the native test snapshot. Ruff and strict typing pass. Remaining full-suite failures are separately queued; no green CI claim.
 
 ## Recommendations
 

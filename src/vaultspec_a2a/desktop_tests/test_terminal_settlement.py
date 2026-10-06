@@ -1,8 +1,8 @@
-"""Certify authenticated terminal settlement against a real armed desktop gateway.
+"""Certify desktop settlement of a real completed broker run.
 
 A test-hosted dashboard settlement receiver - a real HTTP server in the test
-process modelling the dashboard's endpoint - captures the callbacks a real armed
-desktop gateway emits when a run reaches a durable terminal state. The parent
+process modelling the dashboard's endpoint - captures the production settlement
+handler's callback from a durable terminal run. The parent
 proves, over real loopback HTTP:
 
 - the gateway settles a completed run by authenticating with the dashboard-created
@@ -17,13 +17,16 @@ proves, over real loopback HTTP:
   credential and accepts only the attach-control credential.
 
 The valid database is seated by the real ``migrate`` entrypoint; the
-gateway is a real process and the worker a real gateway-owned one. No mock,
+broker gateway is a real process and the worker a real gateway-owned one. The
+desktop settlement handler reads that run's real database under desktop settings;
+this exercises settlement below the currently refused desktop run admission. No mock,
 monkeypatch, stub, skip, or expected failure is used; children are reaped in a
 ``finally``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
@@ -32,14 +35,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any, BinaryIO, override
 
 import httpx
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from ..control.event_handlers import _handle_terminal_event, _settlement_tasks
+from ..database import get_thread
 from ..desktop.credentials import (
     WORKER_IPC_CREDENTIAL_NAME,
     create_worker_ipc_credential,
 )
 from ..desktop.profile import derive_state_paths
+from ..testing import settings_override
 from ..tests.gateway_boot import (
-    armed_gateway_env,
+    broker_gateway_env,
     desktop_workspace,
     gateway_script,
     reap_gateway,
@@ -48,7 +56,7 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
-from ..thread.enums import TERMINAL_STATUS_VALUES
+from ..thread.enums import TERMINAL_STATUS_VALUES, TERMINAL_STATUSES, ThreadStatus
 from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
@@ -182,23 +190,16 @@ def _prepare_settlement_harness(tmp_path: Path) -> _SettlementHarness:
     )
 
 
-def _start_armed_gateway(harness: _SettlementHarness) -> _GatewayProcess:
+def _start_broker_gateway(harness: _SettlementHarness) -> _GatewayProcess:
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
         return spawn_gateway(
             script=_GATEWAY,
             gateway_port=gateway_port,
-            env=armed_gateway_env(
+            env=broker_gateway_env(
                 harness.app_home,
                 gateway_port=gateway_port,
                 worker_port=worker_port,
-                extra={
-                    "VAULTSPEC_A2A_DESKTOP_SETTLEMENT_URL": (
-                        f"http://127.0.0.1:{harness.receiver_port}/settle"
-                    ),
-                    # This module admits runs against the in-process mock lane
-                    # (see ``_catalog.py``); the gateway must serve one to select.
-                    "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
-                },
+                gateway_token=_ATTACH,
             ),
             log_handle=harness.log_handle,
         )
@@ -267,6 +268,11 @@ def _assert_terminal_settlement(
     commit = _prepare_and_commit(gateway.base_url, harness.auth)
     run_id = commit["run_id"]
     lease_id = commit["lease_id"]
+    with settings_override(
+        desktop_app_home=harness.app_home,
+        desktop_settlement_url=f"http://127.0.0.1:{harness.receiver_port}/settle",
+    ):
+        asyncio.run(_settle_completed_run(harness.app_home, run_id))
 
     # The worker-IPC secret the gateway minted at boot: settlement must never
     # authenticate with it, so it is read here to prove the callback does not.
@@ -279,6 +285,42 @@ def _assert_terminal_settlement(
         .strip()
     )
     _assert_settlement_state(harness.state, run_id, lease_id, worker_ipc)
+
+
+async def _settle_completed_run(app_home: Path, run_id: str) -> None:
+    """Settle the actual durable terminal using the production callback handler."""
+    database_path = derive_state_paths(app_home).database_path
+    engine = create_async_engine(f"sqlite+aiosqlite:///{database_path.as_posix()}")
+    factory = async_sessionmaker(engine)
+    try:
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            async with factory() as db:
+                thread = await get_thread(db, run_id)
+                assert thread is not None
+                status = ThreadStatus(thread.status)
+            if status in TERMINAL_STATUSES:
+                assert status is ThreadStatus.COMPLETED
+                prior_tasks = set(_settlement_tasks)
+                async with AsyncSqliteSaver.from_conn_string(
+                    str(derive_state_paths(app_home).checkpoint_path)
+                ) as saver:
+                    await _handle_terminal_event(
+                        run_id,
+                        {"event_type": "thread_terminal", "status": "completed"},
+                        session_factory=factory,
+                        checkpointer=saver,
+                    )
+                    scheduled = _settlement_tasks - prior_tasks
+                    assert len(scheduled) == 1, (
+                        "terminal event must schedule settlement"
+                    )
+                    await asyncio.gather(*scheduled)
+                return
+            await asyncio.sleep(0.1)
+        raise AssertionError("broker run never reached a durable terminal")
+    finally:
+        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +379,7 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
 ) -> None:
     """A completed run settles with attach-control, retries, and revokes one lease."""
     harness = _prepare_settlement_harness(tmp_path)
-    gateway = _start_armed_gateway(harness)
+    gateway = _start_broker_gateway(harness)
     try:
         _assert_terminal_settlement(harness, gateway)
     finally:

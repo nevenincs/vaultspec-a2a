@@ -1,8 +1,8 @@
 """Certify the dashboard-facing public run contract against a real stack.
 
-Every scenario drives the versioned public surface of one real armed-desktop
+Every scenario drives the versioned public surface of one real authenticated
 gateway - a real gateway process, a real gateway-owned worker, and real SQLite
-control and checkpoint stores - behind the real attach-control credential. None
+control and checkpoint stores - behind a real gateway service credential. None
 uses the test-only authentication bypass.
 
 These certify the provider-INDEPENDENT gateway contract: run admission, run

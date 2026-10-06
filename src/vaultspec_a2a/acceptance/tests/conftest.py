@@ -1,6 +1,6 @@
 """Fixtures and readiness polling for the real-process acceptance suite.
 
-One armed-desktop certification stack is booted per test module and shared by
+One authenticated broker certification stack is booted per test module and shared by
 its scenarios; every scenario uses a distinct run id so a shared gateway never
 couples independent certifications. The polling helpers read only the real
 public surface, so a run that never reaches the awaited state trips the timeout
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 @pytest.fixture(scope="module")
 def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[CertifiedGateway]:
-    """Boot one real armed-desktop certification stack for a test module."""
+    """Boot one real authenticated broker stack for a test module."""
     workdir: Path = tmp_path_factory.mktemp("acceptance-stack")
     with certified_gateway(workdir) as running:
         yield running

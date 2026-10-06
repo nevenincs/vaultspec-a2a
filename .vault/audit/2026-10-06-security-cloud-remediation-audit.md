@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:8d20017f72f5b4295668012944bca25a5542a3ecd8f89fa28dc62c271475ecbe'
+body_hash: 'sha256:abd417adf8d7580801082bd47c3f0ceda1ce321debb7975f0bcdebbfca193264'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -155,6 +155,18 @@ Type: documentation metadata hygiene. Status: queued follow-up. Run 37444176601 
 ### ci-fixture-contract-drift | medium | Queued: desktop success fixtures conflict with accepted execution refusal
 
 Type: test contract drift. The full Linux CI run now passes lint, dependency audit, vault validation and all 157 harness tests. Unit execution exposed nine acceptance fixture errors and the catalog restart test expecting successful new-run admission under an armed desktop profile. The accepted workspace-root-authority desktop-native-admission decision requires start, prepare and commit to refuse before worker startup even for in-process lanes. Move independent broker execution tests outside the desktop profile while preserving authenticated real subprocesses and explicit desktop refusal coverage. The same run found a stale OpenAPI components artifact, queued for regeneration and review. Interrupted after 1000 passing unit tests to address these failures; this is not full-suite success.
+
+### s14-broker-fixtures | medium | Fixed: execution proofs use the supported broker profile
+
+Type: test contract drift. Shared broker_gateway_env extracts the existing desktop_tests/test_run_admission.py unarmed test setup, retaining explicit SQLite stores, separate real gateway/worker credentials, worker ownership and in-process lane opt-in. Acceptance certification and catalog restart now consume it; production admission is unchanged. Seventeen Linux acceptance/restart/OpenAPI tests pass. Existing desktop readiness tests assert authenticated start/prepare/commit refusal, no durable runs, and a cold worker. OpenAPI regeneration changed only DesktopReadiness and RunAdmission descriptions.
+
+### s14-review | low | Independent review passed with full suite verification pending
+
+Type: verification. Independent read-only review of the actual S14 diff found no security, auth, profile, consumer-override or store-isolation defects. Ruff check/format and strict type checks pass for the six changed Python files. Full Linux unit and focused Windows desktop runs are ongoing; no full CI success is claimed.
+
+### s14-platform-verification | low | Passed: Windows desktop boundary and broker admission
+
+Type: verification. Windows test_readiness_model.py and test_run_admission.py pass all nine real-process cases with the final shared helper. Linux build all passes source/wheel build, documentation tests and strict Sphinx generation. The clean base-installation telemetry probe passes for gateway and worker with OTLP absent. The full Linux unit run remains in progress and is not counted as passing evidence.
 
 ## Recommendations
 

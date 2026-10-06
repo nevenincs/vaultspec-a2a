@@ -13,7 +13,7 @@ related:
   - '[[2026-10-01-provider-binary-policy-adr]]'
 modified: '2026-10-06'
 body_schema: body-v2
-body_hash: 'sha256:05f253c6e2f10e050b14568e830de358c6cdffb95d348a0b20dfac4e3ba0cad7'
+body_hash: 'sha256:2df5d0f532ad2018e9bed13b331d8d38180389c87340bc74cc2876c67bd35f0e'
 ---
 
 # `security-cloud-remediation` plan
@@ -36,6 +36,8 @@ The same CI-fix authorization covers S12 after replacement run 37443284479 passe
 
 S13 continues the authorized CI repair after run 37444176601 passed lint, dependency audit and vault checks but failed the storage-anchor harness gate. Use the existing registered credential accessor with an explicit process environment for ambient Claude subscription auth, preserving exclusion of file/settings values; consolidate the duplicated Codex login-source home resolver under its existing external-tool-home authority. No new suppression or exception is introduced; moving the existing justified Codex source-home exception consolidates the same allowed read.
 
+S14 continues the same authorized CI repair after the full local run exposed stale success fixtures under the armed desktop profile and a stale generated OpenAPI description. Reuse the accepted desktop-native-admission decision and the existing unarmed broker fixture pattern in desktop_tests/test_run_admission.py. Consolidate that setup into the shared gateway boot helper and use it for independent broker certification and restart tests, retaining real authentication, subprocesses, migrated databases, and existing desktop refusal tests. Regenerate the API artifact from its owning command; no production policy change is authorized or needed.
+
 ## Steps
 
 - [x] `S01` - Scope Claude OAuth to its selected root process and prove cross-provider non-interference; `workspace/environment.py, providers/factory.py and focused credential tests`.
@@ -51,6 +53,7 @@ S13 continues the authorized CI repair after run 37444176601 passed lint, depend
 - [x] `S11` - Move build-only Linux isolation staging out of shipped runtime and restore CI reachability; `desktop/_linux_runtime_assets.py, scripts/build_linux_isolation.py, desktop and provider native isolation test imports`.
 - [x] `S12` - Update vulnerable transitive Mako lock to the patched release and verify CI dependency audit; `uv.lock and focused migration compatibility checks`.
 - [x] `S13` - Route Claude ambient auth through its registered process-only accessor and share Codex credential-home resolution; `providers/factory.py, _codex_config_home.py, codex_chat_model.py and auth/home tests`.
+- [x] `S14` - Reconcile broker execution fixtures and generated API artifact with the accepted desktop refusal contract; `Shared gateway boot helpers and affected acceptance/restart tests, generated OpenAPI, focused and full Linux CI verification`.
 
 ## Parallelization
 

@@ -57,7 +57,7 @@ from ...team.team_config import load_team_config
 from ...testing.tests._support.catalog_selection import in_process_selection
 from ...tests._write_authority import make_test_write_authority
 from ...tests.gateway_boot import (
-    armed_gateway_env,
+    broker_gateway_env,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -473,8 +473,11 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
     script = gateway_script(log_level="info")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        environment = armed_gateway_env(
-            case.app_home, gateway_port=gateway_port, worker_port=worker_port
+        environment = broker_gateway_env(
+            case.app_home,
+            gateway_port=gateway_port,
+            worker_port=worker_port,
+            gateway_token=case.attach,
         )
         environment["VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"] = "true"
         return spawn_gateway(

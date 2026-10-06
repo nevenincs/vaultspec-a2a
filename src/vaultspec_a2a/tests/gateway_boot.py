@@ -383,6 +383,43 @@ def armed_gateway_env(
     return env
 
 
+def broker_gateway_env(
+    app_home: Path,
+    *,
+    gateway_port: int,
+    worker_port: int,
+    gateway_token: str,
+) -> dict[str, str]:
+    """Boot authenticated broker tests outside the desktop execution profile.
+
+    Desktop admission refuses execution until native isolation is qualified.
+    Independent broker tests use explicit stores and real gateway/worker auth.
+    """
+    env = armed_gateway_env(
+        app_home, gateway_port=gateway_port, worker_port=worker_port
+    )
+    env.pop("VAULTSPEC_A2A_DESKTOP_APP_HOME", None)
+    state = derive_state_paths(app_home)
+    env.update(
+        {
+            "VAULTSPEC_A2A_HOME": str(state.app_home),
+            "VAULTSPEC_A2A_WORKSPACE_ROOT": str(state.workspaces_root),
+            "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
+            "VAULTSPEC_A2A_DATABASE_URL": (
+                f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
+            ),
+            "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": (
+                f"sqlite+aiosqlite:///{state.checkpoint_path.as_posix()}"
+            ),
+            "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
+            "VAULTSPEC_A2A_GATEWAY_TOKEN": gateway_token,
+            "VAULTSPEC_A2A_INTERNAL_TOKEN": "broker-test-worker-ipc-0123456789abcdef",
+            "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
+        }
+    )
+    return env
+
+
 _DESKTOP_WORKSPACES: dict[int, Path] = {}
 
 

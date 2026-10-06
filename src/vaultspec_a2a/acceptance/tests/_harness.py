@@ -3,7 +3,7 @@
 The single source of the certification stack's lifecycle: allocate a loopback
 port pair, seat a valid desktop application home (dashboard-created credentials
 plus a database seated by the real ``migrate`` entrypoint), spawn the production
-gateway armed with the desktop profile so it owns and spawns its own worker, and
+gateway outside the desktop profile so it can execute in-process lanes, and
 wait for readiness with a death-aware poll that fails fast on a child that dies
 before it answers rather than after a silent timeout.
 
@@ -44,7 +44,7 @@ from ...testing.tests._support.catalog_selection import (
 from ...tests.gateway_boot import (
     FIRST_DEMAND_TIMEOUT,
     GatewayBootError,
-    armed_gateway_env,
+    broker_gateway_env,
     gateway_script,
     reap_gateway,
     seat_valid_database,
@@ -78,11 +78,11 @@ DEFAULT_REQUIRED_ROLE = "mock-coder-success"
 
 @dataclass(slots=True)
 class CertifiedGateway:
-    """An authenticated handle to one running armed-desktop certification stack.
+    """An authenticated handle to one running broker certification stack.
 
     The verb helpers shape the exact public-surface requests once so scenarios
     read as assertions on real responses. Every helper presents the real
-    attach-control credential; none uses the test-only authentication bypass.
+    gateway service credential; none uses the test-only authentication bypass.
 
     Run-start requires an explicit catalog selection revalidated against the
     catalog served for the run's workspace, so the run-bearing helpers resolve
@@ -100,7 +100,7 @@ class CertifiedGateway:
 
     @property
     def auth_header(self) -> dict[str, str]:
-        """The real attach-control Authorization header the dashboard presents."""
+        """The real gateway service Authorization header this client presents."""
         return {"Authorization": f"Bearer {self.attach_token}"}
 
     # -- explicit catalog selection -------------------------------------------
@@ -317,7 +317,7 @@ def certified_gateway(
     log_name: str = "gateway.log",
     **extra_env: str,
 ) -> Generator[CertifiedGateway]:
-    """Boot one armed-desktop certification stack over *workdir* and reap it.
+    """Boot one authenticated broker certification stack over *workdir* and reap it.
 
     Seats the dashboard credentials and a real migrated database under a fresh
     application home, spawns the production gateway with worker auto-spawn so the
@@ -344,8 +344,11 @@ def certified_gateway(
     script = gateway_script(log_level="info")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = armed_gateway_env(
-            app_home, gateway_port=gateway_port, worker_port=worker_port
+        env = broker_gateway_env(
+            app_home,
+            gateway_port=gateway_port,
+            worker_port=worker_port,
+            gateway_token=attach_token,
         )
         # Arm the in-process lane serving this stack exists to certify against.
         # The lanes are hidden by default so no product deployment can offer

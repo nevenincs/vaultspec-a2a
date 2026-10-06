@@ -39,12 +39,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..control.state_layout import state_layout
 from ..testing.progress import ProgressDeadline, wait_for
 from ..tests.gateway_boot import (
     FIRST_DEMAND_TIMEOUT,
     LOOPBACK_TIMEOUT,
-    armed_gateway_env,
+    broker_gateway_env,
     desktop_workspace,
     gateway_script,
     reap_gateway,
@@ -92,29 +91,13 @@ def _running_gateway(
     log_handle = log_path.open("wb")
 
     def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = armed_gateway_env(
+        env = broker_gateway_env(
             app_home,
             gateway_port=gateway_port,
             worker_port=worker_port,
-            extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true", **extra_env},
+            gateway_token=_ATTACH,
         )
-        env.pop("VAULTSPEC_A2A_DESKTOP_APP_HOME", None)
-        layout = state_layout(app_home)
-        env.update(
-            {
-                "VAULTSPEC_A2A_HOME": str(app_home),
-                "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
-                "VAULTSPEC_A2A_DATABASE_URL": (
-                    f"sqlite+aiosqlite:///{layout.database_path.as_posix()}"
-                ),
-                "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
-                "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": (
-                    f"sqlite+aiosqlite:///{layout.checkpoint_path.as_posix()}"
-                ),
-                "VAULTSPEC_A2A_GATEWAY_TOKEN": _ATTACH,
-                "VAULTSPEC_A2A_INTERNAL_TOKEN": "broker-worker-credential-0123456789",
-            }
-        )
+        env.update(extra_env)
         return spawn_gateway(
             script=_GATEWAY,
             gateway_port=gateway_port,

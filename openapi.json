@@ -1844,7 +1844,7 @@
           "run_admission"
         ],
         "title": "DesktopReadiness",
-        "description": "The authenticated desktop readiness projection.\n\nCarries process and product identity alongside the five separate bounded\nreadiness facts. The facts are never collapsed into a single boolean: a cold,\nstartable worker leaves ``gateway_readiness`` ``ready`` while ``run_admission``\nstays ``deferred``, so gateway-readiness and execution-readiness remain\ndistinct. Served only to an attach-authenticated caller."
+        "description": "The authenticated desktop readiness projection.\n\nCarries process and product identity alongside the five separate bounded\nreadiness facts. The facts are never collapsed into a single boolean: a cold,\nstartable worker leaves ``gateway_readiness`` ``ready`` while ``run_admission``\nstays ``deferred`` or ``blocked``, so attachment and execution readiness\nremain distinct. Served only to an attach-authenticated caller."
       },
       "DocumentCapability": {
         "type": "string",
@@ -3073,7 +3073,7 @@
           "blocked"
         ],
         "title": "RunAdmission",
-        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and a provider that is\nboth installed and credentialed, so this staged gate and the\ncredential-aware gate launch applies agree, rather than admitting a run and\nreserving capacity for it that the latter then refuses.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard gateway dependency (the database) is unavailable."
+        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and a provider that is\nboth installed and credentialed, so this staged gate and the\ncredential-aware gate launch applies agree, rather than admitting a run and\nreserving capacity for it that the latter then refuses.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard dependency or the profile's required native\nexecution isolation is unavailable. Attachment can remain gateway-ready."
       },
       "RunAgentSummary": {
         "properties": {

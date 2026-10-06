@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:eda10fcbba929ebcf0b064b2bc37a9612bafac2d5a65ca132450bbfc5b2410a4'
+body_hash: 'sha256:9e2a22e578c49a8528e77130eb0b841c0020bb6c4142e412923e77d5bc7d7da1'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -109,9 +109,26 @@ related:
 - `S13` `verify:` `Windows provider auth home factory tests (117 tests)` -> `pass`
 - `S13` `verify:` `independent S13 code review` -> `pass`
 - `S13` `verify:` `Linux full CI unit stage` -> `fail`
+- `S14` `M` `src/vaultspec_a2a/tests/gateway_boot.py`
+- `S14` `M` `src/vaultspec_a2a/acceptance/tests/_harness.py`
+- `S14` `M` `src/vaultspec_a2a/acceptance/tests/conftest.py`
+- `S14` `M` `src/vaultspec_a2a/acceptance/tests/test_dashboard_contract.py`
+- `S14` `M` `src/vaultspec_a2a/api/tests/test_catalog_restart_redispatch.py`
+- `S14` `M` `src/vaultspec_a2a/desktop_tests/test_run_admission.py`
+- `S14` `M` `openapi.json`
+- `S14` `M` `.vault/audit/2026-10-06-security-cloud-remediation-audit.md`
+- `S14` `M` `.vault/plan/2026-10-06-security-cloud-remediation-plan.md`
+- `S14` `verify:` `Linux acceptance restart OpenAPI 17 tests` -> `pass`
+- `S14` `verify:` `Windows desktop readiness and broker admission 9 tests` -> `pass`
+- `S14` `verify:` `ruff check and format six changed Python files` -> `pass`
+- `S14` `verify:` `ty check six changed Python files` -> `pass`
+- `S14` `verify:` `independent S14 code review` -> `pass`
+- `S14` `verify:` `Linux python -m dev build all` -> `pass`
+- `S14` `verify:` `Linux base-only telemetry probe` -> `pass`
 
 ## Notes
 
 - `S09` The combined suite has one unrelated Codex 0.160.0 proof-range failure reproduced on clean baseline 64fb0ea2; recorded in audit.
 - `S11` Initial WSL mounted checkout MCP permission and copy-timeout failures resolved by clean /tmp archive plus patch. Incomplete verification environment replaced with CI full locked dependency profile.
 - `S13` Full CI reached unrelated desktop fixture contract drift and stale OpenAPI artifact; queued for next Step.
+- `S14` Full Linux unit verification is running; remote CI remains to be checked.

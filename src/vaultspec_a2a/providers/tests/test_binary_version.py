@@ -39,19 +39,21 @@ def test_real_launcher_version_is_cached_until_file_changes(
 ) -> None:
     launcher = tmp_path / ("version.cmd" if os.name == "nt" else "version")
     count = tmp_path / "probes.txt"
-    _launcher(launcher, count, "0.159.2")
+    initial_version = "1.2.3"
+    updated_version = "1.2.4"
+    _launcher(launcher, count, initial_version)
 
-    assert probe_binary_version(launcher) == "0.159.2"
-    assert probe_binary_version(launcher) == "0.159.2"
+    assert probe_binary_version(launcher) == initial_version
+    assert probe_binary_version(launcher) == initial_version
     assert count.read_text(encoding="utf-8").splitlines() == ["probe"]
 
     previous = launcher.stat()
-    _launcher(launcher, count, "0.159.3")
+    _launcher(launcher, count, updated_version)
     os.utime(
         launcher,
         ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000_000),
     )
-    assert probe_binary_version(launcher) == "0.159.3"
+    assert probe_binary_version(launcher) == updated_version
     assert count.read_text(encoding="utf-8").splitlines() == ["probe", "probe"]
 
 
@@ -62,7 +64,7 @@ def test_missing_or_malformed_launcher_version_is_refused(tmp_path: Path) -> Non
     _launcher(launcher, tmp_path / "probes.txt", "not-a-version")
     with pytest.raises(BinaryVersionProbeError, match="version is unavailable"):
         probe_binary_version(launcher)
-    assert parse_binary_version("codex-cli 0.159.2 and 0.160.0") is None
+    assert parse_binary_version("probe-cli 1.2.3 and 2.3.4") is None
 
 
 def test_shim_identity_tracks_current_target(tmp_path: Path) -> None:

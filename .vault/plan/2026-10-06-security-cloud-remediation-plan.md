@@ -10,9 +10,10 @@ related:
   - '[[2026-09-23-project-bound-state-adr]]'
   - '[[2026-10-01-tool-permission-model-adr]]'
   - '[[2026-07-16-authoring-contract-adr]]'
+  - '[[2026-10-01-provider-binary-policy-adr]]'
 modified: '2026-10-06'
 body_schema: body-v2
-body_hash: 'sha256:f38d0309b00b0440dcbd76b480344efa29ff7ccf13a4708589bd88a54c5abecd'
+body_hash: 'sha256:4e86f3424fb8aaae63e75eac43f144b02f7c82e904e4651430fe7482c30aa85b'
 ---
 
 # `security-cloud-remediation` plan
@@ -25,6 +26,10 @@ Reuse accepted native admission and Linux backend decisions for credential and t
 
 The user's subsequent explicit instruction "fix the leak" on 2026-10-06 authorizes S09, the adjacent ambient Z.ai credential disclosure recorded in the audit. The supervisor owns its implementation under the existing provider credential boundary; it does not wait on the unresolved medium-worker model selection.
 
+The user's 2026-10-06 correction that Codex should not fail authorizes S10 to resolve the recorded Codex verification prerequisite. Reuse accepted provider-binary-policy D2: establish a real turn on the resolved binary, refresh its recorded version and next-minor range, and align the CI pin and boundary controls. The supervisor owns this scoped proof refresh. Semantic code discovery remains unavailable because managed Qdrant is missing; named admission, factory, version and cited live-test modules supply bounded source grounding. No new architecture decision is needed.
+
+The user additionally requested removing release-specific version numbers from tests to avoid recurring maintenance. S10 therefore derives admission controls from the declared proof, compares live persisted identity with the actual resolved binary version, and makes synthetic probe/database fixtures independent of Codex releases.
+
 ## Steps
 
 - [x] `S01` - Scope Claude OAuth to its selected root process and prove cross-provider non-interference; `workspace/environment.py, providers/factory.py and focused credential tests`.
@@ -36,6 +41,7 @@ The user's subsequent explicit instruction "fix the leak" on 2026-10-06 authoriz
 - [ ] `S07` - Enforce vault write prohibition for Claude native writes; `providers/_claude_tool_policy.py, required mediation seams and tests`.
 - [ ] `S08` - Validate Codex credential refresh before publishing operator auth; `providers/_codex_auth.py, _codex_config_home.py and tests`.
 - [x] `S09` - Remove ambient Z.ai credentials and gateway overrides from shared child environments while preserving selected Z.ai auth; `workspace/environment.py, provider credential and version-probe seams, focused environment/auth and MCP tests`.
+- [x] `S10` - Refresh Codex binary proof after a real completed turn and restore factory verification; `providers/lane_admission.py, binary admission and version tests, provider and graph live identity tests, worker identity tests, .github/workflows/test.yml`.
 
 ## Parallelization
 

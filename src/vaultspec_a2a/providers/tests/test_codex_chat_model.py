@@ -46,6 +46,7 @@ from .._factory_commands import _classify_codex_command, classify_provider_comma
 from .._project_scope import RunProjectScope
 from .._runtime_identity import bind_model_runtime_identity
 from .._subprocess import STDERR_TAIL_LINES, spawn_acp_process
+from ..binary_version import probe_binary_version
 from ..cli_resolution import (
     ProviderRuntimeUnavailableError,
     resolve_provider_cli_executable,
@@ -775,6 +776,7 @@ async def test_codex_live_turn_persists_initialized_runtime_identity(
             Provider.CODEX, model=served, workspace_root=tmp_path
         )
         assert isinstance(model, CodexChatModel)
+        observed_version = probe_binary_version(model.command[0])
         bound = bind_model_runtime_identity(
             model,
             thread_id="codex-live-identity",
@@ -790,7 +792,7 @@ async def test_codex_live_turn_persists_initialized_runtime_identity(
                 ("codex-live-identity", "codex", "codex-app-server"),
             )
             assert row is not None
-            assert row.cli_version == "0.159.2"
+            assert row.cli_version == observed_version
             assert row.adapter_version == row.cli_version
             assert row.provider_session_id
             assert row.managed_policy_present is None

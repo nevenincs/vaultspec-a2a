@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:d980d0176a3c1ee5c5299cc383e0d5a7cd6db1fc2d72a45d4056fc6a69e947eb'
+body_hash: 'sha256:02b55c6006cabf152990886eca859138839a46ba942f7c6eef796cfe18896d2b'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -95,6 +95,22 @@ Type: verification and review record. Status: resolved. Fresh read-only candidat
 ### codex-installed-proof-range | low | Installed Codex version blocks an unrelated factory control
 
 Type: verification environment prerequisite. Status: open follow-up. test_factory_applies_exact_codex_model_scoped_controls fails BINARY_OUT_OF_PROOF_RANGE with installed Codex 0.160.0. A detached clean worktree at pre-S09 commit 64fb0ea2 reproduces the same failure using the locked Windows environment. Baseline and patched version probes both report 0.160.0. Restore a binary within existing completed-turn proof coverage, or establish new proof through the authorized eligibility workflow, before using this factory control as passing evidence. No test or eligibility rule was weakened.
+
+### codex-proof-refresh | low | Current Codex works after refreshing stale admission evidence
+
+Type: verification prerequisite and release drift. Status: fixed in S10, superseding codex-installed-proof-range. Installed Codex 0.160.0 completed a direct production CodexChatModel app-server turn returning pong before the declaration changed. The cited production-factory live-turn test then passed, and the live SQLite identity test passed. PROVEN_TURN_LANES now records that observed version with its next-minor exclusive ceiling; all CI installation, version assertion and signature-audit pins match. No admission predicate or missing-proof refusal was weakened. This updates evidence under provider-binary-policy D2, not the governing decision.
+
+### codex-test-release-coupling | low | Live identity and boundary controls duplicated release pins
+
+Type: test maintenance and coverage. Status: fixed in S10 at the user's request. Admission controls now use declared floor, ceiling and generated adjacent versions; live provider and worker/research identity checks compare persisted identity to an independent probe of the actual resolved command. Synthetic cache and database fixtures use generic test versions independent of installed releases. Tests no longer need release-number edits when proof is refreshed. Independent review found a generated below-floor control would become malformed at a future major rollover; corrected it to handle patch, minor and major predecessors and explicitly reject a zero-only fixture.
+
+### codex-s10-verification | low | Refreshed proof restores the previously failing Codex factory control
+
+Type: verification and review record. Status: verified. Combined credential/factory/admission suite passed 145 tests after proof refresh. After removing release coupling, affected factory/admission/version/SQL identity suite passed 62; actual provider SQL identity and graph worker plus research live service tests passed 2, with observed CLI identity assertions. Final corrected boundary tests passed 5. Ruff lint/format and ty passed on all seven changed Python files; final correction rechecked. Direct CI pin consistency and git diff --check passed. Windows locked uv environment, installed system Codex 0.160.0, catalog-selected gpt-6.1-sol; temporary prompt only requested pong. Linux CI was not run locally. No credentials printed or committed. Review covers this bounded refresh and preserves the unresolved medium Cloud findings.
+
+### codex-s10-review | low | Independent final review passes
+
+Type: review record. Status: resolved. The fresh read-only reviewer verified the actual S10 diff and predecessor correction, accepted the supervisor's applicable test and static-check evidence, and returned PASS with no remaining findings. The earlier low boundary-input finding is fixed; no new production bypass or regression was found.
 
 ## Recommendations
 

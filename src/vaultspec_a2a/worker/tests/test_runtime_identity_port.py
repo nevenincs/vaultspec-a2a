@@ -44,10 +44,10 @@ async def test_runtime_identity_port_commits_once_and_refuses_conflicting_retry(
             "execution_mode": "codex-app-server",
             "runtime_authority": "service_path",
             "adapter_name": "codex-app-server",
-            "adapter_version": "0.159.2",
+            "adapter_version": "1.2.3",
             "adapter_entry_path": "/installed/codex",
             "cli_executable_path": "/installed/codex",
-            "cli_version": "0.159.2",
+            "cli_version": "1.2.3",
             "node_version": None,
             "auth_mode": "subscription_login",
             "provider_session_id": "native-1",
@@ -59,8 +59,8 @@ async def test_runtime_identity_port_commits_once_and_refuses_conflicting_retry(
         later_session["provider_session_id"] = "native-2"
         await port.record_identity(**later_session)
         for field, value in (
-            ("cli_version", "0.160.0"),
-            ("adapter_version", "0.160.0"),
+            ("cli_version", "2.3.4"),
+            ("adapter_version", "2.3.4"),
             ("auth_mode", "oauth_token"),
         ):
             changed = evidence.copy()
@@ -71,7 +71,7 @@ async def test_runtime_identity_port_commits_once_and_refuses_conflicting_retry(
         async with factory() as session:
             rows = (await session.scalars(select(ProviderRuntimeIdentityModel))).all()
         assert len(rows) == 1
-        assert rows[0].cli_version == "0.159.2"
+        assert rows[0].cli_version == evidence["cli_version"]
         assert rows[0].provider_session_id == "native-1"
 
 
@@ -94,10 +94,10 @@ async def test_concurrent_sessions_keep_one_first_identity(tmp_path: Path) -> No
             "execution_mode": "codex-app-server",
             "runtime_authority": "system_cli",
             "adapter_name": "codex-app-server",
-            "adapter_version": "0.159.2",
+            "adapter_version": "1.2.3",
             "adapter_entry_path": "/installed/codex",
             "cli_executable_path": "/installed/codex",
-            "cli_version": "0.159.2",
+            "cli_version": "1.2.3",
             "node_version": None,
             "auth_mode": "codex_home",
             "provider_session_id": "branch-a",

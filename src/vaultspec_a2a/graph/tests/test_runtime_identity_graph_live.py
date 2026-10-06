@@ -10,6 +10,8 @@ from langchain_core.messages import HumanMessage
 from ...database.models import ProviderRuntimeIdentityModel
 from ...database.tests._backends import migrated_session_factory
 from ...database.thread_repository import create_thread
+from ...providers.binary_version import probe_binary_version
+from ...providers.codex_chat_model import CodexChatModel
 from ...providers.factory import ProviderFactory
 from ...service_tests._provider_catalog_live import declared_lane_model_value
 from ...tests._write_authority import make_test_write_authority
@@ -50,6 +52,8 @@ async def test_worker_and_research_turns_share_first_runtime_identity(
         model = ProviderFactory().create(
             Provider.CODEX, model=served, workspace_root=tmp_path
         )
+        assert isinstance(model, CodexChatModel)
+        observed_version = probe_binary_version(model.command[0])
         port = SqlRuntimeIdentityPort(factory)
         state = cast(
             "TeamState",
@@ -102,5 +106,5 @@ async def test_worker_and_research_turns_share_first_runtime_identity(
             )
             assert row is not None
             assert row.provider_session_id == first_native_id
-            assert row.cli_version == "0.159.2"
+            assert row.cli_version == observed_version
             assert row.managed_policy_present is None

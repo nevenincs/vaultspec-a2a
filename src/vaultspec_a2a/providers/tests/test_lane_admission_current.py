@@ -82,8 +82,9 @@ def test_only_the_reproved_codex_binary_is_declared_for_external_serving() -> No
     }
     proof = PROVEN_TURN_LANES[Provider.CODEX]
     assert proof.binary == "codex"
-    assert proof.proved_version == proof.floor == "0.159.2"
-    assert proof.ceiling_exclusive == "0.160.0"
+    assert proof.proved_version == proof.floor
+    major, minor, _patch = map(int, proof.proved_version.split("."))
+    assert tuple(map(int, proof.ceiling_exclusive.split("."))) == (major, minor + 1, 0)
     for provider, execution_mode in (
         (Provider.CLAUDE, "claude-agent-acp:node"),
         (Provider.ZAI, "zai-claude-agent-acp:node"),
@@ -96,15 +97,30 @@ def test_only_the_reproved_codex_binary_is_declared_for_external_serving() -> No
 
 def test_proof_range_rejects_unproved_and_malformed_versions() -> None:
     proof = PROVEN_TURN_LANES[Provider.CODEX]
-    assert lane_proof_accepts_version(proof, "0.159.2", "service_path")
-    assert lane_proof_accepts_version(proof, "0.159.3", "service_path")
-    assert not lane_proof_accepts_version(proof, "0.160.0", "service_path")
-    assert not lane_proof_accepts_version(proof, "0.159.1", "service_path")
-    assert lane_proof_accepts_version(proof, "0.159.2", "capsule")
-    assert not lane_proof_accepts_version(proof, "0.159.3", "capsule")
-    assert not lane_proof_accepts_version(proof, "0.159.2-dev", "service_path")
-    assert not lane_proof_accepts_version(proof, "unknown", "service_path")
-    assert not lane_proof_accepts_version(proof, "0.159.2", "unknown")
+    major, minor, patch = map(int, proof.proved_version.split("."))
+    later_patch = f"{major}.{minor}.{patch + 1}"
+    if patch:
+        previous = f"{major}.{minor}.{patch - 1}"
+    elif minor:
+        previous = f"{major}.{minor - 1}.0"
+    else:
+        assert major > 0, "A below-floor control requires a nonzero proved version"
+        previous = f"{major - 1}.0.0"
+    assert lane_proof_accepts_version(proof, proof.proved_version, "service_path")
+    assert lane_proof_accepts_version(proof, later_patch, "service_path")
     assert not lane_proof_accepts_version(
-        replace(proof, ceiling_exclusive="0.161.0"), "0.159.2", "service_path"
+        proof, proof.ceiling_exclusive, "service_path"
+    )
+    assert not lane_proof_accepts_version(proof, previous, "service_path")
+    assert lane_proof_accepts_version(proof, proof.proved_version, "capsule")
+    assert not lane_proof_accepts_version(proof, later_patch, "capsule")
+    assert not lane_proof_accepts_version(
+        proof, f"{proof.proved_version}-dev", "service_path"
+    )
+    assert not lane_proof_accepts_version(proof, "unknown", "service_path")
+    assert not lane_proof_accepts_version(proof, proof.proved_version, "unknown")
+    assert not lane_proof_accepts_version(
+        replace(proof, ceiling_exclusive=f"{major}.{minor + 2}.0"),
+        proof.proved_version,
+        "service_path",
     )

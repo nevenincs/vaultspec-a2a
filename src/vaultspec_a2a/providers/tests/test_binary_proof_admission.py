@@ -27,6 +27,7 @@ from ..factory import (
     ProviderFactory,
     binary_proof_reason,
 )
+from ..lane_admission import PROVEN_TURN_LANES
 from ..provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -84,7 +85,8 @@ async def test_catalog_rechecks_version_beside_cached_models(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A binary update revokes selectability without waiting for catalog TTL."""
-    version = ["0.160.0"]
+    proof = PROVEN_TURN_LANES[Provider.CODEX]
+    version = [proof.ceiling_exclusive]
 
     def report(_path: Path | str) -> str:
         return version[0]
@@ -100,7 +102,7 @@ async def test_catalog_rechecks_version_beside_cached_models(
         rejected.health.reasons
     )
 
-    version[0] = "0.159.3"
+    version[0] = proof.proved_version
     admitted = (await service.records(str(tmp_path)))[0]
     assert factory.discoveries == 1
     assert admitted.health.admission is AdmissionState.ADMITTED
@@ -126,7 +128,7 @@ def test_factory_refuses_out_of_range_codex_before_model_construction(
     )
 
     def report(_path: Path | str) -> str:
-        return "0.160.0"
+        return PROVEN_TURN_LANES[Provider.CODEX].ceiling_exclusive
 
     monkeypatch.setattr(factory_module, "probe_binary_version", report)
 
@@ -145,7 +147,10 @@ def test_pinned_launcher_requires_exact_proved_version(
     """A capsule patch change cannot ride a proof earned on another binary."""
 
     def report(_path: Path | str) -> str:
-        return "0.159.3"
+        major, minor, patch = map(
+            int, PROVEN_TURN_LANES[Provider.CODEX].proved_version.split(".")
+        )
+        return f"{major}.{minor}.{patch + 1}"
 
     monkeypatch.setattr(factory_module, "probe_binary_version", report)
     assert binary_proof_reason(Provider.CODEX, "/capsule/codex", "capsule") is (
@@ -234,15 +239,16 @@ async def test_model_rechecks_changed_launcher_before_child_spawn(
             )
             launcher.chmod(0o755)
 
-    write_launcher("0.159.2")
-    assert probe_binary_version(launcher) == "0.159.2"
+    proof = PROVEN_TURN_LANES[Provider.CODEX]
+    write_launcher(proof.proved_version)
+    assert probe_binary_version(launcher) == proof.proved_version
     model = CodexChatModel(
         command=[str(launcher), "app-server"],
         workspace_root=str(tmp_path),
         version_proof_required=True,
     )
     previous = launcher.stat()
-    write_launcher("0.160.0")
+    write_launcher(proof.ceiling_exclusive)
     os.utime(launcher, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000_000))
     with pytest.raises(ProviderRuntimeUnavailableError) as caught:
         await model.ainvoke([HumanMessage(content="hello")])

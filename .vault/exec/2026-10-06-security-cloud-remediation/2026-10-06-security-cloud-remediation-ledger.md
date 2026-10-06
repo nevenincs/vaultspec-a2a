@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-06'
 body_schema: 'body-v2'
-body_hash: 'sha256:55da683e1aafbd5fe923eba4be147368c5eb3a2cdd74b01a16f4bb9ed0156e12'
+body_hash: 'sha256:94cd727ab23a1e50c4efd712c5e60b8ac12151f8dc090da9e2191a752aaac0a9'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -59,6 +59,23 @@ related:
 - `S09` `verify:` `Ruff lint format and ty seven S09 files` -> `pass`
 - `S09` `verify:` `independent candidate review with supervisor verification` -> `pass`
 - `S09` `by:` `supervisor`
+- `S10` `M` `src/vaultspec_a2a/providers/lane_admission.py`
+- `S10` `M` `.github/workflows/test.yml`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_binary_proof_admission.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_binary_version.py`
+- `S10` `M` `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py`
+- `S10` `M` `src/vaultspec_a2a/graph/tests/test_runtime_identity_graph_live.py`
+- `S10` `M` `src/vaultspec_a2a/worker/tests/test_runtime_identity_port.py`
+- `S10` `verify:` `real Codex direct certification then cited factory live turn and SQL identity` -> `pass`
+- `S10` `verify:` `combined credential factory admission pytest (145 tests)` -> `pass`
+- `S10` `verify:` `final factory admission version worker identity pytest (62 tests)` -> `pass`
+- `S10` `verify:` `final live provider and graph identity pytest (2 tests)` -> `pass`
+- `S10` `verify:` `corrected boundary pytest (5 tests)` -> `pass`
+- `S10` `verify:` `Ruff lint format ty seven S10 Python files` -> `pass`
+- `S10` `verify:` `CI pins agree with proof` -> `pass`
+- `S10` `by:` `supervisor`
+- `S10` `verify:` `independent S10 actual diff and correction review` -> `pass`
 
 ## Notes
 

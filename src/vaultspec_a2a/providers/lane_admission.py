@@ -209,9 +209,9 @@ PROVEN_TURN_LANES: Mapping[Provider, LaneProof] = MappingProxyType(
             proves="a real Codex app-server turn returns model content through "
             "the production factory",
             binary="codex",
-            proved_version="0.159.2",
-            floor="0.159.2",
-            ceiling_exclusive="0.160.0",
+            proved_version="0.160.0",
+            floor="0.160.0",
+            ceiling_exclusive="0.161.0",
         ),
     }
 )

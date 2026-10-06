@@ -228,14 +228,14 @@ jobs:
       # The selected Codex and Kimi gates need installed CLIs but no credential.
       - name: Install the provider CLI these gates require
         run: |
-          npm install -g @openai/codex@0.159.2
-          test "$(codex --version)" = "codex-cli 0.159.2"
+          npm install -g @openai/codex@0.160.0
+          test "$(codex --version)" = "codex-cli 0.160.0"
           uv tool install --force kimi-cli==1.49.0
           uv tool dir --bin >> "$GITHUB_PATH"
 
       - name: Verify pinned Codex registry signatures
         run: |
-          npm install --prefix "$RUNNER_TEMP/codex-signature-audit" --save-exact --ignore-scripts --no-fund @openai/codex@0.159.2
+          npm install --prefix "$RUNNER_TEMP/codex-signature-audit" --save-exact --ignore-scripts --no-fund @openai/codex@0.160.0
           npm audit signatures --prefix "$RUNNER_TEMP/codex-signature-audit"
 
       # Declares those CLIs present, so a gate that skips anyway fails this job

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..environment import resolve_env_vars
+from ..environment import resolve_env_vars, scrub_agent_environment
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,13 +39,12 @@ def test_service_and_database_credentials_never_reach_provider_environment(
     assert not any(secret in resolved.values() for secret in values.values())
 
 
-def test_intended_lane_auth_survives_base_environment_resolution(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "zai-lane-token")
-    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-lane-token")
-
-    resolved = resolve_env_vars(tmp_path)
-
-    assert resolved["ANTHROPIC_AUTH_TOKEN"] == "zai-lane-token"
-    assert resolved["CLAUDE_CODE_OAUTH_TOKEN"] == "claude-lane-token"
+def test_claude_oauth_is_removed_before_lane_selection() -> None:
+    resolved = scrub_agent_environment(
+        {
+            "CLAUDE_CODE_OAUTH_TOKEN": "claude-lane-token",
+            "claude_code_oauth_token": "lowercase-token",
+            "PATH": "runtime-path",
+        }
+    )
+    assert resolved == {"PATH": "runtime-path"}

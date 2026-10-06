@@ -303,7 +303,13 @@ def _transport_evidence(discovery: ProviderCatalogDiscovery) -> HealthState:
 def claude_auth_env() -> tuple[dict[str, str], str]:
     """Select only the declared Claude credential channel for a child."""
     if settings.claude_auth_channel == "subscription_login":
-        return {}, "subscription_login"
+        # Preserve an explicit operator export only at the Claude root seam.
+        # The shared environment must never grant this credential to other lanes.
+        token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+        return (
+            {"CLAUDE_CODE_OAUTH_TOKEN": token} if token.strip() else {},
+            "subscription_login",
+        )
     if settings.claude_auth_channel != "oauth_token":
         raise ProviderRuntimeUnavailableError("unsupported Claude auth channel")
     configured = settings.claude_code_oauth_token

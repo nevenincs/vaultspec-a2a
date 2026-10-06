@@ -117,9 +117,7 @@ _SCRUB_PROBE_SCRIPT = textwrap.dedent(
 
 _SCRUB_SECRET_KEYS: list[str] = [
     "ANTHROPIC_API_KEY",
-    # CLAUDE_CODE_OAUTH_TOKEN is intentionally NOT scrubbed here — it is in the
-    # CLAUDE_CODE_* allowlist so the provider layer can re-inject it. See
-    # test_claude_code_allowlist_keys_are_preserved below.
+    "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENAI_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
@@ -153,7 +151,6 @@ _SCRUB_NON_ALLOWLISTED_CLAUDE_CODE: dict[str, str] = {
 }
 
 _SCRUB_ALLOWLISTED_CLAUDE_CODE: dict[str, str] = {
-    "CLAUDE_CODE_OAUTH_TOKEN": "tok-abc123",
     "CLAUDE_CODE_EXECUTABLE": "/usr/local/bin/claude",
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",

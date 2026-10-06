@@ -17,14 +17,17 @@ from pydantic import SecretStr
 from ...conftest import _claude_credentialed
 from ...graph.enums import Provider
 from ...testing import armed_environment, settings_override
+from .._acp_rpc_terminal_handlers import _terminal_environment
 from .._factory_commands import (
     capsule_acp_entry,
     capsule_claude_executable,
     capsule_node_executable,
 )
+from .._mcp_contract import _probe_environment
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpError
 from ..cli_resolution import ProviderRuntimeUnavailableError, resolve_service_executable
+from ..codex_chat_model import CodexChatModel
 from ..factory import (
     _discover_claude_catalog,
     claude_auth_env,
@@ -137,6 +140,28 @@ def test_subscription_channel_preserves_the_operators_ambient_export(
 
     assert model.auth_mode == "subscription_login"
     assert _child_token(env) == "ambient-test-token"
+
+
+@pytest.mark.parametrize("recipient", ("codex", "kimi", "zai", "mcp", "terminal"))
+def test_ambient_claude_oauth_never_reaches_other_children(
+    tmp_path: Path, recipient: str
+) -> None:
+    with armed_environment(CLAUDE_CODE_OAUTH_TOKEN="synthetic-claude-secret"):
+        if recipient == "codex":
+            env = CodexChatModel()._build_env(tmp_path)
+        elif recipient == "mcp":
+            env = _probe_environment(dict(os.environ))
+        elif recipient == "terminal":
+            env = _terminal_environment({}, tmp_path)
+        else:
+            model = AcpChatModel(
+                command=[],
+                workspace_root=str(tmp_path),
+                provider=recipient,
+                acp_family="kimi" if recipient == "kimi" else "claude",
+            )
+            env = asyncio.run(model._acp_environment())
+    assert _child_token(env) == ""
 
 
 def test_oauth_channel_overrides_ambient_token_in_the_child(tmp_path: Path) -> None:

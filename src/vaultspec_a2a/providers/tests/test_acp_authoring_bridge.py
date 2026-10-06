@@ -44,6 +44,7 @@ from .._factory_commands import _classify_acp_command
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
+from ..factory import claude_auth_env
 from ._acp_frames import read_acp_frame
 
 _CATALOG: JsonObject = {
@@ -145,9 +146,9 @@ async def test_real_agent_connects_to_authoring_bridge(
 
     command, meta = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())
-    # An exported CLAUDE_CODE_OAUTH_TOKEN passes through the workspace scrub,
-    # exactly as it reaches the CLI in a served run.
     env = resolve_env_vars(Path(workspace))
+    auth_environment, _auth_mode = claude_auth_env()
+    env.update(auth_environment)
     env.pop("ANTHROPIC_API_KEY", None)
     sys_claude = resolve_provider_cli_executable(Provider.CLAUDE)
     if sys_claude:

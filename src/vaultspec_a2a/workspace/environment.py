@@ -118,7 +118,6 @@ def scrub_agent_environment(environment: Mapping[str, str]) -> dict[str, str]:
     )
     claude_code_allowlist = frozenset(
         {
-            "CLAUDE_CODE_OAUTH_TOKEN",
             "CLAUDE_CODE_EXECUTABLE",
             # suppress interactive prompts in non-interactive ACP subprocesses.
             "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",

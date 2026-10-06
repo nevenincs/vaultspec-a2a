@@ -16,7 +16,7 @@ from .._claude_tool_policy import claude_bypass_declined_meta
 from .._factory_commands import _classify_acp_command, claude_acp_entry
 from ..acp_catalog import discover_acp_catalog
 from ..cli_resolution import resolve_provider_cli_executable
-from ..factory import _discover_claude_catalog
+from ..factory import _discover_claude_catalog, claude_auth_env
 from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,
@@ -36,9 +36,9 @@ def _real_adapter_inputs() -> tuple[
         )
     command, metadata = _classify_acp_command(settings.acp_backend)
     workspace = Path.cwd()
-    # An exported CLAUDE_CODE_OAUTH_TOKEN passes through the workspace scrub,
-    # exactly as it reaches the CLI in a served run.
     environment = resolve_env_vars(workspace)
+    auth_environment, _auth_mode = claude_auth_env()
+    environment.update(auth_environment)
     environment.pop("ANTHROPIC_API_KEY", None)
     if claude := resolve_provider_cli_executable(Provider.CLAUDE):
         environment["CLAUDE_CODE_EXECUTABLE"] = claude

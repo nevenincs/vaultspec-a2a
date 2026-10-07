@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -30,6 +31,10 @@ from .._acp_rpc_handlers import (
 from .._acp_session import claude_session_options
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._json_contract import JsonObject, JsonValue
+from ..execution_modes import NODE_BACKEND
+
+if TYPE_CHECKING:
+    from ...control.infra_config import AcpBackend
 
 # The read tools the harness registry declares for the search server, in the
 # qualified spelling the composed allowlist carries.
@@ -77,7 +82,7 @@ def _config(
     *,
     workspace_root: str | None,
     acp_family: str = "claude",
-    acp_backend: str | None = "claude_code",
+    acp_backend: AcpBackend | None = NODE_BACKEND,
     permission_callback: PermissionCallback | None = None,
 ) -> AcpModelConfig:
     """Build the frozen config a run of the given lane is served with."""
@@ -448,9 +453,7 @@ async def test_the_kimi_lane_keeps_its_proven_behaviour(
         {"optionId": "approve_for_session", "kind": "allow_always"},
         {"optionId": "reject", "kind": "reject_once"},
     ]
-    config = _config(
-        workspace_root=str(bound), acp_family="kimi", acp_backend="kimi_cli"
-    )
+    config = _config(workspace_root=str(bound), acp_family="kimi", acp_backend=None)
 
     assert (
         await _decide(

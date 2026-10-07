@@ -79,6 +79,7 @@ from ._codex_protocol import (
     _turn_failure,
     _usage_metadata,
 )
+from ._factory_commands import CODEX_HOME_ENV
 from ._json_contract import JsonObject, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
 from ._native_role import require_native_workspace
@@ -423,7 +424,7 @@ class CodexChatModel(ProcessChatModel):
         env = resolve_env_vars(workspace)
         codex_home = self.codex_home or settings.codex_home
         if codex_home and codex_home.strip():
-            env["CODEX_HOME"] = codex_home
+            env[CODEX_HOME_ENV] = codex_home
         return env
 
     @override
@@ -469,7 +470,7 @@ class CodexChatModel(ProcessChatModel):
                 if self._native_workspace is not None
                 else None
             )
-            env["CODEX_HOME"] = str(codex_config_home)
+            env[CODEX_HOME_ENV] = str(codex_config_home)
             await verify_harness_mcp_contract(
                 codex_mcp_server_specs(
                     self.harness_mcp_servers, project_root=self.workspace_root

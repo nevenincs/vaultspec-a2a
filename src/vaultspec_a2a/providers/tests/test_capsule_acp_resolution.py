@@ -27,6 +27,7 @@ from .._factory_commands import (
     claude_acp_entry,
 )
 from ..cli_resolution import resolve_service_executable
+from ..execution_modes import NODE_BACKEND
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -75,7 +76,7 @@ def test_capsule_root_resolves_node_and_acp_only_from_capsule(tmp_path: Path) ->
     assert command.command_kind == "node_entry"
     assert command.command_target == str(acp)
     assert command.command_executable == node.name
-    assert command.acp_backend == "node"
+    assert command.acp_backend == NODE_BACKEND
 
 
 def test_capsule_missing_node_fails_loud_naming_the_asset(tmp_path: Path) -> None:

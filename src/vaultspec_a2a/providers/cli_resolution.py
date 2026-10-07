@@ -8,18 +8,25 @@ import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Literal
 
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
+from .execution_modes import ACP_BACKEND_LANES
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "CLAUDE_EXECUTABLE_ENV",
+    "SYSTEM_CLI_LANES",
     "ClaudeCliResolution",
     "ProviderRuntimeUnavailableError",
     "ProviderRuntimeUnavailableReason",
     "pin_claude_executable",
+    "proof_cli_name",
     "resolve_provider_cli_executable",
     "resolve_service_executable",
 ]
@@ -61,10 +68,18 @@ class ProviderRuntimeUnavailableError(ConfigError):
         self.reason = reason
 
 
-# The lanes that run a CLI installed on this machine; each CLI is named by its
-# provider.
-_SYSTEM_CLI_PROVIDERS: frozenset[Provider] = frozenset(
-    {Provider.CLAUDE, Provider.CODEX, Provider.KIMI}
+# The lanes that run a CLI installed on this machine, each with the CLI it runs;
+# every CLI is named by its provider. The order is the order lanes are reported
+# in. The Z.ai lane is deliberately absent: it launches the Claude lane's ACP
+# wrapper, so it has no CLI of its own to resolve and counting it beside Claude
+# would count one backend twice. :func:`proof_cli_name` is where it is tied to
+# the Claude CLI.
+SYSTEM_CLI_LANES: Mapping[Provider, str] = MappingProxyType(
+    {
+        Provider.CLAUDE: "claude",
+        Provider.CODEX: "codex",
+        Provider.KIMI: "kimi",
+    }
 )
 
 
@@ -139,12 +154,23 @@ def resolve_provider_cli_executable(
     is handed.
     """
 
-    if provider not in _SYSTEM_CLI_PROVIDERS:
+    cli_name = SYSTEM_CLI_LANES.get(provider)
+    if cli_name is None:
         raise ValueError(f"provider {provider.value} has no system CLI")
-    for candidate in _cli_candidates(provider.value, windows=sys.platform == "win32"):
+    for candidate in _cli_candidates(cli_name, windows=sys.platform == "win32"):
         if executable := resolve_service_executable(candidate, search_path=search_path):
             return executable
     return None
+
+
+def proof_cli_name(provider: Provider) -> str:
+    """Return the CLI binary a lane's completed-turn proof binds to.
+
+    The Z.ai lane runs the Claude CLI under its own credential, so its proof
+    names that binary; every other lane's CLI is named by its provider.
+    """
+    cli_lane = Provider.CLAUDE if provider in ACP_BACKEND_LANES else provider
+    return SYSTEM_CLI_LANES.get(cli_lane, cli_lane.value)
 
 
 def _resolved_cli_file(path: Path, *, authority: ClaudeCliAuthority) -> Path:

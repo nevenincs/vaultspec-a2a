@@ -54,12 +54,13 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from ..providers._json_contract import lenient_json_object, lenient_json_object_list
 from ..providers.conditions import ProviderCondition
 from ..testing import (
     GATEWAY_AUTH_HEADERS,
     async_fetch_provider_catalog,
     is_selectable,
+    json_object,
+    json_object_list,
     named_lane_selection,
     resolve_gateway_url,
     wait_for_run_status_async,
@@ -159,11 +160,12 @@ def _selection_from_catalog(catalog: JsonObject) -> dict[str, Any] | None:
     the shared named-lane selection, because a hand-written reference would be
     refused the moment the catalog turned over.
     """
-    for record in lenient_json_object_list(catalog.get("providers")):
+    for record in json_object_list(catalog.get("providers"), at="catalog providers"):
         if not is_selectable(record):
             continue
-        models = lenient_json_object_list(
-            lenient_json_object(record.get("catalog")).get("models")
+        models = json_object_list(
+            json_object(record.get("catalog"), at="provider catalog").get("models"),
+            at="provider catalog models",
         )
         provider_id = record.get("provider_id")
         execution_mode = record.get("execution_mode")

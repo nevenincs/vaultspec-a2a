@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+import pytest
+
 from ...graph.enums import Provider
 from .. import cli_resolution
 
@@ -77,3 +79,27 @@ def test_non_cli_provider_is_rejected() -> None:
         assert "openai has no system CLI" in str(exc)
     else:
         raise AssertionError("an API provider was accepted as a system CLI")
+
+
+def test_zai_shares_the_claude_cli_without_owning_one() -> None:
+    """The Z.ai lane resolves no CLI of its own yet proves against Claude's."""
+    assert Provider.ZAI not in cli_resolution.SYSTEM_CLI_LANES
+    with pytest.raises(ValueError, match="zai has no system CLI"):
+        cli_resolution.resolve_provider_cli_executable(Provider.ZAI)
+    assert cli_resolution.proof_cli_name(Provider.ZAI) == "claude"
+
+
+@pytest.mark.parametrize(
+    ("provider", "cli"),
+    [
+        (Provider.CLAUDE, "claude"),
+        (Provider.CODEX, "codex"),
+        (Provider.KIMI, "kimi"),
+        (Provider.OPENAI, "openai"),
+    ],
+)
+def test_a_lane_proves_against_the_cli_its_provider_names(
+    provider: Provider, cli: str
+) -> None:
+    """Every lane other than Z.ai binds its proof to the CLI named by itself."""
+    assert cli_resolution.proof_cli_name(provider) == cli

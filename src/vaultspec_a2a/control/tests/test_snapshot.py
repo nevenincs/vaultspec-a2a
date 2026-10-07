@@ -29,7 +29,7 @@ from ...thread.snapshots import ThreadStateData
 from ..snapshot import MinimalState, enrich_snapshot_from_state
 
 if TYPE_CHECKING:
-    from ...providers._json_contract import JsonObject
+    from ...providers import JsonObject
 
 
 def _checkpointed_action_message(item: JsonObject) -> BaseMessageChunk:

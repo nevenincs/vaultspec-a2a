@@ -14,7 +14,7 @@ from ..testing import (
 from ._state import select_option_id, thread_state
 
 if TYPE_CHECKING:
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
     from .harness import ServiceStack
 
 # The deterministic permission-pause worker's one request, the labels of the two

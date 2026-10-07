@@ -16,7 +16,7 @@ from ..testing import (
 from ._state import thread_state
 
 if TYPE_CHECKING:
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
     from .harness import ServiceStack
 
 

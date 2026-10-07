@@ -451,17 +451,16 @@ def _eligible_provider_names() -> list[str]:
     resolvability alone - its auth is a file-based persisted session in the
     Codex home rather than a configured secret, so there is no credential to
     check. That asymmetry is the resolver's to own; this seam does not restate
-    it, so the two can never disagree. Z.ai is omitted because it launches the
-    same ACP wrapper as Claude; counting it again would double-count one
-    backend.
+    it, so the two can never disagree. The candidates are the system-CLI lanes,
+    which omit Z.ai because it launches the same ACP wrapper as Claude;
+    counting it again would double-count one backend.
     """
-    from ..graph.enums import Provider
+    from ..providers import SYSTEM_CLI_LANES
     from ..providers.provider_readiness import probe_provider_readiness
 
-    candidates = (Provider.CLAUDE, Provider.CODEX, Provider.KIMI)
     return [
         provider.value
-        for provider in candidates
+        for provider in SYSTEM_CLI_LANES
         if probe_provider_readiness(provider).ready
     ]
 

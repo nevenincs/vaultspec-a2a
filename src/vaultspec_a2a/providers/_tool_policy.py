@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from langgraph.errors import GraphBubbleUp
 
 from ..graph.acp_options import (
+    APPROVE_OPTION_ID,
+    REJECT_OPTION_ID,
     is_approval,
     is_remembering,
     narrowest_option_id,
@@ -188,7 +190,7 @@ def _autonomous_answer(request: ToolPermissionRequest, *, covered: bool) -> str:
     An approval is the NARROWEST offered one: taking the first approval-kind
     option could grant a whole server for a session on the strength of one
     allowlisted tool. A refusal is the narrowest offered refusal, and otherwise
-    the literal ``"reject"``. The literal is a deliberate answer rather than a
+    :data:`REJECT_OPTION_ID`. That id is a deliberate answer rather than a
     gap: an id the agent does not recognise makes it decline the tool call,
     which is the direction a refusal must fail in, while any scan that could
     land on an approval turns one malformed or unusual option list into a grant.
@@ -196,18 +198,18 @@ def _autonomous_answer(request: ToolPermissionRequest, *, covered: bool) -> str:
     options = request.options
     if covered:
         # A covered call whose request offers no approval-kind option is
-        # answered with the first offered id, and with the literal "approve"
+        # answered with the first offered id, and with APPROVE_OPTION_ID
         # when no option carries one. Whether such a call should be refused
         # instead is decided here and nowhere else.
         return narrowest_option_id(options, approving=True) or _option_id_at(
-            options, 0, default="approve"
+            options, 0, default=APPROVE_OPTION_ID
         )
     logger.warning(
         "Refused a tool call at the autonomous rung: tool=%s is not covered by "
         "the run's composed surface",
         request.tool,
     )
-    return narrowest_option_id(options, approving=False) or "reject"
+    return narrowest_option_id(options, approving=False) or REJECT_OPTION_ID
 
 
 async def decide(
@@ -243,7 +245,7 @@ async def decide(
     # first, so substituting the first offered option resolved a refusal whose
     # id did not match to a grant. A request offering no usable id leaves
     # nothing to check against, and the answer is forwarded as given - which
-    # is the case the autonomous literals above are answering.
+    # is the case the autonomous fallback ids above are answering.
     valid_ids = valid_option_ids(request.options)
     if valid_ids and chosen not in valid_ids:
         logger.warning(

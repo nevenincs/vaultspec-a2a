@@ -27,8 +27,6 @@ find_verb = toolchain.find_verb
 # shape; it is only no longer advisory.
 STRICT_SENTINELS = (
     "complexity",
-    "cyclomatic",
-    "shape",
     "limits",
     "size",
 )

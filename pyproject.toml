@@ -144,12 +144,12 @@ tooling = [
   "pytest-xdist>=3.8",
   # Cyclomatic complexity and the Maintainability Index, used as a LIBRARY by
   # dev/health/report.py - the numbers are radon's own, with no command output
-  # parsed in between, so the gate and the health report cannot disagree.
+  # parsed in between.
   #
   # The usual CLI gate built on radon, `xenon`, is deliberately absent: it reads
   # pyproject.toml through configparser, which reads this project's legitimate
   # `log_cli_format` ("%(asctime)s ...") as broken interpolation and crashes
-  # before scanning anything. `dev.health --gate` enforces the same ceiling.
+  # before scanning anything. Ruff's C901 gates cyclomatic complexity instead.
   "radon>=6.0.1",
   "ruff>=0.15.2",
   # Pinned like actionlint-py because it ships the binary. actionlint
@@ -163,9 +163,6 @@ tooling = [
   # without these its calls type as Unknown.
   "types-jsonschema>=4.26",
   "ty>=0.0.15",
-  # Dead-code detection. Advisory: it infers reachability it cannot always see,
-  # so a finding is a lead to confirm rather than a verdict.
-  "vulture>=2.16",
   "websockets>=16.0",
   "zstandard>=0.25.0",
 ]
@@ -555,18 +552,6 @@ max-module-lines = 1000
 max-attributes = 7      # R0902 default
 max-bool-expr = 5       # R0916 default
 max-public-methods = 20 # R0904 default
-
-# ── Dead code ────────────────────────────────────────────────────────────────
-# Advisory. vulture infers reachability it cannot always see - a name reached
-# only through a registry, a plugin lookup, or a framework callback reads as
-# dead - so a finding here is a lead to confirm, never a verdict.
-[tool.vulture]
-exclude = ["*/tests/*", "*/service_tests/*"]
-paths = ["src/vaultspec_a2a"]
-# The tool's own default. Raising it to 80 would hide the whole class of
-# genuinely-unused imports and variables this scan exists to surface.
-min_confidence = 60
-sort_by_size = true
 
 # ── Security ─────────────────────────────────────────────────────────────────
 # Advisory. This project spawns provider CLIs and loads drivers by URL scheme

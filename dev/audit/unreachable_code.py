@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 """Audit shipped code that no shipped entry point can ever reach.
 
-The question here is narrower and stricter than the vulture scan in
-:mod:`dev.audit.dead_code`: *starting from what the wheel installs, which
+The question here is: *starting from what the wheel installs, which
 shipped modules are never imported, and which top-level symbols inside the
 reachable modules are never referenced?*
 
@@ -25,15 +24,15 @@ module, or a string naming it. A bare identifier load somewhere unrelated does
 NOT clear it, which is the whole difference between this and a name-frequency
 heuristic. Members - methods, attributes, enum members - are deliberately out
 of scope: they have no defining-site import to resolve, so they stay a
-bare-identifier question, which is exactly what vulture already answers.
+bare-identifier question this audit does not answer.
 
 Three asymmetries are load-bearing:
 
 * **A decorator that is not merely shaping is a registration.** ``@app.get``,
   ``@app.command``, ``@field_validator`` reach a function without ever spelling
   its name. Everything outside :data:`PLAIN_DECORATORS` therefore clears a
-  symbol - which is the false-positive class that makes the raw vulture output
-  over this tree almost entirely noise.
+  symbol - which is the false-positive class a name-frequency heuristic cannot
+  avoid over this tree.
 * **A reference from a test is not use.** A symbol kept alive only by its own
   unit test is the orphan signal this audit exists to surface, so ``used by:
   tests`` LABELS a finding without clearing it.
@@ -46,8 +45,6 @@ Three asymmetries are load-bearing:
 The scan is static and read-only. It never imports the production package.
 
 See Also:
-    :mod:`dev.audit.dead_code`
-        The heuristic vulture runner; it models no entry point at all.
     :mod:`dev.quality.unreachable_module_coverage`
         The zero-target gate over this audit's module findings.
 """

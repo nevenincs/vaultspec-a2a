@@ -63,7 +63,6 @@ out.txt
 build/
 docs/_build/
 data/
-!src/ui/src/app/data/
 
 # Runtime artifacts
 .vault/runtime/
@@ -71,6 +70,11 @@ data/
 
 # Scratch workspaces (test/audit throwaway)
 workspaces/
+
+# Acceptance run bundles are generated review evidence, written fresh by every
+# run. Only the approved bundle stays tracked.
+src/vaultspec_a2a/acceptance/tests/artifacts/runs/*/*
+!src/vaultspec_a2a/acceptance/tests/artifacts/runs/*/deterministic-completion-c0e019c275e241c4991bcca2c6047316/
 
 # Stray Python installations
 Python/

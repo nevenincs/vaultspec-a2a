@@ -339,16 +339,6 @@ check-exports:
 check-complexity:
     {{dev}} lint complexity
 
-# Gate cyclomatic complexity.
-[group('check')]
-check-cyclomatic:
-    {{dev}} lint cyclomatic
-
-# Gate function and class shape.
-[group('check')]
-check-shape:
-    {{dev}} lint shape
-
 # Gate the declared design limits.
 [group('check')]
 check-limits:
@@ -455,11 +445,6 @@ audit-deps:
 audit-security:
     {{dev}} audit security
 
-# Report unreachable code; advisory, exits 0.
-[group('audit')]
-audit-dead-code:
-    {{dev}} audit dead-code
-
 # Report copy-paste clones; advisory, exits 0.
 [group('audit')]
 audit-duplication:
@@ -469,11 +454,6 @@ audit-duplication:
 [group('audit')]
 audit-reachability:
     {{dev}} audit reachability
-
-# Print the reachability burndown as one integer; scan failures return nonzero.
-[group('audit')]
-audit-dead-code-burndown:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.audit.dead_code_burndown
 
 # Print every type diagnostic verbatim, behind the grouped gate's summary.
 [group('audit')]

@@ -3,11 +3,8 @@
 
 # ── Source code ──────────────────────────────────────────────────────
 *.py        text diff=python
-*.ts        text
-*.tsx       text
 *.js        text
 *.mjs       text
-*.css       text
 *.html      text
 *.md        text diff=markdown
 *.yaml      text
@@ -21,7 +18,6 @@
 *.gitattributes  text
 *.dockerignore   text
 *.npmrc          text
-*.prettierrc     text
 *.geminiignore   text
 .python-version  text
 Dockerfile       text
@@ -29,9 +25,6 @@ Justfile         text
 
 # ── Lock files (exact byte-for-byte) ────────────────────────────────
 *.lock      text -diff linguist-generated
-
-# ── Build / generated (do not show in diffs by default) ─────────────
-src/ui/dist/** -diff linguist-generated
 
 # >>> vaultspec-managed (do not edit this block) >>>
 * text=auto eol=lf

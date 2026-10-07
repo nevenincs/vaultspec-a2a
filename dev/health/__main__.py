@@ -15,10 +15,8 @@ import argparse
 import sys
 
 from dev.health.report import (
-    GATED,
     PACKAGE,
     TOP_N,
-    Dimension,
     measure,
     render_census,
     render_json,
@@ -46,16 +44,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="list every offender rather than the worst few",
     )
-    group.add_argument(
-        "--gate",
-        metavar="DIMENSION",
-        nargs="?",
-        const="",
-        help=(
-            "exit 1 when a dimension has any offender; names one dimension, or "
-            f"gates all of {', '.join(GATED)} when given no value"
-        ),
-    )
     parser.add_argument(
         "--top",
         type=int,
@@ -76,47 +64,8 @@ def main(argv: list[str] | None = None) -> int:
         print(render_json(dimensions))
     elif args.census:
         print(render_census(dimensions))
-    elif args.gate is not None:
-        return _gate(dimensions, args.gate, top_n=args.top)
     else:
         print(render_report(dimensions, top_n=args.top))
-    return 0
-
-
-def _gate(dimensions: list[Dimension], selected: str, *, top_n: int) -> int:
-    """Report the selected dimensions and exit non-zero when any has offenders.
-
-    Args:
-        dimensions: The measured dimensions.
-        selected: One dimension key, or ``""`` for every gated dimension.
-        top_n: How many offenders to list per dimension.
-
-    Returns:
-        1 when any selected dimension has an offender, otherwise 0. Unlike
-        every other rendering here, this one is a GATE - it is what makes
-        ``just check-cyclomatic`` fail a build.
-    """
-    keys = (selected,) if selected else GATED
-    known = {d.key for d in dimensions}
-    unknown = [key for key in keys if key not in known]
-    if unknown:
-        print(
-            f"unknown health dimension(s): {', '.join(unknown)}\n"
-            f"  dimensions: {', '.join(sorted(known))}",
-            file=sys.stderr,
-        )
-        return 2
-
-    chosen = [d for d in dimensions if d.key in set(keys)]
-    print(render_report(chosen, top_n=top_n, gating=True))
-    breached = [d for d in chosen if d.offenders]
-    if breached:
-        print(
-            "\nGATE FAILED: "
-            + ", ".join(f"{d.title} ({len(d.offenders)} over)" for d in breached),
-            file=sys.stderr,
-        )
-        return 1
     return 0
 
 

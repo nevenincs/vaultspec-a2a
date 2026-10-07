@@ -34,7 +34,7 @@ heartbeat = true
 # store). {workspace} is the explicit data seat threaded to the wrapper, which
 # launches the engine with cwd there; an unset seat is refused.
 require_repo = true
-serve = ["{python}", "scripts/engine_serve.py", "--port", "{port}", "--workspace", "{workspace}"]
+serve = ["{python}", "-m", "vaultspec_a2a.lifecycle.engine_serve", "--port", "{port}", "--workspace", "{workspace}"]
 staleness_ms = 120000
 
 [roles.gateway-dev]

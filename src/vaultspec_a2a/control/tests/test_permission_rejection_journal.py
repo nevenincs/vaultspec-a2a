@@ -82,7 +82,7 @@ async def _respond(
         worker_port=9,
         auto_spawn=False,
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
     async with httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client:
         return await respond_to_permission(

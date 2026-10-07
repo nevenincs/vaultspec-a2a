@@ -434,7 +434,7 @@ def make_app(
         worker_port=8001,
         auto_spawn=False,
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     app.state.worker_spawner = spawner
     app.state.db_session_factory = session_factory
 

@@ -43,7 +43,7 @@ class WorkerReadySpec:
 
 async def _await_worker_ready(
     process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
+    containment: ProcessContainment,
     spec: WorkerReadySpec,
 ) -> subprocess.Popen[bytes] | None:
     """Seat the spawned worker in its containment and wait for it to be ours.
@@ -70,7 +70,7 @@ async def _await_worker_ready(
 
 async def _await_worker_ready_inner(
     process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
+    containment: ProcessContainment,
     spec: WorkerReadySpec,
 ) -> subprocess.Popen[bytes] | None:
     """Seat and poll the worker; see :func:`_await_worker_ready` for the guard."""
@@ -79,12 +79,11 @@ async def _await_worker_ready_inner(
     generation = spec.generation
     worker_command = spec.worker_command
     stderr_log_path = spec.stderr_log_path
-    if containment is not None:
-        # Assign the worker to its containment before it boots far enough to spawn
-        # any descendant (provider roots, MCP bridges). A worker this gateway owns
-        # is not admitted without durable tree authority: otherwise a descendant
-        # created during cooperative exit can outlive a root that exits first.
-        containment.assign_process(process)
+    # Assign the worker to its containment before it boots far enough to spawn
+    # any descendant (provider roots, MCP bridges). A worker this gateway owns is
+    # not admitted without durable tree authority: otherwise a descendant created
+    # during cooperative exit can outlive a root that exits first.
+    containment.assign_process(process)
     logger.info(
         "Worker process spawned (PID %d) via `%s` with stderr at %s",
         process.pid,
@@ -161,7 +160,7 @@ async def _await_worker_ready_inner(
 
 async def _reap_unready_worker(
     process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
+    containment: ProcessContainment,
 ) -> None:
     """Reap a worker that spawned but never became ready, tree and all.
 

@@ -593,7 +593,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
         spawner = LazyWorkerSpawner(
             worker_url="http://test-worker:8001", worker_port=8001, auto_spawn=False
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         await redispatch_reconciling_threads(
             worker.client,
             WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=30.0),

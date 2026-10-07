@@ -325,7 +325,7 @@ async def test_the_recovery_sweep_refuses_the_queue_of_a_run_it_fails(
         spawner = LazyWorkerSpawner(
             worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:9", timeout=0.2
         ) as client:

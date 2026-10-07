@@ -21,6 +21,7 @@ rather than skipped, and the portable contract tests carry the invariant there.
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
 from typing import TYPE_CHECKING
 
@@ -107,10 +108,9 @@ async def test_an_adopted_worker_hands_back_no_containment_to_own(
     remember to drop, and did, while the handle behind it stayed open.
     """
     with _worker_like(_owned_body(1)) as (url, port, _flag), _armed_desktop(tmp_path):
-        process, containment = await _spawn_worker_owned(url, port, generation=1)
+        owned = await _spawn_worker_owned(url, port, generation=1)
 
-    assert process is None
-    assert containment is None
+    assert owned is None
 
 
 @pytest.mark.asyncio
@@ -125,10 +125,9 @@ async def test_an_unevictable_occupant_hands_back_no_containment_to_own(
     standing condition, retried on every dispatch.
     """
     with _worker_like(_foreign_body()) as (url, port, _flag), _armed_desktop(tmp_path):
-        process, containment = await _spawn_worker_owned(url, port, generation=1)
+        owned = await _spawn_worker_owned(url, port, generation=1)
 
-    assert process is None
-    assert containment is None
+    assert owned is None
 
 
 def test_posix_containment_holds_no_handle_to_leak() -> None:
@@ -197,21 +196,24 @@ def test_replacing_the_worker_handle_releases_the_containment_it_drops() -> None
     containment is dropped. The restart path reaches it after shutting the old
     worker down - but only when that worker was still running, and the commonest
     restart trigger is the opposite case, a worker that already exited. Its
-    handle would otherwise be overwritten with nothing left to close it.
+    handle would otherwise be overwritten with nothing left to close it, so the
+    replaced worker here is a real process that has already exited.
     """
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
+    exited = subprocess.Popen([sys.executable, "-c", "pass"])
+    exited.wait(timeout=30)
     try:
         for _ in range(5):
-            spawner.replace_process(None, ProcessContainment.create())
+            spawner.replace_process(exited, ProcessContainment.create())
 
         before = _open_handle_count()
         for _ in range(_LEAK_ITERATIONS):
-            spawner.replace_process(None, ProcessContainment.create())
+            spawner.replace_process(exited, ProcessContainment.create())
         growth = _open_handle_count() - before
     finally:
-        spawner.replace_process(None)
+        spawner.adopt_worker()
 
     assert growth <= _LEAK_TOLERANCE, (
         f"{_LEAK_ITERATIONS} handle replacements grew the handle count by "

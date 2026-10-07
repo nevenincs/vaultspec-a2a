@@ -15,12 +15,13 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from ...conftest import materialize_schema
+from ...conftest import SqlitePosture
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import (
@@ -44,7 +45,6 @@ from ...database import (
     update_thread_status,
 )
 from ...database.models import ControlActionModel, ThreadModel
-from ...database.session import configure_sqlite_transactions
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...streaming.sse_frames import enforce_progress_allowlist
@@ -521,22 +521,20 @@ async def _assert_cancel_applied(db_file: Path, action_id: str, thread_id: str) 
 
 
 @pytest.mark.asyncio
-async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) -> None:
+@pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS, timeout=0)
+async def test_terminal_election_busy_retries_same_receipt_once(
+    database_file: Path,
+    engine: AsyncEngine,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """A busy terminal election can recover through the bounded bridge retry."""
-    db_file = materialize_schema(tmp_path / "terminal-election-contention.db")
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{db_file}",
-        connect_args={"timeout": 0},
-    )
-    configure_sqlite_transactions(engine)
-    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    blocker = sqlite3.connect(str(db_file), isolation_level=None, timeout=0)
+    blocker = sqlite3.connect(str(database_file), isolation_level=None, timeout=0)
     attempts: list[dict[str, Any]] = []
     busy_errors: list[str] = []
-    app = _busy_once_control_app(sessions, blocker, attempts, busy_errors)
+    app = _busy_once_control_app(session_factory, blocker, attempts, busy_errors)
 
     action_id = await _seed_current_cancel(
-        sessions,
+        session_factory,
         thread_id="terminal-election-contention",
         dispatch_id="terminal-election-receipt",
     )
@@ -576,7 +574,9 @@ async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) 
         "terminal-election-receipt"
     )
 
-    await _assert_cancel_applied(db_file, action_id, "terminal-election-contention")
+    await _assert_cancel_applied(
+        database_file, action_id, "terminal-election-contention"
+    )
 
 
 @pytest.mark.asyncio

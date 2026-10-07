@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import event, func, select, update
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.pool import QueuePool
 
 from ...tests._write_authority import make_test_write_authority
@@ -29,9 +28,7 @@ from ..run_event_repository import RunEventRecord, RunEventStore
 from ..thread_repository import create_thread
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 _RUN = "replay-store-proof"
 _OTHER = "replay-store-neighbour"
@@ -81,7 +78,7 @@ async def _sequences(
 
 @pytest.mark.asyncio
 async def test_a_batch_is_appended_and_read_strictly_after_a_cursor(
-    migrated_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """One append call stores the whole batch; a read resumes past the cursor."""
     await _seed_threads(migrated_session_factory, _RUN, _OTHER)
@@ -109,7 +106,7 @@ async def test_a_batch_is_appended_and_read_strictly_after_a_cursor(
 
 @pytest.mark.asyncio
 async def test_a_retried_batch_leaves_exactly_one_frame_per_sequence(
-    migrated_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A flush replayed after a partial failure recovers instead of failing."""
     await _seed_threads(migrated_session_factory, _RUN)
@@ -124,7 +121,7 @@ async def test_a_retried_batch_leaves_exactly_one_frame_per_sequence(
 
 @pytest.mark.asyncio
 async def test_the_high_water_mark_is_per_run_and_absent_when_nothing_is_retained(
-    migrated_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The mark answers for one run, and says nothing rather than zero when empty."""
     await _seed_threads(migrated_session_factory, _RUN, _OTHER)
@@ -142,7 +139,7 @@ async def test_the_high_water_mark_is_per_run_and_absent_when_nothing_is_retaine
 
 @pytest.mark.asyncio
 async def test_the_settled_cursor_is_readable_when_the_log_holds_nothing(
-    migrated_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The second seed source answers for a run whose window has already expired."""
     await _seed_threads(migrated_session_factory, _RUN)
@@ -163,7 +160,7 @@ async def test_the_settled_cursor_is_readable_when_the_log_holds_nothing(
 
 @pytest.mark.asyncio
 async def test_the_window_trim_keeps_the_newest_rows_of_one_run(
-    migrated_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The bound applies per run, in the appending batch, and never over-deletes."""
     await _seed_threads(migrated_session_factory, _RUN, _OTHER)
@@ -187,7 +184,7 @@ async def test_the_window_trim_keeps_the_newest_rows_of_one_run(
 
 @pytest.mark.asyncio
 async def test_the_age_bound_deletes_only_frames_produced_before_the_cutoff(
-    migrated_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Deletion is by the frame's own allocation stamp, across every run."""
     await _seed_threads(migrated_session_factory, _RUN, _OTHER)
@@ -216,7 +213,8 @@ async def test_the_age_bound_deletes_only_frames_produced_before_the_cutoff(
 
 @pytest.mark.asyncio
 async def test_the_whole_batch_is_appended_as_one_executemany(
-    migrated_engine: AsyncEngine, tmp_path: Path
+    migrated_engine: AsyncEngine,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The flush costs one round trip, which is what puts it behind the fan-out.
 
@@ -236,9 +234,8 @@ async def test_the_whole_batch_is_appended_as_one_executemany(
     ) -> None:
         statements.append((statement, executemany))
 
-    factory = async_sessionmaker(migrated_engine, expire_on_commit=False)
-    await _seed_threads(factory, _RUN)
-    store = RunEventStore(factory)
+    await _seed_threads(migrated_session_factory, _RUN)
+    store = RunEventStore(migrated_session_factory)
 
     event.listen(
         migrated_engine.sync_engine, "before_cursor_execute", _record_statement
@@ -250,7 +247,7 @@ async def test_the_whole_batch_is_appended_as_one_executemany(
             migrated_engine.sync_engine, "before_cursor_execute", _record_statement
         )
 
-    assert await _sequences(factory, _RUN) == [1, 2, 3, 4, 5]
+    assert await _sequences(migrated_session_factory, _RUN) == [1, 2, 3, 4, 5]
 
     inserts = [
         (statement, executemany)
@@ -263,12 +260,12 @@ async def test_the_whole_batch_is_appended_as_one_executemany(
 
 @pytest.mark.asyncio
 async def test_a_replay_read_releases_its_pooled_connection_before_returning(
-    migrated_engine: AsyncEngine, tmp_path: Path
+    migrated_engine: AsyncEngine,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The stream's own read must not pin a connection for the viewer's lifetime."""
-    factory = async_sessionmaker(migrated_engine, expire_on_commit=False)
-    await _seed_threads(factory, _RUN)
-    store = RunEventStore(factory)
+    await _seed_threads(migrated_session_factory, _RUN)
+    store = RunEventStore(migrated_session_factory)
     await store.append([_record(index) for index in range(1, 4)])
 
     pool = migrated_engine.pool

@@ -145,64 +145,62 @@ def _answer_for(parked: Any) -> object:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_two_approvals_in_one_worker_turn_both_apply() -> None:
+async def test_two_approvals_in_one_worker_turn_both_apply(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """A turn needing a second tool approval finishes it."""
     thread_id = "resume-two-approvals"
     answered: dict[str, str] = {}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-        await checkpointer.setup()
-        bridge = _make_bridge()
-        executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        try:
-            ingest = _current_ingest_dispatch(thread_id)
-            graph = _install_two_permission_graph(executor, ingest, answered)
-            config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    bridge = _make_bridge()
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        ingest = _current_ingest_dispatch(thread_id)
+        graph = _install_two_permission_graph(executor, ingest, answered)
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 
-            await executor.handle_dispatch(ingest)
-            first_park = (await graph.aget_state(config)).interrupts
-            assert [park.value["tool_name"] for park in first_park] == ["Edit"]
+        await executor.handle_dispatch(ingest)
+        first_park = (await graph.aget_state(config)).interrupts
+        assert [park.value["tool_name"] for park in first_park] == ["Edit"]
 
-            await executor.handle_dispatch(
-                _resume_dispatch(
-                    ingest, ordinal=1, resume_value=_answer_for(first_park[0])
-                )
-            )
-            second_park = (await graph.aget_state(config)).interrupts
-            assert [park.value["tool_name"] for park in second_park] == ["Bash"]
+        await executor.handle_dispatch(
+            _resume_dispatch(ingest, ordinal=1, resume_value=_answer_for(first_park[0]))
+        )
+        second_park = (await graph.aget_state(config)).interrupts
+        assert [park.value["tool_name"] for park in second_park] == ["Bash"]
 
-            second = _resume_dispatch(
-                ingest, ordinal=2, resume_value=_answer_for(second_park[0])
-            )
-            await executor.handle_dispatch(second)
+        second = _resume_dispatch(
+            ingest, ordinal=2, resume_value=_answer_for(second_park[0])
+        )
+        await executor.handle_dispatch(second)
 
-            # The run finished, so both calls were answered and neither
-            # resume was refused by the channel the receipts land on.
-            final = await graph.aget_state(config)
-            assert final.next == ()
-            assert final.interrupts == ()
-            assert answered == {"Edit": "allow_once", "Bash": "allow_once"}
+        # The run finished, so both calls were answered and neither
+        # resume was refused by the channel the receipts land on.
+        final = await graph.aget_state(config)
+        assert final.next == ()
+        assert final.interrupts == ()
+        assert answered == {"Edit": "allow_once", "Bash": "allow_once"}
 
-            # The checkpoint names the action that last reached the graph,
-            # and holds an incorporation receipt for every action that did.
-            durable = await checkpointer.aget_tuple(config)
-            assert durable is not None
-            values = durable.checkpoint["channel_values"]
-            receipt = second.require_graph_action_receipt()
-            assert values["active_graph_action_receipt"] == receipt.model_dump(
-                mode="json"
-            )
-            assert set(values["graph_action_receipts"]) == {
-                ingest.dispatch_id,
-                f"{thread_id}-resume-1",
-                f"{thread_id}-resume-2",
-            }
-        finally:
-            await bridge.close()
-            await executor.shutdown()
+        # The checkpoint names the action that last reached the graph,
+        # and holds an incorporation receipt for every action that did.
+        durable = await checkpointer.aget_tuple(config)
+        assert durable is not None
+        values = durable.checkpoint["channel_values"]
+        receipt = second.require_graph_action_receipt()
+        assert values["active_graph_action_receipt"] == receipt.model_dump(mode="json")
+        assert set(values["graph_action_receipts"]) == {
+            ingest.dispatch_id,
+            f"{thread_id}-resume-1",
+            f"{thread_id}-resume-2",
+        }
+    finally:
+        await bridge.close()
+        await executor.shutdown()
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_resume_that_only_asks_again_reports_its_application() -> None:
+async def test_a_resume_that_only_asks_again_reports_its_application(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """An answer that parks the turn on its next question still lands.
 
     The resume that settles the first approval leaves the run parked on the
@@ -215,40 +213,38 @@ async def test_a_resume_that_only_asks_again_reports_its_application() -> None:
     thread_id = "resume-asks-again-receipt"
     answered: dict[str, str] = {}
     relayed: list[dict[str, Any]] = []
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-        await checkpointer.setup()
-        bridge = _make_bridge(relayed=relayed)
-        executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        try:
-            ingest = _current_ingest_dispatch(thread_id)
-            graph = _install_two_permission_graph(executor, ingest, answered)
-            config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    bridge = _make_bridge(relayed=relayed)
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        ingest = _current_ingest_dispatch(thread_id)
+        graph = _install_two_permission_graph(executor, ingest, answered)
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 
-            await executor.handle_dispatch(ingest)
-            first_park = (await graph.aget_state(config)).interrupts
-            first = _resume_dispatch(
-                ingest, ordinal=1, resume_value=_answer_for(first_park[0])
-            )
-            await executor.handle_dispatch(first)
-            second_park = (await graph.aget_state(config)).interrupts
-            assert [park.value["tool_name"] for park in second_park] == ["Bash"]
-            await bridge.flush_events()
+        await executor.handle_dispatch(ingest)
+        first_park = (await graph.aget_state(config)).interrupts
+        first = _resume_dispatch(
+            ingest, ordinal=1, resume_value=_answer_for(first_park[0])
+        )
+        await executor.handle_dispatch(first)
+        second_park = (await graph.aget_state(config)).interrupts
+        assert [park.value["tool_name"] for park in second_park] == ["Bash"]
+        await bridge.flush_events()
 
-            applied = [
-                item["payload"]
-                for item in relayed
-                if item["payload"].get("type") == "dispatch_applied"
-            ]
-            assert [payload["dispatch_id"] for payload in applied] == [
-                ingest.dispatch_id,
-                first.dispatch_id,
-            ]
-            assert applied[1]["graph_action_receipt"] == (
-                first.require_graph_action_receipt().model_dump(mode="json")
-            )
-        finally:
-            await bridge.close()
-            await executor.shutdown()
+        applied = [
+            item["payload"]
+            for item in relayed
+            if item["payload"].get("type") == "dispatch_applied"
+        ]
+        assert [payload["dispatch_id"] for payload in applied] == [
+            ingest.dispatch_id,
+            first.dispatch_id,
+        ]
+        assert applied[1]["graph_action_receipt"] == (
+            first.require_graph_action_receipt().model_dump(mode="json")
+        )
+    finally:
+        await bridge.close()
+        await executor.shutdown()
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -344,7 +340,9 @@ def _install_blocking_permission_graph(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_resume_redelivered_after_its_turn_died_applies() -> None:
+async def test_a_resume_redelivered_after_its_turn_died_applies(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """A resume delivered twice to one parked checkpoint applies and completes.
 
     The first worker takes the answer, gets past the gate, and dies before its
@@ -355,67 +353,63 @@ async def test_a_resume_redelivered_after_its_turn_died_applies() -> None:
     """
     thread_id = "resume-redelivered"
     answered: list[str] = []
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-        await checkpointer.setup()
-        ingest = _current_ingest_dispatch(thread_id)
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-        past_the_gate = asyncio.Event()
-        stranded: list[asyncio.Task[Any]] = []
+    ingest = _current_ingest_dispatch(thread_id)
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    past_the_gate = asyncio.Event()
+    stranded: list[asyncio.Task[Any]] = []
 
-        before_bridge = _make_bridge()
-        before = Executor(checkpointer=checkpointer, bridge=before_bridge)
-        try:
-            graph = _install_blocking_permission_graph(
-                before,
-                ingest,
-                answered,
-                past_the_gate=past_the_gate,
-                stranded=stranded,
-            )
-            await before.handle_dispatch(ingest)
-            parked = (await graph.aget_state(config)).interrupts
-            resume = _resume_dispatch(
-                ingest, ordinal=1, resume_value=_answer_for(parked[0])
-            )
-            dispatch = asyncio.create_task(before.handle_dispatch(resume))
-            await asyncio.wait_for(past_the_gate.wait(), timeout=10.0)
-            # The worker goes away with the turn still inside the node, which
-            # is the window a crash lands in.
-            dispatch.cancel()
-            await asyncio.wait([dispatch], timeout=10.0)
-            for task in stranded:
-                task.cancel()
-            await asyncio.wait(stranded, timeout=10.0)
-            assert answered == ["allow_once"]
-        finally:
-            await before_bridge.close()
-            await before.shutdown()
+    before_bridge = _make_bridge()
+    before = Executor(checkpointer=checkpointer, bridge=before_bridge)
+    try:
+        graph = _install_blocking_permission_graph(
+            before,
+            ingest,
+            answered,
+            past_the_gate=past_the_gate,
+            stranded=stranded,
+        )
+        await before.handle_dispatch(ingest)
+        parked = (await graph.aget_state(config)).interrupts
+        resume = _resume_dispatch(
+            ingest, ordinal=1, resume_value=_answer_for(parked[0])
+        )
+        dispatch = asyncio.create_task(before.handle_dispatch(resume))
+        await asyncio.wait_for(past_the_gate.wait(), timeout=10.0)
+        # The worker goes away with the turn still inside the node, which
+        # is the window a crash lands in.
+        dispatch.cancel()
+        await asyncio.wait([dispatch], timeout=10.0)
+        for task in stranded:
+            task.cancel()
+        await asyncio.wait(stranded, timeout=10.0)
+        assert answered == ["allow_once"]
+    finally:
+        await before_bridge.close()
+        await before.shutdown()
 
-        # Nothing committed, so the run is still waiting on the same request.
-        still_parked = (await graph.aget_state(config)).interrupts
-        assert [park.value["tool_name"] for park in still_parked] == ["Edit"]
+    # Nothing committed, so the run is still waiting on the same request.
+    still_parked = (await graph.aget_state(config)).interrupts
+    assert [park.value["tool_name"] for park in still_parked] == ["Edit"]
 
-        after_bridge = _make_bridge()
-        after = Executor(checkpointer=checkpointer, bridge=after_bridge)
-        try:
-            graph = _install_blocking_permission_graph(after, ingest, answered)
-            await after.handle_dispatch(resume)
+    after_bridge = _make_bridge()
+    after = Executor(checkpointer=checkpointer, bridge=after_bridge)
+    try:
+        graph = _install_blocking_permission_graph(after, ingest, answered)
+        await after.handle_dispatch(resume)
 
-            # The redelivery ran the turn to the end rather than failing it,
-            # and the thread's state is still readable - which is what the
-            # gateway, recovery and every status read depend on.
-            final = await graph.aget_state(config)
-            assert final.next == ()
-            assert final.interrupts == ()
-            assert answered == ["allow_once", "allow_once"]
+        # The redelivery ran the turn to the end rather than failing it,
+        # and the thread's state is still readable - which is what the
+        # gateway, recovery and every status read depend on.
+        final = await graph.aget_state(config)
+        assert final.next == ()
+        assert final.interrupts == ()
+        assert answered == ["allow_once", "allow_once"]
 
-            durable = await checkpointer.aget_tuple(config)
-            assert durable is not None
-            receipt = resume.require_graph_action_receipt()
-            values = durable.checkpoint["channel_values"]
-            assert values["active_graph_action_receipt"] == receipt.model_dump(
-                mode="json"
-            )
-        finally:
-            await after_bridge.close()
-            await after.shutdown()
+        durable = await checkpointer.aget_tuple(config)
+        assert durable is not None
+        receipt = resume.require_graph_action_receipt()
+        values = durable.checkpoint["channel_values"]
+        assert values["active_graph_action_receipt"] == receipt.model_dump(mode="json")
+    finally:
+        await after_bridge.close()
+        await after.shutdown()

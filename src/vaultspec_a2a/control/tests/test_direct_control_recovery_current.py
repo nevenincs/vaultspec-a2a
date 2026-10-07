@@ -13,7 +13,6 @@ import httpx
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 
 from ...conftest import SqlitePosture
@@ -57,6 +56,7 @@ from ..recovery import seed_recovery_attempts
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...providers.team_selection import FrozenLaneAssignment
@@ -634,7 +634,7 @@ def _dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @asynccontextmanager
 async def _worker_already_running(
-    checkpoint_path: Path, thread_id: str
+    checkpointer: AsyncSqliteSaver, thread_id: str
 ) -> AsyncGenerator[httpx.AsyncClient]:
     """Serve the production worker app with one run's slot genuinely taken.
 
@@ -642,25 +642,23 @@ async def _worker_already_running(
     the recovery pass meets is the refusal the worker composes for a run it is
     already executing rather than a status written here.
     """
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        bridge = WorkerBridge("http://control", "direct-control-recovery-test")
-        executor = Executor(saver, bridge)
-        reservation, _reason = await executor.reserve_dispatch_capacity(thread_id)
-        assert reservation is not None
-        app = create_worker_app()
-        app.state.executor = executor
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as client:
-                yield client
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
+    bridge = WorkerBridge("http://control", "direct-control-recovery-test")
+    executor = Executor(checkpointer, bridge)
+    reservation, _reason = await executor.reserve_dispatch_capacity(thread_id)
+    assert reservation is not None
+    app = create_worker_app()
+    app.state.executor = executor
+    async with anyio.create_task_group() as tasks:
+        app.state.task_group = tasks
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://worker",
+            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
+        ) as client:
+            yield client
+        tasks.cancel_scope.cancel()
+    await executor.shutdown()
+    await bridge.close()
 
 
 @pytest.mark.asyncio
@@ -668,6 +666,7 @@ async def _worker_already_running(
 async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A worker executing this run is reporting work in flight, not refusing it.
 
@@ -683,9 +682,7 @@ async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
         await _persist_case(db, case)
         await db.commit()
 
-    async with _worker_already_running(
-        tmp_path / "busy-worker.db", case.thread_id
-    ) as client:
+    async with _worker_already_running(checkpointer, case.thread_id) as client:
         summary = await redrive_direct_control_actions(
             session_factory,
             worker_client=client,

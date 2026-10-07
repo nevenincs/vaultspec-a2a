@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
 from ...control.execution_authority import resolve_execution_authority
@@ -19,6 +18,8 @@ from .test_executor import _make_bridge
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
 def _definition(tmp_path: Path) -> FrozenGraphDefinition:
@@ -43,7 +44,7 @@ def test_partial_executable_authority_is_refused(tmp_path: Path, damage: str) ->
 
 @pytest.mark.asyncio
 async def test_worker_compiles_accepted_program_after_files_change(
-    tmp_path: Path,
+    tmp_path: Path, checkpointer: AsyncSqliteSaver
 ) -> None:
     definition = _definition(tmp_path)
     request = DispatchRequest(
@@ -65,24 +66,23 @@ async def test_worker_compiles_accepted_program_after_files_change(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("invalid toml [", encoding="utf-8")
     bridge = _make_bridge()
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "graph.db")) as saver:
-        executor = Executor(saver, bridge)
-        try:
-            graph = await executor._graph_lifecycle.get_or_compile_graph(request)
-            assert graph is not None
-            budgets = {
-                node.timeout.run_timeout
-                for name, node in cast("Any", graph).nodes.items()
-                if not name.startswith("__")
-            }
-            assert budgets == {60}
-            changed = definition.model_dump(mode="json")
-            changed["team"]["graph"]["step_timeout_seconds"] = 61
-            replacement = FrozenGraphDefinition.model_validate(changed)
-            with pytest.raises(GraphCompilationError, match="bound run"):
-                await executor._graph_lifecycle.get_or_compile_graph(
-                    request.model_copy(update={"graph_definition": replacement})
-                )
-        finally:
-            await executor.shutdown()
-            await bridge.close()
+    executor = Executor(checkpointer, bridge)
+    try:
+        graph = await executor._graph_lifecycle.get_or_compile_graph(request)
+        assert graph is not None
+        budgets = {
+            node.timeout.run_timeout
+            for name, node in cast("Any", graph).nodes.items()
+            if not name.startswith("__")
+        }
+        assert budgets == {60}
+        changed = definition.model_dump(mode="json")
+        changed["team"]["graph"]["step_timeout_seconds"] = 61
+        replacement = FrozenGraphDefinition.model_validate(changed)
+        with pytest.raises(GraphCompilationError, match="bound run"):
+            await executor._graph_lifecycle.get_or_compile_graph(
+                request.model_copy(update={"graph_definition": replacement})
+            )
+    finally:
+        await executor.shutdown()
+        await bridge.close()

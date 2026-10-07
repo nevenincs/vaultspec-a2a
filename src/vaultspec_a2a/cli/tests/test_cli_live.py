@@ -16,17 +16,12 @@ child process has its own clean stdout.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any
-
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from typing import TYPE_CHECKING, Any
 
 from ...api.tests.conftest import SEATED_ATTACH_TOKEN, make_app
-from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
 from ...testing import (
     fetch_in_process_selection_at,
@@ -34,43 +29,11 @@ from ...testing import (
     serve_on_loopback_in_thread,
 )
 
+if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 _PRESET = "mock-success-single"
-
-
-class _GatewayFixture:
-    """Build the real gateway app on a dedicated loop and keep its DB alive."""
-
-    def __init__(self, tmp_path: Any) -> None:
-        self._tmp = tmp_path
-        self._loop = asyncio.new_event_loop()
-        self._cp_cm: Any = None
-        self._engine: Any = None
-        self.app: Any = None
-        self.worker: Any = None
-
-    def __enter__(self) -> _GatewayFixture:
-        self._engine = self._loop.run_until_complete(self._make_engine())
-        session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
-        self._cp_cm = AsyncSqliteSaver.from_conn_string(
-            str(self._tmp / "checkpoints.db")
-        )
-        checkpointer = self._loop.run_until_complete(self._cp_cm.__aenter__())
-        self.app, _agg, self.worker, _cp = make_app(
-            session_factory, checkpointer, stamp_credentials=False
-        )
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        if self._cp_cm is not None:
-            self._loop.run_until_complete(self._cp_cm.__aexit__(None, None, None))
-        if self._engine is not None:
-            self._loop.run_until_complete(self._engine.dispose())
-        self._loop.close()
-
-    async def _make_engine(self) -> Any:
-        materialize_schema(Path(self._tmp / "test.db"))
-        engine = create_async_engine(f"sqlite+aiosqlite:///{self._tmp / 'test.db'}")
-        return engine
 
 
 def _in_process_lane_arguments(base: str) -> dict[str, str]:
@@ -110,65 +73,76 @@ _SEATED_TOKEN_ENV = {
 }
 
 
-def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
+def test_cli_uses_matching_loopback_discovery_token(
+    tmp_path: Any,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """A separate CLI process authenticates from the resident service record."""
     token = "cli-discovery-token"
-    with _GatewayFixture(tmp_path) as gw:
-        gw.app.state.v1_service_token = token
-        with serve_on_loopback_in_thread(gw.app) as base:
-            port = int(base.rsplit(":", 1)[1])
-            a2a_home = tmp_path / "cli-a2a-home"
-            write_service_json(
-                service_json_path(a2a_home),
-                port=port,
-                pid=os.getpid(),
-                service_token=token,
-            )
-            result = run_cli(
-                "presets",
-                "--url",
-                base,
-                env={**_NO_WORKER_CREDENTIAL, "VAULTSPEC_A2A_HOME": str(a2a_home)},
-            )
+    app = make_app(session_factory, checkpointer, stamp_credentials=False)[0]
+    app.state.v1_service_token = token
+    with serve_on_loopback_in_thread(app) as base:
+        port = int(base.rsplit(":", 1)[1])
+        a2a_home = tmp_path / "cli-a2a-home"
+        write_service_json(
+            service_json_path(a2a_home),
+            port=port,
+            pid=os.getpid(),
+            service_token=token,
+        )
+        result = run_cli(
+            "presets",
+            "--url",
+            base,
+            env={**_NO_WORKER_CREDENTIAL, "VAULTSPEC_A2A_HOME": str(a2a_home)},
+        )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["api_version"] == "v1"
 
 
-def test_configured_cli_token_precedes_matching_discovery_token(tmp_path: Any) -> None:
+def test_configured_cli_token_precedes_matching_discovery_token(
+    tmp_path: Any,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """Explicit operator configuration remains the authentication authority."""
     configured = "configured-cli-token"
-    with _GatewayFixture(tmp_path) as gw:
-        gw.app.state.v1_service_token = configured
-        with serve_on_loopback_in_thread(gw.app) as base:
-            port = int(base.rsplit(":", 1)[1])
-            a2a_home = tmp_path / "configured-cli-a2a-home"
-            write_service_json(
-                service_json_path(a2a_home),
-                port=port,
-                pid=os.getpid(),
-                service_token="discovery-token-must-not-win",
-            )
-            result = run_cli(
-                "presets",
-                "--url",
-                base,
-                env={
-                    **_NO_WORKER_CREDENTIAL,
-                    "VAULTSPEC_A2A_HOME": str(a2a_home),
-                    "VAULTSPEC_A2A_GATEWAY_TOKEN": configured,
-                },
-            )
+    app = make_app(session_factory, checkpointer, stamp_credentials=False)[0]
+    app.state.v1_service_token = configured
+    with serve_on_loopback_in_thread(app) as base:
+        port = int(base.rsplit(":", 1)[1])
+        a2a_home = tmp_path / "configured-cli-a2a-home"
+        write_service_json(
+            service_json_path(a2a_home),
+            port=port,
+            pid=os.getpid(),
+            service_token="discovery-token-must-not-win",
+        )
+        result = run_cli(
+            "presets",
+            "--url",
+            base,
+            env={
+                **_NO_WORKER_CREDENTIAL,
+                "VAULTSPEC_A2A_HOME": str(a2a_home),
+                "VAULTSPEC_A2A_GATEWAY_TOKEN": configured,
+            },
+        )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["api_version"] == "v1"
 
 
-def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
-    with (
-        _GatewayFixture(tmp_path) as gw,
-        serve_on_loopback_in_thread(gw.app) as base,
-    ):
+def test_cli_verbs_against_live_gateway(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    app, _aggregator, worker, _checkpointer = make_app(
+        session_factory, checkpointer, stamp_credentials=False
+    )
+    with serve_on_loopback_in_thread(app) as base:
         # presets-list
         presets = run_cli("presets", "--url", base, env=_SEATED_TOKEN_ENV)
         assert presets.returncode == 0, presets.stdout + presets.stderr
@@ -209,7 +183,7 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
         assert start.returncode == 0, start.stdout + start.stderr
         run_id = json.loads(start.stdout)["run_id"]
         assert run_id
-        assert gw.worker.dispatches, "run start must dispatch to the worker"
+        assert worker.dispatches, "run start must dispatch to the worker"
 
         status = run_cli("run", "status", run_id, "--url", base, env=_SEATED_TOKEN_ENV)
         assert status.returncode == 0, status.stdout + status.stderr
@@ -224,7 +198,10 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
         assert missing.returncode == 1
 
 
-def test_doctor_flags_a_resident_missing_a_route(tmp_path: Any) -> None:
+def test_doctor_flags_a_resident_missing_a_route(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """A real server genuinely missing a route reads as a stale resident.
 
     Simulates a resident gateway process started before ``run-stream``
@@ -242,24 +219,24 @@ def test_doctor_flags_a_resident_missing_a_route(tmp_path: Any) -> None:
     from ...api.routes.gateway import router as gateway_router
 
     stream_path = "/v1/runs/{run_id}/stream"
-    with _GatewayFixture(tmp_path) as gw:
-        stale_index = next(
-            i
-            for i, route in enumerate(gateway_router.routes)
-            if getattr(route, "path", None) == stream_path
-        )
-        stale_route = gateway_router.routes.pop(stale_index)
-        try:
-            with serve_on_loopback_in_thread(gw.app) as base:
-                doctor = run_cli("doctor", "--url", base, env=_SEATED_TOKEN_ENV)
-                # A distinct non-zero exit (not the generic transport-error 1)
-                # so automation catches a stale resident without parsing JSON.
-                assert doctor.returncode == 3, doctor.stderr
-                body = json.loads(doctor.stdout)
-                assert body["stale_resident"] is True
-                assert f"GET {stream_path}" in body["missing_routes"]
-        finally:
-            gateway_router.routes.insert(stale_index, stale_route)
+    app = make_app(session_factory, checkpointer, stamp_credentials=False)[0]
+    stale_index = next(
+        i
+        for i, route in enumerate(gateway_router.routes)
+        if getattr(route, "path", None) == stream_path
+    )
+    stale_route = gateway_router.routes.pop(stale_index)
+    try:
+        with serve_on_loopback_in_thread(app) as base:
+            doctor = run_cli("doctor", "--url", base, env=_SEATED_TOKEN_ENV)
+            # A distinct non-zero exit (not the generic transport-error 1)
+            # so automation catches a stale resident without parsing JSON.
+            assert doctor.returncode == 3, doctor.stderr
+            body = json.loads(doctor.stdout)
+            assert body["stale_resident"] is True
+            assert f"GET {stream_path}" in body["missing_routes"]
+    finally:
+        gateway_router.routes.insert(stale_index, stale_route)
 
 
 def test_cli_reports_unreachable_gateway_cleanly() -> None:

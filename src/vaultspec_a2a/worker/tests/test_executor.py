@@ -24,7 +24,6 @@ from fastapi.responses import Response
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import interrupt
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, Span, TracerProvider
@@ -74,6 +73,7 @@ from ..ipc import WorkerBridge
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from langgraph.types import Command
 
     from ...streaming.types import StreamableGraph
@@ -300,148 +300,145 @@ class TestIngestGating:
     """
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_first_mark_returns_true(self) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                result, reason = await executor.reserve_dispatch_capacity("t-1")
-                assert result is not None
-                assert reason == CAPACITY_ACCEPTED
-            finally:
-                await bridge.close()
+    async def test_first_mark_returns_true(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            result, reason = await executor.reserve_dispatch_capacity("t-1")
+            assert result is not None
+            assert reason == CAPACITY_ACCEPTED
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_second_mark_same_thread_returns_false(self) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                await executor.reserve_dispatch_capacity("t-1")
-                result, reason = await executor.reserve_dispatch_capacity("t-1")
-                assert result is None
-                assert reason == CAPACITY_THREAD_ACTIVE
-            finally:
-                await bridge.close()
+    async def test_second_mark_same_thread_returns_false(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            await executor.reserve_dispatch_capacity("t-1")
+            result, reason = await executor.reserve_dispatch_capacity("t-1")
+            assert result is None
+            assert reason == CAPACITY_THREAD_ACTIVE
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_stale_dispatch_release_cannot_remove_a_new_generation(
         self,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """A's late cleanup cannot erase B after B acquires the same thread."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                first, _reason = await executor.reserve_dispatch_capacity("aba-thread")
-                assert first is not None
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            first, _reason = await executor.reserve_dispatch_capacity("aba-thread")
+            assert first is not None
 
-                # Queue A's terminal release and B's reserve on the production
-                # lock in that order. Once A frees its generation, B becomes the
-                # current owner before A's outer-finally release arrives.
-                await executor._ingest_lock.acquire()
-                release_first = asyncio.create_task(
-                    executor.release_dispatch_capacity(first)
-                )
-                reserve_second = asyncio.create_task(
-                    executor.reserve_dispatch_capacity("aba-thread")
-                )
-                executor._ingest_lock.release()
-                assert await release_first is True
-                second, _second_reason = await reserve_second
-                assert second is not None
-                assert second != first
+            # Queue A's terminal release and B's reserve on the production
+            # lock in that order. Once A frees its generation, B becomes the
+            # current owner before A's outer-finally release arrives.
+            await executor._ingest_lock.acquire()
+            release_first = asyncio.create_task(
+                executor.release_dispatch_capacity(first)
+            )
+            reserve_second = asyncio.create_task(
+                executor.reserve_dispatch_capacity("aba-thread")
+            )
+            executor._ingest_lock.release()
+            assert await release_first is True
+            second, _second_reason = await reserve_second
+            assert second is not None
+            assert second != first
 
-                # The stale finalizer is ownership checked. Fill every remaining
-                # slot to prove B remains counted and an additional dispatch is
-                # refused at the configured process bound.
-                assert await executor.release_dispatch_capacity(first) is False
-                others: list[DispatchCapacityReservation] = []
-                for index in range(domain_config.max_concurrent_threads - 1):
-                    owned, _owned_reason = await executor.reserve_dispatch_capacity(
-                        f"other-{index}"
-                    )
-                    assert owned is not None
-                    others.append(owned)
-                assert (
-                    executor.active_ingest_count == domain_config.max_concurrent_threads
+            # The stale finalizer is ownership checked. Fill every remaining
+            # slot to prove B remains counted and an additional dispatch is
+            # refused at the configured process bound.
+            assert await executor.release_dispatch_capacity(first) is False
+            others: list[DispatchCapacityReservation] = []
+            for index in range(domain_config.max_concurrent_threads - 1):
+                owned, _owned_reason = await executor.reserve_dispatch_capacity(
+                    f"other-{index}"
                 )
-                assert await executor.reserve_dispatch_capacity("over-capacity") == (
-                    None,
-                    CAPACITY_FULL,
-                )
+                assert owned is not None
+                others.append(owned)
+            assert executor.active_ingest_count == domain_config.max_concurrent_threads
+            assert await executor.reserve_dispatch_capacity("over-capacity") == (
+                None,
+                CAPACITY_FULL,
+            )
 
-                assert await executor.release_dispatch_capacity(second) is True
-                for owned in others:
-                    assert await executor.release_dispatch_capacity(owned) is True
-                assert executor.active_ingest_count == 0
-            finally:
-                await bridge.close()
+            assert await executor.release_dispatch_capacity(second) is True
+            for owned in others:
+                assert await executor.release_dispatch_capacity(owned) is True
+            assert executor.active_ingest_count == 0
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_different_threads_both_succeed(self) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                assert (await executor.reserve_dispatch_capacity("t-1"))[0] is not None
-                assert (await executor.reserve_dispatch_capacity("t-2"))[0] is not None
-            finally:
-                await bridge.close()
+    async def test_different_threads_both_succeed(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            assert (await executor.reserve_dispatch_capacity("t-1"))[0] is not None
+            assert (await executor.reserve_dispatch_capacity("t-2"))[0] is not None
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_mark_done_releases_slot(self) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                reservation, _reason = await executor.reserve_dispatch_capacity("t-1")
-                assert reservation is not None
-                await executor._mark_ingest_done(
-                    "t-1", ThreadStatus.COMPLETED, reservation
-                )
-                # Slot is now free -- can re-acquire
-                result, _retry_reason = await executor.reserve_dispatch_capacity("t-1")
-                assert result is not None
-            finally:
-                await bridge.close()
+    async def test_mark_done_releases_slot(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            reservation, _reason = await executor.reserve_dispatch_capacity("t-1")
+            assert reservation is not None
+            await executor._mark_ingest_done("t-1", ThreadStatus.COMPLETED, reservation)
+            # Slot is now free -- can re-acquire
+            result, _retry_reason = await executor.reserve_dispatch_capacity("t-1")
+            assert result is not None
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_mark_done_untracks_thread_in_bridge(self) -> None:
+    async def test_mark_done_untracks_thread_in_bridge(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """mark_done must call bridge.untrack_thread -- verify via bridge state."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                # Simulate what _handle_ingest does: track before ingest
-                bridge.track_thread("t-1")
-                assert "t-1" in bridge.active_threads
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            # Simulate what _handle_ingest does: track before ingest
+            bridge.track_thread("t-1")
+            assert "t-1" in bridge.active_threads
 
-                await executor._mark_ingest_done("t-1", ThreadStatus.COMPLETED)
-                assert "t-1" not in bridge.active_threads
-            finally:
-                await bridge.close()
+            await executor._mark_ingest_done("t-1", ThreadStatus.COMPLETED)
+            assert "t-1" not in bridge.active_threads
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_mark_done_for_nonexistent_slot_is_safe(self) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                # Should not raise -- discard on empty set
-                await executor._mark_ingest_done("nonexistent", ThreadStatus.COMPLETED)
-            finally:
-                await bridge.close()
+    async def test_mark_done_for_nonexistent_slot_is_safe(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            # Should not raise -- discard on empty set
+            await executor._mark_ingest_done("nonexistent", ThreadStatus.COMPLETED)
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_mark_done_keeps_tokens_on_interrupt_drops_on_terminal(self) -> None:
+    async def test_mark_done_keeps_tokens_on_interrupt_drops_on_terminal(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Actor tokens survive an interrupt-park and drop only on termination.
 
         A document run parks at its first gate (``"interrupted"``) and later
@@ -449,30 +446,28 @@ class TestIngestGating:
         active-window close that drops them is the run's TERMINAL outcome, not the
         interrupt-park.
         """
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                executor.token_store.register(
-                    "t-doc",
-                    ActorTokenBundle(
-                        tokens={"vaultspec-synthesist": "tok-s"},
-                        engine_bearer="bearer-x",
-                    ),
-                )
-                # Parked at a gate: tokens must persist for the resume.
-                await executor._mark_ingest_done("t-doc", "interrupted")
-                assert executor.token_store.engine_bearer("t-doc") == "bearer-x"
-                assert (
-                    executor.token_store.actor_token("t-doc", "vaultspec-synthesist")
-                    == "tok-s"
-                )
-                # Terminal: the active window closes and tokens are dropped.
-                await executor._mark_ingest_done("t-doc", ThreadStatus.COMPLETED)
-                assert executor.token_store.engine_bearer("t-doc") is None
-            finally:
-                await bridge.close()
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            executor.token_store.register(
+                "t-doc",
+                ActorTokenBundle(
+                    tokens={"vaultspec-synthesist": "tok-s"},
+                    engine_bearer="bearer-x",
+                ),
+            )
+            # Parked at a gate: tokens must persist for the resume.
+            await executor._mark_ingest_done("t-doc", "interrupted")
+            assert executor.token_store.engine_bearer("t-doc") == "bearer-x"
+            assert (
+                executor.token_store.actor_token("t-doc", "vaultspec-synthesist")
+                == "tok-s"
+            )
+            # Terminal: the active window closes and tokens are dropped.
+            await executor._mark_ingest_done("t-doc", ThreadStatus.COMPLETED)
+            assert executor.token_store.engine_bearer("t-doc") is None
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     @pytest.mark.parametrize(
@@ -480,130 +475,118 @@ class TestIngestGating:
         [ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED],
     )
     async def test_every_terminal_outcome_releases_thread_identity(
-        self, outcome: ThreadStatus
+        self, outcome: ThreadStatus, checkpointer: AsyncSqliteSaver
     ) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                _inject_graph(executor, f"terminal-{outcome.value}")
-                assert executor._graph_lifecycle.thread_binding_count == 1
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            _inject_graph(executor, f"terminal-{outcome.value}")
+            assert executor._graph_lifecycle.thread_binding_count == 1
 
-                await executor._mark_ingest_done(f"terminal-{outcome.value}", outcome)
+            await executor._mark_ingest_done(f"terminal-{outcome.value}", outcome)
 
-                assert executor._graph_lifecycle.thread_binding_count == 0
-                assert not executor._graph_lifecycle.has_thread(
-                    f"terminal-{outcome.value}"
-                )
-                # The run's own graph is released with it.
-                assert executor.graph_count == 0
-            finally:
-                await bridge.close()
+            assert executor._graph_lifecycle.thread_binding_count == 0
+            assert not executor._graph_lifecycle.has_thread(f"terminal-{outcome.value}")
+            # The run's own graph is released with it.
+            assert executor.graph_count == 0
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_interrupted_thread_retains_identity_until_terminal(self) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                _inject_graph(executor, "parked-thread")
+    async def test_interrupted_thread_retains_identity_until_terminal(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            _inject_graph(executor, "parked-thread")
 
-                await executor._mark_ingest_done("parked-thread", "interrupted")
-                assert executor._graph_lifecycle.thread_binding_count == 1
-                assert executor._graph_lifecycle.has_thread("parked-thread")
+            await executor._mark_ingest_done("parked-thread", "interrupted")
+            assert executor._graph_lifecycle.thread_binding_count == 1
+            assert executor._graph_lifecycle.has_thread("parked-thread")
 
-                await executor._mark_ingest_done(
-                    "parked-thread", ThreadStatus.CANCELLED
-                )
-                assert executor._graph_lifecycle.thread_binding_count == 0
-            finally:
-                await bridge.close()
+            await executor._mark_ingest_done("parked-thread", ThreadStatus.CANCELLED)
+            assert executor._graph_lifecycle.thread_binding_count == 0
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_high_volume_terminal_settlement_bounds_identity_maps(self) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                for index in range(domain_config.max_concurrent_threads * 20):
-                    thread_id = f"terminal-volume-{index}"
-                    _inject_graph(executor, thread_id)
-                    await executor._mark_ingest_done(thread_id, ThreadStatus.COMPLETED)
+    async def test_high_volume_terminal_settlement_bounds_identity_maps(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            for index in range(domain_config.max_concurrent_threads * 20):
+                thread_id = f"terminal-volume-{index}"
+                _inject_graph(executor, thread_id)
+                await executor._mark_ingest_done(thread_id, ThreadStatus.COMPLETED)
 
-                assert executor._graph_lifecycle.thread_binding_count == 0
-                # Each settled run's own graph goes with it.
-                assert executor.graph_count == 0
-            finally:
-                await bridge.close()
+            assert executor._graph_lifecycle.thread_binding_count == 0
+            # Each settled run's own graph goes with it.
+            assert executor.graph_count == 0
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_real_held_checkpoint_reads_cannot_exceed_reserved_capacity(
-        self, tmp_path: pathlib.Path
+        self, checkpointer: AsyncSqliteSaver
     ) -> None:
-        checkpoint_path = tmp_path / "capacity-held-read.db"
-        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            executor = Executor(
-                checkpointer=cp,
-                bridge=bridge,
-                checkpoint_read_timeout_seconds=0.05,
+        bridge = _make_bridge()
+        executor = Executor(
+            checkpointer=checkpointer,
+            bridge=bridge,
+            checkpoint_read_timeout_seconds=0.05,
+        )
+        await checkpointer.lock.acquire()
+        try:
+            requests = [
+                _current_ingest_dispatch(f"held-{index}")
+                for index in range(domain_config.max_concurrent_threads + 3)
+            ]
+            tasks = [
+                asyncio.create_task(executor.handle_dispatch(request))
+                for request in requests
+            ]
+            await asyncio.sleep(0.01)
+            assert executor.active_ingest_count == (
+                domain_config.max_concurrent_threads
             )
-            await cp.lock.acquire()
-            try:
-                requests = [
-                    _current_ingest_dispatch(f"held-{index}")
-                    for index in range(domain_config.max_concurrent_threads + 3)
-                ]
-                tasks = [
-                    asyncio.create_task(executor.handle_dispatch(request))
-                    for request in requests
-                ]
-                await asyncio.sleep(0.01)
-                assert executor.active_ingest_count == (
-                    domain_config.max_concurrent_threads
-                )
-                await asyncio.gather(*tasks)
-            finally:
-                if cp.lock.locked():
-                    cp.lock.release()
-                await bridge.close()
+            await asyncio.gather(*tasks)
+        finally:
+            if checkpointer.lock.locked():
+                checkpointer.lock.release()
+            await bridge.close()
 
-            assert executor.active_ingest_count == 0
-            assert executor._graph_lifecycle.thread_binding_count == 0
+        assert executor.active_ingest_count == 0
+        assert executor._graph_lifecycle.thread_binding_count == 0
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_cancelled_held_checkpoint_read_returns_capacity_and_locks(
-        self, tmp_path: pathlib.Path
+        self, checkpointer: AsyncSqliteSaver
     ) -> None:
-        checkpoint_path = tmp_path / "cancel-held-read.db"
-        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            executor = Executor(
-                checkpointer=cp,
-                bridge=bridge,
-                checkpoint_read_timeout_seconds=1.0,
-            )
-            await cp.lock.acquire()
-            request = _current_ingest_dispatch("cancel-held")
-            task = asyncio.create_task(executor.handle_dispatch(request))
-            try:
-                while executor.active_ingest_count == 0:
-                    await asyncio.sleep(0)
-                task.cancel()
-                with pytest.raises(asyncio.CancelledError):
-                    await task
-            finally:
-                cp.lock.release()
-                await bridge.close()
+        bridge = _make_bridge()
+        executor = Executor(
+            checkpointer=checkpointer,
+            bridge=bridge,
+            checkpoint_read_timeout_seconds=1.0,
+        )
+        await checkpointer.lock.acquire()
+        request = _current_ingest_dispatch("cancel-held")
+        task = asyncio.create_task(executor.handle_dispatch(request))
+        try:
+            while executor.active_ingest_count == 0:
+                await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            checkpointer.lock.release()
+            await bridge.close()
 
-            assert executor.active_ingest_count == 0
-            assert executor._graph_lifecycle.thread_binding_count == 0
-            assert executor._graph_lifecycle.thread_compile_lock_count == 0
+        assert executor.active_ingest_count == 0
+        assert executor._graph_lifecycle.thread_binding_count == 0
+        assert executor._graph_lifecycle.thread_compile_lock_count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -624,7 +607,9 @@ class TestHandleDispatch:
             )
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_cancel_sets_event_on_aggregator(self) -> None:
+    async def test_cancel_sets_event_on_aggregator(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Verify cancel action sets the cancellation event in the aggregator.
 
         EventAggregator.cancel_thread() calls ``.set()`` on the thread's
@@ -634,48 +619,46 @@ class TestHandleDispatch:
         """
         import asyncio as _asyncio
 
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            relayed: list[dict[str, Any]] = []
-            bridge = _make_bridge(relayed=relayed)
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
+        relayed: list[dict[str, Any]] = []
+        bridge = _make_bridge(relayed=relayed)
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
 
-                # Pre-register a cancel event (as ingest would create one)
-                cancel_event = _asyncio.Event()
-                executor.aggregator._ingest._threads.cancel_events["t-cancel-me"] = (
-                    cancel_event
-                )
-                assert not cancel_event.is_set()
+            # Pre-register a cancel event (as ingest would create one)
+            cancel_event = _asyncio.Event()
+            executor.aggregator._ingest._threads.cancel_events["t-cancel-me"] = (
+                cancel_event
+            )
+            assert not cancel_event.is_set()
 
-                req = DispatchRequest(
-                    action="cancel",
-                    thread_id="t-cancel-me",
-                    recursion_limit=25,
-                )
-                await executor.handle_dispatch(req)
+            req = DispatchRequest(
+                action="cancel",
+                thread_id="t-cancel-me",
+                recursion_limit=25,
+            )
+            await executor.handle_dispatch(req)
 
-                # The event should now be set
-                assert cancel_event.is_set()
-                terminal = [
-                    item["payload"]
-                    for item in relayed
-                    if item["payload"].get("event_type") == "thread_terminal"
-                ]
-                assert terminal == [
-                    {
-                        "event_type": "thread_terminal",
-                        "thread_id": "t-cancel-me",
-                        "status": "cancelled",
-                        "cancellation_evidence": {
-                            "schema_version": "cancellation-evidence-v1",
-                            "dispatch_id": req.dispatch_id,
-                            "outcome": "no_active_work",
-                        },
-                    }
-                ]
-            finally:
-                await bridge.close()
+            # The event should now be set
+            assert cancel_event.is_set()
+            terminal = [
+                item["payload"]
+                for item in relayed
+                if item["payload"].get("event_type") == "thread_terminal"
+            ]
+            assert terminal == [
+                {
+                    "event_type": "thread_terminal",
+                    "thread_id": "t-cancel-me",
+                    "status": "cancelled",
+                    "cancellation_evidence": {
+                        "schema_version": "cancellation-evidence-v1",
+                        "dispatch_id": req.dispatch_id,
+                        "outcome": "no_active_work",
+                    },
+                }
+            ]
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     @pytest.mark.parametrize(
@@ -690,208 +673,191 @@ class TestHandleDispatch:
     async def test_active_cancel_retains_exact_cessation_evidence_for_settle(
         self,
         outcome: str,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         thread_id = "t-active-cancel"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge(relayed=relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                reservation, _reason = await executor.reserve_dispatch_capacity(
-                    thread_id
-                )
-                assert reservation is not None
-                graph = _terminal_graph(executor)
-                if outcome == ThreadStatus.COMPLETED:
-                    completed = await executor.aggregator.ingest(
-                        thread_id,
-                        "supervisor",
-                        graph,
-                        {},
-                        {"configurable": {"thread_id": thread_id}},
-                    )
-                    assert completed == ThreadStatus.COMPLETED
-                request = DispatchRequest(
-                    dispatch_id="active-cancel-dispatch",
-                    action="cancel",
-                    thread_id=thread_id,
-                    recursion_limit=25,
-                )
-
-                await executor.handle_dispatch(request)
-                await executor._settle_run(
-                    _current_ingest_dispatch(thread_id),
+        bridge = _make_bridge(relayed=relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            reservation, _reason = await executor.reserve_dispatch_capacity(thread_id)
+            assert reservation is not None
+            graph = _terminal_graph(executor)
+            if outcome == ThreadStatus.COMPLETED:
+                completed = await executor.aggregator.ingest(
+                    thread_id,
+                    "supervisor",
                     graph,
                     {},
-                    outcome,
+                    {"configurable": {"thread_id": thread_id}},
                 )
-                terminal = [
-                    item["payload"]
-                    for item in relayed
-                    if item["payload"].get("event_type") == "thread_terminal"
-                ]
-                assert terminal == [
-                    {
-                        "event_type": "thread_terminal",
-                        "thread_id": thread_id,
-                        "status": "cancelled",
-                        "cancellation_evidence": {
-                            "schema_version": "cancellation-evidence-v1",
-                            "dispatch_id": request.dispatch_id,
-                            "outcome": "ceased",
-                        },
-                    }
-                ]
-                assert executor._pending_cancellations == {}
-                assert executor._terminal_arbitrations == {}
+                assert completed == ThreadStatus.COMPLETED
+            request = DispatchRequest(
+                dispatch_id="active-cancel-dispatch",
+                action="cancel",
+                thread_id=thread_id,
+                recursion_limit=25,
+            )
+
+            await executor.handle_dispatch(request)
+            await executor._settle_run(
+                _current_ingest_dispatch(thread_id),
+                graph,
+                {},
+                outcome,
+            )
+            terminal = [
+                item["payload"]
+                for item in relayed
+                if item["payload"].get("event_type") == "thread_terminal"
+            ]
+            assert terminal == [
+                {
+                    "event_type": "thread_terminal",
+                    "thread_id": thread_id,
+                    "status": "cancelled",
+                    "cancellation_evidence": {
+                        "schema_version": "cancellation-evidence-v1",
+                        "dispatch_id": request.dispatch_id,
+                        "outcome": "ceased",
+                    },
+                }
+            ]
+            assert executor._pending_cancellations == {}
+            assert executor._terminal_arbitrations == {}
+            assert thread_id not in executor.aggregator._ingest._threads.cancel_events
+            if outcome != ThreadStatus.CANCELLED:
                 assert (
-                    thread_id not in executor.aggregator._ingest._threads.cancel_events
-                )
-                if outcome != ThreadStatus.CANCELLED:
-                    assert (
-                        len(
-                            [
-                                item
-                                for item in relayed
-                                if item["payload"].get("type") == "agent_status"
-                                and item["payload"].get("state") == "cancelled"
-                            ]
-                        )
-                        == 1
+                    len(
+                        [
+                            item
+                            for item in relayed
+                            if item["payload"].get("type") == "agent_status"
+                            and item["payload"].get("state") == "cancelled"
+                        ]
                     )
-                await executor.release_dispatch_capacity(reservation)
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+                    == 1
+                )
+            await executor.release_dispatch_capacity(reservation)
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_ingest_without_graph_authority_logs_refusal(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, checkpointer: AsyncSqliteSaver
     ) -> None:
         """An ingest lacking accepted graph authority cannot settle a run."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                req = DispatchRequest(
-                    action="ingest",
-                    workspace_root=_WORKSPACE,
-                    thread_id="t-no-graph",
-                    content="Hello",
-                    recursion_limit=25,
-                    model_assignment=_current_assignment(),
-                )
-                with caplog.at_level(
-                    logging.WARNING, logger="vaultspec_a2a.worker.executor"
-                ):
-                    await executor.handle_dispatch(req)
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            req = DispatchRequest(
+                action="ingest",
+                workspace_root=_WORKSPACE,
+                thread_id="t-no-graph",
+                content="Hello",
+                recursion_limit=25,
+                model_assignment=_current_assignment(),
+            )
+            with caplog.at_level(
+                logging.WARNING, logger="vaultspec_a2a.worker.executor"
+            ):
+                await executor.handle_dispatch(req)
 
-                record = next(
-                    rec
-                    for rec in caplog.records
-                    if "Refusing terminal settlement without accepted graph authority"
-                    in rec.message
-                )
-                assert record.__dict__["thread_id"] == "t-no-graph"
-                assert record.__dict__["dispatch_id"] == req.dispatch_id
-                assert record.__dict__["dispatch_action"] == "ingest"
-                assert record.__dict__["worker_id"] == "test-worker"
-                assert (
-                    record.__dict__["action"] == "dispatch_rejected_without_authority"
-                )
-            finally:
-                await bridge.close()
+            record = next(
+                rec
+                for rec in caplog.records
+                if "Refusing terminal settlement without accepted graph authority"
+                in rec.message
+            )
+            assert record.__dict__["thread_id"] == "t-no-graph"
+            assert record.__dict__["dispatch_id"] == req.dispatch_id
+            assert record.__dict__["dispatch_action"] == "ingest"
+            assert record.__dict__["worker_id"] == "test-worker"
+            assert record.__dict__["action"] == "dispatch_rejected_without_authority"
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_resume_without_graph_authority_logs_refusal(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A resume lacking accepted graph authority cannot settle a run."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                req = DispatchRequest(
-                    action="resume",
-                    thread_id="t-no-graph",
-                    option_id="opt-1",
-                    recursion_limit=25,
-                    model_assignment=_current_assignment(),
-                )
-                with caplog.at_level(
-                    logging.WARNING, logger="vaultspec_a2a.worker.executor"
-                ):
-                    await executor.handle_dispatch(req)
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            req = DispatchRequest(
+                action="resume",
+                thread_id="t-no-graph",
+                option_id="opt-1",
+                recursion_limit=25,
+                model_assignment=_current_assignment(),
+            )
+            with caplog.at_level(
+                logging.WARNING, logger="vaultspec_a2a.worker.executor"
+            ):
+                await executor.handle_dispatch(req)
 
-                record = next(
-                    rec
-                    for rec in caplog.records
-                    if "Refusing terminal settlement without accepted graph authority"
-                    in rec.message
-                )
-                assert record.__dict__["thread_id"] == "t-no-graph"
-                assert record.__dict__["dispatch_id"] == req.dispatch_id
-                assert record.__dict__["dispatch_action"] == "resume"
-                assert record.__dict__["worker_id"] == "test-worker"
-                assert (
-                    record.__dict__["action"] == "dispatch_rejected_without_authority"
-                )
-            finally:
-                await bridge.close()
+            record = next(
+                rec
+                for rec in caplog.records
+                if "Refusing terminal settlement without accepted graph authority"
+                in rec.message
+            )
+            assert record.__dict__["thread_id"] == "t-no-graph"
+            assert record.__dict__["dispatch_id"] == req.dispatch_id
+            assert record.__dict__["dispatch_action"] == "resume"
+            assert record.__dict__["worker_id"] == "test-worker"
+            assert record.__dict__["action"] == "dispatch_rejected_without_authority"
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_ingest_prevents_concurrent_same_thread(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A second ingest for the same thread is dropped while first is active.
 
         The admission reservation now runs before graph lookup, so a pre-held
         same-thread slot refuses the dispatch without checkpoint or graph work.
         """
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                # The cached graph must remain untouched by admission refusal.
-                _inject_graph(executor, "t-1")
-                # Pre-occupy the slot (simulates a running ingest)
-                await executor.reserve_dispatch_capacity("t-1")
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            # The cached graph must remain untouched by admission refusal.
+            _inject_graph(executor, "t-1")
+            # Pre-occupy the slot (simulates a running ingest)
+            await executor.reserve_dispatch_capacity("t-1")
 
-                req = DispatchRequest(
-                    action="ingest",
-                    workspace_root=_WORKSPACE,
-                    thread_id="t-1",
-                    content="Hello",
-                    recursion_limit=25,
-                    model_assignment=_current_assignment(),
-                )
-                with caplog.at_level(
-                    logging.WARNING, logger="vaultspec_a2a.worker.executor"
-                ):
-                    await executor.handle_dispatch(req)
+            req = DispatchRequest(
+                action="ingest",
+                workspace_root=_WORKSPACE,
+                thread_id="t-1",
+                content="Hello",
+                recursion_limit=25,
+                model_assignment=_current_assignment(),
+            )
+            with caplog.at_level(
+                logging.WARNING, logger="vaultspec_a2a.worker.executor"
+            ):
+                await executor.handle_dispatch(req)
 
-                record = next(
-                    rec
-                    for rec in caplog.records
-                    if "Ingest already active" in rec.message
-                )
-                assert record.__dict__["thread_id"] == "t-1"
-                assert record.__dict__["dispatch_id"] == req.dispatch_id
-                assert record.__dict__["dispatch_action"] == "ingest"
-                assert record.__dict__["runtime_mode"] == "ingest"
-                assert record.__dict__["worker_id"] == "test-worker"
-                assert record.__dict__["active_thread_count"] == 1
-                assert record.__dict__["action"] == "ingest_rejected_active"
-            finally:
-                await bridge.close()
+            record = next(
+                rec for rec in caplog.records if "Ingest already active" in rec.message
+            )
+            assert record.__dict__["thread_id"] == "t-1"
+            assert record.__dict__["dispatch_id"] == req.dispatch_id
+            assert record.__dict__["dispatch_action"] == "ingest"
+            assert record.__dict__["runtime_mode"] == "ingest"
+            assert record.__dict__["worker_id"] == "test-worker"
+            assert record.__dict__["active_thread_count"] == 1
+            assert record.__dict__["action"] == "ingest_rejected_active"
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_resume_hard_rejects_when_ingest_active(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A resume for a thread with an active ingest is hard-rejected, not queued.
 
@@ -905,41 +871,39 @@ class TestHandleDispatch:
         (``track_thread`` is past the reject), so the resume is dropped, never
         queued or injected.
         """
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                # The cached graph must remain untouched by admission refusal.
-                _inject_graph(executor, "t-resume")
-                # Pre-occupy the slot (simulates the active authoring ingest).
-                await executor.reserve_dispatch_capacity("t-resume")
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            # The cached graph must remain untouched by admission refusal.
+            _inject_graph(executor, "t-resume")
+            # Pre-occupy the slot (simulates the active authoring ingest).
+            await executor.reserve_dispatch_capacity("t-resume")
 
-                req = DispatchRequest(
-                    action="resume",
-                    thread_id="t-resume",
-                    option_id={"verdict": "rejected", "notes": None},
-                    recursion_limit=25,
-                    model_assignment=_current_assignment(),
-                )
-                with caplog.at_level(
-                    logging.WARNING, logger="vaultspec_a2a.worker.executor"
-                ):
-                    await executor.handle_dispatch(req)
+            req = DispatchRequest(
+                action="resume",
+                thread_id="t-resume",
+                option_id={"verdict": "rejected", "notes": None},
+                recursion_limit=25,
+                model_assignment=_current_assignment(),
+            )
+            with caplog.at_level(
+                logging.WARNING, logger="vaultspec_a2a.worker.executor"
+            ):
+                await executor.handle_dispatch(req)
 
-                record = next(
-                    rec for rec in caplog.records if "cannot resume" in rec.message
-                )
-                assert record.__dict__["action"] == "resume_rejected_active"
-                assert record.__dict__["runtime_mode"] == "resume"
-                assert record.__dict__["dispatch_action"] == "resume"
-                # Returned before ingest, emitted nothing: the pre-held slot is
-                # intact (no finally / _mark_ingest_done ran) and the resume never
-                # reached bridge.track_thread.
-                assert "t-resume" in executor._active_ingests
-                assert "t-resume" not in bridge.active_threads
-            finally:
-                await bridge.close()
+            record = next(
+                rec for rec in caplog.records if "cannot resume" in rec.message
+            )
+            assert record.__dict__["action"] == "resume_rejected_active"
+            assert record.__dict__["runtime_mode"] == "resume"
+            assert record.__dict__["dispatch_action"] == "resume"
+            # Returned before ingest, emitted nothing: the pre-held slot is
+            # intact (no finally / _mark_ingest_done ran) and the resume never
+            # reached bridge.track_thread.
+            assert "t-resume" in executor._active_ingests
+            assert "t-resume" not in bridge.active_threads
+        finally:
+            await bridge.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1148,97 +1112,93 @@ class TestLazyRecompilation:
     """Verify graph cache and thread mapping behaviour (T17)."""
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_compiled_graph_registration_tracks_the_thread(self) -> None:
+    async def test_compiled_graph_registration_tracks_the_thread(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Registration atomically makes a graph available for one thread."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                cache_key = (
-                    "vaultspec-solo-coder",
-                    None,
-                    False,
-                    model_assignment_digest(_current_assignment()),
-                    _test_graph_definition_digest("vaultspec-solo-coder"),
-                )
-                _inject_graph(executor, "t-cache", cache_key=cache_key)
-                assert executor.graph_count == 1
-            finally:
-                await bridge.close()
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            cache_key = (
+                "vaultspec-solo-coder",
+                None,
+                False,
+                model_assignment_digest(_current_assignment()),
+                _test_graph_definition_digest("vaultspec-solo-coder"),
+            )
+            _inject_graph(executor, "t-cache", cache_key=cache_key)
+            assert executor.graph_count == 1
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_resume_without_graph_or_preset_refuses_settlement(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A receiptless resume cannot settle without accepted authority."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                req = DispatchRequest(
-                    action="resume",
-                    thread_id="t-no-graph",
-                    option_id="allow_once",
-                    recursion_limit=25,
-                    model_assignment=_current_assignment(),
-                )
-                with caplog.at_level(
-                    logging.WARNING, logger="vaultspec_a2a.worker.executor"
-                ):
-                    await executor.handle_dispatch(req)
-                record = next(
-                    rec
-                    for rec in caplog.records
-                    if "Refusing terminal settlement without accepted graph authority"
-                    in rec.message
-                )
-                assert record.__dict__["thread_id"] == "t-no-graph"
-                assert record.__dict__["dispatch_id"] == req.dispatch_id
-                assert record.__dict__["dispatch_action"] == "resume"
-                assert record.__dict__["worker_id"] == "test-worker"
-                assert (
-                    record.__dict__["action"] == "dispatch_rejected_without_authority"
-                )
-            finally:
-                await bridge.close()
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            req = DispatchRequest(
+                action="resume",
+                thread_id="t-no-graph",
+                option_id="allow_once",
+                recursion_limit=25,
+                model_assignment=_current_assignment(),
+            )
+            with caplog.at_level(
+                logging.WARNING, logger="vaultspec_a2a.worker.executor"
+            ):
+                await executor.handle_dispatch(req)
+            record = next(
+                rec
+                for rec in caplog.records
+                if "Refusing terminal settlement without accepted graph authority"
+                in rec.message
+            )
+            assert record.__dict__["thread_id"] == "t-no-graph"
+            assert record.__dict__["dispatch_id"] == req.dispatch_id
+            assert record.__dict__["dispatch_action"] == "resume"
+            assert record.__dict__["worker_id"] == "test-worker"
+            assert record.__dict__["action"] == "dispatch_rejected_without_authority"
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_registration_keeps_one_cached_graph(self) -> None:
+    async def test_registration_keeps_one_cached_graph(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """The public registration seam avoids exposing cache dictionaries."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                cache_key = (
-                    "vaultspec-solo-coder",
-                    _WORKSPACE,
-                    False,
-                    model_assignment_digest(_current_assignment()),
-                    _test_graph_definition_digest("vaultspec-solo-coder"),
-                )
-                _inject_graph(executor, "t-preset", cache_key=cache_key)
-                assert executor.graph_count == 1
-            finally:
-                await bridge.close()
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            cache_key = (
+                "vaultspec-solo-coder",
+                _WORKSPACE,
+                False,
+                model_assignment_digest(_current_assignment()),
+                _test_graph_definition_digest("vaultspec-solo-coder"),
+            )
+            _inject_graph(executor, "t-preset", cache_key=cache_key)
+            assert executor.graph_count == 1
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_shutdown_clears_registered_graph(self) -> None:
+    async def test_shutdown_clears_registered_graph(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Shutdown removes a graph that entered through the public seam."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                _inject_graph(executor, "t-1")
-                assert executor.graph_count == 1
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            _inject_graph(executor, "t-1")
+            assert executor.graph_count == 1
 
-                await executor.shutdown()
-                assert executor.graph_count == 0
-            finally:
-                await bridge.close()
+            await executor.shutdown()
+            assert executor.graph_count == 0
+        finally:
+            await bridge.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1250,35 +1210,33 @@ class TestShutdown:
     """Verify that shutdown() clears internal state via observable effects."""
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_shutdown_clears_graph_count_to_zero(self) -> None:
+    async def test_shutdown_clears_graph_count_to_zero(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """Shutdown should reset graph_count (public property) to 0."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                # Inject a graph entry -- this is the only way to pre-populate
-                # without running a full team config compilation.
-                _inject_graph(executor, "thread-1")
-                assert executor.graph_count == 1
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            # Inject a graph entry -- this is the only way to pre-populate
+            # without running a full team config compilation.
+            _inject_graph(executor, "thread-1")
+            assert executor.graph_count == 1
 
-                await executor.shutdown()
-                assert executor.graph_count == 0
-            finally:
-                await bridge.close()
+            await executor.shutdown()
+            assert executor.graph_count == 0
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_shutdown_is_idempotent(self) -> None:
+    async def test_shutdown_is_idempotent(self, checkpointer: AsyncSqliteSaver) -> None:
         """Calling shutdown twice doesn't raise."""
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                await executor.shutdown()
-                await executor.shutdown()
-            finally:
-                await bridge.close()
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            await executor.shutdown()
+            await executor.shutdown()
+        finally:
+            await bridge.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1323,85 +1281,83 @@ class TestPreRunGuardTraceFidelity:
 
     @pytest.mark.asyncio(loop_scope="function")
     @pytest.mark.parametrize("guards", [_INGEST_GUARDS, _RESUME_GUARDS])
-    async def test_missing_graph_marks_the_span_failed(self, guards: Any) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                req = DispatchRequest(
-                    action=guards.runtime_mode,
-                    workspace_root=_WORKSPACE,
-                    thread_id="t-guard-no-graph",
-                    content="hello",
-                    option_id="allow_once",
-                    recursion_limit=25,
-                )
-                span = _recording_span()
-                await executor._reject_missing_graph(req, span, guards)
+    async def test_missing_graph_marks_the_span_failed(
+        self, guards: Any, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            req = DispatchRequest(
+                action=guards.runtime_mode,
+                workspace_root=_WORKSPACE,
+                thread_id="t-guard-no-graph",
+                content="hello",
+                option_id="allow_once",
+                recursion_limit=25,
+            )
+            span = _recording_span()
+            await executor._reject_missing_graph(req, span, guards)
 
-                attributes = _span_attributes(span)
-                assert attributes["error"] is True
-                assert attributes["error.message"] == "No team preset"
-            finally:
-                await bridge.close()
+            attributes = _span_attributes(span)
+            assert attributes["error"] is True
+            assert attributes["error.message"] == "No team preset"
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     @pytest.mark.parametrize("guards", [_INGEST_GUARDS, _RESUME_GUARDS])
-    async def test_slot_held_marks_the_span_failed(self, guards: Any) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                req = DispatchRequest(
-                    action=guards.runtime_mode,
-                    workspace_root=_WORKSPACE,
-                    thread_id="t-guard-slot",
-                    content="hello",
-                    option_id="allow_once",
-                    recursion_limit=25,
-                )
-                span = _recording_span()
-                executor._reject_slot_held(req, span, guards)
+    async def test_slot_held_marks_the_span_failed(
+        self, guards: Any, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            req = DispatchRequest(
+                action=guards.runtime_mode,
+                workspace_root=_WORKSPACE,
+                thread_id="t-guard-slot",
+                content="hello",
+                option_id="allow_once",
+                recursion_limit=25,
+            )
+            span = _recording_span()
+            executor._reject_slot_held(req, span, guards)
 
-                attributes = _span_attributes(span)
-                assert attributes["error"] is True
-                assert attributes["error.message"] == "Ingest already active"
-            finally:
-                await bridge.close()
+            attributes = _span_attributes(span)
+            assert attributes["error"] is True
+            assert attributes["error.message"] == "Ingest already active"
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     @pytest.mark.parametrize("guards", [_INGEST_GUARDS, _RESUME_GUARDS])
     async def test_compile_failure_marks_the_span_with_the_reason(
-        self, guards: Any
+        self, guards: Any, checkpointer: AsyncSqliteSaver
     ) -> None:
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                req = DispatchRequest(
-                    action=guards.runtime_mode,
-                    workspace_root=_WORKSPACE,
-                    thread_id="t-guard-compile",
-                    content="hello",
-                    option_id="allow_once",
-                    recursion_limit=25,
-                )
-                span = _recording_span()
-                exc = GraphCompilationError("engine unreachable")
-                await executor._reject_compile_failure(req, span, exc, guards)
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            req = DispatchRequest(
+                action=guards.runtime_mode,
+                workspace_root=_WORKSPACE,
+                thread_id="t-guard-compile",
+                content="hello",
+                option_id="allow_once",
+                recursion_limit=25,
+            )
+            span = _recording_span()
+            exc = GraphCompilationError("engine unreachable")
+            await executor._reject_compile_failure(req, span, exc, guards)
 
-                attributes = _span_attributes(span)
-                assert attributes["error"] is True
-                assert attributes["error.message"] == "engine unreachable"
-            finally:
-                await bridge.close()
+            attributes = _span_attributes(span)
+            assert attributes["error"] is True
+            assert attributes["error.message"] == "engine unreachable"
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_resume_slot_reject_keeps_its_distinct_log_action(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Unifying the guards must not flatten the two modes' log identities.
 
@@ -1409,42 +1365,40 @@ class TestPreRunGuardTraceFidelity:
         operator-facing actions; a shared implementation that collapsed them
         would erase which mode was dropped.
         """
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                executor = Executor(checkpointer=cp, bridge=bridge)
-                ingest_req = DispatchRequest(
-                    action="ingest",
-                    workspace_root=_WORKSPACE,
-                    thread_id="t-actions",
-                    content="hello",
-                    recursion_limit=25,
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            ingest_req = DispatchRequest(
+                action="ingest",
+                workspace_root=_WORKSPACE,
+                thread_id="t-actions",
+                content="hello",
+                recursion_limit=25,
+            )
+            resume_req = DispatchRequest(
+                action="resume",
+                thread_id="t-actions",
+                option_id="allow_once",
+                recursion_limit=25,
+            )
+            with caplog.at_level(
+                logging.WARNING, logger="vaultspec_a2a.worker.executor"
+            ):
+                executor._reject_slot_held(
+                    ingest_req, _recording_span(), _INGEST_GUARDS
                 )
-                resume_req = DispatchRequest(
-                    action="resume",
-                    thread_id="t-actions",
-                    option_id="allow_once",
-                    recursion_limit=25,
+                executor._reject_slot_held(
+                    resume_req, _recording_span(), _RESUME_GUARDS
                 )
-                with caplog.at_level(
-                    logging.WARNING, logger="vaultspec_a2a.worker.executor"
-                ):
-                    executor._reject_slot_held(
-                        ingest_req, _recording_span(), _INGEST_GUARDS
-                    )
-                    executor._reject_slot_held(
-                        resume_req, _recording_span(), _RESUME_GUARDS
-                    )
 
-                actions = [
-                    rec.__dict__["action"]
-                    for rec in caplog.records
-                    if "action" in rec.__dict__
-                ]
-                assert actions == ["ingest_rejected_active", "resume_rejected_active"]
-            finally:
-                await bridge.close()
+            actions = [
+                rec.__dict__["action"]
+                for rec in caplog.records
+                if "action" in rec.__dict__
+            ]
+            assert actions == ["ingest_rejected_active", "resume_rejected_active"]
+        finally:
+            await bridge.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1578,6 +1532,7 @@ class TestSettleOrdering:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_ingest_emits_one_application_receipt_for_stable_dispatch(
         self,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         thread_id = "message-application-receipt"
         receipt = GraphActionReceipt(
@@ -1594,89 +1549,89 @@ class TestSettleOrdering:
         )
         observations: list[dict[str, Any]] = []
         holder: dict[str, Any] = {"thread_id": thread_id, "executor": None}
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_observing_bridge(observations, holder)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            holder["executor"] = executor
-            try:
-                request = _current_ingest_dispatch(thread_id).model_copy(
-                    update={
-                        "dispatch_id": "stable-message-dispatch",
-                        "graph_action_receipt": receipt,
-                        "content": "continue",
-                    }
-                )
-                _install_completing_graph(executor, request)
-                await executor.handle_dispatch(request)
+        bridge = _make_observing_bridge(observations, holder)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        holder["executor"] = executor
+        try:
+            request = _current_ingest_dispatch(thread_id).model_copy(
+                update={
+                    "dispatch_id": "stable-message-dispatch",
+                    "graph_action_receipt": receipt,
+                    "content": "continue",
+                }
+            )
+            _install_completing_graph(executor, request)
+            await executor.handle_dispatch(request)
 
-                checkpoint = await cp.aget_tuple(
-                    {"configurable": {"thread_id": thread_id}}
-                )
-                assert checkpoint is not None
-                assert checkpoint.checkpoint["channel_values"][
-                    "active_graph_action_receipt"
-                ] == receipt.model_dump(mode="json")
-                assert checkpoint.checkpoint["channel_values"][
-                    "graph_action_receipts"
-                ] == {receipt.dispatch_id: receipt.model_dump(mode="json")}
-                receipts = [
-                    observation
-                    for observation in observations
-                    if observation["kind"] == "dispatch_applied"
-                ]
-                assert receipts == [
-                    {
-                        "kind": "dispatch_applied",
-                        "dispatch_id": "stable-message-dispatch",
-                        "dispatch_action": "ingest",
-                        "status": None,
-                        "tokens_held": False,
-                        "tracked": True,
-                    }
-                ]
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            checkpoint = await checkpointer.aget_tuple(
+                {"configurable": {"thread_id": thread_id}}
+            )
+            assert checkpoint is not None
+            assert checkpoint.checkpoint["channel_values"][
+                "active_graph_action_receipt"
+            ] == receipt.model_dump(mode="json")
+            assert checkpoint.checkpoint["channel_values"]["graph_action_receipts"] == {
+                receipt.dispatch_id: receipt.model_dump(mode="json")
+            }
+            receipts = [
+                observation
+                for observation in observations
+                if observation["kind"] == "dispatch_applied"
+            ]
+            assert receipts == [
+                {
+                    "kind": "dispatch_applied",
+                    "dispatch_id": "stable-message-dispatch",
+                    "dispatch_action": "ingest",
+                    "status": None,
+                    "tokens_held": False,
+                    "tracked": True,
+                }
+            ]
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_ingest_settle_lands_terminal_before_dropping_tokens(self) -> None:
+    async def test_ingest_settle_lands_terminal_before_dropping_tokens(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         thread_id = "settle-ingest"
         observations: list[dict[str, Any]] = []
         holder: dict[str, Any] = {"thread_id": thread_id, "executor": None}
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_observing_bridge(observations, holder)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            holder["executor"] = executor
-            try:
-                req = _current_ingest_dispatch(thread_id).model_copy(
-                    update={"actor_tokens": _SETTLE_TOKENS}
-                )
-                _install_completing_graph(executor, req)
-                await executor.handle_dispatch(req)
+        bridge = _make_observing_bridge(observations, holder)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        holder["executor"] = executor
+        try:
+            req = _current_ingest_dispatch(thread_id).model_copy(
+                update={"actor_tokens": _SETTLE_TOKENS}
+            )
+            _install_completing_graph(executor, req)
+            await executor.handle_dispatch(req)
 
-                kinds = [obs["kind"] for obs in observations]
-                assert "execution_state_projection" in kinds
-                assert "thread_terminal" in kinds
-                assert kinds.index("execution_state_projection") < kinds.index(
-                    "thread_terminal"
-                )
+            kinds = [obs["kind"] for obs in observations]
+            assert "execution_state_projection" in kinds
+            assert "thread_terminal" in kinds
+            assert kinds.index("execution_state_projection") < kinds.index(
+                "thread_terminal"
+            )
 
-                terminal = observations[kinds.index("thread_terminal")]
-                assert terminal["status"] == ThreadStatus.COMPLETED
-                # The close's window: terminal has landed, tokens are still held.
-                assert terminal["tokens_held"] is True
-                assert terminal["tracked"] is True
-                # And the window closes once the settle finishes.
-                assert executor.token_store.engine_bearer(thread_id) is None
-                assert thread_id not in bridge.active_threads
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            terminal = observations[kinds.index("thread_terminal")]
+            assert terminal["status"] == ThreadStatus.COMPLETED
+            # The close's window: terminal has landed, tokens are still held.
+            assert terminal["tokens_held"] is True
+            assert terminal["tracked"] is True
+            # And the window closes once the settle finishes.
+            assert executor.token_store.engine_bearer(thread_id) is None
+            assert thread_id not in bridge.active_threads
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_resume_settle_lands_terminal_before_dropping_tokens(self) -> None:
+    async def test_resume_settle_lands_terminal_before_dropping_tokens(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """The resume path settles through the same epilogue as ingest.
 
         A gated run completes on its FINAL resume, so the resume settle — not the
@@ -1685,41 +1640,39 @@ class TestSettleOrdering:
         thread_id = "settle-resume"
         observations: list[dict[str, Any]] = []
         holder: dict[str, Any] = {"thread_id": thread_id, "executor": None}
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_observing_bridge(observations, holder)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            holder["executor"] = executor
-            try:
-                ingest = _current_ingest_dispatch(thread_id).model_copy(
-                    update={"actor_tokens": _SETTLE_TOKENS}
-                )
-                _install_gated_graph(executor, ingest)
-                await executor.handle_dispatch(ingest)
-                # Parked at the gate: not terminal, so the tokens survive.
-                assert executor.token_store.engine_bearer(thread_id) == "settle-bearer"
-                observations.clear()
+        bridge = _make_observing_bridge(observations, holder)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        holder["executor"] = executor
+        try:
+            ingest = _current_ingest_dispatch(thread_id).model_copy(
+                update={"actor_tokens": _SETTLE_TOKENS}
+            )
+            _install_gated_graph(executor, ingest)
+            await executor.handle_dispatch(ingest)
+            # Parked at the gate: not terminal, so the tokens survive.
+            assert executor.token_store.engine_bearer(thread_id) == "settle-bearer"
+            observations.clear()
 
-                await executor.handle_dispatch(
-                    _current_resume_dispatch(ingest, option_id="approve")
-                )
+            await executor.handle_dispatch(
+                _current_resume_dispatch(ingest, option_id="approve")
+            )
 
-                kinds = [obs["kind"] for obs in observations]
-                assert "execution_state_projection" in kinds
-                assert "thread_terminal" in kinds
-                assert kinds.index("execution_state_projection") < kinds.index(
-                    "thread_terminal"
-                )
+            kinds = [obs["kind"] for obs in observations]
+            assert "execution_state_projection" in kinds
+            assert "thread_terminal" in kinds
+            assert kinds.index("execution_state_projection") < kinds.index(
+                "thread_terminal"
+            )
 
-                terminal = observations[kinds.index("thread_terminal")]
-                assert terminal["status"] == ThreadStatus.COMPLETED
-                assert terminal["tokens_held"] is True
-                assert terminal["tracked"] is True
-                assert executor.token_store.engine_bearer(thread_id) is None
-                assert thread_id not in bridge.active_threads
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            terminal = observations[kinds.index("thread_terminal")]
+            assert terminal["status"] == ThreadStatus.COMPLETED
+            assert terminal["tokens_held"] is True
+            assert terminal["tracked"] is True
+            assert executor.token_store.engine_bearer(thread_id) is None
+            assert thread_id not in bridge.active_threads
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
 
 class TestAuthoringBridgeFailClosed:
@@ -1733,42 +1686,42 @@ class TestAuthoringBridgeFailClosed:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_build_provider_raises_without_reachable_engine(
-        self, tmp_path: Any
+        self, tmp_path: Any, checkpointer: AsyncSqliteSaver
     ) -> None:
         from ...authoring import EngineUnavailableError
 
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
+        bridge = _make_bridge()
+        try:
+            manager = Executor(
+                checkpointer=checkpointer, bridge=bridge
+            )._graph_lifecycle
+            # Deterministic no-engine via the discovery contract's own env: a
+            # bogus explicit service.json path plus an empty HOME so the
+            # ~/.vaultspec/service.json fallback resolves nothing either.
+            empty_home = tmp_path / "home"
+            empty_home.mkdir()
+            keys = ("VAULTSPEC_A2A_ENGINE_SERVICE_JSON", "USERPROFILE", "HOME")
+            saved = {k: os.environ.get(k) for k in keys}
+            os.environ["VAULTSPEC_A2A_ENGINE_SERVICE_JSON"] = str(
+                tmp_path / "nope.json"
+            )
+            os.environ["USERPROFILE"] = str(empty_home)
+            os.environ["HOME"] = str(empty_home)
             try:
-                manager = Executor(checkpointer=cp, bridge=bridge)._graph_lifecycle
-                # Deterministic no-engine via the discovery contract's own env: a
-                # bogus explicit service.json path plus an empty HOME so the
-                # ~/.vaultspec/service.json fallback resolves nothing either.
-                empty_home = tmp_path / "home"
-                empty_home.mkdir()
-                keys = ("VAULTSPEC_A2A_ENGINE_SERVICE_JSON", "USERPROFILE", "HOME")
-                saved = {k: os.environ.get(k) for k in keys}
-                os.environ["VAULTSPEC_A2A_ENGINE_SERVICE_JSON"] = str(
-                    tmp_path / "nope.json"
-                )
-                os.environ["USERPROFILE"] = str(empty_home)
-                os.environ["HOME"] = str(empty_home)
-                try:
-                    with pytest.raises(EngineUnavailableError):
-                        await manager._build_authoring_binding_provider()
-                finally:
-                    for k, v in saved.items():
-                        if v is None:
-                            os.environ.pop(k, None)
-                        else:
-                            os.environ[k] = v
+                with pytest.raises(EngineUnavailableError):
+                    await manager._build_authoring_binding_provider()
             finally:
-                await bridge.close()
+                for k, v in saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+        finally:
+            await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_engine_discovery_retry_is_offloaded_not_blocking_the_worker(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, checkpointer: AsyncSqliteSaver
     ) -> None:
         """resolve_engine_with_retry's blocking time.sleep must not freeze the
         worker's event loop while it runs.
@@ -1797,27 +1750,27 @@ class TestAuthoringBridgeFailClosed:
             authoring_pkg, "resolve_engine_with_retry", _slow_blocking_resolve
         )
 
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_bridge()
-            try:
-                manager = Executor(checkpointer=cp, bridge=bridge)._graph_lifecycle
+        bridge = _make_bridge()
+        try:
+            manager = Executor(
+                checkpointer=checkpointer, bridge=bridge
+            )._graph_lifecycle
 
-                events: list[str] = []
+            events: list[str] = []
 
-                async def _fast_concurrent_task() -> None:
-                    await asyncio.sleep(0.05)
-                    events.append("fast_task")
+            async def _fast_concurrent_task() -> None:
+                await asyncio.sleep(0.05)
+                events.append("fast_task")
 
-                ticker = asyncio.create_task(_fast_concurrent_task())
-                with pytest.raises(EngineUnavailableError):
-                    await manager._build_authoring_binding_provider()
-                events.append("slow_build")
-                await ticker
+            ticker = asyncio.create_task(_fast_concurrent_task())
+            with pytest.raises(EngineUnavailableError):
+                await manager._build_authoring_binding_provider()
+            events.append("slow_build")
+            await ticker
 
-                assert events == ["fast_task", "slow_build"]
-            finally:
-                await bridge.close()
+            assert events == ["fast_task", "slow_build"]
+        finally:
+            await bridge.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1905,52 +1858,48 @@ class TestUnhandledDispatchTerminal:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_slot_owning_dispatch_fails_the_run_and_returns_its_slot(
         self,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         thread_id = "t-unhandled-dispatch"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                # The slot the ingest took before it died, taken through the
-                # executor's own gate rather than by reaching into its state.
-                reservation, _reason = await executor.reserve_dispatch_capacity(
-                    thread_id
-                )
-                assert reservation is not None
-                await executor._fail_unhandled_dispatch(
-                    _current_ingest_dispatch(thread_id),
-                    _wrapped_failure(),
-                    reservation,
-                )
-                await bridge.flush_events()
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            # The slot the ingest took before it died, taken through the
+            # executor's own gate rather than by reaching into its state.
+            reservation, _reason = await executor.reserve_dispatch_capacity(thread_id)
+            assert reservation is not None
+            await executor._fail_unhandled_dispatch(
+                _current_ingest_dispatch(thread_id),
+                _wrapped_failure(),
+                reservation,
+            )
+            await bridge.flush_events()
 
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1, "the run must settle exactly once"
-                assert terminals[0]["status"] == ThreadStatus.FAILED
-                # The whole cause chain, not just the outermost wrapper: the
-                # wrapper says where the run died, the cause says why.
-                assert "RuntimeError: relay exploded" in terminals[0]["error_detail"]
-                assert "ValueError: bad workspace root" in terminals[0]["error_detail"]
+            terminals = _frames_of(relayed, "thread_terminal")
+            assert len(terminals) == 1, "the run must settle exactly once"
+            assert terminals[0]["status"] == ThreadStatus.FAILED
+            # The whole cause chain, not just the outermost wrapper: the
+            # wrapper says where the run died, the cause says why.
+            assert "RuntimeError: relay exploded" in terminals[0]["error_detail"]
+            assert "ValueError: bad workspace root" in terminals[0]["error_detail"]
 
-                errors = _frames_of(relayed, "error")
-                assert len(errors) == 1, (
-                    "the failure must carry a machine-readable code"
-                )
-                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
-                assert errors[0]["recoverable"] is False
+            errors = _frames_of(relayed, "error")
+            assert len(errors) == 1, "the failure must carry a machine-readable code"
+            assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+            assert errors[0]["recoverable"] is False
 
-                # The slot the dispatch took is given back, or the thread could
-                # never be dispatched again.
-                assert executor.active_ingest_count == 0
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            # The slot the dispatch took is given back, or the thread could
+            # never be dispatched again.
+            assert executor.active_ingest_count == 0
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_cancel_fault_stays_silent_while_an_ingest_owns_the_terminal(
         self,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """A cancel arm must not fabricate a failure over a live run's outcome.
 
@@ -1960,33 +1909,29 @@ class TestUnhandledDispatchTerminal:
         """
         thread_id = "t-cancel-fault"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                # The slot a live ingest would hold, taken through the executor's
-                # own gate rather than by reaching into its state.
-                assert (await executor.reserve_dispatch_capacity(thread_id))[
-                    0
-                ] is not None
-                await executor._fail_unhandled_dispatch(
-                    DispatchRequest(
-                        action="cancel",
-                        thread_id=thread_id,
-                        recursion_limit=10,
-                    ),
-                    RuntimeError("cancel relay exploded"),
-                )
-                await bridge.flush_events()
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            # The slot a live ingest would hold, taken through the executor's
+            # own gate rather than by reaching into its state.
+            assert (await executor.reserve_dispatch_capacity(thread_id))[0] is not None
+            await executor._fail_unhandled_dispatch(
+                DispatchRequest(
+                    action="cancel",
+                    thread_id=thread_id,
+                    recursion_limit=10,
+                ),
+                RuntimeError("cancel relay exploded"),
+            )
+            await bridge.flush_events()
 
-                assert _frames_of(relayed, "thread_terminal") == []
-                assert _frames_of(relayed, "error") == []
-                # The concurrent ingest still owns its slot.
-                assert executor.active_ingest_count == 1
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            assert _frames_of(relayed, "thread_terminal") == []
+            assert _frames_of(relayed, "error") == []
+            # The concurrent ingest still owns its slot.
+            assert executor.active_ingest_count == 1
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
 
 class TestPreRunRefusalsCarryTheirReason:
@@ -2000,40 +1945,42 @@ class TestPreRunRefusalsCarryTheirReason:
     """
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_a_dispatch_with_no_preset_names_the_missing_graph(self) -> None:
+    async def test_a_dispatch_with_no_preset_names_the_missing_graph(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         thread_id = "t-no-preset"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                # No graph registered and no preset on the dispatch, so the
-                # missing-graph guard is reached through a real handle_dispatch.
-                await executor.handle_dispatch(
-                    DispatchRequest(
-                        action="ingest",
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it",
-                        recursion_limit=10,
-                        model_assignment=_current_assignment(),
-                    )
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            # No graph registered and no preset on the dispatch, so the
+            # missing-graph guard is reached through a real handle_dispatch.
+            await executor.handle_dispatch(
+                DispatchRequest(
+                    action="ingest",
+                    workspace_root=_WORKSPACE,
+                    thread_id=thread_id,
+                    content="build it",
+                    recursion_limit=10,
+                    model_assignment=_current_assignment(),
                 )
-                await bridge.flush_events()
+            )
+            await bridge.flush_events()
 
-                assert _frames_of(relayed, "thread_terminal") == []
+            assert _frames_of(relayed, "thread_terminal") == []
 
-                errors = _frames_of(relayed, "error")
-                assert len(errors) == 1
-                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
-                assert errors[0]["recoverable"] is False
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            errors = _frames_of(relayed, "error")
+            assert len(errors) == 1
+            assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+            assert errors[0]["recoverable"] is False
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_an_unclassified_execution_failure_still_names_itself(self) -> None:
+    async def test_an_unclassified_execution_failure_still_names_itself(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """A failure ingest never classified settles with a reason, not blank.
 
         The executor's execution catch-all fires when an exception escapes
@@ -2045,46 +1992,46 @@ class TestPreRunRefusalsCarryTheirReason:
         """
         thread_id = "t-unclassified-failure"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                graph = _terminal_graph(executor)
-                config = {"configurable": {"thread_id": thread_id}}
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            graph = _terminal_graph(executor)
+            config = {"configurable": {"thread_id": thread_id}}
 
-                await executor._settle_run(
-                    _current_ingest_dispatch(thread_id),
-                    graph,
-                    config,
-                    ThreadStatus.FAILED,
-                    "Graph execution failed unexpectedly",
-                )
-                await bridge.flush_events()
+            await executor._settle_run(
+                _current_ingest_dispatch(thread_id),
+                graph,
+                config,
+                ThreadStatus.FAILED,
+                "Graph execution failed unexpectedly",
+            )
+            await bridge.flush_events()
 
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1
-                assert terminals[0]["status"] == ThreadStatus.FAILED
-                assert terminals[0]["error_detail"] == (
-                    "Graph execution failed unexpectedly"
-                )
-                assert (
-                    terminals[0]["failure_evidence"]["action"]["dispatch_id"]
-                    == f"{thread_id}-dispatch"
-                )
+            terminals = _frames_of(relayed, "thread_terminal")
+            assert len(terminals) == 1
+            assert terminals[0]["status"] == ThreadStatus.FAILED
+            assert terminals[0]["error_detail"] == (
+                "Graph execution failed unexpectedly"
+            )
+            assert (
+                terminals[0]["failure_evidence"]["action"]["dispatch_id"]
+                == f"{thread_id}-dispatch"
+            )
 
-                # Both channels, not one: a consumer keying on the frame's code
-                # could not see this failure at all when only the terminal spoke.
-                errors = _frames_of(relayed, "error")
-                assert len(errors) == 1
-                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
-                assert errors[0]["recoverable"] is False
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            # Both channels, not one: a consumer keying on the frame's code
+            # could not see this failure at all when only the terminal spoke.
+            errors = _frames_of(relayed, "error")
+            assert len(errors) == 1
+            assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+            assert errors[0]["recoverable"] is False
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_a_settle_with_no_fallback_invents_no_failure(self) -> None:
+    async def test_a_settle_with_no_fallback_invents_no_failure(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """The fallback arm stays shut when the caller offers none.
 
         The companion to the case above, and the reason it matters: if settling
@@ -2093,65 +2040,64 @@ class TestPreRunRefusalsCarryTheirReason:
         """
         thread_id = "t-settle-no-fallback"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                graph = _terminal_graph(executor)
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            graph = _terminal_graph(executor)
 
-                await executor._settle_run(
-                    DispatchRequest(
-                        action="ingest",
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it",
-                        recursion_limit=10,
-                    ),
-                    graph,
-                    {"configurable": {"thread_id": thread_id}},
-                    ThreadStatus.COMPLETED,
-                )
-                await bridge.flush_events()
+            await executor._settle_run(
+                DispatchRequest(
+                    action="ingest",
+                    workspace_root=_WORKSPACE,
+                    thread_id=thread_id,
+                    content="build it",
+                    recursion_limit=10,
+                ),
+                graph,
+                {"configurable": {"thread_id": thread_id}},
+                ThreadStatus.COMPLETED,
+            )
+            await bridge.flush_events()
 
-                assert _frames_of(relayed, "error") == []
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1
-                assert terminals[0]["status"] == ThreadStatus.COMPLETED
-                assert not terminals[0].get("error_detail")
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            assert _frames_of(relayed, "error") == []
+            terminals = _frames_of(relayed, "thread_terminal")
+            assert len(terminals) == 1
+            assert terminals[0]["status"] == ThreadStatus.COMPLETED
+            assert not terminals[0].get("error_detail")
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_a_resume_with_no_graph_names_what_it_cannot_resume(self) -> None:
+    async def test_a_resume_with_no_graph_names_what_it_cannot_resume(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
         """The two modes keep distinct client wording, not one flattened line."""
         thread_id = "t-no-graph-resume"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                await executor.handle_dispatch(
-                    _current_resume_dispatch(
-                        _current_ingest_dispatch(thread_id), option_id="allow_once"
-                    )
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            await executor.handle_dispatch(
+                _current_resume_dispatch(
+                    _current_ingest_dispatch(thread_id), option_id="allow_once"
                 )
-                await bridge.flush_events()
+            )
+            await bridge.flush_events()
 
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1
-                assert terminals[0]["error_detail"] == (
-                    "No graph to resume: the run has no compiled graph"
-                )
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            terminals = _frames_of(relayed, "thread_terminal")
+            assert len(terminals) == 1
+            assert terminals[0]["error_detail"] == (
+                "No graph to resume: the run has no compiled graph"
+            )
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_checkpoint_that_already_failed_reports_why_it_is_not_rerun(
         self,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """The pre-flight failed arm shares the missing-graph blank shape.
 
@@ -2162,63 +2108,61 @@ class TestPreRunRefusalsCarryTheirReason:
         """
         thread_id = "t-preflight-failed"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
 
-                def exploding_node(state: TeamState) -> dict[str, object]:
-                    del state
-                    raise RuntimeError("node exploded")
+            def exploding_node(state: TeamState) -> dict[str, object]:
+                del state
+                raise RuntimeError("node exploded")
 
-                builder = new_state_graph()
-                add_test_node(builder, "boom", exploding_node)
-                builder.add_edge("__start__", "boom")
-                builder.add_edge("boom", "__end__")
-                graph: RegisteredCompiledGraph = compile_test_graph(
-                    builder, checkpointer=cp
-                )
-                first = _current_ingest_dispatch(thread_id)
-                executor.register_compiled_graph(
-                    thread_id,
-                    (
-                        first.require_graph_definition().team_id,
-                        first.workspace_root,
-                        first.autonomous,
-                        model_assignment_digest(first.model_assignment),
-                        first.require_graph_definition().digest(),
-                    ),
-                    graph,
-                )
+            builder = new_state_graph()
+            add_test_node(builder, "boom", exploding_node)
+            builder.add_edge("__start__", "boom")
+            builder.add_edge("boom", "__end__")
+            graph: RegisteredCompiledGraph = compile_test_graph(
+                builder, checkpointer=checkpointer
+            )
+            first = _current_ingest_dispatch(thread_id)
+            executor.register_compiled_graph(
+                thread_id,
+                (
+                    first.require_graph_definition().team_id,
+                    first.workspace_root,
+                    first.autonomous,
+                    model_assignment_digest(first.model_assignment),
+                    first.require_graph_definition().digest(),
+                ),
+                graph,
+            )
 
-                await executor.handle_dispatch(first)
-                await bridge.flush_events()
-                assert executor._graph_lifecycle.thread_binding_count == 0
-                relayed.clear()
+            await executor.handle_dispatch(first)
+            await bridge.flush_events()
+            assert executor._graph_lifecycle.thread_binding_count == 0
+            relayed.clear()
 
-                # A second dispatch: the pre-flight reads the error the failed
-                # run left in the checkpoint and refuses to re-run it.
-                await executor.handle_dispatch(first)
-                await bridge.flush_events()
+            # A second dispatch: the pre-flight reads the error the failed
+            # run left in the checkpoint and refuses to re-run it.
+            await executor.handle_dispatch(first)
+            await bridge.flush_events()
 
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1
-                assert terminals[0]["status"] == ThreadStatus.FAILED
-                assert "earlier attempt" in terminals[0]["error_detail"]
+            terminals = _frames_of(relayed, "thread_terminal")
+            assert len(terminals) == 1
+            assert terminals[0]["status"] == ThreadStatus.FAILED
+            assert "earlier attempt" in terminals[0]["error_detail"]
 
-                errors = _frames_of(relayed, "error")
-                assert len(errors) == 1
-                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
-                assert executor._graph_lifecycle.thread_binding_count == 0
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            errors = _frames_of(relayed, "error")
+            assert len(errors) == 1
+            assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+            assert executor._graph_lifecycle.thread_binding_count == 0
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
     @pytest.mark.parametrize("guards", [_INGEST_GUARDS, _RESUME_GUARDS])
     async def test_a_compile_refusal_carries_a_code_and_not_only_a_reason(
-        self, guards: Any
+        self, guards: Any, checkpointer: AsyncSqliteSaver
     ) -> None:
         """The refusal that spoke on one channel now speaks on both.
 
@@ -2233,50 +2177,48 @@ class TestPreRunRefusalsCarryTheirReason:
         """
         thread_id = f"t-compile-refusal-{guards.runtime_mode}"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
             try:
-                try:
-                    raise RuntimeError("engine unreachable at http://127.0.0.1:1")
-                except RuntimeError as cause:
-                    exc = GraphCompilationError(str(cause))
-                    exc.__cause__ = cause
+                raise RuntimeError("engine unreachable at http://127.0.0.1:1")
+            except RuntimeError as cause:
+                exc = GraphCompilationError(str(cause))
+                exc.__cause__ = cause
 
-                ingest = _current_ingest_dispatch(thread_id)
-                request = (
-                    ingest
-                    if guards.runtime_mode == "ingest"
-                    else _current_resume_dispatch(ingest, option_id="allow_once")
-                )
-                await executor._reject_compile_failure(
-                    request,
-                    _recording_span(),
-                    exc,
-                    guards,
-                )
-                await bridge.flush_events()
+            ingest = _current_ingest_dispatch(thread_id)
+            request = (
+                ingest
+                if guards.runtime_mode == "ingest"
+                else _current_resume_dispatch(ingest, option_id="allow_once")
+            )
+            await executor._reject_compile_failure(
+                request,
+                _recording_span(),
+                exc,
+                guards,
+            )
+            await bridge.flush_events()
 
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1
-                assert terminals[0]["status"] == ThreadStatus.FAILED
-                assert terminals[0]["error_detail"] == (
-                    "engine unreachable at http://127.0.0.1:1"
-                )
+            terminals = _frames_of(relayed, "thread_terminal")
+            assert len(terminals) == 1
+            assert terminals[0]["status"] == ThreadStatus.FAILED
+            assert terminals[0]["error_detail"] == (
+                "engine unreachable at http://127.0.0.1:1"
+            )
 
-                errors = _frames_of(relayed, "error")
-                assert len(errors) == 1, (
-                    "a compile refusal must carry a machine-readable code"
-                )
-                assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
-                assert errors[0]["recoverable"] is False
-                # The reason reaches both channels intact: a consumer keying on
-                # either one recovers the same account of the refusal.
-                assert errors[0]["message"] == terminals[0]["error_detail"]
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            errors = _frames_of(relayed, "error")
+            assert len(errors) == 1, (
+                "a compile refusal must carry a machine-readable code"
+            )
+            assert errors[0]["code"] == ProviderCondition.UNKNOWN.value
+            assert errors[0]["recoverable"] is False
+            # The reason reaches both channels intact: a consumer keying on
+            # either one recovers the same account of the refusal.
+            assert errors[0]["message"] == terminals[0]["error_detail"]
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
 
 class TestTheFailureStashCannotOutliveItsRun:
@@ -2316,81 +2258,81 @@ class TestTheFailureStashCannotOutliveItsRun:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_dispatch_that_dies_before_its_settle_strands_nothing(
         self,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         thread_id = "t-stash-leak"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                # Run A fails through a real ingest, which classifies it and
-                # stashes both halves exactly as production does.
-                ingest = cast("_Ingest", executor.aggregator.ingest)
-                outcome = await ingest(
-                    thread_id,
-                    "supervisor",
-                    self._throttled_graph(executor),
-                    {"messages": []},
-                    {"configurable": {"thread_id": thread_id}},
-                )
-                assert outcome == ThreadStatus.FAILED
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            # Run A fails through a real ingest, which classifies it and
+            # stashes both halves exactly as production does.
+            ingest = cast("_Ingest", executor.aggregator.ingest)
+            outcome = await ingest(
+                thread_id,
+                "supervisor",
+                self._throttled_graph(executor),
+                {"messages": []},
+                {"configurable": {"thread_id": thread_id}},
+            )
+            assert outcome == ThreadStatus.FAILED
 
-                # Run A's settle never reaches its pops. What production runs in
-                # that case is this backstop, reached from handle_dispatch's own
-                # handler with whatever killed the settle.
-                await executor._fail_unhandled_dispatch(
-                    _current_ingest_dispatch(thread_id),
-                    RuntimeError("execution-state projection died"),
-                )
-                await bridge.flush_events()
+            # Run A's settle never reaches its pops. What production runs in
+            # that case is this backstop, reached from handle_dispatch's own
+            # handler with whatever killed the settle.
+            await executor._fail_unhandled_dispatch(
+                _current_ingest_dispatch(thread_id),
+                RuntimeError("execution-state projection died"),
+            )
+            await bridge.flush_events()
 
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1
-                # The run's own account is preferred over the backstop's
-                # wording: what killed the settle is a fault in the machinery,
-                # not the reason the run failed.
-                assert terminals[0]["provider_condition"] == (
-                    ProviderCondition.THROTTLED.value
-                )
-                assert "quota exceeded" in terminals[0]["error_detail"]
+            terminals = _frames_of(relayed, "thread_terminal")
+            assert len(terminals) == 1
+            # The run's own account is preferred over the backstop's
+            # wording: what killed the settle is a fault in the machinery,
+            # not the reason the run failed.
+            assert terminals[0]["provider_condition"] == (
+                ProviderCondition.THROTTLED.value
+            )
+            assert "quota exceeded" in terminals[0]["error_detail"]
 
-                relayed.clear()
+            relayed.clear()
 
-                # Run B reuses the thread id and completes cleanly. Nothing of
-                # run A may reach it.
-                await executor._settle_run(
-                    DispatchRequest(
-                        action="ingest",
-                        workspace_root=_WORKSPACE,
-                        thread_id=thread_id,
-                        content="build it again",
-                        recursion_limit=10,
-                    ),
-                    _terminal_graph(executor),
-                    {"configurable": {"thread_id": thread_id}},
-                    ThreadStatus.COMPLETED,
-                )
-                await bridge.flush_events()
+            # Run B reuses the thread id and completes cleanly. Nothing of
+            # run A may reach it.
+            await executor._settle_run(
+                DispatchRequest(
+                    action="ingest",
+                    workspace_root=_WORKSPACE,
+                    thread_id=thread_id,
+                    content="build it again",
+                    recursion_limit=10,
+                ),
+                _terminal_graph(executor),
+                {"configurable": {"thread_id": thread_id}},
+                ThreadStatus.COMPLETED,
+            )
+            await bridge.flush_events()
 
-                second = _frames_of(relayed, "thread_terminal")
-                assert len(second) == 1
-                assert second[0]["status"] == ThreadStatus.COMPLETED
-                assert not second[0].get("error_detail"), (
-                    "run B must not inherit the reason run A failed with"
-                )
-                assert not second[0].get("provider_condition"), (
-                    "run B must not inherit the condition run A failed with - "
-                    "a client branches on it and would act on the wrong run"
-                )
-                assert _frames_of(relayed, "error") == []
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            second = _frames_of(relayed, "thread_terminal")
+            assert len(second) == 1
+            assert second[0]["status"] == ThreadStatus.COMPLETED
+            assert not second[0].get("error_detail"), (
+                "run B must not inherit the reason run A failed with"
+            )
+            assert not second[0].get("provider_condition"), (
+                "run B must not inherit the condition run A failed with - "
+                "a client branches on it and would act on the wrong run"
+            )
+            assert _frames_of(relayed, "error") == []
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_backstop_with_nothing_stashed_reports_its_own_failure(
         self,
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         """Adopting the run's account must not silence the backstop's own.
 
@@ -2400,33 +2342,30 @@ class TestTheFailureStashCannotOutliveItsRun:
         """
         thread_id = "t-stash-empty"
         relayed: list[dict[str, Any]] = []
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-            await cp.setup()
-            bridge = _make_recording_bridge(relayed)
-            executor = Executor(checkpointer=cp, bridge=bridge)
-            try:
-                await executor._fail_unhandled_dispatch(
-                    _current_ingest_dispatch(thread_id),
-                    _wrapped_failure(),
-                )
-                await bridge.flush_events()
+        bridge = _make_recording_bridge(relayed)
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        try:
+            await executor._fail_unhandled_dispatch(
+                _current_ingest_dispatch(thread_id),
+                _wrapped_failure(),
+            )
+            await bridge.flush_events()
 
-                terminals = _frames_of(relayed, "thread_terminal")
-                assert len(terminals) == 1
-                assert (
-                    "Worker dispatch failed unexpectedly"
-                    in (terminals[0]["error_detail"])
-                )
-                assert terminals[0]["provider_condition"] == (
-                    ProviderCondition.UNKNOWN.value
-                )
-                assert (
-                    terminals[0]["failure_evidence"]["action"]["dispatch_id"]
-                    == f"{thread_id}-dispatch"
-                )
-            finally:
-                await bridge.close()
-                await executor.shutdown()
+            terminals = _frames_of(relayed, "thread_terminal")
+            assert len(terminals) == 1
+            assert (
+                "Worker dispatch failed unexpectedly" in (terminals[0]["error_detail"])
+            )
+            assert terminals[0]["provider_condition"] == (
+                ProviderCondition.UNKNOWN.value
+            )
+            assert (
+                terminals[0]["failure_evidence"]["action"]["dispatch_id"]
+                == f"{thread_id}-dispatch"
+            )
+        finally:
+            await bridge.close()
+            await executor.shutdown()
 
 
 # A review loop whose loop node never passes, so every turn runs to its ceiling.

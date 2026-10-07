@@ -14,7 +14,6 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control import run_discovery_service
 from ...control.run_discovery_service import discover_active_runs
@@ -29,6 +28,7 @@ from ..thread_repository import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -47,7 +47,7 @@ def test_both_seams_share_one_normalizer_object() -> None:
 
 @pytest.mark.asyncio
 async def test_write_and_read_hashes_agree_for_an_uncanonical_spelling(
-    session: AsyncSession, tmp_path: Path
+    session: AsyncSession, tmp_path: Path, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A run written under one spelling is discoverable under another.
 
@@ -70,11 +70,9 @@ async def test_write_and_read_hashes_agree_for_an_uncanonical_spelling(
     )
     await session.commit()
 
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-        await checkpointer.setup()
-        result = await discover_active_runs(
-            session, checkpointer=checkpointer, workspace_root=queried_as
-        )
+    result = await discover_active_runs(
+        session, checkpointer=checkpointer, workspace_root=queried_as
+    )
 
     assert [run.run_id for run in result.runs] == ["run-workspace-identity"]
 

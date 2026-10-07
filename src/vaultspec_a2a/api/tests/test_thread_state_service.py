@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...conftest import materialize_schema
 from ...control.thread_state_service import capture_thread_state
 from ...database import (
     create_thread,
@@ -27,7 +24,10 @@ from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from langchain_core.runnables import RunnableConfig
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...thread.snapshots import ThreadStateData
 
@@ -51,21 +51,11 @@ async def _snapshot(
 
 @pytest.mark.asyncio
 async def test_checkpoint_failure_updates_execution_readiness_with_repair_status(
+    session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
     """Checkpoint read failures must not leave stale readiness on the snapshot."""
-    case_dir = tmp_path / "thread-state-service-db-closed"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
+    checkpoints_file = tmp_path / "closed-checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
         pass
 
@@ -93,42 +83,30 @@ async def test_checkpoint_failure_updates_execution_readiness_with_repair_status
     assert snapshot.replay_status == "unknown"
     assert "checkpoint_unavailable" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
-async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) -> None:
+async def test_missing_checkpoint_degrades_snapshot_readiness(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """A missing checkpoint must not leave the snapshot looking healthy."""
-    case_dir = tmp_path / "thread-state-service-db-missing"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-missing-checkpoint",
+            status="running",
+            repair_status="healthy",
+        )
+        await session.commit()
 
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-missing-checkpoint",
-                status="running",
-                repair_status="healthy",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-missing-checkpoint",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-missing-checkpoint",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.snapshot_complete is False
@@ -141,55 +119,41 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) ->
     assert snapshot.execution_readiness == "replay_gap"
     assert "checkpoint_missing" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_missing_checkpoint_hides_durable_pending_permission_state(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Missing checkpoint truth must not leave approvals looking resumable."""
-    case_dir = tmp_path / "thread-state-service-db-missing-pending-permission"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-missing-checkpoint-permission",
+            status="input_required",
+            repair_status="healthy",
+        )
+        thread.approval_status = "pending"
+        thread.approval_request_id = "perm-missing-checkpoint-permission"
+        await record_permission_request(
+            session,
+            request_id="perm-missing-checkpoint-permission",
+            thread_id="thread-missing-checkpoint-permission",
+            pause_reason_type="plan_approval_request",
+            description="Approve missing-checkpoint plan",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call=None,
+        )
+        await session.commit()
 
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-missing-checkpoint-permission",
-                status="input_required",
-                repair_status="healthy",
-            )
-            thread.approval_status = "pending"
-            thread.approval_request_id = "perm-missing-checkpoint-permission"
-            await record_permission_request(
-                session,
-                request_id="perm-missing-checkpoint-permission",
-                thread_id="thread-missing-checkpoint-permission",
-                pause_reason_type="plan_approval_request",
-                description="Approve missing-checkpoint plan",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call=None,
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-missing-checkpoint-permission",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-missing-checkpoint-permission",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.pending_permissions == []
@@ -203,58 +167,44 @@ async def test_missing_checkpoint_hides_durable_pending_permission_state(
     assert "checkpoint_missing" in snapshot.degraded_reasons
     assert "pending_permission_without_checkpoint_truth" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_submitted_thread_missing_checkpoint_clears_stale_pending_approval(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Submitted threads must not expose approval residue.
 
     This must hold before checkpoint truth exists.
     """
-    case_dir = tmp_path / "thread-state-service-db-submitted-stale-approval"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-submitted-stale-approval",
+            status="submitted",
+            repair_status="healthy",
+        )
+        thread.approval_status = "pending"
+        thread.approval_request_id = "perm-submitted-stale-approval"
+        await record_permission_request(
+            session,
+            request_id="perm-submitted-stale-approval",
+            thread_id="thread-submitted-stale-approval",
+            pause_reason_type="plan_approval_request",
+            description="Approve stale submitted plan",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call=None,
+        )
+        await session.commit()
 
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-submitted-stale-approval",
-                status="submitted",
-                repair_status="healthy",
-            )
-            thread.approval_status = "pending"
-            thread.approval_request_id = "perm-submitted-stale-approval"
-            await record_permission_request(
-                session,
-                request_id="perm-submitted-stale-approval",
-                thread_id="thread-submitted-stale-approval",
-                pause_reason_type="plan_approval_request",
-                description="Approve stale submitted plan",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call=None,
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-submitted-stale-approval",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-submitted-stale-approval",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.status == "submitted"
@@ -266,73 +216,58 @@ async def test_submitted_thread_missing_checkpoint_clears_stale_pending_approval
     assert snapshot.replay_status == "unknown"
     assert "pending_permission_without_checkpoint_truth" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoint(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Checkpoint-backed snapshots must still surface durable state corruption."""
-    case_dir = tmp_path / "thread-state-service-db-corrupt-state"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-corrupt-state",
+            "checkpoint_ns": "",
+        }
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-corrupt-state"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
     )
 
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-corrupt-state",
-                "checkpoint_ns": "",
-            }
-        }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-corrupt-state"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-corrupt-state",
+            status="running",
+            repair_status="healthy",
         )
-
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
+        session.add(
+            ThreadExecutionStateModel(
                 thread_id="thread-corrupt-state",
-                status="running",
-                repair_status="healthy",
+                checkpoint_id="cp-corrupt-state",
+                parent_checkpoint_id=None,
+                task_count=0,
+                interrupt_count=0,
+                next_nodes_json="{",
+                interrupt_types_json="[]",
+                tasks_json="[]",
+                degraded_reasons_json="[]",
             )
-            session.add(
-                ThreadExecutionStateModel(
-                    thread_id="thread-corrupt-state",
-                    checkpoint_id="cp-corrupt-state",
-                    parent_checkpoint_id=None,
-                    task_count=0,
-                    interrupt_count=0,
-                    next_nodes_json="{",
-                    interrupt_types_json="[]",
-                    tasks_json="[]",
-                    degraded_reasons_json="[]",
-                )
-            )
-            await session.commit()
+        )
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-corrupt-state",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-corrupt-state",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.snapshot_complete is False
@@ -341,73 +276,58 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
     assert snapshot.repair_status == "operator_intervention_required"
     assert snapshot.execution_readiness == "operator_intervention_required"
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_stale_execution_state_degrades_snapshot_readiness(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Stale durable execution-state lineage must not leave reconnect healthy."""
-    case_dir = tmp_path / "thread-state-service-db-stale-state"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-stale-state",
+            "checkpoint_ns": "",
+        }
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-fresh-state"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
     )
 
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-stale-state",
-                "checkpoint_ns": "",
-            }
-        }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-fresh-state"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-stale-state",
+            status="running",
+            repair_status="healthy",
         )
-
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
+        session.add(
+            ThreadExecutionStateModel(
                 thread_id="thread-stale-state",
-                status="running",
-                repair_status="healthy",
+                checkpoint_id="cp-superseded-state",
+                parent_checkpoint_id=None,
+                task_count=1,
+                interrupt_count=0,
+                next_nodes_json='["worker"]',
+                interrupt_types_json="[]",
+                tasks_json="[]",
+                degraded_reasons_json="[]",
             )
-            session.add(
-                ThreadExecutionStateModel(
-                    thread_id="thread-stale-state",
-                    checkpoint_id="cp-superseded-state",
-                    parent_checkpoint_id=None,
-                    task_count=1,
-                    interrupt_count=0,
-                    next_nodes_json='["worker"]',
-                    interrupt_types_json="[]",
-                    tasks_json="[]",
-                    degraded_reasons_json="[]",
-                )
-            )
-            await session.commit()
+        )
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-stale-state",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-stale-state",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.snapshot_complete is False
@@ -420,71 +340,56 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
     assert snapshot.pending_interrupt_count == 0
     assert snapshot.execution_tasks == []
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Corrupted durable permission rows must degrade the snapshot, not break it."""
-    case_dir = tmp_path / "thread-state-service-db-corrupt-permission"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-corrupt-permission",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-corrupt-permission",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-corrupt-permission"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-corrupt-permission"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-corrupt-permission",
+            status="input_required",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-corrupt-permission",
-                status="input_required",
-                repair_status="healthy",
-            )
-            await record_permission_request(
-                session,
-                request_id="perm-corrupt",
-                thread_id="thread-corrupt-permission",
-                pause_reason_type="permission_request",
-                description="Allow file write?",
-                allowed_options=[{"option_id": "allow_once", "name": "Allow Once"}],
-                tool_call="bash",
-            )
-            permission = await session.get(PermissionRequestModel, "perm-corrupt")
-            assert permission is not None
-            permission.allowed_options_json = '{"broken":'
-            await session.commit()
+        await record_permission_request(
+            session,
+            request_id="perm-corrupt",
+            thread_id="thread-corrupt-permission",
+            pause_reason_type="permission_request",
+            description="Allow file write?",
+            allowed_options=[{"option_id": "allow_once", "name": "Allow Once"}],
+            tool_call="bash",
+        )
+        permission = await session.get(PermissionRequestModel, "perm-corrupt")
+        assert permission is not None
+        permission.allowed_options_json = '{"broken":'
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-corrupt-permission",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-corrupt-permission",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.snapshot_complete is False
@@ -494,71 +399,56 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
     assert snapshot.repair_status == "operator_intervention_required"
     assert snapshot.execution_readiness == "operator_intervention_required"
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Unreadable plan-approval rows must not leak mirrored approval metadata."""
-    case_dir = tmp_path / "thread-state-service-db-corrupt-plan"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-corrupt-plan-approval",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-corrupt-plan-approval",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-corrupt-plan-approval"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-corrupt-plan-approval"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-corrupt-plan-approval",
+            status="input_required",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-corrupt-plan-approval",
-                status="input_required",
-                repair_status="healthy",
-            )
-            await record_permission_request(
-                session,
-                request_id="perm-corrupt-plan",
-                thread_id="thread-corrupt-plan-approval",
-                pause_reason_type="plan_approval_request",
-                description="Approve plan?",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call="plan_approval",
-            )
-            permission = await session.get(PermissionRequestModel, "perm-corrupt-plan")
-            assert permission is not None
-            permission.allowed_options_json = '{"broken":'
-            await session.commit()
+        await record_permission_request(
+            session,
+            request_id="perm-corrupt-plan",
+            thread_id="thread-corrupt-plan-approval",
+            pause_reason_type="plan_approval_request",
+            description="Approve plan?",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call="plan_approval",
+        )
+        permission = await session.get(PermissionRequestModel, "perm-corrupt-plan")
+        assert permission is not None
+        permission.allowed_options_json = '{"broken":'
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-corrupt-plan-approval",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-corrupt-plan-approval",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.snapshot_complete is False
@@ -567,73 +457,58 @@ async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
     assert snapshot.approval_request_id is None
     assert "permission_projection_unreadable" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Corrupt plan-approval rows must override stale thread-row approval state."""
-    case_dir = tmp_path / "thread-state-service-db-stale-plan"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-stale-plan-approval",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-stale-plan-approval",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-stale-plan-approval"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-stale-plan-approval"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-stale-plan-approval",
+            status="input_required",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-stale-plan-approval",
-                status="input_required",
-                repair_status="healthy",
-            )
-            thread.approval_status = "pending"
-            thread.approval_request_id = "perm-stale-plan"
-            await record_permission_request(
-                session,
-                request_id="perm-stale-plan",
-                thread_id="thread-stale-plan-approval",
-                pause_reason_type="plan_approval_request",
-                description="Approve plan?",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call="plan_approval",
-            )
-            permission = await session.get(PermissionRequestModel, "perm-stale-plan")
-            assert permission is not None
-            permission.allowed_options_json = '{"broken":'
-            await session.commit()
+        thread.approval_status = "pending"
+        thread.approval_request_id = "perm-stale-plan"
+        await record_permission_request(
+            session,
+            request_id="perm-stale-plan",
+            thread_id="thread-stale-plan-approval",
+            pause_reason_type="plan_approval_request",
+            description="Approve plan?",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call="plan_approval",
+        )
+        permission = await session.get(PermissionRequestModel, "perm-stale-plan")
+        assert permission is not None
+        permission.allowed_options_json = '{"broken":'
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-stale-plan-approval",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-stale-plan-approval",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.snapshot_complete is False
@@ -641,131 +516,101 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
     assert snapshot.approval_request_id is None
     assert "permission_projection_unreadable" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_missing_plan_approval_request_clears_stale_thread_pending_approval(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Stale thread-row pending approval must not survive without backing state."""
-    case_dir = tmp_path / "thread-state-service-db-missing-plan"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-stale-pending-approval",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-stale-pending-approval",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-no-plan-approval"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-no-plan-approval"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-stale-pending-approval",
+            status="input_required",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-stale-pending-approval",
-                status="input_required",
-                repair_status="healthy",
-            )
-            thread.approval_status = "pending"
-            thread.approval_request_id = "perm-missing-plan"
-            await session.commit()
+        thread.approval_status = "pending"
+        thread.approval_request_id = "perm-missing-plan"
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-stale-pending-approval",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-stale-pending-approval",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.approval_status is None
     assert snapshot.approval_request_id is None
     assert snapshot.replay_status == "durable"
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_plan_approval_without_tool_call_preserves_pending_approval(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Plan approval rows created without tool_call must stay actionable."""
-    case_dir = tmp_path / "thread-state-service-db-plan-no-tool-call"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-plan-no-tool-call",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-plan-no-tool-call",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-plan-no-tool-call"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-plan-no-tool-call"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-plan-no-tool-call",
+            status="input_required",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-plan-no-tool-call",
-                status="input_required",
-                repair_status="healthy",
-            )
-            thread.approval_status = "pending"
-            thread.approval_request_id = "perm-plan-no-tool-call"
-            await record_permission_request(
-                session,
-                request_id="perm-plan-no-tool-call",
-                thread_id="thread-plan-no-tool-call",
-                pause_reason_type="plan_approval_request",
-                description="Approve plan without tool call?",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call=None,
-            )
-            await session.commit()
+        thread.approval_status = "pending"
+        thread.approval_request_id = "perm-plan-no-tool-call"
+        await record_permission_request(
+            session,
+            request_id="perm-plan-no-tool-call",
+            thread_id="thread-plan-no-tool-call",
+            pause_reason_type="plan_approval_request",
+            description="Approve plan without tool call?",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call=None,
+        )
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-plan-no-tool-call",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-plan-no-tool-call",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.approval_status == "pending"
@@ -773,70 +618,55 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
     assert len(snapshot.pending_permissions) == 1
     assert snapshot.pending_permissions[0].tool_call == "plan_approval"
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approval(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Public thread state must follow the live durable pending plan approval."""
-    case_dir = tmp_path / "thread-state-service-db-rejected-stale-live-plan"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-rejected-stale-live-plan",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-rejected-stale-live-plan",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-rejected-stale-live-plan"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-rejected-stale-live-plan"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-rejected-stale-live-plan",
+            status="input_required",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-rejected-stale-live-plan",
-                status="input_required",
-                repair_status="healthy",
-            )
-            thread.approval_status = "rejected"
-            thread.approval_request_id = "perm-stale-rejected-plan"
-            await record_permission_request(
-                session,
-                request_id="perm-live-pending-plan",
-                thread_id="thread-rejected-stale-live-plan",
-                pause_reason_type="plan_approval_request",
-                description="Approve revised plan?",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call=None,
-            )
-            await session.commit()
+        thread.approval_status = "rejected"
+        thread.approval_request_id = "perm-stale-rejected-plan"
+        await record_permission_request(
+            session,
+            request_id="perm-live-pending-plan",
+            thread_id="thread-rejected-stale-live-plan",
+            pause_reason_type="plan_approval_request",
+            description="Approve revised plan?",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call=None,
+        )
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-rejected-stale-live-plan",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-rejected-stale-live-plan",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.approval_status == "pending"
@@ -844,131 +674,101 @@ async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approva
     assert len(snapshot.pending_permissions) == 1
     assert snapshot.pending_permissions[0].request_id == "perm-live-pending-plan"
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_rejected_thread_approval_residue_does_not_surface_without_live_plan(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Rejected approval residue must not remain on the public thread snapshot."""
-    case_dir = tmp_path / "thread-state-service-db-rejected-residue"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-rejected-residue",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-rejected-residue",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-rejected-residue"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-rejected-residue"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-rejected-residue",
+            status="running",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-rejected-residue",
-                status="running",
-                repair_status="healthy",
-            )
-            thread.approval_status = "rejected"
-            thread.approval_request_id = "perm-rejected-residue"
-            await session.commit()
+        thread.approval_status = "rejected"
+        thread.approval_request_id = "perm-rejected-residue"
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-rejected-residue",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-rejected-residue",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.approval_status is None
     assert snapshot.approval_request_id is None
     assert snapshot.pending_permissions == []
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_terminal_thread_excludes_durable_pending_permission_from_thread_state(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Terminal threads must not expose stale durable permissions as actionable."""
-    case_dir = tmp_path / "thread-state-service-db-terminal-permission-residue"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-terminal-permission-residue",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-terminal-permission-residue",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-terminal-permission-residue"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-terminal-permission-residue"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-terminal-permission-residue",
+            status="completed",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-terminal-permission-residue",
-                status="completed",
-                repair_status="healthy",
-            )
-            thread.approval_status = "pending"
-            thread.approval_request_id = "perm-terminal-permission-residue"
-            await record_permission_request(
-                session,
-                request_id="perm-terminal-permission-residue",
-                thread_id="thread-terminal-permission-residue",
-                pause_reason_type="plan_approval_request",
-                description="Stale terminal plan approval",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call=None,
-            )
-            await session.commit()
+        thread.approval_status = "pending"
+        thread.approval_request_id = "perm-terminal-permission-residue"
+        await record_permission_request(
+            session,
+            request_id="perm-terminal-permission-residue",
+            thread_id="thread-terminal-permission-residue",
+            pause_reason_type="plan_approval_request",
+            description="Stale terminal plan approval",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call=None,
+        )
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-terminal-permission-residue",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-terminal-permission-residue",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.pending_permissions == []
@@ -980,76 +780,61 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
     assert snapshot.repair_status == "needs_reconciliation"
     assert snapshot.execution_readiness == "needs_reconciliation"
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_answered_pending_apply_permission_does_not_surface_in_thread_state(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Snapshots must not advertise already-answered permissions as pending."""
-    case_dir = tmp_path / "thread-state-service-db-answered-pending-apply"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-answered-pending-apply",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-answered-pending-apply",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-answered-pending-apply"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-answered-pending-apply"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-answered-pending-apply",
+            status="input_required",
+            repair_status="healthy",
         )
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-answered-pending-apply",
-                status="input_required",
-                repair_status="healthy",
-            )
-            thread.approval_status = "pending"
-            thread.approval_request_id = "perm-answered-pending-apply"
-            await record_permission_request(
-                session,
-                request_id="perm-answered-pending-apply",
-                thread_id="thread-answered-pending-apply",
-                pause_reason_type="plan_approval_request",
-                description="Already answered plan approval",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call=None,
-            )
-            await record_permission_response_submission(
-                session,
-                request_id="perm-answered-pending-apply",
-                option_id="approve",
-                idempotency_key="idem-answered-pending-apply",
-            )
-            await session.commit()
+        thread.approval_status = "pending"
+        thread.approval_request_id = "perm-answered-pending-apply"
+        await record_permission_request(
+            session,
+            request_id="perm-answered-pending-apply",
+            thread_id="thread-answered-pending-apply",
+            pause_reason_type="plan_approval_request",
+            description="Already answered plan approval",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call=None,
+        )
+        await record_permission_response_submission(
+            session,
+            request_id="perm-answered-pending-apply",
+            option_id="approve",
+            idempotency_key="idem-answered-pending-apply",
+        )
+        await session.commit()
 
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-answered-pending-apply",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-answered-pending-apply",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
+        )
 
     assert snapshot is not None
     assert snapshot.pending_permissions == []
@@ -1057,161 +842,131 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
     assert snapshot.approval_request_id is None
     assert snapshot.pause_cause is None
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_aggregator_only_pending_permission_does_not_surface_in_thread_state(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Reconnect snapshots must not expose permissions without durable rows."""
     import time
 
-    case_dir = tmp_path / "thread-state-service-db-aggregator-only-permission"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-aggregator-only-permission",
+            "checkpoint_ns": "",
+        }
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-aggregator-only-permission"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-aggregator-only-permission",
+            status="input_required",
+            repair_status="healthy",
+        )
+        await session.commit()
+
+    aggregator = EventAggregator()
+    aggregator._emitters._pending_permissions[
+        "thread-aggregator-only-permission:perm-1"
+    ] = (
+        PermissionRequest(
+            thread_id="thread-aggregator-only-permission",
+            agent_id="vaultspec-coder",
+            timestamp=time.time(),
+            request_id="thread-aggregator-only-permission:perm-1",
+            description="Allow file write?",
+            options=[],
+        ),
+        0.0,
     )
 
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-aggregator-only-permission",
-                "checkpoint_ns": "",
-            }
-        }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-aggregator-only-permission"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-aggregator-only-permission",
+            aggregator=aggregator,
+            checkpointer=checkpointer,
         )
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-aggregator-only-permission",
-                status="input_required",
-                repair_status="healthy",
-            )
-            await session.commit()
-
-        aggregator = EventAggregator()
-        aggregator._emitters._pending_permissions[
-            "thread-aggregator-only-permission:perm-1"
-        ] = (
-            PermissionRequest(
-                thread_id="thread-aggregator-only-permission",
-                agent_id="vaultspec-coder",
-                timestamp=time.time(),
-                request_id="thread-aggregator-only-permission:perm-1",
-                description="Allow file write?",
-                options=[],
-            ),
-            0.0,
-        )
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-aggregator-only-permission",
-                aggregator=aggregator,
-                checkpointer=checkpointer,
-            )
 
     assert snapshot is not None
     assert snapshot.pending_permissions == []
     assert snapshot.approval_status is None
     assert snapshot.approval_request_id is None
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_state(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Checkpoint interrupts alone must not advertise actionable permissions."""
-    case_dir = tmp_path / "thread-state-service-db-checkpoint-only-permission"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
+    seed_config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-checkpoint-only-permission",
+            "checkpoint_ns": "",
+        }
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-checkpoint-only-permission"
+    config = await checkpointer.aput(
+        seed_config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    await checkpointer.aput_writes(
+        config,
+        [
+            (
+                "__interrupt__",
+                [
+                    Interrupt(
+                        value={
+                            "type": "permission_request",
+                            "request_id": "perm-checkpoint-only",
+                            "tool_name": "bash",
+                            "options": [
+                                {
+                                    "optionId": "allow_once",
+                                    "name": "Allow Once",
+                                }
+                            ],
+                        },
+                        id="perm-checkpoint-only",
+                    )
+                ],
+            )
+        ],
+        task_id="task-checkpoint-only-permission",
     )
 
-    checkpoints_file = case_dir / "checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        seed_config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-checkpoint-only-permission",
-                "checkpoint_ns": "",
-            }
-        }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-checkpoint-only-permission"
-        config = await checkpointer.aput(
-            seed_config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-checkpoint-only-permission",
+            status="input_required",
+            repair_status="healthy",
         )
-        await checkpointer.aput_writes(
-            config,
-            [
-                (
-                    "__interrupt__",
-                    [
-                        Interrupt(
-                            value={
-                                "type": "permission_request",
-                                "request_id": "perm-checkpoint-only",
-                                "tool_name": "bash",
-                                "options": [
-                                    {
-                                        "optionId": "allow_once",
-                                        "name": "Allow Once",
-                                    }
-                                ],
-                            },
-                            id="perm-checkpoint-only",
-                        )
-                    ],
-                )
-            ],
-            task_id="task-checkpoint-only-permission",
+        await session.commit()
+
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="thread-checkpoint-only-permission",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
         )
-
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-checkpoint-only-permission",
-                status="input_required",
-                repair_status="healthy",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="thread-checkpoint-only-permission",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
 
     assert snapshot is not None
     assert snapshot.pending_permissions == []
@@ -1219,5 +974,3 @@ async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_sta
     assert "checkpoint_permission_without_durable_row" in snapshot.degraded_reasons
     assert snapshot.repair_status == "needs_reconciliation"
     assert snapshot.execution_readiness == "needs_reconciliation"
-
-    await engine.dispose()

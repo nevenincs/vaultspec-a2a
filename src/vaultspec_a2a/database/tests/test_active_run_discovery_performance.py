@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import insert, text
 
 from ...control.run_discovery_service import discover_active_runs
@@ -20,6 +19,7 @@ from ..thread_repository import _active_thread_page_statement, _workspace_key
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
     from ...control.run_discovery_service import ActiveRunDiscoveryResult
@@ -145,6 +145,7 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
     engine: AsyncEngine,
     session: AsyncSession,
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A 100k-row history must not turn the bounded read into a table scan."""
     workspace = os.path.normcase(os.path.realpath(tmp_path / "workspace"))
@@ -152,13 +153,11 @@ async def test_active_discovery_stays_indexed_and_bounded_at_large_history(
     await _seed_history(session, workspace, foreign_workspace)
     await _assert_active_indexes(engine, session, workspace)
 
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-        await checkpointer.setup()
-        result, samples_ms, peak_bytes = await _measure_discovery(
-            session,
-            checkpointer,
-            tmp_path / "workspace",
-        )
+    result, samples_ms, peak_bytes = await _measure_discovery(
+        session,
+        checkpointer,
+        tmp_path / "workspace",
+    )
 
     assert [run.run_id for run in result.runs] == [
         "history-099999",

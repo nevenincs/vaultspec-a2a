@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 import anyio
 import httpx
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...api.tests.clarification_harness import park_clarification
 from ...control._permission_response_contract import PermissionInput
@@ -59,6 +58,7 @@ from ...worker.ipc import WorkerBridge
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import (
         AsyncSession,
         async_sessionmaker,
@@ -75,7 +75,7 @@ def _dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @asynccontextmanager
 async def _saturated_worker(
-    checkpoint_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> AsyncGenerator[httpx.AsyncClient]:
     """Serve the production worker app with every run slot already taken.
 
@@ -83,28 +83,24 @@ async def _saturated_worker(
     the 429 the gateway meets is the one the worker composes for a full
     service rather than a status written here.
     """
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        bridge = WorkerBridge("http://control", "dispatch-failure-transition-test")
-        executor = Executor(saver, bridge)
-        for index in range(domain_config.max_concurrent_threads):
-            reservation, _reason = await executor.reserve_dispatch_capacity(
-                f"held-{index}"
-            )
-            assert reservation is not None
-        app = create_worker_app()
-        app.state.executor = executor
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as client:
-                yield client
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
+    bridge = WorkerBridge("http://control", "dispatch-failure-transition-test")
+    executor = Executor(checkpointer, bridge)
+    for index in range(domain_config.max_concurrent_threads):
+        reservation, _reason = await executor.reserve_dispatch_capacity(f"held-{index}")
+        assert reservation is not None
+    app = create_worker_app()
+    app.state.executor = executor
+    async with anyio.create_task_group() as tasks:
+        app.state.task_group = tasks
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://worker",
+            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
+        ) as client:
+            yield client
+        tasks.cancel_scope.cancel()
+    await executor.shutdown()
+    await bridge.close()
 
 
 # A follow-up inherits the active project its run was created with, so a thread
@@ -299,6 +295,7 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
 async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_land(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """An answer that never reached the parked node says so durably.
 
@@ -309,53 +306,49 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
     recorded where a live run can carry it and nowhere that claims a failure.
     """
     thread_id = "undelivered-clarification-resume"
-    async with AsyncSqliteSaver.from_conn_string(
-        str(tmp_path / "clarification-checkpoints.db")
-    ) as checkpointer:
-        await checkpointer.setup()
-        parked = await park_clarification(checkpointer, thread_id=thread_id)
+    parked = await park_clarification(checkpointer, thread_id=thread_id)
 
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id=thread_id,
-                status=ThreadStatus.INPUT_REQUIRED,
-                title="Undelivered clarification resume",
-                repair_status="paused_resumable",
-                metadata=current_execution_metadata(tmp_path),
-            )
-            await _seed_accepted_initial_action(session, thread_id, workspace=tmp_path)
-            await session.commit()
-
-        spawner = adopted_spawner()
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1,
-            recovery_timeout=30.0,
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.INPUT_REQUIRED,
+            title="Undelivered clarification resume",
+            repair_status="paused_resumable",
+            metadata=current_execution_metadata(tmp_path),
         )
-        circuit_breaker.force_open()
+        await _seed_accepted_initial_action(session, thread_id, workspace=tmp_path)
+        await session.commit()
 
-        async with (
-            httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client,
-            session_factory() as session,
-        ):
-            result = await respond_to_clarification(
-                session,
-                thread_id=thread_id,
+    spawner = adopted_spawner()
+    circuit_breaker = WorkerCircuitBreaker(
+        failure_threshold=1,
+        recovery_timeout=30.0,
+    )
+    circuit_breaker.force_open()
+
+    async with (
+        httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client,
+        session_factory() as session,
+    ):
+        result = await respond_to_clarification(
+            session,
+            thread_id=thread_id,
+            request_id=parked.request.request_id,
+            resolution=ClarificationAnswers(
                 request_id=parked.request.request_id,
-                resolution=ClarificationAnswers(
-                    request_id=parked.request.request_id,
-                    answers={"provider": "codex"},
+                answers={"provider": "codex"},
+            ),
+            runtime=ClarificationRuntime(
+                checkpointer,
+                DispatchTransport(
+                    worker_client=client,
+                    circuit_breaker=circuit_breaker,
+                    worker_spawner=spawner,
                 ),
-                runtime=ClarificationRuntime(
-                    checkpointer,
-                    DispatchTransport(
-                        worker_client=client,
-                        circuit_breaker=circuit_breaker,
-                        worker_spawner=spawner,
-                    ),
-                ),
-            )
+            ),
+        )
 
     assert result.dispatched is False
     assert result.failure_type is FailureType.CIRCUIT_OPEN
@@ -451,6 +444,7 @@ async def _parked_permission_run(
 async def test_a_saturated_worker_leaves_the_parked_run_answerable(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Backpressure retains the accepted answer instead of quarantining the run.
 
@@ -466,7 +460,7 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
     )
 
     async with (
-        _saturated_worker(tmp_path / "capacity-checkpoints.db") as worker_client,
+        _saturated_worker(checkpointer) as worker_client,
         session_factory() as session,
     ):
         pending = await get_permission_request(session, request_id)

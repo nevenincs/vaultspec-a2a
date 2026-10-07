@@ -1,29 +1,29 @@
-"""Tests for the database layer using real in-memory SQLite.
+"""Tests for the database layer using real SQLite.
 
 No mocks, no monkeypatching. Every test runs against a real aiosqlite
-in-memory database. Tests cover CRUD operations, session management
-(init_db, close_db, get_session_factory, get_db), WAL mode verification,
-cross-session durability, and cascade-delete behaviour.
+database: the per-test file the root fixtures provide, or an in-memory one
+where the test drives ``init_db`` itself. Tests cover CRUD operations, session
+management (init_db, close_db, get_session_factory, get_db), WAL mode
+verification, cross-session durability, and cascade-delete behaviour.
 """
 
 import json
 from collections.abc import AsyncGenerator
 from decimal import Decimal
-from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 from starlette.datastructures import State
 from starlette.requests import Request
 
+from ...conftest import SqlitePosture
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import (
     ApprovalStatus,
@@ -53,7 +53,6 @@ from .. import (
 from .. import session as _session_module
 from ..models import (
     ArtifactModel,
-    Base,
     CostTrackingModel,
     PermissionLogModel,
 )
@@ -869,24 +868,10 @@ class TestWALMode:
     """Verify WAL mode on a file-backed SQLite database."""
 
     @pytest.mark.asyncio
-    async def test_wal_mode_on_file_db(self, runtime_dir: Path) -> None:
+    @pytest.mark.sqlite_engine(SqlitePosture.APPLICATION)
+    async def test_wal_mode_on_file_db(self, engine: AsyncEngine) -> None:
         """verify_wal_mode returns 'wal' on a file-backed SQLite DB."""
-        db_path = runtime_dir / "test_wal.db"
-        eng = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
-
-        # WAL mode is set via the connect event listener in session.py;
-        # replicate it here for a standalone engine.
-        def _set_wal(dbapi_conn: Any, _rec: object) -> None:
-            dbapi_conn.execute("PRAGMA journal_mode=WAL")
-
-        event.listen(eng.sync_engine, "connect", _set_wal)
-
-        async with eng.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-        mode = await verify_wal_mode(eng)
-        assert mode == "wal"
-        await eng.dispose()
+        assert await verify_wal_mode(engine) == "wal"
 
 
 # ---------------------------------------------------------------------------
@@ -927,18 +912,14 @@ class TestSessionFunctions:
             assert isinstance(session, AsyncSession)
 
     @pytest.mark.asyncio
-    async def test_get_session_factory_with_explicit_engine(self) -> None:
+    async def test_get_session_factory_with_explicit_engine(
+        self, engine: AsyncEngine
+    ) -> None:
         """get_session_factory(engine) accepts an explicit engine."""
-        eng = create_async_engine("sqlite+aiosqlite:///:memory:")
-        async with eng.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        try:
-            factory = get_session_factory(eng)
-            assert callable(factory)
-            async with factory() as session:
-                assert isinstance(session, AsyncSession)
-        finally:
-            await eng.dispose()
+        factory = get_session_factory(engine)
+        assert callable(factory)
+        async with factory() as session:
+            assert isinstance(session, AsyncSession)
 
     @pytest.mark.asyncio
     async def test_get_db_yields_session(self) -> None:

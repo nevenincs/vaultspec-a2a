@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langchain_core.callbacks import AsyncCallbackHandler
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 from langgraph.types import RetryPolicy
 
@@ -19,6 +18,7 @@ if TYPE_CHECKING:
 
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import BaseMessage
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...thread.state import TeamState
@@ -820,20 +820,20 @@ def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) -> None:
+async def test_compile_team_graph_step_timeout_set(
+    pf: ProviderFactoryProtocol, checkpointer: AsyncSqliteSaver
+) -> None:
     """The step budget caps every node, and the graph backstop sits above it."""
     team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            step_timeout=42.0,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        step_timeout=42.0,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
     assert _node_run_timeouts(graph) == {42.0}
     # The backstop covers the RETRY budget, not one attempt of it: every
     # attempt gets the whole per-node budget and the loop waits between them.
@@ -847,21 +847,20 @@ async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_compile_team_graph_step_timeout_falls_back_to_toml(
     pf: ProviderFactoryProtocol,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """When step_timeout=None, the team TOML step_timeout_seconds is used."""
     team = load_team_config("vaultspec-solo-coder")
     assert team.graph.step_timeout_seconds == 120
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            step_timeout=None,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        step_timeout=None,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
     assert _node_run_timeouts(graph) == {120.0}
     assert graph.step_timeout == (
         node_occupancy_ceiling(120.0) + STEP_BACKSTOP_GRACE_SECONDS
@@ -871,6 +870,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
 @pytest.mark.asyncio(loop_scope="function")
 async def test_a_compiled_graph_is_named_for_the_team_it_came_from(
     pf: ProviderFactoryProtocol,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Every compiled graph says which team produced it.
 
@@ -880,21 +880,20 @@ async def test_a_compiled_graph_is_named_for_the_team_it_came_from(
     """
     team = load_team_config("vaultspec-solo-coder")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
     assert graph.name == "vaultspec-solo-coder"
 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_superstep_backstop_covers_every_attempt_a_node_may_make(
     pf: ProviderFactoryProtocol,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The graph bound cannot cut a node's own retries short.
 
@@ -908,16 +907,14 @@ async def test_the_superstep_backstop_covers_every_attempt_a_node_may_make(
     team = load_team_config("vaultspec-solo-coder")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     budget = 90.0
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            step_timeout=budget,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        step_timeout=budget,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
 
     attempts = _NODE_RETRY_POLICY.max_attempts
     assert _node_run_timeouts(graph) == {budget}
@@ -1021,6 +1018,7 @@ async def test_compile_team_graph_passes_supervisor_agent_config_to_provider_fac
 @pytest.mark.asyncio(loop_scope="function")
 async def test_compile_team_graph_does_not_set_recursion_limit(
     pf: ProviderFactoryProtocol,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """compile_team_graph leaves recursion_limit at LangGraph default.
 
@@ -1030,15 +1028,13 @@ async def test_compile_team_graph_does_not_set_recursion_limit(
     team = load_team_config("vaultspec-solo-coder")
     assert team.graph.recursion_limit == 10
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
     # recursion_limit is passed at runtime via config, not set on graph.
     assert not hasattr(graph, "recursion_limit")
 

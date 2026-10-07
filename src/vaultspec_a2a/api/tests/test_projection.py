@@ -1,14 +1,12 @@
 """Tests for repair-aware checkpoint projection helpers."""
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.types import Interrupt
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...conftest import materialize_schema
 from ...control.projection import (
     apply_checkpoint_projection,
     apply_execution_state_projection,
@@ -434,16 +432,10 @@ def test_project_execution_state_model_recovers_valid_task_siblings() -> None:
 
 @pytest.mark.asyncio
 async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_siblings(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Durable permission-list corruption drops only unreadable option siblings."""
-    case_dir = tmp_path / "api-test-projection-permission-siblings"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
+    async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
@@ -480,8 +472,6 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
     assert [
         option.option_id for option in projected.pending_permissions[0].options
     ] == ["allow_once", "reject_once"]
-
-    await engine.dispose()
 
 
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:
@@ -524,16 +514,10 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Checkpoint mismatch should explicitly mark execution-state projection stale."""
-    case_dir = tmp_path / "api-test-projection-db-stale"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
+    async with session_factory() as session:
         thread = await create_thread(
             session, write_authority=make_test_write_authority(), thread_id="thread-1"
         )
@@ -569,21 +553,13 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
         assert snapshot.snapshot_complete is False
         assert "execution_state_projection_stale" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_degraded_only_projection_keeps_the_prior_lineage(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A degraded-only write must not overwrite the row's last real lineage."""
-    case_dir = tmp_path / "api-test-projection-db-degraded-only"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
+    async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
@@ -639,21 +615,13 @@ async def test_degraded_only_projection_keeps_the_prior_lineage(
     assert snapshot.snapshot_complete is False
     assert "execution_state_projection_stale" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_unreadable_execution_state_requires_operator_intervention(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Corrupted durable execution-state rows must fail closed on readiness."""
-    case_dir = tmp_path / "api-test-projection-db-corrupt"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
+    async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
@@ -692,5 +660,3 @@ async def test_unreadable_execution_state_requires_operator_intervention(
     assert "execution_state_projection_unreadable" in snapshot.degraded_reasons
     assert snapshot.repair_status == "operator_intervention_required"
     assert snapshot.execution_readiness == "operator_intervention_required"
-
-    await engine.dispose()

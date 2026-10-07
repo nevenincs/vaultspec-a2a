@@ -86,6 +86,9 @@ class TestSessionSettings(ProjectSettings):
     cpu_budget: int | None = Field(default=None, gt=0)
     completion_endpoint: str | None = None
     completion_owner_pid: int | None = None
+    # The file a fixture lane's hold-then-complete turn waits on, handed to the
+    # gateway or worker child a test spawns.
+    hold_gate: Path | None = None
 
 
 class SessionSeat:

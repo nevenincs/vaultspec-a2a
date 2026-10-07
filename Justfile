@@ -629,7 +629,7 @@ docs-build:
 
 # ===========================================================================
 #  dev - passthroughs to the product CLI, the process registry, the bounded
-#  Compose stacks, and this checkout's own vaultspec and RAG state.
+#  Jaeger fixture stack, and this checkout's own vaultspec and RAG state.
 # ===========================================================================
 
 # Pass arguments directly to the product CLI.

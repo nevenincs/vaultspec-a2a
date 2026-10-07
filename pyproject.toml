@@ -324,7 +324,7 @@ markers = [
   "core: marks Layer 1 + Layer 1.5 tests — pure domain, zero infrastructure (run with '-m core')",
   "middleware: marks middleware-layer tests — protocol adapters + infra services, no orchestration deps (run with '-m middleware')",
   "unit: marks pure unit tests across all layers — no I/O, no database, no HTTP (run with '-m unit')",
-  "service: marks Layer 3 certification tests — most require Docker compose services, though some members are engine-free and run fully in-process. Run with pytest -m service.",
+  "service: marks Layer 3 certification tests — most drive the native gateway, worker and real provider or engine processes, though some members are engine-free and run fully in-process. Run with pytest -m service.",
   "resource(key, shared=False): declares a contended real resource this test uses; drives scheduling groups, machine-global leases, and timeout backstops (vaultspec_a2a.testing).",
 ]
 testpaths = ["src/vaultspec_a2a"]

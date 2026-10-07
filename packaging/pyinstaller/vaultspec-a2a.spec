@@ -1,6 +1,6 @@
 # PyInstaller onedir spec for the dashboard-bundled a2a runtime binary.
 #
-# Shape decision (see the dashboard-bundled-runtime decision record): onedir,
+# Shape: onedir,
 # never onefile - a long-lived service must not self-extract to a temp
 # directory on every boot, and the dashboard bundles a directory per target
 # anyway. The dashboard's release pipeline invokes scripts/build_binary.py,

@@ -89,6 +89,7 @@ async def _compile_measured_graph(
     from ...worker.catalog_store import RunCatalogStore
     from ...worker.graph_lifecycle import GraphLifecycleManager
     from ...worker.token_store import RunTokenStore
+    from ..team_selection import FrozenLaneAssignment
 
     lifecycle = GraphLifecycleManager(
         checkpointer=checkpointer,
@@ -113,17 +114,19 @@ async def _compile_measured_graph(
             workspace_root=str(workspace),
             recursion_limit=10,
             model_assignment={
-                "mock-coder-success": {
-                    "schema_version": 1,
-                    "provider": "mock",
-                    "execution_mode": "in-process-mock",
-                    "catalog_revision": "test-revision",
-                    "entry_id": "mock-high",
-                    "model_name": "mock-high",
-                    "controls": [],
-                    "fallbacks": [],
-                    "provenance": {"selection_source": "team_selection"},
-                }
+                "mock-coder-success": FrozenLaneAssignment.model_validate(
+                    {
+                        "schema_version": 1,
+                        "provider_id": "mock",
+                        "execution_mode": "in-process-mock",
+                        "catalog_revision": "test-revision",
+                        "entry_id": "mock-high",
+                        "model_name": "mock-high",
+                        "controls": [],
+                        "defaulted_control_ids": [],
+                        "provenance": {"selection_source": "team_selection"},
+                    }
+                )
             },
         )
     )

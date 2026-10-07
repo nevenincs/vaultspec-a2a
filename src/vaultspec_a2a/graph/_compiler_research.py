@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from langgraph.runtime import Runtime
 
     from ..authoring import FeedbackContextReader
+    from ..providers.team_selection import FrozenLaneAssignment
     from ..thread.clarification import ClarificationRequest
     from .nodes.worker import WorkerNode
     from .protocols import CostPort, ProviderFactoryProtocol, RuntimeIdentityPort
@@ -99,7 +100,7 @@ class _CompileResearchAdrOptions(
     workspace_root: Path | None
     autonomous: bool
     feedback_reader: FeedbackContextReader | None
-    frozen_assignment: dict[str, dict[str, Any]] | None
+    frozen_assignment: dict[str, FrozenLaneAssignment] | None
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
 

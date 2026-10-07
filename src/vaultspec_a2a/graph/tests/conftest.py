@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 
+from ...providers.team_selection import FrozenLaneAssignment, LaneProvenance
 from ...testing import apply_layer_markers
 from ..enums import Provider
 from ..protocols import ProviderFactoryProtocol
@@ -89,20 +90,22 @@ def pf() -> ProviderFactoryProtocol:
     return factory
 
 
-def deterministic_model_assignment(team_config: Any) -> dict[str, dict[str, Any]]:
+def deterministic_model_assignment(
+    team_config: Any,
+) -> dict[str, FrozenLaneAssignment]:
     """Build exact schema-v1 assignments for topology-only graph tests."""
-    assignment: dict[str, Any] = {
-        "provider": Provider.DETERMINISTIC.value,
-        "execution_mode": "in-process-deterministic",
-        "catalog_revision": "test-revision",
-        "entry_id": "test-entry",
-        "model_name": "deterministic",
-        "controls": [],
-        "fallbacks": [],
-        "provenance": {"selection_source": "team_selection"},
-        "schema_version": 1,
-    }
+    assignment = FrozenLaneAssignment(
+        schema_version=1,
+        provider_id=Provider.DETERMINISTIC,
+        execution_mode="in-process-deterministic",
+        catalog_revision="test-revision",
+        entry_id="test-entry",
+        model_name="deterministic",
+        controls=(),
+        defaulted_control_ids=(),
+        provenance=LaneProvenance(selection_source="team_selection"),
+    )
     return {
-        "__supervisor__": dict(assignment),
-        **{ref.agent_id: dict(assignment) for ref in team_config.workers},
+        "__supervisor__": assignment,
+        **{ref.agent_id: assignment for ref in team_config.workers},
     }

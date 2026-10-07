@@ -94,6 +94,7 @@ MAX_TEXT_LENGTH: Final = 1_024
 MAX_DISPLAY_LENGTH: Final = 256
 MAX_MODELS: Final = 256
 MAX_CONTROLS: Final = 32
+MAX_FALLBACKS: Final = 8
 MAX_OPTIONS: Final = 128
 MAX_CAPABILITIES: Final = 64
 MAX_HEALTH_REASONS: Final = 16
@@ -103,8 +104,6 @@ MAX_HEALTH_REASONS: Final = 16
 MAX_PUBLIC_ID_LENGTH: Final = 512
 MAX_CONTROL_ID_LENGTH: Final = 128
 MAX_PROVIDER_LANES: Final = 128
-# How many ordered fallback lanes one team selection may name.
-MAX_FALLBACKS: Final = 8
 
 
 def required_text(

@@ -61,6 +61,11 @@ from .cli_resolution import (
     pin_claude_executable,
 )
 from .codex_catalog import discover_codex_catalog
+from .execution_modes import (
+    ACP_BACKEND_LANES,
+    EXTERNAL_EXECUTION_MODES,
+    external_execution_mode,
+)
 from .in_process_catalog import (
     IN_PROCESS_EXECUTION_MODES,
     discover_in_process_catalog,
@@ -94,18 +99,12 @@ class UnsupportedExecutionLaneError(ValueError):
 
 def validate_current_execution_lane(provider: Provider, execution_mode: str) -> None:
     """Refuse a structurally impossible provider/mode pair without construction."""
-    expected_modes = {
-        Provider.ANTIGRAVITY: "antigravity-cli",
-        Provider.CODEX: "codex-app-server",
-        Provider.CLAUDE: f"claude-agent-acp:{settings.acp_backend}",
-        Provider.ZAI: f"zai-claude-agent-acp:{settings.acp_backend}",
-        Provider.KIMI: "kimi-code-acp",
-        Provider.OPENAI: "openai-api",
-        Provider.ZHIPU: "zhipu-openai-compatible-api",
-        Provider.DETERMINISTIC: IN_PROCESS_EXECUTION_MODES[Provider.DETERMINISTIC],
-        Provider.MOCK: IN_PROCESS_EXECUTION_MODES[Provider.MOCK],
-    }
-    if expected_modes.get(provider) != execution_mode:
+    expected = (
+        external_execution_mode(provider, settings.acp_backend)
+        if provider in EXTERNAL_EXECUTION_MODES
+        else IN_PROCESS_EXECUTION_MODES.get(provider)
+    )
+    if expected != execution_mode:
         raise UnsupportedExecutionLaneError(
             f"Provider {provider.value!r} cannot execute mode {execution_mode!r}"
         )
@@ -605,6 +604,13 @@ async def _discover_unverified_catalog(
     )
 
 
+def _external_catalog_key(provider: Provider) -> ProviderCatalogKey:
+    """Return the catalog identity an external lane is served under now."""
+    return ProviderCatalogKey(
+        provider.value, external_execution_mode(provider, settings.acp_backend)
+    )
+
+
 def _admit_and_resolve_model_name(provider: Provider, model: object) -> str:
     """Admit the provider and resolve its model name, or raise.
 
@@ -636,11 +642,11 @@ def _admit_execution_mode(
     if execution_mode is not None:
         if not isinstance(execution_mode, str):
             raise ValueError("execution_mode must be a string")
-        acp_prefixes = {
-            Provider.CLAUDE: "claude-agent-acp:",
-            Provider.ZAI: "zai-claude-agent-acp:",
-        }
-        acp_prefix = acp_prefixes.get(provider)
+        acp_prefix = (
+            f"{EXTERNAL_EXECUTION_MODES[provider]}:"
+            if provider in ACP_BACKEND_LANES
+            else None
+        )
         if acp_prefix is not None and execution_mode.startswith(acp_prefix):
             frozen_backend = execution_mode.removeprefix(acp_prefix)
             if frozen_backend not in {"node", "binary"}:
@@ -674,6 +680,18 @@ def _admit_native_controls(
     return selected_controls
 
 
+def _native_control_fields(selected_controls: dict[str, str]) -> dict[str, str]:
+    """Key admitted native controls by the provider field each one sets.
+
+    Only reached after :func:`validate_current_native_controls`, which refuses an
+    unsupported or repeated field for every lane that reads controls this way.
+    """
+    return {
+        control_id.partition(":")[0]: value
+        for control_id, value in selected_controls.items()
+    }
+
+
 def _admit_create_options(
     provider: Provider, backend: str | None, kwargs: dict[str, Any]
 ) -> tuple[Any, str | None, dict[str, str]]:
@@ -701,14 +719,7 @@ def _create_codex_model(
         codex_binary_proof_reason(command, workspace_root=workspace_root)
     )
     # Codex auth is file-based; no secret env is injected.
-    codex_controls: dict[str, str] = {}
-    for control_id, value in selected_controls.items():
-        field = control_id.partition(":")[0]
-        if field not in {"reasoning_effort", "service_tier"}:
-            raise ValueError(f"Unsupported Codex native control {control_id!r}")
-        if field in codex_controls:
-            raise ValueError(f"Duplicate Codex native control {field!r}")
-        codex_controls[field] = value
+    codex_controls = _native_control_fields(selected_controls)
     return CodexChatModel(
         command=command,
         model_name=model_name,
@@ -719,7 +730,7 @@ def _create_codex_model(
         codex_home=settings.codex_home,
         timeout=float(timeout),
         provider=str(Provider.CODEX.value),
-        execution_mode="codex-app-server",
+        execution_mode=EXTERNAL_EXECUTION_MODES[Provider.CODEX],
         runtime_authority=command_meta["runtime_authority"],
         command_origin=command_meta["command_origin"],
         command_kind=command_meta["command_kind"],
@@ -769,7 +780,7 @@ def _create_claude_model(
         workspace_root=str(workspace_root) if workspace_root else None,
         use_exec=(backend == "binary"),
         provider=str(Provider.CLAUDE.value),
-        execution_mode=f"claude-agent-acp:{backend}",
+        execution_mode=external_execution_mode(Provider.CLAUDE, backend),
         runtime_authority=command_meta["runtime_authority"],
         command_origin=command_meta["command_origin"],
         command_kind=command_meta["command_kind"],
@@ -823,7 +834,7 @@ def _create_zai_model(
         workspace_root=str(workspace_root) if workspace_root else None,
         use_exec=(backend == "binary"),
         provider=str(Provider.ZAI.value),
-        execution_mode=f"zai-claude-agent-acp:{backend}",
+        execution_mode=external_execution_mode(Provider.ZAI, backend),
         runtime_authority=command_meta["runtime_authority"],
         command_origin=command_meta["command_origin"],
         command_kind=command_meta["command_kind"],
@@ -861,13 +872,7 @@ def _create_kimi_model(
         kimi_temporary_model_capabilities=settings.kimi_temporary_model_capabilities,
     )
     env_vars.update(_kimi_home_env(settings.kimi_code_home))
-    kimi_effort: str | None = None
-    for control_id, value in selected_controls.items():
-        if control_id.partition(":")[0] != "thinking_effort":
-            raise ValueError(f"Unsupported Kimi native control {control_id!r}")
-        if kimi_effort is not None:
-            raise ValueError("Duplicate Kimi thinking-effort control")
-        kimi_effort = value
+    kimi_effort = _native_control_fields(selected_controls).get("thinking_effort")
     if kimi_effort is not None:
         env_vars["KIMI_MODEL_THINKING_EFFORT"] = kimi_effort
     logger.debug(
@@ -881,7 +886,7 @@ def _create_kimi_model(
         agent_config=agent_config,
         workspace_root=str(workspace_root) if workspace_root else None,
         provider=str(Provider.KIMI.value),
-        execution_mode="kimi-code-acp",
+        execution_mode=EXTERNAL_EXECUTION_MODES[Provider.KIMI],
         acp_family="kimi",
         runtime_authority=command_meta["runtime_authority"],
         command_origin=command_meta["command_origin"],
@@ -997,17 +1002,13 @@ class ProviderFactory:
             if serve_in_process_lanes is None
             else serve_in_process_lanes
         )
-        claude = ProviderCatalogKey(
-            Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
-        )
-        codex = ProviderCatalogKey(Provider.CODEX.value, "codex-app-server")
-        antigravity = ProviderCatalogKey(Provider.ANTIGRAVITY.value, "antigravity-cli")
-        kimi = ProviderCatalogKey(Provider.KIMI.value, "kimi-code-acp")
-        openai = ProviderCatalogKey(Provider.OPENAI.value, "openai-api")
-        zai = ProviderCatalogKey(
-            Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
-        )
-        zhipu = ProviderCatalogKey(Provider.ZHIPU.value, "zhipu-openai-compatible-api")
+        claude = _external_catalog_key(Provider.CLAUDE)
+        codex = _external_catalog_key(Provider.CODEX)
+        antigravity = _external_catalog_key(Provider.ANTIGRAVITY)
+        kimi = _external_catalog_key(Provider.KIMI)
+        openai = _external_catalog_key(Provider.OPENAI)
+        zai = _external_catalog_key(Provider.ZAI)
+        zhipu = _external_catalog_key(Provider.ZHIPU)
         in_process = tuple(
             # ``key=key`` binds this iteration's lane into the callback; a bare
             # closure over the loop variable would give every registration the
@@ -1129,11 +1130,6 @@ class ProviderFactory:
         if provider == Provider.KIMI:
             return _create_kimi_model(
                 model_name, agent_config, workspace_root, selected_controls
-            )
-
-        if selected_controls:
-            raise ValueError(
-                f"Provider {provider.value!r} has no exact native-control executor"
             )
 
         if provider in {Provider.ZHIPU, Provider.OPENAI}:

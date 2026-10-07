@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from ..database import ThreadStatusElectionResult
     from ..database.models import ThreadModel
+    from ..providers.team_selection import FrozenLaneAssignment
     from .circuit_breaker import DispatchAdmission, WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
@@ -479,7 +480,7 @@ async def _refuse_missing_project(
 async def _restore_reconciling_dispatch(
     db: AsyncSession,
     thread: ThreadModel,
-    frozen_map: dict[str, dict[str, object]],
+    frozen_map: dict[str, FrozenLaneAssignment],
     workspace_root: str,
 ) -> DispatchRequest | None:
     """Load the accepted action only when it matches stored execution authority."""

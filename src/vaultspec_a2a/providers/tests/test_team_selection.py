@@ -7,6 +7,7 @@ from typing import cast
 
 import pytest
 
+from .._team_selection_record import frozen_team_selection_from_record
 from ..provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -28,7 +29,6 @@ from ..provider_catalog import (
 from ..team_selection import (
     TeamSelectionError,
     freeze_team_selection,
-    frozen_team_selection_from_record,
     normalize_replay_selection,
 )
 
@@ -118,7 +118,7 @@ def test_freeze_normalizes_authoritative_defaults_and_exact_model_value() -> Non
     assert frozen.selection.reference.controls == (
         ControlSelection(control_id="reasoning", option_id="low"),
     )
-    assert frozen.compiler_map()["coder"]["model_name"] == "gpt-exact"
+    assert frozen.compiler_map()["coder"].model_name == "gpt-exact"
     assert frozen.to_record()["selection"]["controls"] == [
         {
             "control_id": "reasoning",
@@ -305,13 +305,13 @@ def test_replay_normalizes_implicit_and_explicit_default_identically() -> None:
         records=(_record(),),
     )
     omitted, _, _ = normalize_replay_selection(
-        record=frozen.to_record(),
+        frozen=frozen,
         selection=_selection(),
         overrides={},
         fallbacks=(),
     )
     explicit, _, _ = normalize_replay_selection(
-        record=frozen.to_record(),
+        frozen=frozen,
         selection=_selection(controls=(ControlSelection("reasoning", "low"),)),
         overrides={},
         fallbacks=(),

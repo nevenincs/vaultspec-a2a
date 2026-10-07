@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
+    from ..providers.team_selection import FrozenLaneAssignment
     from ..streaming.aggregator import EventAggregator
     from .authoring_binding import AuthoringBindingProvider
     from .ipc import WorkerBridge
@@ -142,7 +143,7 @@ class RegisteredCompiledGraph(StreamableGraph, Protocol):
 
 
 class _AuthoringAttachOptional(TypedDict, total=False):
-    frozen_assignment: dict[str, dict[str, Any]] | None
+    frozen_assignment: dict[str, FrozenLaneAssignment] | None
 
 
 class _AuthoringAttachArgs(_AuthoringAttachOptional):

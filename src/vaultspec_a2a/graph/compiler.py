@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from langgraph.types import Command, RetryPolicy
 
     from ..authoring import FeedbackContextReader
+    from ..providers.team_selection import FrozenLaneAssignment
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.phase_gate import DocumentProposalSubmitter
     from .protocols import (
@@ -313,7 +314,7 @@ def _agent_node_metadata(
 
 class _CompileWorkerOptions(TypedDict):
     provider_factory: ProviderFactoryProtocol
-    frozen_assignment: dict[str, dict[str, Any]] | None
+    frozen_assignment: dict[str, FrozenLaneAssignment] | None
     autonomous: bool
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
@@ -622,7 +623,7 @@ class _CompileTeamOptional(TypedDict, total=False):
     proposal_submitter: DocumentProposalSubmitter | None
     feedback_reader: FeedbackContextReader | None
     authoring_binding_provider: AuthoringBindingProvider | None
-    model_assignment: dict[str, dict[str, Any]] | None
+    model_assignment: dict[str, FrozenLaneAssignment] | None
 
 
 class _CompileTeamOptions(_CompileTeamOptional):

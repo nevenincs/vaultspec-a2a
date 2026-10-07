@@ -33,7 +33,7 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...ipc.schemas import DispatchRequest
-from ...providers.team_selection import model_assignment_digest
+from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_team_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.action_receipts import (
@@ -59,7 +59,7 @@ _REVIEWER_TOKEN = "secret-reviewer-token"
 _BEARER = "secret-machine-bearer"
 
 
-def _current_assignment() -> dict[str, dict[str, object]]:
+def _current_assignment() -> dict[str, FrozenLaneAssignment]:
     return resolve_execution_authority(
         current_execution_metadata(
             pathlib.Path.cwd(), required_roles=("mock-coder-success",)

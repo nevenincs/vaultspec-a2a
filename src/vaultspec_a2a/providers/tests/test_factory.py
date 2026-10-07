@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -33,6 +32,7 @@ from ..cli_resolution import (
 from ..codex_chat_model import CodexChatModel
 from ..factory import ProviderFactory
 from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
+from ..team_selection import FrozenLaneAssignment
 
 # The exact model values a run freezes into its role assignment for each external
 # lane. Literals rather than lookups: an external provider's models are named by
@@ -463,29 +463,32 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
     team = load_team_config("vaultspec-solo-coder")
     worker_ref = team.workers[0]
     agent = load_agent_config(worker_ref.agent_id)
-    assignment: dict[str, dict[str, Any]] = {
-        worker_ref.agent_id: {
-            "schema_version": 1,
-            "provider": "codex",
-            "execution_mode": "unavailable-mode",
-            "catalog_revision": "rev",
-            "entry_id": "primary",
-            "model_name": "primary-model",
-            "controls": [],
-            "provenance": {"selection_source": "team_selection"},
-            "fallbacks": [
-                {
-                    "schema_version": 1,
-                    "provider_id": "codex",
-                    "execution_mode": "codex-app-server",
-                    "catalog_revision": "rev",
-                    "entry_id": "fallback",
-                    "model_name": "fallback-model",
-                    "controls": [],
-                    "defaulted_control_ids": [],
-                }
-            ],
-        }
+    assignment = {
+        worker_ref.agent_id: FrozenLaneAssignment.model_validate(
+            {
+                "schema_version": 1,
+                "provider_id": "codex",
+                "execution_mode": "unavailable-mode",
+                "catalog_revision": "rev",
+                "entry_id": "primary",
+                "model_name": "primary-model",
+                "controls": [],
+                "defaulted_control_ids": [],
+                "provenance": {"selection_source": "team_selection"},
+                "fallbacks": [
+                    {
+                        "schema_version": 1,
+                        "provider_id": "codex",
+                        "execution_mode": "codex-app-server",
+                        "catalog_revision": "rev",
+                        "entry_id": "fallback",
+                        "model_name": "fallback-model",
+                        "controls": [],
+                        "defaulted_control_ids": [],
+                    }
+                ],
+            }
+        )
     }
 
     with pytest.raises(ValueError, match="cannot execute mode"):

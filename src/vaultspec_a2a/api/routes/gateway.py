@@ -39,6 +39,10 @@ if TYPE_CHECKING:
 from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.config import settings
 from ...control.drain import DrainGate
+from ...control.execution_authority import (
+    read_frozen_team_selection,
+    record_frozen_team_selection,
+)
 from ...control.health import (
     assemble_desktop_readiness,
 )
@@ -110,7 +114,6 @@ __all__ = [
     "_probe_admission_readiness",
     "_probe_harness",
     "_raise_for_dispatch_failure",
-    "_read_persisted_team_selection",
     "_release_binding_digest",
     "_release_ineligible_reservation",
     "_replay_identity_or_conflict",
@@ -353,13 +356,12 @@ def _canonical_replay_body(
     metadata_json: str | None, body: RunStartRequest
 ) -> RunStartRequest:
     """Canonicalize a replay from persisted defaults, without live discovery."""
-    metadata = _metadata_object(metadata_json)
-    record = metadata.get(_TEAM_SELECTION_METADATA_KEY) if metadata else None
-    if record is None:
-        return body
     try:
+        frozen = read_frozen_team_selection(metadata_json)
+        if frozen is None:
+            return body
         selection, overrides, fallbacks = normalize_replay_selection(
-            record=record,
+            frozen=frozen,
             selection=_selection_reference(body.selection),
             overrides={
                 role: _selection_reference(reference)
@@ -679,28 +681,13 @@ def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
     )
 
 
-_TEAM_SELECTION_METADATA_KEY = "provider_catalog_selection"
-
-
 def _persist_team_selection(
     metadata_json: str | None, frozen: FrozenTeamSelection
 ) -> str:
     """Persist the normalized schema-v1 catalog selection."""
     data = _metadata_object(metadata_json) or {}
-    data[_TEAM_SELECTION_METADATA_KEY] = frozen.to_record()
+    record_frozen_team_selection(data, frozen)
     return json.dumps(data)
-
-
-def _read_persisted_team_selection(
-    metadata_json: str | None,
-) -> FrozenTeamSelection | None:
-    """Rebuild the modern frozen execution authority without live discovery."""
-    from ...providers.team_selection import frozen_team_selection_from_record
-
-    data = _metadata_object(metadata_json)
-    if data is None or _TEAM_SELECTION_METADATA_KEY not in data:
-        return None
-    return frozen_team_selection_from_record(data[_TEAM_SELECTION_METADATA_KEY])
 
 
 def _modern_frozen_disclosure(

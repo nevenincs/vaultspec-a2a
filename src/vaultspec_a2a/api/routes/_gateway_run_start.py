@@ -21,6 +21,7 @@ from ...context.metadata import ThreadMetadata
 from ...control._worker_health import worker_liveness
 from ...control.admission import AdmissionBroker
 from ...control.config import settings
+from ...control.execution_authority import read_frozen_team_selection
 from ...control.provider_execution import native_execution_refusal_reason
 from ...control.run_start_policy import (
     evaluate_execution_eligibility,
@@ -88,7 +89,6 @@ from .gateway import (
     _probe_admission_readiness,
     _probe_harness,
     _raise_for_dispatch_failure,
-    _read_persisted_team_selection,
     _release_binding_digest,
     _release_ineligible_reservation,
     _replay_identity_or_conflict,
@@ -407,7 +407,7 @@ async def _create_run_core(
             thread_id=existing.id,
             status=existing.status,
             nickname=existing.nickname,
-            frozen=_read_persisted_team_selection(existing.thread_metadata),
+            frozen=read_frozen_team_selection(existing.thread_metadata),
             replayed=True,
         )
     # End the read before the awaits below: a snapshot held across admission
@@ -478,7 +478,7 @@ async def _create_run_core(
                 thread_id=creation.thread_id,
                 status=creation.status,
                 nickname=creation.nickname,
-                frozen=_read_persisted_team_selection(creation.metadata_json),
+                frozen=read_frozen_team_selection(creation.metadata_json),
                 replayed=True,
             )
         result = creation
@@ -644,7 +644,7 @@ async def _commit_replay(
 ) -> RunCommitResponse:
     canonical_body = _canonical_replay_body(existing.thread_metadata, body)
     commit_digest = request_digest(canonical_body, prepared=False)
-    existing_modern = _read_persisted_team_selection(existing.thread_metadata)
+    existing_modern = read_frozen_team_selection(existing.thread_metadata)
     binding = _persisted_lease_binding(existing.thread_metadata)
     if binding is None:
         raise HTTPException(

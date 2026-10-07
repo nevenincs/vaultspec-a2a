@@ -27,6 +27,7 @@ from ..authoring import (
 )
 from ..graph.compiler import compile_team_graph
 from ..providers.factory import ProviderFactory
+from ..providers.team_selection import FrozenLaneAssignment
 from ..team import load_agent_config, load_team_config
 from ..thread.actor_tokens import ActorTokenBundle
 from ..worker.token_store import RunTokenStore
@@ -115,15 +116,24 @@ async def _live_token_store(
     return store
 
 
-def _frozen_deterministic_assignment(agent_ids: list[str]) -> dict[str, dict[str, str]]:
+def _frozen_deterministic_assignment(
+    agent_ids: list[str],
+) -> dict[str, FrozenLaneAssignment]:
     """Pin every preset worker to the real in-process deterministic provider."""
-    return {
-        agent_id: {
-            "provider": "deterministic",
+    lane = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": "deterministic",
+            "execution_mode": "in-process-deterministic",
+            "catalog_revision": "test-revision",
+            "entry_id": "test-entry",
             "model_name": "deterministic",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
         }
-        for agent_id in agent_ids
-    }
+    )
+    return dict.fromkeys(agent_ids, lane)
 
 
 def _document_state(thread_id: str, feature: str, workspace_root: str) -> TeamState:

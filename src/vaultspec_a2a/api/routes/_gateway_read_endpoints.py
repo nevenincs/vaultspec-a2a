@@ -25,6 +25,7 @@ from ...control.cancel_service import (
     raise_for_cancel_failure,
 )
 from ...control.config import settings
+from ...control.execution_authority import read_frozen_team_selection
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
 from ...control.thread_listing import list_threads_service
@@ -104,7 +105,6 @@ from .gateway import (
     _optional_enum,
     _persisted_lease_binding,
     _persisted_lease_id,
-    _read_persisted_team_selection,
     admission_gate,
     router,
 )
@@ -353,7 +353,7 @@ async def run_status_endpoint(
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
-    modern_frozen = _read_persisted_team_selection(capture.thread_metadata)
+    modern_frozen = read_frozen_team_selection(capture.thread_metadata)
 
     metadata = None
     if capture.thread_metadata:

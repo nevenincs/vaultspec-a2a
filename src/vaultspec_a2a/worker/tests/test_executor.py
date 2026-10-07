@@ -40,7 +40,7 @@ from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
-from ...providers.team_selection import model_assignment_digest
+from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_agent_config, load_team_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.action_receipts import (
@@ -130,13 +130,13 @@ def _make_bridge(
     return bridge
 
 
-def _current_assignment() -> dict[str, dict[str, object]]:
+def _current_assignment() -> dict[str, FrozenLaneAssignment]:
     return resolve_execution_authority(
         current_execution_metadata(pathlib.Path.cwd())
     ).model_assignment
 
 
-def _mock_assignment() -> dict[str, dict[str, object]]:
+def _mock_assignment() -> dict[str, FrozenLaneAssignment]:
     return resolve_execution_authority(
         current_execution_metadata(
             pathlib.Path.cwd(), required_roles=("mock-coder-success",)
@@ -2448,21 +2448,23 @@ class _LoopReviewFactory:
         return FakeListChatModel(responses=[f"{agent_id} did its part"])
 
 
-def _loop_assignment(team: Any) -> dict[str, dict[str, Any]]:
-    lane: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": "deterministic",
-        "execution_mode": "in-process-deterministic",
-        "catalog_revision": "test-revision",
-        "entry_id": "test-entry",
-        "model_name": "deterministic",
-        "controls": [],
-        "fallbacks": [],
-        "provenance": {"selection_source": "team_selection"},
-    }
+def _loop_assignment(team: Any) -> dict[str, FrozenLaneAssignment]:
+    lane = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": "deterministic",
+            "execution_mode": "in-process-deterministic",
+            "catalog_revision": "test-revision",
+            "entry_id": "test-entry",
+            "model_name": "deterministic",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+        }
+    )
     return {
-        "__supervisor__": dict(lane),
-        **{ref.agent_id: dict(lane) for ref in team.workers},
+        "__supervisor__": lane,
+        **{ref.agent_id: lane for ref in team.workers},
     }
 
 

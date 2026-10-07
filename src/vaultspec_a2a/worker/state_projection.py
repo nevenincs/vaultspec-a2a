@@ -27,7 +27,7 @@ from ..thread.checkpoint_evidence import (
 )
 from ..thread.enums import TERMINAL_STATUSES, DegradedReason, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence
-from ..thread.snapshots import ExecutionTaskData
+from ..thread.snapshots import ExecutionTaskSnapshot
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
@@ -198,12 +198,14 @@ def _is_execution_state_snapshot(value: object) -> TypeGuard[_ExecutionStateSnap
     )
 
 
-def _task_projection(task: object, live: Iterable[LiveInterrupt]) -> ExecutionTaskData:
+def _task_projection(
+    task: object, live: Iterable[LiveInterrupt]
+) -> ExecutionTaskSnapshot:
     """Project one pending LangGraph task with the questions it is still asking."""
     task_id = str(getattr(task, "id", ""))
     asking = [interrupt for interrupt in live if interrupt.task_id == task_id]
     error = getattr(task, "error", None)
-    return ExecutionTaskData(
+    return ExecutionTaskSnapshot(
         task_id=task_id,
         name=str(getattr(task, "name", "")),
         path=[str(item) for item in getattr(task, "path", ())],
@@ -226,7 +228,7 @@ def _task_projection(task: object, live: Iterable[LiveInterrupt]) -> ExecutionTa
 
 def _parked_next_nodes(
     state_next: Iterable[object],
-    tasks: Iterable[ExecutionTaskData],
+    tasks: Iterable[ExecutionTaskSnapshot],
 ) -> list[str]:
     """Return the nodes the run resumes at, counting every parked task.
 

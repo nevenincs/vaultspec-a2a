@@ -223,7 +223,7 @@ def test_node_phase_map_and_prefix_resolution_stay_inside_the_vocabulary() -> No
 def test_replay_contract_only_ever_writes_declared_members() -> None:
     """Drive every branch of the replay contract and check what it writes."""
     from ...control.projection import finalize_snapshot_replay_status
-    from ...thread.snapshots import ThreadStateData
+    from ...thread.snapshots import ThreadStateSnapshot
 
     declared_replay = {member.value for member in ReplayStatus}
     declared_reasons = {member.value for member in DegradedReason}
@@ -234,7 +234,7 @@ def test_replay_contract_only_ever_writes_declared_members() -> None:
             for present in (True, False):
                 for status in ThreadStatus:
                     result = finalize_snapshot_replay_status(
-                        ThreadStateData(
+                        ThreadStateSnapshot(
                             thread_id="replay-contract",
                             status=status,
                             last_sequence=0,

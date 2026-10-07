@@ -21,7 +21,7 @@ from ..database import (
 )
 from ..domain_config import domain_config
 from ..thread.enums import DegradedReason, RepairStatus, ThreadStatus
-from ..thread.snapshots import ThreadStateData, record_repair_posture
+from ..thread.snapshots import ThreadStateSnapshot, record_repair_posture
 from ..utils.coercion import coerce_nonempty_str, decode_json_object
 from .projection import (
     clear_permissions_without_checkpoint_truth,
@@ -145,7 +145,7 @@ async def _judge_run_posture(
     db: AsyncSession,
     thread: ThreadModel,
     probe: CheckpointRead | None,
-) -> ThreadStateData:
+) -> ThreadStateSnapshot:
     """Judge one thread's repair posture and approval as run-status judges them.
 
     The summary serves only the posture fields of the snapshot, so this applies
@@ -155,7 +155,7 @@ async def _judge_run_posture(
     checkpointer was given, and then no claim is made about the checkpoint
     either way.
     """
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id=thread.id, status=ThreadStatus(thread.status), last_sequence=0
     )
     record_repair_posture(snapshot, thread.repair_status)

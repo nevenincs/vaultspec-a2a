@@ -44,10 +44,10 @@ from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
     CheckpointProjection,
     ExecutionStateProjection,
-    ExecutionTaskData,
-    PermissionData,
-    PermissionOptionData,
-    ThreadStateData,
+    ExecutionTaskSnapshot,
+    PermissionOptionSnapshot,
+    PermissionSnapshot,
+    ThreadStateSnapshot,
     record_repair_posture,
 )
 from .permission_options import pending_option_ids
@@ -68,7 +68,7 @@ __all__ = [
 ]
 
 _JSON_LIST_ADAPTER = TypeAdapter(list[object])
-_EXECUTION_TASK_ADAPTER = TypeAdapter(ExecutionTaskData)
+_EXECUTION_TASK_ADAPTER = TypeAdapter(ExecutionTaskSnapshot)
 
 #: How far each degraded repair posture holds a run back. The postures absent
 #: here (healthy, paused, cancel pending) demand nothing and yield to all of them.
@@ -112,7 +112,7 @@ def escalate_repair_posture(
 
 
 def mark_degraded(
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     reason: DegradedReason,
     *,
     repair: RepairStatus | None = None,
@@ -133,13 +133,13 @@ def mark_degraded(
 
 
 def finalize_snapshot_replay_status(
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     *,
     checkpoint_loaded: bool,
     checkpoint_present: bool,
     checkpoint_error: bool,
     thread_status: str,
-) -> ThreadStateData:
+) -> ThreadStateSnapshot:
     """Apply the reconnect snapshot replay/degradation contract."""
     if checkpoint_loaded:
         snapshot.replay_status = ReplayStatus.DURABLE.value
@@ -220,13 +220,13 @@ def classify_transcript_availability(
 
 
 def apply_authoring_completion_check(
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     *,
     thread_status: str,
     requires_document_authoring: bool,
     proposal_ids: list[str],
     changeset_ids: list[str],
-) -> ThreadStateData:
+) -> ThreadStateSnapshot:
     """Flag a completed document-authoring run that produced no artifact.
 
     A document-authoring preset (the research_adr phase machine or the solo
@@ -260,7 +260,7 @@ def apply_authoring_completion_check(
     return snapshot
 
 
-def _clear_non_actionable_pause_state(snapshot: ThreadStateData) -> None:
+def _clear_non_actionable_pause_state(snapshot: ThreadStateSnapshot) -> None:
     """Clear pause metadata when no user-actionable permission remains."""
     if snapshot.pending_permissions:
         return
@@ -270,8 +270,8 @@ def _clear_non_actionable_pause_state(snapshot: ThreadStateData) -> None:
 
 
 def clear_permissions_without_checkpoint_truth(
-    snapshot: ThreadStateData,
-) -> ThreadStateData:
+    snapshot: ThreadStateSnapshot,
+) -> ThreadStateSnapshot:
     """Fail closed when pending approval state has no checkpoint authority."""
     had_actionable_permission_state = bool(snapshot.pending_permissions) or bool(
         snapshot.approval_status
@@ -291,9 +291,9 @@ def clear_permissions_without_checkpoint_truth(
     return snapshot
 
 
-def _permission_data_from_pending(
+def _permission_snapshot_from_pending(
     pending: PendingPermission,
-) -> PermissionData | None:
+) -> PermissionSnapshot | None:
     """Project one pending request, or None when its options are unreadable."""
     raw_options = pending.offered
     if raw_options is None:
@@ -305,19 +305,19 @@ def _permission_data_from_pending(
         and permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
     ):
         tool_call = PermissionType.PLAN_APPROVAL.value
-    options: list[PermissionOptionData] = []
+    options: list[PermissionOptionSnapshot] = []
     for raw_option in raw_options:
         option = coerce_object_mapping(raw_option)
         if option is None:
             continue
         options.append(
-            PermissionOptionData(
+            PermissionOptionSnapshot(
                 option_id=option_id_of(option) or "",
                 name=str(option.get("name", "")),
                 kind=option_kind(option),
             )
         )
-    return PermissionData(
+    return PermissionSnapshot(
         request_id=permission.request_id,
         description=permission.description,
         options=options,
@@ -327,9 +327,9 @@ def _permission_data_from_pending(
 
 
 def apply_checkpoint_projection(
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     projection: CheckpointProjection,
-) -> ThreadStateData:
+) -> ThreadStateSnapshot:
     """Merge a normalized checkpoint projection into the snapshot."""
     snapshot.checkpoint_id = projection.checkpoint_id
     snapshot.checkpoint_created_at = projection.checkpoint_created_at
@@ -365,9 +365,9 @@ def apply_checkpoint_projection(
 
 
 def reconcile_checkpoint_permissions_with_durable_state(
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     projection: CheckpointProjection,
-) -> ThreadStateData:
+) -> ThreadStateSnapshot:
     """Fail closed when the checkpoint is parked on a permission with no durable row.
 
     The durable row is the only source of a pending permission's content, so
@@ -414,7 +414,7 @@ def project_execution_state_model(
         )
     ]
     raw_tasks = _decode_json_list(model.tasks_json, field_name="tasks_json")
-    execution_tasks: list[ExecutionTaskData] = []
+    execution_tasks: list[ExecutionTaskSnapshot] = []
     for raw_task in raw_tasks:
         task_data = coerce_object_mapping(raw_task)
         if task_data is None:
@@ -446,9 +446,9 @@ def project_execution_state_model(
 
 
 def apply_execution_state_projection(
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     projection: ExecutionStateProjection,
-) -> ThreadStateData:
+) -> ThreadStateSnapshot:
     """Merge a durable execution-state projection into the snapshot."""
     snapshot.next_nodes = list(projection.next_nodes)
     snapshot.task_count = projection.task_count
@@ -484,7 +484,7 @@ def durable_approval(
 
 
 def _merge_durable_permissions(
-    snapshot: ThreadStateData, pending: Sequence[PendingPermission]
+    snapshot: ThreadStateSnapshot, pending: Sequence[PendingPermission]
 ) -> None:
     if pending and snapshot.pause_cause is None:
         snapshot.pause_cause = pending[0].request.pause_reason_type
@@ -492,7 +492,7 @@ def _merge_durable_permissions(
     for entry in pending:
         if entry.request.request_id in existing:
             continue
-        projected = _permission_data_from_pending(entry)
+        projected = _permission_snapshot_from_pending(entry)
         if projected is None:
             mark_degraded(
                 snapshot,
@@ -507,8 +507,8 @@ async def enrich_snapshot_from_durable_state(
     session: AsyncSession,
     *,
     thread: ThreadModel,
-    snapshot: ThreadStateData,
-) -> ThreadStateData:
+    snapshot: ThreadStateSnapshot,
+) -> ThreadStateSnapshot:
     """Merge durable gateway-owned state into a reconnect snapshot."""
     record_repair_posture(snapshot, thread.repair_status)
     approval = thread.approval_status
@@ -569,10 +569,10 @@ async def enrich_snapshot_from_execution_state(
     session: AsyncSession,
     *,
     thread: ThreadModel,
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     checkpoint_present: bool | None,
     checkpoint_id: str | None,
-) -> ThreadStateData:
+) -> ThreadStateSnapshot:
     """Merge durable execution-state truth and classify freshness.
 
     ``checkpoint_present`` is ``None`` when the caller read no checkpoint at

@@ -30,7 +30,7 @@ from ..thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
-from ..thread.snapshots import ThreadStateData, project_checkpoint_tuple
+from ..thread.snapshots import ThreadStateSnapshot, project_checkpoint_tuple
 from ..utils.coercion import (
     coerce_nonempty_str,
     coerce_string_list,
@@ -236,7 +236,7 @@ class _ThreadStateCapture:
     checkpoint, and an unreachable checkpoint store all at once.
     """
 
-    snapshot: ThreadStateData
+    snapshot: ThreadStateSnapshot
     checkpoint_projection: CheckpointProjection | None
     team_preset: str | None
     metadata: _MetadataView
@@ -287,7 +287,7 @@ def _view_metadata(thread_id: str, text: str | None) -> _MetadataView:
 
 @dataclass(frozen=True, slots=True)
 class _CheckpointSnapshotRead:
-    snapshot: ThreadStateData
+    snapshot: ThreadStateSnapshot
     loaded: bool
     present: bool
     error: bool
@@ -296,7 +296,7 @@ class _CheckpointSnapshotRead:
 
 async def _read_projected_checkpoint(
     checkpointer: Checkpointer,
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     mirror: RunLiveStateMirror,
     expected_assignment_digest: str | None,
 ) -> _CheckpointSnapshotRead:
@@ -424,7 +424,7 @@ async def capture_thread_state(
     thread = await get_thread(db, thread_id, refresh=True)
     if thread is None or thread.status == ThreadStatus.DELETING.value:
         return None
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id=thread_id,
         status=ThreadStatus(thread.status),
         last_sequence=await _served_last_sequence(db, thread, relay_hub),

@@ -26,9 +26,9 @@ from ...thread.enums import DegradedReason, RepairStatus, ThreadStatus
 from ...thread.snapshots import (
     CheckpointProjection,
     ExecutionStateProjection,
-    ExecutionTaskData,
+    ExecutionTaskSnapshot,
     ProjectedInterrupt,
-    ThreadStateData,
+    ThreadStateSnapshot,
     project_checkpoint_tuple,
 )
 
@@ -157,7 +157,7 @@ def test_a_checkpoint_only_permission_is_flagged_rather_than_merged() -> None:
     nothing to the snapshot's pending permissions: it is flagged as an orphan
     the respond route cannot act on, and the run is held for reconciliation.
     """
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-1",
         status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
@@ -236,7 +236,7 @@ def test_apply_checkpoint_projection_discards_runtime_corrupt_interrupt_payload(
     interrupt_type: str,
 ) -> None:
     """A corrupt checkpoint payload cannot surface an actionable interrupt."""
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-corrupt-interrupt",
         status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
@@ -267,10 +267,10 @@ def test_apply_checkpoint_projection_merges_clarification_request() -> None:
 
     Mirrors the permission-merge test above but for the clarification
     interrupt kind, disclosed on a separate field (not pending_permissions —
-    its bounded questions do not fit the single-decision PermissionData
+    its bounded questions do not fit the single-decision PermissionSnapshot
     shape).
     """
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-1",
         status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
@@ -318,7 +318,7 @@ def test_apply_checkpoint_projection_merges_clarification_request() -> None:
 
 def test_apply_checkpoint_projection_uses_later_valid_clarification_sibling() -> None:
     """A corrupt clarification interrupt must not hide a later valid sibling."""
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-corrupt-clarification-sibling",
         status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
@@ -388,7 +388,7 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
         DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT
     ]
     assert projection.execution_tasks == [
-        ExecutionTaskData(
+        ExecutionTaskSnapshot(
             task_id="task-1",
             name="supervisor",
             path=["supervisor"],
@@ -455,7 +455,7 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
         )
         await session.commit()
 
-        snapshot = ThreadStateData(
+        snapshot = ThreadStateSnapshot(
             thread_id=thread.id,
             status=ThreadStatus(thread.status),
             last_sequence=0,
@@ -474,7 +474,7 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
 
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     """Durable execution-state projection should enrich reconnect snapshots."""
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-1",
         status=ThreadStatus.RUNNING,
         last_sequence=0,
@@ -484,7 +484,7 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
         interrupt_count=1,
         next_nodes=["supervisor"],
         execution_tasks=[
-            ExecutionTaskData(
+            ExecutionTaskSnapshot(
                 task_id="task-1",
                 name="supervisor",
                 path=["supervisor"],
@@ -532,7 +532,7 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
         )
         await session.commit()
 
-        snapshot = ThreadStateData(
+        snapshot = ThreadStateSnapshot(
             thread_id="thread-1",
             status=ThreadStatus(thread.status),
             last_sequence=0,
@@ -585,7 +585,7 @@ async def test_degraded_only_projection_keeps_the_prior_lineage(
         )
         await session.commit()
 
-        snapshot = ThreadStateData(
+        snapshot = ThreadStateSnapshot(
             thread_id="thread-degraded-only",
             status=ThreadStatus(thread.status),
             last_sequence=0,
@@ -634,7 +634,7 @@ async def test_unreadable_execution_state_requires_operator_intervention(
         )
         await session.commit()
 
-        snapshot = ThreadStateData(
+        snapshot = ThreadStateSnapshot(
             thread_id=thread.id,
             status=ThreadStatus(thread.status),
             last_sequence=0,

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from ..database import actionable_pending_permissions
 from ..graph.enums import AgentLifecycleState
-from ..thread.snapshots import AgentData, build_agent_descriptor
+from ..thread.snapshots import AgentSnapshot, build_agent_descriptor
 from .permission_options import pending_is_actionable
 
 if TYPE_CHECKING:
@@ -37,15 +37,15 @@ class PendingPermissionInfo:
 class TeamStatus:
     """Assembled team status returned by :func:`build_team_status`."""
 
-    agents: list[AgentData] = field(default_factory=list)
+    agents: list[AgentSnapshot] = field(default_factory=list)
     active_threads: list[str] = field(default_factory=list)
     pending_permissions: list[PendingPermissionInfo] = field(default_factory=list)
 
 
 def _active_agent_descriptors(
     mirror: RunLiveStateMirror, active_threads: list[str]
-) -> list[AgentData]:
-    agents: list[AgentData] = []
+) -> list[AgentSnapshot]:
+    agents: list[AgentSnapshot] = []
     for thread_id in active_threads:
         agent_states = mirror.get_agent_states(thread_id)
         agents.extend(

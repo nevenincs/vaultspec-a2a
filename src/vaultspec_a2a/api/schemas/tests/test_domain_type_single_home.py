@@ -1,6 +1,6 @@
 """``PlanEntry`` is carried by the run snapshot but declared by exactly one module.
 
-The run snapshot is the Layer-1 dataclass ``ThreadStateData`` and this
+The run snapshot is the Layer-1 dataclass ``ThreadStateSnapshot`` and this
 subpackage declares no mirror of it. ``PlanEntry`` is a domain dataclass
 belonging to ``vaultspec_a2a.thread.models``, which the snapshot merely carries
 as a field type, exactly as it carries ``ThreadStatus``, ``ToolKind``, and
@@ -21,7 +21,7 @@ from pydantic import TypeAdapter
 
 from ....thread.enums import ThreadStatus
 from ....thread.models import PlanEntry
-from ....thread.snapshots import ThreadStateData
+from ....thread.snapshots import ThreadStateSnapshot
 from ... import schemas as facade
 
 
@@ -33,7 +33,7 @@ def test_the_snapshot_declares_the_domain_type_itself() -> None:
     identically, so comparing ``__name__`` would pass against exactly the defect
     a copied type introduces.
     """
-    annotations = {f.name: f.type for f in dataclasses.fields(ThreadStateData)}
+    annotations = {f.name: f.type for f in dataclasses.fields(ThreadStateSnapshot)}
     (item_type,) = typing.get_args(annotations["plan"])
 
     assert item_type is PlanEntry
@@ -42,8 +42,8 @@ def test_the_snapshot_declares_the_domain_type_itself() -> None:
 
 def test_a_domain_entry_survives_validation_as_the_domain_type() -> None:
     """Real construction and round-trip, so the annotation is not merely decorative."""
-    adapter = TypeAdapter(ThreadStateData)
-    snapshot = ThreadStateData(
+    adapter = TypeAdapter(ThreadStateSnapshot)
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-plan",
         status=ThreadStatus.RUNNING,
         last_sequence=1,
@@ -83,4 +83,3 @@ def test_the_subpackage_holds_no_second_declaration_of_the_snapshot() -> None:
     """
     assert importlib.util.find_spec(f"{facade.__name__}.snapshots") is None
     assert not hasattr(facade, "ThreadStateSnapshot")
-    assert not hasattr(facade, "ThreadStateData")

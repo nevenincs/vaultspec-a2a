@@ -1,6 +1,6 @@
 """Contract tests for the run snapshot as the gateway serves it.
 
-``ThreadStateData`` is both the domain read model and the wire declaration, so
+``ThreadStateSnapshot`` is both the domain read model and the wire declaration, so
 these tests drive the real pydantic machinery over it: the validation the
 history route applies, the JSON it emits, the bounds it carries, and the shared
 execution-task shape the worker sends across the gateway-worker wire.
@@ -24,22 +24,22 @@ from ....thread.enums import (
 from ....thread.snapshots import (
     MAX_REPAIR_REASON_CHARS,
     MODEL_ASSIGNMENT_DIGEST_CHARS,
-    ArtifactData,
-    ExecutionTaskData,
-    MessageData,
-    PermissionData,
-    ThreadStateData,
+    ArtifactSnapshot,
+    ExecutionTaskSnapshot,
+    MessageSnapshot,
+    PermissionSnapshot,
+    ThreadStateSnapshot,
     ToolCallContentDiff,
     ToolCallContentTerminal,
     ToolCallContentText,
-    ToolCallData,
     ToolCallLocation,
+    ToolCallSnapshot,
 )
 from ..gateway import RunHistoryResponse
 
 NOW = datetime.now(tz=UTC)
 
-_THREAD_STATE = TypeAdapter(ThreadStateData)
+_THREAD_STATE = TypeAdapter(ThreadStateSnapshot)
 
 # The order the snapshot's fields are served in, which clients may rely on.
 _SERVED_FIELD_ORDER = [
@@ -82,12 +82,12 @@ _SERVED_FIELD_ORDER = [
 ]
 
 
-def _populated_snapshot() -> ThreadStateData:
-    return ThreadStateData(
+def _populated_snapshot() -> ThreadStateSnapshot:
+    return ThreadStateSnapshot(
         thread_id="t-1",
         status=ThreadStatus.RUNNING,
         messages=[
-            MessageData(
+            MessageSnapshot(
                 message_id="m-1",
                 role="user",
                 content="Hello",
@@ -95,7 +95,7 @@ def _populated_snapshot() -> ThreadStateData:
             ),
         ],
         tool_calls=[
-            ToolCallData(
+            ToolCallSnapshot(
                 tool_call_id="tc-1",
                 title="Read file",
                 kind=ToolKind.READ,
@@ -103,7 +103,7 @@ def _populated_snapshot() -> ThreadStateData:
             ),
         ],
         artifacts=[
-            ArtifactData(
+            ArtifactSnapshot(
                 artifact_id="art-1",
                 filename="out.txt",
                 content="data",
@@ -124,7 +124,7 @@ def _populated_snapshot() -> ThreadStateData:
         task_count=1,
         pending_interrupt_count=1,
         execution_tasks=[
-            ExecutionTaskData(
+            ExecutionTaskSnapshot(
                 task_id="task-1",
                 name="supervisor",
                 path=["supervisor"],
@@ -162,7 +162,7 @@ class TestToolCallContentUnion:
 
     def test_validation_dispatches_each_block_to_its_own_type(self) -> None:
         """Raw blocks resolve to the block their ``content_type`` names."""
-        restored = TypeAdapter(ToolCallData).validate_python(
+        restored = TypeAdapter(ToolCallSnapshot).validate_python(
             {
                 "tool_call_id": "tc-1",
                 "title": "Edit file",
@@ -194,7 +194,7 @@ class TestToolCallContentUnion:
     def test_an_unknown_content_type_is_refused(self) -> None:
         """A block outside the three declared kinds is not served."""
         with pytest.raises(ValidationError):
-            TypeAdapter(ToolCallData).validate_python(
+            TypeAdapter(ToolCallSnapshot).validate_python(
                 {
                     "tool_call_id": "tc-1",
                     "title": "Edit file",
@@ -220,7 +220,7 @@ class TestServedSnapshot:
 
     def test_snapshot_default_empty_lists(self) -> None:
         """A snapshot defaults all collections to empty lists."""
-        snapshot = ThreadStateData(
+        snapshot = ThreadStateSnapshot(
             thread_id="t-2",
             status=ThreadStatus.SUBMITTED,
             last_sequence=0,
@@ -327,7 +327,7 @@ class TestServedSnapshot:
         assert restored.tool_calls[0].kind is ToolKind.EXECUTE
         assert restored.tool_calls[0].status is ToolCallStatus.PENDING
         permission = restored.pending_permissions[0]
-        assert isinstance(permission, PermissionData)
+        assert isinstance(permission, PermissionSnapshot)
         assert permission.options[0].kind is PermissionOptionKind.ALLOW_ONCE
         assert permission.tool_kind is ToolKind.EXECUTE
 
@@ -376,7 +376,7 @@ class TestServedSnapshot:
         """The published schema keeps the guidance on the two fields that need it."""
         schema = _THREAD_STATE.json_schema(mode="serialization")
         declared = (
-            schema if "properties" in schema else schema["$defs"]["ThreadStateData"]
+            schema if "properties" in schema else schema["$defs"]["ThreadStateSnapshot"]
         )
         properties = declared["properties"]
         assert "no longer exists" in properties["checkpoint_parent_id"]["description"]
@@ -407,7 +407,7 @@ class TestExecutionTaskAcrossTheWorkerWire:
         payload = ExecutionStateProjectionPayload(
             task_count=1,
             tasks=[
-                ExecutionTaskData(
+                ExecutionTaskSnapshot(
                     task_id="task-9",
                     name="supervisor",
                     path=["__pregel_pull", "supervisor"],
@@ -424,4 +424,4 @@ class TestExecutionTaskAcrossTheWorkerWire:
         assert emitted["tasks"][0] == dataclasses.asdict(payload.tasks[0])
         rebuilt = ExecutionStateProjectionPayload.model_validate(emitted)
         assert rebuilt.tasks == payload.tasks
-        assert all(isinstance(task, ExecutionTaskData) for task in rebuilt.tasks)
+        assert all(isinstance(task, ExecutionTaskSnapshot) for task in rebuilt.tasks)

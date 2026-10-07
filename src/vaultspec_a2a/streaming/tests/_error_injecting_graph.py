@@ -20,19 +20,14 @@ file already drives a real blocked node. Neither is this fixture's job.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END
 from langgraph.types import interrupt
 
-from ...graph.nodes._config_contract import accepting_runnable_config
 from ...providers import AcpPromptCancelledError
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ..custom_writes import emit_custom_node_write
-
-if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
 
 __all__ = [
     "ERROR_INJECTION_NODE",
@@ -81,21 +76,11 @@ class InjectableGraphInput(TypedDict, total=False):
     pairing this with a low ``recursion_limit`` in its run config gets a real
     ``GraphRecursionError`` from LangGraph's own Pregel loop."""
 
-    custom_write: str
-    """Push this text through :func:`emit_custom_node_write`, stamped with
-    this node's own identity, before acting on any other field."""
-
     raise_signal: str
     """Raise :class:`InjectedSignal` carrying this text."""
 
 
-async def _inject(
-    state: InjectableGraphInput,
-    config: RunnableConfig | None = None,
-) -> dict[str, Any]:
-    custom_write = state.get("custom_write")
-    if custom_write:
-        emit_custom_node_write(custom_write, config=config)
+async def _inject(state: InjectableGraphInput) -> dict[str, Any]:
     signal = state.get("raise_signal")
     if signal is not None:
         raise InjectedSignal(signal)
@@ -118,15 +103,6 @@ async def _inject(
         await asyncio.sleep(stall_seconds)
         return {}
     return {"loop": True} if state.get("loop") else {}
-
-
-# ``from __future__ import annotations`` stringizes ``config``'s annotation to
-# "RunnableConfig | None", which LangGraph's injector does not recognise (its
-# own fixed set names only the ``Optional[...]`` spelling) - see
-# ``graph/nodes/_config_contract.py``. Without this, ``config`` silently
-# arrives as ``None`` and a custom write's node stamp would silently be
-# ``None`` too, wrong for exactly the reason this fixture exists to catch.
-_inject = accepting_runnable_config(_inject)
 
 
 def build_error_injecting_graph() -> Any:

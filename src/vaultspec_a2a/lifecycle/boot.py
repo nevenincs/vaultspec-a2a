@@ -102,6 +102,12 @@ def read_internal_token(token_file: str, *, label: str) -> str:
     or empty is refused with :class:`LifecycleError` rather than silently booting
     with no token - a silent empty-token fallback would reintroduce the invisible
     gateway/worker mismatch this pairing exists to close.
+
+    It is deliberately not read through the private-file reader. The file is a
+    development pairing token the operator names on the command line, read with
+    the operator's own authority and handed only to the operator's own child, so
+    there is no second principal for an owner-restriction or link refusal to keep
+    out, and the operator may keep it wherever and however they choose.
     """
     from pathlib import Path as _Path
 

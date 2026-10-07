@@ -48,21 +48,18 @@ from ..desktop._filesystem_authority import (
     create_anonymous_file,
     create_private_file,
     directory_lease,
-    open_shared_read_descriptor,
-    path_is_link_like,
     publish_no_replace,
+    read_private_file,
     resolve_directory_authority,
-)
-from ..desktop._platform_acl import (
-    confirm_opened_secret,
-    unfollowed_read_flags,
 )
 from ..desktop._platform_acl import (
     harden_credential_path as _harden_credential_path,
 )
+from ..desktop._platform_acl import path_is_link_like
 from ..desktop._platform_acl import (
     restrict_windows_file as _restrict_windows_file,
 )
+from ..desktop.credentials import MAX_CREDENTIAL_BYTES
 from ..utils._process_tree import pid_is_live
 from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int
@@ -138,7 +135,11 @@ def service_json_path(a2a_home: Path) -> Path:
 
 
 def _read_handoff_credential(discovery_path: Path, reference: object) -> str | None:
-    """Read only this discovery record's regular, owner-restricted token file."""
+    """Read only this discovery record's regular, owner-restricted token file.
+
+    The file carries the gateway's service token, so it is held to the attach
+    credential's size bound.
+    """
     if not isinstance(reference, str) or not reference:
         return None
     candidate = Path(reference)
@@ -147,44 +148,13 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
         expected = authority.path / HANDOFF_CREDENTIAL
         if candidate != expected or path_is_link_like(candidate):
             return None
-        with directory_lease(authority) as leased:
-            return _read_leased_credential(leased, expected)
+        raw = read_private_file(expected, max_bytes=MAX_CREDENTIAL_BYTES)
     except (OSError, subprocess.SubprocessError):
         return None
-
-
-def _read_leased_credential(leased: DirectoryAuthority, expected: Path) -> str | None:
-    """Read one verified token while holding its parent directory authority."""
-    if path_is_link_like(expected):
-        return None
-    if os.name == "posix":
-        if leased.dir_fd is None or not hasattr(os, "O_NOFOLLOW"):
-            return None
-        descriptor = os.open(
-            HANDOFF_CREDENTIAL, unfollowed_read_flags(), dir_fd=leased.dir_fd
-        )
-        named = os.stat(HANDOFF_CREDENTIAL, dir_fd=leased.dir_fd, follow_symlinks=False)
-    else:
-        # DELETE sharing keeps a credential read from blocking publication.
-        descriptor = open_shared_read_descriptor(expected)
-        named = expected.stat(follow_symlinks=False)
     try:
-        opened = os.fstat(descriptor)
-        if not confirm_opened_secret(descriptor, named=named, path=expected):
-            return None
-        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
-            descriptor = -1
-            token = handle.read().strip()
-        assert_directory_authority(leased)
-        named_after = expected.stat(follow_symlinks=False)
-        if path_is_link_like(expected) or (
-            named_after.st_dev,
-            named_after.st_ino,
-        ) != (opened.st_dev, opened.st_ino):
-            return None
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
+        token = raw.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return None
     return token or None
 
 

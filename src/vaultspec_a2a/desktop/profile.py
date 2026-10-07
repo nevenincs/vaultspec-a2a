@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 from ..control.state_layout import seal_state_home, state_layout
+from ._platform_acl import harden_credential_path, path_is_link_like
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -376,10 +377,8 @@ def _restrict_state_path(
     path: Path, *, directory: bool, ephemeral: bool = False
 ) -> None:
     """Refuse aliases before changing permissions on sensitive state."""
-    from ._platform_acl import harden_credential_path
-
     try:
-        if path.is_symlink() or path.is_junction():
+        if path_is_link_like(path):
             raise OSError("linked state paths are not private")
         if directory:
             path.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -415,7 +414,7 @@ def ensure_private_state(state: DesktopStatePaths) -> None:
     hardening because Windows files can retain explicit, permissive ACLs.
     """
     # Refuse a linked home before the seal can write through it.
-    if state.app_home.is_symlink() or state.app_home.is_junction():
+    if path_is_link_like(state.app_home):
         raise DesktopProfileError(
             f"desktop application home is linked: {state.app_home}; "
             "choose a real directory with owner-only access."

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..desktop._filesystem_authority import confined_file_descriptor
+from ..desktop._platform_acl import harden_credential_path
 from ..utils.atomic_write import atomic_write_text
 from ..utils.file_lock import held_exclusive_lock
 
@@ -97,12 +98,6 @@ def forget_run_credential(run_home: Path) -> None:
 
 def _digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
-
-
-def _restrict_file(path: Path) -> None:
-    """Best-effort owner-only permissions on a credential file; never raises."""
-    with contextlib.suppress(OSError):
-        path.chmod(0o600)
 
 
 def codex_credential_store_mode(base_home: Path) -> str:
@@ -202,10 +197,9 @@ def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None
         os.fdopen(descriptor, "wb", closefd=False) as copied,
     ):
         copied.write(payload)
-    # Defensive: pin the credential copy to owner-only regardless of the
-    # source's mode (POSIX-effective; a no-op on Windows, where the temp tree is
-    # already user-scoped).
-    _restrict_file(destination)
+    # Pin the credential copy to owner-only regardless of the source's mode:
+    # POSIX mode bits, or a private access-control list on Windows.
+    harden_credential_path(destination)
     seed = CodexAuthSeed(
         source=source,
         digest=_digest(payload),

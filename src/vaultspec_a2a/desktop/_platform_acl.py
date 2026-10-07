@@ -1,16 +1,17 @@
 """Cross-platform owner-restriction primitives for local credential files.
 
-Single authority for two questions asked of every local secret file this product
-writes or reads: "make this file reachable only by its owner" and "is this file
-owner-restricted?". The answer spans POSIX permission bits and Windows discretionary
-access-control lists (DACLs). The gateway discovery credential and the desktop
-attach, ownership, and worker-interprocess-communication (IPC) credentials all
-protect a local secret with the same guarantee, so the native Windows ACL machinery
-lives here once rather than being restated in each consumer.
+Single authority for the questions asked of every local secret file this product
+writes or reads: "make this file reachable only by its owner", "is this file
+owner-restricted?" and "is this name a link?". The answer spans POSIX permission
+bits and Windows discretionary access-control lists (DACLs). The gateway discovery
+credential and the desktop attach, ownership, and worker-interprocess-communication
+(IPC) credentials all protect a local secret with the same guarantee, so the native
+Windows ACL machinery lives here once rather than being restated in each consumer.
 
 The Windows helpers stay read-only where they inspect and use only native ACL APIs
 where they mutate; no third-party dependency is required. On POSIX the guarantee is
-mode ``0o600`` owned by the current effective user with no group or other access.
+ownership by the current effective user with no group or other access; the state
+and credential predicates differ, on purpose, in how exact the mode must be.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import os
 import stat
 import subprocess
 from csv import reader as csv_reader
+from enum import Enum, auto
 from functools import cache
 from pathlib import Path
 
@@ -28,11 +30,19 @@ __all__ = [
     "credential_file_is_owner_restricted",
     "harden_credential_path",
     "owner_only_mode",
+    "path_is_link_like",
     "path_is_owner_restricted",
     "restrict_windows_file",
     "unfollowed_read_flags",
     "windows_file_is_restricted",
 ]
+
+
+class _OwnerRule(Enum):
+    """The two owner-only rules, applied by the predicate named for each."""
+
+    STATE = auto()
+    CREDENTIAL = auto()
 
 
 class _AclSizeInformation(ctypes.Structure):
@@ -238,6 +248,15 @@ def windows_file_is_restricted(path: Path, *, allow_inherited: bool = False) -> 
         kernel32.LocalFree(descriptor)
 
 
+def path_is_link_like(path: Path) -> bool:
+    """Return whether *path* is a symlink or Windows junction."""
+    return path.is_symlink() or path.is_junction()
+
+
+def _owner_only_bits(*, directory: bool) -> int:
+    return 0o700 if directory else 0o600
+
+
 def owner_only_mode(path: Path) -> int:
     """Return the POSIX mode that restricts *path* to its owner.
 
@@ -247,7 +266,7 @@ def owner_only_mode(path: Path) -> int:
     success. The failure therefore surfaces far from its cause, which is why the
     distinction is decided here rather than at each call site.
     """
-    return 0o700 if path.is_dir() else 0o600
+    return _owner_only_bits(directory=path.is_dir())
 
 
 def harden_credential_path(path: Path) -> None:
@@ -258,7 +277,7 @@ def harden_credential_path(path: Path) -> None:
     readable beside it. Reads back the effective permissions on both platforms,
     so a filesystem that ignores permission changes cannot silently pass.
     """
-    if path.is_symlink() or path.is_junction():
+    if path_is_link_like(path):
         raise OSError(f"refusing to restrict a linked path: {path}")
     if os.name == "posix":
         os.chmod(path, owner_only_mode(path))
@@ -270,27 +289,59 @@ def harden_credential_path(path: Path) -> None:
         raise OSError(f"could not apply owner-restricted access to {path}")
 
 
+def _owner_rule_holds(info: os.stat_result, path: Path, *, rule: _OwnerRule) -> bool:
+    """Apply *rule* to *info*, the metadata of *path* or of its descriptor.
+
+    The Windows DACL is reachable only by name, so *path* is read there whichever
+    object *info* describes. A platform that is neither POSIX nor Windows has no
+    rule this module can verify and is never owner-restricted.
+    """
+    if os.name == "posix":
+        if info.st_uid != os.geteuid():
+            return False
+        if rule is _OwnerRule.CREDENTIAL:
+            return not info.st_mode & 0o077
+        expected = _owner_only_bits(directory=stat.S_ISDIR(info.st_mode))
+        return stat.S_IMODE(info.st_mode) == expected
+    if os.name == "nt":
+        return windows_file_is_restricted(
+            path, allow_inherited=rule is _OwnerRule.STATE
+        )
+    return False
+
+
 def path_is_owner_restricted(path: Path) -> bool:
-    """Check a real file or directory's effective private permissions."""
-    if path.is_symlink() or path.is_junction():
+    """Check a real file or directory's effective private permissions.
+
+    This is the state rule, the one :func:`harden_credential_path` applies and
+    verifies: exactly ``0o600`` for a file or ``0o700`` for a directory on POSIX,
+    and on Windows the private DACL, where private entries inherited from an
+    already restricted parent also pass because SQLite creates its side files
+    after that parent was hardened. A secret is read under the stricter
+    :func:`credential_file_is_owner_restricted` instead. A symlink or junction is
+    never owner-restricted; a path that cannot be inspected raises.
+    """
+    if path_is_link_like(path):
         return False
     info = path.stat(follow_symlinks=False)
     if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
         return False
-    if os.name == "posix":
-        mode = 0o700 if stat.S_ISDIR(info.st_mode) else 0o600
-        return info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == mode
-    return os.name == "nt" and windows_file_is_restricted(path, allow_inherited=True)
+    return _owner_rule_holds(info, path, rule=_OwnerRule.STATE)
 
 
 def credential_file_is_owner_restricted(path: Path) -> bool:
     """Return whether *path* is a regular file reachable only by its owner.
 
-    POSIX requires the current effective user as owner with no group or other
-    access; Windows requires the private-DACL predicate. A non-regular file, a
-    symlink, or a Windows junction is never owner-restricted.
+    This is the credential rule a secret is read under, and it differs from
+    :func:`path_is_owner_restricted` on purpose. POSIX requires the current
+    effective user as owner with no group or other access, so a read-only
+    ``0o400`` secret qualifies. Windows requires the private DACL with explicit
+    entries only, because a file carrying inherited ones was never hardened
+    itself and follows whatever its parent is later granted. A non-regular file,
+    a symlink, a Windows junction, or a path that cannot be inspected is never
+    owner-restricted.
     """
-    if path.is_symlink() or path.is_junction():
+    if path_is_link_like(path):
         return False
     try:
         info = path.stat(follow_symlinks=False)
@@ -298,9 +349,7 @@ def credential_file_is_owner_restricted(path: Path) -> bool:
         return False
     if not stat.S_ISREG(info.st_mode):
         return False
-    if os.name == "posix":
-        return info.st_uid == os.geteuid() and not (info.st_mode & 0o077)
-    return windows_file_is_restricted(path)
+    return _owner_rule_holds(info, path, rule=_OwnerRule.CREDENTIAL)
 
 
 def unfollowed_read_flags() -> int:
@@ -345,8 +394,8 @@ def confirm_opened_secret(
     the named and the opened file are regular, so a directory or device
     substituted for either is refused; their device and inode agree, so a
     different file at the same name is refused; and the descriptor is
-    owner-restricted, so a file that became reachable by another account between
-    the two observations is refused.
+    owner-restricted under the credential rule, so a file that became reachable
+    by another account between the two observations is refused.
 
     Owner-restriction is asked of the descriptor rather than the name wherever
     the platform allows it, because the name can be re-pointed after the answer
@@ -373,6 +422,4 @@ def confirm_opened_secret(
         return False
     if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
         return False
-    if os.name == "posix":
-        return opened.st_uid == os.geteuid() and not (opened.st_mode & 0o077)
-    return windows_file_is_restricted(path)
+    return _owner_rule_holds(opened, path, rule=_OwnerRule.CREDENTIAL)

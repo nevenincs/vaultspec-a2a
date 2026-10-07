@@ -12,11 +12,13 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
-from ..desktop._filesystem_authority import path_is_link_like
+from ..desktop._platform_acl import harden_credential_path, path_is_link_like
 from ._ids import derive_idempotency_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+__all__ = ["JournalIndex", "closed_marker_name", "flush_directory", "journal_name"]
 
 _STORE = (
     "CREATE TABLE store (id INTEGER PRIMARY KEY CHECK (id=1), "
@@ -65,7 +67,7 @@ class JournalIndex:
         if os.name == "posix":
             if root.stat().st_uid != os.getuid():
                 raise ValueError("authoring index must be owned by the service")
-            root.chmod(0o700)
+            harden_credential_path(root)
         identity = derive_idempotency_key(self._root).removeprefix("idk:")
         return root / (identity + ".db")
 

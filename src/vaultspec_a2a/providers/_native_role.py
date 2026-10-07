@@ -15,6 +15,7 @@ from ..desktop._filesystem_authority import (
     assert_directory_authority,
     resolve_directory_authority,
 )
+from ..desktop._platform_acl import harden_credential_path
 from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
 from ..desktop.profile import derive_state_paths
 from ..utils.async_cleanup import complete_cleanup
@@ -103,7 +104,7 @@ def _new_home(authority: NativeWorkspaceAuthority) -> DirectoryAuthority:
         Path(tempfile.mkdtemp(prefix="vaultspec-native-home-", dir=root))
     )
     try:
-        created.path.chmod(0o700)
+        harden_credential_path(created.path)
     except OSError:
         _remove_home(created)
         raise

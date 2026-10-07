@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import subprocess
 from dataclasses import dataclass, field
@@ -13,24 +12,23 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from ..desktop._filesystem_authority import (
-    assert_directory_authority,
-    directory_lease,
-    open_shared_read_descriptor,
-    path_is_link_like,
-    resolve_directory_authority,
-)
-from ..desktop._platform_acl import (
-    confirm_opened_secret,
-    credential_file_is_owner_restricted,
-    path_is_owner_restricted,
-    unfollowed_read_flags,
-)
+from ..desktop._filesystem_authority import read_private_file
+from ..desktop._platform_acl import path_is_link_like
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
+
+__all__ = [
+    "CHALLENGE_HEADER",
+    "ENGINE_PRODUCER",
+    "ENGINE_RECORD_VERSION",
+    "PROOF_HEADER",
+    "TrustedEngineRecord",
+    "prove_engine_identity",
+    "read_engine_record",
+]
 
 ENGINE_RECORD_VERSION = 1
 ENGINE_PRODUCER = "vaultspec-engine"
@@ -71,41 +69,6 @@ def _record_path_is_external(path: Path, workspace_roots: tuple[Path, ...]) -> b
     if any(canonical.is_relative_to(root.resolve()) for root in workspace_roots):
         return False
     return not any((parent / ".git").exists() for parent in canonical.parents)
-
-
-def _read_private_record(path: Path) -> dict[str, object] | None:
-    authority = resolve_directory_authority(path.parent)
-    if not path_is_owner_restricted(authority.path):
-        return None
-    with directory_lease(authority) as leased:
-        if not credential_file_is_owner_restricted(path):
-            return None
-        named = path.stat(follow_symlinks=False)
-        if os.name == "posix":
-            descriptor = os.open(
-                path.name,
-                unfollowed_read_flags() | os.O_NONBLOCK,
-                dir_fd=leased.dir_fd,
-            )
-        else:
-            descriptor = open_shared_read_descriptor(path)
-        try:
-            if not confirm_opened_secret(descriptor, named=named, path=path):
-                return None
-            opened = os.fstat(descriptor)
-            if opened.st_nlink != 1 or opened.st_size > _MAX_RECORD_BYTES:
-                return None
-            with os.fdopen(descriptor, "rb") as handle:
-                descriptor = -1
-                contents = handle.read(_MAX_RECORD_BYTES + 1)
-            assert_directory_authority(leased)
-            if len(contents) > _MAX_RECORD_BYTES:
-                return None
-            decoded: object = json.loads(contents)
-            return coerce_object_mapping(decoded)
-        finally:
-            if descriptor != -1:
-                os.close(descriptor)
 
 
 def _positive_int(info: Mapping[str, object], name: str) -> int | None:
@@ -152,7 +115,10 @@ def read_engine_record(
     try:
         if not _record_path_is_external(path, workspace_roots):
             return None
-        info = _read_private_record(path)
+        decoded: object = json.loads(
+            read_private_file(path, max_bytes=_MAX_RECORD_BYTES, private_parent=True)
+        )
+        info = coerce_object_mapping(decoded)
         if info is None or _positive_int(info, "last_heartbeat") is None:
             return None
         if not heartbeat_is_fresh(info, now_ms):

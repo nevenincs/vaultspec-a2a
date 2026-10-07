@@ -596,7 +596,7 @@ async def _redrive_expired_claim(
         worker_port=8001,
         auto_spawn=False,
     )
-    worker_spawner.replace_process(None)
+    worker_spawner.adopt_worker()
     async with _real_worker(None, run.target, checkpointer) as worker_client:
         runtime = ClarificationRuntime(
             checkpointer,

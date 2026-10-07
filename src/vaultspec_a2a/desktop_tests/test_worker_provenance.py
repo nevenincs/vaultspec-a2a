@@ -355,7 +355,7 @@ def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
             ), "expected B's log to carry a provenance-shaped refusal"
 
 
-# A genuinely armed drive of the production ``_spawn_worker`` conflict branch.
+# A genuinely armed drive of the production spawn seam's conflict branch.
 #
 # The PRIOR_GENERATION authorized-eviction path cannot be reached by a black-box
 # gateway subprocess: ``GATEWAY_LIFETIME_ID`` is a per-process ``uuid4`` a
@@ -364,7 +364,7 @@ def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
 # reads THIS process's own lifetime - the only value a prior-generation worker of
 # this gateway could legitimately carry - hands it to a stubborn squatter that
 # reports an earlier generation and refuses to die, then drives the production
-# ``_spawn_worker`` at a higher generation. The gateway logic is production code;
+# ``_spawn_worker_owned`` at a higher generation. The gateway logic is production code;
 # the squatter is the modeled adversary (a wedged prior worker), never a stand-in
 # for any code under test.
 _PRIOR_GENERATION_CONFLICT_DRIVER = """
@@ -380,7 +380,7 @@ import httpx
 from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.control.worker_management import (
     GATEWAY_LIFETIME_ID,
-    _spawn_worker,
+    _spawn_worker_owned,
     _worker_stderr_log_path,
 )
 
@@ -422,23 +422,24 @@ worker_url = f"http://127.0.0.1:{worker_port}"
 # generation=2 makes the reported generation 1 a PRIOR_GENERATION verdict, which
 # authorizes eviction under the armed profile; the squatter's refusal to release
 # the port makes that eviction fail.
-result = asyncio.run(_spawn_worker(worker_url, worker_port, generation=2))
+owned = asyncio.run(_spawn_worker_owned(worker_url, worker_port, generation=2))
 autospawn_log = _worker_stderr_log_path(worker_port)
 
-# Were the conflict guard absent, _spawn_worker would spawn a real worker onto the
-# held port; reap any such handle so the driver leaks nothing, while still
-# reporting that a spawn was attempted.
-if result is not None:
+# Were the conflict guard absent, the seam would spawn a real contained worker onto
+# the held port; reap its tree through that containment so the driver leaks
+# nothing, while still reporting that a spawn was attempted.
+if owned is not None:
+    _process, containment = owned
     with contextlib.suppress(Exception):
-        result.kill()
-        result.wait(timeout=10)
+        asyncio.run(containment.terminate(term_timeout=5.0, kill_timeout=5.0))
+    containment.close()
 
 with open(result_file, "w", encoding="utf-8") as handle:
     json.dump(
         {
             "armed": settings.desktop_profile_armed,
             "squatter_pid": squatter.pid,
-            "spawn_result": "process" if result is not None else "none",
+            "spawn_result": "process" if owned is not None else "none",
             "autospawn_log": str(autospawn_log),
             "autospawn_log_exists": autospawn_log.exists(),
         },
@@ -460,7 +461,7 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
 
     Discriminating on three independent axes, all against real processes:
 
-    - No adoption: ``_spawn_worker`` returns no worker handle.
+    - No adoption: ``_spawn_worker_owned`` returns no worker handle.
     - No spawn after the failed eviction: the deterministic worker-autospawn
       stderr log is never created. Remove the conflict guard and the code falls
       through to spawn a real worker onto the held port, which opens that log

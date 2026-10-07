@@ -251,7 +251,7 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
     bundle = ActorTokenBundle(
         tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
@@ -332,7 +332,7 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     thread_id = "early-terminal"
     async with (
         httpx.AsyncClient(
@@ -385,7 +385,7 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     thread_id = "deleted-before-ack"
     async with (
         httpx.AsyncClient(
@@ -431,7 +431,7 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     thread_id = "terminal-before-lost-ack"
     async with (
         httpx.AsyncClient(
@@ -483,7 +483,7 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     thread_id = "cancel-wins-before-capacity-response"
     async with (
         httpx.AsyncClient(
@@ -564,7 +564,7 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://worker"
@@ -639,7 +639,7 @@ async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     async with (
         httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as worker_client,
         session_factory() as session,

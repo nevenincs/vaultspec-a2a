@@ -219,7 +219,7 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
         spawner = LazyWorkerSpawner(
             worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -300,7 +300,7 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
         spawner = LazyWorkerSpawner(
             worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -390,7 +390,7 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
         spawner = LazyWorkerSpawner(
             worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -467,7 +467,7 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
         spawner = LazyWorkerSpawner(
             worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -520,7 +520,7 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
         spawner = LazyWorkerSpawner(
             worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -591,7 +591,7 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
         spawner = LazyWorkerSpawner(
             worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )

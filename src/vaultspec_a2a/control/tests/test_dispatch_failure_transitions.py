@@ -291,7 +291,7 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
             worker_port=9,
             auto_spawn=False,
         )
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1,
             recovery_timeout=30.0,
@@ -376,7 +376,7 @@ def _permission_spawner(worker_url: str = "http://worker") -> LazyWorkerSpawner:
     spawner = LazyWorkerSpawner(
         worker_url=worker_url, worker_port=8001, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     return spawner
 
 

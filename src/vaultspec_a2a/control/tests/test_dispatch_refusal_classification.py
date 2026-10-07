@@ -84,7 +84,7 @@ def _spawner() -> LazyWorkerSpawner:
     spawner = LazyWorkerSpawner(
         worker_url="http://worker", worker_port=8001, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     return spawner
 
 
@@ -300,7 +300,7 @@ async def test_an_unreachable_worker_opens_the_circuit(tmp_path: Path) -> None:
     spawner = LazyWorkerSpawner(
         worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     async with httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.25) as client:
         outcomes = [
             await safe_dispatch(

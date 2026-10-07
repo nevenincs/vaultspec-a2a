@@ -23,6 +23,7 @@ from ...control.health import assemble_health_status
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ...testing.ports import free_port
 from ...testing.tests._support.listeners import health_listener
+from ...utils.process import ProcessContainment
 
 
 def _stale_app_state(**singletons: object) -> SimpleNamespace:
@@ -53,21 +54,27 @@ def test_owns_worker_requires_a_process_and_auto_spawn() -> None:
             spawner, WorkerCircuitBreaker(3, 30.0), WorkerState(), SimpleNamespace()
         )
 
-    # A real (already-exited) process handle stands in for an owned worker process.
+    # A real (already-exited) process handle stands in for an owned worker process,
+    # held with real containment as every owned worker is.
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
     proc.wait()
+    external_containment = ProcessContainment.create()
+    owned_containment = ProcessContainment.create()
     try:
         external = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=False)
-        external.replace_process(proc)  # has a handle but is not auto-spawn
+        # has a handle but is not auto-spawn
+        external.replace_process(proc, external_containment)
         owned = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=True)
-        owned.replace_process(proc)
+        owned.replace_process(proc, owned_containment)
         adopted = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=True)
-        adopted.replace_process(None)  # auto-spawn but no owned process
+        adopted.adopt_worker()  # auto-spawn but no owned process
 
         assert wd(external)._owns_worker() is False
         assert wd(owned)._owns_worker() is True
         assert wd(adopted)._owns_worker() is False
     finally:
+        external_containment.close()
+        owned_containment.close()
         if proc.poll() is None:
             proc.kill()
 
@@ -93,7 +100,7 @@ def test_restart_cooldown_gate() -> None:
 async def test_external_healthy_worker_stale_heartbeat_is_not_restarted() -> None:
     with health_listener() as port:
         spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
-        spawner.replace_process(None)  # adopted external worker: spawned, no process
+        spawner.adopt_worker()  # adopted external worker: spawned, no process
         app_state = _stale_app_state(
             circuit_breaker=WorkerCircuitBreaker(3, 30.0),
             worker_spawner=spawner,
@@ -126,7 +133,7 @@ async def test_adopted_worker_recovers_from_transient_down_to_up() -> None:
     with health_listener() as port:
         # auto_spawn True with no owned process is the same-gateway adoption shape.
         spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=True)
-        spawner.replace_process(None)
+        spawner.adopt_worker()
         app_state = _stale_app_state(
             circuit_breaker=WorkerCircuitBreaker(3, 30.0),
             worker_spawner=spawner,
@@ -149,7 +156,7 @@ async def test_unowned_down_worker_is_reported_not_restarted() -> None:
     # No listener → worker unreachable; auto_spawn False → external (not ours).
     port = free_port()
     spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     app_state = _stale_app_state(
         circuit_breaker=WorkerCircuitBreaker(3, 30.0),
         worker_spawner=spawner,

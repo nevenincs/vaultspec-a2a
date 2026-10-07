@@ -155,7 +155,7 @@ def _spawner(worker_url: str = "http://worker") -> LazyWorkerSpawner:
         worker_port=8001,
         auto_spawn=False,
     )
-    spawner.replace_process(None)
+    spawner.adopt_worker()
     return spawner
 
 

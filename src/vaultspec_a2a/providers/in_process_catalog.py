@@ -4,37 +4,39 @@ An in-process lane has no external transport to interrogate. There is no
 subprocess to spawn, no endpoint to enumerate, and no credential to present, so
 there is no discovery round trip to perform - and this module deliberately does
 not fake one. The catalog it returns is computed, not fetched: the entries are
-the in-process provider's own selectors, and the state is marked available
-because the provider is compiled into this process and cannot be absent.
+the lane's own selectors, and the state is marked available because the lane is
+held by this process and cannot be absent.
 
 That honesty is the whole reason this module exists separately from the four
 external discoverers. Their catalogs answer "what did the provider tell us just
-now"; this one answers "what does this build contain", which is a different
+now"; this one answers "what does this process hold", which is a different
 question with a different truth condition. Rendering it through a synthetic
 round trip would have made a static fact look like an observation.
 
-**Serving is armed, never ambient.** Internal deterministic test lanes are
-constrained to stay hidden, and the reason is a
-product one: a lane that returns fixed content would otherwise appear in the
-composer beside real providers, and a user could select canned output believing
-it was work. So the default posture is hidden, and a deployment that wants these
-lanes must say so - the certification stack does, because a run that must never
-spend has nowhere else to go now that run start requires a served selection.
+**The lanes are registrations, not names.** An in-process lane is a
+:class:`~.lane_registry.LaneRegistration`: the ones this build compiles in, plus
+whatever the configured lane plugins register (:mod:`.lane_registry`). The
+admission declaration, the factory and the catalog service all read the lane set
+from :func:`in_process_lanes`, so they cannot drift into disagreeing about what
+an in-process lane is called, and none of them names a lane it does not hold.
 
-The execution modes declared here are the single source for that identity. The
-admission declaration reads them to name the exact lanes it admits, and the
-factory reads them to validate a frozen mode at construction, so the three sites
-cannot drift into disagreeing about what an in-process lane is called.
+**Serving is armed, never ambient.** These lanes are constrained to stay
+hidden, and the reason is a product one: a lane that returns fixed content would
+otherwise appear in the composer beside real providers, and a user could select
+canned output believing it was work. So the default posture is hidden, and a
+deployment that wants these lanes must say so.
 """
 
 from __future__ import annotations
 
-from types import MappingProxyType
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final
 
 from ..graph.enums import Provider
 from ._catalog_discovery import ProviderCatalogDiscovery, available_catalog
 from ._catalog_fields import local_id, model_list_revision
+from .execution_modes import EXTERNAL_EXECUTION_MODES
+from .lane_registry import LaneRegistration, registered_lanes
 from .provider_catalog import (
     AuthenticationState,
     ModelCatalogEntry,
@@ -43,63 +45,76 @@ from .provider_catalog import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from datetime import datetime
 
+    from langchain_core.language_models import BaseChatModel
+
+    from ..team.team_config import AgentConfig
+
 __all__ = [
-    "IN_PROCESS_EXECUTION_MODES",
-    "IN_PROCESS_MODEL_VALUES",
+    "BUILT_IN_LANES",
     "build_in_process_catalog",
     "discover_in_process_catalog",
     "in_process_catalog_key",
+    "in_process_lane",
+    "in_process_lanes",
     "served_in_process_lanes",
 ]
 
 
-# The exact execution mode each in-process lane is served under. Catalog identity
-# is execution-mode specific by decision, so these strings are lane identity, not
-# labels: changing one renames the lane everywhere it is admitted, frozen, and
-# replayed.
-IN_PROCESS_EXECUTION_MODES: Mapping[Provider, str] = MappingProxyType(
-    {
-        Provider.DETERMINISTIC: "in-process-deterministic",
-        Provider.MOCK: "in-process-mock",
-    }
-)
+@dataclass(frozen=True, slots=True)
+class _MockLane:
+    """The tape-replay lane this build compiles in."""
 
-# Exact selectors implemented by the in-process executors. This is executable
-# lane vocabulary, not a capability-to-model policy table.
-IN_PROCESS_MODEL_VALUES: Mapping[Provider, tuple[str, ...]] = MappingProxyType(
-    {
-        Provider.DETERMINISTIC: ("deterministic",),
-        Provider.MOCK: ("mock-high", "mock-low", "mock-max", "mock-mid"),
-    }
-)
+    provider: Provider = Provider.MOCK
+    execution_mode: str = "in-process-mock"
+    display_name: str = "Mock (in-process tape replay)"
+    description: str = (
+        "In-process mock provider; replays recorded tapes from the configured "
+        "tape server with no live model spend."
+    )
+    model_values: tuple[str, ...] = ("mock-high", "mock-low", "mock-max", "mock-mid")
 
-_DESCRIPTIONS: Mapping[Provider, str] = MappingProxyType(
-    {
-        Provider.DETERMINISTIC: (
-            "In-process deterministic provider; returns fixed role-keyed content "
-            "with no external service and no spend."
-        ),
-        Provider.MOCK: (
-            "In-process mock provider; replays recorded tapes from the configured "
-            "tape server with no live model spend."
-        ),
-    }
-)
+    def create_model(self, agent_config: AgentConfig | None) -> BaseChatModel:
+        from .mock_chat_model import MockChatModel
+
+        return MockChatModel(agent_config=agent_config)
 
 
-def in_process_catalog_key(provider: Provider) -> ProviderCatalogKey:
-    """Return the catalog identity *provider* is served under.
+_MOCK_LANE: Final = _MockLane()
+
+#: The in-process lanes this build holds without any plugin. They are executable
+#: whatever the arming; serving them is still armed by the deployment.
+BUILT_IN_LANES: Final[tuple[LaneRegistration, ...]] = (_MOCK_LANE,)
+
+_BUILT_IN_PROVIDERS: Final = frozenset(lane.provider for lane in BUILT_IN_LANES)
+
+
+def in_process_lanes() -> tuple[LaneRegistration, ...]:
+    """Return every in-process lane this process can execute, plugin lanes first.
 
     Raises:
-        ValueError: If *provider* is not an in-process lane.
+        LanePluginError: If the configured lane plugins cannot be honoured.
     """
-    execution_mode = IN_PROCESS_EXECUTION_MODES.get(provider)
-    if execution_mode is None:
-        raise ValueError(f"provider {provider.value} is not an in-process lane")
-    return ProviderCatalogKey(provider.value, execution_mode)
+    return (*registered_lanes(reserved=_BUILT_IN_PROVIDERS), *BUILT_IN_LANES)
+
+
+def in_process_lane(provider: Provider) -> LaneRegistration | None:
+    """Return the in-process lane *provider* names, or ``None`` when it has none.
+
+    An external provider is answered without resolving the lane set: no
+    registration may claim one, so it can never be in-process.
+    """
+    if provider in EXTERNAL_EXECUTION_MODES:
+        return None
+    return next(
+        (lane for lane in in_process_lanes() if lane.provider is provider), None
+    )
+
+
+def in_process_catalog_key(lane: LaneRegistration) -> ProviderCatalogKey:
+    """Return the catalog identity *lane* is served under."""
+    return ProviderCatalogKey(lane.provider.value, lane.execution_mode)
 
 
 def served_in_process_lanes(
@@ -107,18 +122,21 @@ def served_in_process_lanes(
 ) -> tuple[ProviderCatalogKey, ...]:
     """Return the in-process lanes this deployment serves, in registry order.
 
-    Unarmed serves nothing at all. Armed always serves the deterministic lane,
-    which runs entirely inside this process and therefore cannot be unavailable.
-    The mock lane additionally requires a configured tape server: it proxies one
-    over HTTP, so serving it without a base URL would advertise a transport that
-    does not exist, and a certification run that froze it would fail at its first
+    Unarmed serves nothing at all. Armed serves every plugin lane, which runs
+    entirely inside this process and therefore cannot be unavailable. The mock
+    lane additionally requires a configured tape server: it proxies one over
+    HTTP, so serving it without a base URL would advertise a transport that does
+    not exist, and a certification run that froze it would fail at its first
     turn rather than never having been offered the lane.
     """
     if not armed:
         return ()
-    lanes = [in_process_catalog_key(Provider.DETERMINISTIC)]
+    lanes = [
+        in_process_catalog_key(lane)
+        for lane in registered_lanes(reserved=_BUILT_IN_PROVIDERS)
+    ]
     if mock_api_base and mock_api_base.strip():
-        lanes.append(in_process_catalog_key(Provider.MOCK))
+        lanes.append(in_process_catalog_key(_MOCK_LANE))
     return tuple(lanes)
 
 
@@ -126,33 +144,23 @@ def _entry_id(key: ProviderCatalogKey, provider_value: str) -> str:
     return local_id(f"{key.provider_id}:{key.execution_mode}:model", provider_value)
 
 
-def _provider_values(provider: Provider) -> tuple[str, ...]:
-    """Return the lane's distinct selectors, sorted.
-
-    These values are the exact selectors implemented and served by the lane.
-    They intentionally carry no capability mapping and no default.
-    """
-    return IN_PROCESS_MODEL_VALUES[provider]
-
-
 def build_in_process_catalog(
-    key: ProviderCatalogKey, *, checked_at: datetime | None = None
+    lane: LaneRegistration, *, checked_at: datetime | None = None
 ) -> ProviderCatalog:
     """Compute the static catalog for one in-process lane.
 
-    Raises:
-        ValueError: If *key* does not name a served in-process lane identity.
+    The entries are exactly the selectors the lane implements and serves. They
+    intentionally carry no capability mapping and no default.
     """
-    provider = _in_process_provider(key)
-    description = _DESCRIPTIONS[provider]
+    key = in_process_catalog_key(lane)
     models = tuple(
         ModelCatalogEntry(
             entry_id=_entry_id(key, provider_value),
             provider_value=provider_value,
             display_name=provider_value,
-            description=description,
+            description=lane.description,
         )
-        for provider_value in _provider_values(provider)
+        for provider_value in lane.model_values
     )
     return available_catalog(
         key,
@@ -162,25 +170,20 @@ def build_in_process_catalog(
     )
 
 
-def _in_process_provider(key: ProviderCatalogKey) -> Provider:
-    """Resolve the in-process provider *key* names, exactly.
+def _lane_for_key(key: ProviderCatalogKey) -> LaneRegistration:
+    """Resolve the in-process lane *key* names, exactly.
 
     A provider matched under a foreign execution mode is refused here rather than
-    served: catalog identity is the pair, and an in-process provider is only
-    in-process under the mode this module declares for it.
+    served: catalog identity is the pair, and an in-process lane is only
+    in-process under the mode it declares.
 
     Raises:
-        ValueError: If *key* is not a declared in-process lane identity.
+        ValueError: If *key* is not a held in-process lane identity.
     """
-    try:
-        provider = Provider(key.provider_id)
-    except ValueError:
-        raise ValueError(
-            "catalog key does not name an in-process provider lane"
-        ) from None
-    if IN_PROCESS_EXECUTION_MODES.get(provider) != key.execution_mode:
-        raise ValueError("catalog key does not name an in-process provider lane")
-    return provider
+    for lane in in_process_lanes():
+        if in_process_catalog_key(lane) == key:
+            return lane
+    raise ValueError("catalog key does not name an in-process provider lane")
 
 
 def discover_in_process_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
@@ -196,9 +199,9 @@ def discover_in_process_catalog(key: ProviderCatalogKey) -> ProviderCatalogDisco
     fact from ``UNKNOWN``.
 
     Raises:
-        ValueError: If *key* does not name a served in-process lane identity.
+        ValueError: If *key* does not name a held in-process lane identity.
     """
     return ProviderCatalogDiscovery(
-        catalog=build_in_process_catalog(key),
+        catalog=build_in_process_catalog(_lane_for_key(key)),
         authentication=AuthenticationState.NOT_APPLICABLE,
     )

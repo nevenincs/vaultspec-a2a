@@ -2,10 +2,10 @@
 
 import logging
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Annotated, Literal, get_args
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import SettingsConfigDict
+from pydantic_settings import NoDecode, SettingsConfigDict
 
 from ..utils import redact_url
 from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
@@ -346,8 +346,18 @@ class InfraConfig(ProjectSettings):
     serve_in_process_lanes: bool = Field(
         default=False,
         description=(
-            "Serve the in-process provider lanes (deterministic and mock). Off "
-            "by default so a deployment sees them only when it arms them."
+            "Serve the in-process provider lanes: the built-in mock lane and any "
+            "lane a configured lane plugin registers. Off by default so a "
+            "deployment sees them only when it arms them."
+        ),
+    )
+    lane_plugins: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=(),
+        description=(
+            "Comma-separated module paths, each exposing register_lanes(registry), "
+            "whose in-process lanes this process holds. Honoured only while "
+            "serve_in_process_lanes is armed and the desktop profile is not; any "
+            "other non-empty value refuses startup."
         ),
     )
     codex_config_home_retain: bool = Field(
@@ -960,6 +970,20 @@ class InfraConfig(ProjectSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("lane_plugins", mode="before")
+    @classmethod
+    def _split_lane_plugins(cls, value: object) -> object:
+        """Read the comma-separated list as module paths, refusing a malformed one."""
+        if not isinstance(value, str):
+            return value
+        if not value.strip():
+            return ()
+        modules = tuple(part.strip() for part in value.split(","))
+        for module in modules:
+            if not module or not all(part.isidentifier() for part in module.split(".")):
+                raise ValueError("lane plugins must be comma-separated module paths")
+        return tuple(dict.fromkeys(modules))
 
     @field_validator("kimi_temporary_model_max_context_size", mode="before")
     @classmethod

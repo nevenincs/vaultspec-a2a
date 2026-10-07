@@ -6,8 +6,8 @@ TOML's own fields. A scenario preset asserted only against its own declaration
 proves nothing a typo could not also satisfy - which is exactly how the older
 tool-failure scenario came to advertise a failure while completing successfully.
 
-Nothing here is armed: the preset names the in-process deterministic provider,
-so these run with no credential, no network, and no tape server.
+The graph is compiled with the in-process deterministic lane held through its
+plugin, so these run with no credential, no network, and no tape server.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing.lanes import DeterministicResearchAdrChatModel, seated_lanes
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
@@ -73,14 +74,15 @@ def _compiled_graph() -> CompiledTeamGraph:
     )
     step_timeout_seconds = team_config.graph.step_timeout_seconds
     assert step_timeout_seconds is not None
-    return compile_team_graph(
-        team_config,
-        agent_configs,
-        step_timeout=float(step_timeout_seconds),
-        provider_factory=ProviderFactory(),
-        workspace_root=Path.cwd(),
-        model_assignment={ref.agent_id: lane for ref in team_config.workers},
-    )
+    with seated_lanes():
+        return compile_team_graph(
+            team_config,
+            agent_configs,
+            step_timeout=float(step_timeout_seconds),
+            provider_factory=ProviderFactory(),
+            workspace_root=Path.cwd(),
+            model_assignment={ref.agent_id: lane for ref in team_config.workers},
+        )
 
 
 def test_the_preset_is_discoverable() -> None:
@@ -129,16 +131,12 @@ async def test_a_real_turn_completes_before_the_budget_is_exhausted() -> None:
 
     The turn's content is compared against what the in-process provider itself
     produces for that role, asked for directly. That is the empirical half of
-    the unarmed claim - it shows the turn was served in process rather than by
+    the in-process claim - it shows the turn was served in process rather than by
     a tape server that happened to be running on the developer's machine - and
     the expectation is derived from the production model rather than pasted
     from an observed run, so it cannot drift into asserting whatever the code
     currently emits.
     """
-    from ...providers.deterministic_chat_model import (
-        DeterministicResearchAdrChatModel,
-    )
-
     first_worker = load_team_config(_PRESET).workers[0].agent_id
     in_process_turn = await DeterministicResearchAdrChatModel(
         agent_config=load_agent_config(first_worker)

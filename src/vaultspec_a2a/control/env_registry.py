@@ -18,9 +18,11 @@ a failure rather than a credential quietly left ungated.
 
 A credential never chains to a shared framework name, so each spelling a field
 accepts is its own entry, canonical a2a name first and the owning tool's own
-name behind it. The non-secret entry is the operator environment file itself -
+name behind it. The non-secret entries are the operator environment file itself -
 a2a's replacement for reading settings out of the workspace, resolved through
-the same accessor so that a blank value means unset here too.
+the same accessor so that a blank value means unset here too - and the lane
+plugins setting, declared so the registry records that a workspace can never
+supply the modules a process imports.
 
 The provider names a2a never registers are declared here too. With the
 registered credentials they are the whole provider-credential vocabulary, so
@@ -43,6 +45,7 @@ __all__ = [
     "CREDENTIAL_VARIABLES",
     "ENV_FILE_VARIABLE",
     "FOREIGN_PROVIDER_ENV_NAMES",
+    "LANE_PLUGINS_VARIABLE",
 ]
 
 #: The distribution name whose install mode gates the workspace ``.env``.
@@ -88,6 +91,21 @@ ENV_FILE_VARIABLE: Final = ConfigVariable(
     description=(
         "Path to the operator's settings file for this service. Relative to "
         "the project root; a named file that does not exist is refused."
+    ),
+)
+
+#: The modules whose in-process lanes a process imports. A setting, never a
+#: credential: neither a workspace ``.env`` nor the project store may supply it,
+#: so it reaches a process only through the environment its launcher hands it.
+LANE_PLUGINS_VARIABLE: Final = ConfigVariable(
+    env_name=f"{ENV_PREFIX}LANE_PLUGINS",
+    attr_name=None,
+    var_type=str,
+    default=None,
+    description=(
+        "Comma-separated module paths, each exposing register_lanes(registry). "
+        "Honoured only while the in-process lanes are armed outside the desktop "
+        "profile; any other non-empty value refuses startup."
     ),
 )
 
@@ -165,6 +183,7 @@ register_registry(
     PACKAGE,
     (
         ENV_FILE_VARIABLE,
+        LANE_PLUGINS_VARIABLE,
         *(entry for entries in CREDENTIAL_VARIABLES.values() for entry in entries),
     ),
 )

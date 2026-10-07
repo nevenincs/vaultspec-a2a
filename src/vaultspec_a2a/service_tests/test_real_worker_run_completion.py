@@ -51,9 +51,9 @@ import uuid
 from typing import TYPE_CHECKING
 
 from ..acceptance.tests._harness import certified_gateway
-from ..providers.deterministic_chat_model import UNATTENDED_REPLY
 from ..team import load_team_config
 from ..testing import ok_body, wait_for_run_status
+from ..testing.lanes import UNATTENDED_REPLY
 from ..testing.payloads import json_object, json_object_list
 
 if TYPE_CHECKING:

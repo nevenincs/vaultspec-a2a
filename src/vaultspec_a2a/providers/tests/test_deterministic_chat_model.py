@@ -9,16 +9,15 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from ...authoring.contract import RESEARCH_ADR_ROLES
 from ...graph.enums import Provider
 from ...team.team_config import AgentConfig, AgentPersonaConfig, load_team_config
-from ...thread.constants import DEFAULT_SUPERVISOR_ID
-from ..deterministic_chat_model import (
+from ...testing.lanes import (
     UNATTENDED_REPLY,
     DeterministicResearchAdrChatModel,
-    _role_of,
+    seated_lanes,
 )
+from ...testing.lanes.deterministic import _role_of
+from ...thread.constants import DEFAULT_SUPERVISOR_ID
 from ..factory import ProviderFactory
-from ..lane_admission import (
-    IN_PROCESS_LANES,
-)
+from ..in_process_catalog import in_process_lane
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -36,16 +35,22 @@ def _agent(agent_id: str) -> AgentConfig:
     )
 
 
-def _model(agent_id: str, **kwargs: Any) -> DeterministicResearchAdrChatModel:
-    model = ProviderFactory().create(
-        Provider.DETERMINISTIC,
-        model="deterministic",
-        execution_mode="in-process-deterministic",
-        agent_config=_agent(agent_id),
-        **kwargs,
-    )
+def _model(agent_id: str) -> DeterministicResearchAdrChatModel:
+    """Build the lane's model through the production factory, lanes held."""
+    with seated_lanes():
+        model = ProviderFactory().create(
+            Provider.DETERMINISTIC,
+            model="deterministic",
+            execution_mode="in-process-deterministic",
+            agent_config=_agent(agent_id),
+        )
     assert isinstance(model, DeterministicResearchAdrChatModel)
     return model
+
+
+def _authored(agent_id: str, **document: Any) -> DeterministicResearchAdrChatModel:
+    """Build the model directly, for a feature tag or topic the factory never sets."""
+    return DeterministicResearchAdrChatModel(agent_config=_agent(agent_id), **document)
 
 
 def test_exact_provider_identity_is_wired() -> None:
@@ -54,7 +59,8 @@ def test_exact_provider_identity_is_wired() -> None:
 
 def test_factory_returns_first_class_base_chat_model() -> None:
     """The production factory resolves the permanent completion floor."""
-    assert Provider.DETERMINISTIC in IN_PROCESS_LANES
+    with seated_lanes():
+        assert in_process_lane(Provider.DETERMINISTIC) is not None
     model = _model("vaultspec-researcher")
     assert isinstance(model, BaseChatModel)
 
@@ -70,7 +76,7 @@ async def test_doc_reviewer_returns_pass_sentinel() -> None:
 @pytest.mark.asyncio
 async def test_synthesist_returns_research_document() -> None:
     """The synthesist emits a valid research document with the feature tag."""
-    result = await _model(
+    result = await _authored(
         "vaultspec-synthesist", feature_tag="grid-layout", topic="layout"
     ).ainvoke([HumanMessage(content="x")])
     body = str(result.content)
@@ -82,7 +88,7 @@ async def test_synthesist_returns_research_document() -> None:
 @pytest.mark.asyncio
 async def test_adr_author_returns_adr_document() -> None:
     """The adr-author emits a valid ADR document with the feature tag."""
-    result = await _model(
+    result = await _authored(
         "vaultspec-adr-author", feature_tag="grid-layout", topic="layout"
     ).ainvoke([HumanMessage(content="x")])
     body = str(result.content)
@@ -94,7 +100,7 @@ async def test_adr_author_returns_adr_document() -> None:
 @pytest.mark.asyncio
 async def test_researcher_returns_findings_not_a_document() -> None:
     """The researcher emits findings text (feeds synthesis), not a vault doc."""
-    result = await _model("vaultspec-researcher", topic="layout").ainvoke(
+    result = await _authored("vaultspec-researcher", topic="layout").ainvoke(
         [HumanMessage(content="x")]
     )
     body = str(result.content)
@@ -118,7 +124,7 @@ async def test_no_prompt_makes_this_provider_ask_a_question() -> None:
         "research it, nothing special",
         "research it. DETERMINISTIC_FORCE_CLARIFICATION",
     ):
-        result = await _model("vaultspec-researcher", topic="layout").ainvoke(
+        result = await _authored("vaultspec-researcher", topic="layout").ainvoke(
             [HumanMessage(content=prompt)]
         )
         body = str(result.content)

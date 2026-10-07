@@ -50,12 +50,12 @@ is deliberately a SIBLING of the turn declaration rather than a field on
 withdrawn independently - upstream tool drift can cost a lane its web activation
 while it keeps serving turns perfectly - and folding them into one record would
 make withdrawing one an edit to the other's citation. The turn side admits lanes
-through TWO declarations, the mapping and :data:`IN_PROCESS_LANES`, and the
-in-process lanes must never be web-proven: they spawn no CLI, so there is nothing
-there to retrieve with, and a field hanging off :class:`LaneProof` could not have
-expressed that at all, because those lanes hold no proof record. And the consumers
-differ: turn admission is a REFUSAL consulted by the eligibility service, while web
-proof is an ACTIVATION consulted by tool and persona composition.
+through TWO sources, the mapping and the in-process lanes this process holds, and
+the in-process lanes must never be web-proven: they spawn no CLI, so there is
+nothing there to retrieve with, and a field hanging off :class:`LaneProof` could
+not have expressed that at all, because those lanes hold no proof record. And the
+consumers differ: turn admission is a REFUSAL consulted by the eligibility service,
+while web proof is an ACTIVATION consulted by tool and persona composition.
 
 What keeps the sibling from becoming a registry that can disagree with the turn one
 is not a shared container but an enforced implication, asserted at import by
@@ -89,15 +89,13 @@ from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .binary_version import next_minor_version, parse_binary_version
 from .execution_modes import EXTERNAL_EXECUTION_MODES
-from .in_process_catalog import IN_PROCESS_EXECUTION_MODES
+from .in_process_catalog import in_process_catalog_key, in_process_lanes
 from .provider_catalog import ProviderCatalogKey
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "IN_PROCESS_CATALOG_LANES",
-    "IN_PROCESS_LANES",
     "PROVEN_CATALOG_TURN_LANES",
     "PROVEN_TURN_LANES",
     "PROVEN_WEB_LANES",
@@ -229,35 +227,6 @@ PROVEN_CATALOG_TURN_LANES: Mapping[ProviderCatalogKey, LaneProof] = MappingProxy
     }
 )
 
-# The in-process lanes: no external transport exists to complete a turn against,
-# so the completed-turn standard cannot be applied to them and does not gate them.
-# MOCK proxies the in-repo tape server and DETERMINISTIC runs entirely in-process
-# (the acceptance provider). Both are admitted by this explicit declaration, never
-# by falling through the check - an unlisted lane must always land on deny.
-IN_PROCESS_LANES: frozenset[Provider] = frozenset(
-    {Provider.MOCK, Provider.DETERMINISTIC}
-)
-
-# The same in-process admission at CATALOG identity, and it is a SEPARATE
-# declaration for the reason the catalog map above is separate from the
-# provider-level one: catalog admission is execution-mode specific, so admitting
-# a provider does not admit every mode it might one day be served under. An
-# in-process provider offered under some other execution mode is not this
-# declaration and still lands on deny.
-#
-# It is derived from :data:`IN_PROCESS_LANES` and the serving module's mode
-# declaration rather than hand-listed, and that is deliberate in a module whose
-# rule is otherwise "edit by hand, never derive". The hand-editing rule protects
-# claims about work that finished on a lane; these lanes make no such claim, and
-# their identity is exactly "the in-process lanes, under the modes they are
-# served as". Restating the pair here would create a second place for a renamed
-# execution mode to be forgotten, which is the failure mode this module exists to
-# prevent, not an instance of the vigilance it asks for.
-IN_PROCESS_CATALOG_LANES: frozenset[ProviderCatalogKey] = frozenset(
-    ProviderCatalogKey(provider.value, IN_PROCESS_EXECUTION_MODES[provider])
-    for provider in IN_PROCESS_LANES
-)
-
 # ---------------------------------------------------------------------------
 # THE WEB DECLARATION - edit by hand, never derive. It landed EMPTY, because the
 # wiring lands before the PROOF and every seam is asserted dark until a live run
@@ -304,9 +273,9 @@ def _require_web_proof_implies_turn_proof(
 
     The single rule that keeps the two declarations from disagreeing. A retrieval
     is work completed on a lane, so a lane with no completed turn cannot have
-    completed a retrieval; and the in-process lanes, admitted for service by
-    :data:`IN_PROCESS_LANES` rather than by proof, spawn no CLI and have nothing
-    to retrieve with. Checked at import against the real declarations, so an
+    completed a retrieval; and the in-process lanes, admitted for service as held
+    lanes rather than by proof, spawn no CLI and have nothing to retrieve with.
+    Checked at import against the real declarations, so an
     incoherent pair - a lane activated for web while refused for service - cannot
     be committed and discovered later at a spawn.
 
@@ -349,11 +318,22 @@ def is_catalog_lane_admissible(key: ProviderCatalogKey) -> bool:
     """Return whether this exact execution lane may be served as selectable.
 
     True for an external lane with recorded completed-turn proof and for the
-    in-process lanes under the exact modes they are served as. False for
-    everything else, including an in-process provider named under a foreign
-    execution mode - deny is the default here as it is one layer up.
+    in-process lanes this process holds, under the exact modes they declare. No
+    external transport exists to complete a turn against on those, so the
+    completed-turn standard cannot apply to them; they are admitted as held
+    lanes instead. False for everything else, including an in-process provider
+    named under a foreign execution mode - deny is the default here as it is one
+    layer up.
+
+    The in-process set is read from the lane registrations rather than
+    hand-listed, deliberately in a module whose rule is otherwise "edit by hand,
+    never derive": that rule protects claims about work that finished on a lane,
+    these lanes make no such claim, and restating their identity here would be a
+    second place for a renamed execution mode to be forgotten.
     """
-    return key in PROVEN_CATALOG_TURN_LANES or key in IN_PROCESS_CATALOG_LANES
+    return key in PROVEN_CATALOG_TURN_LANES or any(
+        in_process_catalog_key(lane) == key for lane in in_process_lanes()
+    )
 
 
 def catalog_lane_admission_reason(key: ProviderCatalogKey) -> str | None:

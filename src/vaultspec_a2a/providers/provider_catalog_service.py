@@ -17,6 +17,7 @@ from .factory import (
     ProviderCatalogRegistration,
     ProviderFactory,
 )
+from .in_process_catalog import in_process_lane
 from .lane_admission import (
     catalog_lane_admission_reason,
     is_catalog_lane_admissible,
@@ -52,12 +53,6 @@ _DISPLAY_NAMES = {
     Provider.OPENAI: "OpenAI",
     Provider.ZAI: "Z.ai",
     Provider.ZHIPU: "Zhipu AI",
-    # The in-process lanes name themselves as such wherever they are displayed.
-    # They are served only to a deployment that armed them, but a served lane is
-    # a lane a human can read, and one that returns fixed or replayed content
-    # must not be presentable as an ordinary provider.
-    Provider.DETERMINISTIC: "Deterministic (in-process)",
-    Provider.MOCK: "Mock (in-process tape replay)",
 }
 
 
@@ -259,9 +254,13 @@ class ProviderCatalogService:
             key, catalog, authentication, configured, transport, binary_reason
         )
         provider = Provider(key.provider_id)
+        # An in-process lane names itself, as in-process, through its registration.
+        lane = in_process_lane(provider)
         return ProviderRecord(
             provider_id=key.provider_id,
-            display_name=_DISPLAY_NAMES[provider],
+            display_name=(
+                lane.display_name if lane is not None else _DISPLAY_NAMES[provider]
+            ),
             execution_mode=key.execution_mode,
             health=health,
             catalog=catalog,

@@ -103,6 +103,9 @@ PROMOTION_OWNED_CONDITIONS = frozenset(
 #: it: no further turn may start, so none of them can be promoted.
 _LIFETIME_SPENT_REFUSAL = "the run's total lifetime is spent"
 
+#: The run is parked on a question and is waiting for a human, not for recovery.
+_AWAITING_CONTROL = "awaiting_control"
+
 
 @dataclass(frozen=True, slots=True)
 class RecoveryRequest:
@@ -162,6 +165,19 @@ async def _reconcile_incomplete_checkpoint(
 ) -> RecoveryObservation:
     status = decision.status
     evidence = decision.evidence
+    if (
+        status is ThreadStatus.INPUT_REQUIRED
+        and evidence.kind is CheckpointEvidenceKind.INTERRUPTED
+    ):
+        # A park is this pair and nothing else: the run row says it is parked
+        # and its checkpoint holds an unanswered question. The rule this
+        # replaces looked for a ``permission_request_created`` writer, which no
+        # park carries - a permission park elects under the graph-run dispatch
+        # that raised it, as a clarification does - so it matched nothing and
+        # every pass read a waiting run as an unfinished execution.
+        return RecoveryObservation(
+            status, _AWAITING_CONTROL, evidence.checkpoint_id, False
+        )
     owner = _promotion_owner(decision)
     if owner is not None:
         return RecoveryObservation(status, owner, evidence.checkpoint_id, False)
@@ -357,14 +373,6 @@ async def reconcile_run_checkpoint(
     action = await get_control_action_by_dispatch_id(
         db, thread_id=thread_id, dispatch_id=expectation.authority.action_receipt_id
     )
-    if (
-        action is not None
-        and status is ThreadStatus.INPUT_REQUIRED
-        and action.action_type == ControlActionType.PERMISSION_REQUEST_CREATED
-        and expectation.authority.action_type
-        is ControlActionType.PERMISSION_REQUEST_CREATED
-    ):
-        return RecoveryObservation(status, "awaiting_control", None, False)
     receipt = validate_current_graph_receipt(thread, action)
     if receipt is None or action is None:
         return RecoveryObservation(status, "incompatible_action_receipt", None, False)

@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
+from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...conftest import SqlitePosture
@@ -36,7 +37,7 @@ from ...thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
     classify_checkpoint_evidence,
 )
-from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.enums import ControlActionType, InterruptType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import thread_create_action_key
 from ...thread.state import TeamState
@@ -254,3 +255,84 @@ async def test_only_startup_demotes_unfinished_execution(durable_run: DurableRun
         assert row is not None
         assert row.run_revision == 1
         assert row.repair_reason == "checkpoint_absent"
+
+
+def _parking_node(state: TeamState) -> dict[str, object]:
+    """Ask for one tool permission and leave the run suspended on it."""
+    del state
+    interrupt(
+        {
+            "type": InterruptType.PERMISSION_REQUEST.value,
+            "request_id": "perm-recovery-park",
+            "tool_name": "bash",
+            "tool_input": {"command": "ls"},
+            "options": [{"optionId": "allow_once", "name": "Allow once"}],
+        }
+    )
+    return {}
+
+
+def _parking_graph(saver: AsyncSqliteSaver) -> CompiledTeamGraph:
+    builder = new_state_graph(TeamState)
+    add_test_node(builder, "ask", _parking_node)
+    add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder.add_edge(START, "ask")
+    builder.add_edge("ask", GRAPH_COMPLETION_NODE)
+    builder.add_edge(GRAPH_COMPLETION_NODE, END)
+    return compile_test_graph(builder, checkpointer=saver, name="recovery-park-probe")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("durable_run", [ThreadStatus.INPUT_REQUIRED], indirect=True)
+@pytest.mark.parametrize(
+    "trigger", [RecoveryTrigger.READ, RecoveryTrigger.STARTUP, RecoveryTrigger.RETRY]
+)
+async def test_a_parked_run_is_recognised_by_its_checkpoint_not_its_writer(
+    durable_run: DurableRun, trigger: RecoveryTrigger
+) -> None:
+    """A park is ``INPUT_REQUIRED`` plus a pending checkpoint interrupt.
+
+    A permission park elects under the graph-run dispatch that raised it, as a
+    clarification does, so no park carries a ``permission_request_created``
+    writer. Recognising one by that writer's action type therefore matched
+    nothing, and every pass read the run as an unfinished execution rather than
+    as a run waiting for a human. The recognition is the checkpoint's: the run
+    holds an unanswered interrupt, and recovery leaves it alone whatever
+    triggered the pass.
+    """
+    sessions, saver, receipt = durable_run
+    config: RunnableConfig = {"configurable": {"thread_id": "run"}}
+    parked = await _parking_graph(saver).ainvoke(
+        {
+            "active_graph_action_receipt": receipt.model_dump(mode="json"),
+            "graph_action_receipts": {
+                receipt.dispatch_id: receipt.model_dump(mode="json")
+            },
+        },
+        config,
+    )
+    assert "__interrupt__" in parked
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(saver, "run", timeout=5), receipt
+    )
+    assert evidence.kind is CheckpointEvidenceKind.INTERRUPTED
+
+    async with sessions() as db:
+        observed = await reconcile_run_checkpoint(
+            db,
+            saver,
+            RecoveryRequest(
+                thread_id="run", trigger=trigger, checkpoint_timeout_seconds=5
+            ),
+        )
+    assert observed.condition == "awaiting_control"
+    assert observed.status is ThreadStatus.INPUT_REQUIRED
+    assert not observed.changed
+
+    async with sessions() as db:
+        row = await get_thread(db, "run")
+    assert row is not None
+    assert row.status == ThreadStatus.INPUT_REQUIRED.value
+    assert row.repair_reason is None
+    # The revision the fixture seated, untouched: nothing elected over the park.
+    assert row.run_revision == 0

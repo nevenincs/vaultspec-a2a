@@ -101,24 +101,33 @@ async def test_both_option_id_spellings_reach_the_client_intact() -> None:
 
 @pytest.mark.asyncio
 async def test_an_option_id_present_but_null_does_not_reach_the_client() -> None:
-    """A present-but-null key defeated the old ``dict.get`` fallback chain.
+    """An option naming no id is dropped, never renamed.
 
     ``opt.get("optionId", ...)`` returns ``None`` when the key exists with a null
     value — the default never fires — so a null id was projected into the frame
-    and offered to the dashboard as something a human could answer with.
+    and offered to the dashboard as something a human could answer with. Naming
+    one for it is worse: the id that was substituted, ``allow_once``, is an
+    APPROVAL, so a malformed refusal reached the operator as a grant. The worker
+    refuses a request with no pickable option, so nothing here needs an invention
+    to stay answerable.
     """
     options = await _project("thread-null", [{"optionId": None, "label": "Broken"}])
 
-    assert options[0]["option_id"] == "allow_once"
-    assert options[0]["option_id"] is not None
+    assert options == []
 
 
 @pytest.mark.asyncio
-async def test_an_options_list_the_agent_omits_falls_back_to_allow_and_deny() -> None:
-    """An agent offering nothing still yields an answerable pair."""
+async def test_an_options_list_the_agent_omits_stays_empty() -> None:
+    """An agent offering nothing is projected as offering nothing.
+
+    The pair this used to invent was persisted as the request's own offer and
+    the human's pick validated against it, so the worker then rejected that pick
+    against the real offer and the run stalled. Such a request is refused at the
+    worker and never parks, so no frame of it reaches here at all.
+    """
     options = await _project("thread-empty", [])
 
-    assert [opt["option_id"] for opt in options] == ["allow_once", "deny_once"]
+    assert options == []
 
 
 @pytest.mark.asyncio

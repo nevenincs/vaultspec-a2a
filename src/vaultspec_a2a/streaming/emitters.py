@@ -13,7 +13,6 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, NotRequired, TypedDict, Unpack
-from uuid import uuid4
 
 from ..domain_config import domain_config
 from ..graph.acp_options import option_id_of, option_kind
@@ -392,13 +391,19 @@ class EventEmitters:
         options = kwargs["options"]
         tool_call = kwargs.get("tool_call")
         tool_kind = kwargs.get("tool_kind")
+        # An option carrying no id is dropped, never renamed. A minted id names
+        # a choice no producer offered and no answer can be matched back to, so
+        # a frame carrying one offered the operator a button that decides
+        # nothing - and the durable row cached that invention as the request's
+        # own offer.
         parsed_options: list[dict[str, str]] = [
             {
-                "option_id": option_id_of(opt) or str(uuid4()),
+                "option_id": option_id,
                 "name": opt.get("name", ""),
                 "kind": str(option_kind(opt)),
             }
             for opt in options
+            if (option_id := option_id_of(opt))
         ]
 
         resolved_kind = tool_kind

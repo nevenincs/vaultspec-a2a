@@ -74,16 +74,13 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
-from ..control.config import setting_env, settings
 from ..streaming.sse_frames import decode_sse_lines
 from ..team.team_config import load_team_config
 from ..testing import (
-    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     NoSelectableLaneError,
     fetch_provider_catalog,
     in_process_selection,
     is_terminal,
-    live_provider_catalog_selector_is_configured,
     ok_body,
     selection_from_served_catalog,
     wait_for_run_status,
@@ -124,17 +121,6 @@ _FEATURE_TAG = "clarification-loop"
 # documents move through the engine's proposal path rather than the filesystem.
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 
-# The ENGINE's discovery record, which is NOT a2a's own gateway record: the
-# engine publishes .vault/data/engine-data/service.json in the project, while
-# .vault/data/agents/service.json is this product's gateway record. Naming the
-# wrong one sends a reader to a file that exists, looks healthy, and has nothing
-# to do with the missing substrate.
-_ENGINE_RECORD = settings.engine_discovery_path
-_SUPPLY_ENGINE = (
-    f"start the vaultspec engine so it publishes {_ENGINE_RECORD} "
-    f"(or point {setting_env('engine_service_json')} at a live record)"
-)
-
 _WORKER_READY_BUDGET_SECONDS = "120"
 
 _PARK_BUDGET = 180.0
@@ -172,8 +158,8 @@ def _optional_text_list(body: JsonObject, field: str, *, at: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _require_substrates() -> None:
-    """Skip, naming the substrate, when the loop cannot honestly run.
+def _require_engine(rule: ExternalPrerequisiteRule) -> None:
+    """Report, naming the substrate, when the loop cannot honestly run.
 
     Only ONE substrate is needed. The preset runs the in-process deterministic
     provider, so no model container is involved - the tape corpus carries no
@@ -187,23 +173,19 @@ def _require_substrates() -> None:
     # goes is indistinguishable from a pass that comes and goes. A genuinely dead
     # engine still skips - it simply has to be dead for the whole window.
     if resolve_engine_with_retry(attempts=3, delay_seconds=2.0) is None:
-        pytest.skip(
-            "no reachable engine: a document-authoring preset builds its "
-            "authoring submitter at graph-compile time and fails closed without "
-            f"one, so this loop cannot run. To supply it: {_SUPPLY_ENGINE}"
+        rule.absent(
+            "loopback-stack",
+            "no discovery record resolved to a healthy authoring engine: a "
+            "document-authoring preset builds its authoring submitter at "
+            "graph-compile time and fails closed without one",
         )
 
 
 def _require_codex_substrates(rule: ExternalPrerequisiteRule) -> None:
     """Require the engine plus an authenticated real Codex command lane."""
     rule("codex-cli")
-    if not (Path.home() / ".codex" / "auth.json").is_file():
-        rule.absent("codex-cli", "no ~/.codex/auth.json; run 'codex login'")
-    if resolve_engine_with_retry(attempts=3, delay_seconds=2.0) is None:
-        rule.absent(
-            "loopback-stack",
-            "no discovery record resolved to a healthy authoring engine",
-        )
+    rule("codex-credential")
+    _require_engine(rule)
 
 
 # ---------------------------------------------------------------------------
@@ -407,15 +389,17 @@ def _served_catalog(gateway: CertifiedGateway) -> JsonObject:
         )
 
 
-def _served_in_process_selection(gateway: CertifiedGateway) -> JsonObject:
-    """Resolve the served in-process lane's selection, or skip naming the gap.
+def _served_in_process_selection(
+    gateway: CertifiedGateway, rule: ExternalPrerequisiteRule
+) -> JsonObject:
+    """Resolve the served in-process lane's selection, or report the missing lane.
 
     The loop's ONE substitution is the model, and under the explicit-selection
     contract the substitution is expressed as a selection naming the served
     in-process lane - the freeze wins outright at compilation, so a selection
     naming any other served lane would hand every document role to a real
     external provider. Refusing a billable lane is the shared mechanism's own
-    guarantee; what is local here is the skip, because a loop that cannot express
+    guarantee; what is local here is the report, because a loop that cannot express
     its substitution has nothing honest left to assert.
     """
     try:
@@ -424,9 +408,10 @@ def _served_in_process_selection(gateway: CertifiedGateway) -> JsonObject:
             prefer_provider_id="deterministic",
         )
     except NoSelectableLaneError as exc:
-        pytest.skip(
+        rule.absent(
+            "in-process-lanes",
             f"the loop's deterministic model substitution cannot be selected "
-            f"without freezing a real external provider: {exc}"
+            f"without freezing a real external provider: {exc}",
         )
 
 
@@ -627,9 +612,10 @@ def _assert_codex_continuation_applied(
 
 def test_clarification_loop_parks_discloses_answers_and_resumes(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """One run: park, disclose, nudge, answer over HTTP, and genuinely resume."""
-    _require_substrates()
+    _require_engine(external_prerequisite)
     expected_questions = _declared_questions()
 
     run_id = f"clarify-stitch-{uuid.uuid4().hex[:12]}"
@@ -638,7 +624,9 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         started = _start_document_run(
-            gateway, run_id, selection=_served_in_process_selection(gateway)
+            gateway,
+            run_id,
+            selection=_served_in_process_selection(gateway, external_prerequisite),
         )
         assert started.status_code == 201, started.text
 
@@ -718,6 +706,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
 
 def test_answering_a_question_the_run_is_not_parked_on_is_refused(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """The scoping check holds across the real boundary, not just in-process.
 
@@ -726,7 +715,7 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
     performs, and it must precede any dispatch: the run stays parked on its own
     questionnaire afterwards.
     """
-    _require_substrates()
+    _require_engine(external_prerequisite)
 
     run_id = f"clarify-scope-{uuid.uuid4().hex[:12]}"
     with certified_gateway(
@@ -734,7 +723,9 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         started = _start_document_run(
-            gateway, run_id, selection=_served_in_process_selection(gateway)
+            gateway,
+            run_id,
+            selection=_served_in_process_selection(gateway, external_prerequisite),
         )
         assert started.status_code == 201, started.text
 
@@ -794,13 +785,10 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
     proof to five independent research turns.
     """
     _require_codex_substrates(external_prerequisite)
-    if not live_provider_catalog_selector_is_configured():
-        pytest.skip(
-            "no explicit live catalog selection is configured for this "
-            "billable Codex election; set "
-            + ", ".join(LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON)
-            + " from the currently served catalog"
-        )
+    external_prerequisite(
+        "provider-catalog-live-selection",
+        "this billable Codex election needs an explicit live catalog selection",
+    )
 
     run_id = f"clarify-codex-load-{uuid.uuid4().hex[:12]}"
     markers = [

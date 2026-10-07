@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from ...authoring.contract import DOCUMENT_AUTHORING_ROLES, RESEARCH_ADR_ROLES
+from ...conftest import ExternalPrerequisiteRule
 from ...thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
@@ -416,7 +417,7 @@ agent_id = "coder"
         assert cfg.display_name == "Custom Override"
 
     def test_workspace_override_cannot_follow_a_link_outside_teams(
-        self, tmp_path: Path
+        self, tmp_path: Path, external_prerequisite: ExternalPrerequisiteRule
     ) -> None:
         """An override filename must resolve inside its configured directory."""
         override_dir = tmp_path / ".vaultspec" / "teams"
@@ -428,8 +429,8 @@ agent_id = "coder"
         )
         try:
             (override_dir / "external_config.toml").symlink_to(outside)
-        except OSError:
-            pytest.skip("this host does not permit creating symlinks")
+        except OSError as exc:
+            external_prerequisite.absent("symlinks", str(exc))
         with pytest.raises(TeamConfigNotFoundError):
             load_team_config("external_config", workspace_root=tmp_path)
 

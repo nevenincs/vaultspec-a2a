@@ -48,7 +48,7 @@ from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
     from ...conftest import ExternalPrerequisiteRule
-from .._factory_commands import _classify_acp_command, claude_acp_entry
+from .._factory_commands import _classify_acp_command
 from ..factory import ProviderFactory
 
 _RAG = "vaultspec-rag"
@@ -73,14 +73,6 @@ def chirp() -> str:
 if __name__ == "__main__":
     server.run("stdio")
 '''
-
-
-def _require_acp_entry() -> None:
-    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
-        pytest.skip(
-            "Claude ACP node entry not installed; run 'npm install' "
-            "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"
-        )
 
 
 def _ambient_user_server_names() -> list[str]:
@@ -192,7 +184,7 @@ async def test_strict_session_bounds_the_surface_to_the_injected_set(
     tmp_path: Path,
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
-    _require_acp_entry()
+    external_prerequisite("claude-acp-adapter")
     seeded = _seed_workspace_canary(tmp_path)
     ambient_names = _ambient_user_server_names()
 
@@ -235,7 +227,7 @@ async def test_strict_session_bounds_the_surface_to_the_injected_set(
 async def test_injected_rag_tool_completes_real_work_under_strict(
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
-    _require_acp_entry()
+    external_prerequisite("claude-acp-adapter")
     ambient_names = _ambient_user_server_names()
     project_names = _project_scope_server_names(_REPO_ROOT)
     # The regression premise: the repository's own project scope declares

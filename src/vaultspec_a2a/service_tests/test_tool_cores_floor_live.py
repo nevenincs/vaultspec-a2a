@@ -363,6 +363,7 @@ async def _prepare_named_adr_floor(
     gateway_url: str,
     engine_base_url: str,
     engine_bearer: str,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> _NamedAdrFloorContext:
     """Select the live ADR and prepare its read-evidence harness."""
     target_adr = _pick_named_adr(vault_root)
@@ -383,7 +384,7 @@ async def _prepare_named_adr_floor(
             "prompt; cannot form hallucination-resistant read evidence"
         )
     selection, overrides = await _resolve_selection(
-        case, gateway_url, str(vault_root.parent)
+        case, gateway_url, str(vault_root.parent), external_prerequisite
     )
     harness = AcceptanceHarness(
         case=case,
@@ -457,7 +458,11 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
     context = await _prepare_named_adr_floor(
-        vault_root, gateway_url, engine_base_url, engine_bearer
+        vault_root,
+        gateway_url,
+        engine_base_url,
+        engine_bearer,
+        external_prerequisite,
     )
     cited, matched_tokens, delta = await _run_named_adr_floor(context)
 
@@ -532,13 +537,14 @@ async def _prepare_rag_floor(
     engine_base_url: str,
     engine_bearer: str,
     vault_root: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> _RagFloorContext:
     """Prepare the live harness and workspace for the semantic proof."""
     workspace_root = vault_root.parent
     feature = f"tool-cores-semantic-{int(time.time())}"
     case = _rag_case(feature)
     selection, overrides = await _resolve_selection(
-        case, gateway_url, str(workspace_root)
+        case, gateway_url, str(workspace_root), external_prerequisite
     )
     harness = AcceptanceHarness(
         case=case,
@@ -617,7 +623,11 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
     context = await _prepare_rag_floor(
-        gateway_url, engine_base_url, engine_bearer, vault_root
+        gateway_url,
+        engine_base_url,
+        engine_bearer,
+        vault_root,
+        external_prerequisite,
     )
     rag_invoked, service_down, resolving, delta = await _run_rag_floor(context)
 

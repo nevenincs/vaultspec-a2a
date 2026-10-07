@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -42,6 +43,9 @@ from ...authoring.discovery import HEARTBEAT_STALE_MS
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN
 from ...thread.clarification import MAX_ANSWER_CHARS
 from ...thread.constants import MAX_REQUEST_ID_CHARS
+
+if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
 
 # Where the engine's a2a edge module lives inside the consuming project's tree.
 _EDGE_MODULE = Path("engine/crates/vaultspec-api/src/routes/ops/a2a.rs")
@@ -62,8 +66,8 @@ _CONVENTIONAL_ROOTS = (
 )
 
 
-def _engine_module_source(module: Path) -> str:
-    """Return an engine module's text, or skip naming what is missing."""
+def _engine_module_source(module: Path, rule: ExternalPrerequisiteRule) -> str:
+    """Return an engine module's text, or report the missing dashboard checkout."""
     override = os.environ.get(_ENGINE_SOURCE_ENV)
     roots = [Path(override)] if override else list(_CONVENTIONAL_ROOTS)
     for root in roots:
@@ -71,21 +75,24 @@ def _engine_module_source(module: Path) -> str:
         if candidate.is_file():
             return candidate.read_text(encoding="utf-8")
     searched = ", ".join(str(root / module) for root in roots)
-    pytest.skip(
+    rule.absent(
+        "dashboard-source",
         "engine source not on disk, so the shared bounds cannot be compared; "
         f"set {_ENGINE_SOURCE_ENV} to a dashboard checkout root (searched: "
-        f"{searched})"
+        f"{searched})",
     )
 
 
-def _edge_source() -> str:
-    """Return the engine edge module's text, or skip naming what is missing."""
-    return _engine_module_source(_EDGE_MODULE)
+@pytest.fixture
+def edge_source(external_prerequisite: ExternalPrerequisiteRule) -> str:
+    """The engine edge module's text."""
+    return _engine_module_source(_EDGE_MODULE, external_prerequisite)
 
 
-def _contract_source() -> str:
-    """Return the engine's shared a2a contract module, or skip."""
-    return _engine_module_source(_CONTRACT_MODULE)
+@pytest.fixture
+def contract_source(external_prerequisite: ExternalPrerequisiteRule) -> str:
+    """The engine's shared a2a contract module's text."""
+    return _engine_module_source(_CONTRACT_MODULE, external_prerequisite)
 
 
 def _engine_const(source: str, name: str) -> int:
@@ -101,13 +108,13 @@ def _engine_const(source: str, name: str) -> int:
     return int(match.group(1).replace("_", ""))
 
 
-def test_role_ceiling_is_the_same_number_on_both_sides() -> None:
+def test_role_ceiling_is_the_same_number_on_both_sides(edge_source: str) -> None:
     """Red when either side changes the ceiling the other applies.
 
     The engine's own comment states it applies "the same ceiling" as this side.
     That sentence is the contract; this is the check that it stays true.
     """
-    engine_max = _engine_const(_edge_source(), "MAX_A2A_REQUIRED_ROLES")
+    engine_max = _engine_const(edge_source, "MAX_A2A_REQUIRED_ROLES")
 
     assert engine_max == MAX_ROLES_PER_RUN, (
         f"role ceiling drift: engine MAX_A2A_REQUIRED_ROLES={engine_max}, "
@@ -118,14 +125,16 @@ def test_role_ceiling_is_the_same_number_on_both_sides() -> None:
     )
 
 
-def test_heartbeat_staleness_is_the_same_number_on_both_sides() -> None:
+def test_heartbeat_staleness_is_the_same_number_on_both_sides(
+    edge_source: str,
+) -> None:
     """Red when the two sides disagree on when a discovery record is stale.
 
     A consumer with a shorter threshold treats a live service as crashed and
     refuses to attach; a longer one attaches to a service that has already gone.
     Both are silent, and both look like the other side's fault.
     """
-    engine_stale_ms = _engine_const(_edge_source(), "A2A_HEARTBEAT_STALE_MS")
+    engine_stale_ms = _engine_const(edge_source, "A2A_HEARTBEAT_STALE_MS")
 
     assert engine_stale_ms == HEARTBEAT_STALE_MS, (
         f"heartbeat staleness drift: engine A2A_HEARTBEAT_STALE_MS="
@@ -133,7 +142,9 @@ def test_heartbeat_staleness_is_the_same_number_on_both_sides() -> None:
     )
 
 
-def test_clarification_answer_cap_is_the_same_number_on_both_sides() -> None:
+def test_clarification_answer_cap_is_the_same_number_on_both_sides(
+    contract_source: str,
+) -> None:
     """Red when the engine forwards an answer this side's wire model refuses.
 
     This one is not hypothetical: the engine carried 4096 against this side's
@@ -151,7 +162,7 @@ def test_clarification_answer_cap_is_the_same_number_on_both_sides() -> None:
     this one - can see it.
     """
     engine_answer_chars = _engine_const(
-        _contract_source(), "A2A_MAX_CLARIFICATION_ANSWER_CHARS"
+        contract_source, "A2A_MAX_CLARIFICATION_ANSWER_CHARS"
     )
 
     assert engine_answer_chars == MAX_ANSWER_CHARS, (
@@ -164,7 +175,9 @@ def test_clarification_answer_cap_is_the_same_number_on_both_sides() -> None:
     )
 
 
-def test_clarification_request_id_ceiling_is_not_below_what_a2a_mints() -> None:
+def test_clarification_request_id_ceiling_is_not_below_what_a2a_mints(
+    contract_source: str,
+) -> None:
     """Red when the engine would refuse a request id this side can mint.
 
     Deliberately an inequality, not an equality, because the two sides are not
@@ -182,7 +195,7 @@ def test_clarification_request_id_ceiling_is_not_below_what_a2a_mints() -> None:
     and a future widening on either side stays green.
     """
     engine_request_id_chars = _engine_const(
-        _contract_source(), "A2A_MAX_CLARIFICATION_REQUEST_ID_CHARS"
+        contract_source, "A2A_MAX_CLARIFICATION_REQUEST_ID_CHARS"
     )
 
     assert engine_request_id_chars >= MAX_REQUEST_ID_CHARS, (
@@ -214,7 +227,9 @@ def _engine_str_slice(source: str, name: str) -> tuple[str, ...]:
     return tuple(re.findall(r'"([^"]*)"', match.group(1)))
 
 
-def test_provider_condition_vocabulary_is_the_same_set_on_both_sides() -> None:
+def test_provider_condition_vocabulary_is_the_same_set_on_both_sides(
+    contract_source: str,
+) -> None:
     """Red when either side names a provider condition the other does not.
 
     This gate exists because the coupling is asymmetric and silent in the
@@ -234,7 +249,7 @@ def test_provider_condition_vocabulary_is_the_same_set_on_both_sides() -> None:
     """
     from ...providers.conditions import ProviderCondition
 
-    engine_members = _engine_str_slice(_contract_source(), "A2A_PROVIDER_CONDITIONS")
+    engine_members = _engine_str_slice(contract_source, "A2A_PROVIDER_CONDITIONS")
     a2a_members = tuple(member.value for member in ProviderCondition)
 
     assert engine_members == a2a_members, (

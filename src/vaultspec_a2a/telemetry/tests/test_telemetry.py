@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 
     from starlette.requests import Request
 
+    from ...conftest import ExternalPrerequisiteRule
+
 from .. import (
     TelemetryConfig,
     TelemetryMiddleware,
@@ -743,11 +745,13 @@ def _run_exporter_selection_probe(
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def test_default_selection_builds_both_export_pipelines(tmp_path: Path) -> None:
+def test_default_selection_builds_both_export_pipelines(
+    tmp_path: Path, external_prerequisite: ExternalPrerequisiteRule
+) -> None:
     """Unset means export, so the "none" cases below are not vacuously true."""
     default = _run_exporter_selection_probe(tmp_path, {})
     if not default["otlp_available"]:
-        pytest.skip("the OTLP gRPC exporter is not installed in this environment")
+        external_prerequisite.absent("otlp-grpc-exporter")
 
     assert default["span_processors"] >= 1, default
     assert default["metric_readers"] >= 1, default
@@ -774,13 +778,15 @@ def test_none_selection_builds_no_exporter_at_all(tmp_path: Path) -> None:
     assert off["metrics_exporting"] is False
 
 
-def test_the_two_signals_switch_off_independently(tmp_path: Path) -> None:
+def test_the_two_signals_switch_off_independently(
+    tmp_path: Path, external_prerequisite: ExternalPrerequisiteRule
+) -> None:
     """Silencing metrics must not silence traces, or the switch is too blunt."""
     metrics_off = _run_exporter_selection_probe(
         tmp_path, {"OTEL_METRICS_EXPORTER": "none"}
     )
     if not metrics_off["otlp_available"]:
-        pytest.skip("the OTLP gRPC exporter is not installed in this environment")
+        external_prerequisite.absent("otlp-grpc-exporter")
 
     assert metrics_off["metric_readers"] == 0, metrics_off
     assert metrics_off["span_processors"] >= 1, metrics_off

@@ -225,10 +225,10 @@ async def test_a_real_provider_refusal_reaches_run_status_as_a_typed_condition(
     """
     expected = _declared_expectation()
     if expected is None:
-        pytest.skip(
-            f"{_EXPECT_ENV} is not set, so no lane is armed to refuse work and no "
-            "real provider condition can be observed. This is a truthful skip "
-            "naming the missing prerequisite: the chain is unproven, not proven"
+        external_prerequisite.absent(
+            "provider-refusal-armed",
+            f"{_EXPECT_ENV} is not set, so no real provider condition can be "
+            "observed: the chain is unproven, not proven",
         )
 
     stack = _gateway_only_stack()

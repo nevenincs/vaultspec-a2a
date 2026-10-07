@@ -473,10 +473,9 @@ async def _confirm_codex_serves(client: _CodexAppServerClient, wanted: str) -> s
 
 
 def _require_codex(rule: ExternalPrerequisiteRule) -> None:
-    """Skip unless the Codex CLI is installed AND carries a session credential."""
+    """Require the Codex CLI AND a session credential for it."""
     rule("codex-cli")
-    if not (Path.home() / ".codex" / "auth.json").is_file():
-        rule.absent("codex-cli", "no ~/.codex/auth.json; run 'codex login'")
+    rule("codex-credential")
 
 
 @pytest.fixture(scope="module")
@@ -491,7 +490,9 @@ def published_version(external_prerequisite: ExternalPrerequisiteRule) -> str:
     try:
         return _published_version()
     except (httpx.HTTPError, ValueError, KeyError) as exc:
-        pytest.skip(f"no outbound network to {_SOURCE_HOST} ({exc!r})")
+        external_prerequisite.absent(
+            "outbound-network", f"no outbound network to {_SOURCE_HOST} ({exc!r})"
+        )
 
 
 @pytest.fixture(scope="module")

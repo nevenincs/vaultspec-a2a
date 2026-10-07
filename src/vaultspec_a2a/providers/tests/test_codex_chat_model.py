@@ -48,7 +48,6 @@ from .._subprocess import STDERR_TAIL_LINES, spawn_acp_process
 from ..binary_version import probe_binary_version
 from ..cli_resolution import (
     ProviderRuntimeUnavailableError,
-    resolve_provider_cli_executable,
 )
 from ..codex_chat_model import CodexChatModel
 from ..conditions import ProviderCondition
@@ -61,19 +60,6 @@ if TYPE_CHECKING:
     from ...conftest import ExternalPrerequisiteRule
     from .._acp_types import PermissionCallback
     from .._json_contract import JsonObject
-
-
-def _codex_present() -> bool:
-    """Whether the codex CLI resolves on PATH, asked WHEN ASKED.
-
-    A function rather than a module constant so the PATH scan does not run while
-    the module is merely imported. Import-time I/O is invisible to both purity
-    mechanisms - it is neither a call in a test body nor a fixture in a closure -
-    so as a constant this made every test in the file touch the filesystem on
-    import while the file's own tests claimed to do no I/O at all. Deferring it
-    confines the scan to the three tests that actually depend on it.
-    """
-    return resolve_provider_cli_executable(Provider.CODEX) is not None
 
 
 # A minimal JSON-RPC-over-stdio echo server matching the app-server framing:
@@ -534,19 +520,21 @@ def test_classify_codex_command_shape() -> None:
     assert meta["command_kind"] == "codex_cli"
 
 
-def test_classify_provider_command_resolves_codex() -> None:
+def test_classify_provider_command_resolves_codex(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """When codex is installed, the provider command classifier resolves it."""
-    if not _codex_present():
-        pytest.skip("codex CLI not on PATH")
+    external_prerequisite("codex-cli")
     meta = classify_provider_command(Provider.CODEX)
     assert meta["command_kind"] == "codex_cli"
     assert meta["command_origin"] == "system_path_executable"
 
 
-def test_codex_readiness_ready_when_installed() -> None:
+def test_codex_readiness_ready_when_installed(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """Readiness is command-resolvability only; no secret is emitted."""
-    if not _codex_present():
-        pytest.skip("codex CLI not on PATH")
+    external_prerequisite("codex-cli")
     readiness = probe_provider_readiness(Provider.CODEX)
     assert readiness.ready is True
     assert readiness.reason is None

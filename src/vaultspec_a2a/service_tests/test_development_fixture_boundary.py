@@ -5,19 +5,32 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from typing import TYPE_CHECKING
 
 import pytest
 
 from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
+if TYPE_CHECKING:
+    from ..conftest import ExternalPrerequisiteRule
+
+
+@pytest.fixture
+def docker(external_prerequisite: ExternalPrerequisiteRule) -> str:
+    """The Docker executable, once the rule has confirmed compose answers."""
+    external_prerequisite("docker")
+    return resolve_docker_executable()
+
 
 @pytest.mark.parametrize("ui_port", ["", "26686"])
 @pytest.mark.parametrize("otlp_port", ["", "24317"])
-def test_resolved_integration_jaeger_boundary(ui_port: str, otlp_port: str) -> None:
+def test_resolved_integration_jaeger_boundary(
+    docker: str, ui_port: str, otlp_port: str
+) -> None:
     """Host certification retains loopback ingestion and querying at custom ports."""
     result = subprocess.run(
         [
-            resolve_docker_executable(),
+            docker,
             "compose",
             "--env-file",
             os.devnull,
@@ -50,11 +63,13 @@ def test_resolved_integration_jaeger_boundary(ui_port: str, otlp_port: str) -> N
     "variable", ["JAEGER_UI_PORT", "JAEGER_OTLP_PORT", "VIDAIMOCK_PORT"]
 )
 @pytest.mark.parametrize("value", ["0.0.0.0:26686", "[::]:26686"])
-def test_fixture_rejects_host_address_override(variable: str, value: str) -> None:
+def test_fixture_rejects_host_address_override(
+    docker: str, variable: str, value: str
+) -> None:
     """A port override cannot restore wildcard publication through short syntax."""
     result = subprocess.run(
         [
-            resolve_docker_executable(),
+            docker,
             "compose",
             "--env-file",
             os.devnull,

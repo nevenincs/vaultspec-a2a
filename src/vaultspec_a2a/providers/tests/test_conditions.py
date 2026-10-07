@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
+    from ...conftest import ExternalPrerequisiteRule
     from .._json_contract import JsonObject
 
 # Emits the given frames on stdout and then CLOSES it, which is what tells the
@@ -79,12 +80,37 @@ sys.stdout.close()
 """
 
 
-def _installed_acp_kinds() -> frozenset[str]:
-    """Return every error kind the installed ACP lane can put on the wire."""
+@pytest.fixture
+def installed_acp_kinds(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> frozenset[str]:
+    """Every error kind the installed ACP lane can put on the wire."""
     try:
         return acp_error_kinds() | acp_adapter_error_kinds()
     except MissingInstalledVocabularyError as exc:
-        pytest.skip(str(exc))
+        external_prerequisite.absent("claude-acp-adapter", str(exc))
+
+
+@pytest.fixture
+def installed_acp_categories(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> dict[str, str]:
+    """The remedy category the installed adapter assigns each kind."""
+    try:
+        return acp_adapter_failure_categories()
+    except MissingInstalledVocabularyError as exc:
+        external_prerequisite.absent("claude-acp-adapter", str(exc))
+
+
+@pytest.fixture
+def installed_codex_variants(
+    external_prerequisite: ExternalPrerequisiteRule, tmp_path: Path
+) -> frozenset[str]:
+    """Every error-info variant the installed Codex app-server declares."""
+    try:
+        return codex_error_info_variants(tmp_path / "codex-schema")
+    except MissingInstalledVocabularyError as exc:
+        external_prerequisite.absent("codex-cli", str(exc))
 
 
 async def _drive_codex_frames(
@@ -113,20 +139,13 @@ async def _drive_codex_frames(
 # ---------------------------------------------------------------------------
 
 
-def test_the_acp_mapping_resolves_every_installed_kind_to_a_member() -> None:
+def test_the_acp_mapping_resolves_every_installed_kind_to_a_member(
+    installed_acp_kinds: frozenset[str],
+) -> None:
     """Every installed kind resolves, through the real frame shape, to a member."""
-    installed = _installed_acp_kinds()
-    for kind in sorted(installed):
+    for kind in sorted(installed_acp_kinds):
         frame = {"code": AcpErrorCode.INTERNAL_ERROR, "data": {"errorKind": kind}}
         assert isinstance(condition_from_acp_error(frame), ProviderCondition)
-
-
-def _installed_acp_categories() -> dict[str, str]:
-    """Return the remedy category the installed adapter assigns each kind."""
-    try:
-        return acp_adapter_failure_categories()
-    except MissingInstalledVocabularyError as exc:
-        pytest.skip(str(exc))
 
 
 #: The adapter's own name for "I could not classify this either".
@@ -139,7 +158,9 @@ def _acp_condition(kind: str) -> ProviderCondition:
     return condition_from_acp_error(frame)
 
 
-def test_a_kind_the_adapter_classifies_never_lands_on_our_floor() -> None:
+def test_a_kind_the_adapter_classifies_never_lands_on_our_floor(
+    installed_acp_categories: dict[str, str],
+) -> None:
     """The floor is for kinds nobody classified, not for kinds we never mapped.
 
     The adapter states, in the artefact that runs, which remedy each error kind
@@ -148,10 +169,9 @@ def test_a_kind_the_adapter_classifies_never_lands_on_our_floor() -> None:
     bump does when it adds a member to the kind union and nothing here notices.
     Only the adapter's own unclassified category justifies this project's floor.
     """
-    categories = _installed_acp_categories()
     classified = {
         kind
-        for kind, category in categories.items()
+        for kind, category in installed_acp_categories.items()
         if category != _ADAPTER_UNCLASSIFIED
     }
     assert classified, "the installed adapter classifies no error kind at all"
@@ -164,7 +184,9 @@ def test_a_kind_the_adapter_classifies_never_lands_on_our_floor() -> None:
     )
 
 
-def test_kinds_the_adapter_files_together_resolve_together() -> None:
+def test_kinds_the_adapter_files_together_resolve_together(
+    installed_acp_categories: dict[str, str],
+) -> None:
     """Kinds sharing one remedy in the adapter share one condition here.
 
     The adapter groups its kinds by the action a user has to take. This project's
@@ -173,9 +195,8 @@ def test_kinds_the_adapter_files_together_resolve_together() -> None:
     distinction the wire never made, and it is how a newly added kind drifts away
     from the established member its own group already resolves to.
     """
-    categories = _installed_acp_categories()
     by_category: dict[str, set[ProviderCondition]] = {}
-    for kind, category in categories.items():
+    for kind, category in installed_acp_categories.items():
         by_category.setdefault(category, set()).add(_acp_condition(kind))
     disagreeing = {
         category: sorted(conditions)
@@ -188,7 +209,9 @@ def test_kinds_the_adapter_files_together_resolve_together() -> None:
     )
 
 
-def test_the_acp_rate_limit_kind_never_claims_usage_exhaustion() -> None:
+def test_the_acp_rate_limit_kind_never_claims_usage_exhaustion(
+    installed_acp_kinds: frozenset[str],
+) -> None:
     """The one distinction this lane's wire cannot carry is not asserted.
 
     The CLI assigns its rate-limit kind to both a short-term refusal and an
@@ -196,7 +219,7 @@ def test_the_acp_rate_limit_kind_never_claims_usage_exhaustion() -> None:
     Reporting the finer member here would be a claim the wire never made.
     """
     kind = "rate_limit"
-    assert kind in _installed_acp_kinds(), (
+    assert kind in installed_acp_kinds, (
         "the installed adapter no longer declares a rate-limit kind; the "
         "collapse this test guards may no longer be the right shape"
     )
@@ -262,15 +285,10 @@ def test_the_acp_raise_site_falls_back_to_the_code_and_then_the_floor() -> None:
 
 
 def test_the_codex_mapping_resolves_every_installed_variant_to_a_member(
-    tmp_path: Path,
+    installed_codex_variants: frozenset[str],
 ) -> None:
     """Every installed variant resolves in both of the shapes it can arrive in."""
-    try:
-        installed = codex_error_info_variants(tmp_path / "codex-schema")
-    except MissingInstalledVocabularyError as exc:
-        pytest.skip(str(exc))
-
-    for variant in sorted(installed):
+    for variant in sorted(installed_codex_variants):
         as_string = condition_from_codex_error_info(variant)
         as_object = condition_from_codex_error_info({variant: {}})
         assert isinstance(as_string, ProviderCondition)
@@ -278,19 +296,14 @@ def test_the_codex_mapping_resolves_every_installed_variant_to_a_member(
 
 
 def test_the_codex_usage_and_budget_members_come_from_the_wire(
-    tmp_path: Path,
+    installed_codex_variants: frozenset[str],
 ) -> None:
     """The two members only this lane can emit are emitted for the named variants.
 
     The installed schema is consulted first, so if either variant is renamed
     upstream this fails rather than quietly asserting a member no wire produces.
     """
-    try:
-        installed = codex_error_info_variants(tmp_path / "codex-schema")
-    except MissingInstalledVocabularyError as exc:
-        pytest.skip(str(exc))
-
-    assert {"usageLimitExceeded", "sessionBudgetExceeded"} <= installed
+    assert {"usageLimitExceeded", "sessionBudgetExceeded"} <= installed_codex_variants
     assert (
         condition_from_codex_error_info("usageLimitExceeded")
         is ProviderCondition.USAGE_EXHAUSTED

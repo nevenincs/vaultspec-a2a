@@ -12,16 +12,18 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from ...authoring import AgentTool, CatalogSnapshot
-from ...authoring.discovery import resolve_engine
 from ...thread.actor_tokens import ActorTokenBundle
 from ..authoring_binding import AuthoringBindingProvider
 from ..catalog_store import RunCatalogStore
 from ..token_store import RunTokenStore
+
+if TYPE_CHECKING:
+    from ...authoring.discovery import EngineEndpoint
 
 _ENGINE_URL = "http://127.0.0.1:8767"
 
@@ -227,19 +229,17 @@ class TestAuthoringBindingProvider:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_binding_for_fetches_catalog_once_per_run_live() -> None:
+async def test_binding_for_fetches_catalog_once_per_run_live(
+    live_engine: EngineEndpoint,
+) -> None:
     """Live: binding_for fetches the engine catalog once and caches it per run."""
-    endpoint = resolve_engine()
-    if endpoint is None:
-        pytest.skip(
-            "no reachable authoring engine; set VAULTSPEC_A2A_ENGINE_SERVICE_JSON and "
-            "start `vaultspec serve` per the runbook"
-        )
     run_id = f"binding-live-{uuid.uuid4().hex[:8]}"
     # Mint a real actor token for the run and register it, as the executor does.
     from ...authoring import AuthoringClient, AuthoringResponse, mint_actor_token
 
-    async with AuthoringClient(endpoint.base_url, endpoint.bearer_token) as client:
+    async with AuthoringClient(
+        live_engine.base_url, live_engine.bearer_token
+    ) as client:
         minted = await mint_actor_token(
             client, actor_id=f"agent:{run_id}", kind="agent"
         )
@@ -251,12 +251,12 @@ async def test_binding_for_fetches_catalog_once_per_run_live() -> None:
         run_id,
         ActorTokenBundle(
             tokens={"vaultspec-coder": raw_token},
-            engine_bearer=endpoint.bearer_token,
+            engine_bearer=live_engine.bearer_token,
         ),
     )
     catalog_store = RunCatalogStore()
     provider = AuthoringBindingProvider(
-        engine_base_url=endpoint.base_url,
+        engine_base_url=live_engine.base_url,
         token_store=token_store,
         catalog_store=catalog_store,
     )
@@ -278,7 +278,9 @@ async def test_binding_for_fetches_catalog_once_per_run_live() -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_binding_for_concurrent_fetches_share_one_snapshot_live() -> None:
+async def test_binding_for_concurrent_fetches_share_one_snapshot_live(
+    live_engine: EngineEndpoint,
+) -> None:
     """Live: concurrent binding_for on an empty cache fetches once (per-thread lock).
 
     Without the lock the two workers would each fetch and the second register would
@@ -287,13 +289,12 @@ async def test_binding_for_concurrent_fetches_share_one_snapshot_live() -> None:
     """
     import asyncio as _asyncio
 
-    endpoint = resolve_engine()
-    if endpoint is None:
-        pytest.skip("no reachable authoring engine")
     run_id = f"binding-conc-{uuid.uuid4().hex[:8]}"
     from ...authoring import AuthoringClient, AuthoringResponse, mint_actor_token
 
-    async with AuthoringClient(endpoint.base_url, endpoint.bearer_token) as client:
+    async with AuthoringClient(
+        live_engine.base_url, live_engine.bearer_token
+    ) as client:
         minted = await mint_actor_token(
             client, actor_id=f"agent:{run_id}", kind="agent"
         )
@@ -305,12 +306,12 @@ async def test_binding_for_concurrent_fetches_share_one_snapshot_live() -> None:
         run_id,
         ActorTokenBundle(
             tokens={"vaultspec-coder": raw_token},
-            engine_bearer=endpoint.bearer_token,
+            engine_bearer=live_engine.bearer_token,
         ),
     )
     catalog_store = RunCatalogStore()
     provider = AuthoringBindingProvider(
-        engine_base_url=endpoint.base_url,
+        engine_base_url=live_engine.base_url,
         token_store=token_store,
         catalog_store=catalog_store,
     )

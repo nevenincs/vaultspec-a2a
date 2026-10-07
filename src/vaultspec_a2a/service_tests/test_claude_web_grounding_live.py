@@ -456,6 +456,7 @@ async def _observe_web_grounding_run(
 def _assert_web_grounding_evidence(
     harness: AcceptanceHarness,
     observation: _GroundingObservation,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     # A run that died before the evidence landed proves nothing either way, so the
     # two causes are separated rather than reported as one failure. A provider that
@@ -472,7 +473,8 @@ def _assert_web_grounding_evidence(
         observation.failure_reason or observation.failure_condition
     ):
         if _is_provider_rate_refusal(observation.failure_condition):
-            pytest.skip(
+            external_prerequisite.absent(
+                "provider-capacity",
                 f"the {_PRESET_LIVE!r} lane's provider refused the run for rate "
                 "before the evidence landed (condition "
                 f"{observation.failure_condition!r}): "
@@ -480,8 +482,7 @@ def _assert_web_grounding_evidence(
                 "short-term rate "
                 "limit or an exhausted subscription window caused it - its adapter "
                 "reports both identically - so this names only what the wire "
-                "carried. A truthful skip for an absent external resource, not a "
-                "masked failure; re-run once the provider admits work again"
+                "carried",
             )
         pytest.fail(
             f"run {harness.run_id} went terminal before the retrieval evidence "
@@ -580,11 +581,11 @@ async def test_claude_lane_completes_a_real_web_retrieval(
 
     shas_before = _fetch_live_commit_shas()
     if not shas_before:
-        pytest.skip(
+        external_prerequisite.absent(
+            "outbound-network",
             f"could not resolve live commit SHAs from {_LIVE_SHA_URL} (network "
             "unreachable or rate-limited); the completed-retrieval proof cannot be "
-            "posed without a live token the prompt never carried. This is a truthful "
-            "skip, not a masked failure"
+            "posed without a live token the prompt never carried",
         )
 
     feature = f"tool-cores-web-{int(time.time())}"
@@ -610,6 +611,7 @@ async def test_claude_lane_completes_a_real_web_retrieval(
             failure_reason=failure_reason,
             failure_condition=failure_condition,
         ),
+        external_prerequisite,
     )
 
 

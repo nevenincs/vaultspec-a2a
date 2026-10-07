@@ -1,4 +1,4 @@
-"""Middleware test configuration + shared fixtures for api/tests/.
+"""Shared fixtures for api/tests/.
 
 Centralises engine, session_factory, session, checkpointer, and make_app so
 that all test modules use the same isolated file-backed SQLite setup and
@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
 import httpx
-import pytest
 import pytest_asyncio
 import uvicorn
 from fastapi import FastAPI, Request
@@ -52,7 +50,9 @@ from ..internal import internal_router
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
+    from pathlib import Path
 
+    import pytest
     from starlette.types import ASGIApp, Receive, Scope, Send
 
     from ...providers.provider_catalog_service import ProviderCatalogService
@@ -73,23 +73,6 @@ type JsonValue = (
 # asserting the very structure it would be narrowing. The dict itself stays
 # typed, so the container contract is still stated.
 type DispatchPayload = dict[str, Any]
-
-_PACKAGE_DIR = str(Path(__file__).resolve().parent)
-
-
-# API tests are middleware-layer; they drive the real SQLite/ASGI fixtures below.
-_PURE_FILES: frozenset[str] = frozenset()
-
-
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark tests here as ``middleware`` (plus ``unit`` for the pure-logic files)."""
-    for item in items:
-        if not str(item.path).startswith(_PACKAGE_DIR):
-            continue
-        item.add_marker(pytest.mark.middleware)
-        if item.path.name in _PURE_FILES:
-            item.add_marker(pytest.mark.unit)
-
 
 __all__: list[str] = []
 

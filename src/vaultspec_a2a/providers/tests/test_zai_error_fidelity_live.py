@@ -79,7 +79,7 @@ async def test_zai_rejected_credential_carries_a_typed_error_kind(
     try:
         installed_kinds = acp_error_kinds()
     except MissingInstalledVocabularyError as exc:
-        pytest.skip(str(exc))
+        external_prerequisite.absent("claude-acp-adapter", str(exc))
 
     model = ProviderFactory().create(
         Provider.ZAI, model="zai-test-model", workspace_root=tmp_path

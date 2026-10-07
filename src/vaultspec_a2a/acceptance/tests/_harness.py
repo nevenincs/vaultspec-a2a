@@ -35,8 +35,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
-import pytest
 
+from ...conftest import ExternalPrerequisiteRule
 from ...testing import NoSelectableLaneError, fetch_in_process_selection
 from ...tests.gateway_boot import (
     FIRST_DEMAND_TIMEOUT,
@@ -146,7 +146,7 @@ class CertifiedGateway:
                     cache=True,
                 )
         except NoSelectableLaneError as exc:
-            pytest.skip(f"this certification stack cannot present a selection: {exc}")
+            ExternalPrerequisiteRule().absent("in-process-lanes", str(exc))
 
     def client(self, *, timeout: float = 30.0) -> httpx.Client:
         """A synchronous authenticated client bound to the gateway base URL."""

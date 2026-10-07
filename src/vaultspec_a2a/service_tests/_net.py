@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import os
 import socket
 from urllib.parse import urlparse
 
-__all__ = ["tape_server_listening"]
+__all__ = ["TAPE_SERVER_ENV", "tape_server_base", "tape_server_listening"]
+
+# The scripted backend the mock provider proxies to. The compose service publishes
+# it on this loopback port; an environment that already runs one points at it with
+# the same variable the production provider reads.
+_TAPE_SERVER_DEFAULT = "http://127.0.0.1:8100"
+TAPE_SERVER_ENV = "VAULTSPEC_A2A_MOCK_API_BASE"
+
+
+def tape_server_base() -> str:
+    """The scripted backend's base URL, overridable by the production variable."""
+    return (os.environ.get(TAPE_SERVER_ENV) or "").strip() or _TAPE_SERVER_DEFAULT
 
 
 def tape_server_listening(base: str) -> bool:

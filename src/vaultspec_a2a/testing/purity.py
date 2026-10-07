@@ -53,8 +53,12 @@ IMPURE_FIXTURES: Final = frozenset(
     {
         # Spawns a real Python child and hands over its actual stdio streams.
         "acp_session_context",
+        # Spawns a real echoing Python child and round-trips frames through it.
+        "echo_context",
         # Reads a discovery record from disk and probes a live engine over HTTP.
         "live_engine",
+        # Opens a pool against the live PostgreSQL server.
+        "pooled_postgres_saver",
     }
 )
 

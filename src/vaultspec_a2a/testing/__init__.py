@@ -78,7 +78,7 @@ if TYPE_CHECKING:
         lease_home,
     )
     from .links import plant_link_to_file
-    from .markers import apply_layer_markers
+    from .markers import LayerRule, apply_layer_markers
     from .polling import (
         is_terminal,
         ok_body,
@@ -254,6 +254,7 @@ _LAZY_EXPORTS = {
     "hold_lease": ("vaultspec_a2a.testing.leases", "hold_lease"),
     "lease_home": ("vaultspec_a2a.testing.leases", "lease_home"),
     "plant_link_to_file": ("vaultspec_a2a.testing.links", "plant_link_to_file"),
+    "LayerRule": ("vaultspec_a2a.testing.markers", "LayerRule"),
     "apply_layer_markers": ("vaultspec_a2a.testing.markers", "apply_layer_markers"),
     "is_terminal": ("vaultspec_a2a.testing.polling", "is_terminal"),
     "ok_body": ("vaultspec_a2a.testing.polling", "ok_body"),
@@ -344,6 +345,7 @@ __all__ = [
     "SCRATCH_ROLE",
     "SERVICE_MARKER",
     "SESSION_LEASE_KEY",
+    "LayerRule",
     "Lease",
     "LeaseAcquisitionTimeoutError",
     "LivenessWatch",

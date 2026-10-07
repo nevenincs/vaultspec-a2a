@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+import os
 import shlex
 import signal
 import subprocess
@@ -95,21 +96,57 @@ def resolve_data_seat(raw: str) -> str:
     return str(path)
 
 
+def _split_command_template(template: str) -> list[str]:
+    r"""Split an operator's command string by THIS host's quoting rules.
+
+    The template is written by whoever configured it, in the shell they are
+    sitting in, so the host decides what its characters mean. POSIX mode reads a
+    backslash as an escape, which silently eats the separators of an ordinary
+    Windows path: ``C:\engine\engine.exe`` becomes ``C:engineengine.exe``, a path
+    that does not exist, and the launch fails as a missing binary with nothing
+    naming the cause.
+
+    Windows therefore splits in non-POSIX mode, which keeps backslashes literal.
+    That mode retains the quote characters inside the token it produced, so a
+    matching surrounding pair is removed here: quotes are the shell's way of
+    joining a path that contains spaces into one word, never part of the path, and
+    a binary name carrying them is as unopenable as one missing its separators.
+    """
+    if os.name != "nt":
+        return shlex.split(template)
+    return [_unquoted(token) for token in shlex.split(template, posix=False)]
+
+
+def _unquoted(token: str) -> str:
+    """Strip one matching pair of surrounding quotes from a non-POSIX token."""
+    for quote in ('"', "'"):
+        if len(token) >= 2 and token.startswith(quote) and token.endswith(quote):
+            return token[1:-1]
+    return token
+
+
 def engine_command(port: int, workspace: str) -> list[str]:
     """The engine launch command with ``{port}``/``{workspace}`` substituted.
 
-    Shell-splits the configured ``engine_serve_cmd`` template, then delegates token
-    substitution to the lifecycle's :func:`render_command` (the single substitution
-    implementation - no parallel copy). Threading ``{workspace}`` lets a template
-    seat the data store explicitly (``--scope {workspace}`` /
-    ``--data-dir {workspace}/engine-data``) instead of relying on cwd alone; the
-    ``{python}`` token render_command also resolves is simply absent from engine
-    templates.
+    Splits the configured ``engine_serve_cmd`` template by the host's own quoting
+    rules (:func:`_split_command_template`), then delegates token substitution to
+    the lifecycle's :func:`render_command` (the single substitution implementation
+    - no parallel copy). Substituting AFTER the split is what lets a workspace
+    path containing spaces stay one argument: the operator cannot usefully quote a
+    placeholder, so rendering the whole template first would tear the seat they
+    supplied into separate arguments.
+
+    Threading ``{workspace}`` lets a template seat the data store explicitly
+    (``--scope {workspace}`` / ``--data-dir {workspace}/engine-data``) instead of
+    relying on cwd alone; the ``{python}`` token render_command also resolves is
+    simply absent from engine templates.
     """
     from ..control.config import settings
 
     template = settings.engine_serve_cmd or _DEFAULT_SERVE_CMD
-    return render_command(shlex.split(template), port=port, workspace=workspace)
+    return render_command(
+        _split_command_template(template), port=port, workspace=workspace
+    )
 
 
 def _heartbeat(record: ProcRecord | None, stop: threading.Event) -> None:

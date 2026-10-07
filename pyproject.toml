@@ -48,7 +48,6 @@ dependencies = [
   # than copied, so the runtime refuses exactly what the framework refuses. No
   # upper bound: the framework moves and this service moves with it.
   "vaultspec-core>=0.3.2",
-  "websockets>=16.0",
   "alembic>=1.15.1",
   "click>=8.1",
   "langsmith>=0.14.2",
@@ -163,7 +162,6 @@ tooling = [
   # without these its calls type as Unknown.
   "types-jsonschema>=4.26",
   "ty>=0.0.15",
-  "websockets>=16.0",
   "zstandard>=0.25.0",
 ]
 # The frozen-binary build closure: PyInstaller. vaultspec-core, which the binary
@@ -416,8 +414,6 @@ known_first_party = ["vaultspec_a2a"]
     # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
     # "sqlite+aiosqlite://..." — never imported directly.
     "aiosqlite",
-    # Uvicorn loads websockets as its protocol backend.
-    "websockets",
     # The server profile loads PostgreSQL drivers through SQLAlchemy URLs.
     "asyncpg",
     "psycopg",

@@ -1,6 +1,6 @@
 """Tests for src/vaultspec_a2a/api/internal.py -- internal IPC router endpoints.
 
-Validates the /internal/health, /internal/events, and /internal/heartbeat
+Validates the /internal/health, /internal/events/batch, and /internal/heartbeat
 HTTP endpoints using a real FastAPI test client with httpx.ASGITransport.
 
 Uses a real EventAggregator as the relay target (no fakes or mocks).
@@ -195,6 +195,11 @@ def _make_test_app(
     return app
 
 
+def _batch_of(thread_id: str, payload: dict[str, object]) -> dict[str, object]:
+    """Wrap one worker event in the body the batch ingress route accepts."""
+    return {"events": [{"thread_id": thread_id, "payload": payload}]}
+
+
 # ---------------------------------------------------------------------------
 # /internal/health
 # ---------------------------------------------------------------------------
@@ -252,15 +257,18 @@ async def test_dispatch_application_receipt_is_not_broadcast_to_progress(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.post(
-            "/internal/events",
+            "/internal/events/batch",
             json={
-                "type": "event",
-                "thread_id": "receipt-thread",
-                "payload": {
-                    "type": "dispatch_applied",
-                    "dispatch_id": "private-stable-id",
-                    "action": "ingest",
-                },
+                "events": [
+                    {
+                        "thread_id": "receipt-thread",
+                        "payload": {
+                            "type": "dispatch_applied",
+                            "dispatch_id": "private-stable-id",
+                            "action": "ingest",
+                        },
+                    }
+                ]
             },
         )
 
@@ -375,14 +383,14 @@ class TestInternalHeartbeat:
 
 
 # ---------------------------------------------------------------------------
-# /internal/events
+# /internal/events/batch
 # ---------------------------------------------------------------------------
 
 
 class TestInternalEvents:
-    """Verify the /internal/events endpoint.
+    """Verify the /internal/events/batch endpoint.
 
-    When the relay target is present, the endpoint accepts the event. When it is
+    When the relay target is present, the endpoint accepts the batch. When it is
     absent, it returns 503 so the worker can detect the unready gateway and retry
     or backoff.
     """
@@ -394,76 +402,11 @@ class TestInternalEvents:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                },
+                "/internal/events/batch",
+                json=_batch_of("t-42", {"event_type": "chunk", "data": "hello"}),
             )
             assert resp.status_code == 200
             assert resp.json() == {"status": "ok"}
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_event_with_aggregator_only_returns_ok(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """The HTTP path should accept events when the aggregator is available."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                },
-            )
-            assert resp.status_code == 200
-            assert resp.json() == {"status": "ok"}
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_event_without_relay_target_returns_503(self) -> None:
-        """With no relay target seated, /internal/events returns 503.
-
-        The guard survives the collapse to a single relay: a gateway whose
-        aggregator is not yet seated must tell the worker to back off rather
-        than accept an event it will silently drop.
-        """
-        app = _make_test_app()
-        assert app.state.aggregator is None
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                },
-            )
-            assert resp.status_code == 503
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_missing_thread_id_is_malformed(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A malformed event without thread_id is rejected."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "payload": {"data": "hello"},
-                },
-            )
-            assert resp.status_code == 422
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_execution_state_projection_persists_without_broadcasting(
@@ -487,11 +430,10 @@ class TestInternalEvents:
             base_url="http://test",
         ) as client:
             resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-84",
-                    "payload": {
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-84",
+                    {
                         "type": "execution_state_projection",
                         "checkpoint_id": "cp-1",
                         "parent_checkpoint_id": "cp-0",
@@ -515,7 +457,7 @@ class TestInternalEvents:
                         ],
                         "degraded_reasons": [],
                     },
-                },
+                ),
             )
 
         assert resp.status_code == 200
@@ -557,16 +499,15 @@ class TestInternalEvents:
             base_url="http://test",
         ) as client:
             response = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-invalid-projection-clock",
-                    "payload": {
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-invalid-projection-clock",
+                    {
                         "type": "execution_state_projection",
                         "checkpoint_id": "cp-invalid-clock",
                         "snapshot_created_at": "not-an-rfc3339-timestamp",
                     },
-                },
+                ),
             )
 
         assert response.status_code == 200
@@ -612,11 +553,10 @@ class TestInternalEvents:
             base_url="http://test",
         ) as client:
             relay = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": thread_id,
-                    "payload": {
+                "/internal/events/batch",
+                json=_batch_of(
+                    thread_id,
+                    {
                         "type": "plan_approval_request",
                         "request_id": request_id,
                         "description": "Approve plan before execution",
@@ -633,7 +573,7 @@ class TestInternalEvents:
                             },
                         ],
                     },
-                },
+                ),
             )
 
         assert relay.status_code == 200
@@ -683,11 +623,10 @@ class TestInternalEvents:
             base_url="http://test",
         ) as client:
             good = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-84-degraded",
-                    "payload": {
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-84-degraded",
+                    {
                         "type": "execution_state_projection",
                         "checkpoint_id": "cp-good",
                         "parent_checkpoint_id": "cp-parent",
@@ -711,18 +650,17 @@ class TestInternalEvents:
                         ],
                         "degraded_reasons": [],
                     },
-                },
+                ),
             )
             degraded = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-84-degraded",
-                    "payload": {
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-84-degraded",
+                    {
                         "type": "execution_state_projection",
                         "degraded_reasons": ["execution_state_projection_unavailable"],
                     },
-                },
+                ),
             )
 
         assert good.status_code == 200
@@ -740,59 +678,32 @@ class TestInternalEvents:
         )
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_missing_payload_is_malformed(self) -> None:
-        """A malformed event without payload is rejected."""
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            pytest.param({"payload": {"event_type": "chunk"}}, id="missing-thread-id"),
+            pytest.param({"thread_id": "t-2"}, id="missing-payload"),
+            pytest.param(
+                {"thread_id": "", "payload": {"event_type": "chunk"}},
+                id="empty-thread-id",
+            ),
+            pytest.param({"thread_id": "t-2", "payload": {}}, id="empty-payload"),
+            pytest.param(
+                {"thread_id": "t" * 129, "payload": {"event_type": "chunk"}},
+                id="over-long-thread-id",
+            ),
+            pytest.param(
+                {"thread_id": "t-2", "payload": {"event_type": "chunk"}, "ts": "late"},
+                id="non-numeric-ts",
+            ),
+        ],
+    )
+    async def test_batch_with_malformed_event_is_rejected_before_any_relay(
+        self, entry: dict[str, object]
+    ) -> None:
+        """One malformed entry fails the whole batch before any entry relays."""
         app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                },
-            )
-            assert resp.status_code == 422
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_empty_thread_id_is_treated_as_malformed(self) -> None:
-        """An empty string thread_id is treated as missing (falsy)."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "",
-                    "payload": {"data": "hello"},
-                },
-            )
-            assert resp.status_code == 422
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_empty_payload_is_treated_as_malformed(self) -> None:
-        """An empty dict payload is treated as missing (falsy)."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {},
-                },
-            )
-            assert resp.status_code == 422
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_batch_with_malformed_event_is_rejected(self) -> None:
-        """Malformed entries in /internal/events/batch fail the whole batch."""
-        app = _make_test_app(with_aggregator=True)
+        aggregator = app.state.aggregator
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -801,11 +712,22 @@ class TestInternalEvents:
                 json={
                     "events": [
                         {"thread_id": "t-1", "payload": {"event_type": "chunk"}},
-                        {"thread_id": "", "payload": {"event_type": "chunk"}},
+                        entry,
                     ]
                 },
             )
-            assert resp.status_code == 422
+        assert resp.status_code == 422
+        assert aggregator.sequence_count() == 0
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_batch_without_events_is_rejected(self) -> None:
+        """A body that is not a batch is refused rather than read as empty."""
+        app = _make_test_app(with_aggregator=True)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post("/internal/events/batch", json={})
+        assert resp.status_code == 422
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_with_aggregator_only_returns_ok(self) -> None:
@@ -846,110 +768,6 @@ class TestInternalEvents:
                 },
             )
             assert resp.status_code == 503
-
-
-class TestInternalWebSocketLogging:
-    """Verify structured logging on the internal worker WebSocket path."""
-
-    def test_malformed_event_log_includes_runtime_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Malformed event envelopes should log bounded WS metadata."""
-        app = _make_test_app()
-
-        with (
-            caplog.at_level(logging.WARNING, logger="vaultspec_a2a.api.internal"),
-            TestClient(app) as client,
-            client.websocket_connect("/internal/ws") as ws,
-        ):
-            ws.send_json({"type": "event", "thread_id": "", "payload": {}})
-
-        record = next(
-            rec
-            for rec in caplog.records
-            if "Malformed worker event envelope" in rec.message
-        )
-        assert record.__dict__["thread_id"] == ""
-        assert record.__dict__["event_type"] == ""
-        assert record.__dict__["message_type"] == "event"
-        assert record.__dict__["transport"] == "ws"
-        assert record.__dict__["frame_size"] > 0
-
-    def test_missing_relay_target_log_includes_runtime_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Dropped relay events should log thread and event correlation fields."""
-        app = _make_test_app()
-
-        with (
-            caplog.at_level(logging.WARNING, logger="vaultspec_a2a.api.internal"),
-            TestClient(app) as client,
-            client.websocket_connect("/internal/ws") as ws,
-        ):
-            ws.send_json(
-                {
-                    "type": "event",
-                    "thread_id": "t-drop",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                }
-            )
-
-        record = next(
-            rec
-            for rec in caplog.records
-            if "No relay target available -- dropping event" in rec.message
-        )
-        assert record.__dict__["thread_id"] == "t-drop"
-        assert record.__dict__["event_type"] == "chunk"
-        assert record.__dict__["transport"] == "ws"
-        assert record.__dict__["action"] == "relay_drop_event"
-
-    def test_ws_heartbeat_log_includes_runtime_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Internal WS heartbeat logs should carry count and transport metadata."""
-        app = _make_test_app()
-
-        with (
-            caplog.at_level(logging.DEBUG, logger="vaultspec_a2a.api.internal"),
-            TestClient(app) as client,
-            client.websocket_connect("/internal/ws") as ws,
-        ):
-            ws.send_json(
-                {
-                    "type": "heartbeat",
-                    "active_threads": ["t-1", "t-2"],
-                }
-            )
-
-        record = next(
-            rec for rec in caplog.records if "Worker heartbeat:" in rec.message
-        )
-        assert record.__dict__["message_type"] == "heartbeat"
-        assert record.__dict__["active_thread_count"] == 2
-        assert record.__dict__["transport"] == "ws"
-
-    def test_unknown_ws_message_log_includes_runtime_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Unknown WS message types should log bounded frame metadata."""
-        app = _make_test_app()
-
-        with (
-            caplog.at_level(logging.WARNING, logger="vaultspec_a2a.api.internal"),
-            TestClient(app) as client,
-            client.websocket_connect("/internal/ws") as ws,
-        ):
-            ws.send_json({"type": "mystery", "payload": {"ignored": True}})
-
-        record = next(
-            rec
-            for rec in caplog.records
-            if "Unknown internal WS message type" in rec.message
-        )
-        assert record.__dict__["message_type"] == "mystery"
-        assert record.__dict__["transport"] == "ws"
-        assert record.__dict__["frame_size"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -1412,16 +1230,16 @@ class TestConditionSurvivesAReload:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             relayed = await client.post(
-                "/internal/events",
-                json={
-                    "thread_id": "t-reload-condition",
-                    "payload": _failed_payload(
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-reload-condition",
+                    _failed_payload(
                         receipt,
                         "Graph event stream failed unexpectedly: "
                         "AcpPromptError: credit balance too low",
                         ProviderCondition.CREDITS_EXHAUSTED,
                     ),
-                },
+                ),
             )
             assert relayed.status_code == 200
 

@@ -1,8 +1,6 @@
 """Worker-to-control-surface IPC bridge.
 
-Uses HTTP POST to push events and heartbeats to the gateway.
-Avoids introducing a WebSocket client dependency by using httpx
-(already in the project's dependency set).
+Uses HTTP POST, through httpx, to push events and heartbeats to the gateway.
 
 Events are batched for up to ``ipc_flush_interval_seconds`` seconds before being
 sent as a single HTTP POST to ``/internal/events/batch``.
@@ -11,11 +9,10 @@ sent as a single HTTP POST to ``/internal/events/batch``.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import anyio
 import httpx
@@ -24,12 +21,10 @@ from fastapi.encoders import jsonable_encoder
 from ..control.config import settings
 from ..domain_config import domain_config
 from ..graph.enums import ServerEventType
+from ..ipc.schemas import WorkerEventBatch, WorkerEventEnvelope
 from ..streaming.fanout import PROTECTED_WIRE_TYPES
 from ..telemetry import inject_trace_context
 from ..thread.snapshots import wire_event_type
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 __all__ = ["WorkerBridge", "event_client_timeout"]
 
@@ -67,7 +62,7 @@ class _BatchState:
     flush cannot schedule a redrive onto a client about to close under it.
     """
 
-    events: list[dict[str, Any]] = field(default_factory=list)
+    events: list[WorkerEventEnvelope] = field(default_factory=list)
     flush_task: asyncio.Task[None] | None = None
     flush_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     closing: bool = False
@@ -90,18 +85,17 @@ def event_client_timeout() -> httpx.Timeout:
     )
 
 
-def _entry_event_type(entry: dict[str, Any]) -> str:
+def _entry_event_type(entry: WorkerEventEnvelope) -> str:
     """Return the wire event type of one buffered entry, or an empty string."""
-    payload: Mapping[str, Any] | None = entry.get("payload")
-    return wire_event_type(payload) if isinstance(payload, dict) else ""
+    return wire_event_type(entry.payload)
 
 
-def _is_protected_entry(entry: dict[str, Any]) -> bool:
+def _is_protected_entry(entry: WorkerEventEnvelope) -> bool:
     """Report whether an entry states an outcome that nothing later restates."""
     return _entry_event_type(entry) in PROTECTED_WIRE_TYPES
 
 
-def _encoded_batch(batch: list[dict[str, Any]]) -> bytes:
+def _encoded_batch(batch: list[WorkerEventEnvelope]) -> bytes:
     """Serialize one batch into exactly the bytes that will be posted.
 
     The body is built here rather than handed to the HTTP client as an object,
@@ -109,12 +103,12 @@ def _encoded_batch(batch: list[dict[str, Any]]) -> bytes:
     checks are the same number. Measuring one serialization and sending another
     is how a batch sized to fit still arrives over the limit.
     """
-    return json.dumps({"events": batch}, separators=(",", ":")).encode("utf-8")
+    return WorkerEventBatch(events=batch).model_dump_json().encode("utf-8")
 
 
 def _split_into_deliverable_batches(
-    events: list[dict[str, Any]], *, limit: int
-) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    events: list[WorkerEventEnvelope], *, limit: int
+) -> tuple[list[list[WorkerEventEnvelope]], list[WorkerEventEnvelope]]:
     """Split *events* into batches under *limit* bytes, separating the impossible.
 
     Returns the deliverable batches in order, then the individual events that
@@ -124,9 +118,9 @@ def _split_into_deliverable_batches(
     An event too large alone is the one case retrying cannot fix, so it is
     separated rather than made to block everything behind it.
     """
-    batches: list[list[dict[str, Any]]] = []
-    oversized: list[dict[str, Any]] = []
-    current: list[dict[str, Any]] = []
+    batches: list[list[WorkerEventEnvelope]] = []
+    oversized: list[WorkerEventEnvelope] = []
+    current: list[WorkerEventEnvelope] = []
     size = _BATCH_ENVELOPE_BYTES
     for event in events:
         # One comma per event after the first.
@@ -190,7 +184,7 @@ class WorkerBridge:
         self._consecutive_hb_failures: int = 0
 
     @property
-    def _event_buffer(self) -> list[dict[str, Any]]:
+    def _event_buffer(self) -> list[WorkerEventEnvelope]:
         return self._batch.events
 
     @property
@@ -312,11 +306,11 @@ class WorkerBridge:
             self._evict_one_buffered_event(thread_id)
 
         self._batch.events.append(
-            {
-                "thread_id": thread_id,
-                "payload": jsonable_encoder(payload),
-                "ts": time.monotonic(),
-            }
+            WorkerEventEnvelope(
+                thread_id=thread_id,
+                payload=jsonable_encoder(payload),
+                ts=time.monotonic(),
+            )
         )
         self._schedule_flush(settings.ipc_flush_interval_seconds)
 
@@ -346,7 +340,7 @@ class WorkerBridge:
             },
         )
 
-    def _pop_evictable_event(self) -> dict[str, Any]:
+    def _pop_evictable_event(self) -> WorkerEventEnvelope:
         """Remove and return the oldest buffered event that is not an outcome.
 
         The oldest outcome goes only when every buffered event is one, so the
@@ -386,7 +380,7 @@ class WorkerBridge:
 
     async def _post_event_batch(
         self,
-        batch: list[dict[str, Any]],
+        batch: list[WorkerEventEnvelope],
         *,
         attempt: int,
         request_timeout: httpx.Timeout | float | None,
@@ -434,7 +428,11 @@ class WorkerBridge:
         return False
 
     async def _send_batch_once(
-        self, batch: list[dict[str, Any]], *, attempt: int, remaining: float | None
+        self,
+        batch: list[WorkerEventEnvelope],
+        *,
+        attempt: int,
+        remaining: float | None,
     ) -> bool:
         request_timeout: httpx.Timeout | float | None = (
             self._client.timeout if remaining is None else remaining
@@ -448,7 +446,11 @@ class WorkerBridge:
             raise
 
     async def _wait_for_flush_retry(
-        self, batch: list[dict[str, Any]], *, attempt: int, deadline: float | None
+        self,
+        batch: list[WorkerEventEnvelope],
+        *,
+        attempt: int,
+        deadline: float | None,
     ) -> bool:
         delay = settings.ipc_retry_backoff_base_seconds * (2**attempt)
         remaining = self._remaining(deadline)
@@ -506,7 +508,7 @@ class WorkerBridge:
         return delivered and not oversized
 
     async def _deliver_batch(
-        self, batch: list[dict[str, Any]], *, deadline: float | None
+        self, batch: list[WorkerEventEnvelope], *, deadline: float | None
     ) -> bool:
         """Post one size-bounded batch, retrying with backoff inside the deadline."""
         for attempt in range(settings.ipc_max_flush_retries):
@@ -525,7 +527,9 @@ class WorkerBridge:
                 return False
         return False
 
-    def _report_undeliverable_events(self, oversized: list[dict[str, Any]]) -> None:
+    def _report_undeliverable_events(
+        self, oversized: list[WorkerEventEnvelope]
+    ) -> None:
         """Record events no batch can carry, rather than retrying them forever.
 
         An event larger than the whole batch limit cannot be delivered by any
@@ -538,7 +542,7 @@ class WorkerBridge:
                 "Event exceeds the gateway's batch limit and cannot be relayed",
                 extra={
                     "worker_id": self._worker_id,
-                    "thread_id": event.get("thread_id"),
+                    "thread_id": event.thread_id,
                     "action": "flush_events_undeliverable",
                     "dropped_event_type": _entry_event_type(event),
                     "dropped_outcome_event": _is_protected_entry(event),
@@ -547,7 +551,7 @@ class WorkerBridge:
                 },
             )
 
-    def _requeue_failed_batch(self, batch: list[dict[str, Any]]) -> None:
+    def _requeue_failed_batch(self, batch: list[WorkerEventEnvelope]) -> None:
         """Report exhausted delivery and preserve the buffered events that fit."""
         logger.error(
             "Event flush to gateway FAILED after %d attempts"

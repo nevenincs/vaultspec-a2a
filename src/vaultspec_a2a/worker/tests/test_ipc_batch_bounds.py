@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -22,6 +22,7 @@ from httpx import ASGITransport
 
 from ...api.internal import internal_router
 from ...control.config import settings
+from ...ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
 from ...streaming.aggregator import EventAggregator
 from ...testing.environment import settings_override
 from ..ipc import WorkerBridge
@@ -35,12 +36,14 @@ _SMALL_BODY_LIMIT = 4096
 def _gateway_app() -> FastAPI:
     """Mount the production internal relay route on a real application.
 
-    The route itself is the gateway's own, so the batch limit it enforces is the
-    shipped one. It is given a real event aggregator and told explicitly that it
-    has no database, which is the declared shape for a host that relays progress
-    without persisting it - and progress is all these events are.
+    The route and the body-limit middleware in front of it are the gateway's own,
+    so the batch limit enforced is the shipped one. It is given a real event
+    aggregator and told explicitly that it has no database, which is the declared
+    shape for a host that relays progress without persisting it - and progress is
+    all these events are.
     """
     app = FastAPI()
+    app.add_middleware(cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit)
     app.include_router(internal_router)
     app.state.aggregator = EventAggregator()
     app.state.db_session_factory = None
@@ -213,7 +216,7 @@ async def test_a_full_buffer_gives_up_progress_before_an_outcome() -> None:
                 await bridge.send_event("run-bounds", _progress(index, size=32))
 
             buffered = [
-                entry["payload"].get("event_type") for entry in bridge._event_buffer
+                entry.payload.get("event_type") for entry in bridge._event_buffer
             ]
             assert "thread_terminal" in buffered, buffered
             assert await bridge.flush_events() is True
@@ -279,7 +282,7 @@ async def test_a_refused_batch_keeps_its_outcome_when_the_buffer_refilled(
                 assert await flush is False
 
             buffered = [
-                entry["payload"].get("event_type") for entry in bridge._event_buffer
+                entry.payload.get("event_type") for entry in bridge._event_buffer
             ]
         finally:
             await bridge.close()

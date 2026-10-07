@@ -2918,30 +2918,34 @@ class TestDeleteThread:
             request_id = f"{thread_id}:req-plan-relay"
 
             relay = client.post(
-                "/internal/events",
+                "/internal/events/batch",
                 json={
-                    "thread_id": thread_id,
-                    "payload": {
-                        "type": "plan_approval_request",
-                        "request_id": request_id,
-                        "description": "Approve plan for feature 'audit-5'",
-                        "options": [
-                            {
-                                "option_id": "approve",
-                                "name": "Approve plan",
-                                "kind": "allow_once",
+                    "events": [
+                        {
+                            "thread_id": thread_id,
+                            "payload": {
+                                "type": "plan_approval_request",
+                                "request_id": request_id,
+                                "description": "Approve plan for feature 'audit-5'",
+                                "options": [
+                                    {
+                                        "option_id": "approve",
+                                        "name": "Approve plan",
+                                        "kind": "allow_once",
+                                    },
+                                    {
+                                        "option_id": "reject",
+                                        "name": "Reject plan",
+                                        "kind": "reject_once",
+                                    },
+                                ],
+                                "tool_call": "plan_approval",
+                                "feature": "audit-5",
+                                "plan_paths": [".vault/plan/audit-5.md"],
+                                "exec_worker": "vaultspec-coder",
                             },
-                            {
-                                "option_id": "reject",
-                                "name": "Reject plan",
-                                "kind": "reject_once",
-                            },
-                        ],
-                        "tool_call": "plan_approval",
-                        "feature": "audit-5",
-                        "plan_paths": [".vault/plan/audit-5.md"],
-                        "exec_worker": "vaultspec-coder",
-                    },
+                        }
+                    ]
                 },
             )
             assert relay.status_code == 200

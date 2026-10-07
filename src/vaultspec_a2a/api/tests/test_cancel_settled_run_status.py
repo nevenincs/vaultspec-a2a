@@ -3,7 +3,7 @@
 Real gateway app on a real socket, real SQLite database and checkpointer, real
 in-process dispatch receiver, and - the part that makes this a proof rather than a
 rehearsal - the run is driven to its terminal state by relaying a real worker
-terminal event over the real ``/internal/events`` relay. Nothing here hand-writes
+terminal event over the real ``/internal/events/batch`` relay. Nothing here hand-writes
 a status into the database, so the state the cancel is refused against is the
 state production actually produces.
 
@@ -78,7 +78,6 @@ async def _run_body(client: httpx.AsyncClient) -> dict[str, object]:
 def _terminal_envelope(run_id: str, status: str) -> dict[str, object]:
     """The worker-IPC envelope carrying one run's terminal event."""
     return {
-        "type": "event",
         "thread_id": run_id,
         "payload": {
             "type": "thread_terminal",
@@ -157,7 +156,7 @@ async def _settle(
             dispatch_id=str(worker.dispatches[-1]["dispatch_id"]),
             outcome="no_active_work",
         ).model_dump(mode="json")
-    resp = await client.post("/internal/events", json=envelope)
+    resp = await client.post("/internal/events/batch", json={"events": [envelope]})
     assert resp.status_code == 200, resp.text
     snapshot = await client.get(f"/v1/runs/{run_id}")
     assert snapshot.status_code == 200, snapshot.text
@@ -255,7 +254,8 @@ async def test_accepted_cancel_rejects_late_completion_and_settles_exact_receipt
         assert cancel.json()["accepted"] is True
         await _complete_checkpoint(checkpointer, graph_receipt)
         completion = await client.post(
-            "/internal/events", json=_terminal_envelope(run_id, "completed")
+            "/internal/events/batch",
+            json={"events": [_terminal_envelope(run_id, "completed")]},
         )
         assert completion.status_code == 200, completion.text
         snapshot = await client.get(f"/v1/runs/{run_id}")

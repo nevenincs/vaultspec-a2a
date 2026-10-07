@@ -80,7 +80,6 @@ async def _run_body(
 def _terminal_envelope(run_id: str, status: str = "completed") -> dict[str, Any]:
     """The worker-IPC envelope carrying one run's terminal event."""
     return {
-        "type": "event",
         "thread_id": run_id,
         "payload": {
             "type": "thread_terminal",
@@ -155,7 +154,7 @@ async def _relay_terminal(
             dispatch_id=str(dispatch["dispatch_id"]),
             outcome="no_active_work",
         ).model_dump(mode="json")
-    resp = await client.post("/internal/events", json=envelope)
+    resp = await client.post("/internal/events/batch", json={"events": [envelope]})
     assert resp.status_code == 200, resp.text
 
 
@@ -309,7 +308,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
 
     The whole seam, live: a real gateway on a real socket starts and dispatches a
     run through the real run-start verb, then the worker's terminal event arrives
-    over the real ``/internal/events`` relay endpoint and travels the production
+    over the real ``/internal/events/batch`` relay endpoint and travels the production
     path (endpoint -> ``_relay_single_event`` -> ``relay_event`` ->
     ``_handle_terminal_event``). Real SQLite for the durable status write, real
     in-process dispatch receiver, no mock or monkeypatch anywhere.

@@ -3,20 +3,20 @@
 Two properties are held here, and they are the same property seen from the two
 sides of the gateway-worker boundary.
 
-The first is convergence: every transport that observes worker contact - the
-internal WebSocket accept, a WebSocket heartbeat frame, the HTTP heartbeat
-route, and the post-dispatch acknowledgement - lands on ONE record, and every
-reader that interprets it - the health projection, the watchdog's staleness
-check, and the team-status thread list - reads that same record. The tests drive
-the real routers over real transports rather than assigning the fields, because
-an assignment would pass just as well against wiring that no longer exists.
+The first is convergence: every writer that observes worker contact - the HTTP
+heartbeat route and the post-dispatch acknowledgement - lands on ONE record, and
+every reader that interprets it - the health projection, the watchdog's
+staleness check, and the team-status thread list - reads that same record. The
+tests drive the real routers over real transports rather than assigning the
+fields, because an assignment would pass just as well against wiring that no
+longer exists.
 
-The second is that the heartbeat's wire kind is named once. The dispatch arm
-that accepts a heartbeat frame is bound to the declared enum member, so a
-respelling moves the producer and the consumer together. A dispatch matching a
-hand-copied literal would keep matching the old spelling while the producer
-followed the declaration, and heartbeats would fall through to the unknown-type
-branch - starving exactly the liveness signal the first property protects.
+The second is that the heartbeat's wire kind is named once. The progress catalog
+and the shared frame reader are keyed by the declared enum member, so a
+respelling moves the producer and every consumer together. A consumer matching
+a hand-copied literal would keep matching the old spelling while the producer
+followed the declaration, starving exactly the liveness signal the first
+property protects.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from starlette.testclient import TestClient
 
 from ...api.internal import internal_router
 from ...control._worker_health import WorkerLiveness, WorkerState, worker_liveness
@@ -118,40 +117,12 @@ async def test_real_worker_bridge_heartbeat_crosses_to_the_gateway_record() -> N
     assert record.is_fresh()
 
 
-def test_websocket_accept_and_heartbeat_land_on_the_same_record() -> None:
-    """Two writers on one transport, one record - not one record each."""
-    app = _gateway_app()
-    with TestClient(app) as client, client.websocket_connect("/internal/ws") as ws:
-        # The accept itself is contact, and claims no thread set.
-        at_accept = app.state.worker_liveness
-        assert at_accept.is_fresh()
-        assert at_accept.active_threads == []
-
-        ws.send_text(
-            json.dumps(
-                {
-                    "type": ServerEventType.HEARTBEAT.value,
-                    "active_threads": ["t-ws"],
-                }
-            )
-        )
-        # Round-trip an unknown frame to serialise against the handler's own
-        # receive loop: once it has answered this, the heartbeat before it has
-        # certainly been processed.
-        ws.send_text(json.dumps({"type": "not-a-known-kind"}))
-        ws.send_text(json.dumps({"type": "not-a-known-kind"}))
-
-    after = app.state.worker_liveness
-    assert after is at_accept, "the heartbeat arm seated a second record"
-    assert after.active_threads == ["t-ws"]
-
-
 def test_omitting_the_thread_set_leaves_the_last_known_one_standing() -> None:
     """A writer that observed contact without learning threads must not blank them.
 
-    The socket accept and the post-dispatch acknowledgement both know only that
-    the worker answered. Recording an empty list for them would erase a live
-    thread set and report the worker as running nothing.
+    The post-dispatch acknowledgement knows only that the worker answered.
+    Recording an empty list for it would erase a live thread set and report the
+    worker as running nothing.
     """
     record = WorkerLiveness()
     record.record_contact(active_threads=["t-a", "t-b"])
@@ -247,45 +218,6 @@ def test_the_accessor_seats_a_record_rather_than_reporting_absence() -> None:
 # ---------------------------------------------------------------------------
 # One vocabulary for the heartbeat's wire kind
 # ---------------------------------------------------------------------------
-
-
-def test_the_ws_dispatch_is_bound_to_the_declared_heartbeat_value() -> None:
-    """The heartbeat arm matches the declaration, and matches nothing else.
-
-    The trap is asserted live before it is exercised: a near-miss spelling must
-    reach the unknown-type branch and record no contact. Without that half, a
-    heartbeat accepted for any reason at all would pass this test, including a
-    dispatch that had stopped discriminating.
-    """
-    app = _gateway_app()
-    near_miss = ServerEventType.HEARTBEAT.value + "s"
-    assert near_miss != ServerEventType.HEARTBEAT.value
-
-    with TestClient(app) as client, client.websocket_connect("/internal/ws") as ws:
-        record = app.state.worker_liveness
-        aged_out = settings.worker_heartbeat_timeout_seconds + 5.0
-        record.record_contact(when=record.last_contact_ts - aged_out)
-        stale_stamp = record.last_contact_ts
-
-        ws.send_text(json.dumps({"type": near_miss, "active_threads": ["t-ghost"]}))
-        ws.send_text(json.dumps({"type": near_miss}))
-        assert record.last_contact_ts == stale_stamp, (
-            "a frame that is not the declared heartbeat kind recorded contact"
-        )
-        assert record.active_threads == []
-
-        ws.send_text(
-            json.dumps(
-                {
-                    "type": ServerEventType.HEARTBEAT.value,
-                    "active_threads": ["t-real"],
-                }
-            )
-        )
-        ws.send_text(json.dumps({"type": near_miss}))
-
-    assert record.last_contact_ts > stale_stamp
-    assert record.active_threads == ["t-real"]
 
 
 def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:

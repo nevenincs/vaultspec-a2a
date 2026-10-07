@@ -16,10 +16,11 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ..control.config import settings
-from ..database.run_event_repository import RunEventStore
+from ..database.run_event_repository import RunEventStore, retained_high_water_mark
+from ._replay_writer_seat import replay_writer_seat
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -30,7 +31,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__: list[str] = []
+__all__ = [
+    "RESUME_WINDOW_START",
+    "ReplayFrame",
+    "ReplayWindow",
+    "ResumePosition",
+    "replay_is_served",
+    "replay_window",
+    "resume_position",
+    "retained_after",
+    "retained_sequence",
+    "run_stream_resumability",
+]
 
 RESUME_WINDOW_START = "-"
 """The cursor meaning "from the start of whatever is still retained".
@@ -103,6 +115,48 @@ def replay_is_served(aggregator: EventAggregator, thread_id: str) -> bool:
         return False
     allocator = aggregator.sequence_allocator
     return allocator is not None and allocator.is_numbered(thread_id)
+
+
+async def run_stream_resumability(app: Any, db: AsyncSession, thread_id: str) -> bool:
+    """Whether this run's stream can be resumed from the id its frames carry.
+
+    Both halves of the posture, because either alone misreports it. The
+    switch governs the whole mechanism; the retained rows say whether THIS
+    run has a window behind it, which a run that has produced nothing - or
+    one whose window has expired - does not. The writer's unflushed ring
+    counts as retained: a resume taken in that interval reads it, so
+    answering false there would understate a capability the stream has.
+
+    Read off the retained window rather than this gateway's numbering, unlike
+    :func:`replay_is_served`, because a resume is served from that window: a
+    gateway that never numbered the run - a second process, or this one after
+    a restart - still reads the table, and still serves what it holds.
+
+    Probed on the caller's own session rather than through a factory of its
+    own. Run-status is the hottest read on the gateway and it already holds a
+    pooled connection; opening a second one beside it for an additive
+    boolean halved how many of these calls an engine could serve at once,
+    and on a small pool that is the difference between answering and waiting.
+
+    A store that cannot answer reports false, which is the safe direction:
+    a client told it cannot resume loses nothing but an optimisation, while
+    one told it can and then refused has already thrown away its position.
+    """
+    if not settings.stream_replay_enabled:
+        return False
+    writer = replay_writer_seat(app)
+    if writer is not None and writer.pending(thread_id):
+        return True
+    try:
+        return (await retained_high_water_mark(db, thread_id)) is not None
+    except Exception:
+        logger.warning(
+            "Could not read the replay window of run %s for run-status",
+            thread_id,
+            exc_info=True,
+            extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
+        )
+        return False
 
 
 def retained_sequence(payload: dict[str, object]) -> int | None:

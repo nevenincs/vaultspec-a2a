@@ -66,22 +66,6 @@ def test_an_unbounded_queue_never_drops() -> None:
     assert queue.qsize() == 50
 
 
-def test_structured_context_is_accepted_without_changing_the_outcome() -> None:
-    """The richer WebSocket logging path shares the policy, not a fork of it."""
-    queue: asyncio.Queue[object] = asyncio.Queue(maxsize=1)
-    queue.put_nowait("oldest")
-
-    delivered = deliver_bounded(
-        queue,
-        "newest",
-        client_id="c1",
-        log_extra={"thread_id": "t1", "queue_maxsize": 1},
-    )
-
-    assert delivered.delivered is True
-    assert _drain(queue) == ["newest"]
-
-
 def _error_event(sequence: int) -> dict[str, object]:
     """Build the relayed failure payload, in the wire shape it arrives in."""
     return {

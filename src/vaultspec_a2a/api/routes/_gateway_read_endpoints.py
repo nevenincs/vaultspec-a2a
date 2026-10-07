@@ -24,7 +24,6 @@ from ...control.cancel_service import (
     cancel_thread,
     raise_for_cancel_failure,
 )
-from ...control.config import settings
 from ...control.execution_authority import read_frozen_team_selection
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
@@ -46,7 +45,6 @@ from ...database import (
     resolve_session_factory,
 )
 from ...database.checkpoints import Checkpointer
-from ...database.run_event_repository import retained_high_water_mark
 from ...domain_config import domain_config
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
@@ -67,6 +65,7 @@ from ...thread.enums import (
     TranscriptAvailability,
 )
 from .._replay_writer_seat import replay_writer_seat
+from .._stream_replay import run_stream_resumability
 from .._utils import trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -293,43 +292,6 @@ def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
     return None
 
 
-async def _stream_is_resumable(app: Any, db: AsyncSession, run_id: str) -> bool:
-    """Whether this run's stream can be resumed from the id its frames carry.
-
-    Both halves of the posture, because either alone misreports it. The
-    switch governs the whole mechanism; the retained rows say whether THIS
-    run has a window behind it, which a run that has produced nothing - or
-    one whose window has expired - does not. The writer's unflushed ring
-    counts as retained: a resume taken in that interval reads it, so
-    answering false there would understate a capability the stream has.
-
-    Probed on the REQUEST's own session rather than through a factory of its
-    own. This is the hottest read on the gateway and it already holds a
-    pooled connection; opening a second one beside it for an additive
-    boolean halved how many of these calls an engine could serve at once,
-    and on a small pool that is the difference between answering and waiting.
-
-    A store that cannot answer reports false, which is the safe direction:
-    a client told it cannot resume loses nothing but an optimisation, while
-    one told it can and then refused has already thrown away its position.
-    """
-    if not settings.stream_replay_enabled:
-        return False
-    writer = replay_writer_seat(app)
-    if writer is not None and writer.pending(run_id):
-        return True
-    try:
-        return (await retained_high_water_mark(db, run_id)) is not None
-    except Exception:
-        logger.warning(
-            "Could not read the replay window of run %s for run-status",
-            run_id,
-            exc_info=True,
-            extra={"thread_id": run_id, "action": "run_event_replay_failed"},
-        )
-        return False
-
-
 @router.get("/runs/{run_id}", response_model=RunStatusResponse)
 async def run_status_endpoint(
     run_id: PathSafeRunId,
@@ -392,7 +354,7 @@ async def run_status_endpoint(
         # Read beside the cursor it qualifies: last_sequence says where the
         # run's numbering stood, and this says whether that number is one the
         # stream will honour as a resumption point.
-        stream_resumable=await _stream_is_resumable(request.app, db, run_id),
+        stream_resumable=await run_stream_resumability(request.app, db, run_id),
         # From the same capture as everything else, so a queue depth is never
         # reported against a moment the run has already left. A run whose turn
         # ended with a continuation waiting is RUNNING with a quiet stream,

@@ -24,13 +24,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, MutableSequence
 from dataclasses import dataclass
 from typing import Any, cast
 
 from ..graph.enums import ServerEventType, StreamFrameKind
+from ..thread.snapshots import wire_event_type
 
-__all__ = ["PROTECTED_WIRE_TYPES", "deliver_bounded"]
+__all__ = [
+    "PROTECTED_WIRE_TYPES",
+    "DeliveryOutcome",
+    "deliver_bounded",
+    "is_protected_payload",
+    "pop_oldest_droppable",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -41,37 +48,51 @@ PROTECTED_WIRE_TYPES = frozenset(
 
 Both state an outcome exactly once. Every other frame on this stream is either
 repeated, superseded, or recoverable by re-reading authoritative state.
-
-Shared with the worker's own event buffer, which drops oldest under the same
-pressure for the same reason: one policy for which events a bounded buffer may
-give up, rather than one per buffer.
 """
 
 
-def _is_protected(payload: object) -> bool:
+def is_protected_payload(payload: object) -> bool:
     """Report whether *payload* is an outcome frame rather than progress.
 
-    An outcome is recognised by its wire type, which a relayed payload already
-    carries; anything that is not a wire mapping is ordinary progress.
+    An outcome is recognised by its wire type, read under either key a relayed
+    payload may carry it; anything that is not a wire mapping is ordinary
+    progress.
     """
     if not isinstance(payload, Mapping):
         return False
-    return cast("Mapping[str, object]", payload).get("type") in PROTECTED_WIRE_TYPES
+    return wire_event_type(cast("Mapping[str, Any]", payload)) in PROTECTED_WIRE_TYPES
+
+
+def pop_oldest_droppable[T](
+    entries: MutableSequence[T], is_protected: Callable[[T], bool]
+) -> T:
+    """Remove and return the oldest entry *is_protected* does not shield.
+
+    The one eviction rule for every bounded event buffer - the relay queues
+    here and the worker's own outbound buffer - so which event a full buffer
+    gives up is decided once rather than once per buffer. The survivors keep
+    their order, because a consumer reads an error before the terminal that
+    follows it.
+
+    When every entry is protected the oldest still yields, since the
+    alternative is an unbounded buffer and the bound is the whole point. That
+    case needs a buffer holding nothing but errors and terminals, which is a
+    saturated consumer rather than a normal one. *entries* must not be empty.
+    """
+    index = next(
+        (position for position, entry in enumerate(entries) if not is_protected(entry)),
+        0,
+    )
+    return entries.pop(index)
 
 
 def _evict_one(queue: asyncio.Queue[Any]) -> bool:
-    """Free exactly one slot, taking the oldest droppable entry.
+    """Free exactly one slot in *queue*, under :func:`pop_oldest_droppable`.
 
     The common case is the old one and costs the same: the head is ordinary
     progress and is dropped where it stands. Only when the head is an outcome
-    frame does this scan behind it, and it restores the survivors in their
-    original order because a consumer reads an error before the terminal that
-    follows it.
-
-    When every buffered entry is an outcome frame the oldest still yields, since
-    the alternative is an unbounded queue and the bound is the whole point of
-    this module. That case needs a queue holding nothing but errors and
-    terminals, which is a saturated client rather than a normal one.
+    frame is the queue drained behind it, so the shared rule can choose, and
+    the survivors are restored in their original order.
     """
     try:
         head = queue.get_nowait()
@@ -79,22 +100,16 @@ def _evict_one(queue: asyncio.Queue[Any]) -> bool:
         # Another consumer drained it between the fullness check and this call,
         # so the queue has room and nothing was given up to make it.
         return False
-    if not _is_protected(head):
+    if not is_protected_payload(head):
         return True
 
     held: list[object] = [head]
-    evicted = False
     while True:
         try:
-            item = queue.get_nowait()
+            held.append(queue.get_nowait())
         except asyncio.QueueEmpty:
             break
-        if not evicted and not _is_protected(item):
-            evicted = True
-            continue
-        held.append(item)
-    if not evicted:
-        held.pop(0)
+    pop_oldest_droppable(held, is_protected_payload)
     for item in held:
         queue.put_nowait(item)
     return True
@@ -125,7 +140,6 @@ def deliver_bounded(
     payload: object,
     *,
     client_id: str,
-    log_extra: dict[str, object] | None = None,
 ) -> DeliveryOutcome:
     """Put *payload* on *queue*, evicting the oldest droppable event when full.
 
@@ -133,16 +147,11 @@ def deliver_bounded(
         queue: The client's bounded relay queue.
         payload: A pre-serialized event to deliver.
         client_id: Identifier used in the backpressure warnings.
-        log_extra: Structured logging fields. Callers that carry richer context -
-            a thread identifier, a bounded action name - pass it here so the two
-            relay paths can log at different fidelity without forking the policy
-            they share.
 
     Returns:
         A :class:`DeliveryOutcome` saying whether the payload was enqueued and
         how many events this delivery cost the client.
     """
-    extra = log_extra or {}
     dropped = 0
     if queue.full() and _evict_one(queue):
         dropped += 1
@@ -150,7 +159,6 @@ def deliver_bounded(
             "Dropped an event for slow client %s (relay backpressure, maxsize=%d)",
             client_id,
             queue.maxsize,
-            extra={**extra, "action": "relay_drop_oldest"} if extra else None,
         )
     try:
         queue.put_nowait(payload)
@@ -158,7 +166,6 @@ def deliver_bounded(
         logger.warning(
             "Relay event dropped for client %s - queue still full",
             client_id,
-            extra={**extra, "action": "relay_drop_event"} if extra else None,
         )
         return DeliveryOutcome(delivered=False, dropped=dropped + 1)
     return DeliveryOutcome(delivered=True, dropped=dropped)

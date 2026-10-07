@@ -34,17 +34,17 @@ from ..providers._acp_rpc_terminal_handlers import release_owned_terminal
 from ..providers._acp_types import AcpModelConfig, AcpSessionContext
 from ..providers._subprocess import kill_process_tree, spawn_acp_process
 from ..providers.tests._terminal_process import retain_terminal_process
-from ..testing.catalog import unvalidated_selection
-from ..tests.gateway_boot import (
+from ..testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_OWNERSHIP_CAPABILITY,
+    RunVerbs,
     armed_gateway_env,
+    booted_gateway,
     desktop_workspace,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    seat_app_home,
     worker_lifecycle_gateway_script,
 )
+from ..testing.catalog import unvalidated_selection
 from ..utils import kill_pid_tree_async
 from ..utils._process_tree import pid_is_live, port_has_listener, wait_pid_gone
 from ..utils.process import ProcessContainment
@@ -242,12 +242,7 @@ async def test_terminal_child_tree_contained_and_reaped(
 # Gateway-owned worker (real armed desktop gateway)
 # ---------------------------------------------------------------------------
 
-_ATTACH = "attach-credential-ownedtree-1234567890abcdef"
-_OWNERSHIP = "ownership-capability-ownedtree-fedcba0987654321"
 _PRESET = "mock-success-single"
-
-# The INFO variant, so the gateway's own worker-spawn narration reaches the log.
-_GATEWAY = worker_lifecycle_gateway_script()
 
 
 def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
@@ -259,52 +254,28 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     still refuses, while receipt-owned shutdown must reap the existing worker.
     """
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
+    seat_app_home(app_home)
+    auth = {"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"}
 
-    auth = {"Authorization": f"Bearer {_ATTACH}"}
-    log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
-
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        return spawn_gateway(
-            script=_GATEWAY,
-            gateway_port=gateway_port,
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-            ),
-            log_handle=log_handle,
+    # The lifecycle driver narrates its own worker spawn into the log.
+    with booted_gateway(
+        armed_gateway_env(app_home),
+        log_path=tmp_path / "gateway.log",
+        script=worker_lifecycle_gateway_script(),
+    ) as gateway:
+        base = gateway.base_url
+        worker_port = gateway.worker_port
+        # Desktop execution refuses before run start reads the catalog, so a
+        # well-formed selection is all the request needs.
+        verbs = RunVerbs(
+            base_url=base,
+            authorization=auth["Authorization"],
+            team_preset=_PRESET,
+            workspace_root=desktop_workspace(base),
+            selection=lambda _workspace: unvalidated_selection(),
+            tokens={"coder": "tok-coder"},
         )
-
-    proc, _gateway_port, worker_port, base = spawn_until_ready(
-        _spawn, log_path=log_path
-    )
-    try:
-        # Desktop execution refuses before a worker can be spawned.
-        _workspace = desktop_workspace(base)
-        with httpx.Client(base_url=base, timeout=60.0) as client:
-            start = client.post(
-                "/v1/runs",
-                headers=auth,
-                json={
-                    "team_preset": _PRESET,
-                    "message": "build it",
-                    "autonomous": True,
-                    "run_id": "owned-process-tree-01",
-                    "metadata": {"workspace_root": _workspace},
-                    # Desktop execution is refused before run start reads the
-                    # catalog, so a well-formed selection is all the request
-                    # needs.
-                    "selection": unvalidated_selection(),
-                    "actor_tokens": {
-                        "tokens": {"coder": "tok-coder"},
-                        "engine_bearer": "bearer",
-                    },
-                },
-            )
+        start = verbs.start("owned-process-tree-01")
         assert start.status_code == 503, start.text
         assert "OS isolation backend" in start.json()["detail"]
         deadline = time.monotonic() + 30.0
@@ -328,14 +299,19 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
         ):
             resp = client.post(
                 "/admin/shutdown",
-                headers={**auth, "X-Vaultspec-Lifecycle-Capability": _OWNERSHIP},
+                headers={
+                    **auth,
+                    "X-Vaultspec-Lifecycle-Capability": DEFAULT_OWNERSHIP_CAPABILITY,
+                },
             )
             assert resp.status_code == 202, resp.text
 
         # The gateway exits gracefully before teardown can force-kill it.
         with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=30)
-        assert proc.poll() is not None, "graceful shutdown must stop the gateway"
+            gateway.process.wait(timeout=30)
+        assert gateway.process.poll() is not None, (
+            "graceful shutdown must stop the gateway"
+        )
         deadline = time.monotonic() + 15.0
         while (
             port_has_listener(worker_port, timeout=0.5) and time.monotonic() < deadline
@@ -344,5 +320,3 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
         assert not port_has_listener(worker_port, timeout=0.5), (
             "graceful shutdown must reap the gateway-owned worker"
         )
-    finally:
-        reap_gateway(proc)

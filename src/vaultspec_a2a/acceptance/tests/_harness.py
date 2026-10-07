@@ -7,11 +7,10 @@ gateway outside the desktop profile so it can execute in-process lanes, and
 wait for readiness with a death-aware poll that fails fast on a child that dies
 before it answers rather than after a silent timeout.
 
-The lifecycle primitives themselves live one tier down, in
-:mod:`vaultspec_a2a.tests.gateway_boot`, which every real-process tier shares.
-This module owns only what is genuinely specific to certification: the bundled
-deterministic preset it certifies against, and the authenticated handle
-scenarios drive.
+The lifecycle primitives and the run-start verb themselves live in
+:mod:`vaultspec_a2a.testing`, which every real-process tier shares. This module
+owns only what is genuinely specific to certification: the bundled deterministic
+preset it certifies against, and the authenticated handle scenarios drive.
 
 The deterministic provider backend the worker proxies to (VidaiMock) is a
 separate real process. Where a certifying environment runs it, pass its base URL
@@ -22,10 +21,11 @@ gateway contract - run creation, status, cancellation routing, streaming,
 deletion, and authentication all hold whether a run ultimately completes or
 fails - so those scenarios drive this stack without it.
 
-``CertifiedGateway`` is the authenticated handle scenarios drive. Its request
-helpers are the one place the public verbs are shaped, so a scenario asserts on
-responses instead of re-deriving request bodies - no shadowed request logic
-spread across scenario files.
+``CertifiedGateway`` is the authenticated handle scenarios drive. Its run-start
+verb is the shared :class:`~vaultspec_a2a.testing.RunVerbs` bound to this stack's
+preset, workspace and selection, so a scenario asserts on responses instead of
+re-deriving request bodies - no shadowed request logic spread across scenario
+files.
 """
 
 from __future__ import annotations
@@ -38,28 +38,27 @@ import httpx
 
 from ...conftest import ExternalPrerequisiteRule
 from ...graph.enums import Provider
-from ...testing import NoSelectableLaneError, fetch_in_process_selection
-from ...tests.gateway_boot import (
-    FIRST_DEMAND_TIMEOUT,
-    GatewayBootError,
+from ...testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_OWNERSHIP_CAPABILITY,
+    NoSelectableLaneError,
+    RunVerbs,
+    booted_gateway,
     broker_gateway_env,
+    fetch_in_process_selection,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    seat_app_home,
 )
 
 if TYPE_CHECKING:
-    import subprocess
     from collections.abc import Generator
     from pathlib import Path
 
-# ``GatewayBootError`` is raised here but declared by ``tests.gateway_boot``, which
-# holds it as ONE class for every tier - two same-named copies once diverged, so an
-# ``except`` written against one silently missed the other. Republishing it here
-# would hand the next tier a second place to import it from and start that again.
+# ``GatewayBootError`` is raised by this stack's boot and warm-up but declared by
+# ``testing.boot``, which holds it as ONE class for every tier - two same-named
+# copies once diverged, so an ``except`` written against one silently missed the
+# other. Republishing it here would hand the next tier a second place to import it
+# from and start that again.
 __all__ = [
     "DEFAULT_REQUIRED_ROLE",
     "DEFAULT_TEAM_PRESET",
@@ -83,12 +82,11 @@ _DEFAULT_PRESET_LANE = Provider.MOCK.value
 class CertifiedGateway:
     """An authenticated handle to one running broker certification stack.
 
-    The verb helpers shape the exact public-surface requests once so scenarios
-    read as assertions on real responses. Every helper presents the real
-    gateway service credential; none uses the test-only authentication bypass.
+    Every request presents the real gateway service credential; none uses the
+    test-only authentication bypass.
 
     Run-start requires an explicit catalog selection revalidated against the
-    catalog served for the run's workspace, so the run-bearing helpers resolve
+    catalog served for the run's workspace, so the run-bearing verbs resolve
     one from this stack's own served catalog and site every run in the stack's
     dedicated workspace directory. The resolution is cached: prepare and release
     must present byte-identical bodies for the release binding to match, and one
@@ -107,26 +105,6 @@ class CertifiedGateway:
 
     # -- explicit catalog selection -------------------------------------------
 
-    def run_fields(self) -> dict[str, Any]:
-        """The selection and metadata fields every run verb now requires.
-
-        Every verb this stack drives - prepare and release as much as start -
-        presents an in-process selection. The frozen selection wins outright at
-        compilation, so any other served lane would hand every role to a real
-        external provider, and deterministic certification must never spend.
-        This stack arms the in-process serving itself, so a catalog without one
-        means the arming failed; the scenario then skips naming the missing
-        serving rather than freezing whichever provider the host has installed.
-        """
-        return {
-            "selection": self.served_in_process_selection(
-                str(self.workspace_root),
-                prefer_provider_id=_DEFAULT_PRESET_LANE,
-                cache=True,
-            ),
-            "metadata": {"workspace_root": str(self.workspace_root)},
-        }
-
     @property
     def selected_provider_id(self) -> str:
         """The provider id this stack's runs are frozen to.
@@ -135,7 +113,7 @@ class CertifiedGateway:
         lane the harness actually selected, rather than restating a literal that
         would keep passing if the resolution ever picked something else.
         """
-        return str(self.run_fields()["selection"]["provider_id"])
+        return str(self.runs.selection(str(self.workspace_root))["provider_id"])
 
     def served_in_process_selection(
         self,
@@ -146,6 +124,10 @@ class CertifiedGateway:
     ) -> dict[str, Any]:
         """Select an in-process lane from the catalog this stack serves.
 
+        Every verb this stack drives - prepare and release as much as start -
+        presents an in-process selection. The frozen selection wins outright at
+        compilation, so any other served lane would hand every role to a real
+        external provider, and deterministic certification must never spend.
         This stack arms in-process serving itself, so a catalog without a
         selectable lane means the arming failed. That is reported as the absent
         ``in-process-lanes`` prerequisite, naming what is missing, rather than
@@ -180,96 +162,26 @@ class CertifiedGateway:
         """The versioned public progress-stream path for *run_id*."""
         return f"/v1/runs/{run_id}/stream"
 
-    # -- versioned run-start verb (prepare / start / release) ------------------
+    # -- versioned run-start verb (prepare / commit / release / start) --------
 
-    def warm_first_demand(self) -> None:
-        """Pay the gateway-owned worker's cold start at ARM time, then free it.
+    @property
+    def runs(self) -> RunVerbs:
+        """The run-start verb bound to this stack's preset, workspace and lane.
 
-        First demand is the prepare that finds no worker: it triggers the spawn
-        and waits for a new interpreter to import the worker stack and answer.
-        Left inside the first scenario's verb, that cost lands inside the very
-        admission window the scenarios reason about, and a stack booting on a
-        loaded host then fails a readiness-gated prepare for a reason that has
-        nothing to do with the contract under certification. The reservation is
-        released immediately, so each scenario still meets the stack's full
-        bounded capacity.
+        Every stage presents the one cached selection, and a start or commit
+        binds a token for the preset's required role.
         """
-        run_id = "run-first-demand-warmup"
-        prepared = self.prepare(run_id)
-        if prepared.status_code != 201:
-            raise GatewayBootError(
-                f"the certification stack refused its warm-up prepare: "
-                f"{prepared.status_code} {prepared.text}"
-            )
-        released = self.release(run_id, prepared.json()["reservation_id"])
-        if released.status_code != 201:
-            raise GatewayBootError(
-                f"the certification stack could not release its warm-up "
-                f"reservation: {released.status_code} {released.text}"
-            )
-
-    def prepare(
-        self, run_id: str, *, team_preset: str = DEFAULT_TEAM_PRESET
-    ) -> httpx.Response:
-        """Reserve a bounded admission slot for *run_id* (readiness-gated)."""
-        with self.client(timeout=FIRST_DEMAND_TIMEOUT) as client:
-            return client.post(
-                "/v1/runs",
-                json={
-                    "team_preset": team_preset,
-                    "stage": "prepare",
-                    "run_id": run_id,
-                    "autonomous": True,
-                    **self.run_fields(),
-                },
-            )
-
-    def release(
-        self,
-        run_id: str,
-        reservation_id: str,
-        *,
-        team_preset: str = DEFAULT_TEAM_PRESET,
-    ) -> httpx.Response:
-        """Explicitly free an uncommitted prepared reservation."""
-        with self.client(timeout=30.0) as client:
-            return client.post(
-                "/v1/runs",
-                json={
-                    "team_preset": team_preset,
-                    "stage": "release",
-                    "reservation_id": reservation_id,
-                    "run_id": run_id,
-                    "autonomous": True,
-                    **self.run_fields(),
-                },
-            )
-
-    def start(
-        self,
-        run_id: str,
-        *,
-        team_preset: str = DEFAULT_TEAM_PRESET,
-        role: str = DEFAULT_REQUIRED_ROLE,
-        message: str = "certify the assembled product",
-    ) -> httpx.Response:
-        """Drive the one-shot ``start`` stage: create and dispatch in one call."""
-        with self.client(timeout=FIRST_DEMAND_TIMEOUT) as client:
-            return client.post(
-                "/v1/runs",
-                json={
-                    "team_preset": team_preset,
-                    "stage": "start",
-                    "run_id": run_id,
-                    "message": message,
-                    "autonomous": True,
-                    "actor_tokens": {
-                        "tokens": {role: "tok-certification"},
-                        "engine_bearer": "bearer",
-                    },
-                    **self.run_fields(),
-                },
-            )
+        return RunVerbs(
+            base_url=self.base_url,
+            authorization=self.auth_header["Authorization"],
+            team_preset=DEFAULT_TEAM_PRESET,
+            workspace_root=str(self.workspace_root),
+            selection=lambda workspace: self.served_in_process_selection(
+                workspace, prefer_provider_id=_DEFAULT_PRESET_LANE, cache=True
+            ),
+            tokens={DEFAULT_REQUIRED_ROLE: "tok-certification"},
+            message="certify the assembled product",
+        )
 
     # -- versioned run reads and cancel ---------------------------------------
 
@@ -310,8 +222,8 @@ class CertifiedGateway:
 def certified_gateway(
     workdir: Path,
     *,
-    attach_token: str = "attach-certification-1234567890abcdef",
-    ownership_capability: str = "ownership-certification-fedcba0987654321",
+    attach_token: str = DEFAULT_ATTACH_CREDENTIAL,
+    ownership_capability: str = DEFAULT_OWNERSHIP_CAPABILITY,
     log_name: str = "gateway.log",
     **extra_env: str,
 ) -> Generator[CertifiedGateway]:
@@ -323,66 +235,33 @@ def certified_gateway(
     :class:`CertifiedGateway`. A certifying environment that runs the
     deterministic provider passes ``VAULTSPEC_A2A_MOCK_API_BASE`` through
     *extra_env* so the gateway-owned worker reaches it. The gateway-owned process
-    tree is reaped in a ``finally`` regardless of scenario outcome, so no worker
-    or gateway leaks.
+    tree is reaped regardless of scenario outcome, so no worker or gateway leaks.
+
+    The broker profile arms the in-process lane serving this stack exists to
+    certify against. The lanes are hidden by default so no product deployment
+    can offer fixed content beside a real provider; certification is exactly the
+    deployment that must select one, because an executing run here may never
+    spend. *extra_env* is applied last, so a caller can still override it.
     """
     app_home = workdir / "app-home"
-    app_home.mkdir(parents=True, exist_ok=True)
+    state = seat_app_home(app_home, attach=attach_token, ownership=ownership_capability)
     # Every run this stack starts is sited in one real directory: the run-start
     # verb requires the active project, and the catalog it revalidates against is
     # served per workspace, so the handle and the runs it drives must name the
     # same one.
-    workspace_root = app_home / "workspaces" / "project"
+    workspace_root = state.workspaces_root / "project"
     workspace_root.mkdir(parents=True, exist_ok=True)
-    seed_credentials(app_home, attach=attach_token, ownership=ownership_capability)
-    seat_valid_database(app_home)
-
-    log_path = workdir / log_name
-    log_handle = log_path.open("wb")
-    script = gateway_script(log_level="info")
-
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = broker_gateway_env(
-            app_home,
-            gateway_port=gateway_port,
-            worker_port=worker_port,
-            gateway_token=attach_token,
-        )
-        # Arm the in-process lane serving this stack exists to certify against.
-        # The lanes are hidden by default so no product deployment can offer
-        # fixed content beside a real provider; certification is exactly the
-        # deployment that must select one, because an executing run here may
-        # never spend. Set before *extra_env* so a caller can still override it.
-        env["VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"] = "true"
-        env.update(extra_env)
-        return spawn_gateway(
-            script=script,
-            gateway_port=gateway_port,
-            env=env,
-            log_handle=log_handle,
-            new_session=True,
-        )
-
-    try:
-        proc, _gateway_port, _worker_port, base = spawn_until_ready(
-            _spawn, log_path=log_path
-        )
-    except BaseException:
-        # The boot helper has already reaped its tree; the log handle is this
-        # frame's to release, and the ``finally`` below is never reached when
-        # the boot itself raises.
-        log_handle.close()
-        raise
-
-    try:
+    with booted_gateway(
+        broker_gateway_env(app_home, gateway_token=attach_token, extra=extra_env),
+        log_path=workdir / log_name,
+        script=gateway_script(log_level="info"),
+        detached=True,
+    ) as gateway:
         running = CertifiedGateway(
-            base_url=base,
+            base_url=gateway.base_url,
             attach_token=attach_token,
             app_home=app_home,
             workspace_root=workspace_root,
         )
-        running.warm_first_demand()
+        running.runs.warm_first_demand()
         yield running
-    finally:
-        reap_gateway(proc)
-        log_handle.close()

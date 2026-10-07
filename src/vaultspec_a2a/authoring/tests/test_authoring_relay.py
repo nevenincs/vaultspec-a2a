@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import socket
 import sys
 import threading
 from contextlib import asynccontextmanager
-from http.server import ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
-import uvicorn
 from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
@@ -21,7 +18,7 @@ from ...providers._acp_authoring import (
     AuthoringToolBinding,
     build_authoring_stdio_mcp_servers,
 )
-from ...testing import settings_override
+from ...testing import serve_handler, serve_on_loopback, settings_override
 from ...thread.actor_tokens import ActorTokenBundle
 from ...worker.app import create_worker_app
 from ...worker.authoring_relay import AuthoringRelay
@@ -59,24 +56,8 @@ async def running_relay(
         yield
 
     app = create_worker_app(lifespan=lifespan)
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen()
-    listener.setblocking(False)
-    port = listener.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, log_level="error", access_log=False))
-    serving = asyncio.create_task(server.serve(sockets=[listener]))
-    try:
-        async with asyncio.timeout(10):
-            while not server.started:
-                if serving.done():
-                    await serving
-                await asyncio.sleep(0.01)
-        yield app, f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        await asyncio.wait_for(serving, timeout=10)
-        listener.close()
+    async with serve_on_loopback(app, lifespan="auto", log_level="error") as origin:
+        yield app, origin
 
 
 def stores(bearer: str) -> tuple[RunTokenStore, RunCatalogStore]:
@@ -152,21 +133,16 @@ async def test_parent_replay_and_refresh_survive_child_restart(
     handler = (
         _handler(rotation) if scenario == "rotation" else _make_handler(lost, bearer)
     )
-    engine = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=engine.serve_forever, daemon=True)
-    thread.start()
-    write_engine_record(record, engine.server_port, bearer)
     tokens, catalogs = stores(bearer)
-    try:
+    with serve_handler(handler) as engine_port:
+        write_engine_record(record, engine_port, bearer)
         with settings_override(
             a2a_home=tmp_path / "private",
             workspace_root=tmp_path / "workspace",
             engine_service_json=record,
         ):
             async with running_relay(tokens, catalogs) as (app, origin):
-                params = bridge(
-                    origin, f"http://127.0.0.1:{engine.server_port}", bearer
-                )
+                params = bridge(origin, f"http://127.0.0.1:{engine_port}", bearer)
                 log = tmp_path / "bridge.log"
                 assert await invoke(params, log=log) is (scenario == "lost_response")
                 path = private_tool_call_journal_path("relay-run", "writer")
@@ -193,10 +169,6 @@ async def test_parent_replay_and_refresh_survive_child_restart(
                 assert len(bodies) == (1 if retired else 2)
                 if len(bodies) == 2:
                     assert bodies[0] == bodies[1]
-    finally:
-        engine.shutdown()
-        engine.server_close()
-        thread.join(timeout=5)
 
 
 @pytest.mark.asyncio
@@ -285,13 +257,10 @@ async def test_concurrent_children_share_parent_replay_state(
     tmp_path: Path, secure_engine_dir: Path
 ) -> None:
     state = _EngineState()
-    engine = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state, _BOOT))
-    thread = threading.Thread(target=engine.serve_forever, daemon=True)
-    thread.start()
     record = secure_engine_dir / "service.json"
-    write_engine_record(record, engine.server_port, _BOOT)
     tokens, catalogs = stores(_BOOT)
-    try:
+    with serve_handler(_make_handler(state, _BOOT)) as engine_port:
+        write_engine_record(record, engine_port, _BOOT)
         with settings_override(
             a2a_home=tmp_path / "private",
             workspace_root=tmp_path / "workspace",
@@ -307,7 +276,7 @@ async def test_concurrent_children_share_parent_replay_state(
                         )
                     assert refusal.value.response.status_code == 409
                 assert _execute_bodies(state) == []
-                params = bridge(origin, f"http://127.0.0.1:{engine.server_port}", _BOOT)
+                params = bridge(origin, f"http://127.0.0.1:{engine_port}", _BOOT)
                 results = await asyncio.gather(
                     *(invoke(params, log=tmp_path / f"child-{i}.log") for i in range(2))
                 )
@@ -317,10 +286,6 @@ async def test_concurrent_children_share_parent_replay_state(
                 tokens.drop("relay-run")
                 assert await invoke(params, log=tmp_path / "revoked.log")
                 assert _execute_bodies(state) == bodies
-    finally:
-        engine.shutdown()
-        engine.server_close()
-        thread.join(timeout=5.0)
 
 
 @pytest.mark.asyncio
@@ -330,40 +295,35 @@ async def test_revocation_during_discovery_cannot_start_engine_session(
     entered = threading.Event()
     release = threading.Event()
     state = _EngineState(health_gate=(entered, release))
-    engine = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state, _BOOT))
-    thread = threading.Thread(target=engine.serve_forever, daemon=True)
-    thread.start()
     record = secure_engine_dir / "service.json"
-    write_engine_record(record, engine.server_port, _BOOT)
     tokens, catalogs = stores(_BOOT)
-    try:
-        with settings_override(
-            a2a_home=tmp_path / "private",
-            workspace_root=tmp_path / "workspace",
-            engine_service_json=record,
-        ):
-            async with running_relay(tokens, catalogs) as (_app, origin):
-                async with AuthoringRelayClient(
-                    origin, _ACTOR, "relay-run", "writer"
-                ) as client:
-                    call = asyncio.create_task(
-                        client.dispatch(
-                            "propose_changeset",
-                            {"operation": "create"},
-                            tool_call_id="revoked-call",
+    with serve_handler(_make_handler(state, _BOOT)) as engine_port:
+        write_engine_record(record, engine_port, _BOOT)
+        try:
+            with settings_override(
+                a2a_home=tmp_path / "private",
+                workspace_root=tmp_path / "workspace",
+                engine_service_json=record,
+            ):
+                async with running_relay(tokens, catalogs) as (_app, origin):
+                    async with AuthoringRelayClient(
+                        origin, _ACTOR, "relay-run", "writer"
+                    ) as client:
+                        call = asyncio.create_task(
+                            client.dispatch(
+                                "propose_changeset",
+                                {"operation": "create"},
+                                tool_call_id="revoked-call",
+                            )
                         )
-                    )
-                    try:
-                        assert await asyncio.to_thread(entered.wait, 5)
-                        tokens.drop("relay-run")
-                    finally:
-                        release.set()
-                    with pytest.raises(httpx.HTTPStatusError) as refusal:
-                        await call
-                    assert refusal.value.response.status_code == 403
-                assert state.requests == []
-    finally:
-        release.set()
-        engine.shutdown()
-        engine.server_close()
-        thread.join(timeout=5.0)
+                        try:
+                            assert await asyncio.to_thread(entered.wait, 5)
+                            tokens.drop("relay-run")
+                        finally:
+                            release.set()
+                        with pytest.raises(httpx.HTTPStatusError) as refusal:
+                            await call
+                        assert refusal.value.response.status_code == 403
+                    assert state.requests == []
+        finally:
+            release.set()

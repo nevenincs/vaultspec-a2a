@@ -30,8 +30,9 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from ..lifecycle.discovery import write_service_json
-from ..service_tests._live_desktop_gateway import ATTACH_CREDENTIAL, armed_gateway
+from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
     LIVE_PROVIDER_PREREQUISITES,
     selection_from_served_catalog,
     wait_for_run_status,
@@ -236,7 +237,7 @@ def _dashboard_engine(
         discovery_home / "service.json",
         port=int(gateway_base.rsplit(":", 1)[1]),
         pid=os.getpid(),
-        service_token=ATTACH_CREDENTIAL,
+        service_token=DEFAULT_ATTACH_CREDENTIAL,
     )
     environment = {
         **{

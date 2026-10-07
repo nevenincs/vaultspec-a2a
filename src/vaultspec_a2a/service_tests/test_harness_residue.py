@@ -16,11 +16,11 @@ import os
 import time
 from typing import TYPE_CHECKING
 
+from ..testing import prune_stale_dirs
 from .harness import (
     RETAINED_RUNTIME_DIRS,
     RUNTIME_ROOT,
     ServiceStack,
-    sweep_stale_runtime_dirs,
 )
 
 if TYPE_CHECKING:
@@ -65,7 +65,7 @@ def test_runtime_directories_are_bounded_and_evict_oldest_first(
         for index in range(RETAINED_RUNTIME_DIRS + 3)
     ]
 
-    removed = sweep_stale_runtime_dirs(root=fake_root)
+    removed = prune_stale_dirs(fake_root, kept_newest=RETAINED_RUNTIME_DIRS)
 
     surviving = sorted(entry.name for entry in fake_root.iterdir())
     assert len(surviving) == RETAINED_RUNTIME_DIRS

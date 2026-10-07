@@ -1,8 +1,14 @@
-"""Session-scoped service harness for the deterministic certification stack."""
+"""Session-scoped service harness for the deterministic certification stack.
+
+What is specific to the service tier lives here: the Compose-managed fixture
+services, the fixed native gateway and worker profile they certify, and the
+diagnostics a failed session leaves behind. Spawning, death-aware readiness,
+tree reaping, log tails and the run-start verb are the shared primitives of
+:mod:`vaultspec_a2a.testing`, composed rather than re-implemented.
+"""
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import shutil
@@ -19,18 +25,23 @@ from sqlalchemy.engine import make_url
 
 from ..control.config import settings
 from ..graph.enums import Provider
-from ..lifecycle.manager import tree_kill
-from ..testing import NoSelectableLaneError, fetch_in_process_selection
+from ..testing import (
+    GatewayBootError,
+    NoSelectableLaneError,
+    RunVerbs,
+    WatchedProcess,
+    await_ready,
+    fetch_in_process_selection,
+    gateway_process_env,
+    log_tail,
+    prune_stale_dirs,
+    reap_process,
+    spawn_logged,
+)
 from ..testing.ports import free_port
-from ..tests.gateway_boot import GatewayBootError
-from ..utils._process_tree import detached_spawn_kwargs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-
-# A process this harness owns, its label, and the log it writes: enough to fail
-# a readiness wait with the exit code and the tail that explain the death.
-_WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
 
 
 class _PermissionResponseOptions(TypedDict, total=False):
@@ -121,140 +132,19 @@ def _run_compose(
     )
 
 
-def _spawn_process(
-    *args: str,
-    env: dict[str, str],
-    log_path: Path,
-) -> tuple[subprocess.Popen[str], Any]:
-    log_file = log_path.open("w", encoding="utf-8", buffering=1)
-    # The canonical detach flags, not a local Windows-only flag: teardown here
-    # goes exclusively through tree_kill's pid-tree walk (see _stop_process),
-    # which discovers descendants by OS process relationship rather than by
-    # process-group membership, so detaching into a POSIX session on the way in
-    # costs nothing on the way out. It is a deliberate convergence with the
-    # gateway/worker children spawned elsewhere in this test tier (e.g.
-    # ``tests.gateway_boot.spawn_gateway(new_session=True)``), not an accident:
-    # this site previously left POSIX unconsidered, isolating the child from a
-    # stray SIGINT delivered to the harness's own foreground process group.
-    flags = detached_spawn_kwargs()
-    proc = subprocess.Popen(
-        args,
-        cwd=REPO_ROOT,
-        env=env,
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        text=True,
-        creationflags=flags.creationflags,
-        start_new_session=flags.start_new_session,
-    )
-    return proc, log_file
-
-
-_ERROR_LOG_TAIL_CHARS = 4000
-_DIAGNOSTIC_LOG_TAIL_CHARS = 20000
-
-
-def _log_tail(log_path: Path, *, limit: int = _ERROR_LOG_TAIL_CHARS) -> str:
-    """Return the last *limit* characters of *log_path*, or ``""``."""
-    try:
-        return log_path.read_text(encoding="utf-8", errors="replace")[-limit:]
-    except OSError:
-        return ""
-
-
-def _log_tail_suffix(watch: Sequence[_WatchedProcess]) -> str:
-    """Render the watched processes' log tails for a failure message."""
-    parts = [
-        f"\n--- {name} log tail ---\n{tail}"
-        for name, _proc, log_path in watch
-        if (tail := _log_tail(log_path))
-    ]
-    return "".join(parts)
-
-
-def _wait_for(
-    label: str,
-    probe: Callable[[], bool],
-    *,
-    timeout: float = 120.0,
-    interval: float = 1.0,
-    watch: Sequence[_WatchedProcess] = (),
-) -> None:
-    """Poll *probe* until it passes, failing fast on a dead watched process.
-
-    Supplying *watch* makes the wait DEATH-AWARE: a child that exits before the
-    probe passes fails immediately with its exit code and log tail rather than
-    burning the whole deadline — the bind-race signature, and the reason the
-    shared gateway-boot poll checks liveness every iteration. Waits with no
-    owning process (the compose-managed services, whose lifecycle Docker owns)
-    pass no *watch* and keep the plain deadline behaviour, because there is no
-    exit status to consult.
-    """
-    deadline = time.monotonic() + timeout
-    last_error: Exception | None = None
-    while time.monotonic() < deadline:
-        for name, proc, log_path in watch:
-            if proc.poll() is not None:
-                raise GatewayBootError(
-                    f"{label}: {name} exited before readiness "
-                    f"(exit {proc.returncode})"
-                    f"{_log_tail_suffix([(name, proc, log_path)])}"
-                )
-        try:
-            if probe():
-                return
-        except Exception as exc:  # pragma: no cover - diagnostic path
-            last_error = exc
-        time.sleep(interval)
-    raise TimeoutError(
-        f"Timed out waiting for {label}"
-        + (f": {last_error}" if last_error is not None else "")
-        + _log_tail_suffix(watch)
-    )
+# The tail of a native process's log a session's diagnostics preserve: wider
+# than a readiness failure quotes, because this is read after the fact.
+_DIAGNOSTIC_LOG_TAIL_BYTES = 20000
 
 
 RETAINED_RUNTIME_DIRS = 5
-"""How many service-test runtime directories to keep before evicting the oldest.
+"""How many earlier service-test runtime directories survive beside the current one.
 
 Deleting a run's directory outright would destroy the compose logs and session
 summary the harness writes precisely so a failed run can be diagnosed after the
 fact. Bounding the count keeps recent post-mortems available while stopping the
 unbounded accumulation in the operator's machine-global home.
 """
-
-
-def sweep_stale_runtime_dirs(
-    *, keep: Path | None = None, root: Path | None = None
-) -> list[Path]:
-    """Evict all but the most recent service-test runtime directories.
-
-    Args:
-        keep: A directory to retain regardless of age - the caller's own run.
-        root: Directory to sweep; defaults to the machine-global runtime root.
-            Taking it as a parameter keeps the sweep testable against a real
-            temporary tree without reassigning module state.
-
-    Returns:
-        The directories removed.
-    """
-    search_root = root if root is not None else RUNTIME_ROOT
-    try:
-        candidates = [entry for entry in search_root.iterdir() if entry.is_dir()]
-    except OSError:
-        return []
-    # Name breaks ties so several directories sharing one filesystem timestamp
-    # tick evict deterministically rather than in arbitrary order.
-    ordered = sorted(
-        candidates, key=lambda entry: (entry.stat().st_mtime, entry.name), reverse=True
-    )
-    removed: list[Path] = []
-    for stale in ordered[RETAINED_RUNTIME_DIRS:]:
-        if keep is not None and stale == keep:
-            continue
-        shutil.rmtree(stale, ignore_errors=True)
-        if not stale.exists():
-            removed.append(stale)
-    return removed
 
 
 @dataclass(slots=True)
@@ -267,15 +157,13 @@ class ServiceStack:
     started_at: float = field(default_factory=time.time)
     runtime_dir: Path = field(init=False)
     artifacts: dict[str, Any] = field(default_factory=dict)
-    _gateway_proc: subprocess.Popen[str] | None = field(
+    _gateway_proc: subprocess.Popen[bytes] | None = field(
         default=None, init=False, repr=False
     )
-    _worker_proc: subprocess.Popen[str] | None = field(
+    _worker_proc: subprocess.Popen[bytes] | None = field(
         default=None, init=False, repr=False
     )
-    _gateway_log: Any | None = field(default=None, init=False, repr=False)
     _gateway_log_name: str = field(default="gateway.log", init=False, repr=False)
-    _worker_log: Any | None = field(default=None, init=False, repr=False)
     _mock_paused: bool = field(default=False, init=False, repr=False)
     _stopped: bool = field(default=False, init=False, repr=False)
 
@@ -290,7 +178,9 @@ class ServiceStack:
     def _ensure_runtime_dir(self) -> None:
         """Create the runtime directory at the point something will write to it."""
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        sweep_stale_runtime_dirs(keep=self.runtime_dir)
+        prune_stale_dirs(
+            RUNTIME_ROOT, kept_newest=RETAINED_RUNTIME_DIRS, keep=self.runtime_dir
+        )
 
     @property
     def gateway_url(self) -> str:
@@ -346,19 +236,19 @@ class ServiceStack:
             resp = client.get("/health")
             return resp.status_code == 200
 
-    def _watched(self, *names: str) -> list[_WatchedProcess]:
+    def _watched(self, *names: str) -> list[WatchedProcess]:
         """Return the named harness-owned processes that are currently spawned.
 
         Only processes this harness holds a ``Popen`` for are watchable; the
         compose-managed services are deliberately absent, since Docker owns
         their lifecycle and there is no local exit status to read.
         """
-        owned: dict[str, subprocess.Popen[str] | None] = {
+        owned: dict[str, subprocess.Popen[bytes] | None] = {
             "gateway": self._gateway_proc,
             "worker": self._worker_proc,
         }
         return [
-            (
+            WatchedProcess(
                 name,
                 proc,
                 self.runtime_dir
@@ -374,12 +264,12 @@ class ServiceStack:
         try:
             self._start_infra()
             self._start_gateway()
-            _wait_for(
-                "gateway HTTP readiness",
+            await_ready(
                 self._gateway_http_ready,
+                what="gateway HTTP",
+                watch=self._watched("gateway"),
                 timeout=120.0,
                 interval=1.0,
-                watch=self._watched("gateway"),
             )
             self._start_worker()
             self._wait_for_process_health(
@@ -408,7 +298,11 @@ class ServiceStack:
         )
 
     def _local_env(self) -> dict[str, str]:
-        env = os.environ.copy()
+        env = gateway_process_env(
+            gateway_port=self.ports["gateway"],
+            worker_port=self.ports["worker"],
+            auto_spawn_worker=False,
+        )
         if self.postgres_url is None:
             database_url = (
                 f"sqlite+aiosqlite:///{(self.runtime_dir / 'service.db').as_posix()}"
@@ -423,18 +317,14 @@ class ServiceStack:
             backend = "postgres"
         env.update(
             {
-                "VAULTSPEC_A2A_ENVIRONMENT": "production",
                 "VAULTSPEC_A2A_DATABASE_URL": database_url,
                 "VAULTSPEC_A2A_DATABASE_BACKEND": backend,
                 "VAULTSPEC_A2A_CHECKPOINT_BACKEND": backend,
                 "VAULTSPEC_A2A_GATEWAY_URL": self.gateway_url,
                 "VAULTSPEC_A2A_WORKER_URL": self.worker_url,
                 "VAULTSPEC_A2A_WORKER_HOST": "127.0.0.1",
-                "VAULTSPEC_A2A_WORKER_PORT": str(self.ports["worker"]),
-                "VAULTSPEC_A2A_PORT": str(self.ports["gateway"]),
                 "VAULTSPEC_A2A_INTERNAL_TOKEN": _INTERNAL_TOKEN,
                 "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
-                "VAULTSPEC_A2A_AUTO_SPAWN_WORKER": "false",
                 "VAULTSPEC_A2A_INSTALL_ROOT": str(REPO_ROOT),
                 "VAULTSPEC_A2A_MOCK_API_BASE": self.vidaimock_url,
                 # Arm the in-process lanes. This stack has no provider
@@ -463,63 +353,65 @@ class ServiceStack:
             env["VAULTSPEC_A2A_POSTGRES_REQUIRED"] = "true"
         return env
 
+    def spawn_native(
+        self,
+        factory: str,
+        *,
+        port: int,
+        env: dict[str, str],
+        log_name: str,
+    ) -> subprocess.Popen[bytes]:
+        """Spawn the production ASGI *factory* under uvicorn on *port*.
+
+        Detached, so a stray interrupt aimed at the harness's own foreground
+        group never reaches it; its output lands in *log_name* under this run's
+        directory, where readiness failures and diagnostics read it back.
+        """
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        return spawn_logged(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                factory,
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            env=env,
+            log_path=self.runtime_dir / log_name,
+            cwd=REPO_ROOT,
+            detached=True,
+        )
+
     def _start_worker(self) -> None:
         if self._worker_proc is not None:
             return
-        self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        proc, log_file = _spawn_process(
-            sys.executable,
-            "-m",
-            "uvicorn",
+        self._worker_proc = self.spawn_native(
             "vaultspec_a2a.worker.app:create_worker_app",
-            "--factory",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(self.ports["worker"]),
+            port=self.ports["worker"],
             env=self._local_env(),
-            log_path=self.runtime_dir / "worker.log",
+            log_name="worker.log",
         )
-        self._worker_proc = proc
-        self._worker_log = log_file
 
     def _start_gateway(self) -> None:
         if self._gateway_proc is not None:
             return
-        proc, log_file = _spawn_process(
-            sys.executable,
-            "-m",
-            "uvicorn",
+        self._gateway_proc = self.spawn_native(
             "vaultspec_a2a.api.app:create_app",
-            "--factory",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(self.ports["gateway"]),
+            port=self.ports["gateway"],
             env=self._local_env(),
-            log_path=self.runtime_dir / self._gateway_log_name,
+            log_name=self._gateway_log_name,
         )
-        self._gateway_proc = proc
-        self._gateway_log = log_file
-
-    def _stop_process(self, proc: subprocess.Popen[str] | None) -> None:
-        if proc is None or proc.poll() is not None:
-            return
-        # Reuse the lifecycle tree-kill: a bare terminate/kill orphans grandchildren
-        # on Windows (no taskkill /T), stranding e.g. an engine the process spawned.
-        tree_kill(proc.pid, timeout=30.0)
-        with contextlib.suppress(Exception):
-            proc.wait(timeout=30.0)
 
     def crash_gateway(self) -> None:
         """Kill this stack's gateway while leaving its worker and stores running."""
         if self._gateway_proc is None:
             raise RuntimeError("gateway is not running")
-        self._stop_process(self._gateway_proc)
+        reap_process(self._gateway_proc)
         self._gateway_proc = None
-        if self._gateway_log is not None:
-            self._gateway_log.close()
-            self._gateway_log = None
         self._gateway_log_name = "gateway-restarted.log"
 
     def restart_gateway(self) -> None:
@@ -549,14 +441,14 @@ class ServiceStack:
         *,
         label: str,
         timeout: float,
-        watch: Sequence[_WatchedProcess] = (),
+        watch: Sequence[WatchedProcess] = (),
     ) -> None:
-        _wait_for(
-            label,
+        await_ready(
             lambda: probe().get("status") == "ok",
+            what=label,
+            watch=watch,
             timeout=timeout,
             interval=1.0,
-            watch=watch,
         )
 
     def stop(self) -> None:
@@ -570,14 +462,9 @@ class ServiceStack:
                 self.resume_mock_service()
             except Exception as exc:
                 self.record("mock-unpause-error", {"error": repr(exc)})
-        self._stop_process(self._gateway_proc)
-        self._stop_process(self._worker_proc)
-        if self._gateway_log is not None:
-            self._gateway_log.close()
-            self._gateway_log = None
-        if self._worker_log is not None:
-            self._worker_log.close()
-        self._worker_log = None
+        for process in (self._gateway_proc, self._worker_proc):
+            if process is not None:
+                reap_process(process)
         self._gateway_proc = None
         self._worker_proc = None
         diagnostics_error: Exception | None = None
@@ -654,7 +541,7 @@ class ServiceStack:
         ):
             if proc_path.exists():
                 (self.runtime_dir / f"{name}-tail.txt").write_text(
-                    _log_tail(proc_path, limit=_DIAGNOSTIC_LOG_TAIL_CHARS),
+                    log_tail(proc_path, limit=_DIAGNOSTIC_LOG_TAIL_BYTES),
                     encoding="utf-8",
                 )
 
@@ -696,12 +583,12 @@ class ServiceStack:
 
         # The aggregate probe spans both owned processes, so either dying is a
         # fast failure rather than a 180s burn ending in a bare timeout.
-        _wait_for(
-            "gateway readiness",
+        await_ready(
             _probe,
+            what="service stack",
+            watch=self._watched("gateway", "worker"),
             timeout=180.0,
             interval=2.0,
-            watch=self._watched("gateway", "worker"),
         )
         return self.health()
 
@@ -842,28 +729,26 @@ class ServiceStack:
         # Path-safe by construction: run ids reach the filesystem, and the
         # schema pattern refuses anything else.
         run_id = f"svc-{uuid.uuid4().hex}"
-        meta: dict[str, Any] = dict(metadata) if metadata else {}
-        workspace_root = str(meta.get("workspace_root") or self.runtime_dir)
+        workspace_root = str((metadata or {}).get("workspace_root") or self.runtime_dir)
         Path(workspace_root).mkdir(parents=True, exist_ok=True)
-        meta["workspace_root"] = workspace_root
-
-        body: dict[str, Any] = {
-            "message": initial_message,
-            "team_preset": team_preset,
-            "run_id": run_id,
-            "selection": self.catalog_selection(workspace_root, team_preset),
-            "metadata": meta,
-        }
-        if title is not None:
-            body["title"] = title
-        if autonomous is not None:
-            body["autonomous"] = autonomous
-        with self._client(timeout=30.0) as client:
-            resp = client.post("/v1/runs", json=body)
-            resp.raise_for_status()
-            payload = resp.json()
-            self.record("last-create-thread", payload)
-            return payload
+        verbs = RunVerbs(
+            base_url=self.gateway_url,
+            authorization=f"Bearer {_GATEWAY_SERVICE_TOKEN}",
+            team_preset=team_preset,
+            workspace_root=workspace_root,
+            selection=lambda workspace: self.catalog_selection(workspace, team_preset),
+        )
+        resp = verbs.start(
+            run_id,
+            message=initial_message,
+            metadata={**(metadata or {}), "workspace_root": workspace_root},
+            title=title,
+            autonomous=autonomous,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        self.record("last-create-thread", payload)
+        return payload
 
     def list_threads(self, *, status: str | None = None) -> dict[str, Any]:
         """List every run, including terminal ones, via the history reading.

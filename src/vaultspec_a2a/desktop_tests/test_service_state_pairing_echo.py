@@ -27,22 +27,19 @@ reaped in a ``finally``.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
 from ..control._worker_health import GATEWAY_LIFETIME_ID
-from ..control.config import setting_env
-from ..tests.gateway_boot import armed_gateway_env, reap_gateway
+from ..testing import DEFAULT_ATTACH_CREDENTIAL, reap_process
 from .test_ownership_prerequisites import (
     _prepare,
     _serve,
+    _spawn_stray_worker,
     _worker_health,
     _worker_ipc_secret,
 )
-from .test_run_admission import _ATTACH
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,7 +48,10 @@ if TYPE_CHECKING:
 def _service_state(base: str) -> dict[str, Any]:
     """Read the gateway's authenticated service-state body over real HTTP."""
     with httpx.Client(base_url=base, timeout=60.0) as client:
-        resp = client.get("/v1/service", headers={"Authorization": f"Bearer {_ATTACH}"})
+        resp = client.get(
+            "/v1/service",
+            headers={"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"},
+        )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert isinstance(body, dict), body
@@ -156,24 +156,14 @@ def test_service_state_reports_blank_for_a_worker_it_did_not_spawn(
         assert before["worker_paired_gateway_lifetime"] is None, before
         assert before["worker_generation"] is None, before
 
-        # A real production worker that no gateway spawned. Both pairing
-        # variables are cleared so an inherited value from the test host cannot
-        # forge the evidence at issue.
-        stray_env = armed_gateway_env(
+        # A real production worker that no gateway spawned, on the gateway's
+        # own private worker port.
+        stray = _spawn_stray_worker(
             app_home,
             gateway_port=port,
             worker_port=worker_port,
-            auto_spawn_worker=False,
-        )
-        stray_env["VAULTSPEC_A2A_INTERNAL_TOKEN"] = secret
-        stray_env.pop(setting_env("gateway_lifetime_id"), None)
-        stray_env.pop(setting_env("worker_generation"), None)
-        stray_log = (tmp_path / "stray-worker.log").open("wb")
-        stray = subprocess.Popen(
-            [sys.executable, "-m", "vaultspec_a2a.worker"],
-            env=stray_env,
-            stdout=stray_log,
-            stderr=subprocess.STDOUT,
+            secret=secret,
+            log_path=tmp_path / "stray-worker.log",
         )
         try:
             stranger = _worker_health(worker_port, secret)
@@ -195,5 +185,4 @@ def test_service_state_reports_blank_for_a_worker_it_did_not_spawn(
             assert after["worker_paired_gateway_lifetime"] != gateway_lifetime, after
             assert after["worker_generation"] == "", after
         finally:
-            reap_gateway(stray)
-            stray_log.close()
+            reap_process(stray)

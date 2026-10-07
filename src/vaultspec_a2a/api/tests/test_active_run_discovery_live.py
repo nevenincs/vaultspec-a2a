@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import socket
-import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -18,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...database.models import ThreadModel
 from ...database.thread_repository import create_thread
-from ...testing.ports import free_port
+from ...testing import booted_gateway
 from ...tests._write_authority import (
     make_test_thread_authority_columns,
     make_test_write_authority,
@@ -33,81 +31,46 @@ _SERVICE_TOKEN = "active-discovery-service-token"
 _WORKER_TOKEN = "active-discovery-worker-token"
 
 
-# A full ``serve`` boot imports the application, runs migrations, and completes a
-# lifespan before it answers. Ten seconds is comfortable on an idle machine and
-# marginal inside a loaded whole-repository run, where this test was the one that
-# failed under ordering pressure while passing in isolation. The budget is
-# generous rather than tuned: a slow boot should cost wall-clock, not a red suite.
-_READY_ATTEMPTS = 3000
-_READY_INTERVAL_SECONDS = 0.02
-
-
 @asynccontextmanager
 async def _production_gateway(
     tmp_path: Path,
 ) -> AsyncGenerator[tuple[str, async_sessionmaker[AsyncSession]]]:
-    """Boot the installed gateway with its production lifespan and real storage."""
-    port = free_port()
+    """Boot the installed gateway with its production lifespan and real storage.
+
+    Through the real ``serve`` verb, outside the desktop profile, over explicit
+    stores and with no worker spawned: the worker URL names the reserved worker
+    port, on which nothing ever listens.
+    """
     database_path = tmp_path / "gateway.db"
     database_url = f"sqlite+aiosqlite:///{database_path.as_posix()}"
     checkpoint_path = tmp_path / "checkpoints.db"
     runtime_home = tmp_path / "a2a-home"
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "VAULTSPEC_A2A_HOST": "127.0.0.1",
-            "VAULTSPEC_A2A_PORT": str(port),
-            "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
-            "VAULTSPEC_A2A_DATABASE_URL": database_url,
-            "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
-            "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": (
-                f"sqlite+aiosqlite:///{checkpoint_path}"
-            ),
-            "VAULTSPEC_A2A_HOME": str(runtime_home),
-            "VAULTSPEC_A2A_WORKSPACE_ROOT": str(tmp_path / "managed-workspaces"),
-            "VAULTSPEC_A2A_AUTO_SPAWN_WORKER": "false",
-            "VAULTSPEC_A2A_WORKER_URL": f"http://127.0.0.1:{free_port()}",
-            "VAULTSPEC_A2A_INTERNAL_TOKEN": _WORKER_TOKEN,
-            "VAULTSPEC_A2A_GATEWAY_TOKEN": _SERVICE_TOKEN,
-        }
-    )
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "vaultspec_a2a.cli.main",
-        "serve",
-        env=environment,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    base_url = f"http://127.0.0.1:{port}"
-    try:
-        async with httpx.AsyncClient(
-            base_url=base_url,
-            timeout=2.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
-        ) as client:
-            for _ in range(_READY_ATTEMPTS):
-                if process.returncode is not None:
-                    output = await process.stdout.read() if process.stdout else b""
-                    pytest.fail(
-                        "production gateway exited during startup:\n"
-                        + output.decode(errors="replace")
-                    )
-                try:
-                    response = await client.get("/v1/runs", params={"limit": 1})
-                    if response.status_code == 200:
-                        break
-                except httpx.TransportError:
-                    pass
-                await asyncio.sleep(_READY_INTERVAL_SECONDS)
-            else:
-                budget = _READY_ATTEMPTS * _READY_INTERVAL_SECONDS
-                pytest.fail(
-                    f"production gateway did not become ready within {budget:.0f}s "
-                    f"on port {port}; a bind conflict on that port is a plausible "
-                    "cause alongside a genuinely slow or failed boot"
-                )
+
+    def _environment(gateway_port: int, worker_port: int) -> dict[str, str]:
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "VAULTSPEC_A2A_HOST": "127.0.0.1",
+                "VAULTSPEC_A2A_PORT": str(gateway_port),
+                "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
+                "VAULTSPEC_A2A_DATABASE_URL": database_url,
+                "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "sqlite",
+                "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": (
+                    f"sqlite+aiosqlite:///{checkpoint_path}"
+                ),
+                "VAULTSPEC_A2A_HOME": str(runtime_home),
+                "VAULTSPEC_A2A_WORKSPACE_ROOT": str(tmp_path / "managed-workspaces"),
+                "VAULTSPEC_A2A_AUTO_SPAWN_WORKER": "false",
+                "VAULTSPEC_A2A_WORKER_URL": f"http://127.0.0.1:{worker_port}",
+                "VAULTSPEC_A2A_INTERNAL_TOKEN": _WORKER_TOKEN,
+                "VAULTSPEC_A2A_GATEWAY_TOKEN": _SERVICE_TOKEN,
+            }
+        )
+        return environment
+
+    with booted_gateway(
+        _environment, log_path=tmp_path / "gateway.log", script=None
+    ) as gateway:
         fixture_engine = create_async_engine(database_url)
         try:
             session_factory = async_sessionmaker(
@@ -115,20 +78,9 @@ async def _production_gateway(
                 class_=AsyncSession,
                 expire_on_commit=False,
             )
-            yield base_url, session_factory
+            yield gateway.base_url, session_factory
         finally:
             await fixture_engine.dispose()
-    finally:
-        if process.returncode is None:
-            process.terminate()
-        try:
-            # ``wait()`` reaps the child but does not guarantee that Windows'
-            # Proactor pipe transports have consumed EOF and closed.  Draining
-            # through ``communicate()`` owns both operations on this loop.
-            await asyncio.wait_for(process.communicate(), timeout=10.0)
-        except TimeoutError:
-            process.kill()
-            await process.communicate()
 
 
 async def _assert_unauthenticated_routes(anonymous: httpx.AsyncClient) -> None:

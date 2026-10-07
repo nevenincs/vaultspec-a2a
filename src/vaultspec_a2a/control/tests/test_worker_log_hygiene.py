@@ -12,9 +12,8 @@ from __future__ import annotations
 import http.server
 import subprocess
 import sys
-import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,7 +23,7 @@ from ...control._worker_health import (
     sweep_orphan_worker_logs,
 )
 from ...lifecycle.registry import ProcRecord, now_ms, write_record
-from ...testing import settings_override
+from ...testing import JsonReplyHandler, serve_handler, settings_override
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -38,36 +37,20 @@ def _a2a_home(path: Path) -> Generator[None]:
         yield
 
 
-def _make_handler() -> type[http.server.BaseHTTPRequestHandler]:
-    class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self.send_response(404)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+class _ForeignWorkerHandler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
+    """Answers health 404 and accepts every shutdown without ever exiting."""
 
-        def do_POST(self) -> None:
-            self.send_response(202)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+    def do_GET(self) -> None:
+        self._reply_empty(404)
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            """Silence the default access log."""
-
-    return _Handler
+    def do_POST(self) -> None:
+        self._reply_empty(202)
 
 
 @contextmanager
 def _foreign_worker() -> Generator[int]:
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler())
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_handler(_ForeignWorkerHandler) as port:
         yield port
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 @pytest.mark.asyncio

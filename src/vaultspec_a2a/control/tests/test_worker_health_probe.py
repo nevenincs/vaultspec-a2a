@@ -9,21 +9,21 @@ the two can never silently disagree on a worker's health.
 from __future__ import annotations
 
 import http.server
-import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
 from ...control._worker_health import WorkerHealthProbe, probe_worker_health
+from ...testing import JsonReplyHandler, serve_handler
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
 
 def _make_handler(status: int) -> type[http.server.BaseHTTPRequestHandler]:
-    class _Handler(http.server.BaseHTTPRequestHandler):
+    class _Handler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             self.send_response(status if self.path == "/health" else 404)
             payload = b"[]" if status == 200 and self.path == "/health" else b""
@@ -34,24 +34,13 @@ def _make_handler(status: int) -> type[http.server.BaseHTTPRequestHandler]:
             if payload:
                 self.wfile.write(payload)
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            """Silence the default access log."""
-
     return _Handler
 
 
 @contextmanager
 def _health_server(status: int) -> Generator[str]:
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(status))
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_handler(_make_handler(status)) as port:
         yield f"http://127.0.0.1:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 @pytest.mark.asyncio

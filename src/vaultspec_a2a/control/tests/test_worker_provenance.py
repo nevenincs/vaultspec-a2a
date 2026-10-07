@@ -9,14 +9,12 @@ classification and eviction helpers.
 from __future__ import annotations
 
 import http.server
-import json
 import os
 import subprocess
 import sys
 import textwrap
-import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, TypedDict, override
+from typing import TYPE_CHECKING, TypedDict
 
 import pytest
 
@@ -24,6 +22,7 @@ from ...control._worker_health import WorkerHealthProbe, probe_worker_health
 from ...control.config import settings
 from ...control.infra_config import INTERNAL_TOKEN_ENV
 from ...control.worker_management import LazyWorkerSpawner
+from ...testing import JsonReplyHandler, serve_handler
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -39,35 +38,20 @@ def _make_handler(
     body: dict[str, object] | None,
     shutdown_log: _ShutdownObservation,
 ) -> type[http.server.BaseHTTPRequestHandler]:
-    class _Handler(http.server.BaseHTTPRequestHandler):
+    class _Handler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path != "/health" or body is None:
-                self.send_response(404)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
+                self._reply_empty(404)
                 return
-            payload = json.dumps(body).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            self._reply(200, body)
 
         def do_POST(self) -> None:
             if self.path != "/admin/shutdown":
-                self.send_response(404)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
+                self._reply_empty(404)
                 return
             shutdown_log["called"] = True
             shutdown_log["authorization"] = self.headers.get("Authorization")
-            self.send_response(202)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            """Silence the default access log."""
+            self._reply_empty(202)
 
     return _Handler
 
@@ -77,17 +61,8 @@ def _worker_like(
     body: dict[str, object] | None,
 ) -> Generator[tuple[str, int, _ShutdownObservation]]:
     shutdown_log: _ShutdownObservation = {"called": False, "authorization": None}
-    server = http.server.ThreadingHTTPServer(
-        ("127.0.0.1", 0), _make_handler(body, shutdown_log)
-    )
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_handler(_make_handler(body, shutdown_log)) as port:
         yield f"http://127.0.0.1:{port}", port, shutdown_log
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 @pytest.mark.asyncio

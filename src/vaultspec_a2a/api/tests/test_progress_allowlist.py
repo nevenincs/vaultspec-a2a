@@ -25,14 +25,13 @@ import pytest
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
-from ...testing import read_frame
+from ...testing import read_frame, serve_on_loopback
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import (
     SEATED_ATTACH_TOKEN,
     AppFixture,
     SessionFactory,
-    _live_server,
     make_app,
 )
 
@@ -99,7 +98,7 @@ async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
@@ -146,7 +145,7 @@ async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
@@ -200,7 +199,7 @@ async def test_authenticated_stream_bounds_the_token_delta(
     oversized = "T" * (MAX_PROGRESS_CONTENT_CHARS + 5000)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
@@ -250,7 +249,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
@@ -336,7 +335,7 @@ async def test_authenticated_stream_degrades_an_uncatalogued_frame(
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
@@ -381,7 +380,7 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
@@ -431,7 +430,7 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
@@ -462,7 +461,7 @@ async def test_global_stream_quota_admits_the_authenticated_caller_below_capacit
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,

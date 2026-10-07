@@ -15,16 +15,14 @@ residual).
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import pathlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, override
 
 import httpx
 import pytest
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport
@@ -42,6 +40,7 @@ from ...testing import (
     async_catalog_run_fields,
     compile_test_graph,
     new_state_graph,
+    serve_on_loopback,
 )
 from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
@@ -57,7 +56,7 @@ from ...worker.ipc import WorkerBridge
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Generator
+    from collections.abc import Generator
     from pathlib import Path
 
     from ...thread.state import TeamState
@@ -87,27 +86,6 @@ class _MultiroleFixture:
 # ---------------------------------------------------------------------------
 # Live-socket helpers
 # ---------------------------------------------------------------------------
-
-
-@contextlib.asynccontextmanager
-async def _live_server(app: object) -> AsyncGenerator[str]:
-    config = uvicorn.Config(
-        cast("Any", app), host="127.0.0.1", port=0, log_level="warning", lifespan="on"
-    )
-    server = uvicorn.Server(config)
-    task = asyncio.create_task(server.serve())
-    try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "uvicorn did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(task, timeout=5.0)
 
 
 def _bridge() -> WorkerBridge:
@@ -283,7 +261,7 @@ async def _dispatch_multirole_run(
         _assert_no_token(records)
         app, _agg, _worker, _cp = make_app(session_factory, cp)
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base) as client,
         ):
             return await _read_run_status(client, fixture.thread_id)
@@ -297,7 +275,7 @@ async def _read_restart_status(
     async with AsyncSqliteSaver.from_conn_string(fixture.checkpoint_path) as restart_cp:
         app2, _a2, _w2, _c2 = make_app(session_factory, restart_cp)
         async with (
-            _live_server(app2) as base2,
+            serve_on_loopback(app2) as base2,
             httpx.AsyncClient(base_url=base2) as client2,
         ):
             return await _read_run_status(client2, fixture.thread_id)
@@ -370,7 +348,10 @@ async def test_run_start_carries_no_token_into_logs(
         "tokens": {"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
         "engine_bearer": _BEARER,
     }
-    async with _live_server(app) as base, httpx.AsyncClient(base_url=base) as client:
+    async with (
+        serve_on_loopback(app) as base,
+        httpx.AsyncClient(base_url=base) as client,
+    ):
         # Derived OUTSIDE the capture: the catalog probe is setup, not the run
         # under test, and the assertion below is sharpest when the captured window
         # holds only the run-start that carries the tokens.

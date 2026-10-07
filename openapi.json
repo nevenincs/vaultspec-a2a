@@ -2338,7 +2338,7 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker; retry later."
+            "description": "Gateway service token is not configured, the worker is saturated or shut out by the failure breaker, or another writer held the store's write lock for the whole of this write; nothing was applied, so retry later."
           },
           "404": {
             "description": "No such run, or the run is not parked on this questionnaire."
@@ -2418,7 +2418,7 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker; retry later."
+            "description": "Gateway service token is not configured, the worker is saturated or shut out by the failure breaker, or another writer held the store's write lock for the whole of this write; nothing was applied, so retry later."
           },
           "404": {
             "description": "No such run."

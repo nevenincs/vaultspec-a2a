@@ -68,8 +68,9 @@ _UPSTREAM = _ServedRefusal(
 # status replaces the router-wide description, so it is restated here.
 _UNAVAILABLE = _ServedRefusal(
     503,
-    "Gateway service token is not configured, or the worker is saturated or "
-    "shut out by the failure breaker; retry later.",
+    "Gateway service token is not configured, the worker is saturated or shut "
+    "out by the failure breaker, or another writer held the store's write lock "
+    "for the whole of this write; nothing was applied, so retry later.",
 )
 
 #: Every condition a dispatch can end in. A refusing worker may name any member
@@ -107,7 +108,9 @@ def _served(failure_type: FailureType) -> _ServedRefusal:
             | FailureType.CREDENTIALS_REQUIRED
         ):
             return _UPSTREAM
-        case FailureType.CIRCUIT_OPEN | FailureType.AT_CAPACITY:
+        case (
+            FailureType.CIRCUIT_OPEN | FailureType.AT_CAPACITY | FailureType.STORE_BUSY
+        ):
             return _UNAVAILABLE
         case _:
             assert_never(failure_type)

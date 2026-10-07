@@ -42,6 +42,7 @@ from ...control.workspace import (
 from ...database import (
     Checkpointer,
     ThreadModel,
+    WriteContentionError,
     get_thread,
     retry_write_contention,
 )
@@ -53,6 +54,7 @@ from ...providers.team_selection import (
 from ...streaming import RelayHub
 from ...team import TeamConfig
 from ...telemetry import trace_headers
+from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     ThreadStatus,
 )
@@ -411,6 +413,12 @@ async def _create_thread_with_retry(
     )
     try:
         return await _attempt_thread_creation(db, body, request, runtime)
+    except WriteContentionError as exc:
+        # No run exists: every attempt at the creating write was refused by a
+        # competing writer. The same retryable refusal every run-control verb
+        # serves for the same condition, rather than an internal fault.
+        logger.warning("Run %s found the store contended: %s", body.run_id, exc)
+        raise refused_dispatch(FailureType.STORE_BUSY, str(exc)) from exc
     except NicknameConflictError as exc:
         raise HTTPException(
             status_code=409,

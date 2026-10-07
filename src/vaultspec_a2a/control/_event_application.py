@@ -110,7 +110,6 @@ async def apply_permission_resolution(
             thread_id,
             approval_status=fx_res.approval_status,
             approval_request_id=request_id,
-            approval_reason=permission.description,
         )
 
 

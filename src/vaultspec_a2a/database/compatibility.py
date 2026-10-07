@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SchemaCompatibilityError",
+    "read_alembic_version",
     "supported_migration_head",
     "validate_desktop_schema",
 ]
@@ -119,11 +120,12 @@ def _known_revisions(database_url: str) -> set[str]:
     return {revision.revision for revision in script.walk_revisions()}
 
 
-def _read_alembic_version(db_path: Path) -> str | None:
+def read_alembic_version(db_path: Path) -> str | None:
     """Return the primary database's recorded Alembic revision, or ``None``.
 
-    ``None`` means the ``alembic_version`` table is absent (an empty or never
-    migrated store) or carries no row.
+    ``None`` means the file or its ``alembic_version`` table is absent (an empty
+    or never migrated store) or the table carries no row. The store is opened
+    read-only, so asking never creates or changes it.
     """
     if not db_path.is_file():
         return None
@@ -241,7 +243,7 @@ def _validate_primary_schema(database_url: str) -> None:
     db_path = _sqlite_path_from_url(database_url)
     head = supported_migration_head(database_url)
     try:
-        current = _read_alembic_version(db_path)
+        current = read_alembic_version(db_path)
     except sqlite3.Error as exc:
         raise SchemaCompatibilityError(
             f"desktop primary database at {db_path} is unreadable or corrupt; "

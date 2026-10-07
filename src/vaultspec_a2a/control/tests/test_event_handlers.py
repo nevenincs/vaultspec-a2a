@@ -914,7 +914,6 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         assert thread.status == ThreadStatus.INPUT_REQUIRED.value
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
-        assert thread.approval_reason == permission.description
         assert thread.run_revision == 1
         assert thread.writer_generation == 1
         assert thread.writer_action_type == ControlActionType.INGEST
@@ -970,7 +969,6 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
             thread_id,
             approval_status="pending",
             approval_request_id=request_id,
-            approval_reason="Approve the plan before completion",
         )
         action, _receipt, _checkpoint = await _seed_unapplied_leased_action(
             session,
@@ -1002,7 +1000,6 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
         assert thread.status == "completed"
         assert thread.approval_status is None
         assert thread.approval_request_id is None
-        assert thread.approval_reason is None
         assert thread.approval_response_action_id is None
         stored_action = await session.get(ControlActionModel, action.id)
         assert stored_action is not None
@@ -1199,7 +1196,6 @@ async def _answered_rejection(
                 thread.id,
                 approval_status="rejected",
                 approval_request_id=request_id,
-                approval_reason="Approve?",
             )
         await session.commit()
         thread_id = thread.id

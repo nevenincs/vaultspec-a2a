@@ -117,7 +117,6 @@ async def _expire_overdue_actions(
             thread_id=row.thread_id,
             action_type=row.action_type,
             payload=decode_json_object(row.payload_json) or {},
-            worker_generation=row.worker_generation,
             recovery_deadline_at=row.recovery_deadline_at,
         )
         for row in rows
@@ -171,7 +170,6 @@ class _StoredAction:
     thread_id: str
     action_type: str
     payload: dict[str, object]
-    worker_generation: int
     recovery_deadline_at: datetime
 
 
@@ -385,7 +383,6 @@ async def _settle_missing_action(
                 thread_id=recovery_claim.thread_id,
                 action_type=recovery_claim.authority.action_type.value,
                 payload=payload or {},
-                worker_generation=row.worker_generation,
                 recovery_deadline_at=recovery_claim.deadline_at,
             ),
             refusal,
@@ -550,7 +547,6 @@ async def _prepare_recovery_action(
         thread_id=recovery_claim.thread_id,
         action_type=recovery_claim.authority.action_type.value,
         payload=payload,
-        worker_generation=row.worker_generation,
         recovery_deadline_at=recovery_claim.deadline_at,
     )
     action_claim_expires_at = row.claim_expires_at
@@ -564,7 +560,6 @@ async def _prepare_recovery_action(
             idempotency_key=action.identity.idempotency_key,
             payload=action.payload,
             dispatch_id=action.identity.dispatch_id,
-            worker_generation=action.worker_generation,
             recovery_deadline_at=action.recovery_deadline_at,
             now=claim_started,
         ),

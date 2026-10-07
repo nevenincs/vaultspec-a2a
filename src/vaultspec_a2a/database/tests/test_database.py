@@ -53,7 +53,6 @@ from .. import (
 )
 from .. import session as _session_module
 from ..models import (
-    ArtifactModel,
     CostTrackingModel,
     PermissionLogModel,
     ThreadModel,
@@ -71,7 +70,7 @@ from ..session import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
-EXPECTED_TABLES = {"artifacts", "cost_tracking", "permission_logs", "threads"}
+EXPECTED_TABLES = {"cost_tracking", "permission_logs", "threads"}
 
 # The bound the cross-repository consumer of a failed run's reason enforces: it
 # rejects anything longer than 500 BYTES outright, so a reason over that is not
@@ -456,14 +455,12 @@ class TestThreadCRUD:
             thread.id,
             approval_status=ApprovalStatus.PENDING,
             approval_request_id="approval-1",
-            approval_reason="Approve plan before exec",
             approval_response_action_id="action-1",
         )
 
         assert updated is not None
         assert updated.approval_status == "pending"
         assert updated.approval_request_id == "approval-1"
-        assert updated.approval_reason == "Approve plan before exec"
         assert updated.approval_response_action_id == "action-1"
         assert updated.approval_updated_at is not None
 
@@ -643,34 +640,6 @@ class TestThreadCRUD:
             found = await get_thread(s2, tid)
             assert found is not None
             assert found.title == "durable"
-
-
-# ---------------------------------------------------------------------------
-# Artifact CRUD Tests
-# ---------------------------------------------------------------------------
-
-
-class TestArtifactCRUD:
-    """Tests for artifact model persistence."""
-
-    @pytest.mark.asyncio
-    async def test_save_artifact_with_extra_fields(self, session: AsyncSession) -> None:
-        """save_model should persist an ArtifactModel with all fields set."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="Full Artifact"
-        )
-        artifact = ArtifactModel(
-            id=uuid4().hex,
-            thread_id=thread.id,
-            type="file",
-            path="src/lib.py",
-            content_hash="abc123",
-            agent_id="coder-1",
-        )
-        saved = await save_model(session, artifact)
-        assert isinstance(saved, ArtifactModel)
-        assert saved.content_hash == "abc123"
-        assert saved.agent_id == "coder-1"
 
 
 # ---------------------------------------------------------------------------

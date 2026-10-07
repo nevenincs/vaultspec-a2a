@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -934,13 +933,6 @@ async def _handle_execution_state_event(
     from ..database import begin_write_transaction, record_thread_execution_state
 
     projection = ExecutionStateProjectionPayload.model_validate(payload)
-    snapshot_created_at: datetime | None = None
-    if projection.snapshot_created_at is not None:
-        try:
-            snapshot_created_at = datetime.fromisoformat(projection.snapshot_created_at)
-        except ValueError:
-            snapshot_created_at = None
-
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the execution-state projection", thread_id)
@@ -952,11 +944,9 @@ async def _handle_execution_state_event(
             thread_id=thread_id,
             checkpoint_id=projection.checkpoint_id,
             parent_checkpoint_id=projection.parent_checkpoint_id,
-            snapshot_created_at=snapshot_created_at,
             task_count=projection.task_count,
             interrupt_count=projection.interrupt_count,
             next_nodes=list(projection.next_nodes),
-            interrupt_types=list(projection.interrupt_types),
             tasks=[asdict(task) for task in projection.tasks],
             degraded_reasons=list(projection.degraded_reasons),
         )

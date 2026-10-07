@@ -812,7 +812,6 @@ async def set_thread_repair_state(
 class _ApprovalStateOptions(TypedDict, total=False):
     approval_status: ApprovalStatus | str | _UnsetType | None
     approval_request_id: str | _UnsetType | None
-    approval_reason: str | _UnsetType | None
     approval_response_action_id: str | _UnsetType | None
     approval_updated_at: datetime | None
 
@@ -823,7 +822,6 @@ async def set_thread_approval_state(
     """Persist durable plan-approval state on the thread row."""
     approval_status = kwargs.get("approval_status", _UNSET)
     approval_request_id = kwargs.get("approval_request_id", _UNSET)
-    approval_reason = kwargs.get("approval_reason", _UNSET)
     approval_response_action_id = kwargs.get("approval_response_action_id", _UNSET)
     approval_updated_at = kwargs.get("approval_updated_at")
     thread = await get_thread(session, thread_id)
@@ -837,8 +835,6 @@ async def set_thread_approval_state(
         )
     if not isinstance(approval_request_id, _UnsetType):
         thread.approval_request_id = approval_request_id
-    if not isinstance(approval_reason, _UnsetType):
-        thread.approval_reason = approval_reason
     if not isinstance(approval_response_action_id, _UnsetType):
         thread.approval_response_action_id = approval_response_action_id
     thread.approval_updated_at = approval_updated_at or _utcnow()
@@ -847,20 +843,18 @@ async def set_thread_approval_state(
 
 
 def _is_degraded_only_execution_state(
-    checkpoint_fields: tuple[str | None, str | None, datetime | None],
-    activity_fields: tuple[int, int, list[str], list[str], list[dict[str, object]]],
+    checkpoint_fields: tuple[str | None, str | None],
+    activity_fields: tuple[int, int, list[str], list[dict[str, object]]],
     degraded_reasons: list[DegradedReason],
 ) -> bool:
-    checkpoint_id, parent_checkpoint_id, snapshot_created_at = checkpoint_fields
-    task_count, interrupt_count, next_nodes, interrupt_types, tasks = activity_fields
+    checkpoint_id, parent_checkpoint_id = checkpoint_fields
+    task_count, interrupt_count, next_nodes, tasks = activity_fields
     return (
         checkpoint_id is None
         and parent_checkpoint_id is None
-        and snapshot_created_at is None
         and task_count == 0
         and interrupt_count == 0
         and not next_nodes
-        and not interrupt_types
         and not tasks
         and bool(degraded_reasons)
     )
@@ -870,11 +864,9 @@ class _ExecutionStateArgs(TypedDict):
     thread_id: str
     checkpoint_id: str | None
     parent_checkpoint_id: str | None
-    snapshot_created_at: datetime | None
     task_count: int
     interrupt_count: int
     next_nodes: list[str]
-    interrupt_types: list[str]
     tasks: list[dict[str, object]]
     degraded_reasons: list[DegradedReason]
 
@@ -889,22 +881,16 @@ async def record_thread_execution_state(
 
     existing = await session.get(ThreadExecutionStateModel, kwargs["thread_id"])
     degraded_only = _is_degraded_only_execution_state(
-        (
-            kwargs["checkpoint_id"],
-            kwargs["parent_checkpoint_id"],
-            kwargs["snapshot_created_at"],
-        ),
+        (kwargs["checkpoint_id"], kwargs["parent_checkpoint_id"]),
         (
             kwargs["task_count"],
             kwargs["interrupt_count"],
             kwargs["next_nodes"],
-            kwargs["interrupt_types"],
             kwargs["tasks"],
         ),
         kwargs["degraded_reasons"],
     )
     next_nodes_json = json.dumps(kwargs["next_nodes"])
-    interrupt_types_json = json.dumps(kwargs["interrupt_types"])
     tasks_json = json.dumps(kwargs["tasks"])
     degraded_reasons_json = json.dumps(kwargs["degraded_reasons"])
 
@@ -912,11 +898,9 @@ async def record_thread_execution_state(
         if not degraded_only:
             existing.checkpoint_id = kwargs["checkpoint_id"]
             existing.parent_checkpoint_id = kwargs["parent_checkpoint_id"]
-            existing.snapshot_created_at = kwargs["snapshot_created_at"]
             existing.task_count = kwargs["task_count"]
             existing.interrupt_count = kwargs["interrupt_count"]
             existing.next_nodes_json = next_nodes_json
-            existing.interrupt_types_json = interrupt_types_json
             existing.tasks_json = tasks_json
         existing.recorded_at = _utcnow()
         existing.degraded_reasons_json = degraded_reasons_json
@@ -927,12 +911,10 @@ async def record_thread_execution_state(
         thread_id=kwargs["thread_id"],
         checkpoint_id=kwargs["checkpoint_id"],
         parent_checkpoint_id=kwargs["parent_checkpoint_id"],
-        snapshot_created_at=kwargs["snapshot_created_at"],
         recorded_at=_utcnow(),
         task_count=kwargs["task_count"],
         interrupt_count=kwargs["interrupt_count"],
         next_nodes_json=next_nodes_json,
-        interrupt_types_json=interrupt_types_json,
         tasks_json=tasks_json,
         degraded_reasons_json=degraded_reasons_json,
     )

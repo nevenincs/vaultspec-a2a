@@ -134,7 +134,6 @@ async def settle_terminal(
         thread.id,
         approval_status=None,
         approval_request_id=None,
-        approval_reason=None,
         approval_response_action_id=None,
     )
     await mark_control_action_applied(

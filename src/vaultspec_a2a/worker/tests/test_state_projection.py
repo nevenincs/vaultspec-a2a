@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import operator
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 
 import httpx
@@ -46,7 +45,6 @@ class _StateNormalizationFixture(BaseModel):
     next: tuple[str, ...]
     interrupts: tuple[Interrupt, ...]
     tasks: tuple[PregelTask, ...]
-    created_at: datetime
     config: dict[str, object]
     parent_config: dict[str, object] | None
 
@@ -68,7 +66,6 @@ def test_normalize_execution_state_projects_interrupt_contract() -> None:
                 interrupts=(approval_interrupt,),
             ),
         ),
-        created_at=datetime(2026, 8, 2, tzinfo=UTC),
         config={"configurable": {"checkpoint_id": "checkpoint-7"}},
         parent_config={"configurable": {"checkpoint_id": "checkpoint-6"}},
     )
@@ -77,9 +74,7 @@ def test_normalize_execution_state_projects_interrupt_contract() -> None:
 
     assert payload.checkpoint_id == "checkpoint-7"
     assert payload.parent_checkpoint_id == "checkpoint-6"
-    assert payload.snapshot_created_at == "2026-08-02T00:00:00+00:00"
     assert payload.next_nodes == ["await_approval"]
-    assert payload.interrupt_types == ["approval"]
     assert payload.interrupt_count == 1
     assert payload.task_count == 1
     task = payload.tasks[0]
@@ -149,7 +144,6 @@ async def test_a_node_that_asks_again_is_still_the_next_node() -> None:
     )
 
     assert payload.next_nodes == ["ask_until_settled"]
-    assert payload.interrupt_types == ["approval"]
     assert payload.interrupt_count == 1
 
     await graph.ainvoke(Command(resume="settled"), config=config)
@@ -291,7 +285,6 @@ def test_normalize_state_keeps_missing_configurable_metadata_optional() -> None:
         next=(),
         interrupts=(),
         tasks=(),
-        created_at=datetime(2026, 8, 2, tzinfo=UTC),
         config={},
         parent_config=None,
     )
@@ -308,7 +301,6 @@ def test_normalize_state_raises_for_malformed_configurable_metadata() -> None:
         next=(),
         interrupts=(),
         tasks=(),
-        created_at=datetime(2026, 8, 2, tzinfo=UTC),
         config={"configurable": []},
         parent_config=None,
     )

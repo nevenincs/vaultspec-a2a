@@ -35,8 +35,9 @@ from vaultspec_a2a.database.thread_repository import (  # absolute-import-ok
     select_orphaned_writer_thread,
 )
 from vaultspec_a2a.database.write_authority_schema import (  # absolute-import-ok
+    WRITE_AUTHORITY_CHECKS,
     WRITE_AUTHORITY_COLUMNS,
-    write_authority_checks_match,
+    named_checks_match,
     write_authority_receipt_index_matches,
 )
 
@@ -143,7 +144,25 @@ def run_migrations_offline() -> None:
 # -- Online mode (async) ------------------------------------------------------
 
 
-def _authority_was_installed(connection: Connection, tables: set[str]) -> bool:
+#: The revision that installed run write authority.
+_AUTHORITY_REVISION = "0017"
+#: The revision that narrowed the run writer's action vocabulary.
+_NARROWED_ACTIONS_REVISION = "0026"
+_WRITER_ACTION_CHECK = "ck_threads_writer_action_type_current"
+# Spelled literally, as the revisions spell it: this is the predicate every
+# revision from 0017 up to 0026 left on ``threads``, and it must not follow
+# whatever the package's action vocabulary means later.
+_PRE_NARROWING_WRITER_ACTION_PREDICATE = (
+    "writer_action_type IN "
+    "('ingest', 'resume', 'cancel', 'permission_request_created', "
+    "'permission_response_submitted', 'permission_response_applied', "
+    "'message_followup_requested', 'message_followup_applied', "
+    "'repair_started', 'repair_finished')"
+)
+
+
+def _store_reached(connection: Connection, tables: set[str], revision: str) -> bool:
+    """Whether the store's recorded revision is *revision* or descends from it."""
     current_revision = None
     if "alembic_version" in tables:
         current_revision = connection.exec_driver_sql(
@@ -154,11 +173,28 @@ def _authority_was_installed(connection: Connection, tables: set[str]) -> bool:
     revisions = ScriptDirectory.from_config(config).iterate_revisions(
         str(current_revision), "base"
     )
-    return any(candidate.revision == "0017" for candidate in revisions)
+    return any(candidate.revision == revision for candidate in revisions)
+
+
+def _expected_write_authority_checks(narrowed: bool) -> dict[str, str]:
+    """The write-authority CHECKs a store at its recorded revision must carry.
+
+    A store that has not yet reached the narrowing revision still admits the
+    retired repair actions in its writer CHECK; that revision rebuilds the
+    CHECK, so holding such a store to the current predicate would refuse the
+    very upgrade that brings it current. Its rows are still proven against the
+    current vocabulary by the populated-store check.
+    """
+    if narrowed:
+        return dict(WRITE_AUTHORITY_CHECKS)
+    return {
+        **WRITE_AUTHORITY_CHECKS,
+        _WRITER_ACTION_CHECK: _PRE_NARROWING_WRITER_ACTION_PREDICATE,
+    }
 
 
 def _has_current_write_authority_structure(
-    connection: Connection, inspector: Inspector
+    connection: Connection, inspector: Inspector, *, narrowed: bool
 ) -> bool:
     expected = {
         name: (column_type, False, None)
@@ -184,7 +220,7 @@ def _has_current_write_authority_structure(
     return (
         has_structure
         and write_authority_receipt_index_matches(inspector.get_indexes("threads"))
-        and write_authority_checks_match(checks)
+        and named_checks_match(checks, _expected_write_authority_checks(narrowed))
     )
 
 
@@ -212,9 +248,12 @@ def _validate_current_only_head(connection: Connection) -> None:
         and connection.exec_driver_sql("SELECT 1 FROM threads LIMIT 1").first()
         is not None
     )
-    authority_installed = _authority_was_installed(connection, tables)
+    authority_installed = _store_reached(connection, tables, _AUTHORITY_REVISION)
     if populated or authority_installed:
-        if not _has_current_write_authority_structure(connection, inspector):
+        narrowed = _store_reached(connection, tables, _NARROWED_ACTIONS_REVISION)
+        if not _has_current_write_authority_structure(
+            connection, inspector, narrowed=narrowed
+        ):
             connection.rollback()
             raise CommandError(
                 "cannot migrate a store without complete current "

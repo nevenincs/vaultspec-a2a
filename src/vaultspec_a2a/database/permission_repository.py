@@ -77,7 +77,6 @@ argument at those call sites rather than being folded into this constant.
 
 class _PermissionRequestOptional(TypedDict, total=False):
     tool_call: str | None
-    worker_generation: int
 
 
 class _PermissionRequestArgs(_PermissionRequestOptional):
@@ -99,7 +98,6 @@ async def record_permission_request(
     description = kwargs["description"]
     allowed_options = kwargs["allowed_options"]
     tool_call = kwargs.get("tool_call")
-    worker_generation = kwargs.get("worker_generation", 0)
     existing = await session.get(PermissionRequestModel, request_id)
     allowed_options_json = json.dumps(allowed_options)
     if existing is not None:
@@ -107,7 +105,6 @@ async def record_permission_request(
         existing.description = description
         existing.allowed_options_json = allowed_options_json
         existing.tool_call = tool_call
-        existing.worker_generation = worker_generation
         existing.request_status = PermissionRequestStatus.PENDING.value
         existing.response_option_id = None
         existing.idempotency_key = None
@@ -124,7 +121,6 @@ async def record_permission_request(
         description=description,
         allowed_options_json=allowed_options_json,
         request_status=PermissionRequestStatus.PENDING.value,
-        worker_generation=worker_generation,
     )
     return await save_model(session, model)
 

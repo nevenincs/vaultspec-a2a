@@ -368,7 +368,6 @@ async def create_and_dispatch_thread(
             idempotency_key=thread_create_action_key(thread.id),
             payload=accepted_input,
             dispatch_id=action_receipt_id,
-            worker_generation=thread.writer_generation,
             write_expectation=thread_write_expectation(thread),
             recovery_deadline_at=recovery_deadline_at,
         ),

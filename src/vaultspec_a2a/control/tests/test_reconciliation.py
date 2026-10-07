@@ -170,7 +170,6 @@ async def test_deleting_thread_with_pending_permission_is_never_swept(
     assert unswept.status == "deleting"
     assert unswept.repair_status == "healthy"
     assert unswept.execution_readiness == "healthy"
-    assert unswept.recovery_epoch == 0
 
 
 @pytest.mark.asyncio
@@ -235,5 +234,3 @@ async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
     assert repaired.status == "reconciling"
     assert repaired.repair_status == "needs_reconciliation"
     assert repaired.execution_readiness == "needs_reconciliation"
-    assert repaired.recovery_epoch == 0
-    assert repaired.repair_generation == 0

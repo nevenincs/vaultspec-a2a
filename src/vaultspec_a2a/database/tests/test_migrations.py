@@ -28,14 +28,32 @@ from ..migrate import (
 
 _APP_TABLES = {
     "threads",
-    "artifacts",
     "permission_logs",
     "cost_tracking",
     "thread_execution_state",
-    "task_queue_entries",
     "thread_deletion_saga",
     "permission_requests",
     "control_actions",
+}
+#: Revision 0026 retired these; head must not carry them.
+_RETIRED_TABLES = {"artifacts", "task_queue_entries"}
+_RETIRED_COLUMNS = {
+    "threads": {"approval_reason", "repair_generation", "recovery_epoch"},
+    "thread_execution_state": {
+        "snapshot_created_at",
+        "recovery_epoch",
+        "interrupt_types_json",
+    },
+    "control_actions": {"worker_generation"},
+    "permission_requests": {"worker_generation"},
+}
+_ACTIVE_INDEX_ORDERING = {
+    "ix_threads_active_order": "(created_at DESC, id DESC)",
+    "ix_threads_active_workspace_order": "(workspace_key, created_at DESC, id DESC)",
+    "ix_threads_active_feature_order": "(feature_tag, created_at DESC, id DESC)",
+    "ix_threads_active_workspace_feature_order": (
+        "(workspace_key, feature_tag, created_at DESC, id DESC)"
+    ),
 }
 _LANGGRAPH_TABLES = {"checkpoints", "writes"}
 _ALEMBIC_INI = (
@@ -103,6 +121,29 @@ def _get_tables(db_path: Path) -> set[str]:
         conn.close()
 
 
+def _get_columns(db_path: Path, table: str) -> set[str]:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return {
+            str(row[1])
+            for row in conn.execute("SELECT name FROM pragma_table_info(?)", (table,))
+        }
+    finally:
+        conn.close()
+
+
+def _stored_sql(db_path: Path, kind: str, name: str) -> str:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?", (kind, name)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, f"{kind} {name} is absent"
+    return str(row[0])
+
+
 class TestAlembicUpgradeDowngrade:
     def test_control_action_lease_columns_upgrade_and_downgrade(
         self, runtime_dir: Path
@@ -137,6 +178,74 @@ class TestAlembicUpgradeDowngrade:
         conn.close()
         assert not {"dispatch_id", "claim_token", "claim_expires_at"} & downgraded
 
+    def test_schema_retirement_drops_and_restores_its_schema(
+        self, runtime_dir: Path
+    ) -> None:
+        """0026 retires dead schema, keeps run order descending, and reverses.
+
+        Stepping on down to 0016 proves the restored write-authority CHECKs sit
+        where 0017 put them: 0017's downgrade drops those columns natively,
+        which SQLite refuses while a table-level CHECK names them.
+        """
+        db = runtime_dir / "schema-retirement.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0025")
+        assert _get_tables(db) >= _RETIRED_TABLES
+
+        command.upgrade(cfg, "0026")
+        assert not (_RETIRED_TABLES & _get_tables(db))
+        for table, retired in _RETIRED_COLUMNS.items():
+            assert not (retired & _get_columns(db, table)), table
+        for index, ordering in _ACTIVE_INDEX_ORDERING.items():
+            ddl = _stored_sql(db, "index", index)
+            assert ordering in ddl, ddl
+            assert "WHERE is_active IS 1" in ddl, ddl
+        for table in ("threads", "control_actions"):
+            assert "repair_started" not in _stored_sql(db, "table", table)
+
+        command.downgrade(cfg, "0025")
+        assert _get_tables(db) >= _RETIRED_TABLES
+        for table, retired in _RETIRED_COLUMNS.items():
+            assert retired <= _get_columns(db, table), table
+        for index, ordering in _ACTIVE_INDEX_ORDERING.items():
+            assert ordering in _stored_sql(db, "index", index)
+        for table in ("threads", "control_actions"):
+            assert "repair_started" in _stored_sql(db, "table", table)
+
+        command.downgrade(cfg, "0016")
+        assert "writer_action_type" not in _get_columns(db, "threads")
+
+    def test_schema_retirement_refuses_a_stored_retired_action(
+        self, runtime_dir: Path
+    ) -> None:
+        """A journal row naming a retired action type stops 0026 before any DDL."""
+        db = runtime_dir / "retired-action.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0025")
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute(
+                "INSERT INTO control_actions (id, thread_id, action_type, "
+                "idempotency_key, requested_at, result_status, worker_generation) "
+                "VALUES ('retired-action', 'retired-run', 'repair_started', "
+                "'retired-key', '2026-10-07 00:00:00', 'applied', 0)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with pytest.raises(RuntimeError, match="repair action type"):
+            command.upgrade(cfg, "0026")
+
+        conn = sqlite3.connect(str(db))
+        try:
+            version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        finally:
+            conn.close()
+        assert version == ("0025",)
+        assert _get_tables(db) >= _RETIRED_TABLES
+        assert "worker_generation" in _get_columns(db, "control_actions")
+
     def test_upgrade_head_creates_all_app_tables(self, runtime_dir: Path) -> None:
         db = runtime_dir / "test.db"
         cfg = _make_config(db)
@@ -144,6 +253,7 @@ class TestAlembicUpgradeDowngrade:
 
         tables = _get_tables(db)
         assert tables >= _APP_TABLES
+        assert not (tables & _RETIRED_TABLES)
         # alembic_version is also expected
         assert "alembic_version" in tables
 
@@ -155,7 +265,7 @@ class TestAlembicUpgradeDowngrade:
 
         tables = _get_tables(db)
         # Only alembic_version should remain (Alembic's own tracking table)
-        assert not (_APP_TABLES & tables)
+        assert not ((_APP_TABLES | _RETIRED_TABLES) & tables)
 
     def test_langgraph_tables_excluded(self, runtime_dir: Path) -> None:
         """Pre-create LangGraph tables, run upgrade, verify they are untouched."""
@@ -223,10 +333,10 @@ class TestAlembicUpgradeDowngrade:
         assert {
             "approval_status",
             "approval_request_id",
-            "approval_reason",
             "approval_response_action_id",
             "approval_updated_at",
         } <= columns
+        assert "approval_reason" not in columns
 
     def test_upgrade_head_adds_thread_execution_state_table(
         self,
@@ -250,16 +360,21 @@ class TestAlembicUpgradeDowngrade:
             "thread_id",
             "checkpoint_id",
             "parent_checkpoint_id",
-            "snapshot_created_at",
             "recorded_at",
-            "recovery_epoch",
             "task_count",
             "interrupt_count",
             "next_nodes_json",
-            "interrupt_types_json",
             "tasks_json",
             "degraded_reasons_json",
         } <= columns
+        assert (
+            not {
+                "snapshot_created_at",
+                "recovery_epoch",
+                "interrupt_types_json",
+            }
+            & columns
+        )
 
     def test_upgrade_head_adds_thread_deletion_saga_table(
         self,

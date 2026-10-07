@@ -64,10 +64,10 @@ class ThreadStatus(StrEnum):
 class RepairStatus(StrEnum):
     """Repair and readiness classification distinct from lifecycle.
 
-    Types BOTH durable columns that carry this classification:
-    ``threads.repair_status`` and ``threads.execution_readiness``. The two ask
-    different questions — what is wrong with this run, and is it fit to resume —
-    but they answer from this one closed set, so a new member becomes available
+    Types ``threads.repair_status``, the durable answer to what is wrong with a
+    run. A run's served ``execution_readiness`` asks whether it is fit to resume
+    and answers from this same closed set, because it is derived from that repair
+    posture at read time rather than judged on its own; a new member is available
     to both at once and neither can drift into a private vocabulary.
     """
 
@@ -207,8 +207,6 @@ class ControlActionType(StrEnum):
     PERMISSION_RESPONSE_APPLIED = "permission_response_applied"
     MESSAGE_FOLLOWUP_REQUESTED = "message_followup_requested"
     MESSAGE_FOLLOWUP_APPLIED = "message_followup_applied"
-    REPAIR_STARTED = "repair_started"
-    REPAIR_FINISHED = "repair_finished"
 
 
 RECOVERY_ACTION_TYPES: tuple[ControlActionType, ...] = (

@@ -352,9 +352,7 @@ class TestInternalEvents:
                         "type": "execution_state_projection",
                         "checkpoint_id": "cp-1",
                         "parent_checkpoint_id": "cp-0",
-                        "snapshot_created_at": "2026-03-10T12:00:00+00:00",
                         "next_nodes": ["supervisor"],
-                        "interrupt_types": ["permission_request"],
                         "interrupt_count": 1,
                         "task_count": 1,
                         "tasks": [
@@ -387,15 +385,14 @@ class TestInternalEvents:
         assert projection.task_count == 1
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_invalid_projection_timestamp_persists_without_relay_state(
+    async def test_projection_persists_without_relay_state(
         self,
         session_factory: SessionFactory,
     ) -> None:
-        """The ASGI projection route stores malformed clock data as absent.
+        """The ASGI projection route stores the report and touches no relay state.
 
         Execution-state projection is a persistence-only worker report. It must
-        not enter subscriber or sequence state while the durable boundary safely
-        treats an invalid optional timestamp as unavailable.
+        not enter subscriber or sequence state.
         """
         aggregator = RelayHub()
         app = _make_test_app(session_factory=session_factory)
@@ -405,7 +402,7 @@ class TestInternalEvents:
             await create_thread(
                 session,
                 write_authority=make_test_write_authority(),
-                thread_id="t-invalid-projection-clock",
+                thread_id="t-projection-persistence",
             )
             await session.commit()
 
@@ -416,11 +413,10 @@ class TestInternalEvents:
             response = await client.post(
                 "/internal/events/batch",
                 json=_batch_of(
-                    "t-invalid-projection-clock",
+                    "t-projection-persistence",
                     {
                         "type": "execution_state_projection",
-                        "checkpoint_id": "cp-invalid-clock",
-                        "snapshot_created_at": "not-an-rfc3339-timestamp",
+                        "checkpoint_id": "cp-persisted",
                     },
                 ),
             )
@@ -430,7 +426,7 @@ class TestInternalEvents:
         assert aggregator.subscriber_count() == 0
         assert aggregator.get_active_thread_ids() == []
         # Never prepared for numbering: the projection bypassed the relay seam.
-        assert aggregator.issued_sequence("t-invalid-projection-clock") is None
+        assert aggregator.issued_sequence("t-projection-persistence") is None
 
         async with session_factory() as session:
             rows = list(
@@ -438,15 +434,14 @@ class TestInternalEvents:
                     await session.scalars(
                         select(ThreadExecutionStateModel).where(
                             ThreadExecutionStateModel.thread_id
-                            == "t-invalid-projection-clock"
+                            == "t-projection-persistence"
                         )
                     )
                 ).all()
             )
 
         assert len(rows) == 1
-        assert rows[0].checkpoint_id == "cp-invalid-clock"
-        assert rows[0].snapshot_created_at is None
+        assert rows[0].checkpoint_id == "cp-persisted"
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_plan_approval_relay_creates_durable_permission_and_can_be_responded(
@@ -546,9 +541,7 @@ class TestInternalEvents:
                         "type": "execution_state_projection",
                         "checkpoint_id": "cp-good",
                         "parent_checkpoint_id": "cp-parent",
-                        "snapshot_created_at": "2026-03-10T12:00:00+00:00",
                         "next_nodes": ["supervisor"],
-                        "interrupt_types": ["permission_request"],
                         "interrupt_count": 1,
                         "task_count": 1,
                         "tasks": [

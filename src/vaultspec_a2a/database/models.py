@@ -1,8 +1,8 @@
 """SQLAlchemy 2.0 async models for the persistence layer.
 
-Defines the core data models for threads, artifacts, permission logs,
-and cost tracking. Uses ``DeclarativeBase`` with ``Mapped`` / ``mapped_column``
-for full type-safety.
+Defines the core data models for threads, permission logs, the control
+journal, execution state and cost tracking. Uses ``DeclarativeBase`` with
+``Mapped`` / ``mapped_column`` for full type-safety.
 """
 
 from collections.abc import Mapping
@@ -56,7 +56,6 @@ from .write_authority_schema import (
 
 __all__ = [
     "MONEY_SCALE",
-    "ArtifactModel",
     "AuthoringEventCursorModel",
     "Base",
     "ControlActionModel",
@@ -217,12 +216,12 @@ class Base(DeclarativeBase):
     entire suite and fail on real deployments. That is strictly worse than the
     status quo, so a forward-only convention is refused.
 
-    Renaming the existing constraints instead would mean rebuilding all ten
-    tables under SQLite batch mode (every table has an unnamed primary key, and
-    eight also carry an unnamed ``thread_id`` foreign key), copying every row
-    and recreating the four partial ``ix_threads_active_*`` indexes — a
-    whole-database rewrite whose only beneficiary is a migration nobody has
-    written yet.
+    Renaming the existing constraints instead would mean rebuilding every table
+    under SQLite batch mode (each has an unnamed primary key, and every
+    thread-owned table also carries an unnamed ``thread_id`` foreign key),
+    copying every row and recreating the four partial ``ix_threads_active_*``
+    indexes — a whole-database rewrite whose only beneficiary is a migration
+    nobody has written yet.
 
     That beneficiary is already served without any of it. Alembic's
     ``batch_alter_table`` accepts a ``naming_convention`` argument precisely so
@@ -230,13 +229,13 @@ class Base(DeclarativeBase):
     moment a migration needs to target it::
 
         with op.batch_alter_table(
-            "artifacts",
+            "permission_logs",
             naming_convention={
                 "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s"
             },
         ) as batch_op:
             batch_op.drop_constraint(
-                "fk_artifacts_thread_id_threads", type_="foreignkey"
+                "fk_permission_logs_thread_id_threads", type_="foreignkey"
             )
 
     That is the supported way to drop one of these foreign keys, it needs no
@@ -359,15 +358,12 @@ class ThreadModel(Base):
     last_sequence: Mapped[int | None] = mapped_column(default=None)
     approval_status: Mapped[str | None] = mapped_column(default=None)
     approval_request_id: Mapped[str | None] = mapped_column(default=None)
-    approval_reason: Mapped[str | None] = mapped_column(Text, default=None)
     approval_response_action_id: Mapped[str | None] = mapped_column(default=None)
     approval_updated_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime(), default=None
     )
     last_requested_action: Mapped[str | None] = mapped_column(default=None)
     last_applied_action: Mapped[str | None] = mapped_column(default=None)
-    repair_generation: Mapped[int] = mapped_column(default=0)
-    recovery_epoch: Mapped[int] = mapped_column(default=0)
     thread_metadata: Mapped[str | None] = mapped_column(Text, default=None)
     workspace_root: Mapped[str | None] = mapped_column(
         String(MAX_WORKSPACE_ROOT_LENGTH), default=None
@@ -379,9 +375,6 @@ class ThreadModel(Base):
     nickname: Mapped[str | None] = mapped_column(default=None)
     team_preset: Mapped[str | None] = mapped_column(default=None)
 
-    artifacts: Mapped[list["ArtifactModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
-    )
     permission_logs: Mapped[list["PermissionLogModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
@@ -410,34 +403,6 @@ class ThreadModel(Base):
         return (
             f"ThreadModel(id={self.id!r}, status={self.status!r}, "
             f"nickname={self.nickname!r})"
-        )
-
-
-class ArtifactModel(Base):
-    """File artifact produced by an agent during a thread."""
-
-    __tablename__ = "artifacts"
-
-    id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
-    type: Mapped[str] = mapped_column()
-    path: Mapped[str] = mapped_column()
-    content_hash: Mapped[str | None] = mapped_column(default=None)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    agent_id: Mapped[str | None] = mapped_column(default=None)
-
-    thread: Mapped["ThreadModel"] = relationship(
-        back_populates="artifacts", lazy="raise"
-    )
-
-    __table_args__ = (Index("ix_artifacts_thread_id", "thread_id"),)
-
-    @override
-    def __repr__(self) -> str:
-        """Return developer-friendly representation."""
-        return (
-            f"ArtifactModel(id={self.id!r}, thread_id={self.thread_id!r}, "
-            f"type={self.type!r}, path={self.path!r})"
         )
 
 
@@ -484,7 +449,6 @@ class PermissionRequestModel(Base):
     request_status: Mapped[str] = mapped_column(default=PermissionRequestStatus.PENDING)
     response_option_id: Mapped[str | None] = mapped_column(default=None)
     idempotency_key: Mapped[str | None] = mapped_column(default=None)
-    worker_generation: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
     applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
@@ -546,7 +510,6 @@ class ControlActionModel(Base):
         default=ControlActionResultStatus.ACCEPTED_NOT_APPLIED
     )
     payload_json: Mapped[str | None] = mapped_column(Text, default=None)
-    worker_generation: Mapped[int] = mapped_column(default=0)
     graph_receipt_json: Mapped[str | None] = mapped_column(Text, default=None)
     # Stable identity reused for every redelivery of this accepted intention.
     # Existing pre-0012 journal rows legitimately carry NULL until reconciled.
@@ -673,15 +636,10 @@ class ThreadExecutionStateModel(Base):
     thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"), primary_key=True)
     checkpoint_id: Mapped[str | None] = mapped_column(default=None)
     parent_checkpoint_id: Mapped[str | None] = mapped_column(default=None)
-    snapshot_created_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime(), default=None
-    )
     recorded_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    recovery_epoch: Mapped[int] = mapped_column(default=0)
     task_count: Mapped[int] = mapped_column(default=0)
     interrupt_count: Mapped[int] = mapped_column(default=0)
     next_nodes_json: Mapped[str] = mapped_column(Text, default="[]")
-    interrupt_types_json: Mapped[str] = mapped_column(Text, default="[]")
     tasks_json: Mapped[str] = mapped_column(Text, default="[]")
     degraded_reasons_json: Mapped[str] = mapped_column(Text, default="[]")
 

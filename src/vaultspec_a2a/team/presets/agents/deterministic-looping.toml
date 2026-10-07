@@ -1,0 +1,8 @@
+[agent]
+id           = "deterministic-looping"
+display_name = "Deterministic Looping"
+role         = "coder"
+description  = "In-process ProviderFactory scenario that streams output until its turn is cancelled."
+
+[agent.persona]
+system_prompt = "Emit the programmed deterministic loop."

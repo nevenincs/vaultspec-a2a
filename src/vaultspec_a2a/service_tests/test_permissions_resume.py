@@ -17,6 +17,14 @@ if TYPE_CHECKING:
     from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
 
+# The deterministic permission-pause worker's one request, the labels of the two
+# options it offers, and the reply it gives for each answer.
+_TOOL = "deterministic_permission"
+_ALLOW = "Allow once"
+_DENY = "Deny once"
+_APPROVED_REPLY = "Deterministic permission approved with allow_once."
+_DENIED_REPLY = "Deterministic permission denied with deny_once."
+
 
 def _pending_permissions(state: JsonObject) -> list[JsonObject]:
     """Read the public pending-permissions projection as real objects."""
@@ -127,7 +135,7 @@ def test_permission_request_can_be_resumed_via_public_api(
     """The human-in-loop preset should pause, resume, and complete."""
     created = service_stack.create_thread(
         initial_message="Request approval and then finish the task.",
-        team_preset="mock-human-in-loop",
+        team_preset="deterministic-permission-pause",
         title="service permission resume",
     )
     thread_id = required_text(
@@ -142,7 +150,7 @@ def test_permission_request_can_be_resumed_via_public_api(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
-            option_id=select_option_id(request, label="approve"),
+            option_id=select_option_id(request, label=_ALLOW),
         ),
         at="permission response",
     )
@@ -166,9 +174,9 @@ def test_permission_request_can_be_resumed_via_public_api(
         if message.get("role") == "assistant"
     ]
     assert assistant_messages, "resume flow should emit a deterministic assistant reply"
-    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
-        "Permission approved. The privileged command completed successfully "
-        "and the task is now finished."
+    assert (
+        required_text(assistant_messages[-1], "content", at="assistant message")
+        == _APPROVED_REPLY
     )
 
 
@@ -178,7 +186,7 @@ def test_invalid_permission_option_is_rejected_without_resuming(
     """Hostile option ids must keep the thread paused and undispatched."""
     created = service_stack.create_thread(
         initial_message="Request approval and then finish the task.",
-        team_preset="mock-human-in-loop",
+        team_preset="deterministic-permission-pause",
         title="service permission invalid option",
     )
     thread_id = required_text(
@@ -221,7 +229,7 @@ def test_conflicting_second_permission_response_is_rejected_after_resume(
     """A conflicting response cannot replace the accepted permission verdict."""
     created = service_stack.create_thread(
         initial_message="Request approval and then finish the task.",
-        team_preset="mock-human-in-loop",
+        team_preset="deterministic-permission-pause",
         title="service permission stale response",
     )
     thread_id = required_text(
@@ -231,7 +239,7 @@ def test_conflicting_second_permission_response_is_rejected_after_resume(
     paused = _wait_for_pending_permission(service_stack, thread_id)
     request = _first_pending_permission(paused)
 
-    approved_option_id = select_option_id(request, label="approve")
+    approved_option_id = select_option_id(request, label=_ALLOW)
     accepted = json_object(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
@@ -252,7 +260,7 @@ def test_conflicting_second_permission_response_is_rejected_after_resume(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
-            option_id=select_option_id(request, label="deny"),
+            option_id=select_option_id(request, label=_DENY),
             idempotency_key="conflicting-second-response",
             expected_status=409,
         ),
@@ -266,9 +274,9 @@ def test_conflicting_second_permission_response_is_rejected_after_resume(
         for message in _messages(completed)
         if message.get("role") == "assistant"
     ]
-    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
-        "Permission approved. The privileged command completed successfully "
-        "and the task is now finished."
+    assert (
+        required_text(assistant_messages[-1], "content", at="assistant message")
+        == _APPROVED_REPLY
     )
 
 
@@ -278,7 +286,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
     """Invalid permission payloads must fail closed without breaking recovery."""
     created = service_stack.create_thread(
         initial_message="Request approval and then finish the task.",
-        team_preset="mock-human-in-loop",
+        team_preset="deterministic-permission-pause",
         title="service invalid permission option",
     )
     thread_id = required_text(
@@ -314,7 +322,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
-            option_id=select_option_id(request, label="approve"),
+            option_id=select_option_id(request, label=_ALLOW),
         ),
         at="resumed permission response",
     )
@@ -332,9 +340,9 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         for message in _messages(completed)
         if message.get("role") == "assistant"
     ]
-    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
-        "Permission approved. The privileged command completed successfully "
-        "and the task is now finished."
+    assert (
+        required_text(assistant_messages[-1], "content", at="assistant message")
+        == _APPROVED_REPLY
     )
 
 
@@ -344,7 +352,7 @@ def test_permission_denial_completes_with_denied_outcome(
     """The deny path should remain deterministic and avoid privileged work."""
     created = service_stack.create_thread(
         initial_message="Request approval and then finish the task.",
-        team_preset="mock-human-in-loop",
+        team_preset="deterministic-permission-pause",
         title="service permission deny",
     )
     thread_id = required_text(
@@ -358,7 +366,7 @@ def test_permission_denial_completes_with_denied_outcome(
         service_stack.respond_permission(
             required_text(request, "request_id", at="pending permission"),
             thread_id=thread_id,
-            option_id=select_option_id(request, label="deny"),
+            option_id=select_option_id(request, label=_DENY),
         ),
         at="denied permission response",
     )
@@ -376,8 +384,9 @@ def test_permission_denial_completes_with_denied_outcome(
         for message in _messages(completed)
         if message.get("role") == "assistant"
     ]
-    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
-        "Permission denied. The privileged command was not executed."
+    assert (
+        required_text(assistant_messages[-1], "content", at="assistant message")
+        == _DENIED_REPLY
     )
 
 
@@ -395,8 +404,9 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
 
     created = service_stack.create_thread(
         initial_message="Implement the approved feature through the supervisor path.",
-        team_preset="mock-supervisor-human-in-loop",
+        team_preset="deterministic-supervisor-routing",
         title="service supervisor approval resume",
+        autonomous=False,
         metadata={
             "workspace_root": str(workspace_root),
             "feature_tag": "audit-five",
@@ -446,26 +456,26 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
     worker_paused = _wait_for_pending_permission_matching(
         service_stack,
         thread_id,
-        description_contains="Permission required",
+        description_contains=_TOOL,
     )
     service_stack.record(f"supervisor-worker-paused:{thread_id}", worker_paused)
 
-    worker_request = _pending_permission_matching(worker_paused, "Permission required")
+    worker_request = _pending_permission_matching(worker_paused, _TOOL)
     assert worker_paused["status"] == "input_required"
-    assert worker_paused["pause_cause"] == "session_request_permission"
+    assert worker_paused["pause_cause"] == _TOOL
     assert required_text(
         worker_request, "request_id", at="worker permission"
     ) != required_text(plan_request, "request_id", at="plan permission")
-    assert worker_request["tool_call"] == "session_request_permission"
+    assert worker_request["tool_call"] == _TOOL
     assert _option_ids(worker_request) == {
-        "approve",
-        "reject_once",
+        "allow_once",
+        "deny_once",
     }
     worker_response = json_object(
         service_stack.respond_permission(
             required_text(worker_request, "request_id", at="worker permission"),
             thread_id=thread_id,
-            option_id=select_option_id(worker_request, label="approve"),
+            option_id=select_option_id(worker_request, label=_ALLOW),
         ),
         at="worker approval response",
     )
@@ -489,16 +499,16 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         for message in _messages(completed)
         if message.get("role") == "assistant"
     ]
-    assert required_text(assistant_messages[-1], "content", at="assistant message") == (
-        "Permission approved. The privileged command completed successfully "
-        "and the task is now finished."
+    assert (
+        required_text(assistant_messages[-1], "content", at="assistant message")
+        == _APPROVED_REPLY
     )
 
 
 def test_supervisor_plan_rejection_requires_revision_before_reapproval(
     service_stack: ServiceStack,
 ) -> None:
-    """Supervisor rejection should revise first, then require a fresh approval."""
+    """A rejected plan returns to the supervisor and needs a fresh approval."""
     feature_tag = "audit-five-reject"
     workspace_root = service_stack.runtime_dir / "supervisor-plan-reject-workspace"
     plan_dir = workspace_root / ".vault" / "plan"
@@ -510,8 +520,9 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
 
     created = service_stack.create_thread(
         initial_message="Implement the approved feature through the supervisor path.",
-        team_preset="mock-supervisor-human-in-loop",
+        team_preset="deterministic-supervisor-routing",
         title="service supervisor reject revise",
+        autonomous=False,
         metadata={
             "workspace_root": str(workspace_root),
             "feature_tag": feature_tag,
@@ -573,20 +584,15 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
         "reject",
     }
 
-    assistant_messages = [
+    # The team has no plan-phase worker to revise the plan, so the rejection goes
+    # back to the supervisor, which asks again before routing any work: the
+    # worker has not taken a turn, and no request of its own is pending.
+    assert not [
         message
         for message in _messages(second_plan_pause)
         if message.get("role") == "assistant"
     ]
-    assert any(
-        message.get("content")
-        == (
-            "Revising the implementation plan based on the rejection feedback "
-            "before asking for approval again."
-        )
-        for message in assistant_messages
-    )
     assert not any(
-        permission.get("tool_call") == "session_request_permission"
+        permission.get("tool_call") == _TOOL
         for permission in _pending_permissions(second_plan_pause)
     )

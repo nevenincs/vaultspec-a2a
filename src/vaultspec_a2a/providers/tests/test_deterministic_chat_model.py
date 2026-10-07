@@ -1,16 +1,17 @@
 """Tests for the deterministic in-process research_adr acceptance provider."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...authoring.contract import RESEARCH_ADR_ROLES
 from ...graph.enums import Provider
-from ...team.team_config import AgentConfig, AgentPersonaConfig
+from ...team.team_config import AgentConfig, AgentPersonaConfig, load_team_config
+from ...thread.constants import DEFAULT_SUPERVISOR_ID
 from ..deterministic_chat_model import (
-    _ROLE_DISPATCH_KEYS,
+    UNATTENDED_REPLY,
     DeterministicResearchAdrChatModel,
     _role_of,
 )
@@ -18,6 +19,11 @@ from ..factory import ProviderFactory
 from ..lane_admission import (
     IN_PROCESS_LANES,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from langchain_core.messages import AIMessageChunk
 
 
 def _agent(agent_id: str) -> AgentConfig:
@@ -148,19 +154,60 @@ def test_sync_generate_unsupported() -> None:
         _model("vaultspec-researcher").invoke([HumanMessage(content="x")])
 
 
-def test_role_dispatch_keys_match_authoring_contract() -> None:
-    """The provider's role dispatch keys stay in sync with the authoring contract.
-
-    Guards authoring-contract ADR binding (b): the deterministic provider keeps a
-    private copy of the role names, so this asserts it never diverges from the
-    code-truth research_adr roster it exists to drive. The solo doc-editor is
-    deliberately absent - it is not a research_adr role, and this provider serves
-    only that phase machine.
-    """
-    assert frozenset(_ROLE_DISPATCH_KEYS) == frozenset(RESEARCH_ADR_ROLES)
-
-
 def test_role_of_resolves_every_contract_role() -> None:
     """Every research_adr role resolves from its namespaced agent id via _role_of."""
     for role in RESEARCH_ADR_ROLES:
         assert _role_of(f"vaultspec-{role}") == role
+
+
+@pytest.mark.asyncio
+async def test_supervisor_routes_to_its_worker_until_the_worker_answers() -> None:
+    """The scripted supervisor routes a human turn once, then finishes it.
+
+    The route is read off the bundled supervisor-routing team, so the script and
+    the preset whose worker it routes to cannot drift apart unnoticed.
+    """
+    worker = load_team_config("deterministic-supervisor-routing").workers[0].agent_id
+    supervisor = _model(DEFAULT_SUPERVISOR_ID)
+    prompt = SystemMessage(content="Respond with the next route.")
+    opened = HumanMessage(content="Do the task.")
+    answered = AIMessage(content="Done.", name=worker)
+
+    first = await supervisor.ainvoke([prompt, opened])
+    finished = await supervisor.ainvoke([prompt, opened, answered])
+    follow_up = await supervisor.ainvoke(
+        [prompt, opened, answered, HumanMessage(content="And the next one.")]
+    )
+
+    assert first.content == worker
+    assert finished.content == "FINISH"
+    assert follow_up.content == worker
+
+
+@pytest.mark.asyncio
+async def test_permission_pause_without_a_callback_proceeds_unattended() -> None:
+    """A turn with no permission callback is autonomous, so nothing is asked."""
+    model = _model("deterministic-permission-pause")
+    generated = await model.ainvoke([HumanMessage(content="x")])
+    streamed = "".join(
+        [str(c.content) async for c in model.astream([HumanMessage(content="x")])]
+    )
+    assert generated.content == UNATTENDED_REPLY
+    assert streamed == UNATTENDED_REPLY
+
+
+@pytest.mark.asyncio
+async def test_looping_turn_keeps_generating_until_it_is_closed() -> None:
+    """The looping scenario streams distinct output with no end of its own."""
+    stream = _model("deterministic-looping").astream([HumanMessage(content="loop")])
+    chunks: list[str] = []
+    async for chunk in stream:
+        chunks.append(str(chunk.content))
+        if len(chunks) == 20:
+            break
+    # The loop never ends by itself and this one was broken off early, so the
+    # generator is closed explicitly rather than left for the collector.
+    await cast("AsyncGenerator[AIMessageChunk]", stream).aclose()
+
+    assert len(set(chunks)) == 20
+    assert all(chunks)

@@ -312,7 +312,7 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 # identity keys is the correct outcome.
 #
 # ``graph_registered`` does travel the relay, and does degrade to identity keys.
-# Its payload is consumed server-side by the aggregator BEFORE projection and
+# Its payload is consumed server-side by the relay hub's mirror BEFORE projection and
 # resurfaces through catalogued team-status fields, and no consumer reads the
 # frame itself, so the loss is equivalent rather than a regression. It is left
 # uncatalogued rather than enumerated because nothing on the subscriber side

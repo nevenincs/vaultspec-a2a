@@ -136,7 +136,7 @@ The command is fail-fast and runs these stages in order:
 
 A failed stage reports a validation failure. Later stages are *not run*.
 Service tests and documentation are *excluded* from ``just ci``. The unit gate
-does run non-service migration tests, but the hosted PostgreSQL upgrade and
+does run non-service migration tests, but the hosted SQLite upgrade and
 downgrade round trip remains a separate workflow.
 
 Use narrower commands to diagnose failures:

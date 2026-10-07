@@ -1,9 +1,9 @@
 """The subscriber registry must be globally bounded wherever a caller enters it.
 
-The gateway admits stream subscribers from two places - the SSE progress route
-and the event WebSocket - and both register against one shared registry. A limit
-checked inside one route is therefore not a limit at all: the other path admits
-subscribers that check never observes. The SSE route's own pre-check is weaker
+The gateway admits stream subscribers through the SSE progress route, which
+registers against one shared registry. A limit checked inside the route alone is
+therefore not a limit at all: any other entry into the registry admits
+subscribers that check never observes. The route's own pre-check is weaker
 still, because it runs while building the response and the registration it
 authorises does not happen until the client starts reading the body.
 

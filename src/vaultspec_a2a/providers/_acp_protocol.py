@@ -479,7 +479,7 @@ async def handle_session_update(
         return
     if u_type == "plan":
         # Plan updates are metadata; log receipt and let graph-level plan
-        # handling in the supervisor/aggregator layer process them.
+        # handling in the supervisor/event-producer layer process them.
         plan_entries = update.get("entries")
         logger.debug(
             "ACP plan update: %d entries received",

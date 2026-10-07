@@ -100,12 +100,11 @@ def test_a_guard_status_outranks_the_typed_failure_beside_it() -> None:
 class TestSettledRunIsNotAnUpstreamFailure:
     """A run's own state forbidding the verb is a 409, never a bad gateway.
 
-    The distinction these pin is the one ``FailureType`` already draws and the
-    HTTP mapping used to discard: a DISPATCH failure could not deliver the
-    request, a DOMAIN rejection never tried because the run had already settled.
-    Reporting the second as 502 told callers their infrastructure was broken when
-    the truth was that their run had finished - observed live, where a cancel
-    issued against a run that had just failed answered 502 three times over.
+    The distinction these pin is the one ``FailureType`` draws and the HTTP
+    mapping preserves: a DISPATCH failure could not deliver the request, a
+    DOMAIN rejection never tried because the run had already settled. Reporting
+    the second as 502 would tell callers their infrastructure was broken when
+    the truth is that their run had finished.
     """
 
     @pytest.mark.parametrize("status", ["failed", "completed", "archived", "deleting"])

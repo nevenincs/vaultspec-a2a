@@ -891,7 +891,7 @@ class TestHandleDispatch:
 
 
 # ---------------------------------------------------------------------------
-# graph_input construction -- tested via _build_graph_input (T13)
+# graph_input construction -- tested via _build_graph_input
 # ---------------------------------------------------------------------------
 
 
@@ -1088,12 +1088,12 @@ class TestGraphInputBuilding:
 
 
 # ---------------------------------------------------------------------------
-# T17 — lazy graph recompilation on resume
+# Lazy graph recompilation on resume
 # ---------------------------------------------------------------------------
 
 
 class TestLazyRecompilation:
-    """Verify graph cache and thread mapping behaviour (T17)."""
+    """Verify graph cache and thread mapping behaviour."""
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_compiled_graph_registration_tracks_the_thread(
@@ -1252,8 +1252,8 @@ class TestPreRunGuardTraceFidelity:
     """Both dispatch modes mark the run's span when a pre-run guard rejects it.
 
     The three pre-run guards are one behaviour each, reached from two dispatch
-    modes. The resume arms used to log the rejection but leave the span clean, so
-    the same failure was visible in logs and invisible in traces depending on
+    modes. A resume arm that logged the rejection but left the span clean would
+    make the same failure visible in logs and invisible in traces depending on
     which mode hit it. These pin the trace side for both modes.
 
     Reaching each guard from a real ``handle_dispatch`` is covered by
@@ -1716,10 +1716,10 @@ class TestAuthoringBridgeFailClosed:
         """resolve_engine_with_retry's blocking time.sleep must not freeze the
         worker's event loop while it runs.
 
-        S37: before this fix, this call ran directly on the worker's single
-        event loop — heartbeats, every other thread's dispatch, everything —
-        was frozen solid for the full retry window on every first compile of
-        a preset+workspace cache key. Proven here by racing a fast
+        Run directly on the worker's single event loop, the call would freeze
+        heartbeats and every other thread's dispatch for the full retry window
+        on every first compile of a preset+workspace cache key. Proven here by
+        racing a fast
         asyncio.sleep task against a stand-in for the blocking discovery
         call: if the call is genuinely offloaded (asyncio.to_thread), the
         fast task finishes first; if it were still blocking the loop

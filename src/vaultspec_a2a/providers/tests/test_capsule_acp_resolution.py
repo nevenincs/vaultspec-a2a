@@ -242,7 +242,7 @@ print(json.dumps({{
 def test_explicit_none_keeps_project_backend_behavior(
     installed_acp_adapter: Path,
 ) -> None:
-    """Explicit None selects the existing Compose/project-local classifier."""
+    """Explicit None selects the project-local classifier."""
     del installed_acp_adapter
     command = _classify_acp_command("node", capsule_assets_root=None)
     assert command.argv == (

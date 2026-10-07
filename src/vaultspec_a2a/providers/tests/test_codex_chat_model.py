@@ -712,7 +712,7 @@ async def test_early_app_server_exit_reports_redacted_bounded_stderr_tail(
 
 @pytest.mark.asyncio
 async def test_cleanup_continues_and_reaps_the_process_after_a_prior_failure() -> None:
-    """A cleanup failure must not skip reaping the real provider subprocess (S124).
+    """A cleanup failure must not skip reaping the real provider subprocess.
 
     Spawn the real echo subprocess and wrap it in the real client, then run an
     independent cleanup where a prior step raises before the client's own
@@ -896,7 +896,7 @@ async def test_an_unannounced_error_still_ends_the_turn_immediately() -> None:
     """The guard is bounded to what the lane actually claimed.
 
     A frame that does NOT say a retry is coming must keep ending the turn at
-    once - otherwise the fix would trade a premature failure for a hang.
+    once - otherwise the guard would trade a premature failure for a hang.
     """
     client = await _notifier_client(
         [

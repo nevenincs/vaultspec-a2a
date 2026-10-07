@@ -1,4 +1,4 @@
-"""Deterministic proof of the per-backend ACP _meta conditioning (P02.S08).
+"""Deterministic proof of the per-backend ACP _meta conditioning.
 
 No mocks: a real ``AcpChatModel`` drives the real ACP protocol simulator as a
 subprocess, which records the exact ``initialize`` and ``session/new`` params it
@@ -98,7 +98,7 @@ async def test_claude_family_serializes_allowed_tools_meta(tmp_path: Path) -> No
 async def test_kimi_family_omits_allowed_tools_meta(tmp_path: Path) -> None:
     """The kimi family omits the claudeCode namespace though allowed_tools is set.
 
-    Read-only enforcement moves to the permission-RPC handler (P03.S10); the
+    Read-only enforcement moves to the permission-RPC handler; the
     session/new the CLI receives carries NO claudeCode allowedTools _meta.
     """
     _, session_new = await _drive_and_record(tmp_path, "kimi")
@@ -179,8 +179,8 @@ async def test_kimi_session_specs_are_normalized_to_carry_an_env_list(
 
     The ACP schema models ``env`` as part of the stdio server shape and the
     migrated adapter's validator silently DROPS a spec without it - the failure
-    that was long misread as session injection never surfacing. An env-less
-    spec is exactly the class that used to vanish; the kimi family (no
+    that reads as session injection never surfacing. An env-less
+    spec is exactly the class that would vanish; the kimi family (no
     declared-surface guard) can advertise one directly, and the normalization
     is family-shared code.
     """

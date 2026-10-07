@@ -1,4 +1,4 @@
-"""Kimi harness composition rides the existing with_mcp_servers ACP branch (P03.S13).
+"""Kimi harness composition rides the existing with_mcp_servers ACP branch.
 
 Masking-gap lesson (Codex wiring defect): the wiring claim is proven THROUGH the
 real ``compose_harness_mcp_servers`` seam - the exact production call the worker

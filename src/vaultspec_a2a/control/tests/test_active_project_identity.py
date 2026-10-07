@@ -1,12 +1,12 @@
 """The active project is minted once and named in one spelling everywhere.
 
-A run's project used to be re-derived at every boundary it crossed. Admission
-resolved the caller's spelling locally and dispatched that; the durable record
-kept the caller's original; and every later dispatch - follow-up, clarification
-response, verdict resume, crash recovery - read the durable one back. Two
-strings for one directory, agreeing only by coincidence, and the worker's graph
-cache keyed on the raw string, so a single workspace occupied two entries and
-recompiled its graph on the first follow-up.
+A run's project is minted once, not re-derived at every boundary it crosses. If
+admission dispatched its locally resolved spelling while the durable record
+kept the caller's original, every later dispatch - follow-up, clarification
+response, verdict resume, crash recovery - would read the durable one back: two
+strings for one directory, agreeing only by coincidence. The worker's graph
+cache is keyed on the raw string, so a single workspace would then occupy two
+entries and recompile its graph on the first follow-up.
 
 These tests drive the real seams that produced the split: the admission
 function, the dispatch schema every construction site validates through, and

@@ -55,8 +55,8 @@ def provisioned_workspace(
     """A freshly provisioned, harness-ready run workspace.
 
     Adopts the provision verb: one ``provision_workspace`` call scaffolds
-    the ``.vaultspec`` corpus and verifies its harness, replacing the manual
-    recipe the acceptance harness used to hand-roll. Fails loudly if provisioning
+    the ``.vaultspec`` corpus and verifies its harness, in place of a manual
+    hand-rolled recipe. Fails loudly if provisioning
     runs but leaves the harness incomplete; reports an absent prerequisite only
     when ``vaultspec-core`` is not resolvable in the environment at all.
     """

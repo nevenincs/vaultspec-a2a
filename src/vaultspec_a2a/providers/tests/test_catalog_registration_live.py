@@ -1,4 +1,4 @@
-"""Installed prompt-free proofs for the S06 catalog registration boundary."""
+"""Installed prompt-free proofs for the catalog registration boundary."""
 
 from __future__ import annotations
 

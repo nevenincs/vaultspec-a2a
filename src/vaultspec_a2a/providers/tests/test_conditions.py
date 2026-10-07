@@ -61,12 +61,12 @@ if TYPE_CHECKING:
 # Emits the given frames on stdout and then CLOSES it, which is what tells the
 # consumer the turn produced no further result.
 #
-# This used to linger instead, on the reasoning that the consumer always ends the
-# process by raising. That holds only for a frame set carrying a terminal
-# outcome. A `willRetry` error is an ATTEMPT, not an outcome: the consumer
-# deliberately defers it and keeps reading, because raising there once reported a
-# refused credential as "Reconnecting... 1/5". For such a set nothing ever
-# raised, so the reader waited on a frame the script had already decided never to
+# Lingering instead would assume the consumer always ends the process by
+# raising. That holds only for a frame set carrying a terminal outcome. A
+# `willRetry` error is an ATTEMPT, not an outcome: the consumer deliberately
+# defers it and keeps reading, because raising there would report a refused
+# credential as "Reconnecting... 1/5". For such a set nothing would ever raise,
+# so the reader would wait on a frame the script had already decided never to
 # send - a hung test, not a slow one.
 #
 # Closing does not race the reader: every frame is written and flushed first, and

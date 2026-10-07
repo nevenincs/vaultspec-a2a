@@ -201,13 +201,13 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
     client is not at the head of the window, it is past the end of the run.
     Reported as complete, it reads to the consumer as a successful resume.
 
-    Worse than the silence is what the claim used to buy. The stream seeded
-    its de-duplication mark from the cursor, so every live frame at or below
+    Worse than the silence is what the claim would buy. Seeding the stream's
+    de-duplication mark from the cursor would drop every live frame at or below
     5000 - which is every frame this run will ever send, including its
-    terminal - was dropped as a repeat, and the viewer heartbeated over a
-    run it could see nothing of. The mark is now clamped to what the run has
-    actually produced, so the stream goes live immediately after the notice
-    and closes on the terminal like any other.
+    terminal - as a repeat, and the viewer would heartbeat over a run it could
+    see nothing of. The mark is clamped to what the run has actually produced,
+    so the stream goes live immediately after the notice and closes on the
+    terminal like any other.
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     async with session_factory() as session:

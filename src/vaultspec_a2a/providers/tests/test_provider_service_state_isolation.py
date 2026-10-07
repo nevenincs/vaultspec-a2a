@@ -1,4 +1,4 @@
-"""Provider launch admission fails closed around the Compose identity boundary."""
+"""Provider launch admission fails closed around the POSIX identity boundary."""
 
 from __future__ import annotations
 

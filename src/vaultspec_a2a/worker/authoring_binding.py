@@ -15,7 +15,7 @@ provider never starts a run against an unreachable engine; a bearer rotation
 mid-run is tolerated by the client's ``bearer_resolver`` re-resolve, matching the
 submitter precedent.
 
-Token hygiene (R7): the bearer and actor token live only in the returned binding
+Token hygiene: the bearer and actor token live only in the returned binding
 (which redacts them from ``repr`` and is never checkpointed) and in the
 ``RunTokenStore`` the executor drops at run end. The provider holds no token state
 of its own.

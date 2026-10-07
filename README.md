@@ -6,8 +6,9 @@
 
 Headless agent-to-agent orchestration for Vaultspec.
 
-Run agent workflows without a user interface. A gateway accepts HTTP and WebSocket
-requests from authoring clients; a separate worker executes the workflows.
+Run agent workflows without a user interface. A gateway accepts HTTP requests from
+authoring clients and streams run progress over server-sent events; a separate
+worker executes the workflows.
 
 [![tests](https://img.shields.io/github/actions/workflow/status/nevenincs/vaultspec-a2a/test.yml?branch=main&style=flat&label=tests&logo=githubactions&logoColor=white&labelColor=24292f&color=57606a)](https://github.com/nevenincs/vaultspec-a2a/actions/workflows/test.yml)
 [![runtime](https://img.shields.io/badge/runtime-Python%203.13%2B-57606a?style=flat&logo=python&logoColor=white&labelColor=24292f)](https://www.python.org/downloads/)
@@ -97,7 +98,7 @@ just docs-build
 
 This runs documentation tests, builds HTML with Sphinx in nitpicky mode, and
 treats warnings as errors. The [development guide](docs/development.rst)
-defines excluded gates, the separate hosted PostgreSQL migration round trip,
+defines excluded gates, the separate hosted SQLite migration round trip,
 and explicit repair commands.
 
 ## Choose the next task

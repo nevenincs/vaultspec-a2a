@@ -845,7 +845,7 @@ class RunPermissionRespondRequest(BaseModel):
     themselves were advertised on the versioned progress stream in the
     ``permission_request`` frame that raised the question, so the answer names
     one rather than restating it. ``notes`` survives into the verdict resume
-    payload for a locally-respondable verdict-style pause (D6); it is ignored
+    payload for a locally-respondable verdict-style pause; it is ignored
     for a plain tool-permission response, which resumes on the bare option id.
     """
 

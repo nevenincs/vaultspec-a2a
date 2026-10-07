@@ -183,10 +183,10 @@ def test_neither_write_path_follows_a_link_planted_at_the_temporary(
 ) -> None:
     """The temporary name is predictable, so a link planted there must be refused.
 
-    Both write paths are exercised, because they used to disagree: the path with
-    permission bits asked for ``O_NOFOLLOW`` and the path without went through
-    builtin ``open``, which follows.  One function, one name, one docstring, two
-    postures - selected by whether an unrelated argument was passed.
+    Both write paths are exercised, because they must not disagree: the path with
+    permission bits asks for ``O_NOFOLLOW`` and the path without must not go
+    through builtin ``open``, which follows.  One function, one posture,
+    whether or not an unrelated argument is passed.
 
     The refusal has to hold on Windows too, and ``O_NOFOLLOW`` does not exist
     there, so this is what proves the guarantee is real rather than nominal on

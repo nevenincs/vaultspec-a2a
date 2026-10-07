@@ -721,8 +721,8 @@ def test_none_selection_builds_no_exporter_at_all(tmp_path: Path) -> None:
     """``none`` must remove the pipelines, not aim them somewhere unreachable.
 
     ``OTEL_METRICS_EXPORTER`` is an SDK auto-configuration variable and this
-    module builds its providers by hand, so setting it used to change nothing at
-    all: a process whose operator had switched metrics off still ran a
+    module builds its providers by hand, so setting it alone would change
+    nothing: a process whose operator had switched metrics off would still run a
     ``PeriodicExportingMetricReader`` against the configured endpoint.
     """
     off = _run_exporter_selection_probe(

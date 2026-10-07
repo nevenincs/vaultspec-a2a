@@ -3,7 +3,7 @@
 Narrowing a served field from a bare string to an enumeration is a breaking
 change for any consumer the moment the service emits a value the enumeration
 does not contain: the response stops serialising and the caller gets a fault
-where it used to get a field. These tests are the evidence that no such value
+where it would get a field. These tests are the evidence that no such value
 exists, and they prove it two independent ways.
 
 The first way is a CAPTURE. Every value in ``LIVE_*`` below was read off a
@@ -502,8 +502,8 @@ def test_the_capability_and_mechanism_keyings_disagree_on_exactly_two_presets() 
 
     ``vaultspec-doc-editor`` authors documents (role ``doc-editor``) but submits
     through the model's bridged tool rather than the direct path, so it is
-    document-authoring WITHOUT a submitter. This is the case the re-key existed
-    to fix, and the disagreement here is the fix working.
+    document-authoring WITHOUT a submitter. This is the case the re-key exists
+    for, and the disagreement here is the re-key working.
 
     ``deterministic-failure`` reuses the REAL researcher and synthesist agents to
     script a guaranteed graph-budget failure, so it DECLARES document-authoring

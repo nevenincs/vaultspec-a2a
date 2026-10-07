@@ -1,10 +1,10 @@
 """The supervisor gates on the vault as it is now, not as it was last turn.
 
-The phase gates read ``vault_index``, and the only refresh used to happen in
-the mount node - which runs AFTER a routing decision, on the way into the
-worker. So a document a worker had just written was invisible to the very
-decision that had to see it, and the run was told the artifact was missing
-while it sat on disk.
+The phase gates read ``vault_index``, so it is refreshed before a routing
+decision rather than in the mount node, which runs AFTER one, on the way into
+the worker. A document a worker has just written is therefore visible to the
+very decision that has to see it, and the run is never told an artifact is
+missing while it sits on disk.
 
 Driven against a real workspace: the writer worker writes a real file into a
 real ``.vault/`` tree and the compiled star graph is run over a real

@@ -6,7 +6,7 @@ discovery-file contract every other live-engine suite in this package uses
 ``VAULTSPEC_A2A_ENGINE_SERVICE_JSON`` to the engine's discovery file before
 selecting ``-m service``.
 
-The audit finding this closes: a document proposal can reach ``needs_review``
+The failure this guards against: a document proposal can reach ``needs_review``
 in the engine, and a human can be told it was "approved" through this
 repository's own respond route, while zero bytes ever reach disk — the a2a
 respond route is a graph-resume signal only, and never advances the engine's
@@ -78,7 +78,7 @@ def _whole_document_op(feature: str) -> dict[str, Any]:
 
     Carries real frontmatter (the engine fails a body closed at apply that
     ``vault set-body --check`` would reject at materialization — an AUTO gate
-    once applied an empty scaffold; it no longer does), so this exercises the
+    must not apply an empty scaffold), so this exercises the
     same shape the production submitter proposes, not a synthetic shortcut.
     """
     return {

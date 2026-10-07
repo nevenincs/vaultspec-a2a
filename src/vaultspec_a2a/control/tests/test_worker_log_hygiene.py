@@ -2,7 +2,7 @@
 
 Real files, a real subprocess for the "live" registry record, and a real HTTP
 server standing in for a foreign worker being evicted - no mocks. Pins the
-retention half of the observability-lanes plan (P02.S03): a killed/evicted
+retention half of the observability lanes: a killed/evicted
 worker's stderr log must not accumulate forever, and a dev-band worker's past
 instances must not leave permanent orphans under the runtime dir.
 """

@@ -1,13 +1,13 @@
 """Real-HTTP proof that one worker never gets two contradictory health verdicts.
 
 A worker that answers ``200`` with a body the decoder cannot read is the case
-where the gateway's two health readers used to disagree. The watchdog and
-``/health`` read it through the probe primitive and saw the worker UP; the
+where the gateway's two health readers could disagree: the watchdog and
+``/health`` read it through the probe primitive and see the worker UP, while the
 boot, adopt, and evict paths read it through the body-returning helper, which
-evaluated ``resp.json()`` inside the same ``try`` that caught transport
-failures, and so received the identical ``None`` it receives for a DEAD worker.
-One live worker was simultaneously up and absent, and the absent reading is the
-one that spawns a competitor onto a port that worker still holds.
+must not conflate an undecodable body with the ``None`` it returns for a DEAD
+worker. One live worker must not be simultaneously up and absent, because the
+absent reading is the one that spawns a competitor onto a port that worker
+still holds.
 
 The occupant here is a real HTTP server in a real subprocess serving a real
 malformed ``200`` over a real socket - the condition itself, not a stand-in for

@@ -1,6 +1,6 @@
 """Live boundary proof: the research_adr writer grounds on a real feedback batch.
 
-Test-integrity / wire-contract (S14): ONLINE against the real engine resolved via
+Test-integrity / wire-contract: ONLINE against the real engine resolved via
 the discovery file, never a mocked wire. It proves the end-to-end grounding path
 the offline tests cannot reach: a REAL feedback batch created on the engine, a
 REAL FeedbackContextReader that retrieves it by id under a REAL minted actor

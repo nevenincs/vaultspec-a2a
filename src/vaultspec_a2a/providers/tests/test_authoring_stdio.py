@@ -1,8 +1,8 @@
-"""Unit tests for the stdio authoring bridge config + binding transport (R4).
+"""Unit tests for the stdio authoring bridge config + binding transport.
 
 Pure logic, no subprocess or engine: the stdio ``mcpServers`` entry must spawn
 our bridge module with the run's engine facts in ENV (never argv, so a process
-listing never exposes the token — R7), and the binding must validate the stdio
+listing never exposes the token), and the binding must validate the stdio
 transport (engine_base_url + run_id) exactly as it validates the HTTP one.
 """
 
@@ -119,7 +119,7 @@ def test_stdio_entry_carries_engine_facts_in_env() -> None:
 
 
 def test_stdio_tokens_never_appear_in_argv() -> None:
-    # R7: tokens travel by env only; a process listing (command + args) must
+    # Tokens travel by env only; a process listing (command + args) must
     # never expose the bearer or actor token.
     entry = build_authoring_stdio_mcp_servers(_stdio_binding())[0]
     command = entry["command"]

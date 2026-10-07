@@ -60,7 +60,7 @@ just test-service
 ```
 
 If you intend to apply Ruff fixes and formatting, use `just fix-python`.
-The PostgreSQL migration upgrade-and-downgrade round trip is a
+The SQLite migration upgrade-and-downgrade round trip is a
 separate hosted workflow. If a gate can't run, document why and state the
 resulting uncertainty.
 

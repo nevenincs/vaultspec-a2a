@@ -122,7 +122,7 @@ async def test_the_same_call_asked_again_receives_its_answer() -> None:
 async def test_an_answer_naming_no_request_is_refused() -> None:
     """A bare option id approves nothing: it cannot be shown to belong here.
 
-    It was previously applied to whatever call was asking, which is how an
+    It is never applied to whatever call happens to be asking, which is how an
     approval given for one call could settle another.
     """
     list_files = ("Bash", {"command": "ls"})

@@ -1,6 +1,6 @@
 """Live proof that a REAL provider refusal surfaces its typed condition end to end.
 
-Every other test in this campaign proves one hop. This one proves the chain: a
+Every other provider-condition test proves one hop. This one proves the chain: a
 served lane refuses real work, the lane resolves a condition from the
 discriminator the provider put on the wire, ingest stashes it, the settle path
 forwards it on the terminal, the gateway persists it, and a client that attached
@@ -18,7 +18,7 @@ then proves the declared condition reached run-status. That shape is deliberate:
 refusals are not equally summonable - a throttle or an exhausted window arrives
 when the account says so, not when a test asks - so welding this proof to one
 provocation would make it undrivable whenever that particular one is out of
-reach. What is asserted is the campaign's actual claim, which is about the chain
+reach. What is asserted is the end-to-end claim, which is about the chain
 rather than about any single member of the vocabulary.
 
 A NOTE ON ONE PROVOCATION THAT DOES NOT WORK, recorded so it is not rediscovered.
@@ -90,7 +90,7 @@ _PROBE_PRESET = "provider-condition-probe"
 
 #: A refusal does not arrive promptly. The lane treats several conditions as
 #: retryable and exhausts a backoff schedule first - a rejected credential took
-#: just under four minutes when this campaign first measured it, and the retry
+#: just under four minutes when first measured, and the retry
 #: classifier has since been bound to MORE conditions, so the wait can only have
 #: grown. Generous enough that a real refusal is never cut short, bounded so a
 #: genuine hang fails loud instead of parking forever.

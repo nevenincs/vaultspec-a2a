@@ -1,8 +1,8 @@
-"""Service discovery and heartbeat for the resident gateway (R8).
+"""Service discovery and heartbeat for the resident gateway.
 
 The A2A gateway publishes ``service.json`` at the root of its state home - by
 default ``.vault/data/agents`` in the project it serves - so the engine can
-attach to it under the attach-never-own discipline. The record adopts the R8
+attach to it under the attach-never-own discipline. The record adopts the
 ``ServiceInfo`` contract: ``port`` required; optional ``pid``, a non-secret
 ``handoff_reference``, and ``last_heartbeat`` (ms-epoch). The bearer lives in
 the referenced owner-restricted file, never in discovery. The producer refreshes the
@@ -83,7 +83,7 @@ __all__ = [
     "write_service_json",
 ]
 
-# Producer refresh cadence (R8): well under the 120s consumer staleness window so
+# Producer refresh cadence: well under the 120s consumer staleness window so
 # a live service never reads as stale between writes.
 HEARTBEAT_REFRESH_SECONDS = 15
 
@@ -91,7 +91,7 @@ HEARTBEAT_REFRESH_SECONDS = 15
 class DiscoveryState(StrEnum):
     """Attach-never-own, filesystem-only classification of a discovery file.
 
-    Shared by the Compose service record and the versioned desktop record.
+    Shared by the service record and the versioned desktop record.
     """
 
     FRESH = "fresh"
@@ -283,7 +283,7 @@ def _service_info(info: dict[str, object], discovery_path: Path) -> ServiceInfo 
 def classify_discovery(
     path: Path, *, now_ms: int | None = None
 ) -> tuple[DiscoveryState, ServiceInfo | None]:
-    """Classify a discovery file filesystem-only (no pid or /health probe, R8).
+    """Classify a discovery file filesystem-only (no pid or /health probe).
 
     ``ABSENT`` when the file is missing, ``MALFORMED`` when it is unreadable or
     lacks a valid ``port``, ``STALE`` when a present heartbeat is beyond the
@@ -306,7 +306,7 @@ def classify_discovery(
 
 
 def read_resident_service(a2a_home: Path) -> tuple[DiscoveryState, ServiceInfo | None]:
-    """Hot-path, filesystem-only discovery of the resident gateway (R8)."""
+    """Hot-path, filesystem-only discovery of the resident gateway."""
     return classify_discovery(service_json_path(a2a_home))
 
 
@@ -403,7 +403,7 @@ def probe_health(
     timeout: float = 2.0,
     headers: Mapping[str, str] | None = None,
 ) -> dict[str, object] | None:
-    """Probe ``GET /health`` on a gateway or worker (lifecycle-only, R8).
+    """Probe ``GET /health`` on a gateway or worker (lifecycle-only).
 
     Returns the parsed health body on a real ``200``, else ``None``. *headers*
     carries a credential only for a caller that already established who owns the
@@ -444,7 +444,7 @@ def health_payload_ready(
 def another_resident_is_live(a2a_home: Path, *, health_timeout: float = 2.0) -> bool:
     """Return ``True`` when a different, live resident gateway already holds the file.
 
-    Single-resident semantics (R8): the record must be ``FRESH``, its pid must be
+    Single-resident semantics: the record must be ``FRESH``, its pid must be
     a live process, and its ``/health`` must answer ``200``. A crashed or stale
     record (dead pid, old heartbeat, no answer) is NOT a live resident — it is
     reclaimable — so this returns ``False`` and the caller may start and overwrite.
@@ -500,7 +500,7 @@ def _remove_handoff_credential(discovery_path: Path) -> None:
 # ---------------------------------------------------------------------------
 #
 # The desktop profile publishes a richer, versioned discovery record than the
-# R8 Compose record above. It never carries a bearer value: the attach
+# service record above. It never carries a bearer value: the attach
 # credential lives in an owner-ACL-protected file that the record only
 # *references* by path. The desktop gateway acquires the runtime singleton and
 # binds its listener before publishing this record; a contender validates it

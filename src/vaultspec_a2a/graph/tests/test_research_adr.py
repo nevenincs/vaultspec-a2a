@@ -226,10 +226,9 @@ async def test_research_adr_discloses_one_metadata_entry_per_worker(
         "plan_author",
         "plan_review",
     }
-    # This is the assertion that fails without the fix: node_metadata_from_graph
-    # SKIPS a node whose metadata dict is empty, and every one of these used to
-    # be added with no metadata= at all - the whole roster was absent, not just
-    # short a field.
+    # node_metadata_from_graph SKIPS a node whose metadata dict is empty, so every
+    # one of these must be added with metadata= - otherwise the whole roster is
+    # absent, not just short a field.
     assert expected_worker_nodes <= set(disclosed), disclosed
 
     for node_name in expected_worker_nodes:

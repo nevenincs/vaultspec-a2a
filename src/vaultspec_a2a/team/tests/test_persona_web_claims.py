@@ -127,14 +127,13 @@ def test_the_vocabulary_this_guard_scans_for_is_not_empty() -> None:
     # scanning every persona for real tokens even with no egressing server at all.
     assert _egressing_native_names() <= vocabulary
 
-    # Said here deliberately, which is what the withdrawn-entry case above always
-    # asked for. There is no vaultspec-owned egressing MCP server, and there will
-    # not be one: the entry that used to sit here put a first-party name on a
-    # third-party package for a server that does not exist. So the MCP half of this
-    # vocabulary is EMPTY by decision, not by a broken derivation - and an entry
-    # appearing here means one arrived on a merge again, which is exactly how the
-    # last one got in. Derived from the registry rather than naming what was
-    # removed, so the tripwire cannot rot into a check for one dead string.
+    # Said here deliberately. There is no vaultspec-owned egressing MCP server,
+    # and there will not be one: an entry here would put a first-party name on a
+    # third-party package for a server that does not exist. So the MCP half of
+    # this vocabulary is EMPTY by decision, not by a broken derivation - and an
+    # entry appearing here means one arrived on a merge. Derived from the
+    # registry rather than naming a removed entry, so the tripwire cannot rot
+    # into a check for one dead string.
     # Exact equality rather than a truthiness check, which also pins the
     # derivation's TYPE: a broken ``_egressing_servers`` returning ``None`` or a
     # list would satisfy ``not ...`` and report green, while this fails. The

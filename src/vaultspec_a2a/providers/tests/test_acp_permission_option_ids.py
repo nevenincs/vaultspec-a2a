@@ -141,8 +141,9 @@ async def test_a_snake_case_option_answered_in_kind_is_accepted(
 ) -> None:
     """A snake_case options list validates its own snake_case answer.
 
-    Previously the valid set was ``{None}``, so the legitimate answer failed the
-    guard and the fallback raised ``KeyError``.
+    The valid set is built from the snake_case options, so the legitimate answer
+    passes the guard rather than failing it and sending the fallback to a
+    ``KeyError``.
     """
     options: list[JsonObject] = [
         {"option_id": "allow_always"},

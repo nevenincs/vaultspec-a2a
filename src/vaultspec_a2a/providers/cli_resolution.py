@@ -108,7 +108,7 @@ def resolve_service_executable(
     virtualenv, so a checkout carrying ``.venv/bin/node`` would supply the
     interpreter of the very process meant to supervise it. Resolution therefore
     reads this service's environment, and the result is absolute so no later
-    search - POSIX ``execvp``, the Compose identity launcher, or Windows
+    search - POSIX ``execvp``, the provider identity launcher, or Windows
     ``cmd.exe``, which consults the working directory first - gets a second
     chance to pick a different file.
 

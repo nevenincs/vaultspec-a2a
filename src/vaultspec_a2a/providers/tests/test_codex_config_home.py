@@ -1,4 +1,4 @@
-"""Unit tests for the per-run Codex CODEX_HOME config.toml emission (P04.S18).
+"""Unit tests for the per-run Codex CODEX_HOME config.toml emission.
 
 Real filesystem + stdlib tomllib, no mocks. The live proof that Codex surfaces
 and invokes the servers under the read-only sandbox is executor-service's later
@@ -196,8 +196,8 @@ def test_render_emits_env_subtable_when_present() -> None:
 
 
 def test_render_with_no_specs_still_declares_the_web_posture() -> None:
-    # Previously this asserted the empty string. It cannot any more, and the
-    # reason is the whole point of the web-posture work: Codex enables web search
+    # The rendered document is never empty, and the reason is the whole point of
+    # the web-posture work: Codex enables web search
     # when the key is absent, so an empty document is not "no capability", it is
     # "whatever the CLI defaults to". A server-less home must still say off.
     parsed = tomllib.loads(
@@ -372,13 +372,8 @@ class TestWebPostureThroughTheProductionModelSeam:
     def test_the_codex_lane_emits_live_because_it_carries_retrieval_proof(
         self, tmp_path: Path
     ) -> None:
-        # This test previously asserted the mirror image - dark, because the lane
-        # carried no proof - and was written to FAIL the day that proof was
-        # recorded rather than quietly go on describing a lane that had since
-        # been activated. That day came: the declaration now carries a live
-        # retrieval proof for this lane, so both halves are restated against the
-        # state that replaced it, and the first still states the precondition the
-        # second depends on.
+        # The declaration carries a live retrieval proof for this lane, so the lane
+        # emits live; this half states the precondition the next one depends on.
         base = tmp_path / "base"
         base.mkdir()
         assert Provider.CODEX in PROVEN_WEB_LANES
@@ -537,8 +532,9 @@ def test_composition_seam_threads_harness_into_codex_config_toml(
     # KILLS THE MASKING GAP: build the model through the REAL production
     # composition seam (compose_harness_mcp_servers), NOT by setting
     # harness_mcp_servers directly, then assert the emitted config.toml carries
-    # vaultspec-rag. Before the fix, compose silently no-oped for Codex (no
-    # with_mcp_servers) and the config.toml was always emitted from an empty list.
+    # vaultspec-rag. Composition must not silently no-op for Codex (no
+    # with_mcp_servers), which would leave the config.toml emitted from an empty
+    # list.
     import tomllib
 
     from .._acp_mcp import compose_harness_mcp_servers
@@ -610,11 +606,11 @@ def test_authoring_bridge_composition_seam_threads_into_codex_config_toml(
     """KILLS THE authoring-bridge masking gap, the Codex counterpart of
     ``test_composition_seam_threads_harness_into_codex_config_toml``.
 
-    Before the fix, ``attach_authoring_tools`` dispatched ONLY on
-    ``with_mcp_servers`` (the ACP lane), so a Codex model - which has no such
-    surface - was returned UNCHANGED: the codex agent connected to app-server
-    but its config.toml never carried the ``vaultspec-authoring`` block, so the
-    engine's propose/read tools silently never reached the model. Build the
+    ``attach_authoring_tools`` must not dispatch ONLY on ``with_mcp_servers``
+    (the ACP lane): a Codex model - which has no such surface - would be
+    returned UNCHANGED, the codex agent would connect to app-server but its
+    config.toml would never carry the ``vaultspec-authoring`` block, and the
+    engine's propose/read tools would silently never reach the model. Build the
     model through the REAL production composition seam
     (``attach_authoring_tools``), not by setting ``authoring_mcp_server``
     directly, then assert the emitted config.toml carries the bridge with EVERY
@@ -700,9 +696,9 @@ def test_authoring_bridge_unions_with_harness_servers_in_one_config_toml(
 
 def test_attach_authoring_tools_refuses_a_provider_with_no_attachment_surface() -> None:
     """A model with neither ``with_mcp_servers`` nor ``with_authoring_mcp_server``
-    must refuse loud, not silently return unchanged (the S20-class defect this
-    campaign closes: a harness-armed run starting an agent with no tools and
-    burning its step timeout finding out)."""
+    must refuse loud, not silently return unchanged (a harness-armed run would
+    otherwise start an agent with no tools and burn its step timeout finding
+    out)."""
     from langchain_openai import ChatOpenAI
 
     from ...thread.errors import ConfigError

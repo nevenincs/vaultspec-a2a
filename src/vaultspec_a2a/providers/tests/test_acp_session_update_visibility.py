@@ -32,7 +32,7 @@ _OBSERVED_KINDS = (
 async def test_adapter_session_updates_are_visible_without_payload_leak(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The protocol logs adapter kinds and keeps S18's terminal usage separate."""
+    """The protocol logs adapter kinds and keeps the terminal usage separate."""
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",

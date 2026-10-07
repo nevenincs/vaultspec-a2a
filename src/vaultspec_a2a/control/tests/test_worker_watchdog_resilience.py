@@ -165,7 +165,7 @@ async def _await_status(state: WorkerState, expected: str, *, timeout: float) ->
 
 @pytest.mark.asyncio
 async def test_a_raising_tick_does_not_end_the_watchdog(tmp_path: Path) -> None:
-    """The defect: one raising tick used to be the last tick.
+    """One raising tick is not the last tick.
 
     The fault is injected where the docstring above says a tick is most likely
     to suffer one - on the recovery path - and by a real filesystem condition
@@ -257,10 +257,11 @@ async def test_a_restart_cycle_that_raises_still_stamps_the_cooldown() -> None:
     """A raising cycle must leave a cooldown stamp, or containment becomes a spin.
 
     Keeping the loop alive across a raising tick is only safe if a persistently
-    failing recovery is still rate-limited. The stamp used to be written after
-    the restart returned, so a cycle that raised skipped it and the gate saw no
-    prior cycle - the next poll would retry at the poll interval instead of the
-    cooldown. Here a real restart cycle is entered against a real crashed worker
+    failing recovery is still rate-limited. The stamp is written even when the
+    restart raises: were it written only after the restart returned, a cycle that
+    raised would skip it and the gate would see no prior cycle - the next poll
+    would retry at the poll interval instead of the cooldown. Here a real restart
+    cycle is entered against a real crashed worker
     and cancelled during its real backoff sleep, which is the shutdown-mid-restart
     case as well as the general raise.
     """

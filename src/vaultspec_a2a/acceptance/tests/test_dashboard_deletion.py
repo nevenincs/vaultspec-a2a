@@ -67,7 +67,7 @@ def _checkpoint_rows_for(app_home: Path, thread_id: str) -> int:
 def test_deletion_removes_the_run_from_control_and_checkpoint_stores(
     gateway: CertifiedGateway,
 ) -> None:
-    """S80: a completed run is deleted from both real stores and stays invisible.
+    """A completed run is deleted from both real stores and stays invisible.
 
     Discriminating across both stores: the run first exists (status 200,
     checkpoint rows present), then after one authenticated delete it is gone from
@@ -102,7 +102,7 @@ def test_deletion_removes_the_run_from_control_and_checkpoint_stores(
 def test_replayed_delete_converges_without_a_second_teardown(
     gateway: CertifiedGateway,
 ) -> None:
-    """S80: replaying a delete after completion converges rather than erroring.
+    """Replaying a delete after completion converges rather than erroring.
 
     Discriminating: the first delete of a real run succeeds (204) and the run is
     gone, and a second identical delete returns a clean 404 - the converged

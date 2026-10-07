@@ -1,11 +1,11 @@
 """Tests for exact monetary storage in ``cost_tracking``.
 
-Guards the defect these tests exist for: ``estimated_cost`` used to be an
-IEEE-754 double that was SUM-aggregated inside the database, so a thread's
-total accumulated binary error against its true decimal cost. The aggregation
-tests below are written so they would FAIL against a float column — each one
-first asserts that the equivalent float arithmetic genuinely diverges, so a
-passing run proves the fix rather than a coincidence.
+Guards the property these tests exist for: ``estimated_cost`` is exact decimal
+storage, not an IEEE-754 double SUM-aggregated inside the database, where a
+thread's total would accumulate binary error against its true decimal cost. The
+aggregation tests below are written so they would FAIL against a float column —
+each one first asserts that the equivalent float arithmetic genuinely diverges,
+so a passing run proves exactness rather than a coincidence.
 
 Everything here drives a real SQLite engine, the real repository functions, and
 real Alembic migrations. Nothing is mocked.

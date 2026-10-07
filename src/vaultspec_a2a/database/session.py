@@ -87,7 +87,7 @@ def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) ->
     """Enable WAL journal mode on every new SQLite connection.
 
     WAL allows concurrent readers while a write is in progress,
-    which is critical for the Event Aggregator's high-frequency writes.
+    which is critical for the run event writer's high-frequency writes.
     """
     cursor = dbapi_conn.cursor()
     # check the return value — PRAGMA journal_mode returns the mode that

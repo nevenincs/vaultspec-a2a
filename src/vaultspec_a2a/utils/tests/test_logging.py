@@ -252,8 +252,8 @@ def test_json_formatter_survives_a_computed_false_exc_info() -> None:
     ``Logger._log`` normalises only truthy ``exc_info`` values, so a caller
     passing a computed flag lands ``False`` on the record verbatim. The OTLP
     gRPC exporter does exactly this on every transport error it does not
-    classify as unknown, and the formatter used to raise ``TypeError`` on it -
-    which discards the record, silencing the very failures the lane exists to
+    classify as unknown, and a formatter that raised ``TypeError`` on it would
+    discard the record, silencing the very failures the lane exists to
     report.
     """
     logger = logging.getLogger("test.exc_info.false")

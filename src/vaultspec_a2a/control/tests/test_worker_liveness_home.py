@@ -45,8 +45,8 @@ def _gateway_app() -> FastAPI:
     app = FastAPI()
     app.include_router(internal_router)
     # Deliberately NOT seating a liveness record: the accessor is the thing under
-    # test, and an app that declares nothing is the case a reader used to have to
-    # guess about. The internal token is seated as None, which the development
+    # test, and an app that declares nothing is the case a reader would otherwise have
+    # to guess about. The internal token is seated as None, which the development
     # environment reads as no authentication.
     app.state.internal_token = None
     app.state.relay_hub = None
@@ -199,10 +199,10 @@ def test_a_degenerate_stamp_reads_as_no_contact_for_both_readers(
 def test_the_accessor_seats_a_record_rather_than_reporting_absence() -> None:
     """An app that declares nothing gets a record saying 'never heard from'.
 
-    A reader used to receive ``None`` here and had to decide for itself what an
-    absent attribute meant. It now receives the same answer in the vocabulary of
-    the domain, and receives the SAME object on every call, so a writer reached
-    through the accessor is visible to a reader reached through it.
+    A reader receives an answer in the vocabulary of the domain rather than a
+    ``None`` whose meaning it must decide for itself, and receives the SAME
+    object on every call, so a writer reached through the accessor is visible
+    to a reader reached through it.
     """
     app_state = SimpleNamespace()
     first = worker_liveness(app_state)

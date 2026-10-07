@@ -865,12 +865,10 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
         )
 
 
-# Two settlement tests were dropped when the deterministic-scenarios branch
-# merged. They asserted that resuming an answered document gate marks its
-# permission row APPLIED and clears approval state at terminal - the settlement
-# this module used to perform inline. That inline settlement was deliberately
-# replaced here by receipt-driven settlement in the worker-event handler, and
-# the dropped tests drove a verdict plus a terminal event with no receipt, so
-# under the current design the row is still pending when terminal expires it.
-# Whether a resolved gate should settle WITHOUT a receipt is a real open
-# question, recorded rather than answered by re-asserting the replaced contract.
+# No test here asserts that resuming an answered document gate marks its
+# permission row APPLIED and clears approval state at terminal without a
+# receipt. Settlement is receipt-driven in the worker-event handler, so a
+# verdict plus a terminal event with no receipt leaves the row pending when
+# terminal expires it. Whether a resolved gate should settle WITHOUT a receipt
+# is a real open question, recorded rather than answered by asserting a
+# replaced contract.

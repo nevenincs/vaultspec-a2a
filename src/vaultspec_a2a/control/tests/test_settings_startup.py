@@ -147,9 +147,9 @@ def test_the_worker_entry_point_reports_one_named_error(tmp_path: Path) -> None:
     """The worker is its own startup site: the gateway spawns it as its own process.
 
     Its import chain reaches the telemetry module and the provider factory,
-    both of which used to read settings while being imported - so a refusal
-    arrived as a traceback from inside the settings library, in a process
-    whose stderr the gateway forwards to an operator.
+    neither of which reads settings while being imported - a refusal would
+    otherwise arrive as a traceback from inside the settings library, in a
+    process whose stderr the gateway forwards to an operator.
     """
     completed = _run(
         ["-m", "vaultspec_a2a.worker"],

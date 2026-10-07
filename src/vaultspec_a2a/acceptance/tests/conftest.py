@@ -9,7 +9,7 @@ run creation, status projection, cancellation routing, streaming, deletion, and
 authentication - which holds whether a run ultimately completes or fails. They
 therefore need no deterministic provider backend and run without Docker.
 Successful-orchestration and interactive-pause certification, which do need the
-provider, live in the Compose service suite.
+provider, live in the service suite.
 """
 
 from __future__ import annotations

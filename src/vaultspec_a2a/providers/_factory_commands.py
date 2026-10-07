@@ -400,7 +400,7 @@ def _classify_acp_command(
             ``"binary"`` for the precompiled Bun executable in bin/.
         capsule_assets_root: Explicit desktop capsule assets root. When omitted,
             the configured ``settings.capsule_assets_root`` is consulted. Explicit
-            ``None`` forces Compose/project-local resolution even when a capsule
+            ``None`` forces project-local resolution even when a capsule
             root is configured. When a root is in force, the default Node backend
             resolves its executable and ACP entry ONLY from capsule assets — no
             checkout or PATH fallback. The experimental binary backend is already

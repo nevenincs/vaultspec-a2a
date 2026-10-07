@@ -119,7 +119,7 @@ async def _worker(state: _State) -> dict[str, Any]:
 
     # A nested runnable inside the node. It carries the node's name in its
     # metadata and returns a plan-shaped value, which is exactly the pair
-    # that used to produce a phantom turn and a plan nobody wrote.
+    # that would produce a phantom turn and a plan nobody wrote.
     nested = RunnableLambda(_format).with_config(run_name="formatter")
     await nested.ainvoke({"x": 1})
 

@@ -321,7 +321,7 @@ def make_app(
     # length of a suite so a long run does not re-probe mid-flight.
     app.state.provider_catalog_service = _session_catalog_service()
 
-    # Store singletons in app.state so WebSocket handlers can read them
+    # Store singletons in app.state so route handlers can read them
     app.state.relay_hub = relay_hub
     app.state.checkpointer = checkpointer
     # The gateway lifespan seats one beside the store it prunes through, and a

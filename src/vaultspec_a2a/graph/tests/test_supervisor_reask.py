@@ -237,9 +237,9 @@ async def test_a_reply_naming_one_route_inside_a_sentence_is_followed() -> None:
 async def test_a_re_ask_shows_the_refusal_when_no_feature_is_bound() -> None:
     """The reason reaches the model whether or not a feature is active.
 
-    It used to travel only inside the anchoring block, which is empty without
-    an active feature - so an unbound thread was re-asked with the prompt it
-    had just failed, verbatim, until the budget ran out.
+    It travels outside the anchoring block, which is empty without an active
+    feature - so an unbound thread is not re-asked with the prompt it just
+    failed, verbatim, until the budget runs out.
     """
     graph = _star_graph([_UNPARSEABLE, "FINISH"])
     prompts = _SupervisorPrompts()
@@ -396,10 +396,10 @@ async def test_a_blocked_finish_still_meets_the_plan_approval_gate() -> None:
 async def test_a_blocked_finish_keeps_its_reason_through_the_approval_gate() -> None:
     """The refusal reaches state on the pass it was decided, not one later.
 
-    The approval branch used to be selected on the routing note being unset,
-    so a blocked FINISH that also needed approval had to drop the gate's
-    reason to park for its human at all - and the run carried no record of
-    why FINISH was refused while the human read the request.
+    The approval branch is not selected on the routing note being unset, so a
+    blocked FINISH that also needs approval keeps the gate's reason while it
+    parks for its human - the run carries a record of why FINISH was refused
+    while the human reads the request.
     """
     graph = _star_graph(["FINISH"])
     prompts = _SupervisorPrompts()
@@ -498,8 +498,8 @@ async def test_a_finish_gate_no_worker_can_satisfy_is_refused_not_rerouted() -> 
     """A gate with no worker to satisfy it refuses rather than picking one.
 
     This team has a plan author and a coder and no reviewer, so nothing on it
-    can produce the audit artifact the completion gate demands. The reroute
-    used to fall back to ``workers[0]`` - here the plan author - whose next
+    can produce the audit artifact the completion gate demands. Falling back to
+    ``workers[0]`` - here the plan author - would hand off to a role whose next
     hand-off is blocked by the same gate for the same reason. Refusing puts
     the reason in front of the supervisor and ends the run within the re-ask
     budget instead.

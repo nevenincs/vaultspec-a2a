@@ -70,9 +70,10 @@ async def test_the_tail_is_reported_at_warning_with_the_session_it_belonged_to(
 ) -> None:
     """A run at the default level sees the diagnostic and the provider session.
 
-    Both were previously invisible: the lines went to DEBUG under an INFO default
-    and the session id was read off the wire and dropped, so a failed turn left
-    nothing to correlate with the transcript the CLI wrote.
+    Both must be visible: the lines would otherwise sit at DEBUG under an INFO
+    default and the session id would be read off the wire and dropped, so a
+    failed turn would leave nothing to correlate with the transcript the CLI
+    wrote.
     """
     model = _model(tmp_path, [_SECRET_LINE, _FATAL_LINE])
 

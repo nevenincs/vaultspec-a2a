@@ -273,9 +273,8 @@ class TestCompactContext:
     def test_first_human_message_preserved(self) -> None:
         """The first HumanMessage (original task) is never dropped during compaction.
 
-        Regression: compaction previously had no protection for the first
-        HumanMessage — it could be silently removed when the budget was
-        exhausted by the system prefix alone.
+        Compaction protects the first HumanMessage: it is never silently removed,
+        even when the budget is exhausted by the system prefix alone.
         """
         system_msg = SystemMessage(content="You are a coding assistant.")
         task_msg = HumanMessage(content="ORIGINAL TASK: implement feature X")

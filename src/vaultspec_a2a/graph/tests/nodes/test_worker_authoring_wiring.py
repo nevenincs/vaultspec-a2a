@@ -199,7 +199,7 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
 
     When the binding carries the engine transport (engine_base_url + run_id) the
     worker prefers the stdio bridge (a spawned subprocess). Neither session-injected
-    transport surfaces to the model per the S20 registration-scope matrix, so this
+    transport surfaces to the model per the registration-scope matrix, so this
     is a transport-mechanics choice, not a surfacing one. The session/new the real
     CLI receives must carry a stdio server entry (command + args, no url/type) whose
     env carries the run's engine facts — proving the wiring reaches a subprocess.

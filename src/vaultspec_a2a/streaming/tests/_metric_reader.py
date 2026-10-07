@@ -1,6 +1,6 @@
 """A real OpenTelemetry SDK meter whose recorded counters a test reads back.
 
-The aggregator hook records through whichever meter it was handed, so a test
+The OTel telemetry hook records through whichever meter it was handed, so a test
 that wants to know what an operator would see builds the hook over a meter it
 owns and collects from the SDK's in-memory reader. Nothing is stood in for: the
 counter is created, incremented, and aggregated by the SDK itself.

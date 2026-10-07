@@ -2,7 +2,8 @@ Vaultspec A2A documentation
 ===========================
 
 Vaultspec A2A runs agent workflows without a user interface. Its gateway accepts
-HTTP and WebSocket requests; a separate worker executes the workflows.
+HTTP requests and streams progress over server-sent events; a separate worker
+executes the workflows.
 
 Start with :doc:`development` to set up a source checkout, or :doc:`operations`
 to run the gateway and worker. For integration details, see :doc:`architecture`

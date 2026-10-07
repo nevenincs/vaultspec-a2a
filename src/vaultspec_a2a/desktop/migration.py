@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from .contract import MigrationRange
 
 __all__ = [
+    "MigrationResult",
     "MigrationStage",
     "StoreName",
     "StoreStatus",

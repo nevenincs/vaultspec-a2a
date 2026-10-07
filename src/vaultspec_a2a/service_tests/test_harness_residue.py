@@ -1,12 +1,13 @@
 """Constructing a service stack must not colonise the operator's real home.
 
 The runtime directory lives in the machine-global A2A home by deliberate design -
-the vault rejects foreign directories inside it - but creation used to happen in
-the dataclass constructor. Several unit-shaped tests build a stack purely to
+the vault rejects foreign directories inside it - but creation must not happen
+in the dataclass constructor. Several unit-shaped tests build a stack purely to
 inspect environment and header wiring and never start anything, and each of those
-left a permanent directory behind in the operator's real state home.
+would otherwise leave a permanent directory behind in the operator's real state
+home.
 
-These tests assert the property that fixes: construction is inert.
+These tests assert the property that prevents it: construction is inert.
 """
 
 from __future__ import annotations

@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 DECLARED_SERVER = "vaultspec-rag"
 
 #: The shipped preset carrying a real, unedited harness declaration. Its topology
-#: is ``pipeline`` - one of the three the compiler used to drop the declaration on.
+#: is ``pipeline`` - one of the three on which the compiler must carry the declaration.
 DOC_EDITOR = "vaultspec-doc-editor"
 
 #: A shipped ``pipeline_loop`` preset. It declares no harness of its own, so the

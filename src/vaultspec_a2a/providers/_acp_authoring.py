@@ -1,4 +1,4 @@
-"""Bind the engine authoring tool catalog into an ACP subprocess session (R4).
+"""Bind the engine authoring tool catalog into an ACP subprocess session.
 
 The engine owns the agent-tool catalog; the authoring package snapshots it per
 run (``vaultspec_a2a.authoring.catalog``). This module turns that snapshot plus
@@ -8,7 +8,7 @@ bridged propose/read tools. Tool execution routes back through the engine's
 run-scoped execute endpoint under the calling role's actor token; that routing
 lives in the served MCP module, not here.
 
-Two invariants hold at construction time (R2 + R4):
+Two invariants hold at construction time:
 
 - Loopback only. The engine edge is loopback HTTP; a non-loopback server host is
   refused so the CLI can never be pointed at a remote authoring surface.
@@ -17,7 +17,7 @@ Two invariants hold at construction time (R2 + R4):
   any tool whose name looks like a raw write so a drifted catalog fails loudly
   rather than silently handing an agent a direct write.
 
-Token hygiene (R7): the machine bearer and per-actor token are held only to
+Token hygiene: the machine bearer and per-actor token are held only to
 assemble request headers for the local subprocess and are redacted from
 ``repr``; the binding is a worker-scoped runtime value, never placed in graph
 state or a checkpoint.
@@ -259,7 +259,7 @@ class AuthoringToolBinding:
         if offenders:
             raise ValueError(
                 f"authoring catalog surfaced filesystem-write tools {offenders!r}; "
-                f"agents get no vault-write path (R2)"
+                "agents get no vault-write path"
             )
 
     def _validate_transport(self) -> None:
@@ -279,12 +279,12 @@ class AuthoringToolBinding:
         if self.server_url is not None and not _is_loopback(self.server_url):
             raise ValueError(
                 f"authoring MCP server_url {self.server_url!r} is not a loopback "
-                f"http(s) host; the engine edge is loopback-only (R4)"
+                "http(s) host; the engine edge is loopback-only"
             )
         if self.engine_base_url is not None and not _is_loopback(self.engine_base_url):
             raise ValueError(
                 f"authoring engine_base_url {self.engine_base_url!r} is not a "
-                f"loopback http(s) host; the engine edge is loopback-only (R4)"
+                "loopback http(s) host; the engine edge is loopback-only"
             )
         has_http = self.server_url is not None
         has_stdio = self.engine_base_url is not None and self.run_id is not None
@@ -365,7 +365,7 @@ def build_authoring_stdio_mcp_servers(
     in ``session/new`` for a server without a ``type``: ``{name, command, args,
     env}``) that runs ``python -m <AUTHORING_STDIO_MODULE>``. The engine origin,
     run id, and tokens travel to the subprocess by env — never argv — so a
-    process listing never exposes them (R7); the subprocess reconstructs the
+    process listing never exposes them; the subprocess reconstructs the
     run's dispatch and serves the bridged tools over stdio. The session seam
     surfaces this spec with its ``env`` values rewritten to
     ``${VAULTSPEC_A2A_AUTHORING_*}`` placeholder references while
@@ -435,7 +435,7 @@ def build_authoring_stdio_mcp_servers(
         )
     # Forward the debug startup marker to the subprocess when enabled (the MCP
     # SDK filters arbitrary parent env, so it must ride the explicit env list).
-    # Off unless the orchestrator sets it; carries no token (R7).
+    # Off unless the orchestrator sets it; carries no token.
     debug_marker = AuthoringBridgeSettings().debug_marker
     if debug_marker is not None:
         env.append({"name": STDIO_ENV_DEBUG_MARKER, "value": str(debug_marker)})

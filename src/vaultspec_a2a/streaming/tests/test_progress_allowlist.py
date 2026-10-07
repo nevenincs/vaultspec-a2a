@@ -415,7 +415,7 @@ def test_metadata_never_survives_any_catalogued_type(frame_type: str) -> None:
 
 
 def test_metadata_never_survives_an_uncatalogued_type() -> None:
-    """The type that used to pass ``metadata`` verbatim no longer does."""
+    """An uncatalogued type never passes ``metadata`` through verbatim."""
     frame = enforce_progress_allowlist(
         {
             "type": "some_future_event",

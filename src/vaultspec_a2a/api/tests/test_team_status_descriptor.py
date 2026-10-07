@@ -236,11 +236,10 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
 def test_mirrored_agent_states_are_enum_members_not_strings() -> None:
     """``get_agent_states()`` yields real enum members at runtime.
 
-    ``control/snapshot.py`` used to wrap this value in ``str()``.  That was not
-    protecting against a string arriving where an enum was expected — it was
-    downgrading a well-typed enum into a bare string, which is what let the
-    stringly-typed descriptor persist.  Dropping the call removes a coercion
-    rather than swapping one silent coercion for another, and this pins it.
+    ``control/snapshot.py`` passes this value through as the enum member without
+    wrapping it in ``str()``, which would downgrade a well-typed enum into a
+    bare string and let the stringly-typed descriptor persist.  This pins the
+    absence of that coercion.
     The relayed payload carries the state as a bare string, so the mirror is
     what has to rebuild the member.
     """

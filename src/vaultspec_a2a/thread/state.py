@@ -279,7 +279,7 @@ class TeamState(TypedDict):
     validation_errors: NotRequired[Annotated[list[str], append_validation_errors]]
 
     # --- authoring proposal references ---
-    # References (D5) to engine authoring artifacts this run produced — the
+    # References to engine authoring artifacts this run produced — the
     # session id and the changeset/proposal ids, never document content. Ids
     # are appended and de-duplicated as proposals are created and submitted.
     authoring_session_id: NotRequired[str | None]

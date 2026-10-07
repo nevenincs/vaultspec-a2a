@@ -1,15 +1,13 @@
-"""Gateway-level SSE coverage for GET /threads/{thread_id}/stream.
+"""Gateway-level SSE coverage for GET /v1/runs/{run_id}/stream.
 
-Net-new coverage: before the src/ui deletion the SSE endpoint had
-no automated exerciser at all — the React SPA was its only consumer. These tests
-drive the real endpoint through a real ASGI app + a real SQLite thread row + the
-real RelayHub, asserting an actual ``text/event-stream`` frame. No mocks,
-no test doubles. The /ws WebSocket tests do NOT cover this SSE surface.
+These tests drive the real endpoint through a real ASGI app + a real SQLite
+thread row + the real RelayHub, asserting an actual ``text/event-stream``
+frame. No mocks, no test doubles.
 
 The terminal-replay path is asserted directly because it is deterministic and
-finite (the endpoint yields one ``thread_terminal`` frame and returns); it is
-exactly the close-after-terminal behaviour the -17 merge extended. The live
-streaming loop is exercised end-to-end by the deterministic-lane run proofs.
+finite (the endpoint yields one ``thread_terminal`` frame and returns), which
+is the close-after-terminal behaviour. The live streaming loop is exercised
+end-to-end by the deterministic-lane run proofs.
 """
 
 from __future__ import annotations

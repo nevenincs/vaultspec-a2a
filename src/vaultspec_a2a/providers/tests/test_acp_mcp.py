@@ -5,10 +5,10 @@ Real objects only, no mocks: composition runs against production
 
 No outward-reaching server is exercised here, and the absence is the point rather
 than a gap. The registry is closed and every entry it now carries declares no egress,
-so there is nothing here that reaching outward would even describe. The cases that
-used to exercise it were written against a first-party web-search server that does
-not exist, and they went with it: a test proving a fiction resolves, renders a
-launch spec, and gets advertised is worse than no test, because it passes. Should
+so there is nothing here that reaching outward would even describe. Cases written
+against a first-party web-search server that does not exist would prove a
+fiction: a test proving a fiction resolves, renders a launch spec, and gets
+advertised is worse than no test, because it passes. Should
 a real egressing entry ever be declared, its coverage belongs here and must be
 written against that entry, never against a placeholder.
 """

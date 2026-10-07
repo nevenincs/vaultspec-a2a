@@ -1,16 +1,17 @@
-"""Manage development processes and gateway-restart reconciliation.
+"""Manage development processes and the resident gateway's lifecycle.
 
-Configuration, registration, the registry, and reconciliation support
-lifecycle verbs for machine-global local services.
-
-:mod:`vaultspec_a2a.lifecycle.reconciliation` also computes pure recovery
-actions for non-terminal :mod:`vaultspec_a2a.thread` state after a gateway
-restart. It doesn't perform database or other input/output operations.
+Configuration, registration, the registry, and the lifecycle verbs for
+machine-global local services, alongside the resident gateway's service
+discovery, dispatch-pairing check, runtime singleton, and shutdown deadline.
 
 :mod:`vaultspec_a2a.lifecycle.procs_config` defines process configuration.
 :mod:`vaultspec_a2a.lifecycle.registration` registers process definitions.
 :mod:`vaultspec_a2a.lifecycle.registry` persists process state.
 :mod:`vaultspec_a2a.lifecycle.manager` performs lifecycle operations.
+:mod:`vaultspec_a2a.lifecycle.discovery` publishes and probes service discovery.
+``vaultspec_a2a.lifecycle.pairing`` verifies gateway and worker pairing.
+``vaultspec_a2a.lifecycle.singleton`` holds the one-owner runtime lock.
+``vaultspec_a2a.lifecycle.shutdown`` bounds an owned server's shutdown.
 
 The process commands in :mod:`vaultspec_a2a.cli` use this package. See
 :ref:`process-registry` for operator guidance.

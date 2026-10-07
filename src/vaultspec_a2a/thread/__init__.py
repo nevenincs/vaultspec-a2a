@@ -2,14 +2,16 @@
 
 The package defines thread enums, errors, models, state, snapshots, actor
 tokens, run write authority, resume-value contracts, and projection helpers.
-Snapshots also use :mod:`vaultspec_a2a.graph.enums`.
+Snapshots use :mod:`vaultspec_a2a.graph.enums`, and resume values use
+``vaultspec_a2a.graph.acp_options``.
 
 :mod:`vaultspec_a2a.context` reads thread state.
 :mod:`vaultspec_a2a.control` coordinates thread operations.
 :mod:`vaultspec_a2a.database` persists thread records and projections.
 
-Graph enums are this package's cross-package runtime dependency. Control and
-database modules consume the thread API but aren't imported by it.
+The graph enums and the ACP option vocabulary are this package's
+cross-package runtime dependencies. Control and database modules consume the
+thread API but aren't imported by it.
 
 Exports are lazy (same pattern as :mod:`vaultspec_a2a.graph`): ``state`` pulls
 the langgraph stack and ``snapshots``/``clarification`` build pydantic models,

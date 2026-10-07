@@ -110,10 +110,9 @@ def test_no_checkpoint_has_no_depth_to_report() -> None:
 async def test_the_depth_needs_no_second_read_of_the_store(tmp_path: Path) -> None:
     """The store is gone and the depth is still there.
 
-    The depth used to come from a second listing under its own ten-second
-    timeout, with two degraded reasons for the ways that read could fail.
-    Computed from the tuple, there is no read to fail: this closes the store
-    before asking, which the old path could not have survived.
+    The depth is computed from the checkpoint tuple, so there is no second
+    listing to time out or fail: this closes the store before asking, which a
+    second read could not survive.
     """
     thread_id = f"closed-{uuid4()}"
     async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.db")) as store:

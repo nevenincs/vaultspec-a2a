@@ -1,7 +1,7 @@
 """The stream quota must bind where registration happens, not only where it is checked.
 
 The global cap on progress-stream subscribers is already proven against the SSE
-edge with a real authenticated client (see the S160 global-quota cases in
+edge with a real authenticated client (see the global-quota cases in
 ``test_progress_allowlist``). That route-level check is not where the bound
 actually holds: it runs while the response is being built, before the
 registration it authorises has happened, so a concurrent stream can take the
@@ -11,7 +11,7 @@ So this covers what the route-level check cannot - that a caller refused at
 registration is told so rather than dropped, that the loser of that race does not
 linger in the registry it was refused from, and that an admitted stream hands its
 slot back. Real registry, no mocks. Capacity is created by registering real
-subscribers through the aggregator's production API, so the registry is genuinely
+subscribers through the relay hub's production API, so the registry is genuinely
 full rather than reported full.
 
 The per-principal dimension is deliberately unrepresented here. This edge

@@ -1,9 +1,9 @@
 """A gateway and its worker must be able to prove they belong together.
 
-Pairing was previously inferred from a URL. A URL cannot distinguish a gateway
-from its own restart on the same port, so a worker left over from a previous
-incarnation reported the correct target and looked correctly paired - the
-condition that let dispatch reach a foreign worker.
+Pairing is not inferred from a URL. A URL cannot distinguish a gateway from its
+own restart on the same port, so a worker left over from a previous
+incarnation would report the correct target and look correctly paired - the
+condition that lets dispatch reach a foreign worker.
 
 These tests pin the identity that makes the distinction possible: one value per
 gateway process, and a generation that advances per spawn attempt.

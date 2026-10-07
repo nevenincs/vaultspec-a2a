@@ -392,14 +392,13 @@ async def test_document_approval_pause_is_refused_not_journalled(
 ) -> None:
     """The engine alone decides a document-approval pause; this route refuses.
 
-    Before the amended edge contract was enforced here, this pause resolved
-    into a REJECTED_INVALID_STATE row carrying an ``{"approved": bool}`` resume
-    the document phase gate could not parse — a state fork against engine
-    truth (D3/D6). The fix refuses before the idempotency and transition logic
-    even runs, so nothing is journalled under the response's natural
-    idempotency key and the permission is left exactly as durably pending as
-    it was before the call — proving the retired approved-boolean resume is
-    never constructed.
+    Accepting the response would resolve this pause into a
+    REJECTED_INVALID_STATE row carrying an ``{"approved": bool}`` resume the
+    document phase gate cannot parse — a state fork against engine truth. The
+    route refuses before the idempotency and transition logic even runs, so
+    nothing is journalled under the response's natural idempotency key and the
+    permission is left exactly as durably pending as it was before the call —
+    proving the retired approved-boolean resume is never constructed.
     """
     thread_id = await _seed_thread(session_factory)
     request_id = await park_document_approval(

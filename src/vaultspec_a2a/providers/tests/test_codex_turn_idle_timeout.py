@@ -141,10 +141,10 @@ def test_silent_turn_is_bounded_by_the_acp_idle_knob() -> None:
 def test_long_idle_knob_outlives_a_short_call_budget() -> None:
     """Inverted control: the call budget must NOT cut a quiet turn short.
 
-    Proves the fix changed which setting governs rather than merely making some
-    timeout fire. Here the call budget is shorter than the observation window
-    and the idle knob is far longer, so the pre-fix wiring expired at the budget
-    and reported ``deadline``. A correctly wired turn is still waiting.
+    Proves the idle knob governs, rather than merely some timeout firing. Here
+    the call budget is shorter than the observation window and the idle knob is
+    far longer, so wiring the call budget in would expire at the budget and
+    report ``deadline``. A correctly wired turn is still waiting.
     """
     probe = _run_probe(
         idle_limit="600",

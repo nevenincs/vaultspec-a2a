@@ -91,8 +91,8 @@ def _make_team(
 ) -> TeamConfig:
     """Build a TeamConfig inline from real models for topology coverage.
 
-    The multi-role coder presets that used to carry the star, pipeline, and
-    pipeline_loop topologies were retired; this constructs an equivalent config
+    No bundled multi-role coder preset carries the star, pipeline, or
+    pipeline_loop topologies; this constructs an equivalent config
     directly so the real ``compile_team_graph`` paths for those topologies stay
     exercised without depending on a bundled preset.
     """
@@ -703,7 +703,7 @@ def test_revision_granted_follows_the_verdict_under_the_budget() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T01 -- star topology conditional edge with missing 'next' field
+# Star topology conditional edge with missing 'next' field
 # ---------------------------------------------------------------------------
 
 
@@ -750,7 +750,7 @@ def test_route_from_supervisor_honors_approval_then_the_next_decision() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T05 -- _worker_retry_on predicate
+# _worker_retry_on predicate
 # ---------------------------------------------------------------------------
 
 
@@ -801,7 +801,7 @@ def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T11 -- step_timeout wired to compiled graph
+# step_timeout wired to compiled graph
 # ---------------------------------------------------------------------------
 
 
@@ -885,10 +885,10 @@ async def test_the_superstep_backstop_covers_every_attempt_a_node_may_make(
 
     Every attempt gets the whole per-node run budget and the loop waits
     between attempts, so the backstop has to cover the budget times the
-    attempts plus those waits. It used to be one budget plus a fixed grace: a
-    node that spent its budget on the first attempt had the grace - about
-    thirty seconds - for the two more it was configured for, so the graph
-    bound fired first and reported an anonymous step timeout.
+    attempts plus those waits. One budget plus a fixed grace would fail this: a
+    node that spent its budget on the first attempt would have the grace - about
+    thirty seconds - for the two more it is configured for, so the graph
+    bound would fire first and report an anonymous step timeout.
     """
     team = load_team_config("vaultspec-solo-coder")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
@@ -1052,7 +1052,7 @@ def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T15 -- GraphRecursionError excluded from retry
+# GraphRecursionError excluded from retry
 # ---------------------------------------------------------------------------
 
 

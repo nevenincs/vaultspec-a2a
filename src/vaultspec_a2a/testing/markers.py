@@ -144,7 +144,6 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
                 "test_resource_lifetimes.py",
                 # Real async engine and session maker.
                 "test_codex_chat_model.py",
-                "test_deterministic_scripts.py",
             }
         ),
         live_files=frozenset(
@@ -160,6 +159,12 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
                 "test_terminal_containment.py",
             }
         ),
+    ),
+    # The fixture lanes, built through the production provider factory.
+    "testing/lanes/tests": LayerRule(
+        "middleware",
+        # Drives a real compiled graph through a real checkpointer.
+        impure_files=frozenset({"test_deterministic_scripts.py"}),
     ),
     # --- Core directories --------------------------------------------------
     "context/tests": LayerRule(

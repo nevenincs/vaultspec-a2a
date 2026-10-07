@@ -1,11 +1,12 @@
 """The exact execution mode each external provider lane is served under.
 
-The external counterpart to the in-process declaration in
-:mod:`.in_process_catalog`. Catalog identity is execution-mode specific by
-decision, so these strings are lane identity, not labels: the catalog
-registrations, the frozen-lane validator, each model's construction, and the
-completed-turn proof declaration all name a lane by them, and changing one renames
-the lane everywhere it is admitted, frozen, and replayed.
+The external counterpart to the in-process lanes, each of which declares its own
+mode through its :class:`~.lane_registry.LaneRegistration`. Catalog identity is
+execution-mode specific by decision, so these strings are lane identity, not
+labels: the catalog registrations, the frozen-lane validator, each model's
+construction, and the completed-turn proof declaration all name a lane by them,
+and changing one renames the lane everywhere it is admitted, frozen, and
+replayed.
 
 The two Claude-backed lanes run on a selectable ACP backend and carry it as a
 ``:<backend>`` suffix. :func:`external_execution_mode` is the one place that

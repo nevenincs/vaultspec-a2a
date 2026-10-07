@@ -115,7 +115,10 @@ def test_supported_provider_and_exact_mode_inventories_are_current_only() -> Non
     )
     factory = ProviderFactory()
     external = tuple(
-        registration.key for registration in factory.catalog_registrations(Path.cwd())
+        registration.key
+        for registration in factory.catalog_registrations(
+            Path.cwd(), serve_in_process_lanes=False
+        )
     )
     assert external == (
         ProviderCatalogKey("antigravity", "antigravity-cli"),

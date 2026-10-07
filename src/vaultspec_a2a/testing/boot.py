@@ -71,6 +71,7 @@ from ..utils.runtime_exec import self_command
 from .children import reap_tree
 from .cli import run_cli
 from .http import serve_on_loopback
+from .lanes import armed_lane_environment
 from .ports import (
     allocate_free_ports,
     hold_for_process_lifetime,
@@ -620,13 +621,22 @@ def booted_gateway(
 
 
 def gateway_process_env(
-    *, gateway_port: int, worker_port: int, auto_spawn_worker: bool
+    *,
+    gateway_port: int,
+    worker_port: int,
+    auto_spawn_worker: bool,
+    serve_in_process_lanes: bool = False,
 ) -> dict[str, str]:
     """The production process environment every harness gateway starts from.
 
     The current environment, in the production profile, addressed on the given
     port pair, and armed with the harness's worker-readiness budget. Profiles
     layer their own stores and credentials on top.
+
+    *serve_in_process_lanes* serves the in-process lanes, the source checkout's
+    fixture lanes among them, through :func:`.lanes.armed_lane_environment`. A
+    gateway hands its worker the environment it was given, so one declaration
+    arms both processes.
     """
     env = os.environ.copy()
     env["VAULTSPEC_A2A_ENVIRONMENT"] = "production"
@@ -634,6 +644,8 @@ def gateway_process_env(
     env["VAULTSPEC_A2A_WORKER_PORT"] = str(worker_port)
     env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true" if auto_spawn_worker else "false"
     env["VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS"] = f"{_WORKER_READY_TIMEOUT:g}"
+    if serve_in_process_lanes:
+        env.update(armed_lane_environment())
     return env
 
 
@@ -686,7 +698,8 @@ def broker_gateway_env(
 
     Desktop admission refuses execution until native isolation is qualified.
     Independent broker tests use explicit stores under *app_home*, real gateway
-    and worker auth, and the in-process lanes served. *extra* is applied last.
+    and worker auth, and the in-process lanes served, the source checkout's
+    fixture lanes among them. *extra* is applied last.
     """
     armed = armed_gateway_env(app_home, auto_spawn_worker=auto_spawn_worker)
 
@@ -710,7 +723,7 @@ def broker_gateway_env(
                 "VAULTSPEC_A2A_INTERNAL_TOKEN": create_worker_ipc_credential(
                     state.credentials_dir
                 ),
-                "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
+                **armed_lane_environment(),
             }
         )
         if extra:

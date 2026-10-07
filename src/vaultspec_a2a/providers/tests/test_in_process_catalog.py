@@ -56,19 +56,12 @@ from ..provider_catalog_service import (
 from ..team_selection import freeze_team_selection
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 _MOCK_LANE = next(lane for lane in BUILT_IN_LANES if lane.provider is Provider.MOCK)
 _LANES: tuple[LaneRegistration, ...] = (DETERMINISTIC_LANE, _MOCK_LANE)
 _DETERMINISTIC = in_process_catalog_key(DETERMINISTIC_LANE)
 _MOCK = in_process_catalog_key(_MOCK_LANE)
-
-
-@pytest.fixture(autouse=True)
-def _held_lanes() -> Iterator[None]:
-    with seated_lanes():
-        yield
 
 
 def _held_keys() -> set[ProviderCatalogKey]:
@@ -105,8 +98,10 @@ def test_a_plugin_named_while_the_lanes_are_unarmed_refuses_the_process() -> Non
 def test_a_plugin_named_under_the_desktop_profile_refuses_the_process(
     tmp_path: Path,
 ) -> None:
+    # Arming the desktop profile unseats the plugin, so it is named again here.
     with (
         armed_desktop_app_home(tmp_path),
+        seated_lanes(),
         pytest.raises(LanePluginError, match="desktop profile"),
     ):
         in_process_lanes()

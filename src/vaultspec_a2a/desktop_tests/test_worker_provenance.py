@@ -43,9 +43,9 @@ from ..testing import (
     seat_app_home,
     spawn_gateway,
     status_and_json,
+    unvalidated_selection,
     worker_lifecycle_gateway_script,
 )
-from ..testing.catalog import unvalidated_selection
 from ..testing.ports import free_port
 from ..utils._process_tree import pid_is_live
 

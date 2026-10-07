@@ -12,7 +12,8 @@ agent side of the protocol over stdio, with the frame builders and the request a
 reply exchange a client-side test uses against it. Beside them sits the
 real-process support every test tier composes rather than retypes: the gateway
 boot and its peers (``boot``), the loopback listeners a test points code at
-(``http``), and the run-start verb shaped once (``verbs``).
+(``http``), the run-start verb shaped once (``verbs``), and the in-process
+fixture lanes a test gateway or test process holds (``lanes``).
 
 The plugin is loaded by the repository-root ``conftest.py``, which is the one
 channel that neither an ``addopts`` override can strip nor a consumer
@@ -90,6 +91,7 @@ if TYPE_CHECKING:
         named_lane_selection,
         override_selection_from_served_catalog,
         selection_from_served_catalog,
+        unvalidated_selection,
     )
     from .children import (
         DEFAULT_IDLE_WINDOW_S,
@@ -123,6 +125,7 @@ if TYPE_CHECKING:
         serve_on_loopback_in_thread,
         uvicorn_started,
     )
+    from .lanes import armed_lane_environment, seated_lanes
     from .leases import (
         LEASE_TTL_MS,
         Lease,
@@ -324,6 +327,10 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.catalog",
         "selection_from_served_catalog",
     ),
+    "unvalidated_selection": (
+        "vaultspec_a2a.testing.catalog",
+        "unvalidated_selection",
+    ),
     "DEFAULT_IDLE_WINDOW_S": (
         "vaultspec_a2a.testing.children",
         "DEFAULT_IDLE_WINDOW_S",
@@ -358,6 +365,11 @@ _LAZY_EXPORTS = {
     ),
     "armed_environment": ("vaultspec_a2a.testing.environment", "armed_environment"),
     "settings_override": ("vaultspec_a2a.testing.environment", "settings_override"),
+    "armed_lane_environment": (
+        "vaultspec_a2a.testing.lanes",
+        "armed_lane_environment",
+    ),
+    "seated_lanes": ("vaultspec_a2a.testing.lanes", "seated_lanes"),
     "add_test_node": ("vaultspec_a2a.testing.graph", "add_test_node"),
     "ainvoke_test_graph": ("vaultspec_a2a.testing.graph", "ainvoke_test_graph"),
     "compile_test_graph": ("vaultspec_a2a.testing.graph", "compile_test_graph"),
@@ -511,6 +523,7 @@ __all__ = [
     "armed_desktop_app_home",
     "armed_environment",
     "armed_gateway_env",
+    "armed_lane_environment",
     "async_catalog_run_fields",
     "async_fetch_in_process_selection",
     "async_fetch_provider_catalog",
@@ -577,6 +590,7 @@ __all__ = [
     "run_child",
     "run_cli",
     "seat_app_home",
+    "seated_lanes",
     "selection_from_served_catalog",
     "serve_handler",
     "serve_on_loopback",
@@ -589,6 +603,7 @@ __all__ = [
     "spawn_signalled",
     "spawn_until_ready",
     "status_and_json",
+    "unvalidated_selection",
     "uses_impure_fixture",
     "uvicorn_started",
     "wait_for",

@@ -33,6 +33,7 @@ from ..testing import (
     gateway_script,
     log_tail,
     seat_app_home,
+    unvalidated_selection,
 )
 
 if TYPE_CHECKING:
@@ -152,13 +153,7 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
 
     # Each new-run entry refuses before worker startup or capacity/token binding.
     workspace = desktop_workspace(str(client.base_url))
-    selection = {
-        "schema_version": 1,
-        "provider_id": "codex",
-        "execution_mode": "app_server",
-        "catalog_revision": "unvalidated",
-        "entry_id": "unvalidated",
-    }
+    selection = unvalidated_selection()
     verbs = RunVerbs(
         base_url=str(client.base_url),
         authorization=_AUTH,

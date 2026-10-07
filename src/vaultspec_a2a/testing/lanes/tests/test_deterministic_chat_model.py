@@ -6,18 +6,14 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from ...authoring.contract import RESEARCH_ADR_ROLES
-from ...graph.enums import Provider
-from ...team.team_config import AgentConfig, AgentPersonaConfig, load_team_config
-from ...testing.lanes import (
-    UNATTENDED_REPLY,
-    DeterministicResearchAdrChatModel,
-    seated_lanes,
-)
-from ...testing.lanes.deterministic import _role_of
-from ...thread.constants import DEFAULT_SUPERVISOR_ID
-from ..factory import ProviderFactory
-from ..in_process_catalog import in_process_lane
+from ....authoring.contract import RESEARCH_ADR_ROLES
+from ....graph.enums import Provider
+from ....providers.factory import ProviderFactory
+from ....providers.in_process_catalog import in_process_lane
+from ....team.team_config import AgentConfig, AgentPersonaConfig, load_team_config
+from ....thread.constants import DEFAULT_SUPERVISOR_ID
+from .. import UNATTENDED_REPLY, DeterministicResearchAdrChatModel
+from ..deterministic import _role_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -36,14 +32,13 @@ def _agent(agent_id: str) -> AgentConfig:
 
 
 def _model(agent_id: str) -> DeterministicResearchAdrChatModel:
-    """Build the lane's model through the production factory, lanes held."""
-    with seated_lanes():
-        model = ProviderFactory().create(
-            Provider.DETERMINISTIC,
-            model="deterministic",
-            execution_mode="in-process-deterministic",
-            agent_config=_agent(agent_id),
-        )
+    """Build the lane's model through the production factory and its plugin."""
+    model = ProviderFactory().create(
+        Provider.DETERMINISTIC,
+        model="deterministic",
+        execution_mode="in-process-deterministic",
+        agent_config=_agent(agent_id),
+    )
     assert isinstance(model, DeterministicResearchAdrChatModel)
     return model
 
@@ -59,8 +54,7 @@ def test_exact_provider_identity_is_wired() -> None:
 
 def test_factory_returns_first_class_base_chat_model() -> None:
     """The production factory resolves the permanent completion floor."""
-    with seated_lanes():
-        assert in_process_lane(Provider.DETERMINISTIC) is not None
+    assert in_process_lane(Provider.DETERMINISTIC) is not None
     model = _model("vaultspec-researcher")
     assert isinstance(model, BaseChatModel)
 

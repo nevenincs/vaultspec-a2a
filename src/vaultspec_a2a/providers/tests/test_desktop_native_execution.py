@@ -12,7 +12,7 @@ import pytest
 from ...control.provider_execution import native_execution_refusal_reason
 from ...control.state_layout import state_layout
 from ...graph.enums import Provider
-from ...testing import settings_override
+from ...testing import armed_desktop_app_home, settings_override
 from ...utils.process import ProcessContainmentError
 from .._acp_rpc_terminal_handlers import on_terminal_create
 from .._acp_types import AcpSessionContext
@@ -54,11 +54,13 @@ async def test_desktop_native_read_is_refused_before_child_execution(
     private.write_text("synthetic-private-state", encoding="utf-8")
     marker = project / "child-started.txt"
     command = _command(project, private, marker)
-    with settings_override(
-        desktop_app_home=home,
-        provider_identity_launcher=sys.executable if identity_configured else None,
-        provider_agent_uid=1002 if identity_configured else None,
-        provider_agent_gid=1002 if identity_configured else None,
+    with (
+        armed_desktop_app_home(home),
+        settings_override(
+            provider_identity_launcher=sys.executable if identity_configured else None,
+            provider_agent_uid=1002 if identity_configured else None,
+            provider_agent_gid=1002 if identity_configured else None,
+        ),
     ):
         with pytest.raises(ProcessContainmentError, match="OS isolation backend"):
             await spawn_acp_process(
@@ -73,7 +75,9 @@ async def test_desktop_native_read_is_refused_before_child_execution(
             verdict = probe_provider_readiness(provider)
             assert not verdict.ready
             assert verdict.reason == native_execution_refusal_reason()
-        assert probe_provider_readiness(Provider.DETERMINISTIC).ready
+        # A lane this build holds in-process launches nothing native, so the
+        # refusal does not reach it; plugin lanes are not held under this profile.
+        assert probe_provider_readiness(Provider.MOCK).ready
     assert not marker.exists()
     assert private.read_text(encoding="utf-8") == "synthetic-private-state"
 

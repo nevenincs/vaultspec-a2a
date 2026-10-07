@@ -25,8 +25,8 @@ from ...database import (
     init_db,
 )
 from ...database.thread_repository import create_thread
+from ...graph.enums import Provider
 from ...ipc.schemas import DispatchRequest
-from ...providers.in_process_catalog import discover_in_process_catalog
 from ...providers.provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -59,6 +59,7 @@ from ...testing import (
     broker_gateway_env,
     fetch_in_process_selection,
     gateway_script,
+    in_process_lane_selection,
     log_tail,
     seat_app_home,
     wait_for_run_status,
@@ -80,9 +81,9 @@ def _current_metadata(
     catalog_revision: str | None = None,
     model_value: str = "deterministic",
 ) -> tuple[dict[str, object], FrozenTeamSelection]:
-    key = ProviderCatalogKey("deterministic", "in-process-deterministic")
+    served, _reference = in_process_lane_selection(Provider.DETERMINISTIC)
     now = datetime.now(UTC)
-    catalog = stamp_catalog_expiry(discover_in_process_catalog(key).catalog)
+    catalog = served.catalog
     if model_value != catalog.models[0].provider_value:
         catalog = replace(
             catalog,
@@ -98,22 +99,7 @@ def _current_metadata(
         catalog = replace(
             catalog, state=replace(catalog.state, revision=catalog_revision)
         )
-    record = ProviderRecord(
-        provider_id=key.provider_id,
-        display_name="Deterministic (in-process)",
-        execution_mode=key.execution_mode,
-        health=StructuredProviderHealth.derive(
-            axes=ProviderHealthAxes(
-                configured=HealthState.AVAILABLE,
-                transport=HealthState.AVAILABLE,
-                authentication=AuthenticationState.NOT_APPLICABLE,
-                catalog=CatalogStatus.AVAILABLE,
-                admission=AdmissionState.ADMITTED,
-            ),
-            checked_at=now,
-        ),
-        catalog=catalog,
-    )
+    record = replace(served, catalog=catalog)
     model = record.catalog.models[0]
     codex_key = ProviderCatalogKey("codex", "codex-app-server")
     codex_revision = "frozen-unused-codex-fallback"
@@ -166,8 +152,8 @@ def _current_metadata(
         ),
     )
     primary = SelectionReference(
-        provider_id=key.provider_id,
-        execution_mode=key.execution_mode,
+        provider_id=record.provider_id,
+        execution_mode=record.execution_mode,
         catalog_revision=record.catalog.state.revision or "",
         entry_id=model.entry_id,
     )

@@ -185,10 +185,11 @@ _DECISION_COMMAND: dict[str, str] = {
 _SYSTEM_AUTO_APPROVER_ID = "system:operation-modes"
 _MODE_POLICY_ID = "authoring.operation_modes"
 
-# The two research_adr driver presets. DETERMINISTIC is the in-process
-# Provider.DETERMINISTIC device: the fast, provider-agnostic lane run on every
-# dispatch. LIVE is the real-Claude preset: the real-provider proof, run once the
-# deterministic lanes are green; select it with `-k live`.
+# The two research_adr driver presets. DETERMINISTIC runs on the deterministic
+# fixture lane this package's lane plugin registers (`testing.lanes`): the fast,
+# provider-agnostic lane run on every dispatch. LIVE is the real-Claude preset:
+# the real-provider proof, run once the deterministic lanes are green; select it
+# with `-k live`.
 PRESET_DETERMINISTIC = "vaultspec-adr-research-deterministic"
 PRESET_LIVE = "vaultspec-adr-research"
 

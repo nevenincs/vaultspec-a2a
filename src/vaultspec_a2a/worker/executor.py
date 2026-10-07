@@ -23,7 +23,7 @@ from ..providers.team_selection import model_assignment_digest
 # same reason: both stop a run that is not over, leaving a resumable
 # checkpoint and an open action for recovery to deliver again. Settling it as
 # FAILED instead wrote a terminal for a run nothing had failed.
-from ..streaming.ingest import INGEST_DRAINED, GraphInvocation
+from ..streaming import INGEST_DRAINED, GraphInvocation
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import operation_span
 from ..thread import PermissionAnswer

@@ -41,7 +41,13 @@ from .types import StreamableGraph, StreamOptions
 #: produced it, and that mode's payload.
 type RawStreamFrame = tuple[Any, Any, Any]
 
-__all__ = ["INGEST_DRAINED", "IngestManager", "summarize_ingest_exception"]
+__all__ = [
+    "INGEST_DRAINED",
+    "GraphInvocation",
+    "IngestManager",
+    "IngestRequest",
+    "summarize_ingest_exception",
+]
 
 #: The outcome of a run that stopped at a superstep boundary because its worker
 #: asked it to drain. Not terminal: the checkpoint is resumable and the run's

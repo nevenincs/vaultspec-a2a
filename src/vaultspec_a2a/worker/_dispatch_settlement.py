@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from ..graph.enums import AgentLifecycleState
-from ..streaming.ingest import INGEST_DRAINED
+from ..streaming import INGEST_DRAINED
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ThreadStatus

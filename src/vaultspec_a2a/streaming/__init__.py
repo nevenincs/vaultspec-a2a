@@ -18,6 +18,7 @@ Events enter from :mod:`vaultspec_a2a.graph.events`. Workers publish through
 from ._interrupt_projection import emit_interrupt_events
 from ._run_state import RunLiveStateMirror
 from .aggregator import RunEventProducer
+from .ingest import INGEST_DRAINED, GraphInvocation, IngestRequest
 from .node_metadata import (
     NODE_METADATA_FIELDS,
     node_metadata_fields,
@@ -34,9 +35,12 @@ from .subscribers import (
 from .types import SequencedEvent, StreamableGraph, classify_tool_kind
 
 __all__ = [
+    "INGEST_DRAINED",
     "NODE_METADATA_FIELDS",
     "AllocationSink",
     "FrameProjector",
+    "GraphInvocation",
+    "IngestRequest",
     "RelayHub",
     "RunEventProducer",
     "RunEventWriter",

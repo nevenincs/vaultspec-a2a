@@ -11,6 +11,7 @@ from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
     read_checkpoint_evidence,
 )
+from ._run_registry import RunScopedRegistry
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from .ipc import WorkerBridge
+
+__all__ = ["DispatchReceiptReporter"]
 
 logger = logging.getLogger("vaultspec_a2a.worker.executor")
 
@@ -37,11 +40,11 @@ class DispatchReceiptReporter:
     """
 
     def __init__(self) -> None:
-        self._reported: dict[str, str] = {}
+        self._reported = RunScopedRegistry[str]()
 
     def forget(self, thread_id: str) -> None:
         """Drop what this thread reported, once its run is over."""
-        self._reported.pop(thread_id, None)
+        self._reported.drop(thread_id)
 
     async def report(
         self,
@@ -92,7 +95,7 @@ class DispatchReceiptReporter:
                     req.thread_id,
                 )
                 return
-            self._reported[req.thread_id] = req.dispatch_id
+            self._reported.register(req.thread_id, req.dispatch_id)
             await bridge.send_event(
                 req.thread_id,
                 DispatchApplicationReceiptPayload(

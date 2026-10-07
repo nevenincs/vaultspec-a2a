@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from ..utils._process_tree import port_has_listener_async
 from ..utils.async_cleanup import complete_cleanup
 from ._worker_health import (
-    _build_worker_restart_detail,
+    build_worker_restart_detail,
     worker_ready_and_ours,
 )
 from ._worker_process_stop import _stop_worker_tree
@@ -102,7 +102,7 @@ async def _await_worker_ready_inner(
         # a failed spawn, never as ready off the foreign worker still answering on
         # the port - so the liveness check leads the readiness check.
         if process.poll() is not None:
-            detail = _build_worker_restart_detail(
+            detail = build_worker_restart_detail(
                 returncode=process.returncode,
                 stderr_log_path=stderr_log_path,
             )

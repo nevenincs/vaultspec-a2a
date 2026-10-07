@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from .._worker_health import _read_log_tail
+from .._worker_health import read_log_tail
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,7 +85,7 @@ def test_tail_never_opens_with_a_broken_character(
     """
     log = _write_log(tmp_path, "worker-autospawn-1.stderr.log", message)
 
-    tail = _read_log_tail(log, max_bytes=width)
+    tail = read_log_tail(log, max_bytes=width)
 
     assert "�" not in tail, (
         f"tail cut at {width} bytes opened with a replacement character: {tail!r}"
@@ -104,7 +104,7 @@ def test_tail_reads_a_whole_short_log_verbatim(tmp_path: Path, message: str) -> 
     """A log inside the cap is not truncated, so it round-trips exactly."""
     log = _write_log(tmp_path, "worker-autospawn-2.stderr.log", message)
 
-    assert _read_log_tail(log, max_bytes=4096) == message
+    assert read_log_tail(log, max_bytes=4096) == message
 
 
 def test_tail_decodes_as_utf8_not_the_host_code_page(tmp_path: Path) -> None:
@@ -115,7 +115,7 @@ def test_tail_decodes_as_utf8_not_the_host_code_page(tmp_path: Path) -> None:
     """
     log = _write_log(tmp_path, "worker-autospawn-3.stderr.log", "日本語")
 
-    assert _read_log_tail(log, max_bytes=4096) == "日本語"
+    assert read_log_tail(log, max_bytes=4096) == "日本語"
 
 
 def test_undecodable_bytes_degrade_instead_of_raising(tmp_path: Path) -> None:
@@ -127,7 +127,7 @@ def test_undecodable_bytes_degrade_instead_of_raising(tmp_path: Path) -> None:
     log = tmp_path / "worker-autospawn-4.stderr.log"
     log.write_bytes(b"start \xff\xfe not utf-8 end")
 
-    tail = _read_log_tail(log, max_bytes=4096)
+    tail = read_log_tail(log, max_bytes=4096)
 
     assert tail.startswith("start")
     assert tail.endswith("end")

@@ -13,8 +13,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control._worker_health import (
     WorkerState,
-    _build_worker_restart_detail,
-    _worker_stderr_log_path,
+    build_worker_restart_detail,
+    worker_stderr_log_path,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.health import build_sqlite_fallback_diagnostics
@@ -80,7 +80,7 @@ def test_build_worker_restart_detail_includes_log_tail(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    detail = _build_worker_restart_detail(
+    detail = build_worker_restart_detail(
         returncode=17,
         stderr_log_path=stderr_log,
     )
@@ -94,7 +94,7 @@ def test_worker_stderr_log_path_lives_in_a2a_home() -> None:
     """Gateway-managed worker stderr logs live in the state home's runtime dir."""
     from ...control.config import settings
 
-    log_path = _worker_stderr_log_path(8123)
+    log_path = worker_stderr_log_path(8123)
 
     assert log_path.name == "worker-autospawn-8123.stderr.log"
     assert log_path.parent == settings.a2a_home / "runtime"
@@ -147,7 +147,7 @@ async def test_health_reports_worker_stderr_log_path(
         worker_last_restart_detail="returncode=9; stderr_log=example.log",
         worker_restart_count=1,
         worker_last_restart_reason="process_exited",
-        worker_stderr_log_path=str(_worker_stderr_log_path(8001)),
+        worker_stderr_log_path=str(worker_stderr_log_path(8001)),
     )
     app.state.worker_state = ws
 

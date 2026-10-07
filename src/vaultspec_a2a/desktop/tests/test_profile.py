@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ...control.state_layout import StateLayout
+from ...control.state_layout import DISCOVERY_RECORD, StateLayout
 from ...providers._factory_commands import (
     capsule_acp_entry,
     capsule_claude_executable,
@@ -75,7 +75,7 @@ def test_derive_state_paths_are_absolute_and_seated_under_app_home(
     # Seated paths mirror the operative a2a_home conventions: runtime logs and the
     # discovery record at the application-home root.
     assert state.logs_dir == app_home / "runtime"
-    assert state.discovery_path.parent == app_home
+    assert state.discovery_path == app_home / DISCOVERY_RECORD
 
 
 def test_derive_state_paths_rejects_relative_app_home() -> None:

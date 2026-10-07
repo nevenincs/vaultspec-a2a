@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI, HTTPException
 
-from ...domain_config import domain_config
+from ...testing import settings_override
 from ..routes.gateway import _catalog_records_within_budget, provider_catalog_service
 
 
@@ -40,15 +40,13 @@ async def test_a_cold_catalog_is_refused_retryably_and_the_retry_is_warm() -> No
     workspace = str(Path(__file__).resolve().parents[3])
     service = provider_catalog_service(app)
 
-    original = domain_config.run_start_catalog_budget_seconds
-    domain_config.run_start_catalog_budget_seconds = 0.001
-    try:
-        with pytest.raises(HTTPException) as refusal:
-            await _catalog_records_within_budget(app, workspace)
-        assert refusal.value.status_code == 503
-        assert "still being built" in str(refusal.value.detail)
-    finally:
-        domain_config.run_start_catalog_budget_seconds = original
+    with (
+        settings_override(run_start_catalog_budget_seconds=0.001),
+        pytest.raises(HTTPException) as refusal,
+    ):
+        await _catalog_records_within_budget(app, workspace)
+    assert refusal.value.status_code == 503
+    assert "still being built" in str(refusal.value.detail)
 
     # The shielded build outlived the refusal. Read through the SERVICE the
     # refused call used: a populated per-lane cache is what makes the retry warm,
@@ -61,11 +59,8 @@ async def test_a_cold_catalog_is_refused_retryably_and_the_retry_is_warm() -> No
     # milliseconds, so two seconds separates the two states rather than merely
     # being small. (A millisecond would not: it expires before the task takes its
     # first step, and would pass for a cold catalog too.)
-    domain_config.run_start_catalog_budget_seconds = 2.0
-    try:
+    with settings_override(run_start_catalog_budget_seconds=2.0):
         warm = await _catalog_records_within_budget(app, workspace)
-    finally:
-        domain_config.run_start_catalog_budget_seconds = original
     assert {record.provider_id for record in warm} == {
         record.provider_id for record in records
     }

@@ -322,7 +322,7 @@ import asyncio
 import logging
 import sys
 import uvicorn
-from vaultspec_a2a.api.app import _lifespan, create_app
+from vaultspec_a2a.api.app import create_app, gateway_lifespan
 from vaultspec_a2a.lifecycle.shutdown import bind_shutdown_owner
 
 logging.basicConfig(level=logging.INFO)
@@ -333,7 +333,7 @@ server = uvicorn.Server(uvicorn.Config(
 bind_shutdown_owner(app, server)
 
 async def main():
-    async with _lifespan(app):
+    async with gateway_lifespan(app):
         await app.state.worker_spawner.ensure_worker()
         print(
             f"lifecycle worker spawned: {app.state.worker_spawner.spawned}", flush=True

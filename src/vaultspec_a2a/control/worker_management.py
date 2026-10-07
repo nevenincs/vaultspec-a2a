@@ -30,15 +30,15 @@ from ..utils.runtime_exec import module_command
 from ._worker_health import (
     GATEWAY_LIFETIME_ID,
     WorkerState,
-    _build_worker_restart_detail,
-    _desktop_worker_port_clear,
-    _shared_worker_port_clear,
-    _worker_stderr_log_path,
+    build_worker_restart_detail,
+    desktop_worker_port_clear,
     internal_auth_headers,
     probe_worker_health,
+    shared_worker_port_clear,
     sweep_orphan_worker_logs,
     worker_liveness,
     worker_ready_and_ours,
+    worker_stderr_log_path,
 )
 from ._worker_process_stop import _shutdown_worker_process
 from ._worker_readiness import (
@@ -107,11 +107,11 @@ async def _spawn_worker(
     # spawn loudly with no eviction - it may be serving someone else's runs,
     # and silence is not evidence of ownership.
     if settings.desktop_profile_armed:
-        if not await _desktop_worker_port_clear(
+        if not await desktop_worker_port_clear(
             worker_url, worker_port, generation, internal_token=internal_token
         ):
             return None
-    elif not await _shared_worker_port_clear(
+    elif not await shared_worker_port_clear(
         worker_url, worker_port, internal_token=internal_token
     ):
         return None
@@ -146,7 +146,7 @@ async def _spawn_worker(
     spawn_env[setting_env("gateway_lifetime_id")] = GATEWAY_LIFETIME_ID
     spawn_env[setting_env("worker_generation")] = str(generation)
 
-    stderr_log_path = _worker_stderr_log_path(worker_port)
+    stderr_log_path = worker_stderr_log_path(worker_port)
     settings.prepare_state_dir(stderr_log_path.parent)
     # Freeze-safe worker re-exec: rendered by the runtime's command authority
     # (``python -m vaultspec_a2a.worker`` from source; the binary's own
@@ -282,7 +282,7 @@ class LazyWorkerSpawner:
             port=worker_port,
             auto_spawn=auto_spawn,
             stderr_log_path=(
-                _worker_stderr_log_path(worker_port) if auto_spawn else None
+                worker_stderr_log_path(worker_port) if auto_spawn else None
             ),
             internal_token=internal_token,
         )
@@ -713,7 +713,7 @@ class WorkerWatchdog:
             return
         detail = None
         if crashed:
-            detail = _build_worker_restart_detail(
+            detail = build_worker_restart_detail(
                 returncode=proc.returncode,
                 stderr_log_path=self._spawner.stderr_log_path,
             )

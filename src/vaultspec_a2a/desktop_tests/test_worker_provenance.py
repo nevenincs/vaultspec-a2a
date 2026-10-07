@@ -262,12 +262,12 @@ import time
 
 import httpx
 
-from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.control.worker_management import (
+from vaultspec_a2a.control._worker_health import (
     GATEWAY_LIFETIME_ID,
-    _spawn_worker_owned,
-    _worker_stderr_log_path,
+    worker_stderr_log_path,
 )
+from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.control.worker_management import _spawn_worker_owned
 from vaultspec_a2a.testing.reap import reap_contained
 
 squatter_file, worker_port_s, squatter_log, result_file = sys.argv[1:5]
@@ -317,7 +317,7 @@ owned = asyncio.run(
         internal_token=settings.internal_token,
     )
 )
-autospawn_log = _worker_stderr_log_path(worker_port)
+autospawn_log = worker_stderr_log_path(worker_port)
 
 # Were the conflict guard absent, the seam would spawn a real contained worker onto
 # the held port; reap its tree through that containment so the driver leaks

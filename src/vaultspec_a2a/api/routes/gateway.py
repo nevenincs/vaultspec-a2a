@@ -495,9 +495,7 @@ _RUN_LEASE_METADATA_KEY = "run_lease"
 # The canonical digest of the request that created a run. Persisted on every
 # create so a later replay can be compared against what the run was actually
 # started with, rather than against the single field the check previously read.
-# The stored value is the rule-stamped form (``<rule>:<digest>``); an unstamped
-# value is a run created before the marker existed and is compared under the
-# rule it was written with.
+# The stored value is the rule-stamped form (``<rule>:<digest>``).
 _REQUEST_DIGEST_METADATA_KEY = "run_request_digest"
 
 
@@ -509,21 +507,11 @@ def _persist_request_digest(metadata_json: str | None, digest: str) -> str:
 
 
 def _persisted_request_digest(metadata_json: str | None) -> str | None:
-    """Read the creating request's digest, or ``None`` for a pre-existing run.
+    """Read the creating request's rule-stamped digest, or ``None`` when absent.
 
-    ``None`` means the digest is UNKNOWN, never that the request was empty, so
-    the caller falls back to the narrower comparison instead of refusing a
-    legitimate replay. Two runs reach that state, and both are expected: a run
-    created before digests were persisted, and a run whose id this service
-    minted, since the digest is stored only for a caller-supplied id.
-
-    The second case has a consequence worth naming. A caller can read a
-    server-minted id off the response and later present it as its own, and that
-    request is then compared on the frozen selection alone rather than on the whole
-    body. Closing it is not merely a matter of persisting the digest anyway: the
-    run id is itself a digested field, so the original request - which carried
-    none - and the later one that carries it would never match, and every such
-    replay would be refused instead. Narrowing here is the deliberate trade.
+    Every run records its digest at creation, because a start always carries a
+    caller-supplied run id. ``None`` therefore means the metadata cannot be tied
+    to any request, never that the request was empty.
     """
     data = _metadata_object(metadata_json)
     digest = data.get(_REQUEST_DIGEST_METADATA_KEY) if data is not None else None
@@ -554,19 +542,15 @@ def _replay_identity_or_conflict(
     rotated bundle here would refuse exactly the lost-acknowledgement recovery
     this path exists to serve. Credential coverage remains enforced at first
     start by admission, which is where an uncovering bundle is refused. The
-    stored fingerprint is compared under the rule it was written with, so a run
-    created before that classification still replays.
+    stored fingerprint is compared under the rule it was written with.
 
     Raises:
-        HTTPException: 409 when the request fingerprint differs.
+        HTTPException: 409 when the request fingerprint differs, or when the
+            run records none to compare against.
     """
-    # ``None`` means the digest is unknown - an older run, or one whose id this
-    # service minted - not that the request was empty; refusing on it would
-    # break a legitimate replay. Such a request passes the identity check
-    # unfingerprinted, which is narrower rather than absent.
     persisted_digest = _persisted_request_digest(metadata_json)
     canonical_body = _canonical_replay_body(metadata_json, body)
-    if persisted_digest is not None and not replay_digest_matches(
+    if persisted_digest is None or not replay_digest_matches(
         persisted_digest, canonical_body
     ):
         raise HTTPException(

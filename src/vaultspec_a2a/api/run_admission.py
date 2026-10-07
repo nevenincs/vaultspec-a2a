@@ -91,16 +91,16 @@ class ReplayDigestRule(StrEnum):
 
     Raw tokens are never persisted and a stored fingerprint therefore cannot be
     recomputed from the durable run. Without the rule recorded beside it, a
-    byte-identical replay of a run stored under the older rule would be refused
+    byte-identical replay of a run stored under an older rule would be refused
     spuriously, so every stored fingerprint carries its rule and is compared
     under that rule rather than under the current one.
 
     The member VALUES appear in durable run metadata: they may be added to, but
-    never renamed or reused.
+    never renamed or reused. ``"r1"`` named a retired rule that folded credential
+    values into the fingerprint; it stays reserved so no later rule can be
+    mistaken for it.
     """
 
-    #: Credential values folded into the fingerprint (pre-classification runs).
-    CREDENTIAL_SENSITIVE = "r1"
     #: Credential values excluded, per the credential-value classification.
     CREDENTIAL_FREE = "r2"
 
@@ -118,15 +118,13 @@ CURRENT_REPLAY_DIGEST_RULE: Final = ReplayDigestRule.CREDENTIAL_FREE
 # editing an existing entry. The duplication with the staged sets above is the
 # price of that immutability and is deliberate.
 _REPLAY_RULE_EXCLUSIONS: Final[dict[ReplayDigestRule, frozenset[str]]] = {
-    ReplayDigestRule.CREDENTIAL_SENSITIVE: frozenset({"stage", "reservation_id"}),
     ReplayDigestRule.CREDENTIAL_FREE: frozenset(
         {"stage", "reservation_id", "actor_tokens"}
     ),
 }
 
-# Separates a stored fingerprint's rule marker from its hex digest. A stored
-# value without it predates the marker and is read as CREDENTIAL_SENSITIVE; a
-# hex digest can never contain it, so the two forms stay unambiguous.
+# Separates a stored fingerprint's rule marker from its hex digest. A hex digest
+# can never contain it, so the split is unambiguous.
 _RULE_MARKER_SEPARATOR: Final = ":"
 
 
@@ -195,12 +193,11 @@ def stamped_replay_digest(body: RunStartRequest) -> str:
 def replay_digest_matches(stored: str, body: RunStartRequest) -> bool:
     """Report whether *body* replays the request *stored* fingerprints.
 
-    *stored* is compared under ITS OWN rule, never the current one. An unstamped
-    value was written before the marker existed and is read as
-    :attr:`ReplayDigestRule.CREDENTIAL_SENSITIVE`, the rule it was computed
-    under. An unrecognised marker - a run written by a newer process than this
-    one - is not comparable at all and reports no match, so the caller refuses
-    rather than answering with a run whose identity it cannot verify.
+    *stored* is compared under ITS OWN rule, never the current one. A value with
+    no recognised marker - an unmarked value, or a run written by a newer
+    process than this one - is not comparable at all and reports no match, so
+    the caller refuses rather than answering with a run whose identity it
+    cannot verify.
 
     The DIGEST comparison is constant-time, matching the commit path's treatment
     of the same class of value, and compares bytes so a stored value that is
@@ -214,12 +211,11 @@ def replay_digest_matches(stored: str, body: RunStartRequest) -> bool:
     """
     marker, separator, hex_digest = stored.partition(_RULE_MARKER_SEPARATOR)
     if not separator:
-        rule, hex_digest = ReplayDigestRule.CREDENTIAL_SENSITIVE, stored
-    else:
-        try:
-            rule = ReplayDigestRule(marker)
-        except ValueError:
-            return False
+        return False
+    try:
+        rule = ReplayDigestRule(marker)
+    except ValueError:
+        return False
     return hmac.compare_digest(
         hex_digest.encode("utf-8"),
         replay_digest(body, rule=rule).encode("utf-8"),

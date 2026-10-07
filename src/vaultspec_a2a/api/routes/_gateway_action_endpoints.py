@@ -838,6 +838,17 @@ def register(router: APIRouter) -> None:
         responses=refusal_responses(
             DISPATCH_FAILURES,
             {
+                403: {
+                    "description": (
+                        "The run is parked on a DOCUMENT approval, which the "
+                        "engine's review surface decides. Answering it here "
+                        "would resume a run whose verdict nothing recorded, so "
+                        "the route refuses and the run resumes only through "
+                        "the verdict subscriber. Reachable on the same request "
+                        "shape as an ordinary permission answer, which is why "
+                        "a client needs a branch for it."
+                    ),
+                },
                 404: {
                     "description": "No such run, or no such permission request on it.",
                 },

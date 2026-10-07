@@ -85,6 +85,7 @@ __all__ = [
     "PROGRESS_CATALOG",
     "SSE_FRAME_VERSION",
     "SseEvent",
+    "catalog_json_schema",
     "catalog_worst_case_frame_bytes",
     "decode_sse_lines",
     "decode_sse_text",
@@ -489,6 +490,136 @@ def catalog_worst_case_frame_bytes() -> int:
         )
         for frame_type, fields in PROGRESS_CATALOG.items()
     )
+
+
+#: How the identity keys every frame may carry are published. Spelled here
+#: rather than derived from :data:`ALWAYS_SAFE_KEYS`, because a key's NAME says
+#: nothing about its type; the pair must be read together, which the schema
+#: builder below enforces by refusing to publish a key it has no type for.
+_ALWAYS_SAFE_SCHEMAS: Final[dict[str, dict[str, object]]] = {
+    "api_version": {"const": SSE_FRAME_VERSION},
+    "thread_id": {"type": "string", "maxLength": MAX_RUN_ID_CHARS},
+    "agent_id": {"type": "string", "maxLength": MAX_ROLE_ID_CHARS},
+    # The run's durable event number, present only on a frame whose replay is
+    # served; the same value is the frame's SSE id.
+    "sequence": {"type": "integer", "minimum": 0},
+    "timestamp": {"type": "number", "description": "Epoch seconds."},
+    "message_id": {"type": "string"},
+    "semantic_phase": {"type": "string", "maxLength": 64},
+}
+
+#: The keys whose value is the frame's own kind. Published as a constant per
+#: branch rather than as a shared string type, because the pair is mirrored and
+#: a consumer may switch on either.
+_KIND_KEYS: Final[tuple[str, ...]] = ("type", "event_type")
+
+
+def _nullable(schema: dict[str, object]) -> dict[str, object]:
+    """Admit ``null`` beside *schema*, the way this document spells it.
+
+    Every field spec passes ``None`` through unchanged, so a catalogued field
+    genuinely can arrive null. Spelled as a union rather than the ``nullable``
+    keyword because this is an OpenAPI 3.1 document, where ``nullable`` was
+    withdrawn in favour of the JSON Schema form the rest of the document uses.
+    """
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _field_json_schema(spec: _FieldSpec) -> dict[str, object]:
+    """Publish one catalogued field as the JSON Schema it projects values onto.
+
+    Exhaustive over the spec vocabulary on purpose: a spec kind added later has
+    no published form until it is given one here, which fails this builder
+    rather than silently publishing a field as untyped.
+    """
+    match spec:
+        case _Text(max_chars=limit):
+            return _nullable({"type": "string", "maxLength": limit})
+        case _Flag():
+            return _nullable({"type": "boolean"})
+        case _Number():
+            return _nullable({"type": "number"})
+        case _Integer():
+            return _nullable({"type": "integer"})
+        case _TextList(max_items=items, max_chars=limit):
+            return _nullable(
+                {
+                    "type": "array",
+                    "maxItems": items,
+                    "items": {"type": "string", "maxLength": limit},
+                }
+            )
+        case _ObjectList(max_items=items, fields=fields):
+            return _nullable(
+                {
+                    "type": "array",
+                    "maxItems": items,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            key: _field_json_schema(field)
+                            for key, field in fields.items()
+                        },
+                        "additionalProperties": False,
+                    },
+                }
+            )
+
+
+def _frame_json_schema(
+    kind: str | None, fields: Mapping[str, _FieldSpec]
+) -> dict[str, object]:
+    """Publish one frame kind, or the identity-only shape an unknown kind takes."""
+    properties: dict[str, object] = dict(_ALWAYS_SAFE_SCHEMAS)
+    for key in _KIND_KEYS:
+        properties[key] = (
+            {"const": kind} if kind is not None else {"type": "string", "maxLength": 64}
+        )
+    properties.update({key: _field_json_schema(spec) for key, spec in fields.items()})
+    return {
+        "type": "object",
+        "title": kind if kind is not None else "uncatalogued_frame",
+        "properties": properties,
+        # Projection rebuilds a frame from these keys alone, so a key not
+        # listed here is one the service cannot emit on this kind.
+        "additionalProperties": False,
+        "required": ["api_version", *_KIND_KEYS],
+    }
+
+
+def catalog_json_schema() -> dict[str, object]:
+    """Publish the served progress-frame contract, generated from the catalog.
+
+    One source for the frame shape. The catalog is what the encoder projects
+    every outgoing frame onto, so a schema derived from it cannot describe a
+    frame the service does not serve, nor omit one it does. A hand-written
+    schema beside the catalog would be a second declaration of one contract,
+    free to drift the moment a frame type is added - and the drift would be
+    silent, because a consumer generated from either would still parse.
+
+    The last branch is the catalog's closed default, not a hole in it: a frame
+    kind nobody enumerated is degraded to its identity keys and still
+    delivered, so a schema listing only the catalogued kinds would publish
+    that frame as invalid and make additive producer evolution read as a
+    contract violation.
+    """
+    return {
+        "title": "RunProgressFrame",
+        "description": (
+            "One frame of a run's progress stream, as the body of a "
+            "text/event-stream event. Frames are non-authoritative and "
+            "droppable: reconcile run state from run-status, never from a "
+            "frame. The kind is carried under both 'type' and 'event_type' "
+            "with the same value, and on the SSE 'event' line."
+        ),
+        "anyOf": [
+            *(
+                _frame_json_schema(kind, fields)
+                for kind, fields in PROGRESS_CATALOG.items()
+            ),
+            _frame_json_schema(None, {}),
+        ],
+    }
 
 
 def enforce_progress_allowlist(

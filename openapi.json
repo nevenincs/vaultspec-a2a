@@ -459,10 +459,1450 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The run's progress stream. Each event's data is one progress frame; the frame kind is on the SSE 'event' line and in the body under both kind keys. A frame whose replay is retained carries an 'id' a reconnect may offer back as Last-Event-ID. Frames are non-authoritative: reconcile run state from run-status.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "title": "RunProgressFrame",
+                  "description": "One frame of a run's progress stream, as the body of a text/event-stream event. Frames are non-authoritative and droppable: reconcile run state from run-status, never from a frame. The kind is carried under both 'type' and 'event_type' with the same value, and on the SSE 'event' line.",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "title": "message_chunk",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "message_chunk"
+                        },
+                        "event_type": {
+                          "const": "message_chunk"
+                        },
+                        "content": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 16384
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "finish_reason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "thought_chunk",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "thought_chunk"
+                        },
+                        "event_type": {
+                          "const": "thought_chunk"
+                        },
+                        "content": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 16384
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "tool_call_start",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "tool_call_start"
+                        },
+                        "event_type": {
+                          "const": "tool_call_start"
+                        },
+                        "tool_call_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "title": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "locations": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 32,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "line": {
+                                    "anyOf": [
+                                      {
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "tool_call_update",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "tool_call_update"
+                        },
+                        "event_type": {
+                          "const": "tool_call_update"
+                        },
+                        "tool_call_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "title": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "locations": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 32,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "line": {
+                                    "anyOf": [
+                                      {
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "artifact_update",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "artifact_update"
+                        },
+                        "event_type": {
+                          "const": "artifact_update"
+                        },
+                        "artifact_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "filename": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "append": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "last_chunk": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "agent_status",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "agent_status"
+                        },
+                        "event_type": {
+                          "const": "agent_status"
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "node_name": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "detail": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "team_status",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "team_status"
+                        },
+                        "event_type": {
+                          "const": "team_status"
+                        },
+                        "active_thread_ids": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 64,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 128
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "agents": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 64,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "thread_id": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "agent_id": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 63
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "state": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "node_name": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "provider": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "model_name": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "role": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "display_name": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "description": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 256
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "error",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "error"
+                        },
+                        "event_type": {
+                          "const": "error"
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "message": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 512
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "recoverable": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "stream_snapshot",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "stream_snapshot"
+                        },
+                        "event_type": {
+                          "const": "stream_snapshot"
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "thread_terminal",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "thread_terminal"
+                        },
+                        "event_type": {
+                          "const": "thread_terminal"
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "replay": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "error_detail": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 512
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "heartbeat",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "heartbeat"
+                        },
+                        "event_type": {
+                          "const": "heartbeat"
+                        },
+                        "server_uptime_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "stream_rejected",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "stream_rejected"
+                        },
+                        "event_type": {
+                          "const": "stream_rejected"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "progress_dropped",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "progress_dropped"
+                        },
+                        "event_type": {
+                          "const": "progress_dropped"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "dropped_type": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "dropped_count": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "first_sequence": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "permission_request",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "permission_request"
+                        },
+                        "event_type": {
+                          "const": "permission_request"
+                        },
+                        "request_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tool_call": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tool_kind": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "options": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 16,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "option_id": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "name": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "kind": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "clarification_pending",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "clarification_pending"
+                        },
+                        "event_type": {
+                          "const": "clarification_pending"
+                        },
+                        "request_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "plan_update",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "plan_update"
+                        },
+                        "event_type": {
+                          "const": "plan_update"
+                        },
+                        "entries": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 64,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "status": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "priority": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "uncatalogued_frame",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "event_type": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    }
+                  ]
+                }
               }
             }
           },
@@ -470,7 +1910,10 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured."
+            "description": "Gateway service token is not configured, or the gateway is at its progress-stream connection limit; retry later."
+          },
+          "404": {
+            "description": "No such run."
           },
           "422": {
             "description": "Validation Error",
@@ -818,6 +2261,9 @@
           "502": {
             "description": "The answer was accepted and retained but the worker could not be reached or failed inside itself. Reconcile from run-status."
           },
+          "403": {
+            "description": "The run is parked on a DOCUMENT approval, which the engine's review surface decides. Answering it here would resume a run whose verdict nothing recorded, so the route refuses and the run resumes only through the verdict subscriber. Reachable on the same request shape as an ordinary permission answer, which is why a client needs a branch for it."
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1148,147 +2594,6 @@
         ]
       }
     },
-    "/internal/health": {
-      "get": {
-        "tags": [
-          "internal"
-        ],
-        "summary": "Internal Health",
-        "description": "Readiness probe -- confirms the internal API is accepting connections.",
-        "operationId": "internal_health_internal_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Internal Health Internal Health Get"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid internal IPC token."
-          },
-          "500": {
-            "description": "Internal IPC token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "InternalIpcToken": []
-          }
-        ]
-      }
-    },
-    "/internal/events/batch": {
-      "post": {
-        "tags": [
-          "internal"
-        ],
-        "summary": "Receive Worker Event Batch",
-        "description": "Receive a batch of events from the worker.\n\nThe ``WorkerBridge`` accumulates events for a short interval then POSTs\nthem as a single ``WorkerEventBatch``. A batch carries many events in one\nrequest, so the body-limit middleware allows it a larger body than any\nother internal write; the worker sizes its batches against the same figure.",
-        "operationId": "receive_worker_event_batch_internal_events_batch_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Receive Worker Event Batch Internal Events Batch Post"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid internal IPC token."
-          },
-          "500": {
-            "description": "Internal IPC token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "InternalIpcToken": []
-          }
-        ]
-      }
-    },
-    "/internal/heartbeat": {
-      "post": {
-        "tags": [
-          "internal"
-        ],
-        "summary": "Receive Worker Heartbeat",
-        "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the gateway can monitor worker liveness.",
-        "operationId": "receive_worker_heartbeat_internal_heartbeat_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Receive Worker Heartbeat Internal Heartbeat Post"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid internal IPC token."
-          },
-          "500": {
-            "description": "Internal IPC token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "InternalIpcToken": []
-          }
-        ]
-      }
-    },
     "/health": {
       "get": {
         "summary": "Health Endpoint",
@@ -1296,13 +2601,22 @@
         "operationId": "health_endpoint_health_get",
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The armed desktop profile serves the readiness projection to an attach-authenticated caller and the minimal liveness fact to everyone else; the unarmed profile serves the probe aggregate.",
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Health Endpoint Health Get"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopReadiness"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LivenessResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayHealthResponse"
+                    }
+                  ],
+                  "title": "Response 200 Health Endpoint Health Get"
                 }
               }
             }
@@ -2173,6 +3487,38 @@
         "title": "FrozenTeamAssignmentSummary",
         "description": "Complete immutable schema-v1 execution authority for a modern run."
       },
+      "GatewayHealthResponse": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "const": "gateway",
+            "title": "Service",
+            "default": "gateway"
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Status"
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "pid": {
+            "type": "integer",
+            "title": "Pid"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status",
+          "ready",
+          "pid"
+        ],
+        "title": "GatewayHealthResponse",
+        "description": "The unarmed profile's probe body on ``GET /health``.\n\nDeclared because this is the one surface an external prober has, and it\nwas published as an untyped object: a reader of the contract learned no\nfield name, no status vocabulary, and no way to tell this body from the\narmed profile's minimal liveness one.\n\nOpen on purpose. The fields below are the ones the endpoint itself\nguarantees on every answer, including the degraded answer it gives when a\nruntime singleton is missing; the probe aggregate carries further\ndependency checks whose set depends on what this build probes, and\npublishing them as a closed shape would promise a client a stability the\naggregate does not have. ``additionalProperties`` says so rather than\nleaving the whole body unnamed."
+      },
       "GatewayReadiness": {
         "type": "string",
         "enum": [
@@ -2204,6 +3550,17 @@
         ],
         "title": "HealthState",
         "description": "A factual binary health axis whose evidence may still be unknown."
+      },
+      "LivenessResponse": {
+        "properties": {
+          "liveness": {
+            "$ref": "#/components/schemas/LivenessState",
+            "default": "alive"
+          }
+        },
+        "type": "object",
+        "title": "LivenessResponse",
+        "description": "The unauthenticated liveness body.\n\nDeliberately minimal: it carries only the liveness fact and discloses no\nprocess identity, product identity, or product state. An unauthenticated\ncaller of the desktop gateway observes this and nothing more."
       },
       "LivenessState": {
         "type": "string",
@@ -5509,11 +6866,6 @@
       "GatewayServiceToken": {
         "type": "http",
         "description": "Gateway service token. The service publishes it in an owner-restricted `service.token` handoff file adjacent to the `service.json` discovery record, whose `handoff_reference` names that file without embedding the secret. Send it as `Authorization: Bearer <token>`.",
-        "scheme": "bearer"
-      },
-      "InternalIpcToken": {
-        "type": "http",
-        "description": "Internal gateway-to-worker IPC token. Not the gateway service token: these routes are the worker's callback surface, not a client surface.",
         "scheme": "bearer"
       }
     }

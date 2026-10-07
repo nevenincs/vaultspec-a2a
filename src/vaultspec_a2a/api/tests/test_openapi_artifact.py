@@ -13,6 +13,13 @@ the source no longer contains.
 
 These assertions bind the file to the live application so the three cannot
 recur silently.
+
+The three narrower checks that once stood here - every live path present, no
+stale path promised, the version string current - are gone: the whole-document
+comparison below implies all three, and its failure already narrows to the
+differing top-level and per-route keys, which is the only thing they added.
+Keeping them meant one drift failing four tests with four different accounts
+of it.
 """
 
 from __future__ import annotations
@@ -65,43 +72,6 @@ def test_the_committed_artifact_is_valid_utf8_json() -> None:
     raw = _committed_bytes()
     decoded = raw.decode("utf-8")
     assert json.loads(decoded)["openapi"].startswith("3."), "not an OpenAPI document"
-
-
-def test_the_committed_artifact_documents_every_live_path() -> None:
-    """Every route the application serves appears in the published contract.
-
-    This is the assertion the drift actually needed. Checking only that the file
-    parses, or that it is non-empty, would have passed throughout the period it
-    was missing the entire versioned surface.
-    """
-    live_paths = set(_live().get("paths", {}))
-    committed_paths = set(json.loads(_committed_bytes().decode("utf-8"))["paths"])
-
-    missing = sorted(live_paths - committed_paths)
-    assert not missing, (
-        f"openapi.json is missing {len(missing)} live path(s): {missing}. "
-        f"Regenerate it: {_REGENERATE_COMMAND}"
-    )
-
-
-def test_the_committed_artifact_documents_no_path_the_app_does_not_serve() -> None:
-    """The contract must not promise routes that no longer exist."""
-    live_paths = set(_live().get("paths", {}))
-    committed_paths = set(json.loads(_committed_bytes().decode("utf-8"))["paths"])
-
-    stale = sorted(committed_paths - live_paths)
-    assert not stale, (
-        f"openapi.json documents {len(stale)} path(s) the app does not serve: "
-        f"{stale}. Regenerate it: {_REGENERATE_COMMAND}"
-    )
-
-
-def test_the_committed_artifact_reports_the_running_version() -> None:
-    """A stale version string misidentifies the contract a consumer generated from."""
-    committed = json.loads(_committed_bytes().decode("utf-8"))
-    assert committed["info"]["version"] == _live()["info"]["version"], (
-        f"openapi.json reports a stale version. Regenerate it: {_REGENERATE_COMMAND}"
-    )
 
 
 def test_the_committed_artifact_matches_the_live_document_exactly() -> None:

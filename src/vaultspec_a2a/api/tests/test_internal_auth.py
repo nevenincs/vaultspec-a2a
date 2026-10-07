@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ...testing import settings_override as _settings_override
+from ...utils import bearer_header
 from ...utils.enums import Environment
 from ..internal import internal_router
 
@@ -31,7 +32,7 @@ def test_internal_route_accepts_a_matching_bearer_token() -> None:
         resp = client.post(
             "/internal/heartbeat",
             json={"active_threads": []},
-            headers={"Authorization": "Bearer secret-token"},
+            headers=bearer_header("secret-token"),
         )
     assert resp.status_code == 200
 
@@ -44,7 +45,7 @@ def test_internal_route_rejects_a_mismatched_bearer_token() -> None:
         resp = client.post(
             "/internal/heartbeat",
             json={"active_threads": []},
-            headers={"Authorization": "Bearer wrong-token"},
+            headers=bearer_header("wrong-token"),
         )
     assert resp.status_code == 401
     assert resp.json()["detail"] == "Invalid internal token"

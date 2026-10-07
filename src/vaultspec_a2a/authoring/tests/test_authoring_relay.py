@@ -20,11 +20,13 @@ from ...providers._acp_authoring import (
 )
 from ...testing import serve_handler, serve_on_loopback, settings_override
 from ...thread.actor_tokens import ActorTokenBundle
+from ...utils import bearer_header
 from ...worker.app import create_worker_app
 from ...worker.authoring_relay import AuthoringRelay
 from ...worker.catalog_store import RunCatalogStore
 from ...worker.token_store import RunTokenStore
 from .._connection_proof import EngineConnectionError
+from .._engine_trust import CHALLENGE_HEADER
 from .._relay_client import RELAY_CALL_PATH, AuthoringRelayClient
 from .._tool_calls import private_tool_call_journal_path, retire_run_tool_calls
 from ..catalog import parse_catalog
@@ -190,7 +192,7 @@ async def test_relay_refuses_unknown_role_token_catalog_and_missing_identity(
                     await client.post(
                         RELAY_CALL_PATH,
                         json=body,
-                        headers={"Authorization": f"Bearer {_ACTOR}"},
+                        headers=bearer_header(_ACTOR),
                     )
                 ).status_code == 403
                 body["role"] = "writer"
@@ -199,7 +201,7 @@ async def test_relay_refuses_unknown_role_token_catalog_and_missing_identity(
                     await client.post(
                         RELAY_CALL_PATH,
                         json=body,
-                        headers={"Authorization": f"Bearer {_ACTOR}"},
+                        headers=bearer_header(_ACTOR),
                     )
                 ).status_code == 403
                 body["run_id"] = "relay-run"
@@ -208,7 +210,7 @@ async def test_relay_refuses_unknown_role_token_catalog_and_missing_identity(
                     await client.post(
                         RELAY_CALL_PATH,
                         json=body,
-                        headers={"Authorization": f"Bearer {_ACTOR}"},
+                        headers=bearer_header(_ACTOR),
                     )
                 ).status_code == 409
                 tokens.drop("relay-run")
@@ -216,7 +218,7 @@ async def test_relay_refuses_unknown_role_token_catalog_and_missing_identity(
                     await client.post(
                         RELAY_CALL_PATH,
                         json=body,
-                        headers={"Authorization": f"Bearer {_ACTOR}"},
+                        headers=bearer_header(_ACTOR),
                     )
                 ).status_code == 403
         assert not (tmp_path / "private" / "state" / "authoring-calls").exists()
@@ -247,7 +249,7 @@ async def test_replacement_relay_never_receives_actor_authority(proof: str) -> N
                     "propose_changeset", {"operation": "create"}, tool_call_id="call"
                 )
         assert len(requests) == 1
-        assert "x-vaultspec-engine-challenge" in requests[0]
+        assert CHALLENGE_HEADER in requests[0]
         assert "Authorization" not in requests[0]
         assert _ACTOR not in str(requests)
 

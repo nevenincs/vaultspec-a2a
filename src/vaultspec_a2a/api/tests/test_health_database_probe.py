@@ -22,6 +22,7 @@ from ...control.config import settings
 from ...control.health import assemble_desktop_readiness
 from ...testing import armed_desktop_app_home as _armed_desktop
 from ...testing import settings_override
+from ...utils import bearer_header
 from .conftest import make_app
 
 if TYPE_CHECKING:
@@ -37,9 +38,7 @@ async def _armed_health(app: FastAPI) -> dict[str, Any]:
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as client:
-        response = await client.get(
-            "/health", headers={"Authorization": f"Bearer {token}"}
-        )
+        response = await client.get("/health", headers=bearer_header(token))
     assert response.status_code == 200, response.text
     return cast("dict[str, Any]", response.json())
 

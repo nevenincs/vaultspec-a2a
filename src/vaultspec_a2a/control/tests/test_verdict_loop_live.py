@@ -89,6 +89,7 @@ from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...thread.idempotency import thread_create_action_key
+from ...utils import bearer_header
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -456,7 +457,7 @@ async def _run_live_verdict_worker(
         httpx.AsyncClient(
             transport=ASGITransport(app=worker_app),
             base_url="http://worker",
-            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
+            headers=bearer_header(_TEST_INTERNAL_TOKEN),
         ) as worker_client,
         anyio.create_task_group() as tg,
     ):

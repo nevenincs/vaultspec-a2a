@@ -17,6 +17,7 @@ from ...lifecycle.discovery import (
     write_desktop_discovery,
 )
 from ...testing import settings_override as _settings_override
+from ...utils import bearer_header
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -53,9 +54,9 @@ def test_desktop_credential_requires_matching_live_discovery(tmp_path: Path) -> 
         a2a_home=a2a_home,
         gateway_service_token=None,
     ):
-        assert gateway_auth_headers("http://127.0.0.1:8123/v1/service") == {
-            "Authorization": f"Bearer {_TOKEN}"
-        }
+        assert gateway_auth_headers(
+            "http://127.0.0.1:8123/v1/service"
+        ) == bearer_header(_TOKEN)
 
 
 def test_desktop_credential_is_not_sent_to_wrong_loopback_port(tmp_path: Path) -> None:

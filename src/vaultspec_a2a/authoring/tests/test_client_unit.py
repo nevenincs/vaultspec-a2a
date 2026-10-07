@@ -23,12 +23,7 @@ from .._ids import (
     is_valid_id,
     validate_id,
 )
-from ..client import (
-    ACTOR_TOKEN_HEADER,
-    BEARER_HEADER,
-    AuthoringClient,
-    _iter_sse_frames,
-)
+from ..client import ACTOR_TOKEN_HEADER, AuthoringClient, _iter_sse_frames
 from ..lifecycle import StreamError
 
 
@@ -221,7 +216,7 @@ class TestClientPureLogic:
     def test_headers_bearer_always_present(self) -> None:
         client = self._client()
         headers = client._headers(actor_token=None, with_actor=False)
-        assert headers[BEARER_HEADER] == "Bearer bearer-xyz"
+        assert headers["Authorization"] == "Bearer bearer-xyz"
         assert ACTOR_TOKEN_HEADER not in headers
 
     def test_headers_actor_added_when_required(self) -> None:

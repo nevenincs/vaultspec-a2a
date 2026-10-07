@@ -21,6 +21,7 @@ from ...testing import (
 )
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
+from ...utils import bearer_header
 from ..routes import PROVIDER_CATALOG_PATH
 from ..routes._gateway_run_start import _require_settled_predecessor
 from .conftest import SEATED_ATTACH_TOKEN, make_app
@@ -138,7 +139,7 @@ async def test_workspace_query_routes_refuse_invalid_roots(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+        headers=bearer_header(SEATED_ATTACH_TOKEN),
     ) as client:
         response = await client.get(route, params={"workspace_root": invalid})
 
@@ -157,7 +158,7 @@ async def test_authenticated_caller_can_select_an_arbitrary_existing_root(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+        headers=bearer_header(SEATED_ATTACH_TOKEN),
     ) as client:
         catalog = await client.get(
             PROVIDER_CATALOG_PATH, params={"workspace_root": str(workspace)}
@@ -203,7 +204,7 @@ async def test_configured_unarmed_profile_confines_every_workspace_route(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+        headers=bearer_header(SEATED_ATTACH_TOKEN),
     ) as client:
         for route in (PROVIDER_CATALOG_PATH, "/v1/presets", "/v1/runs"):
             admitted = await client.get(
@@ -281,7 +282,7 @@ async def test_armed_desktop_confines_queries_and_run_admission(
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://gateway.test",
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client:
             for route in (PROVIDER_CATALOG_PATH, "/v1/presets", "/v1/runs"):
                 allowed = await client.get(
@@ -348,7 +349,7 @@ async def test_configured_profile_refuses_symlink_escape(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+        headers=bearer_header(SEATED_ATTACH_TOKEN),
     ) as client:
         fields = await async_catalog_run_fields(client, workspace_root=str(managed))
         response = await client.get(

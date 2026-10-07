@@ -23,6 +23,7 @@ from ...control.config import settings
 from ...control.infra_config import INTERNAL_TOKEN_ENV
 from ...control.worker_management import LazyWorkerSpawner
 from ...testing import JsonReplyHandler, serve_handler
+from ...utils import bearer_header
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -192,7 +193,10 @@ async def test_auto_spawn_refuses_retained_foreign_worker() -> None:
         )
         await spawner.ensure_worker()
         still_healthy = await probe_worker_health(url)
-    assert log == {"called": True, "authorization": f"Bearer {_EVICTION_TOKEN}"}
+    assert log == {
+        "called": True,
+        "authorization": bearer_header(_EVICTION_TOKEN)["Authorization"],
+    }
     assert still_healthy == WorkerHealthProbe(healthy=True, body=body)
     assert spawner.spawned is False
     assert spawner.process is None

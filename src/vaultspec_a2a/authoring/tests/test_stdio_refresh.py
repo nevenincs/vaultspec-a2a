@@ -25,6 +25,7 @@ from ...protocols.mcp.authoring_stdio import (
 )
 from ...protocols.mcp.tools.authoring_bridge import LOGICAL_CALL_ID_META_KEY
 from ...testing import JsonReplyHandler, serve_handler
+from ...utils import bearer_matches
 from ._engine_peer import reply_health_proof, write_engine_record
 from .test_dispatch_injection import _CATALOG
 
@@ -58,7 +59,7 @@ def _handler(state: _Rotation) -> type[JsonReplyHandler]:
             if self.path.endswith("/agent-tools/execute"):
                 state.execute.append(body)
                 state.actors.append(self.headers.get("x-authoring-actor-token"))
-            if self.headers.get("Authorization") != f"Bearer {state.bearer}":
+            if not bearer_matches(self.headers.get("Authorization"), state.bearer):
                 self._reply(401, {"error": "Unauthorized"})
                 return
             if self.path.endswith("/v1/sessions"):

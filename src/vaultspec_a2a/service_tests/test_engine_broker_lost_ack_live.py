@@ -36,6 +36,7 @@ from ..testing import (
     json_object,
     selection_from_served_catalog,
 )
+from ..utils import bearer_header
 from ..utils.coercion import coerce_object_mapping
 from ._dashboard_engine import dashboard_engine, provision_workspace
 
@@ -336,14 +337,14 @@ def _exercise_lost_ack_flow(**options: Unpack[_LostAckFlowOptions]) -> None:
     """Run and assert the HTTP portion of the lost-ack proof."""
     session = httpx.get(
         f"{options['engine_base']}/session",
-        headers={"Authorization": f"Bearer {options['token']}"},
+        headers=bearer_header(options["token"]),
         timeout=10,
     )
     session.raise_for_status()
     scope = session.json()["data"]["active_scope"]
     catalog_response = httpx.post(
         f"{options['engine_base']}/ops/a2a/provider-catalog",
-        headers={"Authorization": f"Bearer {options['token']}"},
+        headers=bearer_header(options["token"]),
         json={"expected_scope": scope},
         timeout=30,
     )
@@ -357,7 +358,7 @@ def _exercise_lost_ack_flow(**options: Unpack[_LostAckFlowOptions]) -> None:
     selection = selection_from_served_catalog(catalog_data.get("envelope"))
     started = httpx.post(
         f"{options['engine_base']}/ops/a2a/run-start",
-        headers={"Authorization": f"Bearer {options['token']}"},
+        headers=bearer_header(options["token"]),
         json={
             "run_id": _RUN_ID,
             "team_preset": "vaultspec-solo-coder",
@@ -391,7 +392,7 @@ def _exercise_lost_ack_flow(**options: Unpack[_LostAckFlowOptions]) -> None:
     mutation = httpx.post(
         f"{options['engine_base']}/authoring/v1/sessions",
         headers={
-            "Authorization": f"Bearer {options['token']}",
+            **bearer_header(options["token"]),
             "x-authoring-actor-token": actor_token,
         },
         json={

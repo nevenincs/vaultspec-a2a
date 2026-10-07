@@ -14,8 +14,13 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..authoring import AuthoringClient
-from ..authoring._connection_proof import proof_digest
-from ..authoring._engine_trust import CHALLENGE_HEADER, PROOF_HEADER
+from ..authoring._engine_trust import (
+    CHALLENGE_HEADER,
+    PID_HEADER,
+    PROOF_HEADER,
+    STARTED_MS_HEADER,
+    proof_digest,
+)
 from ..authoring._errors import AuthoringError
 from ..authoring._relay_client import (
     RELAY_CALL_PATH,
@@ -95,8 +100,8 @@ class AuthoringRelay:
         return Response(
             headers={
                 PROOF_HEADER: proof,
-                "x-vaultspec-engine-pid": str(os.getpid()),
-                "x-vaultspec-engine-started-ms": str(self._started_ms),
+                PID_HEADER: str(os.getpid()),
+                STARTED_MS_HEADER: str(self._started_ms),
             }
         )
 

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
+from ..utils import bearer_header
 from ._catalog_discovery import (
     ProviderCatalogDiscovery,
     available_catalog,
@@ -276,10 +277,7 @@ async def discover_openai_compatible_catalog(
             client.stream(
                 "GET",
                 models_url,
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {bearer}",
-                },
+                headers={"Accept": "application/json", **bearer_header(bearer)},
             ) as response,
         ):
             body_or_discovery = await _read_model_list_response(response, key)

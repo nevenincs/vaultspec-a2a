@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from ...control.state_layout import state_layout
 from ...ipc.schemas import DispatchRequest
 from ...testing import settings_override
+from ...utils import bearer_header
 from ..app import create_worker_app
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ def test_worker_refuses_desktop_state_before_receipt_or_scheduling(
             response = client.post(
                 "/dispatch",
                 json=request.model_dump(),
-                headers={"Authorization": "Bearer worker-test-token"},
+                headers=bearer_header("worker-test-token"),
             )
             assert response.status_code == expected, response.text
             if root == home:

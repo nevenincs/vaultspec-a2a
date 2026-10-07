@@ -9,6 +9,7 @@ from httpx import ASGITransport
 
 from ...api.internal import internal_router
 from ...testing import settings_override as _settings_override
+from ...utils import bearer_header
 from ...utils.enums import Environment
 
 _WORKER_IPC = "worker-ipc-credential-0123456789abcdef"
@@ -43,7 +44,7 @@ async def test_internal_health_requires_worker_ipc() -> None:
 async def test_internal_health_rejects_attach_credential() -> None:
     """The attach credential is not interchangeable with the worker IPC one."""
     with _settings_override(environment=Environment.TESTING):
-        response = await _get_health({"Authorization": f"Bearer {_ATTACH}"})
+        response = await _get_health(bearer_header(_ATTACH))
     assert response.status_code == 401
 
 
@@ -51,7 +52,7 @@ async def test_internal_health_rejects_attach_credential() -> None:
 async def test_internal_health_accepts_worker_ipc() -> None:
     """The worker IPC bearer passes the internal gate."""
     with _settings_override(environment=Environment.TESTING):
-        response = await _get_health({"Authorization": f"Bearer {_WORKER_IPC}"})
+        response = await _get_health(bearer_header(_WORKER_IPC))
     assert response.status_code == 200
     assert response.json()["service"] == "gateway"
 
@@ -67,7 +68,7 @@ async def test_internal_heartbeat_rejects_attach_credential() -> None:
         ) as client:
             response = await client.post(
                 "/internal/heartbeat",
-                headers={"Authorization": f"Bearer {_ATTACH}"},
+                headers=bearer_header(_ATTACH),
                 json={"active_threads": []},
             )
     assert response.status_code == 401

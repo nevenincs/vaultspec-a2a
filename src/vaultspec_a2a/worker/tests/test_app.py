@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from ...ipc.schemas import DispatchRequest
 from ...testing import settings_override as _settings_override
+from ...utils import bearer_header
 from ...utils.enums import Environment
 from ..app import create_worker_app
 
@@ -84,7 +85,7 @@ def test_dispatch_rejects_invalid_internal_token() -> None:
         resp = client.post(
             "/dispatch",
             json=dispatch.model_dump(),
-            headers={"Authorization": "Bearer wrong-token"},
+            headers=bearer_header("wrong-token"),
         )
 
     assert resp.status_code == 401
@@ -121,7 +122,7 @@ def test_admin_shutdown_rejects_invalid_internal_token() -> None:
     ):
         resp = client.post(
             "/admin/shutdown",
-            headers={"Authorization": "Bearer wrong-token"},
+            headers=bearer_header("wrong-token"),
         )
 
     assert resp.status_code == 401
@@ -140,7 +141,7 @@ def test_admin_shutdown_invokes_callable_lifecycle_owner() -> None:
     ):
         resp = client.post(
             "/admin/shutdown",
-            headers={"Authorization": "Bearer secret-token"},
+            headers=bearer_header("secret-token"),
         )
 
     assert resp.status_code == 202
@@ -158,7 +159,7 @@ def test_admin_shutdown_refuses_malformed_lifecycle_owner() -> None:
     ):
         resp = client.post(
             "/admin/shutdown",
-            headers={"Authorization": "Bearer secret-token"},
+            headers=bearer_header("secret-token"),
         )
 
     assert resp.status_code == 503
@@ -188,7 +189,7 @@ def test_health_rejects_invalid_internal_token() -> None:
         ),
         TestClient(app, raise_server_exceptions=False) as client,
     ):
-        resp = client.get("/health", headers={"Authorization": "Bearer wrong-token"})
+        resp = client.get("/health", headers=bearer_header("wrong-token"))
 
     assert resp.status_code == 401
 
@@ -202,7 +203,7 @@ def test_health_accepts_valid_internal_token() -> None:
         ),
         TestClient(app, raise_server_exceptions=False) as client,
     ):
-        resp = client.get("/health", headers={"Authorization": "Bearer secret-token"})
+        resp = client.get("/health", headers=bearer_header("secret-token"))
 
     assert resp.status_code == 200
     assert resp.json()["service"] == "worker"

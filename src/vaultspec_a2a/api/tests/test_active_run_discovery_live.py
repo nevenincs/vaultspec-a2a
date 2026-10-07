@@ -23,6 +23,7 @@ from ...tests._write_authority import (
     make_test_write_authority,
 )
 from ...thread.enums import ThreadStatus
+from ...utils import bearer_header
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -99,12 +100,12 @@ async def _assert_unauthenticated_routes(anonymous: httpx.AsyncClient) -> None:
         wrong = await anonymous.request(
             method,
             target,
-            headers={"Authorization": "Bearer wrong-service-token"},
+            headers=bearer_header("wrong-service-token"),
         )
         worker_credential = await anonymous.request(
             method,
             target,
-            headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
+            headers=bearer_header(_WORKER_TOKEN),
         )
         assert missing.status_code == 401, (target, missing.text)
         assert wrong.status_code == 401, (target, wrong.text)
@@ -114,11 +115,11 @@ async def _assert_unauthenticated_routes(anonymous: httpx.AsyncClient) -> None:
         )
     gateway_on_worker_boundary = await anonymous.get(
         "/internal/health",
-        headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        headers=bearer_header(_SERVICE_TOKEN),
     )
     worker_on_worker_boundary = await anonymous.get(
         "/internal/health",
-        headers={"Authorization": f"Bearer {_WORKER_TOKEN}"},
+        headers=bearer_header(_WORKER_TOKEN),
     )
     assert gateway_on_worker_boundary.status_code == 401
     assert worker_on_worker_boundary.status_code == 200
@@ -142,7 +143,7 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
         httpx.AsyncClient(
             base_url=base_url,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(_SERVICE_TOKEN),
         ) as client,
     ):
         async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as anonymous:
@@ -386,7 +387,7 @@ async def test_active_run_discovery_rejects_unbounded_selectors(
         httpx.AsyncClient(
             base_url=base_url,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(_SERVICE_TOKEN),
         ) as client,
     ):
         wrong_state = await client.get("/v1/runs", params={"state": "completed"})
@@ -446,7 +447,7 @@ async def test_the_two_readings_answer_with_different_records(tmp_path: Path) ->
         httpx.AsyncClient(
             base_url=base_url,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(_SERVICE_TOKEN),
         ) as client,
     ):
         async with session_factory() as session:

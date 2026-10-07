@@ -61,6 +61,7 @@ from ...testing import (
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...thread.idempotency import thread_create_action_key
+from ...utils import bearer_header
 from ..schemas.gateway import FrozenTeamAssignmentSummary
 from .conftest import _InProcessWorker
 
@@ -373,7 +374,7 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
     case = _prepare_restart_case(tmp_path)
     asyncio.run(_seed_restart_case(case))
     log_path = tmp_path / "gateway.log"
-    headers = {"Authorization": f"Bearer {case.attach}"}
+    headers = bearer_header(case.attach)
     with (
         booted_gateway(
             broker_gateway_env(case.app_home, gateway_token=case.attach),

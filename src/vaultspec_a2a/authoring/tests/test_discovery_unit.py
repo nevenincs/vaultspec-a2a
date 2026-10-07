@@ -17,6 +17,7 @@ import pytest
 
 from ...control.config import settings
 from ...testing import JsonReplyHandler, serve_handler, settings_override
+from .._engine_trust import CHALLENGE_HEADER, PROOF_HEADER
 from ..discovery import EngineEndpoint, resolve_engine
 from ._engine_peer import (
     TEST_BEARER,
@@ -105,11 +106,11 @@ def test_retry_resolves_after_a_transient_stall_window(
             hits["count"] += 1
             self.send_response(503 if hits["count"] <= 2 else 200)
             self.send_header(
-                "x-vaultspec-engine-proof",
+                PROOF_HEADER,
                 health_proof(
                     self.server.server_port,
                     TEST_BEARER,
-                    self.headers.get("x-vaultspec-engine-challenge", ""),
+                    self.headers.get(CHALLENGE_HEADER, ""),
                 ),
             )
             self.end_headers()

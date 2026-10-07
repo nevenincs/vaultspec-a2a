@@ -20,6 +20,7 @@ from urllib.parse import quote
 import httpx
 
 from ..streaming.sse_frames import iter_sse_events
+from ..utils import bearer_header
 from ._connection_proof import EngineConnectionError, authenticated_client
 
 if TYPE_CHECKING:
@@ -38,9 +39,8 @@ from ._envelope import (
 from ._errors import AuthoringError, AuthoringTransportError, raise_for_typed_error
 from .lifecycle import SseFrame, parse_sse_frame
 
-__all__ = ["ACTOR_TOKEN_HEADER", "BEARER_HEADER", "AuthoringClient"]
+__all__ = ["ACTOR_TOKEN_HEADER", "AuthoringClient"]
 
-BEARER_HEADER = "Authorization"
 ACTOR_TOKEN_HEADER = "x-authoring-actor-token"
 
 # The authoring subtree is nested under /authoring in the engine router.
@@ -132,7 +132,7 @@ class AuthoringClient:
     # ------------------------------------------------------------------
 
     def _headers(self, *, actor_token: str | None, with_actor: bool) -> dict[str, str]:
-        headers = {BEARER_HEADER: f"Bearer {self._bearer_token}"}
+        headers = bearer_header(self._bearer_token)
         if with_actor:
             token = actor_token or self._actor_token
             if token is None:

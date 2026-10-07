@@ -43,6 +43,7 @@ from ...providers.provider_catalog_service import (
     validate_public_catalog_bounds,
 )
 from ...testing import settings_override
+from ...utils import bearer_header
 from ..routes import PROVIDER_CATALOG_PATH
 from .conftest import SessionFactory, make_app
 
@@ -102,7 +103,7 @@ async def test_route_rejects_workspace_before_discovery(
         response = await client.get(
             PROVIDER_CATALOG_PATH,
             params={"workspace_root": invalid},
-            headers={"Authorization": f"Bearer {_TOKEN}"},
+            headers=bearer_header(_TOKEN),
         )
     assert response.status_code == 422
     assert getattr(app.state, "provider_catalog_service", None) is None
@@ -115,7 +116,7 @@ async def test_route_rejects_refresh_and_duplicate_workspace_queries(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     app = _gated_app()
-    headers = {"Authorization": f"Bearer {_TOKEN}"}
+    headers = bearer_header(_TOKEN)
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://desktop.test"
     ) as client:
@@ -157,7 +158,7 @@ async def test_authenticated_route_serves_all_registered_lanes_in_order(
             response = await client.get(
                 PROVIDER_CATALOG_PATH,
                 params={"workspace_root": str(workspace)},
-                headers={"Authorization": f"Bearer {_TOKEN}"},
+                headers=bearer_header(_TOKEN),
             )
     assert response.status_code == 200, response.text
     body = response.json()

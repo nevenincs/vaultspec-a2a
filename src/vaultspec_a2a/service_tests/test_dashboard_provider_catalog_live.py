@@ -34,6 +34,7 @@ from ..testing import (
     selection_from_served_catalog,
     wait_for_run_status,
 )
+from ..utils import bearer_header
 from ._dashboard_engine import dashboard_engine, provision_workspace
 
 if TYPE_CHECKING:
@@ -158,7 +159,7 @@ def _wait_for_completed_run(
     def _read_status() -> JsonObject:
         response = httpx.post(
             f"{engine_base}/ops/a2a/run-status",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=bearer_header(token),
             json={"run_id": run_id},
             timeout=30,
         )
@@ -201,7 +202,7 @@ def _run_dashboard_turn(
 ) -> None:
     session = httpx.get(
         f"{scenario.engine_base}/session",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=bearer_header(token),
         timeout=10,
     )
     session.raise_for_status()
@@ -213,7 +214,7 @@ def _run_dashboard_turn(
 
     stale_scope = httpx.post(
         f"{scenario.engine_base}/ops/a2a/provider-catalog",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=bearer_header(token),
         json={"expected_scope": f"{scope}-stale"},
         timeout=30,
     )
@@ -221,7 +222,7 @@ def _run_dashboard_turn(
 
     catalog = httpx.post(
         f"{scenario.engine_base}/ops/a2a/provider-catalog",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=bearer_header(token),
         json={"expected_scope": scope},
         timeout=30,
     )
@@ -239,7 +240,7 @@ def _run_dashboard_turn(
     started = _engine_envelope(
         httpx.post(
             f"{scenario.engine_base}/ops/a2a/run-start",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=bearer_header(token),
             json=start_body,
             timeout=90,
         ),
@@ -259,7 +260,7 @@ def _run_dashboard_turn(
     replayed = _engine_envelope(
         httpx.post(
             f"{scenario.engine_base}/ops/a2a/run-start",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=bearer_header(token),
             json=start_body,
             timeout=90,
         ),

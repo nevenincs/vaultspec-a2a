@@ -56,6 +56,7 @@ from ..testing import (
     wait_for_run_status_async,
 )
 from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
+from ..utils import bearer_matches
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -102,7 +103,7 @@ def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
             with state.lock:
                 state.attempts.append((auth, raw))
                 # The dashboard authenticates settlement with attach-control only.
-                if auth != f"Bearer {state.attach_secret}":
+                if not bearer_matches(auth, state.attach_secret):
                     self._reply(401, {})
                     return
                 body = json.loads(raw)
@@ -167,7 +168,7 @@ def _assert_settlement_state(
     assert settle_attempts, attempts
     for auth, _raw in settle_attempts:
         assert auth == DEFAULT_ATTACH_AUTHORIZATION, auth
-        assert auth != f"Bearer {worker_ipc}", auth
+        assert not bearer_matches(auth, worker_ipc), auth
 
     # --- Body carries only non-secret identities, no raw actor token. ---
     assert set(settlement) == {

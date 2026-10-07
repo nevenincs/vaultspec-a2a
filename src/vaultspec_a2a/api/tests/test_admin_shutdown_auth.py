@@ -15,6 +15,7 @@ from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ...api.routes.gateway import admission_gate
 from ...control.drain import AdmissionState
 from ...testing import loopback_uvicorn, uvicorn_started
+from ...utils import bearer_header
 from ..routes import route_signature
 
 if TYPE_CHECKING:
@@ -63,7 +64,7 @@ async def test_shutdown_refuses_missing_or_malformed_owner_before_admission_clos
         response = await client.post(
             "/admin/shutdown",
             headers={
-                "Authorization": f"Bearer {_ATTACH}",
+                **bearer_header(_ATTACH),
                 LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY,
             },
         )
@@ -86,7 +87,7 @@ async def test_production_uvicorn_owner_returns_202_before_cooperative_exit() ->
             response = await client.post(
                 f"{base}/admin/shutdown",
                 headers={
-                    "Authorization": f"Bearer {_ATTACH}",
+                    **bearer_header(_ATTACH),
                     LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY,
                 },
             )
@@ -111,7 +112,7 @@ async def test_shutdown_requires_attach() -> None:
 @pytest.mark.asyncio
 async def test_shutdown_requires_lifecycle_capability() -> None:
     """Attach alone is insufficient: the lifecycle capability is required (403)."""
-    response = await _post_shutdown({"Authorization": f"Bearer {_ATTACH}"})
+    response = await _post_shutdown(bearer_header(_ATTACH))
     assert response.status_code == 403
     assert _ATTACH not in response.text
     assert _CAPABILITY not in response.text
@@ -122,7 +123,7 @@ async def test_shutdown_rejects_wrong_lifecycle_capability() -> None:
     """A wrong lifecycle capability with a valid attach is still forbidden (403)."""
     response = await _post_shutdown(
         {
-            "Authorization": f"Bearer {_ATTACH}",
+            **bearer_header(_ATTACH),
             LIFECYCLE_CAPABILITY_HEADER: "not-the-capability",
         }
     )

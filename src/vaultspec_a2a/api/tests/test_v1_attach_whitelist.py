@@ -10,6 +10,7 @@ import pytest
 from httpx import ASGITransport
 
 from ...api.app import create_app
+from ...utils import bearer_header
 from ..routes import route_signature
 
 if TYPE_CHECKING:
@@ -120,7 +121,5 @@ async def test_presets_admitted_with_attach_credential() -> None:
     async with httpx.AsyncClient(
         transport=transport, base_url="http://desktop.test"
     ) as client:
-        response = await client.get(
-            "/v1/presets", headers={"Authorization": f"Bearer {_TOKEN}"}
-        )
+        response = await client.get("/v1/presets", headers=bearer_header(_TOKEN))
     assert response.status_code == 200

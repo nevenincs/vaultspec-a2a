@@ -37,7 +37,6 @@ from ..thread.snapshots import (
     is_permission_event,
     is_terminal_event,
 )
-from ..thread.terminal_effects import compute_terminal_effects
 from ..utils.coercion import coerce_object_mapping
 from ._event_application import (
     apply_permission_resolution as _apply_permission_resolution,
@@ -57,6 +56,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ..database import ThreadStatusElectionOutcome
     from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import EventAggregator
     from ..thread import ThreadWriteExpectation
@@ -72,13 +72,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-
-def _time_now_utc() -> datetime:
-    """Return the current UTC timestamp for durable terminal effects."""
-    from datetime import UTC
-
-    return datetime.now(UTC)
 
 
 # The metadata key binding a run to its non-secret admission lease identity,
@@ -137,6 +130,19 @@ def _session_factory(
     return configured
 
 
+async def _keep_settlement_if_won(
+    db: AsyncSession, outcome: ThreadStatusElectionOutcome
+) -> bool:
+    """Commit a worker-evidence settlement whose election won; discard any other."""
+    from ..database import ThreadStatusElectionOutcome
+
+    if outcome is not ThreadStatusElectionOutcome.WON:
+        await db.rollback()
+        return False
+    await db.commit()
+    return True
+
+
 async def _persist_proven_cancellation(
     factory: async_sessionmaker[AsyncSession],
     *,
@@ -145,29 +151,16 @@ async def _persist_proven_cancellation(
     last_sequence: int | None,
 ) -> bool:
     """Elect and settle one exact current cancellation terminal."""
-    from ..database import (
-        ThreadStatusElectionOutcome,
-        begin_write_transaction,
-        elect_thread_status,
-        expire_pending_permission_requests,
-        get_control_action_by_dispatch_id,
-        mark_control_action_applied,
-        set_thread_approval_state,
-        set_thread_repair_state,
-        thread_write_expectation,
-    )
+    from ..database import get_control_action_by_dispatch_id, thread_write_expectation
     from ..thread.enums import ControlActionResultStatus, ControlActionType
-    from .repositories.continuation_queue import (
-        lock_run_for_continuation_decision,
-        refuse_queued_continuations,
+    from .terminal_settlement import (
+        TerminalEvidence,
+        lock_terminal_run,
+        settle_terminal,
     )
 
     async with factory() as db:
-        await begin_write_transaction(db)
-        # Locked against the same row an admission locks, so a continuation
-        # offered while this settles either lands before it and is refused
-        # below, or reads the cancelled status and is refused there.
-        thread = await lock_run_for_continuation_decision(db, thread_id=thread_id)
+        thread = await lock_terminal_run(db, thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.dispatch_id
         )
@@ -185,57 +178,24 @@ async def _persist_proven_cancellation(
         ):
             await db.rollback()
             return False
-        election = await elect_thread_status(
+        outcome = await settle_terminal(
             db,
-            thread_id,
-            expectation=expectation,
-            status=ThreadStatus.CANCELLED,
-            action_type=ControlActionType.CANCEL,
-            action_receipt_id=evidence.dispatch_id,
-        )
-        if election.outcome is not ThreadStatusElectionOutcome.WON:
-            await db.rollback()
-            return False
-        if last_sequence is not None:
-            thread.last_sequence = last_sequence
-        await refuse_queued_continuations(
-            db,
-            thread_id=thread_id,
-            refused_at=_time_now_utc(),
-            reason="the run was cancelled",
-        )
-        await expire_pending_permission_requests(db, thread_id=thread_id)
-        await set_thread_approval_state(
-            db,
-            thread_id,
-            approval_status=None,
-            approval_request_id=None,
-            approval_reason=None,
-            approval_response_action_id=None,
-        )
-        await mark_control_action_applied(
-            db,
-            action.id,
-            applied_at=_time_now_utc(),
-            result_status=(
-                ControlActionResultStatus.CANCELLED_CEASED
-                if evidence.outcome == "ceased"
-                else ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK
+            thread,
+            ThreadStatus.CANCELLED,
+            evidence=TerminalEvidence(
+                expectation=expectation,
+                action_id=action.id,
+                action_type=ControlActionType.CANCEL,
+                action_receipt_id=evidence.dispatch_id,
+                result_status=(
+                    ControlActionResultStatus.CANCELLED_CEASED
+                    if evidence.outcome == "ceased"
+                    else ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK
+                ),
             ),
+            last_sequence=last_sequence,
         )
-        effects = compute_terminal_effects(
-            ThreadStatus.CANCELLED, has_cancel_action=True
-        )
-        await set_thread_repair_state(
-            db,
-            thread_id,
-            repair_status=effects.repair_status,
-            repair_reason=effects.repair_reason,
-            execution_readiness=effects.repair_status.value,
-            last_applied_action=effects.last_applied_action,
-        )
-        await db.commit()
-        return True
+        return await _keep_settlement_if_won(db, outcome)
 
 
 async def _persist_proven_failure(
@@ -247,30 +207,17 @@ async def _persist_proven_failure(
     last_sequence: int | None,
 ) -> bool:
     """Elect and settle one failure for the exact current graph action."""
-    from ..database import (
-        ThreadStatusElectionOutcome,
-        begin_write_transaction,
-        elect_thread_status,
-        expire_pending_permission_requests,
-        get_control_action_by_dispatch_id,
-        mark_control_action_applied,
-        set_thread_approval_state,
-        set_thread_repair_state,
-        thread_write_expectation,
-    )
+    from ..database import get_control_action_by_dispatch_id, thread_write_expectation
     from ..thread.enums import NON_ACTIVE_STATUSES
     from .dispatch_receipts import validate_current_graph_receipt
-    from .repositories.continuation_queue import (
-        lock_run_for_continuation_decision,
-        refuse_queued_continuations,
+    from .terminal_settlement import (
+        TerminalEvidence,
+        lock_terminal_run,
+        settle_terminal,
     )
 
     async with factory() as db:
-        await begin_write_transaction(db)
-        # Locked against the same row an admission locks, so a continuation
-        # offered while this settles either lands before it and is refused
-        # below, or reads the failed status and is refused there.
-        thread = await lock_run_for_continuation_decision(db, thread_id=thread_id)
+        thread = await lock_terminal_run(db, thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=thread_id, dispatch_id=evidence.action.dispatch_id
         )
@@ -282,49 +229,21 @@ async def _persist_proven_failure(
         ):
             await db.rollback()
             return False
-        expectation = thread_write_expectation(thread)
-        election = await elect_thread_status(
+        outcome = await settle_terminal(
             db,
-            thread_id,
-            expectation=expectation,
-            status=ThreadStatus.FAILED,
-            action_type=evidence.action.action_type,
-            action_receipt_id=evidence.action.dispatch_id,
-            failure_reason=failure_reason,
-            provider_condition=evidence.provider_condition,
+            thread,
+            ThreadStatus.FAILED,
+            evidence=TerminalEvidence(
+                expectation=thread_write_expectation(thread),
+                action_id=action.id,
+                action_type=evidence.action.action_type,
+                action_receipt_id=evidence.action.dispatch_id,
+                failure_reason=failure_reason,
+                provider_condition=evidence.provider_condition,
+            ),
+            last_sequence=last_sequence,
         )
-        if election.outcome is not ThreadStatusElectionOutcome.WON:
-            await db.rollback()
-            return False
-        if last_sequence is not None:
-            thread.last_sequence = last_sequence
-        await mark_control_action_applied(db, action.id)
-        await refuse_queued_continuations(
-            db,
-            thread_id=thread_id,
-            refused_at=_time_now_utc(),
-            reason="the run's turn failed",
-        )
-        await expire_pending_permission_requests(db, thread_id=thread_id)
-        await set_thread_approval_state(
-            db,
-            thread_id,
-            approval_status=None,
-            approval_request_id=None,
-            approval_reason=None,
-            approval_response_action_id=None,
-        )
-        effects = compute_terminal_effects(ThreadStatus.FAILED, has_cancel_action=False)
-        await set_thread_repair_state(
-            db,
-            thread_id,
-            repair_status=effects.repair_status,
-            repair_reason=effects.repair_reason,
-            execution_readiness=effects.repair_status.value,
-            last_applied_action=effects.last_applied_action,
-        )
-        await db.commit()
-        return True
+        return await _keep_settlement_if_won(db, outcome)
 
 
 def _skip_without_database(what: str, thread_id: str) -> None:

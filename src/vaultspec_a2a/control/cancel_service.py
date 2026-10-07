@@ -7,15 +7,11 @@ Commits durable transitions; does not raise HTTPException or touch FastAPI state
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from inspect import Parameter, Signature
 from typing import TYPE_CHECKING, cast, override
-
-from sqlalchemy.exc import OperationalError
 
 from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
@@ -34,6 +30,7 @@ from ..database import (
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
+    retry_write_contention,
     thread_write_expectation,
 )
 from ..database.models import ThreadModel
@@ -228,6 +225,7 @@ async def _cancel_preflight(
             thread_id=thread_id,
             cancelled=False,
             thread_status=thread.status,
+            error_detail=eligibility.reason,
             accepted=False,
             applied=eligibility.already_cancelled,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
@@ -266,19 +264,17 @@ async def _cancel_preflight(
     )
 
 
-async def cancel_thread(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    idempotency_key: str | None,
-    transport: DispatchTransport,
-    _busy_retries: int = 0,
-) -> CancelResult:
-    """Execute the cancel-thread workflow.
+@dataclass(frozen=True, slots=True)
+class _ClaimedCancel:
+    preflight: _CancelPreflight
+    dispatch: DispatchRequest
+    claim: ControlActionClaim
 
-    Returns a :class:`CancelResult` describing what happened.  Commits the
-    session before returning — the service owns its transaction boundary.
-    """
+
+async def _claim_cancel(
+    db: AsyncSession, thread_id: str, idempotency_key: str
+) -> _ClaimedCancel | CancelResult:
+    """Claim one cancellation under the write lock, or refuse having written none."""
     # The preflight reads before the claim writes, so the acceptance transaction
     # has to hold the write lock from its first statement to wait for a racing
     # canceller instead of failing on its commit.
@@ -288,49 +284,53 @@ async def cancel_thread(
         # A refusal wrote nothing; release the write lock before returning.
         await db.rollback()
         return preflight
-    thread = preflight.thread
-    thread_status = preflight.thread_status
-    expectation = preflight.expectation
+    dispatch = DispatchRequest(
+        action=to_dispatch_action(ControlActionType.CANCEL),
+        thread_id=thread_id,
+        recursion_limit=accepted_recursion_budget(None),
+    )
+    claim = await prepare_control_action_claim(
+        db,
+        request=ControlActionClaimRequest(
+            thread_id=thread_id,
+            action_type=ControlActionType.CANCEL,
+            idempotency_key=idempotency_key,
+            payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
+            dispatch_id=dispatch.dispatch_id,
+            recovery_deadline_at=preflight.recovery_deadline_at,
+        ),
+    )
+    return _ClaimedCancel(preflight, dispatch, claim)
 
+
+async def cancel_thread(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    idempotency_key: str | None,
+    transport: DispatchTransport,
+) -> CancelResult:
+    """Execute the cancel-thread workflow.
+
+    Returns a :class:`CancelResult` describing what happened.  Commits the
+    session before returning — the service owns its transaction boundary.
+    """
     # Cancellation is a resource transition, so one thread has one durable
     # ownership key even when racing callers supplied different retry labels.
     # The caller's label is still echoed in the response for compatibility;
     # it must not create a second dispatchable intention.
     resolved_idempotency_key = default_cancel_key(thread_id)
     response_idempotency_key = idempotency_key or resolved_idempotency_key
-    dispatch = DispatchRequest(
-        action=to_dispatch_action(ControlActionType.CANCEL),
-        thread_id=thread_id,
-        recursion_limit=accepted_recursion_budget(None),
+    claimed = await retry_write_contention(
+        db, lambda: _claim_cancel(db, thread_id, resolved_idempotency_key)
     )
-    try:
-        claim = await prepare_control_action_claim(
-            db,
-            request=ControlActionClaimRequest(
-                thread_id=thread_id,
-                action_type=ControlActionType.CANCEL,
-                idempotency_key=resolved_idempotency_key,
-                payload=freeze_accepted_input(dispatch, intent={"cancel": True}),
-                dispatch_id=dispatch.dispatch_id,
-                recovery_deadline_at=preflight.recovery_deadline_at,
-            ),
-        )
-    except OperationalError as exc:
-        if (
-            not isinstance(exc.orig, sqlite3.OperationalError)
-            or "locked" not in str(exc.orig).lower()
-            or _busy_retries >= 4
-        ):
-            raise
-        await db.rollback()
-        await asyncio.sleep(0.02 * (_busy_retries + 1))
-        return await cancel_thread(
-            db,
-            thread_id=thread_id,
-            idempotency_key=idempotency_key,
-            transport=transport,
-            _busy_retries=_busy_retries + 1,
-        )
+    if isinstance(claimed, CancelResult):
+        return claimed
+    thread = claimed.preflight.thread
+    thread_status = claimed.preflight.thread_status
+    expectation = claimed.preflight.expectation
+    dispatch = claimed.dispatch
+    claim = claimed.claim
     replay = await _existing_cancel_claim(
         db, claim, thread_id, thread_status, response_idempotency_key
     )

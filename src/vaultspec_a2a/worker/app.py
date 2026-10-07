@@ -399,7 +399,7 @@ def _start_dispatch_task(
 
 async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchResponse:
     """Admit one gateway dispatch and schedule it in the worker task group."""
-    if req.action != "cancel" and req.workspace_root is not None:
+    if req.requires_graph_receipt and req.workspace_root is not None:
         from ..control.workspace import require_admitted_workspace_root
 
         try:
@@ -413,7 +413,7 @@ async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchRespo
     if req.dispatch_id in dispatch_ids:
         return _duplicate_dispatch_response(req)
 
-    owns_capacity = req.action in {"ingest", "resume"}
+    owns_capacity = req.requires_graph_receipt
     reservation, replayed = await _reserve_dispatch_or_replay(
         executor, req, dispatch_ids, owns_capacity
     )

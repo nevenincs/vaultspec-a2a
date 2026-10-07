@@ -182,7 +182,8 @@ class DispatchRequest(BaseModel):
         """Whether this dispatch delivers graph input, which needs its receipt.
 
         A cancel stops a run without entering its graph, so it is the one
-        dispatch that crosses the wire with no receipt.
+        dispatch that crosses the wire with no receipt, no accepted definition
+        and no project to admit, and holds no execution slot on the worker.
         """
         return self.action in GRAPH_ACTION_VERB.values()
 
@@ -201,7 +202,7 @@ class DispatchRequest(BaseModel):
 
     def require_graph_definition(self) -> FrozenGraphDefinition:
         """Require the accepted executable program before compiling or running."""
-        if self.action == "cancel" or self.graph_definition is None:
+        if not self.requires_graph_receipt or self.graph_definition is None:
             raise ValueError("graph execution requires its accepted definition")
         definition = FrozenGraphDefinition.model_validate(
             self.graph_definition.model_dump(mode="json")

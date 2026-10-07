@@ -37,8 +37,9 @@ from ._catalog_fields import (
     optional_description,
     optional_text,
 )
+from ._cleanup import cancel_owned_tasks
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
-from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
+from ._stdio_rpc import OutputBudget, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .acp_exceptions import AcpErrorCode, AcpSessionError
 from .provider_catalog import (
@@ -481,7 +482,10 @@ async def discover_acp_catalog(
     cleanup_steps.extend(
         [
             ("acp-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("acp-catalog-stderr", lambda: cancel_task(stderr_task)),
+            (
+                "acp-catalog-stderr",
+                lambda: cancel_owned_tasks((stderr_task,), reraise=True),
+            ),
         ]
     )
     return await finish_discovery(

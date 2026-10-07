@@ -34,7 +34,6 @@ from ._authoring_close import close_authoring_session_best_effort
 from ._dispatch_contract import (
     _INGEST_GUARDS,
     _RESUME_GUARDS,
-    _SLOT_OWNING_ACTIONS,
     CAPACITY_ACCEPTED,
     CAPACITY_DRAINING,
     CAPACITY_FULL,
@@ -476,11 +475,7 @@ class Executor(SettlementMixin):
         # Drop the run's actor tokens when its active window truly closes,
         # i.e. a terminal outcome - never on an interrupt-park that will resume.
         if outcome in TERMINAL_STATUSES:
-            self._graph_lifecycle.release_thread(thread_id)
-            self._token_store.drop(thread_id)
-            self._catalog_store.drop(thread_id)
-            self._aggregator.remove_node_metadata(thread_id)
-            self._aggregator.clear_thread_state(thread_id)
+            self._release_terminal_thread(thread_id, closes_run_window=True)
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
         self._aggregator.prune_sequences(active_snapshot)
@@ -489,6 +484,25 @@ class Executor(SettlementMixin):
         reservation = reservation or self._dispatch_reservation.get()
         if reservation is not None:
             await self.release_dispatch_capacity(reservation)
+
+    @override
+    def _release_terminal_thread(
+        self, thread_id: str, *, closes_run_window: bool
+    ) -> None:
+        """Release what this worker holds for a run it has stopped executing.
+
+        The compiled graph and the run's stream state go every time. Its actor
+        tokens and catalog snapshot belong to the run's active window and go only
+        when this release *closes_run_window*: a dispatch refused before it ran
+        never opened that window, and the parked run it leaves behind still
+        authors with them on its next turn, which no redelivery provisions again.
+        """
+        if closes_run_window:
+            self._token_store.drop(thread_id)
+            self._catalog_store.drop(thread_id)
+        self._graph_lifecycle.release_thread(thread_id)
+        self._aggregator.remove_node_metadata(thread_id)
+        self._aggregator.clear_thread_state(thread_id)
 
     @override
     async def _close_authoring_session_best_effort(
@@ -500,7 +514,7 @@ class Executor(SettlementMixin):
 
     async def handle_dispatch(self, req: DispatchRequest) -> None:
         """Reserve capacity and route a direct ``DispatchRequest`` call."""
-        owns_slot = req.action in _SLOT_OWNING_ACTIONS
+        owns_slot = req.requires_graph_receipt
         reservation, refusal_reason = (
             await self._reserve_dispatch_capacity(req.thread_id)
             if owns_slot
@@ -621,8 +635,7 @@ class Executor(SettlementMixin):
         async with self._ingest_lock:
             is_active = req.thread_id in self._active_ingests
         if not is_active:
-            self._token_store.drop(req.thread_id)
-            self._catalog_store.drop(req.thread_id)
+            self._release_terminal_thread(req.thread_id, closes_run_window=True)
             await self._state_projector.emit_terminal_status(
                 req.thread_id,
                 ThreadStatus.CANCELLED,
@@ -630,9 +643,6 @@ class Executor(SettlementMixin):
                     req.thread_id, outcome="no_active_work"
                 ),
             )
-            self._graph_lifecycle.release_thread(req.thread_id)
-            self._aggregator.remove_node_metadata(req.thread_id)
-            self._aggregator.clear_thread_state(req.thread_id)
 
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""

@@ -37,7 +37,8 @@ from ._catalog_fields import (
     local_id,
     optional_description,
 )
-from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
+from ._cleanup import cancel_owned_tasks
+from ._stdio_rpc import OutputBudget, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
     MAX_CONTROLS,
@@ -508,7 +509,10 @@ async def discover_codex_catalog(
     cleanup_steps.extend(
         [
             ("codex-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("codex-catalog-stderr", lambda: cancel_task(stderr_task)),
+            (
+                "codex-catalog-stderr",
+                lambda: cancel_owned_tasks((stderr_task,), reraise=True),
+            ),
         ]
     )
     return await finish_discovery(

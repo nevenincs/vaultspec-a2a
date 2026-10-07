@@ -27,7 +27,6 @@ from ..thread.enums import ThreadStatus
 from ..thread.errors import describe_exception_chain
 from ._dispatch_contract import (
     _EXECUTOR_CONDITION,
-    _SLOT_OWNING_ACTIONS,
     DispatchCapacityReservation,
     _GuardWording,
     failure_evidence,
@@ -165,6 +164,10 @@ class _SettlementHost(Protocol):
         reservation: DispatchCapacityReservation | None = None,
     ) -> None: ...
 
+    def _release_terminal_thread(
+        self, thread_id: str, *, closes_run_window: bool
+    ) -> None: ...
+
 
 class SettlementMixin(_SettlementHost):
     """Terminal arbitration, pre-run rejection, and run settlement.
@@ -274,9 +277,7 @@ class SettlementMixin(_SettlementHost):
                     req, action="dispatch_rejected_without_authority"
                 ),
             )
-        self._graph_lifecycle.release_thread(req.thread_id)
-        self._aggregator.remove_node_metadata(req.thread_id)
-        self._aggregator.clear_thread_state(req.thread_id)
+        self._release_terminal_thread(req.thread_id, closes_run_window=False)
         reservation = self._dispatch_reservation.get()
         if reservation is not None:
             await self.release_dispatch_capacity(reservation)
@@ -513,7 +514,7 @@ class SettlementMixin(_SettlementHost):
         past the guard above - the one arm that returns early leaves a live
         ingest owning both the run and the stash it will drain itself.
         """
-        owns_slot = req.action in _SLOT_OWNING_ACTIONS
+        owns_slot = req.requires_graph_receipt
         if not owns_slot:
             async with self._ingest_lock:
                 if req.thread_id in self._active_ingests:
@@ -579,9 +580,7 @@ class SettlementMixin(_SettlementHost):
         )
         span.set_attribute("pre_flight", "completed")
         await self._emit_terminal_outcome(req, ThreadStatus.COMPLETED)
-        self._graph_lifecycle.release_thread(req.thread_id)
-        self._aggregator.remove_node_metadata(req.thread_id)
-        self._aggregator.clear_thread_state(req.thread_id)
+        self._release_terminal_thread(req.thread_id, closes_run_window=False)
         reservation = self._dispatch_reservation.get()
         if reservation is not None:
             await self.release_dispatch_capacity(reservation)

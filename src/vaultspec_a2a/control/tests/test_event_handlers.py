@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.types import interrupt
+from langgraph.types import Command, interrupt
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -1157,6 +1157,74 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
         assert thread.status == "input_required"
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+
+
+@pytest.mark.asyncio
+async def test_a_request_answered_before_its_relay_lands_journals_no_pending_row(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """A request the checkpoint no longer holds leaves no row to answer.
+
+    The worker emits a permission request, batches it, and POSTs it a moment
+    later. An answer accepted and applied inside that window releases the
+    pause, so the frame arrives describing a question nobody is being asked.
+    Journaled as pending it became a ghost: the run reads as holding an open
+    question, every pending-permission surface offers it, and the respond verb
+    refuses it because the checkpoint knows better. The journal consults the
+    checkpoint instead and writes nothing.
+    """
+    async with session_factory() as session:
+        thread_id, _receipt = await seed_accepted_thread(session, status="running")
+        await session.commit()
+
+    request_id = f"{thread_id}:answered-before-relay"
+    payload: dict[str, object] = {
+        "type": "permission_request",
+        "request_id": request_id,
+        "description": "Allow bash?",
+        "options": [{"option_id": "allow_once", "name": "Allow once"}],
+        "tool_call": "bash",
+    }
+
+    # The run parks, is answered, and runs on - all before the frame is relayed.
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    builder = new_state_graph()
+    add_test_node(
+        builder,
+        "gate",
+        lambda _state: {"active_agent": str(interrupt(payload))},
+    )
+    builder.add_edge("__start__", "gate")
+    builder.add_edge("gate", "__end__")
+    graph = compile_test_graph(builder, checkpointer=checkpointer)
+    assert "__interrupt__" in await ainvoke_test_graph(graph, {}, config)
+    await ainvoke_test_graph(graph, Command(resume="allow_once"), config)
+
+    await relay_event(
+        thread_id,
+        payload,
+        services=RelayServices(
+            session_factory=session_factory, checkpointer=checkpointer
+        ),
+    )
+
+    async with session_factory() as session:
+        assert await get_permission_request(session, request_id) is None
+        actions = (
+            (
+                await session.execute(
+                    select(ControlActionModel).where(
+                        ControlActionModel.thread_id == thread_id,
+                        ControlActionModel.action_type
+                        == ControlActionType.PERMISSION_REQUEST_CREATED.value,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert actions == []
 
 
 @dataclass(frozen=True, slots=True)

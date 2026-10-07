@@ -46,9 +46,9 @@ related:
   - '[[2026-10-04-engine-discovery-security-adr]]'
   - '[[2026-10-04-workspace-root-authority-desktop-native-admission-adr]]'
   - '[[2026-10-04-workspace-root-authority-desktop-workspace-boundary-adr]]'
-modified: '2026-10-06'
+modified: '2026-10-07'
 body_schema: body-v2
-body_hash: 'sha256:3b873e6080caaed2e88168a0b81ac366b457a54a64145d7dc3a40c83d3791360'
+body_hash: 'sha256:0faa1445c3bba5b2c9bf8c9dbf1a254382ecf902580d759f8a18ff91efcf8a8d'
 ---
 
 # `codebase-remediation` plan
@@ -57,7 +57,15 @@ Remediate the 206 audited duplication, dead-code and correctness findings into o
 
 ## Description
 
-Draft - awaiting owner approval (2026-10-06). This plan is not approved; no Step may execute until the owner's authorization is recorded on this line.
+Approved 2026-10-07. Authorization basis: the owner directed, on 2026-10-07:
+- "deliver an a2a repository free of duplicate implementations and dead code and feature", keeping support for the Codex, Claude, Z.ai, Kimi and Agy providers, and "finish all steps of the plan";
+- duplicated- and dead-code removal runs first, as pure refactoring with no test runs until every centralization and deletion has landed;
+- the orchestrator amends the ADRs (done: the 2026-10-07 codebase-remediation decisions);
+- findings owned by other plans move into this plan;
+- D3 is reversed, so lanes are kept;
+- D19 is approved.
+
+Execution order under this approval: the centralization and deletion Steps run first, in parallel per-task worktrees merged into branch `refactor/centralize`. One verification phase follows, then the remaining correctness Steps. Behaviour-changing decisions D9, D12 and D14 are outside the first phase.
 
 ### Scope and row legend
 

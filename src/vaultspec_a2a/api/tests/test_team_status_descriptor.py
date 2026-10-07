@@ -1,8 +1,8 @@
 """The team status must report each agent's resolved model assignment.
 
 These exercise the whole chain the descriptor travels — team config resolution,
-graph compilation, the aggregator's node-metadata cache, and the team-status
-service — because the field loss they guard against was invisible at every
+graph compilation, the relayed node metadata the gateway mirrors, and the
+team-status service — because the field loss they guard against was invisible at every
 individual layer: every model in the chain *declared* ``provider``/``model``,
 and only the seam between them dropped the values.
 
@@ -26,7 +26,7 @@ from ...database import create_thread
 from ...graph.compiler import compile_team_graph
 from ...graph.enums import AgentLifecycleState, Provider
 from ...providers.factory import ProviderFactory
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub, node_metadata_from_graph
 from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
@@ -81,8 +81,12 @@ async def test_team_status_reports_the_resolved_provider_and_model(
         step_timeout=60.0,
     )
 
-    aggregator = EventAggregator()
-    aggregator.register_graph("thread-team-status", cast("StreamableGraph", graph))
+    aggregator = RelayHub()
+    # Exactly the payload the worker relays once it has compiled the graph.
+    aggregator.sync_worker_event(
+        "thread-team-status",
+        {"type": "graph_registered", "nodes": node_metadata_from_graph(graph)},
+    )
 
     async with session_factory() as db:
         status = await build_team_status(
@@ -103,7 +107,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
     """The snapshot route carries the assignment too, not just ``/team/status``.
 
     ``control/team_service.py`` and ``control/snapshot.py`` read the same
-    ``get_node_summaries()`` seam, so both should be fixed by populating node
+    mirrored ``get_node_summaries()`` seam, so both should be fixed by populating node
     metadata once — but that is a call-graph inference, and this asserts it
     against the real ``GET /threads/{id}/state`` response instead.
     """
@@ -117,8 +121,11 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
         model_assignment=deterministic_model_assignment(team),
         step_timeout=60.0,
     )
-    aggregator = EventAggregator()
-    aggregator.register_graph(thread_id, cast("StreamableGraph", graph))
+    aggregator = RelayHub()
+    aggregator.sync_worker_event(
+        thread_id,
+        {"type": "graph_registered", "nodes": node_metadata_from_graph(graph)},
+    )
 
     app, _agg, _worker, _cp = make_app(
         session_factory, checkpointer, aggregator=aggregator
@@ -180,7 +187,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         model_assignment=deterministic_model_assignment(team),
         step_timeout=60.0,
     )
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, thread_id, ThreadStatus.RUNNING)
 
     async with (
@@ -194,9 +201,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         )
         executor = Executor(checkpointer=checkpointer, bridge=bridge)
         try:
-            executor.aggregator.register_graph(
-                thread_id, cast("StreamableGraph", graph)
-            )
+            executor._producer.register_graph(thread_id, cast("StreamableGraph", graph))
             async with client.stream("GET", f"/v1/runs/{thread_id}/stream") as response:
                 assert response.status_code == 200
                 reader = SseReader(response.aiter_lines())
@@ -205,7 +210,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
                 # Only agent_id/node_name/state, exactly as the lifecycle
                 # emitter supplies them; the assignment must be merged in from
                 # the registered node metadata.
-                await executor.aggregator._emitters.emit_team_status(
+                await executor._producer._emitters.emit_team_status(
                     thread_id,
                     [
                         {
@@ -228,8 +233,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
     assert summary["model_name"] == "deterministic"
 
 
-@pytest.mark.asyncio
-async def test_aggregator_agent_states_are_enum_members_not_strings() -> None:
+def test_mirrored_agent_states_are_enum_members_not_strings() -> None:
     """``get_agent_states()`` yields real enum members at runtime.
 
     ``control/snapshot.py`` used to wrap this value in ``str()``.  That was not
@@ -237,16 +241,20 @@ async def test_aggregator_agent_states_are_enum_members_not_strings() -> None:
     downgrading a well-typed enum into a bare string, which is what let the
     stringly-typed descriptor persist.  Dropping the call removes a coercion
     rather than swapping one silent coercion for another, and this pins it.
+    The relayed payload carries the state as a bare string, so the mirror is
+    what has to rebuild the member.
     """
-    aggregator = EventAggregator()
-    await aggregator.emit_agent_status(
-        thread_id="thread-agent-state-type",
-        agent_id=_WORKER_ID,
-        node_name=_WORKER_ID,
-        state=AgentLifecycleState.WORKING,
+    aggregator = RelayHub()
+    aggregator.sync_worker_event(
+        "thread-agent-state-type",
+        {
+            "type": "agent_status",
+            "agent_id": _WORKER_ID,
+            "state": AgentLifecycleState.WORKING.value,
+        },
     )
 
-    states = aggregator.get_agent_states("thread-agent-state-type")
+    states = aggregator.mirror.get_agent_states("thread-agent-state-type")
     observed = states[_WORKER_ID]
     assert isinstance(observed, AgentLifecycleState)
     assert observed is AgentLifecycleState.WORKING
@@ -258,17 +266,20 @@ async def test_team_status_reports_unknown_assignment_as_null(
 ) -> None:
     """An agent registered without a resolved assignment reports null, not a guess.
 
-    The aggregator also caches node metadata relayed from the worker process,
-    which may predate model resolution; that path must not fabricate a provider.
+    The gateway mirrors node metadata relayed from the worker process, which
+    may predate model resolution; that path must not fabricate a provider.
     """
-    aggregator = EventAggregator()
-    aggregator._subscribers_mgr.set_node_metadata(
+    aggregator = RelayHub()
+    aggregator.sync_worker_event(
         "thread-unresolved",
         {
-            "unresolved-agent": {
-                "role": "coder",
-                "display_name": "Unresolved",
-                "description": "Registered before its model resolved.",
+            "type": "graph_registered",
+            "nodes": {
+                "unresolved-agent": {
+                    "role": "coder",
+                    "display_name": "Unresolved",
+                    "description": "Registered before its model resolved.",
+                },
             },
         },
     )

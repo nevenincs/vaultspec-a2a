@@ -1,7 +1,7 @@
 """A model call tagged not-to-stream never reaches a client as message text.
 
 A real compiled graph runs two deterministic-lane models, built through the real
-provider factory, in one node through the real aggregator ingest: the supervisor
+provider factory, in one node through the real producer ingest: the supervisor
 invoked the way the supervisor invokes its routing decision, tagged
 ``TAG_NOSTREAM``, and a researcher as an ordinary call. The v2 event API emits
 stream events for both; only the untagged call's text may be relayed.
@@ -22,7 +22,7 @@ from ...graph.events import MessageChunk
 from ...providers import ProviderFactory
 from ...team.team_config import load_agent_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ..aggregator import EventAggregator
+from ..aggregator import RunEventProducer
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
@@ -74,10 +74,14 @@ async def test_a_nostream_model_call_is_not_relayed_to_clients() -> None:
     builder.add_edge("supervisor", END)
     graph = cast("StreamableGraph", compile_test_graph(builder))
 
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber("client-nostream")
-    aggregator.subscribe("client-nostream", ["thread-nostream"])
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    events: list[SequencedEvent] = []
+
+    async def _relay(sequenced: SequencedEvent) -> None:
+        events.append(sequenced)
+
+    producer.add_broadcast_hook(_relay)
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
     outcome = await asyncio.wait_for(
         ingest(
             thread_id="thread-nostream",
@@ -90,9 +94,6 @@ async def test_a_nostream_model_call_is_not_relayed_to_clients() -> None:
     )
 
     assert outcome == "completed"
-    events: list[SequencedEvent] = []
-    while not queue.empty():
-        events.append(queue.get_nowait())
     relayed = "".join(
         s.event.content for s in events if isinstance(s.event, MessageChunk)
     )

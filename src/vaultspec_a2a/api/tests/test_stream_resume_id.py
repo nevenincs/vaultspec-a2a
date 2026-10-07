@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy import text
 
 from ...control.config import settings
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import SseReader, serve_on_loopback, settings_override
 from ...thread.enums import ThreadStatus
 from .conftest import make_app, seed_run_with_status
@@ -70,7 +70,7 @@ async def test_a_served_frame_carries_its_run_and_sequence_as_the_sse_id(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Every live frame names the position a reconnect can resume from."""
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
@@ -110,7 +110,7 @@ async def test_no_frame_carries_an_id_while_replay_is_switched_off(
     and a client handed it back would resume against a position no two runs of
     the worker agree on.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
@@ -150,7 +150,7 @@ async def test_an_unnumbered_run_carries_no_id_although_replay_is_switched_on(
     the replay table is gone from the database the gateway seeds from, which
     is what an unreadable mark looks like from the allocator's side.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
     async with session_factory() as session:

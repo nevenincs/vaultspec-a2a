@@ -1,16 +1,18 @@
-"""Event emission and state tracking for the streaming event bus.
+"""Event emission for the worker's event producer.
 
-Manages per-thread sequence counters, pending permissions, agent lifecycle
-states, tool call state cache, and all ``emit_*`` methods.  Extracted from
-the monolithic ``aggregator.py`` during the aggregator decomposition.
+:class:`BroadcastChannel` is where every event the worker produces leaves it,
+numbered for its run and handed to the relay hooks. :class:`EventEmitters`
+builds each domain event, records what it changes in the run's live state
+through the shared mutation layer, and broadcasts it.
 """
 
 import json
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, ClassVar, NotRequired, TypedDict, Unpack, cast
+from typing import Any, NotRequired, TypedDict, Unpack
 from uuid import uuid4
 
 from ..domain_config import domain_config
@@ -34,14 +36,72 @@ from ..graph.events import (
     ToolCallUpdate,
 )
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
+from ._run_state import RunLiveState
 from .buffering import BufferingManager
 from .node_metadata import node_metadata_fields
-from .subscribers import SubscriberManager
 from .types import SequencedEvent, classify_tool_kind
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["EventEmitters"]
+__all__ = ["BroadcastChannel", "EventEmitters"]
+
+
+class BroadcastChannel:
+    """Where every event the worker produces leaves it, numbered for its run.
+
+    The number is a worker-local ordering aid. It orders a run's events within
+    one worker lifetime and restarts with the process, so it is not the run's
+    event identity: the gateway stamps its own over the body's sequence field
+    where the relayed frame enters subscriber queues. Nothing downstream
+    resumes, deduplicates or persists against it.
+
+    The hooks are the worker's relay to the gateway. A hook that fails costs
+    that event its relay, never the run that produced it.
+    """
+
+    def __init__(self, telemetry: TelemetryHook | NullTelemetryHook) -> None:
+        self._telemetry = telemetry
+        self._sequences: dict[str, int] = defaultdict(int)
+        self._hooks: list[Callable[[SequencedEvent], Awaitable[None]]] = []
+
+    def next_sequence(self, thread_id: str) -> int:
+        """Advance and return *thread_id*'s worker-local ordering number."""
+        self._sequences[thread_id] += 1
+        return self._sequences[thread_id]
+
+    def forget(self, thread_id: str) -> None:
+        """Drop *thread_id*'s counter, so a later run on the id starts at one."""
+        self._sequences.pop(thread_id, None)
+
+    def prune(self, active_thread_ids: set[str]) -> None:
+        """Drop the counter of every run outside *active_thread_ids*."""
+        for thread_id in [t for t in self._sequences if t not in active_thread_ids]:
+            del self._sequences[thread_id]
+
+    def add_hook(self, hook: Callable[[SequencedEvent], Awaitable[None]]) -> None:
+        """Register a hook every broadcast event is handed to."""
+        self._hooks.append(hook)
+
+    async def broadcast(self, sequenced: SequencedEvent) -> None:
+        """Hand one numbered event to every hook, in registration order."""
+        thread_id = sequenced.event.thread_id
+        event_type = type(sequenced.event).__name__
+        with self._telemetry.start_span(
+            "aggregator.broadcast",
+            **{"event.type": event_type, "thread_id": thread_id or ""},
+        ):
+            self._telemetry.increment_counter(
+                "aggregator.events_emitted", 1, **{"event.type": event_type}
+            )
+            for hook in self._hooks:
+                try:
+                    await hook(sequenced)
+                except Exception:
+                    logger.warning("Broadcast hook failed", exc_info=True)
+
+    def clear(self) -> None:
+        """Drop every run's counter."""
+        self._sequences.clear()
 
 
 class _ToolCallStartRequired(TypedDict):
@@ -94,100 +154,30 @@ class _ArtifactUpdateKwargs(_ArtifactUpdateRequired, total=False):
     last_chunk: NotRequired[bool]
 
 
-class EventEmitters:  # pylint: disable=too-many-public-methods
-    """Event emission + state tracking.
+class EventEmitters:
+    """Build each domain event, record what it changes, and broadcast it.
 
-    Manages sequences, permissions, agent states, and tool calls. Each public
-    emitter is a distinct domain event or query used by the event-bus facade.
+    The run's agent, tool-call and node state is recorded through the shared
+    :class:`RunLiveState` mutations, the same ones the gateway's mirror applies
+    to the relayed payloads. Pending permissions are tracked here and nowhere
+    else: the interrupt projection reads them before projecting a parked
+    request again, and the gateway serves the durable row instead.
     """
 
     def __init__(
         self,
-        subscribers: SubscriberManager,
+        channel: BroadcastChannel,
         buffering: BufferingManager,
-        telemetry: TelemetryHook | NullTelemetryHook,
+        state: RunLiveState,
     ) -> None:
-        self._subscribers = subscribers
+        self._channel = channel
         self._buffering = buffering
-        self._telemetry = telemetry
-
-        # Per-thread monotonic sequence counters (start at 0, first event = 1).
-        #
-        # WORKER-LOCAL ORDERING ONLY. This counter orders a run's events within
-        # one process lifetime and restarts at zero when that process does, so
-        # it is not, and must not be read as, the run's event identity. The
-        # gateway allocates the authoritative number where frames enter
-        # subscriber queues and stamps it over the body's sequence field on the
-        # way past (streaming/subscribers.py). Nothing downstream should resume,
-        # deduplicate, or persist against the number produced here.
-        self._sequences: dict[str, int] = defaultdict(int)
-
-        # Track pending permission requests per thread.
+        self._state = state
         self._pending_permissions: dict[str, tuple[PermissionRequest, float]] = {}
 
-        # Track agent lifecycle states for team status endpoint, keyed by
-        # (thread_id, agent_id) - NOT agent_id alone. This EventAggregator
-        # instance is shared across every thread a worker process handles
-        # over its lifetime (one per Executor, not per run), so an agent_id-
-        # only key let a LATER, unrelated run's per-run status (and the
-        # team_status event built from it) report a role state left over
-        # from an EARLIER run that happened to share an agent_id - a real,
-        # observed cross-run state leak (e.g. a doc-editor run's role
-        # appearing "working" inside an unrelated, already-failed
-        # adr-research run's roles list).
-        self._agent_states: dict[tuple[str, str], AgentLifecycleState] = {}
-
-        # Track tool call state for REST snapshot enrichment.
-        self._tool_call_states: dict[tuple[str, str], dict[str, str]] = {}
-
-    # ------------------------------------------------------------------
-    # Sequence management
-    # ------------------------------------------------------------------
-
-    def next_sequence(self, thread_id: str) -> int:
-        """Increment and return this process's next ordering number for a thread.
-
-        A producer-side ordering aid, not the run's event identity; see the
-        counter's declaration in ``__init__``.
-        """
-        self._sequences[thread_id] += 1
-        return self._sequences[thread_id]
-
-    def prune_sequences(self, active_thread_ids: set[str]) -> int:
-        """Remove sequence counters for threads not in *active_thread_ids*."""
-        stale = [tid for tid in self._sequences if tid not in active_thread_ids]
-        for tid in stale:
-            del self._sequences[tid]
-        stale_tc_keys = [
-            k for k in self._tool_call_states if k[0] not in active_thread_ids
-        ]
-        for k in stale_tc_keys:
-            del self._tool_call_states[k]
-        return len(stale)
-
-    # ------------------------------------------------------------------
-    # Tool call state management
-    # ------------------------------------------------------------------
-
-    def _prune_completed_tool_calls(self, thread_id: str, cap: int = 50) -> None:
-        """Remove oldest completed tool call entries when they exceed cap."""
-        completed_keys = [
-            k
-            for k, v in self._tool_call_states.items()
-            if k[0] == thread_id
-            and v.get("status") in (ToolCallStatus.COMPLETED, ToolCallStatus.FAILED)
-        ]
-        if len(completed_keys) > cap:
-            for key in completed_keys[:-cap]:
-                self._tool_call_states.pop(key, None)
-
     def get_tool_call_states(self, thread_id: str) -> dict[str, dict[str, str]]:
-        """Return tool call state dicts for *thread_id*."""
-        return {
-            tc_id: dict(state)
-            for (tid, tc_id), state in self._tool_call_states.items()
-            if tid == thread_id
-        }
+        """Return the state of each tool call recorded for *thread_id*."""
+        return self._state.get_tool_call_states(thread_id)
 
     # ------------------------------------------------------------------
     # Permission management
@@ -238,47 +228,9 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             logger.info("Pruned %d stale permission request(s)", len(stale))
         return len(stale)
 
-    def bind_buffering(self, buffering: BufferingManager) -> None:
-        """Wire the buffering manager after both sides finish constructing.
-
-        ``EventEmitters`` and ``BufferingManager`` reference each other, so the
-        aggregator constructs one with a placeholder and completes the wiring
-        through this setter once both instances exist.
-        """
-        self._buffering = buffering
-
     def has_pending_permission(self, request_id: str) -> bool:
         """Report whether ``request_id`` already has a tracked pending permission."""
         return request_id in self._pending_permissions
-
-    def clear_thread_state(self, thread_id: str) -> None:
-        """Purge all emitter-owned state scoped to ``thread_id``."""
-        self._sequences.pop(thread_id, None)
-        self.expire_thread_permissions(thread_id)
-        stale_tool_calls = [
-            key for key in self._tool_call_states if key[0] == thread_id
-        ]
-        for key in stale_tool_calls:
-            self._tool_call_states.pop(key, None)
-        stale_agent_states = [key for key in self._agent_states if key[0] == thread_id]
-        for key in stale_agent_states:
-            self._agent_states.pop(key, None)
-
-    # ------------------------------------------------------------------
-    # Agent state management
-    # ------------------------------------------------------------------
-
-    def get_agent_states(self, thread_id: str) -> dict[str, AgentLifecycleState]:
-        """Return a snapshot of current agent lifecycle states.
-
-        The required identity prevents a per-run projection from silently
-        becoming a cross-run last-write-wins aggregate.
-        """
-        return {
-            agent_id: state
-            for (tid, agent_id), state in self._agent_states.items()
-            if tid == thread_id
-        }
 
     # ------------------------------------------------------------------
     # Event emission (public API)
@@ -293,8 +245,8 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         detail: str | None = None,
     ) -> None:
         """Emit an agent lifecycle state transition event."""
-        self._agent_states[(thread_id, agent_id)] = state
-        seq = self.next_sequence(thread_id)
+        self._state.record_agent_state(thread_id, agent_id, state)
+        seq = self._channel.next_sequence(thread_id)
         event = AgentStatus(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -303,7 +255,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             state=state,
             detail=detail,
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
         await self._emit_team_status_from_agent_states(thread_id)
 
     async def emit_message_chunk(
@@ -315,7 +267,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         finish_reason: str | None = None,
     ) -> None:
         """Emit a streaming message token event."""
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = MessageChunk(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -324,7 +276,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             message_id=message_id,
             finish_reason=finish_reason,
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_thought_chunk(
         self,
@@ -334,7 +286,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         message_id: str,
     ) -> None:
         """Emit a streaming thought/reasoning token event."""
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = ThoughtChunk(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -342,7 +294,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             content=content,
             message_id=message_id,
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_tool_call_start(
         self,
@@ -364,13 +316,10 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             if len(args_str) > domain_config.tool_arg_truncate_len:
                 args_str = args_str[: domain_config.tool_arg_truncate_len] + "..."
             content.append({"content_type": "text", "text": args_str})
-        self._tool_call_states[(thread_id, tool_call_id)] = {
-            "title": title,
-            "kind": kind.value,
-            "status": ToolCallStatus.PENDING.value,
-            "agent_id": agent_id,
-        }
-        seq = self.next_sequence(thread_id)
+        self._state.start_tool_call(
+            (thread_id, tool_call_id), title=title, kind=kind, agent_id=agent_id
+        )
+        seq = self._channel.next_sequence(thread_id)
         event = ToolCallStart(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -381,7 +330,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             status=ToolCallStatus.PENDING,
             content=content,
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_tool_call_update(
         self,
@@ -405,12 +354,9 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         now = time.monotonic()
         key = (thread_id, tool_call_id)
 
-        self._update_tool_call_state(key, agent_id, status, title)
+        self._state.update_tool_call(key, agent_id=agent_id, status=status, title=title)
 
-        if status in (ToolCallStatus.COMPLETED, ToolCallStatus.FAILED):
-            self._prune_completed_tool_calls(thread_id)
-
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = ToolCallUpdate(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -426,34 +372,13 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         last_emit = self._buffering.get_tool_update_last_emit(key)
         if now - last_emit >= domain_config.tool_call_debounce_seconds:
             self._buffering.set_tool_update_last_emit(key, now)
-            await self._subscribers.broadcast(sequenced)
+            await self._channel.broadcast(sequenced)
         else:
             is_new = await self._buffering.store_pending_tool_update(key, sequenced)
             if is_new:
                 self._buffering.schedule_debounce(
                     self._buffering.broadcast_debounced_tool_update(key)
                 )
-
-    def _update_tool_call_state(
-        self,
-        key: tuple[str, str],
-        agent_id: str,
-        status: ToolCallStatus | None,
-        title: str | None,
-    ) -> None:
-        existing = self._tool_call_states.get(key)
-        if existing is not None:
-            if status is not None:
-                existing["status"] = status.value
-            if title is not None:
-                existing["title"] = title
-        elif status is not None or title is not None:
-            self._tool_call_states[key] = {
-                "title": title or "unknown_tool",
-                "kind": ToolKind.OTHER.value,
-                "status": (status or ToolCallStatus.PENDING).value,
-                "agent_id": agent_id,
-            }
 
     async def emit_permission_request(
         self,
@@ -480,7 +405,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         if resolved_kind is None and tool_call:
             resolved_kind = classify_tool_kind(tool_call)
 
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = PermissionRequest(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -496,7 +421,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             request_id=request_id,
             event=event,
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_clarification_pending(
         self,
@@ -514,14 +439,14 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
 
         The signature takes no question material because there is none to take.
         """
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = ClarificationPending(
             thread_id=thread_id,
             agent_id=agent_id,
             timestamp=datetime.now(UTC).timestamp(),
             request_id=request_id,
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_artifact_update(
         self,
@@ -534,7 +459,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         content = kwargs["content"]
         append = kwargs.get("append", False)
         last_chunk = kwargs.get("last_chunk", True)
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = ArtifactUpdate(
             thread_id=thread_id,
             agent_id="",
@@ -545,7 +470,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             append=append,
             last_chunk=last_chunk,
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_plan_update(
         self,
@@ -553,7 +478,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         entries: list[dict[str, str]],
     ) -> None:
         """Emit a plan update event (debounced)."""
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = PlanUpdate(
             thread_id=thread_id,
             agent_id="",
@@ -565,7 +490,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         last = self._buffering.get_plan_update_last_emit(thread_id)
         if now - last >= domain_config.plan_update_debounce_seconds:
             self._buffering.set_plan_update_last_emit(thread_id, now)
-            await self._subscribers.broadcast(sequenced)
+            await self._channel.broadcast(sequenced)
         else:
             await self._buffering.store_pending_plan_update(thread_id, sequenced)
             self._buffering.schedule_debounce(
@@ -581,7 +506,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         agent_id: str | None = None,
     ) -> None:
         """Emit a server-side error notification."""
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = ErrorOccurred(
             thread_id=thread_id,
             agent_id=agent_id or "",
@@ -590,24 +515,17 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             message=message,
             recoverable=recoverable,
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def _emit_team_status_from_agent_states(
         self,
         thread_id: str,
     ) -> None:
-        """Build agents list from ``_agent_states`` and emit ``team_status``."""
-        agents: list[dict[str, Any]] = []
-        for (tid, agent_id), lifecycle in self._agent_states.items():
-            if tid != thread_id:
-                continue
-            agents.append(
-                {
-                    "agent_id": agent_id,
-                    "node_name": agent_id,
-                    "state": lifecycle.value,
-                }
-            )
+        """Build the run's agents list from its live state and emit ``team_status``."""
+        agents: list[dict[str, Any]] = [
+            {"agent_id": agent_id, "node_name": agent_id, "state": lifecycle.value}
+            for agent_id, lifecycle in self._state.get_agent_states(thread_id).items()
+        ]
         await self.emit_team_status(thread_id, agents)
 
     async def emit_team_status(
@@ -617,7 +535,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         active_thread_ids: list[str] | None = None,
     ) -> None:
         """Emit a team status event (on transitions only)."""
-        node_metadata = self._subscribers.get_node_metadata(thread_id)
+        node_metadata = self._state.get_node_metadata(thread_id)
         agent_summaries: list[dict[str, str]] = []
         for agent_data in agents:
             data = dict(agent_data)
@@ -633,7 +551,7 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
                 {k: str(v) if v is not None else "" for k, v in data.items()}
             )
 
-        seq = self.next_sequence(thread_id)
+        seq = self._channel.next_sequence(thread_id)
         event = TeamStatus(
             thread_id=thread_id,
             agent_id="",
@@ -641,109 +559,4 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             agents=agent_summaries,
             active_thread_ids=active_thread_ids or [],
         )
-        await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
-
-    # ------------------------------------------------------------------
-    # Worker event sync
-    # ------------------------------------------------------------------
-
-    def sync_worker_event(
-        self,
-        thread_id: str,
-        payload: dict[str, Any],
-    ) -> None:
-        """Sync a relayed worker event into aggregator state.
-
-        Validates the event type and dispatches to the per-type sync handler,
-        which owns its own state mutation. Numbering is not part of this: the
-        gateway numbers a relayed frame where it enters subscriber queues.
-        """
-        handler_name = self._SYNC_EVENT_HANDLERS.get(payload.get("type", ""))
-        if handler_name is not None:
-            getattr(self, handler_name)(thread_id, payload)
-
-    def _sync_agent_status(self, thread_id: str, payload: dict[str, Any]) -> None:
-        agent_id = payload.get("agent_id", "")
-        raw_state = payload.get("state", "")
-        if agent_id and raw_state:
-            try:
-                lifecycle = AgentLifecycleState(raw_state)
-            except ValueError:
-                logger.warning(
-                    "Unknown agent state %r in relayed event",
-                    raw_state,
-                )
-                return
-            self._agent_states[(thread_id, agent_id)] = lifecycle
-
-    def _sync_graph_registered(self, thread_id: str, payload: dict[str, Any]) -> None:
-        nodes_raw: object = payload.get("nodes", {})
-        if isinstance(nodes_raw, dict):
-            nodes = cast("dict[str, object]", nodes_raw)
-            self._subscribers.set_node_metadata(
-                thread_id,
-                {
-                    name: node_metadata_fields(cast("dict[str, object]", meta))
-                    for name, meta in nodes.items()
-                    if isinstance(meta, dict)
-                },
-            )
-            logger.debug(
-                "sync_worker_event: cached metadata for %d nodes",
-                len(nodes),
-            )
-
-    def _sync_tool_call_start(self, thread_id: str, payload: dict[str, Any]) -> None:
-        tc_id = payload.get("tool_call_id", "")
-        tc_title = payload.get("title", "unknown_tool")
-        tc_kind = payload.get("kind", ToolKind.OTHER.value)
-        agent_id = payload.get("agent_id", "")
-        if tc_id:
-            self._tool_call_states[(thread_id, tc_id)] = {
-                "title": tc_title,
-                "kind": tc_kind,
-                "status": ToolCallStatus.PENDING.value,
-                "agent_id": agent_id,
-            }
-
-    def _sync_tool_call_update(self, thread_id: str, payload: dict[str, Any]) -> None:
-        tc_id = payload.get("tool_call_id", "")
-        if tc_id:
-            key = (thread_id, tc_id)
-            existing = self._tool_call_states.get(key)
-            if existing is not None:
-                if payload.get("status"):
-                    existing["status"] = payload["status"]
-                if payload.get("title"):
-                    existing["title"] = payload["title"]
-            else:
-                self._tool_call_states[key] = {
-                    "title": payload.get("title", "unknown_tool"),
-                    "kind": payload.get("kind", ToolKind.OTHER.value),
-                    "status": payload.get("status", ToolCallStatus.PENDING.value),
-                    "agent_id": payload.get("agent_id", ""),
-                }
-            updated_status = payload.get("status", "")
-            if updated_status in (
-                ToolCallStatus.COMPLETED.value,
-                ToolCallStatus.FAILED.value,
-            ):
-                self._prune_completed_tool_calls(thread_id)
-
-    # Event type -> bound sync-handler method name. A type absent here carries no
-    # aggregator state to mirror and is ignored by sync_worker_event.
-    _SYNC_EVENT_HANDLERS: ClassVar[dict[str, str]] = {
-        "agent_status": "_sync_agent_status",
-        "graph_registered": "_sync_graph_registered",
-        "tool_call_start": "_sync_tool_call_start",
-        "tool_call_update": "_sync_tool_call_update",
-    }
-
-    # ------------------------------------------------------------------
-    # Shutdown
-    # ------------------------------------------------------------------
-
-    def clear(self) -> None:
-        """Clear all emitter state."""
-        self._sequences.clear()
-        self._tool_call_states.clear()
+        await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import SseReader, serve_on_loopback
 from ...thread.enums import ThreadStatus
 from .conftest import make_app, seed_run_with_status
@@ -67,7 +67,7 @@ async def test_a_cursor_this_run_cannot_honour_closes_the_stream(
     stored id is empty sends no position, so the stream opens normally instead
     of refusing something nobody asked for.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
@@ -89,7 +89,7 @@ async def test_the_query_fallback_is_honoured_for_a_client_that_cannot_set_heade
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The browser EventSource constructor sets no header; the query is its way in."""
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
@@ -114,7 +114,7 @@ async def test_the_header_wins_over_the_query_when_both_are_supplied(
     whatever the connecting URL happened to carry, so a stale URL must not
     override the position the client actually holds.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
@@ -138,7 +138,7 @@ async def test_the_dash_sentinel_asks_for_the_retained_window(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A viewer with no position of its own names the window, not a number."""
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
@@ -157,7 +157,7 @@ async def test_a_cursor_longer_than_the_route_admits_is_refused_at_the_edge(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The bound is the route's, so an unbounded cursor never reaches the body."""
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (

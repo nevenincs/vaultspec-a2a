@@ -5,7 +5,7 @@ outcome -- a pre-run refusal, a normal settle, or the backstop that catches
 whatever escaped every inner handler -- shares the same per-thread terminal
 arbitration lock and the same receipt-aware outcome choice, so it moves as
 one cohesive unit.  ``SettlementMixin`` is mixed into ``Executor``, not used
-standalone: its methods read the collaborators (aggregator, state projector,
+standalone: its methods read the collaborators (event producer, state projector,
 graph lifecycle, dispatch capacity bookkeeping) that ``Executor.__init__``
 assembles, declared below only so the type checker can see this file's
 methods in isolation from the class they are mixed into.
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
     from ..ipc.schemas import DispatchRequest
     from ..providers import ProviderCondition
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RunEventProducer
     from ..streaming.types import StreamableGraph
     from ._run_registry import RunScopedRegistry
     from .graph_lifecycle import GraphCompilationError, GraphLifecycleManager
@@ -126,7 +126,7 @@ class _SettlementHost(Protocol):
     def _terminal_arbitrations(self) -> dict[str, TerminalArbitration]: ...
 
     @property
-    def _aggregator(self) -> EventAggregator: ...
+    def _producer(self) -> RunEventProducer: ...
 
     @property
     def _pending_cancellations(self) -> dict[str, str]: ...
@@ -192,6 +192,18 @@ class SettlementMixin(_SettlementHost):
             arbitration.users -= 1
             if arbitration.users == 0:
                 self._terminal_arbitrations.pop(thread_id)
+
+    async def _release_held_capacity(
+        self, reservation: DispatchCapacityReservation | None = None
+    ) -> None:
+        """Give back the capacity reservation this dispatch holds, if it holds one.
+
+        *reservation* is the one its owner was handed; without it, the
+        reservation bound to the dispatch being handled is the one released.
+        """
+        held = reservation or self._dispatch_reservation.get()
+        if held is not None:
+            await self.release_dispatch_capacity(held)
 
     def _take_cancellation_evidence(
         self,
@@ -260,7 +272,7 @@ class SettlementMixin(_SettlementHost):
         so there is no provider condition to report and inventing one would send
         the reader after a remedy the failure never called for.
         """
-        await self._aggregator.emit_error(
+        await self._producer.emit_error(
             req.thread_id,
             _EXECUTOR_CONDITION.value,
             reason,
@@ -279,9 +291,7 @@ class SettlementMixin(_SettlementHost):
                 ),
             )
         self._release_terminal_thread(req.thread_id, closes_run_window=False)
-        reservation = self._dispatch_reservation.get()
-        if reservation is not None:
-            await self.release_dispatch_capacity(reservation)
+        await self._release_held_capacity()
 
     async def _reject_missing_graph(
         self,
@@ -370,11 +380,11 @@ class SettlementMixin(_SettlementHost):
         # for the next run reusing this thread id. The guarantee therefore sits
         # outside this function, in the dispatch backstop that catches whatever
         # killed the settle - see ``_fail_unhandled_dispatch``.
-        failure_reason = self._aggregator.take_failure_reason(req.thread_id)
+        failure_reason = self._producer.take_failure_reason(req.thread_id)
         # The condition ingest resolved from the failing lane. Both stashes are
         # drained on every settle, not only on a failure, so a completed run
         # cannot inherit a condition stranded by an earlier one on this key.
-        failure_condition = self._aggregator.take_failure_condition(req.thread_id)
+        failure_condition = self._producer.take_failure_condition(req.thread_id)
         if outcome == INGEST_DRAINED:
             # Stopped at a superstep boundary by this worker's own shutdown: the
             # checkpoint resumes and the run is not over, so no terminal status
@@ -392,7 +402,7 @@ class SettlementMixin(_SettlementHost):
             # floor because nothing here observed a provider.
             failure_reason = fallback_reason
             failure_condition = failure_condition or _EXECUTOR_CONDITION
-            await self._aggregator.emit_error(
+            await self._producer.emit_error(
                 req.thread_id,
                 failure_condition.value,
                 fallback_reason,
@@ -437,7 +447,7 @@ class SettlementMixin(_SettlementHost):
         )
         if cancellation_evidence is not None:
             if outcome != ThreadStatus.CANCELLED:
-                await self._aggregator.emit_agent_status(
+                await self._producer.emit_agent_status(
                     req.thread_id,
                     req.agent_id or DEFAULT_SUPERVISOR_ID,
                     "supervisor",
@@ -528,12 +538,12 @@ class SettlementMixin(_SettlementHost):
         # its lane actually resolved instead of the floor.
         reason, condition = _resolve_unhandled_failure(
             owns_slot=owns_slot,
-            stranded_reason=self._aggregator.take_failure_reason(req.thread_id),
-            stranded_condition=self._aggregator.take_failure_condition(req.thread_id),
+            stranded_reason=self._producer.take_failure_reason(req.thread_id),
+            stranded_condition=self._producer.take_failure_condition(req.thread_id),
             exc=exc,
         )
         try:
-            await self._aggregator.emit_error(
+            await self._producer.emit_error(
                 req.thread_id,
                 condition.value,
                 reason,
@@ -582,6 +592,4 @@ class SettlementMixin(_SettlementHost):
         span.set_attribute("pre_flight", "completed")
         await self._emit_terminal_outcome(req, ThreadStatus.COMPLETED)
         self._release_terminal_thread(req.thread_id, closes_run_window=False)
-        reservation = self._dispatch_reservation.get()
-        if reservation is not None:
-            await self.release_dispatch_capacity(reservation)
+        await self._release_held_capacity()

@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import DEFAULT_TEAM_PRESET, catalog_run_fields, park_clarification
 from ...thread.clarification import MAX_ANSWER_CHARS
 from .conftest import make_app
@@ -114,11 +114,11 @@ class TestClarificationRoundTrip:
         parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
         request_id = parked.request.request_id
 
-        # A second, independent app — its own EventAggregator, its own
+        # A second, independent app — its own RelayHub, its own
         # TestClient lifecycle — reading the SAME durable session_factory and
         # checkpointer, simulating a reload/reconnect.
         app2, _agg2, _worker2, _cp2 = make_app(
-            session_factory, checkpointer, aggregator=EventAggregator()
+            session_factory, checkpointer, aggregator=RelayHub()
         )
         with TestClient(app2, raise_server_exceptions=True) as client2:
             status_resp = client2.get(f"/v1/runs/{thread_id}")

@@ -1,19 +1,18 @@
-"""Central Event Aggregator — composition root.
+"""The worker's event producer - composition root of a run's event stream.
 
-Thin facade that delegates to focused sub-modules:
+:class:`RunEventProducer` turns a running graph into the domain events a worker
+relays to its gateway. It composes the focused sub-modules:
 
-- ``subscribers.SubscriberManager`` — client connection state
-- ``buffering.BufferingManager`` — chunk batching + debounce
-- ``emitters.EventEmitters`` — event emission + state tracking
-- ``ingest.IngestManager`` — graph consumption lifecycle
+- ``ingest.IngestManager`` - graph consumption lifecycle
+- ``emitters.EventEmitters`` - event construction and pending permissions
+- ``buffering.BufferingManager`` - chunk batching and debounce
+- ``emitters.BroadcastChannel`` - ordering numbers and the relay hooks
+- ``_run_state.RunLiveState`` - the run's agent, tool-call and node state
 
-This module declares ``EventAggregator`` and nothing else. ``SequencedEvent`` and
-``StreamableGraph`` moved to ``types`` in the decomposition and are imported here
-only to annotate the aggregator; they are not re-published, so the decomposition
-is what callers see rather than the shape it replaced.
+The gateway side of the stream is :class:`vaultspec_a2a.streaming.RelayHub`.
 """
 
-import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict, Unpack, cast
 
@@ -22,14 +21,16 @@ from langgraph.types import Command
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..providers import ProviderCondition
+from ._run_state import RunLiveState
 from .buffering import BufferingManager
-from .emitters import EventEmitters
+from .emitters import BroadcastChannel, EventEmitters
 from .ingest import GraphInvocation, IngestManager, IngestRequest
-from .subscribers import AllocationSink, RunSequenceAllocator, SubscriberManager
-from .transformer import project_run_progress
+from .node_metadata import node_metadata_from_graph
 from .types import SequencedEvent, StreamableGraph
 
-__all__ = ["EventAggregator"]
+logger = logging.getLogger(__name__)
+
+__all__ = ["RunEventProducer"]
 
 
 class _IngestOptions(TypedDict, total=False):
@@ -49,148 +50,78 @@ def _validate_ingest_arguments(
     if unknown:
         unexpected = next(iter(unknown))
         raise TypeError(
-            "EventAggregator.ingest() got an unexpected keyword argument "
+            "RunEventProducer.ingest() got an unexpected keyword argument "
             f"{unexpected!r}"
         )
     if len(args) > 2:
         raise TypeError(
-            "EventAggregator.ingest() takes 5 positional arguments but "
+            "RunEventProducer.ingest() takes 5 positional arguments but "
             f"{len(args) + 4} were given"
         )
     if args and "graph_input" in options:
         raise TypeError(
-            "EventAggregator.ingest() got multiple values for argument 'graph_input'"
+            "RunEventProducer.ingest() got multiple values for argument 'graph_input'"
         )
     if len(args) > 1 and "config" in options:
         raise TypeError(
-            "EventAggregator.ingest() got multiple values for argument 'config'"
+            "RunEventProducer.ingest() got multiple values for argument 'config'"
         )
 
 
-class EventAggregator:  # pylint: disable=too-many-public-methods
-    """Central event bus — composition root delegating to sub-components.
+class RunEventProducer:
+    """The worker's event producer: ingest, emission, buffering and relay hooks.
 
-    Exposes only the operations the worker and the gateway actually call; the
-    public method count is the union of those two surfaces. Everything else is
-    reached on the composed manager that owns it.
+    Exposes only the operations the worker calls; everything else is reached
+    on the composed manager that owns it. It holds no subscriber queue and
+    allocates no number a stream is identified by: every event leaves through
+    the broadcast hooks, and the gateway numbers it on arrival.
     """
 
     def __init__(self, telemetry: TelemetryHook | None = None) -> None:
-        _tel: TelemetryHook | NullTelemetryHook = telemetry or NullTelemetryHook()
-        self._telemetry = _tel
-        self._subscribers_mgr = SubscriberManager(self._telemetry)
-        self._emitters = EventEmitters(
-            self._subscribers_mgr,
-            cast("BufferingManager", None),  # set below after buffering init
-            self._telemetry,
+        self._telemetry: TelemetryHook | NullTelemetryHook = (
+            telemetry or NullTelemetryHook()
         )
-        self._buffering = BufferingManager(
-            self._subscribers_mgr,
-            self._telemetry,
-            self._emitters.next_sequence,
-        )
-        # Wire up the circular reference: emitters needs buffering
-        self._emitters.bind_buffering(self._buffering)
+        self._channel = BroadcastChannel(self._telemetry)
+        self._state = RunLiveState()
+        self._buffering = BufferingManager(self._channel, self._telemetry)
+        self._emitters = EventEmitters(self._channel, self._buffering, self._state)
         self._ingest = IngestManager(self._emitters, self._buffering, self._telemetry)
 
-    # -- Sequence management --------------------------------------------
-
-    def issued_sequence(self, thread_id: str) -> int | None:
-        """Return the highest frame number issued to *thread_id*, or ``None``.
-
-        ``None`` covers a process that numbers nothing - a worker's aggregator,
-        or a gateway serving no replay - and a run left unnumbered, so a caller
-        recording the answer records nothing for either.
-        """
-        allocator = self._subscribers_mgr.sequence_allocator
-        return None if allocator is None else allocator.issued_high_water(thread_id)
-
-    def prune_sequences(self, active_thread_ids: set[str]) -> int:
-        return self._emitters.prune_sequences(active_thread_ids)
-
-    # -- Subscriber management (delegates to subscribers) ---------------
-
-    def add_subscriber(self, client_id: str) -> asyncio.Queue[SequencedEvent]:
-        return self._subscribers_mgr.add_subscriber(client_id)
-
-    def remove_subscriber(self, client_id: str) -> None:
-        self._subscribers_mgr.remove_subscriber(client_id)
-
-    def take_dropped_count(self, client_id: str) -> int:
-        return self._subscribers_mgr.take_dropped_count(client_id)
-
-    def subscribe(self, client_id: str, thread_ids: list[str]) -> None:
-        self._subscribers_mgr.subscribe(client_id, thread_ids)
+    # -- Relay and run state --------------------------------------------
 
     def add_broadcast_hook(
         self, hook: Callable[[SequencedEvent], Awaitable[None]]
     ) -> None:
-        self._subscribers_mgr.add_broadcast_hook(hook)
-
-    def subscriber_count(self) -> int:
-        return self._subscribers_mgr.subscriber_count()
-
-    def get_active_thread_ids(self) -> list[str]:
-        return self._subscribers_mgr.get_active_thread_ids()
-
-    def clear_thread_state(self, thread_id: str) -> None:
-        """Purge all in-memory aggregator state scoped to ``thread_id``."""
-        self._subscribers_mgr.remove_thread(thread_id)
-        self._buffering.clear_thread_state(thread_id)
-        self._ingest.clear_thread_state(thread_id)
-        self._emitters.clear_thread_state(thread_id)
-
-    def discard_run_replay(self, thread_id: str) -> None:
-        """Drop the retained frames a DELETED run's recorder still holds.
-
-        Called by the delete path only, and separately from
-        :meth:`clear_thread_state`, which a terminal also calls while the
-        frames it holds are still waiting to be written.
-        """
-        self._subscribers_mgr.discard_run_replay(thread_id)
-
-    def relay_payload(self, thread_id: str, payload: object) -> None:
-        """Fan out a pre-serialized payload to all subscribers of ``thread_id``.
-
-        Worker run events enter the public progress edge here. Each is projected
-        through the positive progress DTO before it reaches a subscriber queue, so
-        prompts, document and artifact bodies, edit diffs, and raw provider
-        payloads are dropped at the relay seam - a first enforcement the encode
-        boundary independently repeats.
-
-        Call :meth:`prepare_run` for the run first: this path is synchronous and
-        cannot establish a number it has never read.
-        """
-        self._subscribers_mgr.enqueue_payload(thread_id, project_run_progress(payload))
-
-    async def prepare_run(self, thread_id: str) -> None:
-        """Establish *thread_id*'s event numbering before relaying its frames."""
-        await self._subscribers_mgr.prepare_run(thread_id)
-
-    def bind_sequence_allocator(
-        self,
-        allocator: RunSequenceAllocator | None,
-        *,
-        sink: AllocationSink | None = None,
-    ) -> None:
-        """Seat the authority that numbers this process's outgoing frames."""
-        self._subscribers_mgr.bind_sequence_allocator(allocator, sink=sink)
-
-    @property
-    def sequence_allocator(self) -> RunSequenceAllocator | None:
-        """The seated numbering authority, or ``None`` where none is bound."""
-        return self._subscribers_mgr.sequence_allocator
+        """Register a hook every produced event is handed to (the worker relay)."""
+        self._channel.add_hook(hook)
 
     def register_graph(self, thread_id: str, graph: StreamableGraph) -> None:
-        self._subscribers_mgr.register_graph(thread_id, graph)
+        """Cache a compiled graph's per-node team-status metadata for one run."""
+        self._state.record_node_metadata(thread_id, node_metadata_from_graph(graph))
+        logger.debug(
+            "register_graph: cached metadata for %d nodes on %s",
+            len(self._state.get_node_metadata(thread_id)),
+            thread_id,
+        )
 
-    def get_node_summaries(self, thread_id: str) -> list[dict[str, str]]:
-        return self._subscribers_mgr.get_node_summaries(thread_id)
+    def prune_sequences(self, active_thread_ids: set[str]) -> None:
+        """Drop the ordering counters and tool-call state of runs not executing."""
+        self._channel.prune(active_thread_ids)
+        self._state.prune_tool_calls(active_thread_ids)
 
-    def remove_node_metadata(self, thread_id: str) -> None:
-        self._subscribers_mgr.remove_node_metadata(thread_id)
+    def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
+        """Drop pending permission requests older than *max_age_seconds*."""
+        return self._emitters.prune_stale_permissions(max_age_seconds)
 
-    # -- Event emission (delegates to emitters) -------------------------
+    def clear_thread_state(self, thread_id: str) -> None:
+        """Purge all in-memory producer state scoped to ``thread_id``."""
+        self._channel.forget(thread_id)
+        self._state.clear_thread_state(thread_id)
+        self._emitters.expire_thread_permissions(thread_id)
+        self._buffering.clear_thread_state(thread_id)
+        self._ingest.clear_thread_state(thread_id)
+
+    # -- Event emission -------------------------------------------------
 
     async def emit_agent_status(
         self,
@@ -200,25 +131,10 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         state: AgentLifecycleState,
         detail: str | None = None,
     ) -> None:
+        """Emit an agent lifecycle state transition event."""
         await self._emitters.emit_agent_status(
             thread_id, agent_id, node_name, state, detail
         )
-
-    def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
-        return self._emitters.prune_stale_permissions(max_age_seconds)
-
-    def get_agent_states(self, thread_id: str) -> dict[str, AgentLifecycleState]:
-        return self._emitters.get_agent_states(thread_id)
-
-    def get_tool_call_states(self, thread_id: str) -> dict[str, dict[str, str]]:
-        return self._emitters.get_tool_call_states(thread_id)
-
-    def sync_worker_event(
-        self,
-        thread_id: str,
-        payload: dict[str, Any],
-    ) -> None:
-        self._emitters.sync_worker_event(thread_id, payload)
 
     async def emit_error(
         self,
@@ -228,11 +144,13 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         recoverable: bool = True,
         agent_id: str | None = None,
     ) -> None:
+        """Emit a server-side error notification."""
         await self._emitters.emit_error(thread_id, code, message, recoverable, agent_id)
 
-    # -- Ingest (delegates to ingest manager) ---------------------------
+    # -- Ingest ---------------------------------------------------------
 
     def cancel_thread(self, thread_id: str) -> None:
+        """Ask ``thread_id``'s ingest to stop, including one not yet started."""
         self._ingest.cancel_thread(thread_id)
 
     def take_failure_reason(self, thread_id: str) -> str | None:
@@ -251,6 +169,7 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         *args: object,
         **options: Unpack[_IngestOptions],
     ) -> str:
+        """Consume one graph run and return the outcome it settled on."""
         _validate_ingest_arguments(args, options)
         if args:
             graph_input = cast("dict[str, Any] | Command[Any] | None", args[0])
@@ -258,7 +177,7 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
             graph_input = options["graph_input"]
         else:
             raise TypeError(
-                "EventAggregator.ingest() missing required argument 'graph_input'"
+                "RunEventProducer.ingest() missing required argument 'graph_input'"
             )
         if len(args) > 1:
             config = cast("dict[str, Any]", args[1])
@@ -266,7 +185,7 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
             config = options["config"]
         else:
             raise TypeError(
-                "EventAggregator.ingest() missing required argument 'config'"
+                "RunEventProducer.ingest() missing required argument 'config'"
             )
         return await self._ingest.ingest(
             IngestRequest(
@@ -289,6 +208,5 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         """Cancel all tasks and clear state."""
         await self._buffering.shutdown()
         await self._ingest.shutdown()
-        await self._subscribers_mgr.shutdown_allocation_sink()
-        self._subscribers_mgr.clear()
-        self._emitters.clear()
+        self._channel.clear()
+        self._state.clear()

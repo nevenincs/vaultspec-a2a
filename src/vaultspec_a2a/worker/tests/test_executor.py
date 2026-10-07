@@ -598,14 +598,14 @@ class TestHandleDispatch:
             )
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_cancel_sets_event_on_aggregator(
+    async def test_cancel_sets_event_on_the_producer(
         self, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Verify cancel action sets the cancellation event in the aggregator.
+        """Verify cancel action sets the cancellation event in the producer.
 
-        EventAggregator.cancel_thread() calls ``.set()`` on the thread's
+        RunEventProducer.cancel_thread() calls ``.set()`` on the thread's
         ``asyncio.Event``.  We pre-register a cancel event via the
-        aggregator's internal API and verify it transitions from
+        producer's internal API and verify it transitions from
         unset → set after dispatch.
         """
         import asyncio as _asyncio
@@ -617,7 +617,7 @@ class TestHandleDispatch:
 
             # Pre-register a cancel event (as ingest would create one)
             cancel_event = _asyncio.Event()
-            executor.aggregator._ingest._threads.cancel_events["t-cancel-me"] = (
+            executor._producer._ingest._threads.cancel_events["t-cancel-me"] = (
                 cancel_event
             )
             assert not cancel_event.is_set()
@@ -675,7 +675,7 @@ class TestHandleDispatch:
             assert reservation is not None
             graph = _terminal_graph(executor)
             if outcome == ThreadStatus.COMPLETED:
-                completed = await executor.aggregator.ingest(
+                completed = await executor._producer.ingest(
                     thread_id,
                     "supervisor",
                     graph,
@@ -716,7 +716,7 @@ class TestHandleDispatch:
             ]
             assert executor._pending_cancellations == {}
             assert executor._terminal_arbitrations == {}
-            assert thread_id not in executor.aggregator._ingest._threads.cancel_events
+            assert thread_id not in executor._producer._ingest._threads.cancel_events
             if outcome != ThreadStatus.CANCELLED:
                 assert (
                     len(
@@ -905,7 +905,7 @@ class TestHandleDispatch:
 class TestGraphInputBuilding:
     """Verify _build_graph_input produces the correct dict for all scenarios.
 
-    Calls the pure helper method directly -- no aggregator, no graph
+    Calls the pure helper method directly -- no event producer, no graph
     compilation, no async I/O.  Tests the dict-building logic in isolation.
     """
 
@@ -2264,7 +2264,7 @@ class TestTheFailureStashCannotOutliveItsRun:
         try:
             # Run A fails through a real ingest, which classifies it and
             # stashes both halves exactly as production does.
-            ingest = cast("_Ingest", executor.aggregator.ingest)
+            ingest = cast("_Ingest", executor._producer.ingest)
             outcome = await ingest(
                 thread_id,
                 "supervisor",

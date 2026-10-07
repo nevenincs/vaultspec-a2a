@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from ...graph.events import ClarificationPending, ErrorOccurred
-from ..aggregator import EventAggregator
+from ..aggregator import RunEventProducer
 from ._error_injecting_graph import InjectedSignal
 from ._parked_signal_graph import build_parked_then_signalled_graph
 
@@ -27,35 +27,37 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
     from ...graph.events import DomainEvent
+    from ..types import SequencedEvent
     from ._parked_signal_graph import ParkedSignalInput
 
 
 async def _ingest_parked_run(
     thread_id: str, *, raise_signal: bool, broadcast: list[DomainEvent]
 ) -> str:
-    """Run the parked graph, collecting every event its viewer was sent.
+    """Run the parked graph, collecting every event its relay was handed.
 
-    The events are collected even when the ingest raises, because what the
-    viewer was told before the signal surfaced is the thing under test.
+    The events are collected as they are broadcast, so they are kept even when
+    the ingest raises: what the viewer was told before the signal surfaced is
+    the thing under test.
     """
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber(f"{thread_id}-client")
-    aggregator.subscribe(f"{thread_id}-client", [thread_id])
+    producer = RunEventProducer()
+
+    async def _relay(sequenced: SequencedEvent) -> None:
+        broadcast.append(sequenced.event)
+
+    producer.add_broadcast_hook(_relay)
     graph_input: ParkedSignalInput = {
         "request_id": f"{thread_id}-question",
         "raise_signal": raise_signal,
     }
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
-    try:
-        return await ingest(
-            thread_id=thread_id,
-            agent_id="supervisor",
-            graph=build_parked_then_signalled_graph(),
-            graph_input=graph_input,
-            config={"configurable": {"thread_id": thread_id}},
-        )
-    finally:
-        broadcast.extend(queue.get_nowait().event for _ in range(queue.qsize()))
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
+    return await ingest(
+        thread_id=thread_id,
+        agent_id="supervisor",
+        graph=build_parked_then_signalled_graph(),
+        graph_input=graph_input,
+        config={"configurable": {"thread_id": thread_id}},
+    )
 
 
 def _questions(events: list[DomainEvent]) -> list[str]:

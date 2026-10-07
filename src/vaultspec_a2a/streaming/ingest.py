@@ -1,8 +1,7 @@
-"""Graph ingest lifecycle for the streaming event bus.
+"""Graph ingest lifecycle for the worker's event producer.
 
 Manages graph consumption through LangGraph's public ``astream`` stream modes,
-cancellation events, and outcome classification. Extracted from the monolithic
-``aggregator.py`` during the aggregator decomposition.
+cancellation events, and outcome classification.
 """
 
 import asyncio
@@ -342,7 +341,6 @@ class _FinalizeInterrupt:
     """What settling an interrupted run's outcome needs to know."""
 
     thread_id: str
-    agent_id: str
     graph: StreamableGraph
     config: dict[str, Any]
     outcome: str
@@ -717,7 +715,6 @@ class IngestManager:
             progress.outcome = await self._finalize_interrupt(
                 _FinalizeInterrupt(
                     thread_id=thread_id,
-                    agent_id=request.agent_id,
                     graph=request.graph,
                     config=request.invocation.config,
                     outcome=progress.outcome,
@@ -748,7 +745,6 @@ class IngestManager:
         span.set_attribute("interrupted", True)
         projected = await emit_interrupt_events(
             request.thread_id,
-            request.agent_id,
             request.graph,
             request.config,
             self._emitters,

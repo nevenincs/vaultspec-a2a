@@ -18,14 +18,14 @@ from fastapi import HTTPException
 
 from ...api.thread_stream import ThreadStreamRequest, build_thread_stream_response
 from ...domain_config import DomainSettingsConfig, domain_config
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
-def _aggregator_with(subscribers: int) -> EventAggregator:
-    aggregator = EventAggregator()
+def _aggregator_with(subscribers: int) -> RelayHub:
+    aggregator = RelayHub()
     for index in range(subscribers):
         aggregator.add_subscriber(f"client-{index}")
     return aggregator

@@ -3,7 +3,7 @@
 Validates the /internal/health, /internal/events/batch, and /internal/heartbeat
 HTTP endpoints using a real FastAPI test client with httpx.ASGITransport.
 
-Uses a real EventAggregator as the relay target (no fakes or mocks).
+Uses a real RelayHub as the relay target (no fakes or mocks).
 """
 
 from __future__ import annotations
@@ -27,8 +27,9 @@ from ...database import (
     set_thread_repair_state,
 )
 from ...database.models import ThreadExecutionStateModel
+from ...graph.enums import AgentLifecycleState
 from ...providers import ProviderCondition
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import park_plan_approval
 from ...testing import record_completed_checkpoint as _record_completed_checkpoint
 from ...testing import seed_accepted_thread as _seed_accepted_thread
@@ -80,7 +81,7 @@ def _make_test_app(
 ) -> FastAPI:
     """Create a minimal FastAPI app with the internal router and wired state.
 
-    When ``with_aggregator`` is True, a real ``EventAggregator`` - the relay
+    When ``with_aggregator`` is True, a real ``RelayHub`` - the relay
     target the ingest paths write to - is attached (no fakes).
     """
     app = FastAPI()
@@ -102,7 +103,7 @@ def _make_test_app(
     app.state.aggregator = None
 
     if with_aggregator:
-        app.state.aggregator = EventAggregator()
+        app.state.aggregator = RelayHub()
 
     return app
 
@@ -394,7 +395,7 @@ class TestInternalEvents:
         not enter subscriber or sequence state while the durable boundary safely
         treats an invalid optional timestamp as unavailable.
         """
-        aggregator = EventAggregator()
+        aggregator = RelayHub()
         app = _make_test_app(session_factory=session_factory)
         app.state.aggregator = aggregator
 
@@ -426,7 +427,8 @@ class TestInternalEvents:
         assert response.json() == {"status": "ok"}
         assert aggregator.subscriber_count() == 0
         assert aggregator.get_active_thread_ids() == []
-        assert aggregator.get_sequence("t-invalid-projection-clock") == 0
+        # Never prepared for numbering: the projection bypassed the relay seam.
+        assert aggregator.issued_sequence("t-invalid-projection-clock") is None
 
         async with session_factory() as session:
             rows = list(
@@ -616,6 +618,8 @@ class TestInternalEvents:
         """One malformed entry fails the whole batch before any entry relays."""
         app = _make_test_app(with_aggregator=True)
         aggregator = app.state.aggregator
+        observer = aggregator.add_subscriber("batch-observer")
+        aggregator.subscribe("batch-observer", ["t-1", "t-2"])
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -629,7 +633,7 @@ class TestInternalEvents:
                 },
             )
         assert resp.status_code == 422
-        assert not aggregator._emitters._sequences
+        assert observer.empty()
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_without_events_is_rejected(self) -> None:
@@ -760,23 +764,35 @@ class TestWorkerBridgeRetry:
         assert len(bridge._event_buffer) <= settings.ipc_max_event_buffer
 
 
+def _mirror_working_agent(aggregator: RelayHub, thread_id: str) -> None:
+    """Relay one agent-status frame, so the hub mirrors a live agent for the run."""
+    aggregator.sync_worker_event(
+        thread_id,
+        {
+            "type": "agent_status",
+            "agent_id": "coder",
+            "state": AgentLifecycleState.WORKING.value,
+        },
+    )
+
+
 class TestAggregatorGCOnTerminal:
-    """Aggregator sequence counters are pruned on thread_terminal events."""
+    """A settled run's live relay state is purged on its thread_terminal event."""
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_terminal_event_prunes_thread_from_aggregator_sequences(
+    async def test_terminal_event_purges_only_the_settled_runs_live_state(
         self,
         session_factory: SessionFactory,
         checkpointer: AsyncSqliteSaver,
     ) -> None:
-        """_handle_terminal_event removes the terminated thread from
-        aggregator _sequences.
+        """_handle_terminal_event drops the terminated run's mirrored state and
+        leaves a still-active run's alone.
         """
         from ...control.event_handlers import _handle_terminal_event
 
-        aggregator = EventAggregator()
-        aggregator._emitters._sequences["t-pruned"] = 5
-        aggregator._emitters._sequences["t-active"] = 3
+        aggregator = RelayHub()
+        _mirror_working_agent(aggregator, "t-pruned")
+        _mirror_working_agent(aggregator, "t-active")
         async with session_factory() as session:
             _, receipt = await _seed_accepted_thread(session, thread_id="t-pruned")
             await session.commit()
@@ -790,8 +806,10 @@ class TestAggregatorGCOnTerminal:
             checkpointer=checkpointer,
         )
 
-        assert "t-pruned" not in aggregator._emitters._sequences
-        assert "t-active" in aggregator._emitters._sequences
+        assert aggregator.mirror.get_agent_states("t-pruned") == {}
+        assert aggregator.mirror.get_agent_states("t-active") == {
+            "coder": AgentLifecycleState.WORKING
+        }
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_unproven_completion_log_includes_runtime_fields(
@@ -803,7 +821,7 @@ class TestAggregatorGCOnTerminal:
         from ...control.event_handlers import _handle_terminal_event
         from ...thread.enums import ThreadStatus
 
-        aggregator = EventAggregator()
+        aggregator = RelayHub()
         async with session_factory() as session:
             await create_thread(
                 session,
@@ -838,14 +856,14 @@ class TestAggregatorGCOnTerminal:
         """Repeated proven terminal delivery is idempotent for the live set."""
         from ...control.event_handlers import _handle_terminal_event
 
-        aggregator = EventAggregator()
+        aggregator = RelayHub()
         async with session_factory() as session:
             _, receipt = await _seed_accepted_thread(
                 session, thread_id="t-terminal-skip"
             )
             await session.commit()
         await _record_completed_checkpoint(checkpointer, receipt)
-        aggregator._emitters._sequences["t-terminal-skip"] = 4
+        _mirror_working_agent(aggregator, "t-terminal-skip")
 
         await _handle_terminal_event(
             "t-terminal-skip",
@@ -854,7 +872,7 @@ class TestAggregatorGCOnTerminal:
             session_factory=session_factory,
             checkpointer=checkpointer,
         )
-        assert aggregator.get_sequence("t-terminal-skip") == 0
+        assert aggregator.mirror.get_agent_states("t-terminal-skip") == {}
         await _handle_terminal_event(
             "t-terminal-skip",
             {"event_type": "thread_terminal", "status": "completed"},
@@ -862,7 +880,7 @@ class TestAggregatorGCOnTerminal:
             session_factory=session_factory,
             checkpointer=checkpointer,
         )
-        assert aggregator.get_sequence("t-terminal-skip") == 0
+        assert aggregator.mirror.get_agent_states("t-terminal-skip") == {}
 
 
 class TestTerminalEventFailureReasonPersistence:

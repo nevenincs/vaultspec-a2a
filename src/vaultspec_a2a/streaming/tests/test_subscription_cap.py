@@ -6,7 +6,7 @@ against every broadcast event, so an authenticated caller could previously issue
 one `subscribe` with an arbitrarily long thread list and multiply the gateway's
 per-event work without opening a second connection.
 
-These drive the real aggregator at its real shipped default rather than a
+These drive the real relay hub at its real shipped default rather than a
 tuned-down one, so the limit under test is the value operators actually run.
 """
 
@@ -15,15 +15,15 @@ from __future__ import annotations
 import pytest
 
 from ...domain_config import domain_config
-from ...thread.errors import EventAggregatorError
-from ..aggregator import EventAggregator
+from ...thread.errors import StreamSubscriptionError
+from ..subscribers import RelayHub
 from ._metric_reader import counter_total, metered_hook
 
 
 @pytest.fixture
-def aggregator() -> EventAggregator:
-    """Return a fresh EventAggregator for each test."""
-    return EventAggregator()
+def aggregator() -> RelayHub:
+    """Return a fresh RelayHub for each test."""
+    return RelayHub()
 
 
 def _threads(start: int, count: int) -> list[str]:
@@ -31,7 +31,7 @@ def _threads(start: int, count: int) -> list[str]:
 
 
 def test_a_client_may_hold_subscriptions_up_to_the_cap(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """The limit admits exactly its configured number, not one fewer."""
     limit = domain_config.max_subscriptions_per_client
@@ -43,19 +43,19 @@ def test_a_client_may_hold_subscriptions_up_to_the_cap(
 
 
 def test_the_request_that_would_cross_the_cap_is_refused(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """One past the limit raises rather than silently extending the fan-out."""
     limit = domain_config.max_subscriptions_per_client
     aggregator.add_subscriber("client-1")
     aggregator.subscribe("client-1", _threads(0, limit))
 
-    with pytest.raises(EventAggregatorError, match="per-client limit"):
+    with pytest.raises(StreamSubscriptionError, match="per-client limit"):
         aggregator.subscribe("client-1", ["one-thread-too-many"])
 
 
 def test_a_refused_request_leaves_the_existing_subscriptions_intact(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """Refusal is all-or-nothing.
 
@@ -67,7 +67,7 @@ def test_a_refused_request_leaves_the_existing_subscriptions_intact(
     aggregator.subscribe("client-1", _threads(0, limit))
     before = aggregator.get_active_thread_ids()
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.subscribe("client-1", _threads(limit, 50))
 
     after = aggregator.get_active_thread_ids()
@@ -76,7 +76,7 @@ def test_a_refused_request_leaves_the_existing_subscriptions_intact(
 
 
 def test_one_oversized_request_is_refused_outright(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """The cap holds against a single huge list, not just incremental growth.
 
@@ -87,14 +87,14 @@ def test_one_oversized_request_is_refused_outright(
     limit = domain_config.max_subscriptions_per_client
     aggregator.add_subscriber("client-1")
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.subscribe("client-1", _threads(0, limit * 4))
 
     assert aggregator.get_active_thread_ids() == []
 
 
 def test_resubscribing_to_held_threads_at_the_cap_is_not_refused(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """Re-sending a subscription must stay idempotent.
 
@@ -111,7 +111,7 @@ def test_resubscribing_to_held_threads_at_the_cap_is_not_refused(
     assert len(aggregator.get_active_thread_ids()) == limit
 
 
-def test_the_cap_is_per_client_not_global(aggregator: EventAggregator) -> None:
+def test_the_cap_is_per_client_not_global(aggregator: RelayHub) -> None:
     """A second client is unaffected by the first reaching its limit.
 
     The global bound on client count is the connection limit's job; conflating
@@ -138,11 +138,11 @@ def test_a_refusal_emits_the_operational_counter() -> None:
     cannot pass on a counter recorded by some other code path.
     """
     hook, reader = metered_hook()
-    aggregator = EventAggregator(telemetry=hook)
+    aggregator = RelayHub(telemetry=hook)
     limit = domain_config.max_subscriptions_per_client
     aggregator.add_subscriber("client-1")
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.subscribe("client-1", _threads(0, limit + 1))
 
     assert counter_total(reader, "aggregator.subscriptions_refused") == 1
@@ -151,7 +151,7 @@ def test_a_refusal_emits_the_operational_counter() -> None:
 def test_an_accepted_subscription_emits_no_refusal_counter() -> None:
     """Control: the counter tracks refusals, not subscribe calls."""
     hook, reader = metered_hook()
-    aggregator = EventAggregator(telemetry=hook)
+    aggregator = RelayHub(telemetry=hook)
     aggregator.add_subscriber("client-1")
 
     aggregator.subscribe("client-1", _threads(0, 5))
@@ -159,7 +159,7 @@ def test_an_accepted_subscription_emits_no_refusal_counter() -> None:
     assert counter_total(reader, "aggregator.subscriptions_refused") == 0
 
 
-def test_a_purged_thread_frees_capacity_again(aggregator: EventAggregator) -> None:
+def test_a_purged_thread_frees_capacity_again(aggregator: RelayHub) -> None:
     """The cap bounds concurrent held subscriptions, not lifetime total.
 
     A settled run's thread is purged from every subscription set, which is the

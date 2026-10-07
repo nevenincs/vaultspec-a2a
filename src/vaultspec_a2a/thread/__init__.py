@@ -47,11 +47,11 @@ if TYPE_CHECKING:
     from .errors import ContextOverflowError as ContextOverflowError
     from .errors import DatabaseError as DatabaseError
     from .errors import DocumentConformanceError as DocumentConformanceError
-    from .errors import EventAggregatorError as EventAggregatorError
     from .errors import NicknameConflictError as NicknameConflictError
     from .errors import PermissionDeniedError as PermissionDeniedError
     from .errors import ProtocolError as ProtocolError
     from .errors import ProviderSessionError as ProviderSessionError
+    from .errors import StreamSubscriptionError as StreamSubscriptionError
     from .errors import SupervisorRoutingError as SupervisorRoutingError
     from .errors import TeamConfigNotFoundError as TeamConfigNotFoundError
     from .errors import TokenBudgetExceededError as TokenBudgetExceededError
@@ -115,11 +115,11 @@ _LAZY_IMPORTS = {
     "ContextOverflowError": ".errors",
     "DatabaseError": ".errors",
     "DocumentConformanceError": ".errors",
-    "EventAggregatorError": ".errors",
     "NicknameConflictError": ".errors",
     "PermissionDeniedError": ".errors",
     "ProtocolError": ".errors",
     "ProviderSessionError": ".errors",
+    "StreamSubscriptionError": ".errors",
     "SupervisorRoutingError": ".errors",
     "TeamConfigNotFoundError": ".errors",
     "TokenBudgetExceededError": ".errors",
@@ -188,7 +188,6 @@ __all__ = [
     "ControlActionType",
     "DatabaseError",
     "DocumentConformanceError",
-    "EventAggregatorError",
     "ExecutionStateProjection",
     "InterruptType",
     "InvalidTransitionError",
@@ -204,6 +203,7 @@ __all__ = [
     "ProviderSessionError",
     "RepairStatus",
     "RunWriteAuthority",
+    "StreamSubscriptionError",
     "SupervisorRoutingError",
     "TeamConfigNotFoundError",
     "TeamState",

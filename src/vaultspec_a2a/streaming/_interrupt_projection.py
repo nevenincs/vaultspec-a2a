@@ -40,7 +40,6 @@ class _InterruptEmission:
 
 async def emit_interrupt_events(
     thread_id: str,
-    _agent_id: str,
     graph: StreamableGraph,
     config: dict[str, Any],
     emitters: EventEmitters,

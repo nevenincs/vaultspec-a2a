@@ -1,7 +1,7 @@
 """Run identity reaches graph nodes as LangGraph Runtime context.
 
 The resolver is exercised with real ``Runtime`` objects, and the plumbing is
-proven end to end: a context handed to the aggregator's ingest arrives, intact,
+proven end to end: a context handed to the producer's ingest arrives, intact,
 inside a node of a real compiled graph, and a compiled team graph declares it.
 """
 
@@ -14,7 +14,7 @@ import pytest
 from langgraph.graph import END, START
 from langgraph.runtime import Runtime
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RunEventProducer
 from ...team.team_config import load_agent_config, load_team_config
 from ...testing import (
     add_test_node,
@@ -74,8 +74,8 @@ async def test_ingest_delivers_the_run_context_to_graph_nodes() -> None:
     builder.add_edge("record", END)
     graph = cast("StreamableGraph", compile_test_graph(builder))
 
-    aggregator = EventAggregator()
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
     outcome = await asyncio.wait_for(
         ingest(
             thread_id="ctx-thread",

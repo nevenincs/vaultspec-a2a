@@ -9,7 +9,7 @@ producer and a streaming consumer could never run concurrently. A real socket
 streams incrementally, so the SSE test can emit an event mid-stream and read it
 back on the same loop.
 
-No mocks: the app carries the real EventAggregator, the real AsyncSqliteSaver
+No mocks: the app carries the real RelayHub, the real AsyncSqliteSaver
 checkpointer, a real SQLite thread store, and the conftest in-process worker
 that records dispatches over real HTTP.
 """
@@ -31,7 +31,7 @@ from ...database import (
     get_thread,
     list_threads,
 )
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     ProgressDeadline,
@@ -48,7 +48,9 @@ from ...testing import seed_live_thread as _seed_live_thread
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType
+from .._replay_writer_seat import seated_replay_writer
 from ..routes.gateway import admission_gate
+from ._relay_events import progress_event, relay_events
 from .conftest import make_app
 
 if TYPE_CHECKING:
@@ -1072,12 +1074,12 @@ async def test_run_status_carries_reconnect_cursor(
     (``isinstance(..., int)``), which a permanently-zero cursor also satisfies
     -- so it passed against the F19 defect (last_sequence always 0 after a run
     settles) for as long as that defect existed, naming a contract it did not
-    actually check. Widened to advance the aggregator's real counter, settle
-    the run through the SAME terminal handler production dispatch uses, and
-    assert the value the LIVE HTTP read recovers is the one advanced before
-    settle -- the read that actually exercises the reconnect-cursor contract,
-    since a reconnecting client only ever reads run-status after a run has
-    already ended.
+    actually check. Widened to number five relayed frames through the real
+    sequence allocator, settle the run through the SAME terminal handler
+    production dispatch uses, and assert the value the LIVE HTTP read recovers
+    is the one the allocator issued before settle -- the read that actually
+    exercises the reconnect-cursor contract, since a reconnecting client only
+    ever reads run-status after a run has already ended.
     """
     from ...control.event_handlers import _handle_terminal_event
     from ...thread.action_receipts import GraphCompletionReceipt
@@ -1112,24 +1114,33 @@ async def test_run_status_carries_reconnect_cursor(
     )
 
     app, agg, _worker, _cp = make_app(session_factory, checkpointer)
-    for _ in range(5):
-        agg._emitters.next_sequence(run_id)
-
-    await _handle_terminal_event(
-        run_id,
-        {"event_type": "thread_terminal", "status": "completed"},
-        aggregator=agg,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-    )
-    # The prune genuinely ran: the live in-memory counter is gone, matching
-    # what a reconnecting client's HTTP read below has to contend with.
-    assert agg.get_sequence(run_id) == 0
+    # The seat the relay route itself takes on its first batch: the real
+    # sequence allocator over the real replay store, with its recorder.
+    assert seated_replay_writer(app, session_factory) is not None
+    allocator = agg.sequence_allocator
+    assert allocator is not None
 
     async with (
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
+        await relay_events(
+            client, [progress_event(run_id, index) for index in range(1, 6)]
+        )
+        assert allocator.issued_high_water(run_id) == 5
+
+        await _handle_terminal_event(
+            run_id,
+            {"event_type": "thread_terminal", "status": "completed"},
+            aggregator=agg,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        )
+        # The purge genuinely ran: the live counter is gone until the run is
+        # seeded again, matching what a reconnecting client's read below has
+        # to contend with.
+        assert allocator.allocate(run_id) is None
+
         resp = await client.get(f"/v1/runs/{run_id}")
         assert resp.status_code == 200
         body = resp.json()
@@ -1548,7 +1559,7 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
 async def test_sse_stream_delivers_versioned_event_mid_stream(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
     run_id, _receipt = await _seed_live_thread(session_factory, title="live")
 
@@ -1616,7 +1627,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     """
     from ...streaming.sse_frames import MAX_SSE_FRAME_BYTES
 
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
 
     run_id, _receipt = await _seed_live_thread(session_factory, title="live")
@@ -1711,7 +1722,7 @@ async def test_run_stream_verb_reserves_versioned_frames(
     edge sees the identical api_version stamp, mid-stream delivery, and
     terminal-replay-then-close semantics - no second code path.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
     run_id, _receipt = await _seed_live_thread(session_factory, title="run")
 

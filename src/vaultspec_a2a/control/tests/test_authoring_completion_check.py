@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...control.thread_state_service import capture_thread_state
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import elect_status, seed_accepted_thread
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus
@@ -40,7 +40,7 @@ async def _snapshot(
     session: AsyncSession,
     *,
     thread_id: str,
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
     checkpointer: AsyncSqliteSaver,
 ) -> ThreadStateData | None:
     """Project the live capture service to the snapshot these tests inspect."""
@@ -126,7 +126,7 @@ async def test_a_completed_doc_editor_run_with_no_artifact_is_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-empty",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -164,7 +164,7 @@ async def test_a_completed_doc_editor_run_that_did_propose_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-proposed",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -201,7 +201,7 @@ async def test_a_completed_coder_run_with_no_authoring_ids_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="coder-empty",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -231,7 +231,7 @@ async def test_a_still_running_doc_editor_thread_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-running",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=checkpointer,
         )
 

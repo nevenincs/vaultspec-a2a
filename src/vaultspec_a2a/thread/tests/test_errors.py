@@ -8,11 +8,11 @@ from .. import (
     ConfigError,
     ContextOverflowError,
     DatabaseError,
-    EventAggregatorError,
     NicknameConflictError,
     PermissionDeniedError,
     ProtocolError,
     ProviderSessionError,
+    StreamSubscriptionError,
     TeamConfigNotFoundError,
     TokenBudgetExceededError,
     VaultspecError,
@@ -46,7 +46,7 @@ class TestInheritanceHierarchy:
             ConfigError,
             AgentProcessError,
             ProtocolError,
-            EventAggregatorError,
+            StreamSubscriptionError,
             DatabaseError,
             PermissionDeniedError,
             TokenBudgetExceededError,
@@ -346,12 +346,12 @@ class TestAllExports:
             "ContextOverflowError",
             "DatabaseError",
             "DocumentConformanceError",
-            "EventAggregatorError",
             "HarnessToolContractError",
             "NicknameConflictError",
             "PermissionDeniedError",
             "ProtocolError",
             "ProviderSessionError",
+            "StreamSubscriptionError",
             "SupervisorRoutingError",
             "TeamConfigNotFoundError",
             "TokenBudgetExceededError",
@@ -371,7 +371,7 @@ class TestAllExports:
         """
         assert ContextOverflowError is _errors_module.ContextOverflowError
         assert DatabaseError is _errors_module.DatabaseError
-        assert EventAggregatorError is _errors_module.EventAggregatorError
+        assert StreamSubscriptionError is _errors_module.StreamSubscriptionError
         assert PermissionDeniedError is _errors_module.PermissionDeniedError
         assert TokenBudgetExceededError is _errors_module.TokenBudgetExceededError
         assert ProviderSessionError is _errors_module.ProviderSessionError

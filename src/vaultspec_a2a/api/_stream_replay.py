@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..database.run_event_repository import RunEventRecord
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RelayHub
     from ..streaming.run_event_writer import RunEventWriter
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ def resume_position(cursor: str, thread_id: str) -> ResumePosition | None:
     return ResumePosition(after_sequence=int(decimal), from_window_start=False)
 
 
-def replay_is_served(aggregator: EventAggregator, thread_id: str) -> bool:
+def replay_is_served(aggregator: RelayHub, thread_id: str) -> bool:
     """Whether this run's outgoing frames can be replayed to a reconnect.
 
     Two conditions, and both are about this gateway rather than this stream.

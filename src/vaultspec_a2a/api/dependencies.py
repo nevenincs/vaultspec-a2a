@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..database.checkpoints import Checkpointer
-from ..streaming.aggregator import EventAggregator
+from ..streaming import RelayHub
 
 # The header carrying the receipt-bound lifecycle ownership capability. Distinct
 # from the attach Authorization bearer so the two planes never alias; loopback-only
@@ -69,11 +69,11 @@ async def require_lifecycle_capability(
         )
 
 
-def get_aggregator(request: Request) -> EventAggregator:
-    """FastAPI dependency for the EventAggregator singleton."""
-    aggregator: EventAggregator | None = getattr(request.app.state, "aggregator", None)
+def get_aggregator(request: Request) -> RelayHub:
+    """FastAPI dependency for the gateway's relay hub singleton."""
+    aggregator: RelayHub | None = getattr(request.app.state, "aggregator", None)
     if aggregator is None:
-        raise RuntimeError("EventAggregator not initialised in app state")
+        raise RuntimeError("Relay hub not initialised in app state")
     return aggregator
 
 
@@ -111,10 +111,10 @@ def get_worker_spawner(request: Request) -> Any:
 
 async def get_services(
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    aggregator: RelayHub = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
-) -> tuple[AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient]:
+) -> tuple[AsyncSession, RelayHub, Checkpointer, httpx.AsyncClient]:
     """Dependency for bundling all required services into a single injection point.
 
     No longer includes GraphRegistry or TaskGroup -- the worker owns

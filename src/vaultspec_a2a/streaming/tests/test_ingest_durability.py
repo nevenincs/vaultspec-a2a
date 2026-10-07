@@ -26,7 +26,7 @@ from langgraph.graph import END, START
 from langgraph.types import Command, interrupt
 
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ..aggregator import EventAggregator
+from ..aggregator import RunEventProducer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -107,8 +107,8 @@ async def test_ingest_commits_each_superstep_before_the_next_one_starts(
     saver = _TimedSqliteSaver(checkpointer.conn, log)
     await saver.setup()
     graph = _two_step_graph(saver, log)
-    aggregator = EventAggregator()
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
         ingest(
@@ -171,8 +171,8 @@ async def test_a_resume_commits_its_superstep_before_the_next_one_starts(
     saver = _TimedSqliteSaver(checkpointer.conn, log)
     await saver.setup()
     graph = _gated_graph(saver, log)
-    aggregator = EventAggregator()
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     parked = await asyncio.wait_for(
         ingest(

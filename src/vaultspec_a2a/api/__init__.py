@@ -4,11 +4,11 @@ API means application programming interface throughout this package.
 
 This package exports the wire types defined by
 :mod:`vaultspec_a2a.api.schemas`. It doesn't own application orchestration or
-event aggregation.
+the event relay.
 
 Build the application with :func:`vaultspec_a2a.api.app.create_app`.
-:class:`vaultspec_a2a.streaming.aggregator.EventAggregator` owns event
-aggregation.
+:class:`vaultspec_a2a.streaming.RelayHub` owns the gateway's event relay, its
+subscribers and the live run-state mirror.
 
 Request handling delegates orchestration to direct
 :mod:`vaultspec_a2a.control` service modules. The generated OpenAPI document

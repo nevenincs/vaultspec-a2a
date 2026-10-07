@@ -17,7 +17,7 @@ rather than from what LangGraph documents:
 The graph here has all of those shapes - a node with a nested runnable, a
 subgraph, a model that streams a tool call the node then executes, and a model
 tagged not to stream - and it is a real
-compiled graph over a real checkpointer driven through the real aggregator.
+compiled graph over a real checkpointer driven through the real event producer.
 """
 
 from __future__ import annotations
@@ -44,13 +44,13 @@ from ...graph.events import (
     ToolCallUpdate,
 )
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ..aggregator import EventAggregator
+from ..aggregator import RunEventProducer
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 
     from ...graph.events import DomainEvent
-    from ..types import StreamableGraph
+    from ..types import SequencedEvent, StreamableGraph
 
 _MODEL_TOOL_CALL_ID = "call_FROM_THE_MODEL"
 
@@ -168,10 +168,14 @@ def _identity_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
 async def _run_identity_graph() -> list[DomainEvent]:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
         await saver.setup()
-        aggregator = EventAggregator()
-        queue = aggregator.add_subscriber("client-identity")
-        aggregator.subscribe("client-identity", ["thread-identity"])
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+        producer = RunEventProducer()
+        events: list[DomainEvent] = []
+
+        async def _relay(sequenced: SequencedEvent) -> None:
+            events.append(sequenced.event)
+
+        producer.add_broadcast_hook(_relay)
+        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
         outcome = await asyncio.wait_for(
             ingest(
                 thread_id="thread-identity",
@@ -183,9 +187,6 @@ async def _run_identity_graph() -> list[DomainEvent]:
             timeout=30.0,
         )
     assert outcome == "completed"
-    events: list[DomainEvent] = []
-    while not queue.empty():
-        events.append(queue.get_nowait().event)
     return events
 
 

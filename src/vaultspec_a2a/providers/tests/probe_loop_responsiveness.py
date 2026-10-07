@@ -83,7 +83,7 @@ async def _compile_measured_graph(
     from uuid import uuid4
 
     from ...ipc.schemas import DispatchRequest
-    from ...streaming.aggregator import EventAggregator
+    from ...streaming import RunEventProducer
     from ...team.team_config import load_team_config
     from ...testing import (
         DEFAULT_REQUIRED_ROLE,
@@ -98,7 +98,7 @@ async def _compile_measured_graph(
     lifecycle = GraphLifecycleManager(
         checkpointer=checkpointer,
         bridge=bridge,
-        aggregator=EventAggregator(),
+        producer=RunEventProducer(),
         token_store=RunTokenStore(),
         catalog_store=RunCatalogStore(),
     )

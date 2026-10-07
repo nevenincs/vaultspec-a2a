@@ -1,25 +1,32 @@
-"""Chunk buffering and debounce management for streaming events.
+"""Chunk buffering and debounce management for the worker's event producer.
 
 Manages token chunk batching (50ms / 4KB flush), tool call update debounce,
-and plan update debounce.  Extracted from the monolithic ``aggregator.py``
-during the aggregator decomposition.
+and plan update debounce. Every event held here leaves through the producer's
+broadcast channel, numbered when it was built.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
 from collections import defaultdict
-from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..domain_config import domain_config
 from ..graph.events import MessageChunk
-from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from .subscribers import SubscriberManager
 from .types import SequencedEvent, evict_oldest
 
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
+    from ..graph.protocols import NullTelemetryHook, TelemetryHook
+    from .emitters import BroadcastChannel
+
 logger = logging.getLogger(__name__)
+
+__all__ = ["BufferingManager"]
 
 
 @dataclass(slots=True)
@@ -52,13 +59,11 @@ class BufferingManager:
 
     def __init__(
         self,
-        subscribers: SubscriberManager,
+        channel: BroadcastChannel,
         telemetry: TelemetryHook | NullTelemetryHook,
-        next_sequence: Any,  # callable: (thread_id: str) -> int
     ) -> None:
-        self._subscribers = subscribers
+        self._channel = channel
         self._telemetry = telemetry
-        self._next_sequence = next_sequence
         self._chunk_state = _ChunkBufferState()
         self._debounce_state = _DebounceState()
 
@@ -75,7 +80,7 @@ class BufferingManager:
         async with self._debounce_state.lock:
             event = self._debounce_state.tool_update_pending.pop(key, None)
         if event is not None:
-            await self._subscribers.broadcast(event)
+            await self._channel.broadcast(event)
 
     async def broadcast_debounced_plan_update(
         self,
@@ -86,7 +91,7 @@ class BufferingManager:
         async with self._debounce_state.lock:
             event = self._debounce_state.plan_update_pending.pop(thread_id, None)
         if event is not None:
-            await self._subscribers.broadcast(event)
+            await self._channel.broadcast(event)
 
     def schedule_debounce(
         self,
@@ -152,7 +157,7 @@ class BufferingManager:
                 chunk_count=len(chunks),
             ):
                 combined = "".join(chunks)
-                seq = self._next_sequence(thread_id)
+                seq = self._channel.next_sequence(thread_id)
                 event = MessageChunk(
                     thread_id=thread_id,
                     agent_id=meta.get("agent_id", ""),
@@ -160,9 +165,7 @@ class BufferingManager:
                     content=combined,
                     message_id=meta.get("message_id", ""),
                 )
-                await self._subscribers.broadcast(
-                    SequencedEvent(event=event, sequence=seq)
-                )
+                await self._channel.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def _scheduled_chunk_flush(self, thread_id: str) -> None:
         """Timer-based flush: waits 50ms then flushes."""

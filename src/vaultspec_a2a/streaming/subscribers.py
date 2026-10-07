@@ -1,32 +1,27 @@
-"""Subscriber management for the streaming event bus.
+"""The gateway's relay: subscriber queues, frame numbering and the live-state mirror.
 
-Manages client WebSocket connections, thread subscriptions, broadcast hooks,
-and the graph node metadata cache.  Extracted from the monolithic
-``aggregator.py`` during the aggregator decomposition.
-
-This module also owns the one place a run's authoritative event sequence is
-allocated. Every frame a subscriber receives passes through
-:meth:`SubscriberManager.enqueue_payload` or :meth:`SubscriberManager.broadcast`,
-so numbering there - and only there - gives a relayed worker payload and an
-in-process domain event exactly one number each from one counter. A process
-that binds no allocator (the worker's own aggregator, or a gateway serving no
-replay) numbers nothing and behaves exactly as it did before.
+Every frame a viewer receives is a relayed worker payload, and every one enters
+through :meth:`RelayHub.relay_payload`. That is the one place a run's
+authoritative event sequence is allocated: numbering there - and only there -
+gives each relayed frame exactly one number from one counter. A hub that binds
+no allocator (a gateway serving no replay) numbers nothing, and its frames
+carry the worker's own ordering untouched.
 """
 
 import asyncio
 import logging
 from collections import OrderedDict, defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from ..thread.errors import EventAggregatorError
+from ..thread.errors import StreamSubscriptionError
+from ._run_state import RunLiveStateMirror
 from .fanout import deliver_bounded
-from .node_metadata import node_metadata_from_graph
-from .types import SequencedEvent, StreamableGraph
+from .transformer import project_run_progress
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +36,10 @@ _REMEMBERED_FLOORS = 1024
 
 __all__ = [
     "AllocationSink",
+    "RelayHub",
     "RunSequenceAllocator",
     "RunSequenceSeedSource",
     "SequenceAllocation",
-    "SubscriberManager",
 ]
 
 
@@ -229,7 +224,7 @@ class RunSequenceAllocator:
     def forget(self, thread_id: str) -> None:
         """Drop *thread_id*'s in-memory numbering state.
 
-        Called when a run's aggregator state is purged, which the terminal
+        Called when a run's relay state is purged, which the terminal
         relay does before the batch holding that terminal has been flushed.
         The counter goes, the floor it reached stays: a later frame for the
         same run reseeds from the durable mark OR that floor, whichever is
@@ -245,32 +240,40 @@ class RunSequenceAllocator:
             self._issued.popitem(last=False)
 
 
-class SubscriberManager:
-    """Client connection state.
+class RelayHub:
+    """The gateway's relay: subscriber queues, frame numbering, and the live mirror.
 
-    Manages queues, subscriptions, broadcast hooks, and node metadata.
+    A relayed worker payload is projected onto the positive progress catalog,
+    numbered where a number is available, and fanned out to the run's
+    subscribers; the same payload moves the mirror that run-status and team
+    status read the run's live agents, tool calls and nodes from. The hub
+    produces no event of its own.
     """
 
-    def __init__(self, telemetry: TelemetryHook | NullTelemetryHook) -> None:
-        # Subscriber queues: client_id -> bounded asyncio.Queue
-        self._subscribers: dict[str, asyncio.Queue[SequencedEvent]] = {}
+    def __init__(self, telemetry: TelemetryHook | None = None) -> None:
+        # Subscriber queues: client_id -> bounded asyncio.Queue of relayed payloads.
+        self._subscribers: dict[str, asyncio.Queue[object]] = {}
         # Which threads each client is subscribed to: client_id -> set of thread_ids
         self._subscriptions: dict[str, set[str]] = defaultdict(set)
-        # Broadcast hooks: called on every event (used by worker bridge relay).
-        self._broadcast_hooks: list[Callable[[SequencedEvent], Awaitable[None]]] = []
-        # Node metadata cache: thread_id -> node_name -> safe descriptor fields.
-        self._node_metadata: dict[str, dict[str, dict[str, str]]] = {}
         # Events this client lost to backpressure and has not been told about.
         # Held here rather than pushed into the queue because the queue being
         # full is the very condition being reported: a notice enqueued then
         # would evict another event to make room for the news that an event was
         # evicted. The consumer collects it on its way past instead.
         self._dropped: dict[str, int] = defaultdict(int)
-        self._telemetry = telemetry
-        # Unbound by default. The worker's aggregator and a gateway serving no
-        # replay never bind one, and then nothing below numbers anything.
+        self._telemetry: TelemetryHook | NullTelemetryHook = (
+            telemetry or NullTelemetryHook()
+        )
+        # Unbound by default. A gateway serving no replay never binds one, and
+        # then nothing below numbers anything.
         self._allocator: RunSequenceAllocator | None = None
         self._allocation_sink: AllocationSink | None = None
+        self._mirror = RunLiveStateMirror()
+
+    @property
+    def mirror(self) -> RunLiveStateMirror:
+        """The live agent, tool-call and node state the relayed events rebuilt."""
+        return self._mirror
 
     # ------------------------------------------------------------------
     # Sequence allocation
@@ -291,10 +294,19 @@ class SubscriberManager:
         """The seated numbering authority, or ``None`` where none is bound."""
         return self._allocator
 
-    async def prepare_run(self, thread_id: str) -> None:
-        """Establish *thread_id*'s numbering before its frames are enqueued.
+    def issued_sequence(self, thread_id: str) -> int | None:
+        """Return the highest frame number issued to *thread_id*, or ``None``.
 
-        :meth:`enqueue_payload` is synchronous and cannot read a database, so
+        ``None`` covers a gateway serving no replay and a run left unnumbered,
+        so a caller recording the answer records nothing for either.
+        """
+        allocator = self._allocator
+        return None if allocator is None else allocator.issued_high_water(thread_id)
+
+    async def prepare_run(self, thread_id: str) -> None:
+        """Establish *thread_id*'s numbering before its frames are relayed.
+
+        :meth:`relay_payload` is synchronous and cannot read a database, so
         the ingest path that owns the await calls this first. A run reaching
         the chokepoint unprepared is not numbered, which costs it its id and
         never costs it a frame.
@@ -302,25 +314,16 @@ class SubscriberManager:
         if self._allocator is not None:
             await self._allocator.seed(thread_id)
 
-    async def shutdown_allocation_sink(self) -> None:
-        """Close the seated recorder, so a shutdown does not strand its ring."""
-        sink, self._allocation_sink = self._allocation_sink, None
-        if sink is None:
-            return
-        try:
-            await sink.aclose()
-        except Exception:
-            logger.warning("Replay recorder did not close cleanly", exc_info=True)
-
     def discard_run_replay(self, thread_id: str) -> None:
         """Drop what the recorder holds for a run whose durable home is gone.
 
-        Deliberately NOT part of :meth:`remove_thread`. A terminal purges a
-        run's aggregator state while the batch carrying that terminal is
-        still unflushed, so dropping the recorder's hold there would discard
-        the very frames a reconnect comes back for. Only a DELETED run has no
-        durable home left: the rows its held frames would become reference a
-        thread that is gone, so no flush can ever place them.
+        Called by the delete path only, and deliberately NOT part of
+        :meth:`clear_thread_state`. A terminal purges a run's relay state while
+        the batch carrying that terminal is still unflushed, so dropping the
+        recorder's hold there would discard the very frames a reconnect comes
+        back for. Only a DELETED run has no durable home left: the rows its
+        held frames would become reference a thread that is gone, so no flush
+        can ever place them.
         """
         if self._allocation_sink is not None:
             self._allocation_sink.discard(thread_id)
@@ -331,8 +334,8 @@ class SubscriberManager:
         A run's sequence space has to stay contiguous: the replay reader
         serves the longest consecutive tail of what it finds, so one frame
         numbered and never retained costs a resume every older frame in the
-        window. Asking the recorder first is what stops that, and a process
-        with no recorder retains nothing anyway, so nothing there is at stake.
+        window. Asking the recorder first is what stops that, and a hub with
+        no recorder retains nothing anyway, so nothing there is at stake.
         """
         sink = self._allocation_sink
         return sink is None or sink.retains(frame)
@@ -380,7 +383,7 @@ class SubscriberManager:
     # Subscriber management
     # ------------------------------------------------------------------
 
-    def add_subscriber(self, client_id: str) -> asyncio.Queue[SequencedEvent]:
+    def add_subscriber(self, client_id: str) -> asyncio.Queue[object]:
         """Register a new subscriber and return its bounded event queue.
 
         Refuses once the registry is at its global capacity. Each subscriber owns
@@ -388,12 +391,9 @@ class SubscriberManager:
         authenticated caller can demand without limit unless something says no.
 
         Enforced here, at the domain seam, rather than only at the route that
-        happens to have asked first. The registry is shared: the SSE stream route
-        and the event WebSocket both register against it, so a bound checked in
-        one route is not a bound - the other path admits subscribers the check
-        never sees. The route keeps its own cheap pre-check because refusing
-        before a database round trip is worth doing; this is where the limit is
-        actually true.
+        happens to have asked first. The route keeps its own cheap pre-check
+        because refusing before a database round trip is worth doing; this is
+        where the limit is actually true.
 
         Re-registering an existing ``client_id`` replaces that client's queue
         rather than growing the registry, so it is never refused - the same
@@ -420,11 +420,11 @@ class SubscriberManager:
                     "limit": limit,
                 },
             )
-            raise EventAggregatorError(
+            raise StreamSubscriptionError(
                 f"Gateway holds {len(self._subscribers)} stream subscribers, "
                 f"meeting the global limit of {limit}"
             )
-        queue: asyncio.Queue[SequencedEvent] = asyncio.Queue(
+        queue: asyncio.Queue[object] = asyncio.Queue(
             maxsize=domain_config.event_queue_maxsize
         )
         self._subscribers[client_id] = queue
@@ -451,15 +451,15 @@ class SubscriberManager:
         """Subscribe a client to one or more thread event streams.
 
         Refuses the whole request once it would carry the client past its
-        subscription cap. Every subscription is matched against every broadcast
-        event, so cardinality here is fan-out work an authenticated caller can
+        subscription cap. Every subscription is matched against every relayed
+        frame, so cardinality here is fan-out work an authenticated caller can
         demand of the gateway - the connection limit bounds how many clients
         exist, not how much each one costs. Rejecting outright rather than
         truncating keeps the client's view honest: a partially applied
         subscription would silently drop threads it believes it is watching.
         """
         if client_id not in self._subscribers:
-            raise EventAggregatorError(f"Client {client_id} is not registered")
+            raise StreamSubscriptionError(f"Client {client_id} is not registered")
         current = self._subscriptions[client_id]
         limit = domain_config.max_subscriptions_per_client
         # Union first: re-subscribing to threads already held must stay a no-op
@@ -483,29 +483,11 @@ class SubscriberManager:
                     "limit": limit,
                 },
             )
-            raise EventAggregatorError(
+            raise StreamSubscriptionError(
                 f"Client {client_id} would hold {len(prospective)} subscriptions, "
                 f"exceeding the per-client limit of {limit}"
             )
         self._subscriptions[client_id] = prospective
-
-    def remove_thread(self, thread_id: str) -> None:
-        """Remove ``thread_id`` from every active subscriber subscription set."""
-        for client_id in list(self._subscriptions):
-            self._subscriptions[client_id].discard(thread_id)
-        self._node_metadata.pop(thread_id, None)
-        if self._allocator is not None:
-            self._allocator.forget(thread_id)
-
-    def remove_node_metadata(self, thread_id: str) -> None:
-        """Drop the live graph descriptors for one terminal worker thread."""
-        self._node_metadata.pop(thread_id, None)
-
-    def add_broadcast_hook(
-        self, hook: Callable[[SequencedEvent], Awaitable[None]]
-    ) -> None:
-        """Register a hook called on every broadcast (worker bridge relay)."""
-        self._broadcast_hooks.append(hook)
 
     def subscriber_count(self) -> int:
         """Return the number of currently registered subscribers.
@@ -518,34 +500,46 @@ class SubscriberManager:
     def get_active_thread_ids(self) -> list[str]:
         """Return all thread IDs that have at least one subscriber.
 
-        Takes a snapshot of subscription values before iterating to avoid
-        RuntimeError if a subscriber is added/removed concurrently (H1 fix).
+        Takes a snapshot of subscription values before iterating, so a
+        subscriber added or removed concurrently cannot fail the read.
         """
         all_threads: set[str] = set()
         for threads in list(self._subscriptions.values()):
             all_threads.update(threads)
         return sorted(all_threads)
 
-    def enqueue_payload(self, thread_id: str, payload: object) -> None:
-        """Enqueue a pre-serialized payload for all subscribers of ``thread_id``.
+    # ------------------------------------------------------------------
+    # Relay
+    # ------------------------------------------------------------------
 
-        Numbers the frame first, where a number is available AND the frame is
-        one the recorder will keep, and stamps that number over the body's own
-        ``sequence``. The worker's counter orders a run's events within one
-        worker lifetime and restarts with the process; the number stamped here
-        is the run's identity and survives a restart of either process, so the
-        relay overwrites rather than forwards.
+    def relay_payload(self, thread_id: str, payload: object) -> None:
+        """Fan out one relayed worker payload to every subscriber of ``thread_id``.
 
-        A payload that is not a mapping cannot carry the stamp and is not
-        retained either, so it takes no number at all rather than leaving a
-        hole in the run's sequence space.
+        Worker run events enter the public progress edge here. Each is
+        projected through the positive progress DTO before it reaches a
+        subscriber queue, so prompts, document and artifact bodies, edit diffs,
+        and raw provider payloads are dropped at the relay seam - a first
+        enforcement the encode boundary independently repeats.
+
+        The projected frame is then numbered, where a number is available AND
+        the frame is one the recorder will keep, and that number is stamped
+        over the body's own ``sequence``. The worker's counter orders a run's
+        events within one worker lifetime and restarts with the process; the
+        number stamped here is the run's identity and survives a restart of
+        either process, so the relay overwrites rather than forwards. A payload
+        that is not a mapping cannot carry the stamp and is not retained
+        either, so it takes no number at all rather than leaving a hole in the
+        run's sequence space.
+
+        Call :meth:`prepare_run` for the run first: this path is synchronous and
+        cannot establish a number it has never read.
         """
-        delivered = payload
-        if self._retainable(payload) and isinstance(payload, Mapping):
+        delivered = project_run_progress(payload)
+        if self._retainable(delivered) and isinstance(delivered, Mapping):
             allocation = self._allocate(thread_id)
             if allocation is not None:
                 stamped: dict[str, object] = {
-                    **cast("Mapping[str, object]", payload),
+                    **cast("Mapping[str, object]", delivered),
                     "sequence": allocation.sequence,
                 }
                 self._record(allocation, stamped)
@@ -558,100 +552,38 @@ class SubscriberManager:
             if outcome.dropped:
                 self._dropped[client_id] += outcome.dropped
 
-    # ------------------------------------------------------------------
-    # Graph registration
-    # ------------------------------------------------------------------
-
-    def register_graph(self, thread_id: str, graph: StreamableGraph) -> None:
-        """Cache node metadata from a compiled LangGraph graph."""
-        self._node_metadata[thread_id] = node_metadata_from_graph(graph)
-        logger.debug(
-            "register_graph: cached metadata for %d nodes on %s",
-            len(self._node_metadata[thread_id]),
-            thread_id,
-        )
-
-    def get_node_summaries(self, thread_id: str) -> list[dict[str, str]]:
-        """Return a list of node metadata dicts for the team status endpoint."""
-        return [
-            {"node_name": name, "agent_id": name, **meta}
-            for name, meta in self._node_metadata.get(thread_id, {}).items()
-        ]
-
-    def get_node_metadata(self, thread_id: str) -> dict[str, dict[str, str]]:
-        """Return the raw node metadata dict (used by emitters)."""
-        return self._node_metadata.get(thread_id, {})
-
-    def set_node_metadata(
-        self, thread_id: str, metadata: dict[str, dict[str, str]]
-    ) -> None:
-        """Replace node metadata (used by sync_worker_event)."""
-        self._node_metadata[thread_id] = metadata
+    def sync_worker_event(self, thread_id: str, payload: Mapping[str, Any]) -> None:
+        """Mirror one relayed worker event into the run's live state."""
+        self._mirror.sync_worker_event(thread_id, payload)
 
     # ------------------------------------------------------------------
-    # Broadcasting
+    # Lifecycle
     # ------------------------------------------------------------------
 
-    async def broadcast(self, sequenced: SequencedEvent) -> None:
-        """Fan out a sequenced domain event to all interested subscribers.
+    def clear_thread_state(self, thread_id: str) -> None:
+        """Purge every in-memory trace of ``thread_id`` this hub holds.
 
-        An in-process domain event takes its number from the same counter a
-        relayed worker payload does, so two producers on one run cannot both
-        claim one number. The delivered wrapper is a new one rather than the
-        caller's: the hooks below are the worker's relay, which must keep
-        forwarding its own producer-side ordering untouched.
-
-        Uses a drop-oldest strategy: if a subscriber queue is full,
-        the oldest buffered event is discarded before inserting the new
-        one.  This keeps the aggregator non-blocking while bounding
-        per-client memory (research §1.5).
+        The run leaves every subscription set, its mirrored state goes, and the
+        allocator forgets its live counter while keeping the floor it reached.
         """
-        thread_id = getattr(sequenced.event, "thread_id", None)
-        event_type = type(sequenced.event).__name__
+        for client_id in list(self._subscriptions):
+            self._subscriptions[client_id].discard(thread_id)
+        self._mirror.clear_thread_state(thread_id)
+        if self._allocator is not None:
+            self._allocator.forget(thread_id)
 
-        delivered_event = sequenced
-        if thread_id is not None:
-            await self.prepare_run(thread_id)
-            # Same rule as the relay path: a frame the recorder would decline
-            # takes no number, so the run's sequence space stays contiguous.
-            allocation = (
-                self._allocate(thread_id) if self._retainable(sequenced) else None
-            )
-            if allocation is not None:
-                delivered_event = SequencedEvent(
-                    event=sequenced.event, sequence=allocation.sequence
-                )
-                self._record(allocation, delivered_event)
+    async def shutdown(self) -> None:
+        """Close the replay recorder, then drop every subscriber and mirrored run.
 
-        with self._telemetry.start_span(
-            "aggregator.broadcast",
-            **{"event.type": str(event_type), "thread_id": thread_id or ""},
-        ):
-            delivered = 0
-            for client_id, queue in list(self._subscribers.items()):
-                client_subs = self._subscriptions.get(client_id, set())
-                if not (thread_id is None or thread_id in client_subs):
-                    continue
-                outcome = deliver_bounded(queue, delivered_event, client_id=client_id)
-                if outcome.dropped:
-                    self._dropped[client_id] += outcome.dropped
-                if outcome.delivered:
-                    delivered += 1
-            self._telemetry.increment_counter(
-                "aggregator.events_emitted", 1, **{"event.type": str(event_type)}
-            )
-            for hook in self._broadcast_hooks:
-                try:
-                    await hook(sequenced)
-                except Exception:
-                    logger.warning("Broadcast hook failed", exc_info=True)
-
-    # ------------------------------------------------------------------
-    # Shutdown
-    # ------------------------------------------------------------------
-
-    def clear(self) -> None:
-        """Clear all subscriber state."""
+        The recorder is closed first, so a shutdown does not strand its ring.
+        """
+        sink, self._allocation_sink = self._allocation_sink, None
+        if sink is not None:
+            try:
+                await sink.aclose()
+            except Exception:
+                logger.warning("Replay recorder did not close cleanly", exc_info=True)
         self._subscribers.clear()
         self._subscriptions.clear()
         self._dropped.clear()
+        self._mirror.clear()

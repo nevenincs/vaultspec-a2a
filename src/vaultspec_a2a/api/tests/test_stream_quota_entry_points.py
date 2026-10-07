@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...domain_config import domain_config
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...thread.enums import ThreadStatus
 from ..thread_stream import ThreadStreamRequest, _stream_thread_events
 from .conftest import seed_run_with_status
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from .conftest import SessionFactory
 
 
-def _occupy(aggregator: EventAggregator, count: int, *, prefix: str) -> None:
+def _occupy(aggregator: RelayHub, count: int, *, prefix: str) -> None:
     """Register *count* real subscribers through the production registry API."""
     for index in range(count):
         aggregator.add_subscriber(f"{prefix}-{index}")
@@ -56,7 +56,7 @@ async def test_a_stream_refused_at_registration_is_told_why(
     Drives the real response generator against a genuinely full registry, which is
     precisely the state that race produces.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     limit = domain_config.max_stream_connections
     _occupy(aggregator, limit, prefix="raced")
 
@@ -90,7 +90,7 @@ async def test_a_served_stream_gives_its_slot_back_and_spares_the_held_ones(
     load would turn a bounded resource into an outage for the callers that
     arrived first.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     _occupy(aggregator, 2, prefix="held")
     before = aggregator.subscriber_count()
     await seed_run_with_status(session_factory, "run-terminal", ThreadStatus.COMPLETED)
@@ -112,6 +112,6 @@ async def test_a_served_stream_gives_its_slot_back_and_spares_the_held_ones(
     assert "stream_snapshot" in frames[0].decode("utf-8")
     assert "thread_terminal" in frames[1].decode("utf-8")
     assert aggregator.subscriber_count() == before
-    registered = aggregator._subscribers_mgr._subscribers
+    registered = aggregator._subscribers
     assert "held-0" in registered
     assert "held-1" in registered

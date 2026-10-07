@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from langgraph.runtime import RunControl
 
-from ..streaming.aggregator import EventAggregator
+from ..streaming import RunEventProducer
 from ._dispatch_receipts import DispatchReceiptReporter
 from ._run_registry import RunScopedRegistry
 from .catalog_store import RunCatalogStore
@@ -79,7 +79,7 @@ class RunResources:
     pruned on the same per-run boundary, so they are held together.
     """
 
-    aggregator: EventAggregator = field(default_factory=EventAggregator)
+    producer: RunEventProducer = field(default_factory=RunEventProducer)
     token_store: RunTokenStore = field(default_factory=RunTokenStore)
     catalog_store: RunCatalogStore = field(default_factory=RunCatalogStore)
     receipts: DispatchReceiptReporter = field(default_factory=DispatchReceiptReporter)

@@ -15,7 +15,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import SseReader, serve_on_loopback, settings_override
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
@@ -41,7 +41,7 @@ async def test_a_run_with_retained_frames_reports_a_resumable_stream(
     boolean a promise rather than a configuration echo: it is true exactly
     when a client is being handed a cursor it can come back with.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
@@ -72,7 +72,7 @@ async def test_a_switched_off_service_reports_no_resumable_stream(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Off, the field is false even for a run that produced frames."""
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     with settings_override(stream_replay_enabled=False):
@@ -106,16 +106,14 @@ async def test_run_status_answers_the_field_on_one_pooled_connection(
     answers from memory, and the gateway that has only the table is the
     state any second process, or any restart, actually finds.
     """
-    producer, _agg, _worker, _cp = make_app(
-        session_factory, checkpointer, EventAggregator()
-    )
+    producer, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     single = create_async_engine(
         engine.url, pool_size=1, max_overflow=0, pool_timeout=1.0
     )
     viewer, _vagg, _vworker, _vcp = make_app(
         async_sessionmaker(single, expire_on_commit=False),
         checkpointer,
-        EventAggregator(),
+        RelayHub(),
     )
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 

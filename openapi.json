@@ -4204,8 +4204,7 @@
           },
           "last_sequence": {
             "type": "integer",
-            "title": "Last Sequence",
-            "default": 0
+            "title": "Last Sequence"
           },
           "stream_resumable": {
             "type": "boolean",
@@ -4332,10 +4331,11 @@
           "run_id",
           "status",
           "semantic_phase",
-          "topology"
+          "topology",
+          "last_sequence"
         ],
         "title": "RunStatusResponse",
-        "description": "The authoritative recovery snapshot for a run.\n\nDesigned as the read a restarted A2A resumes or reports a run from: topology\nposition, per-role state, and the engine proposal/changeset ids the run has\nproduced, plus the checkpoint cursor and repair posture. Non-authoritative\nSSE progress frames may be lost freely; this snapshot is the source of truth."
+        "description": "The authoritative recovery snapshot for a run.\n\nDesigned as the read a restarted A2A resumes or reports a run from: topology\nposition, per-role state, and the engine proposal/changeset ids the run has\nproduced, plus the checkpoint cursor and repair posture. Non-authoritative\nSSE progress frames may be lost freely; this snapshot is the source of truth.\n\nEvery relay frame is droppable, so this response is where a reloading client\nwith no live stream recovers the run's failure condition, its queue depth and\nthe question it is parked on."
       },
       "RunSummariesResponse": {
         "properties": {

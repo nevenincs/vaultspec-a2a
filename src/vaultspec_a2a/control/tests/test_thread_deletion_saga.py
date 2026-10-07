@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...control.repositories import (
+from ...control.deletion_saga import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,

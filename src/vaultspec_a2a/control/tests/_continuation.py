@@ -2,7 +2,7 @@
 
 Everything here builds production objects through production verbs - a real
 frozen graph definition, a real accepted dispatch envelope, a real journal
-reservation through the queue repository, and a real LangGraph run over a real
+reservation through the continuation queue, and a real LangGraph run over a real
 ``AsyncSqliteSaver`` for the completion receipt - inside the root
 ``migrated_session_factory`` and ``checkpointer`` stores the suite hands in. The
 suites that import it assert on what those produce.
@@ -39,13 +39,13 @@ from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_defin
 from ...thread.idempotency import thread_create_action_key
 from ...thread.state import TeamState
 from ..accepted_input import freeze_accepted_input
-from ..dispatch_receipts import prepare_graph_action_receipt
-from ..repositories import (
+from ..continuation_queue import (
     ContinuationQueueLimits,
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
     reserve_queued_continuation,
 )
+from ..dispatch_receipts import prepare_graph_action_receipt
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -211,7 +211,7 @@ async def queue_continuation(
     content: str = "second turn",
     lifetime_deadline_at: datetime | None = None,
 ) -> str:
-    """Admit one continuation through the production queue repository."""
+    """Admit one continuation through the production continuation queue."""
     async with sessions() as db:
         outcome = await reserve_queued_continuation(
             db,

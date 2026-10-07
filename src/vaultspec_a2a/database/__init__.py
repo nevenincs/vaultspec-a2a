@@ -3,7 +3,7 @@
 :mod:`vaultspec_a2a.database.models` defines SQLAlchemy models, and
 :mod:`vaultspec_a2a.database.session` owns asynchronous sessions. Repository
 modules manage audit logs, authoring cursors, the control action journal,
-permissions, and threads.
+deletion sagas, permissions, and threads.
 
 Migration support belongs to :mod:`vaultspec_a2a.database.migrations`.
 Persistence stores :mod:`vaultspec_a2a.thread` state for
@@ -98,6 +98,22 @@ from .control_action_repository import reserve_control_action as reserve_control
 from .control_action_repository import (
     settle_control_action_lease as settle_control_action_lease,
 )
+from .deletion_saga_repository import (
+    claim_deletion_saga_row as claim_deletion_saga_row,
+)
+from .deletion_saga_repository import get_deletion_saga_row as get_deletion_saga_row
+from .deletion_saga_repository import (
+    insert_deletion_saga_row as insert_deletion_saga_row,
+)
+from .deletion_saga_repository import lock_deletion_saga_row as lock_deletion_saga_row
+from .deletion_saga_repository import read_cleanup_ledger as read_cleanup_ledger
+from .deletion_saga_repository import (
+    release_deletion_saga_claim as release_deletion_saga_claim,
+)
+from .deletion_saga_repository import (
+    remove_deletion_saga_row as remove_deletion_saga_row,
+)
+from .deletion_saga_repository import swap_cleanup_ledger as swap_cleanup_ledger
 from .migrate import build_migration_config as build_migration_config
 from .migrate import migration_script_location as migration_script_location
 from .migrate import run_migrations as run_migrations
@@ -274,6 +290,7 @@ __all__ = [
     "backfill_teamstate_sdd_fields",
     "begin_write_transaction",
     "build_migration_config",
+    "claim_deletion_saga_row",
     "claim_recovery_attempt",
     "close_db",
     "commit_control_action_lease",
@@ -294,6 +311,7 @@ __all__ = [
     "get_control_action_by_dispatch_id",
     "get_control_action_by_idempotency_key",
     "get_db",
+    "get_deletion_saga_row",
     "get_engine",
     "get_latest_control_action",
     "get_pending_permission_requests",
@@ -306,10 +324,12 @@ __all__ = [
     "has_live_queued_continuation_lease",
     "idempotency_key_admitted",
     "init_db",
+    "insert_deletion_saga_row",
     "inspect_sqlite_database",
     "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
+    "lock_deletion_saga_row",
     "mark_control_action_applied",
     "mark_control_action_duplicate",
     "mark_control_action_superseded",
@@ -322,6 +342,7 @@ __all__ = [
     "path_safe_run_id_clause",
     "pending_document_approval_thread",
     "persist_graph_action_receipt",
+    "read_cleanup_ledger",
     "read_latest_checkpoint",
     "read_next_queued_continuation",
     "record_permission_request",
@@ -329,7 +350,9 @@ __all__ = [
     "record_thread_execution_state",
     "reject_queued_continuations",
     "release_control_action_lease",
+    "release_deletion_saga_claim",
     "release_recovery_claim",
+    "remove_deletion_saga_row",
     "reschedule_recovery_claim",
     "reserve_control_action",
     "reset_permission_response_submission",
@@ -349,6 +372,7 @@ __all__ = [
     "sum_cost_by_thread",
     "supersede_permission_requests",
     "supported_migration_head",
+    "swap_cleanup_ledger",
     "thread_owned_by",
     "thread_write_expectation",
     "unscheduled_recovery_actions",

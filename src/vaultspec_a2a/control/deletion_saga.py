@@ -1,4 +1,4 @@
-"""Idempotent repository for the cross-store thread deletion saga.
+"""Idempotent control of the cross-store thread deletion saga.
 
 A thread delete spans three stores that cannot be committed atomically: the
 LangGraph checkpoint store, the workspace filesystem, and the control database.
@@ -34,7 +34,8 @@ reads with its rows intact, forever:
 
 The manifest and per-item result types are the durable representation the saga
 persists; the cleanup executor in :mod:`vaultspec_a2a.control.cleanup` consumes
-them to perform the real store effects.
+them to perform the real store effects. The saga row's queries and conditional
+writes live in :mod:`vaultspec_a2a.database`; this module decides what they mean.
 """
 
 from __future__ import annotations
@@ -44,28 +45,32 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-from sqlalchemy import or_, select, update
-from sqlalchemy.exc import IntegrityError
-
-from ...database import (
-    ThreadDeletionSagaModel,
+from ..database import (
     ThreadStatusElectionOutcome,
+    claim_deletion_saga_row,
     delete_thread,
     elect_thread_deleting,
+    get_deletion_saga_row,
     get_thread,
+    insert_deletion_saga_row,
+    lock_deletion_saga_row,
+    read_cleanup_ledger,
+    release_deletion_saga_claim,
+    remove_deletion_saga_row,
+    swap_cleanup_ledger,
     thread_write_expectation,
 )
-from ...thread.enums import CleanupKind, ThreadStatus
+from ..thread.enums import CleanupKind, ThreadStatus
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from sqlalchemy import CursorResult, Result
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ...thread import ThreadWriteExpectation
+    from ..database import ThreadDeletionSagaModel
+    from ..thread import ThreadWriteExpectation
 
 
 __all__ = [
@@ -73,6 +78,7 @@ __all__ = [
     "CleanupItemResult",
     "CleanupItemState",
     "DeletionSaga",
+    "DeletionSagaContentionError",
     "FinalizeOutcome",
     "advance_deletion_cleanup_item",
     "claim_deletion_saga",
@@ -219,16 +225,6 @@ class FinalizeOutcome:
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _rows_matched(result: Result[Any]) -> int:
-    """Return how many rows a conditional write matched.
-
-    Both conditional writes here decide on the match count, and a DML execution
-    always yields a cursor result; only the declared return type of
-    ``Session.execute`` is the wider ``Result``.
-    """
-    return cast("CursorResult[Any]", result).rowcount
 
 
 def serialize_manifest(items: Sequence[CleanupItem]) -> str:
@@ -450,7 +446,7 @@ async def create_deletion_saga(
     caller commits, so the first durable fact of a delete is the control state,
     not an irreversible external effect.
     """
-    existing = await session.get(ThreadDeletionSagaModel, thread_id)
+    existing = await get_deletion_saga_row(session, thread_id)
     thread = await get_thread(session, thread_id)
     if thread is None:
         return None
@@ -458,22 +454,16 @@ async def create_deletion_saga(
     if existing is not None:
         return await _resume_existing_saga(session, thread_id, existing, expectation)
 
-    row = ThreadDeletionSagaModel(
+    row, inserted = await insert_deletion_saga_row(
+        session,
         thread_id=thread_id,
         manifest_json=serialize_manifest(manifest),
         result_json=serialize_results({}),
     )
-    session.add(row)
-    try:
-        await session.flush()
-    except IntegrityError:
-        # A concurrent request created the saga between the read and the insert.
-        # Discard this transaction's pending work and resume the winner's saga.
-        await session.rollback()
-        existing = await session.get(ThreadDeletionSagaModel, thread_id)
-        if existing is None:
-            raise
-        return _hydrate(existing, created=False)
+    if not inserted:
+        # A concurrent request created the saga between the read and the insert;
+        # its saga is the one this request resumes.
+        return _hydrate(row, created=False)
 
     try:
         election = await elect_thread_deleting(
@@ -515,23 +505,13 @@ async def claim_deletion_saga(
     immediately; :data:`_CLAIM_LEASE` covers only a pass killed before it could
     release, which would otherwise hold the saga for the life of the deployment.
     """
-    now = _now()
-    claim = await session.execute(
-        update(ThreadDeletionSagaModel)
-        .where(
-            ThreadDeletionSagaModel.thread_id == thread_id,
-            or_(
-                ThreadDeletionSagaModel.claimed_at.is_(None),
-                ThreadDeletionSagaModel.claimed_at < now - _CLAIM_LEASE,
-            ),
-        )
-        .values(claimed_at=now, updated_at=now)
-        .execution_options(synchronize_session="fetch")
+    claimed = await claim_deletion_saga_row(
+        session, thread_id, now=_now(), lease=_CLAIM_LEASE
     )
-    row = await session.get(ThreadDeletionSagaModel, thread_id, populate_existing=True)
-    if row is None:
+    if claimed is None:
         return None
-    return _hydrate(row, owned=_rows_matched(claim) == 1)
+    row, owned = claimed
+    return _hydrate(row, owned=owned)
 
 
 async def advance_deletion_cleanup_item(
@@ -552,24 +532,18 @@ async def advance_deletion_cleanup_item(
     losing one item's result is unrecoverable rather than untidy: the manifest
     can then never settle, finalization refuses forever, and the thread stays
     hidden from product reads with its rows intact. The write is therefore a
-    compare-and-swap - the update matches only while the ledger still holds the
-    exact bytes this call read - so a write built on a stale read is rejected
-    and rebuilt rather than applied over a concurrent one.
+    compare-and-swap - it applies only while the ledger still holds the exact
+    bytes this call read - so a write built on a stale read is rejected and
+    rebuilt rather than applied over a concurrent one.
 
     Compare-and-swap rather than a row lock because the lock does not reach the
     default backend: SQLAlchemy's SQLite dialect silently discards ``FOR
-    UPDATE``. The select still takes the lock where the backend honours it, so
-    on Postgres contention serialises instead of retrying, but correctness rests
+    UPDATE``. The read still takes the lock where the backend honours it, so on
+    Postgres contention serialises instead of retrying, but correctness rests
     on the swap, which holds on both.
     """
     for _ in range(_MAX_ADVANCE_ATTEMPTS):
-        witnessed = (
-            await session.execute(
-                select(ThreadDeletionSagaModel.result_json)
-                .where(ThreadDeletionSagaModel.thread_id == thread_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
+        witnessed = await read_cleanup_ledger(session, thread_id)
         if witnessed is None:
             return False
         results = deserialize_results(witnessed)
@@ -577,17 +551,13 @@ async def advance_deletion_cleanup_item(
         if record is None:
             return False
         results[record.key] = record
-        now = _now()
-        swap = await session.execute(
-            update(ThreadDeletionSagaModel)
-            .where(
-                ThreadDeletionSagaModel.thread_id == thread_id,
-                ThreadDeletionSagaModel.result_json == witnessed,
-            )
-            .values(result_json=serialize_results(results), updated_at=now)
-            .execution_options(synchronize_session="fetch")
-        )
-        if _rows_matched(swap) == 1:
+        if await swap_cleanup_ledger(
+            session,
+            thread_id,
+            witnessed=witnessed,
+            replacement=serialize_results(results),
+            updated_at=_now(),
+        ):
             return True
         # Another pass rewrote the ledger between the read and the write. Its
         # result must survive, so this one is rebuilt on the ledger it left.
@@ -635,16 +605,14 @@ async def finalize_deletion_saga(
     removal must not straddle a concurrent write, or a pass could read a settled
     manifest while another is still recording an item.
     """
-    row = await session.get(ThreadDeletionSagaModel, thread_id, with_for_update=True)
+    row = await lock_deletion_saga_row(session, thread_id)
     if row is None:
         return FinalizeOutcome(finalized=True, already_final=True)
     manifest = deserialize_manifest(row.manifest_json)
     results = deserialize_results(row.result_json)
     abandoned = _abandoned_items(manifest, results)
     if abandoned is None:
-        row.claimed_at = None
-        row.updated_at = _now()
-        await session.flush()
+        await release_deletion_saga_claim(session, row, released_at=_now())
         return FinalizeOutcome(finalized=False)
     if abandoned:
         logger.error(
@@ -654,8 +622,7 @@ async def finalize_deletion_saga(
             len(abandoned),
             "; ".join(f"{item.key}: {item.detail}" for item in abandoned),
         )
-    await session.delete(row)
-    await session.flush()
+    await remove_deletion_saga_row(session, row)
     await delete_thread(session, thread_id)
     return FinalizeOutcome(
         finalized=True,

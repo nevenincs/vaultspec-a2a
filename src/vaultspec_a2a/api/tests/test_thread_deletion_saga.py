@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...control.repositories import (
+from ...control.deletion_saga import (
     CleanupItem,
     create_deletion_saga,
 )

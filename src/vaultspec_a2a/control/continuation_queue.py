@@ -33,7 +33,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from ...database import (
+from ..database import (
     ControlActionModel,
     ThreadModel,
     acquire_control_action_lease,
@@ -43,11 +43,11 @@ from ...database import (
     reject_queued_continuations,
     reserve_control_action,
 )
-from ...domain_config import domain_config
-from ...thread.enums import ControlActionResultStatus, ControlActionType
-from ...thread.executable_graph import FrozenGraphDefinition
-from ..accepted_input import AcceptedActionInput
-from ..action_lease import CONTROL_ACTION_LEASE_TTL
+from ..domain_config import domain_config
+from ..thread.enums import ControlActionResultStatus, ControlActionType
+from ..thread.executable_graph import FrozenGraphDefinition
+from .accepted_input import AcceptedActionInput
+from .action_lease import CONTROL_ACTION_LEASE_TTL
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

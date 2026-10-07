@@ -10,11 +10,11 @@ subprocess against this repository.
 from __future__ import annotations
 
 import ast
-import subprocess
 import sys
 from pathlib import Path
 
 from dev.guards import storage_anchors
+from dev.process import run_captured
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -183,12 +183,10 @@ def test_tests_and_tooling_are_held_to_the_tempfile_rule_alone(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    result = subprocess.run(
+    result = run_captured(
         [sys.executable, str(REPO_ROOT / "dev" / "guards" / "storage_anchors.py")],
         cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
+        timeout=None,
     )
 
     assert result.returncode == 1, result.stdout + result.stderr
@@ -204,12 +202,10 @@ def test_the_gate_passes_against_this_repository() -> None:
     Exit 0 means every remaining violation is one of the explicitly deferred
     modules. A new anchor in production code fails this test.
     """
-    result = subprocess.run(
+    result = run_captured(
         [sys.executable, "dev/guards/storage_anchors.py"],
         cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
+        timeout=None,
     )
     assert result.returncode == 0, (
         f"the storage-anchor gate failed:\n{result.stderr}\n{result.stdout}"
@@ -227,11 +223,9 @@ def test_every_deferred_module_still_exists() -> None:
 
 def test_the_gate_refuses_to_pass_from_the_wrong_directory() -> None:
     """A gate that silently passes when it scanned nothing is worse than none."""
-    result = subprocess.run(
+    result = run_captured(
         [sys.executable, str(REPO_ROOT / "dev" / "guards" / "storage_anchors.py")],
         cwd=REPO_ROOT / "dev",
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
+        timeout=None,
     )
     assert result.returncode == 2, result.stdout + result.stderr

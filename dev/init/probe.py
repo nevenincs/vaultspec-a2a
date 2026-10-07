@@ -12,19 +12,23 @@ sandbox, and cannot reason about afterwards. Reporting
 :data:`dev.exit_codes.INIT_HOST_TOOL_MISSING` with the tool's own installation
 URL is a better outcome than a half-provisioned host.
 
-Stdlib-only, by the constraint stated in :mod:`dev.init`.
+Stdlib-only, by the constraint stated in :mod:`dev.init`; a tool is asked its
+version through :func:`dev.process.run_captured`, which is stdlib-only as well.
 """
 
 from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from dev.process import ToolUnavailableError, run_captured
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+__all__ = ["Finding", "Requirement", "check", "check_all"]
 
 #: Matches the first dotted version in a `--version` banner. Every tool this
 #: fleet requires prints one, in among a varying amount of other text.
@@ -86,24 +90,12 @@ def _version_of(requirement: Requirement) -> str | None:
         The first dotted version in its banner, or ``None`` when it does not
         run or prints nothing recognizable.
     """
-    resolved = shutil.which(requirement.command)
-    if resolved is None:
-        return None
-    declared = list(requirement.version_argv or (requirement.command, "--version"))
-    argv = [resolved, *declared[1:]]
+    declared = requirement.version_argv or (requirement.command, "--version")
     try:
-        completed = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=60,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+        completed = run_captured([requirement.command, *declared[1:]], timeout=60)
+    except ToolUnavailableError:
         return None
-    match = _VERSION.search((completed.stdout or "") + (completed.stderr or ""))
+    match = _VERSION.search(completed.stdout + completed.stderr)
     return match.group(0) if match else None
 
 

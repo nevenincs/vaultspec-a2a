@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import sys
 
-from dev.doctor._probe import capture, fail, report, warn
+from dev.doctor._probe import fail, report, warn
+from dev.process import ToolUnavailableError, run_captured
 
 DOCKER_INSTALL_WINDOWS = (
     "https://docs.docker.com/desktop/setup/install/windows-install/"
@@ -36,23 +37,30 @@ def _diagnose() -> str | None:
         when both Docker and Compose are present and working.
     """
     hint = _install_hint()
-    code, banner = capture(["docker", "--version"])
-    if code == 127:
+    try:
+        docker = run_captured(["docker", "--version"], timeout=None)
+    except ToolUnavailableError:
         return f"Docker is not installed. Install it from {hint}"
-    if code != 0:
+    banner = (docker.stdout + docker.stderr).strip()
+    if docker.returncode != 0:
         return (
             f"Docker is unavailable. Install or repair Docker from {hint}\n  {banner}"
         )
     report(banner)
 
-    compose_code, compose_banner = capture(["docker", "compose", "version"])
-    if compose_code != 0:
-        return (
-            f"Docker Compose is unavailable. Install the Compose plugin: "
-            f"{COMPOSE_INSTALL}\n  {compose_banner}"
-        )
-    report(compose_banner)
-    return None
+    try:
+        compose = run_captured(["docker", "compose", "version"], timeout=None)
+    except ToolUnavailableError as exc:
+        compose_banner = str(exc)
+    else:
+        compose_banner = (compose.stdout + compose.stderr).strip()
+        if compose.returncode == 0:
+            report(compose_banner)
+            return None
+    return (
+        f"Docker Compose is unavailable. Install the Compose plugin: "
+        f"{COMPOSE_INSTALL}\n  {compose_banner}"
+    )
 
 
 def docker_optional() -> int:

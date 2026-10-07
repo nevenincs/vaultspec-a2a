@@ -10,14 +10,15 @@ tests drive a real repository under a non-ASCII directory name.
 
 from __future__ import annotations
 
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
 
+from dev.process import run_captured
 from dev.repo import hooks
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
 # Three-byte CJK, a combining accent, and an astral-plane character, all legal in
@@ -30,15 +31,7 @@ _NON_ASCII_DIR_NAMES = [
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    return run_captured(["git", *args], cwd=cwd, timeout=None, check=True)
 
 
 def _init_repo(root: Path) -> None:

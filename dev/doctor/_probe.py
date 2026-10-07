@@ -1,68 +1,22 @@
 """Shared primitives for probing an external tool and reporting the verdict.
 
-The probes in this package all have the same shape: resolve an executable,
-run it to learn its version, and either report success or explain how to
-install the thing that is missing. Expressing that shape once is what keeps
-the individual checks declarative.
+The probes in this package all have the same shape: run an executable through
+:func:`dev.process.run_captured` to learn its version, and either report
+success or explain how to install the thing that is missing. Expressing that
+shape once is what keeps the individual checks declarative.
 """
 
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
 import sys
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+__all__ = ["fail", "format_version", "parse_version", "report", "warn"]
 
 #: Matches the first dotted numeric triple in a version banner. Tools pad their
 #: ``--version`` output with names, build hashes, and release channels; the
 #: triple is the only part any of these checks compares.
 _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
-
-
-def which(tool: str) -> str | None:
-    """Return the resolved path to ``tool``, or ``None`` when it is absent.
-
-    Resolution goes through :func:`shutil.which` rather than handing the bare
-    name to :mod:`subprocess`, because on Windows the interesting tools ship as
-    ``.cmd`` shims that only PATHEXT resolution finds.
-
-    Args:
-        tool: The executable name to look for on ``PATH``.
-
-    Returns:
-        The resolved absolute path, or ``None``.
-    """
-    return shutil.which(tool)
-
-
-def capture(argv: Sequence[str]) -> tuple[int, str]:
-    """Run a command and capture its combined output.
-
-    Args:
-        argv: The argument vector to execute. Never a shell string.
-
-    Returns:
-        A ``(returncode, output)`` pair. A missing or unrunnable executable
-        yields a non-zero code and the reason as the output.
-    """
-    resolved = which(argv[0])
-    if resolved is None:
-        return 127, f"{argv[0]} not found on PATH"
-    try:
-        completed = subprocess.run(
-            [resolved, *argv[1:]],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        return 127, f"{argv[0]} could not be executed: {exc}"
-    output = (completed.stdout + completed.stderr).strip()
-    return completed.returncode, output
 
 
 def parse_version(banner: str) -> tuple[int, int, int] | None:

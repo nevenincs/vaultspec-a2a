@@ -21,10 +21,25 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dev import ci_formats
-from dev.exit_codes import TOOL_MISSING
+from dev.exit_codes import TOOL_BROKEN, TOOL_MISSING
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+__all__ = [
+    "TOOLING_PROFILE",
+    "Cmd",
+    "Echo",
+    "Ref",
+    "Step",
+    "ToolOrDocker",
+    "child_environment",
+    "dev_module",
+    "run",
+    "run_tool_or_docker",
+    "uv_run",
+    "uv_run_env",
+]
 
 #: The locked tooling profile every read-only recipe resolves against.
 #:
@@ -96,18 +111,50 @@ class Ref:
 Step = Cmd | ToolOrDocker | Echo | Ref
 
 
-def run(argv: Sequence[str], env: Mapping[str, str] | None = None) -> int:
-    """Run one subprocess and return its exit code.
+def child_environment(
+    env: Mapping[str, str] | None, *, replace: bool = False
+) -> dict[str, str]:
+    """Return the environment a child process runs with.
+
+    Args:
+        env: Variables overlaid on the inherited environment, or - with
+            ``replace`` - the child's entire environment.
+        replace: Whether ``env`` replaces the inherited environment instead of
+            being overlaid on it.
+
+    Returns:
+        A fresh mapping the caller may hand straight to :mod:`subprocess`.
+    """
+    if replace:
+        return dict(env or {})
+    return {**os.environ, **(env or {})}
+
+
+def run(
+    argv: Sequence[str],
+    env: Mapping[str, str] | None = None,
+    *,
+    cwd: Path | None = None,
+    replace_env: bool = False,
+    timeout: float | None = None,
+) -> int:
+    """Run one subprocess, streaming its output, and return its exit code.
 
     Args:
         argv: The argument vector to execute.
-        env: Variables overlaid on the inherited environment.
+        env: Variables overlaid on the inherited environment, or - with
+            ``replace_env`` - the child's entire environment.
+        cwd: The directory to run in; ``None`` keeps this process's own.
+        replace_env: Whether ``env`` replaces the inherited environment.
+        timeout: Seconds to wait before abandoning the child; ``None`` waits
+            for as long as it runs.
 
     Returns:
-        The child process exit code, or :data:`TOOL_MISSING` when the
-        executable does not exist.
+        The child process exit code; :data:`TOOL_MISSING` when the executable
+        does not exist; :data:`TOOL_BROKEN` when it did not finish inside
+        ``timeout``.
     """
-    merged = {**os.environ, **(env or {})}
+    merged = child_environment(env, replace=replace_env)
     # What a tool PRINTS is decided in one place, from the environment; unset,
     # this returns the command untouched. It never changes the exit status.
     argv = ci_formats.augment(argv, merged)
@@ -125,7 +172,20 @@ def run(argv: Sequence[str], env: Mapping[str, str] | None = None) -> int:
         return TOOL_MISSING
 
     try:
-        return subprocess.run([resolved, *argv[1:]], env=merged, check=False).returncode
+        return subprocess.run(
+            [resolved, *argv[1:]],
+            cwd=cwd,
+            env=merged,
+            check=False,
+            timeout=timeout,
+        ).returncode
+    except subprocess.TimeoutExpired as exc:
+        print(
+            f"{argv[0]} exceeded its {exc.timeout:g}s timeout",
+            file=sys.stderr,
+            flush=True,
+        )
+        return TOOL_BROKEN
     except OSError as exc:
         print(f"{argv[0]} could not be executed: {exc}", file=sys.stderr, flush=True)
         return TOOL_MISSING

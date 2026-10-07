@@ -1,4 +1,4 @@
-"""Domain enums for thread lifecycle, control actions, and permissions.
+"""Domain enums for thread lifecycle, control actions, permissions, and pauses.
 
 These are Layer 1 domain types — consumed by infrastructure services
 (database, control, api) but defined here as the canonical source.
@@ -17,6 +17,7 @@ __all__ = [
     "ControlActionResultStatus",
     "ControlActionType",
     "DegradedReason",
+    "InterruptType",
     "InvalidTransitionError",
     "PermissionRequestStatus",
     "RecoveryCondition",
@@ -241,6 +242,29 @@ class PermissionRequestStatus(StrEnum):
     REJECTED = "rejected"
     SUPERSEDED = "superseded"
     EXPIRED_BY_TERMINAL_STATE = "expired_by_terminal_state"
+
+
+class InterruptType(StrEnum):
+    """The ``type`` discriminator of every interrupt a run can park on.
+
+    One closed vocabulary for the producers that raise a pause - the worker's
+    tool-permission rung, the supervisor's plan gate, the document phase gates
+    and the clarification node - and for every reader that tells one pause from
+    another. A run's checkpoint holds interrupts of several kinds side by side,
+    so this discriminator is the only thing that separates them.
+
+    Producers write a member's ``.value`` into the interrupt payload, because
+    that payload is checkpointed with the parked task and the checkpoint
+    serializer does not round-trip enum members.
+
+    Not :class:`~vaultspec_a2a.graph.enums.PermissionType`, which names the
+    ``tool_call`` category of a permission request with different strings.
+    """
+
+    PERMISSION_REQUEST = "permission_request"
+    PLAN_APPROVAL_REQUEST = "plan_approval_request"
+    DOCUMENT_APPROVAL_REQUEST = "document_approval_request"
+    CLARIFICATION_REQUEST = "clarification_request"
 
 
 class ApprovalStatus(StrEnum):

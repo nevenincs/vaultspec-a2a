@@ -15,7 +15,6 @@ from pydantic import ValidationError
 
 from ..clarification import (
     CLARIFICATION_DECLINE_MARKER,
-    CLARIFICATION_INTERRUPT_TYPE,
     MAX_ANSWER_CHARS,
     MAX_OPTION_CHARS,
     MAX_PROMPT_CHARS,
@@ -34,6 +33,7 @@ from ..clarification import (
     validate_clarification_answers,
 )
 from ..constants import MAX_RUN_MESSAGE_CHARS
+from ..enums import InterruptType
 
 
 def _choice(
@@ -488,7 +488,7 @@ def test_a_payload_round_trips_through_the_interrupt_shape() -> None:
     request = _request()
     parsed = ClarificationRequest.from_payload(request.as_interrupt_payload())
     assert parsed == request
-    assert request.as_interrupt_payload()["type"] == CLARIFICATION_INTERRUPT_TYPE
+    assert request.as_interrupt_payload()["type"] == InterruptType.CLARIFICATION_REQUEST
 
 
 @pytest.mark.parametrize(

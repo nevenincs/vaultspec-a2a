@@ -21,6 +21,7 @@ from ..thread.enums import (
     RECOVERY_ACTION_TYPES,
     ControlActionResultStatus,
     ControlActionType,
+    InterruptType,
     PermissionRequestStatus,
     ThreadStatus,
 )
@@ -87,9 +88,6 @@ always mean both members; the other two toggle ``ANSWERED_PENDING_APPLY`` in
 or out via ``include_answered_pending_apply``, so the toggle stays an explicit
 argument at those call sites rather than being folded into this constant.
 """
-
-_DOCUMENT_APPROVAL_PAUSE = "document_approval_request"
-"""The pause a document gate records, under the proposal id it parked on."""
 
 
 def _encode_payload(payload: dict[str, object] | None) -> str | None:
@@ -239,7 +237,8 @@ async def pending_document_approval_thread(
         .join(ThreadModel, ThreadModel.id == PermissionRequestModel.thread_id)
         .where(
             PermissionRequestModel.request_id.in_(candidates),
-            PermissionRequestModel.pause_reason_type == _DOCUMENT_APPROVAL_PAUSE,
+            PermissionRequestModel.pause_reason_type
+            == InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
             PermissionRequestModel.request_status
             == PermissionRequestStatus.PENDING.value,
             ThreadModel.status == ThreadStatus.INPUT_REQUIRED.value,

@@ -26,13 +26,14 @@ from ..ipc.schemas import (
 from ..providers import ProviderCondition
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
-from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
+from ..thread.enums import TERMINAL_STATUS_VALUES, InterruptType, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..thread.idempotency import permission_request_action_key
 from ..thread.permission_fsm import (
     compute_permission_request_effects,
 )
 from ..thread.snapshots import (
+    PERMISSION_REQUEST_EVENT_TYPES,
     classify_permission_pause_reason,
     is_permission_event,
     is_terminal_event,
@@ -744,8 +745,13 @@ async def _handle_terminal_event(
         aggregator.clear_thread_state(thread_id)
 
 
-_PERMISSION_REQUEST_EVENT_TYPES = frozenset(
-    {"permission_request", "plan_approval_request", "document_approval_request"}
+#: The approval gates record the pause they relay as itself; a tool permission
+#: classifies its pause from the tool it asks about.
+_APPROVAL_GATE_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        InterruptType.PLAN_APPROVAL_REQUEST.value,
+        InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
+    }
 )
 
 
@@ -760,7 +766,7 @@ def _permission_request_fields(
     tool_call = tool_value if isinstance(tool_value, str) else None
     pause_reason_type = (
         event_type
-        if event_type in {"plan_approval_request", "document_approval_request"}
+        if event_type in _APPROVAL_GATE_EVENT_TYPES
         else classify_permission_pause_reason(tool_call)
     )
     description_value = payload.get("description")
@@ -925,7 +931,7 @@ async def _handle_permission_event(
         return
     async with factory() as db:
         await begin_write_transaction(db)
-        if event_type in _PERMISSION_REQUEST_EVENT_TYPES:
+        if event_type in PERMISSION_REQUEST_EVENT_TYPES:
             await _persist_permission_request(
                 db, thread_id, payload, event_type=event_type
             )

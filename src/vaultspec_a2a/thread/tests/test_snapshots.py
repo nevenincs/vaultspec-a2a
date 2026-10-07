@@ -9,10 +9,9 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ...graph.enums import AgentLifecycleState, Provider
-from ..enums import DegradedReason, RepairStatus
+from ..enums import DegradedReason, InterruptType, RepairStatus
 from ..models import PlanEntry
 from ..snapshots import (
-    CLARIFICATION_REQUEST_INTERRUPT_TYPE,
     PLAN_APPROVAL_PAUSE_CAUSES,
     AgentData,
     ArtifactData,
@@ -332,7 +331,7 @@ def _clarify_interrupt(payload: dict[str, Any]) -> ProjectedInterrupt:
 def test_clarification_data_from_interrupt_projects_bounded_questions() -> None:
     interrupt = _clarify_interrupt(
         {
-            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
+            "type": InterruptType.CLARIFICATION_REQUEST,
             "questions": [
                 {
                     "id": "provider",
@@ -370,7 +369,7 @@ def test_clarification_data_from_interrupt_ignores_other_interrupt_types() -> No
 
 def test_clarification_data_from_interrupt_none_when_questions_not_a_list() -> None:
     interrupt = _clarify_interrupt(
-        {"type": CLARIFICATION_REQUEST_INTERRUPT_TYPE, "questions": "not-a-list"}
+        {"type": InterruptType.CLARIFICATION_REQUEST, "questions": "not-a-list"}
     )
     assert clarification_data_from_interrupt(interrupt) is None
 
@@ -378,7 +377,7 @@ def test_clarification_data_from_interrupt_none_when_questions_not_a_list() -> N
 def test_clarification_data_from_interrupt_none_when_no_readable_question() -> None:
     interrupt = _clarify_interrupt(
         {
-            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
+            "type": InterruptType.CLARIFICATION_REQUEST,
             "questions": [{"id": "", "prompt": "missing id"}, "not-a-dict"],
         }
     )
@@ -388,7 +387,7 @@ def test_clarification_data_from_interrupt_none_when_no_readable_question() -> N
 def test_clarification_data_from_interrupt_drops_malformed_entries_keeps_rest() -> None:
     interrupt = _clarify_interrupt(
         {
-            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
+            "type": InterruptType.CLARIFICATION_REQUEST,
             "questions": [
                 {"id": "good", "prompt": "Fine?"},
                 {"id": "", "prompt": "no id"},
@@ -404,7 +403,7 @@ def test_clarification_data_from_interrupt_drops_malformed_entries_keeps_rest() 
 def test_clarification_data_from_interrupt_unknown_kind_falls_back_to_text() -> None:
     interrupt = _clarify_interrupt(
         {
-            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
+            "type": InterruptType.CLARIFICATION_REQUEST,
             "questions": [{"id": "q1", "prompt": "?", "kind": "essay"}],
         }
     )

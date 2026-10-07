@@ -21,7 +21,7 @@ from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
 from ...thread import parse_approval_verdict
-from ...thread.enums import VERDICT_APPROVED, ApprovalStatus
+from ...thread.enums import VERDICT_APPROVED, ApprovalStatus, InterruptType
 from ...thread.errors import SupervisorRoutingError
 from ...thread.state import merge_vault_index
 from ._interrupts import await_request_scoped_resume
@@ -444,7 +444,7 @@ def _plan_approval_decision(
     if autonomous or not exec_route or not plan_ready or approval_granted:
         return None
     payload = {
-        "type": "plan_approval_request",
+        "type": InterruptType.PLAN_APPROVAL_REQUEST.value,
         "feature": state.get("active_feature"),
         "plan_paths": vault_index.get("plan", []),
         "exec_worker": next_route,
@@ -736,7 +736,7 @@ def create_plan_approval_node(
         plan_paths = vault_index.get("plan", [])
         request_id = _plan_approval_request_id(state, exec_worker, plan_paths)
         payload = {
-            "type": "plan_approval_request",
+            "type": InterruptType.PLAN_APPROVAL_REQUEST.value,
             "feature": state.get("active_feature"),
             "plan_paths": plan_paths,
             "exec_worker": exec_worker,

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
 from ..domain_config import domain_config
 from ..graph.acp_options import option_id_of
 from ..graph.enums import AgentLifecycleState, PermissionOptionKind, PermissionType
-from ..thread.clarification import CLARIFICATION_INTERRUPT_TYPE
+from ..thread import InterruptType
 from .types import StreamableGraph, resolve_acp_option_kind
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ class _InterruptEmission:
     thread_id: str
     agent_id: str
     request_id: str
-    interrupt_type: str
+    interrupt_type: InterruptType
     payload: dict[str, Any]
 
 
@@ -37,16 +37,6 @@ class _InterruptTask(Protocol):
 
     name: str
     interrupts: Sequence[object]
-
-
-_INTERRUPT_TYPES = frozenset(
-    {
-        "permission_request",
-        "plan_approval_request",
-        "document_approval_request",
-        CLARIFICATION_INTERRUPT_TYPE,
-    }
-)
 
 
 async def emit_interrupt_events(
@@ -103,7 +93,7 @@ def _interrupt_emissions(
             if payload is None:
                 continue
             interrupt_type = payload.get("type")
-            if interrupt_type not in _INTERRUPT_TYPES:
+            if interrupt_type not in InterruptType:
                 continue
             emissions.append(
                 _InterruptEmission(
@@ -112,7 +102,7 @@ def _interrupt_emissions(
                     request_id=_request_id(
                         thread_id, task_index, interrupt_index, interrupt, payload
                     ),
-                    interrupt_type=interrupt_type,
+                    interrupt_type=InterruptType(interrupt_type),
                     payload=payload,
                 )
             )
@@ -160,11 +150,11 @@ async def _emit_interrupt(
     emission: _InterruptEmission, emitters: EventEmitters
 ) -> None:
     """Route one recognized interrupt to its explicit projection branch."""
-    if emission.interrupt_type == CLARIFICATION_INTERRUPT_TYPE:
+    if emission.interrupt_type is InterruptType.CLARIFICATION_REQUEST:
         await _emit_clarification(emission, emitters)
-    elif emission.interrupt_type == "plan_approval_request":
+    elif emission.interrupt_type is InterruptType.PLAN_APPROVAL_REQUEST:
         await _emit_plan_approval(emission, emitters)
-    elif emission.interrupt_type == "document_approval_request":
+    elif emission.interrupt_type is InterruptType.DOCUMENT_APPROVAL_REQUEST:
         await _emit_document_approval(emission, emitters)
     else:
         await _emit_tool_permission(emission, emitters)

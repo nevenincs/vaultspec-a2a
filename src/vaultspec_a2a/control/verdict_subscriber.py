@@ -59,6 +59,7 @@ from ..thread.enums import (
     VERDICT_APPROVED,
     VERDICT_REJECTED,
     ControlActionType,
+    InterruptType,
     ThreadStatus,
 )
 from ..thread.idempotency import (
@@ -144,7 +145,7 @@ async def settle_verdict_dispatch_receipt(
     await mark_control_action_applied(db, action.id)
     pending = await get_pending_permission_requests(db, thread_id=action.thread_id)
     for permission in pending:
-        if permission.pause_reason_type == "document_approval_request":
+        if permission.pause_reason_type == InterruptType.DOCUMENT_APPROVAL_REQUEST:
             await mark_permission_request_applied(db, request_id=permission.request_id)
     await update_thread_status(db, action.thread_id, ThreadStatus.RUNNING)
     return True

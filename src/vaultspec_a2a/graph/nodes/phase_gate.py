@@ -46,6 +46,7 @@ from ...thread.enums import (
     VERDICT_APPROVED,
     VERDICT_REJECTED,
     VERDICT_REQUEST_CHANGES,
+    InterruptType,
 )
 from ...thread.errors import DocumentConformanceError
 from ._interrupts import await_request_scoped_resume
@@ -274,7 +275,7 @@ def create_phase_gate_node(
         """Pause for the committed proposal's verdict, then route."""
         proposal_id = state.get("gate_pending_proposal_id")
         payload = {
-            "type": "document_approval_request",
+            "type": InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
             "phase": phase,
             "proposal_id": proposal_id,
             "feature": state.get("active_feature"),

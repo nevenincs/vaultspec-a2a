@@ -26,6 +26,7 @@ from ..graph.enums import (
 from .enums import (
     TERMINAL_STATUS_VALUES,
     DegradedReason,
+    InterruptType,
     RepairStatus,
     ReplayStatus,
     ThreadStatus,
@@ -37,8 +38,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
 __all__ = [
-    "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
+    "PERMISSION_REQUEST_EVENT_TYPES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "AgentData",
     "ArtifactData",
@@ -75,11 +76,6 @@ __all__ = [
     "wire_event_type",
 ]
 
-# The interrupt payload's ``type`` discriminator for a mid-run clarification
-# question. Named once here so the projection below and any future
-# producer/consumer read the same literal.
-CLARIFICATION_REQUEST_INTERRUPT_TYPE = "clarification_request"
-
 # Shared constant — previously duplicated in control/projection.py and
 # control/event_handlers.py.
 # Verdict-style approval-gate pause causes (as opposed to tool permission pauses):
@@ -93,19 +89,19 @@ CLARIFICATION_REQUEST_INTERRUPT_TYPE = "clarification_request"
 PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
     {
         PermissionType.PLAN_APPROVAL.value,
-        "plan_approval_request",
-        "document_approval_request",
+        InterruptType.PLAN_APPROVAL_REQUEST.value,
+        InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
     }
 )
 
 # The subset of PLAN_APPROVAL_PAUSE_CAUSES this repository's own respond route
-# may resolve. Excludes "document_approval_request": that pause is decided
+# may resolve. Excludes the document approval pause: that pause is decided
 # solely by the engine review surface, correlated back into the run by the
 # verdict subscriber (the amended a2a-orchestration-edge contract: no second
 # approval authority in A2A). Consumed only by control/permission_service.py's
 # respond-route gating.
 LOCALLY_RESPONDABLE_PAUSE_CAUSES: frozenset[str] = PLAN_APPROVAL_PAUSE_CAUSES - {
-    "document_approval_request"
+    InterruptType.DOCUMENT_APPROVAL_REQUEST.value
 }
 
 # ---------------------------------------------------------------------------
@@ -171,21 +167,32 @@ def is_terminal_event(payload: dict[str, Any]) -> bool:
     )
 
 
+#: The relayed event types that open a durable permission pause: a tool
+#: permission and the two approval gates. A clarification is the one interrupt
+#: type absent, because it parks the run without a permission row.
+PERMISSION_REQUEST_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        InterruptType.PERMISSION_REQUEST.value,
+        InterruptType.PLAN_APPROVAL_REQUEST.value,
+        InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
+    }
+)
+
+
 def is_permission_event(payload: dict[str, Any]) -> bool:
     """Return True if the payload is a permission request or resolution."""
-    return wire_event_type(payload) in {
-        "permission_request",
-        "plan_approval_request",
-        "document_approval_request",
-        "permission_resolved",
-    }
+    event_type = wire_event_type(payload)
+    return (
+        event_type in PERMISSION_REQUEST_EVENT_TYPES
+        or event_type == "permission_resolved"
+    )
 
 
 def classify_permission_pause_reason(tool_call: str | None) -> str:
     """Derive the ``pause_reason_type`` string from a permission tool_call."""
-    if tool_call == "plan_approval":
-        return "plan_approval_request"
-    return str(tool_call or "permission_request")
+    if tool_call == PermissionType.PLAN_APPROVAL:
+        return InterruptType.PLAN_APPROVAL_REQUEST.value
+    return str(tool_call or InterruptType.PERMISSION_REQUEST.value)
 
 
 def _clarification_options(raw_map: dict[str, object]) -> list[str]:
@@ -226,7 +233,7 @@ def clarification_data_from_interrupt(
     """Project a checkpoint-sourced clarification interrupt to its wire shape.
 
     Returns ``None`` for any interrupt whose type is not
-    :data:`CLARIFICATION_REQUEST_INTERRUPT_TYPE`, or whose ``questions`` list
+    :attr:`InterruptType.CLARIFICATION_REQUEST`, or whose ``questions`` list
     contains no readable entry — this is checkpoint-truth disclosure: the
     pending clarification survives a reload from
     ``run-status`` alone because it is read from ``ProjectedInterrupt``
@@ -237,7 +244,7 @@ def clarification_data_from_interrupt(
     drifted producer degrades the disclosed set instead of hiding the whole
     request.
     """
-    if interrupt.interrupt_type != CLARIFICATION_REQUEST_INTERRUPT_TYPE:
+    if interrupt.interrupt_type != InterruptType.CLARIFICATION_REQUEST:
         return None
     payload = interrupt.payload
     if type(payload) is not dict:

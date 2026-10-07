@@ -77,15 +77,21 @@ class CatalogRefreshCacheBase:
     The two caches are separate on purpose. A negative entry never displaces a
     lane's last good catalog: :meth:`peek` keeps returning that snapshot, which is
     what lets a caller serve a stale-but-real catalog through an outage.
+
+    ``max_lanes`` defaults to the most lanes the public catalog can serve.
     """
 
     def __init__(
         self,
         ttl: timedelta,
         *,
-        max_lanes: int = 128,
+        max_lanes: int | None = None,
         failure_ttl: timedelta = DEFAULT_FAILURE_TTL,
     ) -> None:
+        if max_lanes is None:
+            from .provider_catalog import MAX_PROVIDER_LANES
+
+            max_lanes = MAX_PROVIDER_LANES
         if ttl <= timedelta(0):
             raise ValueError("ttl must be positive")
         if max_lanes <= 0:

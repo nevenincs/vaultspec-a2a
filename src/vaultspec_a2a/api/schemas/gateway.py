@@ -49,11 +49,16 @@ from ...thread.clarification import (
     QuestionId,
 )
 from ...thread.constants import (
+    MAX_AGENT_ID_CHARS,
     MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
+    MAX_FEEDBACK_BATCH_ID_CHARS,
+    MAX_PERMISSION_OPTION_ID_CHARS,
     MAX_ROLE_ID_CHARS,
     MAX_RUN_ID_CHARS,
     MAX_RUN_MESSAGE_CHARS,
+    MAX_RUN_TITLE_CHARS,
+    MAX_TEAM_PRESET_CHARS,
     RUN_ID_PATTERN,
 )
 from ...thread.dispatch_policy import FailureType
@@ -165,7 +170,7 @@ class RunStartRequest(BaseModel):
     reservation_id: PathSafeRunId | None = None
     # A non-empty preset is mandatory on the v1 verb: the engine-facing contract
     # never creates the internal surface's non-dispatched draft.
-    team_preset: str = Field(min_length=1, max_length=64)
+    team_preset: str = Field(min_length=1, max_length=MAX_TEAM_PRESET_CHARS)
     # The opening prompt, bounded at 65536 CHARACTERS - not bytes. The bound is
     # a proxy for LLM token consumption, and tokens track characters, so counting
     # bytes instead would hand a CJK or emoji author a quarter of the prompt an
@@ -180,7 +185,7 @@ class RunStartRequest(BaseModel):
     actor_tokens: ActorTokenBundle | None = None
     metadata: ThreadMetadata | None = None
     autonomous: bool | None = None
-    title: str | None = Field(default=None, max_length=200)
+    title: str | None = Field(default=None, max_length=MAX_RUN_TITLE_CHARS)
     # Target feature tag for document-authoring runs. Bounded; the eligibility
     # policy requires it for document-authoring presets. Falls back to
     # metadata.feature_tag when the field is omitted.
@@ -204,7 +209,9 @@ class RunStartRequest(BaseModel):
     # never parses or owns batch content; it transports only the id
     # and the worker retrieves the authoritative feedback context from the engine
     # batch read route. Bounded; content-addressed ("feedback-batch:<digest>").
-    feedback_batch_id: str | None = Field(default=None, min_length=1, max_length=256)
+    feedback_batch_id: str | None = Field(
+        default=None, min_length=1, max_length=MAX_FEEDBACK_BATCH_ID_CHARS
+    )
 
     @model_validator(mode="after")
     def _enforce_stage_invariants(self) -> RunStartRequest:
@@ -421,9 +428,9 @@ class RunSummaryRecord(BaseModel):
     run_id: PathSafeRunId
     status: ThreadStatus
     feature_tag: str | None = Field(default=None, max_length=MAX_FEATURE_TAG_LENGTH)
-    title: str | None = Field(default=None, max_length=200)
+    title: str | None = Field(default=None, max_length=MAX_RUN_TITLE_CHARS)
     nickname: str | None = Field(default=None, max_length=128)
-    team_preset: str | None = Field(default=None, max_length=64)
+    team_preset: str | None = Field(default=None, max_length=MAX_TEAM_PRESET_CHARS)
     # The projection's verdict on this run's recoverability. A caller scanning
     # history for work that needs attention reads these, and they are the whole
     # reason this record exists rather than the discovery one.
@@ -720,7 +727,7 @@ class RunMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: str = Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS)
-    agent_id: str | None = Field(default=None, max_length=128)
+    agent_id: str | None = Field(default=None, max_length=MAX_AGENT_ID_CHARS)
 
 
 class RunMessageResponse(BaseModel):
@@ -827,7 +834,7 @@ class RunPermissionRespondRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    option_id: str = Field(min_length=1, max_length=64)
+    option_id: str = Field(min_length=1, max_length=MAX_PERMISSION_OPTION_ID_CHARS)
     notes: str | None = Field(default=None, max_length=2048)
 
 

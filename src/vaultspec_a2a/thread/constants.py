@@ -21,13 +21,19 @@ compiles the shared text rather than restating it.
 
 __all__ = [
     "DEFAULT_SUPERVISOR_ID",
+    "MAX_AGENT_ID_CHARS",
     "MAX_DISCOVERY_RESULTS",
     "MAX_FEATURE_TAG_LENGTH",
+    "MAX_FEEDBACK_BATCH_ID_CHARS",
     "MAX_PERMISSION_DESCRIPTION_CHARS",
+    "MAX_PERMISSION_OPTION_ID_CHARS",
     "MAX_REQUEST_ID_CHARS",
     "MAX_ROLE_ID_CHARS",
     "MAX_RUN_ID_CHARS",
     "MAX_RUN_MESSAGE_CHARS",
+    "MAX_RUN_TITLE_CHARS",
+    "MAX_SEED_TRANSCRIPT_MESSAGES",
+    "MAX_TEAM_PRESET_CHARS",
     "MAX_TOOL_CALL_CHARS",
     "MAX_WORKSPACE_ROOT_LENGTH",
     "ROLE_ID_PATTERN",
@@ -36,6 +42,14 @@ __all__ = [
 
 DEFAULT_SUPERVISOR_ID: str = "vaultspec-supervisor"
 """The agent_id used when no explicit agent is specified."""
+
+MAX_AGENT_ID_CHARS: int = 128
+"""Longest agent identity a turn may address.
+
+A follow-up turn names the agent it addresses and the dispatch carrying that
+turn to the worker names the same agent, so the edge and the dispatch admit the
+same length.
+"""
 
 MAX_RUN_ID_CHARS: int = 128
 """Longest run identity, for every reader of one.
@@ -77,6 +91,27 @@ track characters; a byte bound would hand a CJK or emoji author a quarter of
 the turn an ASCII author gets.
 """
 
+MAX_SEED_TRANSCRIPT_MESSAGES: int = 100
+"""How many predecessor turns a successor run may be seeded with.
+
+The operator setting that chooses the depth is capped by it and the dispatch
+carrying the seeded turns refuses more, so no configured depth can build a
+dispatch the worker rejects.
+"""
+
+MAX_TEAM_PRESET_CHARS: int = 64
+"""Longest team preset identity the run edge accepts and reports."""
+
+MAX_RUN_TITLE_CHARS: int = 200
+"""Longest run title the run edge accepts and reports."""
+
+MAX_FEEDBACK_BATCH_ID_CHARS: int = 256
+"""Longest feedback-batch identity a revision run carries.
+
+The id is opaque engine data the run only transports: the edge accepts it and
+the dispatch forwards it unchanged, so both admit the same length.
+"""
+
 MAX_REQUEST_ID_CHARS: int = 128
 """Longest interrupt request handle, for every party that correlates on one.
 
@@ -87,6 +122,13 @@ length: a truncated handle names a request that does not exist.
 
 MAX_TOOL_CALL_CHARS: int = 128
 """How much of a permission request's tool-call label the stream carries."""
+
+MAX_PERMISSION_OPTION_ID_CHARS: int = 64
+"""Longest permission option identity, for the frame and the answer alike.
+
+An answer names an option the permission frame advertised, so the frame carries
+option ids up to the length the answer admits.
+"""
 
 MAX_DISCOVERY_RESULTS: int = 100
 """The most runs one listing page returns.

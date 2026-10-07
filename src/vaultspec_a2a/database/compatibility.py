@@ -20,6 +20,7 @@ import asyncio
 import sqlite3
 from pathlib import Path
 
+from ..thread import RECEIPT_ID_MAX_LENGTH
 from .checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
     CheckpointSchemaError,
@@ -206,7 +207,7 @@ def _validate_write_authority(db_path: Path) -> None:
                     OR writer_generation < 1
                     OR writer_action_type NOT IN ({placeholders})
                     OR length(trim(writer_action_receipt_id)) < 1
-                    OR length(writer_action_receipt_id) > 64
+                    OR length(writer_action_receipt_id) > {RECEIPT_ID_MAX_LENGTH}
                  LIMIT 1""",
             WRITE_ACTION_TYPES,
         ).fetchone()

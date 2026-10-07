@@ -19,6 +19,7 @@ from ...providers.provider_catalog import (
     MAX_PROVIDER_LANES,
     MAX_PUBLIC_ID_LENGTH,
     MAX_TEXT_LENGTH,
+    PUBLIC_ID_PATTERN,
     AdmissionState,
     AuthenticationState,
     CatalogStatus,
@@ -32,15 +33,13 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-_NO_CONTROL_CHARACTERS = r"^[^\x00-\x1f\x7f]+$"
-
 PublicId = Annotated[
     str,
     StringConstraints(
         strip_whitespace=True,
         min_length=1,
         max_length=MAX_PUBLIC_ID_LENGTH,
-        pattern=_NO_CONTROL_CHARACTERS,
+        pattern=PUBLIC_ID_PATTERN,
     ),
 ]
 ControlId = Annotated[
@@ -49,7 +48,7 @@ ControlId = Annotated[
         strip_whitespace=True,
         min_length=1,
         max_length=MAX_CONTROL_ID_LENGTH,
-        pattern=_NO_CONTROL_CHARACTERS,
+        pattern=PUBLIC_ID_PATTERN,
     ),
 ]
 DisplayText = Annotated[

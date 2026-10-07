@@ -163,7 +163,7 @@ async def test_gate_interrupts_with_the_bounded_clarification_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_answers_resume_the_run_and_are_recorded_under_the_request_id() -> None:
+async def test_answers_resume_the_run_and_render_one_transcript_turn() -> None:
     graph = _clarify_graph(_CountingProducer(_request()))
     config = {"configurable": {"thread_id": "clarify-resume"}}
 
@@ -180,9 +180,6 @@ async def test_answers_resume_the_run_and_are_recorded_under_the_request_id() ->
     )
 
     assert resumed["next"] == "proceed"
-    assert resumed["clarification_answers"] == {
-        "clarify-1": {"scope": "right", "constraints": "must survive a reload"}
-    }
     expected = clarification_resolution_fingerprint(
         ClarificationAnswers(
             request_id="clarify-1",
@@ -193,8 +190,8 @@ async def test_answers_resume_the_run_and_are_recorded_under_the_request_id() ->
     # The questionnaire is answered, so a later status read must not re-offer it.
     assert resumed.get("clarification_request") is None
     assert resumed.get("clarification_request_id") is None
-    # The answered questionnaire is also one rendered human turn - the recorded
-    # state alone reaches no model turn, so the transcript carries the answers.
+    # The transcript is the only state a model turn reads, so it alone carries
+    # the answers, as one rendered human turn.
     assert resumed["messages"][-1].content == (
         "Answers to the clarification questionnaire:\n"
         "- Which surface should the monitor panel dock to?: right\n"
@@ -206,8 +203,8 @@ async def test_answers_resume_the_run_and_are_recorded_under_the_request_id() ->
 async def test_an_empty_effective_answer_map_appends_no_transcript_turn() -> None:
     """An all-optional questionnaire resolved empty leaves the transcript alone.
 
-    The resolution is still recorded (receipt and empty answer entry), but no
-    contentless human turn is put in front of downstream roles.
+    The resolution is still recorded (its receipt), but no contentless human turn
+    is put in front of downstream roles.
     """
     request = ClarificationRequest(
         request_id="clarify-1",
@@ -231,7 +228,6 @@ async def test_an_empty_effective_answer_map_appends_no_transcript_turn() -> Non
         config=config,
     )
 
-    assert resumed["clarification_answers"] == {"clarify-1": {}}
     assert resumed["clarification_resolution_receipts"] == {
         "clarify-1": clarification_resolution_fingerprint(resolution)
     }
@@ -261,25 +257,25 @@ async def test_continuation_records_a_receipt_without_copying_prompt_state() -> 
     assert [message.content for message in resumed["messages"]].count(
         resolution.prompt
     ) == 1
-    assert resumed.get("clarification_answers", {}) == {}
     assert (
         resolution.prompt not in resumed["clarification_resolution_receipts"].values()
     )
 
 
 @pytest.mark.asyncio
-async def test_decline_leaves_one_marker_and_records_no_answer() -> None:
+async def test_decline_leaves_one_marker_and_no_answer_turn() -> None:
     """Refusal resumes the run with the fixed marker as its only trace.
 
     The run advances through the same proceed target as an answered
     questionnaire, the pending request is cleared so a status read stops
     re-offering it, the receipt carries the decline's own fingerprint, and no
-    answer entry is fabricated - a declined question was not answered.
+    answer turn is fabricated - a declined question was not answered.
     """
     graph = _clarify_graph(_CountingProducer(_request()))
     config = {"configurable": {"thread_id": "clarify-decline"}}
 
-    await graph.ainvoke(_base_state(), config=config)
+    initial = _base_state()
+    await graph.ainvoke(initial, config=config)
     resolution = ClarificationDecline(request_id="clarify-1")
     resumed = await graph.ainvoke(
         Command(resume=resolution.as_resume_value()),
@@ -291,7 +287,7 @@ async def test_decline_leaves_one_marker_and_records_no_answer() -> None:
     assert [message.content for message in resumed["messages"]].count(
         CLARIFICATION_DECLINE_MARKER
     ) == 1
-    assert resumed.get("clarification_answers", {}) == {}
+    assert len(resumed["messages"]) == len(initial["messages"]) + 1
     assert resumed["clarification_resolution_receipts"] == {
         "clarify-1": clarification_resolution_fingerprint(resolution)
     }
@@ -423,7 +419,7 @@ async def test_answers_for_undeclared_questions_are_dropped() -> None:
 
     The verb validates at the boundary; this is the node's own guard for a resume
     that arrived by some other route. An entry naming a question nobody asked has
-    nowhere to be routed, so it is dropped rather than recorded.
+    nowhere to be routed, so it is dropped rather than rendered.
     """
     graph = _clarify_graph(_CountingProducer(_request()))
     config = {"configurable": {"thread_id": "clarify-undeclared"}}
@@ -440,7 +436,10 @@ async def test_answers_for_undeclared_questions_are_dropped() -> None:
         config=config,
     )
 
-    assert resumed["clarification_answers"] == {"clarify-1": {"scope": "right"}}
+    assert resumed["messages"][-1].content == (
+        "Answers to the clarification questionnaire:\n"
+        "- Which surface should the monitor panel dock to?: right"
+    )
 
 
 @pytest.mark.asyncio
@@ -459,8 +458,8 @@ async def test_producer_failure_is_not_swallowed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_second_questionnaire_does_not_erase_the_first_answers() -> None:
-    """Answers accumulate per request id across a multi-question run."""
+async def test_second_questionnaire_appends_its_own_turn_after_the_first() -> None:
+    """Each answered questionnaire leaves its own turn across a multi-question run."""
     first, second = _request("clarify-a"), _request("clarify-b")
 
     class _TwoShotProducer:
@@ -527,10 +526,12 @@ async def test_second_questionnaire_does_not_erase_the_first_answers() -> None:
         config=config,
     )
 
-    assert final["clarification_answers"] == {
-        "clarify-a": {"scope": "right"},
-        "clarify-b": {"scope": "left"},
-    }
+    assert [message.content for message in final["messages"][-2:]] == [
+        "Answers to the clarification questionnaire:\n"
+        "- Which surface should the monitor panel dock to?: right",
+        "Answers to the clarification questionnaire:\n"
+        "- Which surface should the monitor panel dock to?: left",
+    ]
     assert final["clarification_resolution_receipts"] == {
         "clarify-a": clarification_resolution_fingerprint(
             ClarificationAnswers(request_id="clarify-a", answers={"scope": "right"})
@@ -553,7 +554,8 @@ async def test_a_refused_answer_re_parks_and_the_next_one_still_resolves() -> No
     graph = _clarify_graph(_CountingProducer(_request()))
     config = {"configurable": {"thread_id": "clarify-refused"}}
 
-    await graph.ainvoke(_base_state(), config=config)
+    initial = _base_state()
+    await graph.ainvoke(initial, config=config)
 
     # An answer to a request this run never asked.
     reparked = await graph.ainvoke(
@@ -571,7 +573,7 @@ async def test_a_refused_answer_re_parks_and_the_next_one_still_resolves() -> No
 
     state = await graph.aget_state(config)
     assert state.values["clarification_request_id"] == "clarify-1"
-    assert not state.values.get("clarification_answers")
+    assert len(state.values["messages"]) == len(initial["messages"])
 
     resolved = await graph.ainvoke(
         Command(
@@ -584,5 +586,8 @@ async def test_a_refused_answer_re_parks_and_the_next_one_still_resolves() -> No
         config=config,
     )
     assert "__interrupt__" not in resolved
-    assert resolved["clarification_answers"] == {"clarify-1": {"scope": "right"}}
+    assert resolved["messages"][-1].content == (
+        "Answers to the clarification questionnaire:\n"
+        "- Which surface should the monitor panel dock to?: right"
+    )
     assert resolved["clarification_request_id"] is None

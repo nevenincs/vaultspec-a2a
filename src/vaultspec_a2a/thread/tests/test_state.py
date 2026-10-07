@@ -328,7 +328,6 @@ class TestTeamStateStructure:
             # mid-run clarification
             "clarification_request",
             "clarification_request_id",
-            "clarification_answers",
             "clarification_resolution_receipts",
             # workspace root path
             "workspace_root",

@@ -45,6 +45,8 @@ from .nodes._config_contract import accepting_runnable_config
 from .nodes._worker_permissions import recorded_permission_answers
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
 from .nodes.clarification import (
+    CLARIFICATION_GATE_NODE,
+    CLARIFICATION_REQUEST_NODE,
     ClarificationQuestionProducer,
     create_clarification_gate_node,
     create_clarification_request_node,
@@ -76,11 +78,6 @@ __all__ = [
     "_make_research_producer",
 ]
 
-# Structural node names for the document phase machine. Fixed rather than
-# agent-id-derived so the phase gates and inner review loops can reference their
-# targets deterministically.
-_RA_CLARIFY_REQUEST = "clarification_request"
-_RA_CLARIFY_GATE = "clarification_gate"
 # Correlation handle for a parked questionnaire, derived from the run itself so
 # it is stable across a replay and distinct between concurrent runs. The run id
 # already uses a subset of the permitted alphabet, so truncation cannot produce
@@ -153,6 +150,9 @@ def _declared_clarification_producer(
     return producer
 
 
+# Structural node names for the document phase machine. Fixed rather than
+# agent-id-derived so the phase gates and inner review loops can reference their
+# targets deterministically.
 _RA_DISPATCH = "research_dispatch"
 _RA_SYNTHESIS = "synthesis"
 _RA_RESEARCH_REVIEW = "research_review"
@@ -653,21 +653,21 @@ def _compile_research_adr(
     else:
         add_graph_node(
             builder,
-            _RA_CLARIFY_REQUEST,
+            CLARIFICATION_REQUEST_NODE,
             create_clarification_request_node(
                 clarification_producer,
-                gate_target=_RA_CLARIFY_GATE,
+                gate_target=CLARIFICATION_GATE_NODE,
                 proceed_target=_RA_DISPATCH,
             ),
-            destinations=(_RA_CLARIFY_GATE, _RA_DISPATCH),
+            destinations=(CLARIFICATION_GATE_NODE, _RA_DISPATCH),
         )
         add_graph_node(
             builder,
-            _RA_CLARIFY_GATE,
+            CLARIFICATION_GATE_NODE,
             create_clarification_gate_node(proceed_target=_RA_DISPATCH),
             destinations=(_RA_DISPATCH,),
         )
-        builder.add_edge(START, _RA_CLARIFY_REQUEST)
+        builder.add_edge(START, CLARIFICATION_REQUEST_NODE)
 
     builder.add_edge(_RA_SYNTHESIS, _RA_RESEARCH_REVIEW)
     builder.add_conditional_edges(

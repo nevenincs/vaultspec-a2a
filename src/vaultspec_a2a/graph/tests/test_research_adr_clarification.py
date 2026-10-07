@@ -219,10 +219,13 @@ async def test_answering_releases_the_run_into_the_diverge_stage(
         config=config,
     )
 
-    # The human's answer is durable state the rest of the run can read.
-    assert resumed["clarification_answers"] == {
-        request_id: {"scope": "both", "constraints": "keep it collapsible"}
-    }
+    # The human's answer reaches the rest of the run as one human turn in the
+    # transcript, which is the only state a model turn reads.
+    assert (
+        "Answers to the clarification questionnaire:\n"
+        "- Which surface should this cover?: both\n"
+        "- Any constraint the work must respect?: keep it collapsible"
+    ) in [message.content for message in resumed["messages"]]
     # And the pipeline genuinely continued: the fan-out produced its finding and
     # the run advanced to the first document gate.
     assert [f["source_thread"] for f in resumed["research_findings"]] == ["codebase"]

@@ -9,6 +9,9 @@ the worktrees directory) or in the main repository root.
 import os
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Final
+
+from ..control.env_registry import CREDENTIAL_ENV_NAMES, FOREIGN_PROVIDER_ENV_NAMES
 
 __all__ = [
     "resolve_env_vars",
@@ -16,6 +19,20 @@ __all__ = [
     "scrub_agent_environment",
     "scrub_infrastructure_environment",
 ]
+
+#: Test-runner markers of the SPAWNING process, not of the agent. They are set
+#: by pytest in this service's own process and would otherwise be inherited by
+#: every agent subprocess and ITS tool servers; env-sniffing children (the rag
+#: MCP server's own-test guard, for one) then misclassify a live agent run as
+#: running inside a test and refuse their real backends.
+_TEST_RUNNER_MARKERS: Final = frozenset({"PYTEST_CURRENT_TEST", "PYTEST_VERSION"})
+
+#: Every name a provider child never inherits: each credential a2a accepts,
+#: which the provider layer re-injects only for the lane it selected, each
+#: provider name a2a never accepts, and the spawning test runner's markers.
+_AGENT_SCRUB_NAMES: Final = (
+    CREDENTIAL_ENV_NAMES | FOREIGN_PROVIDER_ENV_NAMES | _TEST_RUNNER_MARKERS
+)
 
 
 def resolve_venv(workspace_path: Path) -> Path | None:
@@ -83,45 +100,6 @@ def scrub_infrastructure_environment(environment: Mapping[str, str]) -> dict[str
 
 def scrub_agent_environment(environment: Mapping[str, str]) -> dict[str, str]:
     """Remove infrastructure and ambient provider credentials before role additions."""
-    scrub_keys = frozenset(
-        {
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_BASE_URL",
-            "ZAI_AUTH_TOKEN",
-            "ZAI_API_KEY",
-            "ZAI_BASE_URL",
-            "ZAI_ANTHROPIC_BASE_URL",
-            "OPENAI_API_KEY",
-            "GEMINI_API_KEY",
-            "GOOGLE_API_KEY",
-            "AWS_SECRET_ACCESS_KEY",
-            "AZURE_OPENAI_API_KEY",
-            "ZHIPU_API_KEY",
-            "LANGCHAIN_API_KEY",
-            "LANGSMITH_API_KEY",
-            "LANGCHAIN_TRACING_V2",
-            "ANTHROPIC_LOG",
-            # Kimi Code's temporary-provider definition is an all-or-none unit.
-            # Scrub its current family and retired spellings so only the
-            # Settings-owned current definition can be re-injected by the factory.
-            "KIMI_API_KEY",
-            "KIMI_BASE_URL",
-            "KIMI_MODEL_API_KEY",
-            "KIMI_MODEL_BASE_URL",
-            "KIMI_MODEL_NAME",
-            "KIMI_MODEL_MAX_CONTEXT_SIZE",
-            "KIMI_MODEL_CAPABILITIES",
-            # Test-runner markers of the SPAWNING process, not of the agent.
-            # They are set by pytest in this service's own process and would
-            # otherwise be inherited by every agent subprocess and ITS tool
-            # servers; env-sniffing children (the rag MCP server's own-test
-            # guard, for one) then misclassify a live agent run as running
-            # inside a test and refuse their real backends.
-            "PYTEST_CURRENT_TEST",
-            "PYTEST_VERSION",
-        }
-    )
     claude_code_allowlist = frozenset(
         {
             "CLAUDE_CODE_EXECUTABLE",
@@ -133,7 +111,7 @@ def scrub_agent_environment(environment: Mapping[str, str]) -> dict[str, str]:
     env = {
         k: v
         for k, v in scrub_infrastructure_environment(environment).items()
-        if k.upper() not in scrub_keys
+        if k.upper() not in _AGENT_SCRUB_NAMES
         and not (
             k.upper().startswith("CLAUDE_CODE_")
             and k.upper() not in claude_code_allowlist

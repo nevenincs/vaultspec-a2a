@@ -126,8 +126,13 @@ async def _thread_uses_a_delta_channel(checkpointer: Any, thread_id: str) -> boo
     snapshot, and drops the count only when every delta channel snapshotted
     in that checkpoint. A snapshot holds the channel's whole accumulated value,
     so a head with no count needs nothing older and is pruned like any other.
+
+    A read that does not answer raises, so no history is pruned on a guess.
     """
-    latest = await checkpointer.aget_tuple({"configurable": {"thread_id": thread_id}})
+    # Deferred: the checkpoint module imports this one to prune through it.
+    from .checkpoints import read_latest_checkpoint
+
+    latest = (await read_latest_checkpoint(checkpointer, thread_id)).tuple_or_raise()
     if latest is None:
         return False
     metadata: Mapping[str, object] = latest.metadata or {}

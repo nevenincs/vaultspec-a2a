@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, overri
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
+from ..database import read_latest_checkpoint
 from ..domain_config import domain_config
 from ..graph._compiler_models import resolve_model_for_worker
 from ..graph.compiler import compile_team_graph
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.base import CheckpointTuple
     from langgraph.types import Command, Interrupt
 
     from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
@@ -562,10 +564,13 @@ class GraphLifecycleManager:
             else:
                 self._state.cache_key_compile_lock_users[cache_key] = users
 
-    async def _checkpoint_present(
+    async def _durable_checkpoint(
         self, thread_id: str, *, checkpoint_deadline: float | None
-    ) -> bool:
-        """Check that a bound resume has a durable checkpoint to resume."""
+    ) -> CheckpointTuple | None:
+        """Read the run's latest durable checkpoint within the dispatch deadline.
+
+        A timeout refuses the compilation; any other read failure propagates.
+        """
         timeout = self._checkpoint_read_timeout_seconds
         if checkpoint_deadline is not None:
             timeout = min(
@@ -573,37 +578,32 @@ class GraphLifecycleManager:
             )
         if timeout <= 0:
             raise GraphCompilationError("durable checkpoint read timed out")
+        checkpoint = await read_latest_checkpoint(
+            self._ports.checkpointer, thread_id, timeout=timeout
+        )
         try:
-            checkpoint_tuple = await asyncio.wait_for(
-                self._ports.checkpointer.aget_tuple(
-                    {"configurable": {"thread_id": thread_id}}
-                ),
-                timeout=timeout,
-            )
+            return checkpoint.tuple_or_raise()
         except TimeoutError as exc:
             raise GraphCompilationError("durable checkpoint read timed out") from exc
-        return checkpoint_tuple is not None
+
+    async def _checkpoint_present(
+        self, thread_id: str, *, checkpoint_deadline: float | None
+    ) -> bool:
+        """Check that a bound resume has a durable checkpoint to resume."""
+        return (
+            await self._durable_checkpoint(
+                thread_id, checkpoint_deadline=checkpoint_deadline
+            )
+            is not None
+        )
 
     async def _checkpoint_compilation_digests(
         self, thread_id: str, *, checkpoint_deadline: float | None
     ) -> tuple[str, str] | None:
         """Read and validate the current assignment binding from checkpoint state."""
-        timeout = self._checkpoint_read_timeout_seconds
-        if checkpoint_deadline is not None:
-            timeout = min(
-                timeout, checkpoint_deadline - asyncio.get_running_loop().time()
-            )
-        if timeout <= 0:
-            raise GraphCompilationError("durable checkpoint read timed out")
-        try:
-            checkpoint_tuple = await asyncio.wait_for(
-                self._ports.checkpointer.aget_tuple(
-                    {"configurable": {"thread_id": thread_id}}
-                ),
-                timeout=timeout,
-            )
-        except TimeoutError as exc:
-            raise GraphCompilationError("durable checkpoint read timed out") from exc
+        checkpoint_tuple = await self._durable_checkpoint(
+            thread_id, checkpoint_deadline=checkpoint_deadline
+        )
         if checkpoint_tuple is None:
             return None
         checkpoint = getattr(checkpoint_tuple, "checkpoint", None)

@@ -15,6 +15,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, cast
 
+from ..database import read_latest_checkpoint
 from ..domain_config import domain_config
 from ..graph.enums import StreamFrameKind
 from ..ipc.schemas import (
@@ -608,7 +609,9 @@ class StateProjector:
                 receipt, timeout_seconds=timeout_seconds
             )
         answered = tasks_past_their_interrupt(
-            await self._held_writes(snapshot.config, timeout_seconds=timeout_seconds)
+            await self._held_writes(
+                receipt.thread_id, snapshot.config, timeout_seconds=timeout_seconds
+            )
         )
         return _addressed_admission(_live_interrupts(snapshot, answered), resume_value)
 
@@ -647,7 +650,11 @@ class StateProjector:
         return snapshot
 
     async def _held_writes(
-        self, config: Mapping[str, object], *, timeout_seconds: float
+        self,
+        thread_id: str,
+        config: Mapping[str, object],
+        *,
+        timeout_seconds: float,
     ) -> tuple[object, ...]:
         """The writes the store holds against the checkpoint *config* names.
 
@@ -658,22 +665,22 @@ class StateProjector:
         reading, and the one that keeps disclosing a question rather than
         stranding an answer on a momentary store failure.
         """
-        try:
-            stored = await asyncio.wait_for(
-                self._checkpointer.aget_tuple(cast("Any", config)),
-                timeout=timeout_seconds,
-            )
-        except Exception:
+        stored = await read_latest_checkpoint(
+            self._checkpointer,
+            thread_id,
+            timeout=timeout_seconds,
+            checkpoint_id=_checkpoint_id(config),
+        )
+        if stored.unreadable:
             logger.warning(
                 "Checkpoint writes could not be read; every interrupt the "
                 "snapshot lists will be reported as still pending",
-                exc_info=True,
                 extra=self._log_extra_fn(action="held_writes_unavailable"),
             )
             return ()
-        if stored is None:
+        if stored.checkpoint_tuple is None:
             return ()
-        return tuple(cast("Any", stored.pending_writes) or ())
+        return tuple(cast("Any", stored.checkpoint_tuple.pending_writes) or ())
 
     async def _durable_resume_refusal(
         self,
@@ -766,6 +773,7 @@ class StateProjector:
             payload = self.normalize_execution_state(
                 state,
                 await self._held_writes(
+                    thread_id,
                     state.config,
                     timeout_seconds=domain_config.aget_state_timeout_seconds,
                 ),

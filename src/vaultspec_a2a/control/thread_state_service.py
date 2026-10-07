@@ -7,12 +7,10 @@ handler validates input and converts the result to a Pydantic wire model.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from langgraph.checkpoint.base import CheckpointTuple
 from pydantic import ValidationError
 
 from ..authoring.contract import is_document_authoring_role
@@ -34,7 +32,7 @@ from ..control.snapshot import (
     checkpoint_history_depth,
     enrich_snapshot_from_state,
 )
-from ..database import ThreadModel, get_thread
+from ..database import ThreadModel, get_thread, read_latest_checkpoint
 from ..domain_config import domain_config
 from ..graph.enums import SemanticPhase, research_adr_semantic_phase
 from ..team.team_config import load_agent_config, load_team_config
@@ -55,7 +53,7 @@ from ..utils.coercion import coerce_object_mapping, coerce_string_list
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.base import CheckpointTuple
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.checkpoints import Checkpointer
@@ -137,39 +135,6 @@ def _channel_values(checkpoint_tuple: CheckpointTuple) -> dict[str, object]:
     """Return the channel values of a checkpoint tuple, or an empty mapping."""
     channel_values: object = checkpoint_tuple.checkpoint.get("channel_values")
     return coerce_object_mapping(channel_values) or {}
-
-
-async def read_run_snapshot(
-    checkpointer: Checkpointer,
-    thread_id: str,
-    *,
-    timeout: float = 2.0,
-) -> CheckpointTuple | None:
-    """Read a run's checkpoint tuple once, or ``None`` when it is unreadable.
-
-    Every run-status field derives from one snapshot. Reading the checkpoint
-    per field let a run advance between reads, so a single response could carry
-    a status from one moment and a position from another - internally
-    inconsistent, and worse than a stale but coherent answer.
-
-    Non-raising, matching the derivations it feeds: a missing, timed-out, or
-    unreadable checkpoint yields ``None`` and each field degrades to its own
-    empty value.
-    """
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-    try:
-        checkpoint_tuple = await asyncio.wait_for(
-            checkpointer.aget_tuple(config), timeout=timeout
-        )
-        return (
-            checkpoint_tuple if isinstance(checkpoint_tuple, CheckpointTuple) else None
-        )
-    except TimeoutError:
-        logger.warning("Checkpoint read timed out: %s", thread_id)
-        return None
-    except Exception:
-        logger.warning("Checkpoint read failed: %s", thread_id, exc_info=True)
-        return None
 
 
 def derive_run_authoring_ids(
@@ -293,11 +258,9 @@ async def _read_projected_checkpoint(
     captured_tuple: CheckpointTuple | None = None
 
     try:
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-        checkpoint_tuple = await asyncio.wait_for(
-            checkpointer.aget_tuple(config),
-            timeout=10.0,
-        )
+        checkpoint_tuple = (
+            await read_latest_checkpoint(checkpointer, thread_id)
+        ).tuple_or_raise()
         if checkpoint_tuple is not None:
             checkpoint_present = True
             # Read off the tuple above, so there is no second listing to time
@@ -327,11 +290,6 @@ async def _read_projected_checkpoint(
             checkpoint_loaded = True
             captured_tuple = checkpoint_tuple
     except TimeoutError:
-        logger.warning(
-            "Timed out loading checkpoint for thread %s after 10s; "
-            "returning partial snapshot",
-            thread_id,
-        )
         checkpoint_error = True
         snapshot.snapshot_complete = False
         snapshot.degraded_reasons.append("checkpoint_timeout")

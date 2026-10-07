@@ -35,7 +35,12 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from ..database import inspect_sqlite_database, verify_wal_mode
+from ..database import (
+    CheckpointReadStatus,
+    inspect_sqlite_database,
+    read_latest_checkpoint,
+    verify_wal_mode,
+)
 from ..utils.coercion import coerce_object_mapping
 from ._worker_health import WorkerState, probe_worker_health, worker_liveness
 from .config import settings
@@ -758,27 +763,17 @@ async def _checkpoint_health_check(app_state: object) -> dict[str, str]:
         checkpoint_check["status"] = "error"
         checkpoint_check["detail"] = "checkpointer missing"
     else:
-        try:
-            await asyncio.wait_for(
-                checkpointer.aget_tuple(
-                    {
-                        "configurable": {
-                            "thread_id": "__health_probe__",
-                            "checkpoint_ns": "",
-                        }
-                    }
-                ),
-                timeout=SERVICE_HEALTH_DEADLINE_SECONDS,
-            )
-            checkpoint_check["status"] = "ok"
-        except TimeoutError:
-            logger.warning("Health check: checkpoint probe timed out")
+        probe = await read_latest_checkpoint(
+            checkpointer, "__health_probe__", timeout=SERVICE_HEALTH_DEADLINE_SECONDS
+        )
+        if probe.status is CheckpointReadStatus.TIMEOUT:
             checkpoint_check["status"] = "error"
             checkpoint_check["detail"] = "checkpoint probe timed out"
-        except Exception:
-            logger.exception("Health check: checkpoint probe failed")
+        elif probe.status is CheckpointReadStatus.ERROR:
             checkpoint_check["status"] = "error"
             checkpoint_check["detail"] = "checkpoint probe failed"
+        else:
+            checkpoint_check["status"] = "ok"
     return checkpoint_check
 
 

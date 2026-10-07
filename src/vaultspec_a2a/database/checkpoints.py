@@ -11,6 +11,8 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
@@ -23,39 +25,125 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Collection
     from concurrent.futures import Future as ConcurrentFuture
 
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.base import CheckpointTuple
     from langgraph.checkpoint.serde.base import SerializerProtocol
 
 from ..control.config import settings
 from ..domain_config import domain_config
+from ..utils.coercion import coerce_object_mapping
 from .checkpoint_retention import prune_settled_checkpoints, scalar
 from .checkpoint_schema import checkpoint_pragmas
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "CheckpointRead",
+    "CheckpointReadStatus",
     "Checkpointer",
     "concurrent_checkpointer",
     "open_checkpointer",
     "postgres_checkpoint_pool",
     "prune_settled_thread",
+    "read_latest_checkpoint",
     "setup_postgres_checkpointer",
     "surviving_transcript",
 ]
+
+
+class CheckpointReadStatus(StrEnum):
+    """What one bounded read of a thread's checkpoint found."""
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    TIMEOUT = "timeout"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class CheckpointRead:
+    """One bounded checkpoint read: the tuple, or why there is none.
+
+    ``ABSENT`` is a store that answered and holds nothing for the thread.
+    ``TIMEOUT`` and ``ERROR`` are a store that did not answer, which proves
+    nothing about the thread either way. ``error`` is set exactly for those
+    two, so a caller whose contract is to raise can raise what the store did.
+    """
+
+    status: CheckpointReadStatus
+    checkpoint_tuple: CheckpointTuple | None = None
+    error: Exception | None = None
+
+    @property
+    def unreadable(self) -> bool:
+        """Whether the store failed to answer, as opposed to holding nothing."""
+        return self.status in {CheckpointReadStatus.TIMEOUT, CheckpointReadStatus.ERROR}
+
+    @property
+    def channel_values(self) -> dict[str, object]:
+        """The checkpoint's channel values, or an empty mapping without any.
+
+        Durable storage is untrusted despite the saver's declared types, so a
+        checkpoint or channel map that is not a plain dict reads as empty.
+        """
+        checkpoint = coerce_object_mapping(
+            getattr(self.checkpoint_tuple, "checkpoint", None)
+        )
+        if checkpoint is None:
+            return {}
+        return coerce_object_mapping(checkpoint.get("channel_values")) or {}
+
+    def tuple_or_raise(self) -> CheckpointTuple | None:
+        """Return the tuple, ``None`` when absent, or raise the read's failure."""
+        if self.error is not None:
+            raise self.error
+        return self.checkpoint_tuple
+
+
+async def read_latest_checkpoint(
+    checkpointer: Checkpointer,
+    thread_id: str,
+    *,
+    timeout: float | None = None,
+    checkpoint_id: str | None = None,
+) -> CheckpointRead:
+    """Read a thread's latest checkpoint tuple once, bounded by *timeout*.
+
+    Non-raising: a timed-out or failed read is an outcome, logged here, so
+    each caller decides what an unanswered store means for it. Cancellation
+    still propagates. *timeout* defaults to
+    ``domain_config.aget_state_timeout_seconds``, read per call so an operator
+    bound applies to every reader alike. *checkpoint_id* reads that checkpoint
+    of the thread instead of its latest.
+    """
+    configurable: dict[str, Any] = {"thread_id": thread_id}
+    if checkpoint_id is not None:
+        configurable["checkpoint_id"] = checkpoint_id
+    config: RunnableConfig = {"configurable": configurable}
+    bound = domain_config.aget_state_timeout_seconds if timeout is None else timeout
+    try:
+        checkpoint_tuple = await asyncio.wait_for(
+            checkpointer.aget_tuple(config), timeout=bound
+        )
+    except TimeoutError as exc:
+        logger.warning("Checkpoint read timed out for thread %s", thread_id)
+        return CheckpointRead(CheckpointReadStatus.TIMEOUT, error=exc)
+    except Exception as exc:
+        logger.warning("Checkpoint read failed for thread %s", thread_id, exc_info=True)
+        return CheckpointRead(CheckpointReadStatus.ERROR, error=exc)
+    if checkpoint_tuple is None:
+        return CheckpointRead(CheckpointReadStatus.ABSENT)
+    return CheckpointRead(CheckpointReadStatus.PRESENT, checkpoint_tuple)
 
 
 async def surviving_transcript(
     checkpointer: Checkpointer, thread_id: str, depth: int
 ) -> list[HumanMessage | AIMessage] | None:
     """Read a settled run's retained final conversation from its checkpoint."""
-    checkpoint = await checkpointer.aget_tuple(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-    )
-    if checkpoint is None:
+    checkpoint = await read_latest_checkpoint(checkpointer, thread_id)
+    if checkpoint.tuple_or_raise() is None:
         return None
-    raw_values = cast("object", checkpoint.checkpoint.get("channel_values"))
-    if not isinstance(raw_values, dict):
-        return None
-    values = cast("dict[str, object]", raw_values)
+    values = checkpoint.channel_values
     raw_messages: object = values.get("messages")
     if not isinstance(raw_messages, list):
         return None

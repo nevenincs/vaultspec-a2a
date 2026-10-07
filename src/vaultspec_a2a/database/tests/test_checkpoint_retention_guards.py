@@ -13,7 +13,6 @@ deletes succeed and the damage shows up on the next read.
 from __future__ import annotations
 
 import operator
-import sqlite3
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast, override
 from uuid import uuid4
 
@@ -217,33 +216,3 @@ async def test_a_saver_that_prunes_itself_is_asked_to(
     assert calls == [([thread_id], "keep_latest")]
     assert await stored_history(saver, thread_id) == before
     assert type(saver).aprune is not cast("object", BaseCheckpointSaver.aprune)
-
-
-@pytest.mark.asyncio
-async def test_a_sqlite_prune_still_rolls_back_a_failure(
-    checkpointer: AsyncSqliteSaver,
-) -> None:
-    """The guards must not have moved the rollback off the failure path.
-
-    The saver shares one connection, so deletes a failed prune leaves open are
-    committed by its next write.
-    """
-    graph = _one_step_graph(checkpointer, _Log)
-    thread_id = f"refused-{uuid4()}"
-    await graph.ainvoke(
-        cast("Any", {"log": ["one"]}), cast("Any", config_for(thread_id))
-    )
-    before = await stored_history(checkpointer, thread_id)
-    await checkpointer.conn.execute(
-        "CREATE TRIGGER refuse_prune BEFORE DELETE ON checkpoints "
-        "BEGIN SELECT RAISE(ABORT, 'prune refused'); END"
-    )
-    await checkpointer.conn.commit()
-
-    with pytest.raises(sqlite3.DatabaseError, match="prune refused"):
-        await prune_settled_checkpoints(checkpointer, thread_id)
-
-    await checkpointer.conn.execute("DROP TRIGGER refuse_prune")
-    await graph.ainvoke(cast("Any", {"log": ["two"]}), cast("Any", config_for("other")))
-
-    assert await stored_history(checkpointer, thread_id) == before

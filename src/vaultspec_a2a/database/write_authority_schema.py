@@ -21,7 +21,6 @@ __all__ = [
     "WRITE_AUTHORITY_RECEIPT_INDEX_COLUMNS",
     "WRITE_AUTHORITY_VIOLATION_PREDICATE",
     "named_checks_match",
-    "normalize_schema_expression",
     "receipt_id_bounded",
     "write_authority_checks_match",
     "write_authority_receipt_index_matches",

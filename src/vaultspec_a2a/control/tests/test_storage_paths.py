@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import ValidationError
 
 from ...control.config import Settings
 from ...desktop.profile import derive_state_paths
@@ -171,49 +170,12 @@ def test_an_absolute_posix_path_is_accepted_on_any_host(tmp_path: Path) -> None:
     assert settings.a2a_home == Path("/app/state")
 
 
-def test_server_and_in_memory_urls_are_left_alone(tmp_path: Path) -> None:
-    url = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/vaultspec"
-    with _project(
-        tmp_path / "project",
-        VAULTSPEC_A2A_DATABASE_URL=url,
-        VAULTSPEC_A2A_DATABASE_BACKEND="postgres",
-        VAULTSPEC_A2A_CHECKPOINT_BACKEND="postgres",
-    ):
-        assert build_settings(env_file=None).database_url == url
-
+def test_an_in_memory_url_is_left_alone(tmp_path: Path) -> None:
     with _project(
         tmp_path / "project",
         VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///:memory:",
     ):
         assert build_settings(env_file=None).database_path == Path(":memory:")
-
-
-def test_backend_and_url_disagreement_is_refused_at_construction(
-    tmp_path: Path,
-) -> None:
-    """The synchronous admin engines have no other seam to catch this."""
-    with (
-        _project(
-            tmp_path / "project",
-            VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:////app/data/vaultspec.db",
-            VAULTSPEC_A2A_DATABASE_BACKEND="postgres",
-        ),
-        pytest.raises(ValidationError, match="VAULTSPEC_A2A_DATABASE_BACKEND=postgres"),
-    ):
-        build_settings(env_file=None)
-
-
-def test_a_postgres_checkpoint_backend_over_a_sqlite_default_is_refused(
-    tmp_path: Path,
-) -> None:
-    """The defaulted checkpoint store is held to the same agreement."""
-    with (
-        _project(tmp_path / "project", VAULTSPEC_A2A_CHECKPOINT_BACKEND="postgres"),
-        pytest.raises(
-            ValidationError, match="VAULTSPEC_A2A_CHECKPOINT_BACKEND=postgres"
-        ),
-    ):
-        build_settings(env_file=None)
 
 
 def test_an_armed_desktop_profile_seats_everything_under_its_home(

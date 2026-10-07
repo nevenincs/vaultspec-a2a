@@ -65,8 +65,6 @@ _DOCUMENTED_ELSEWHERE = {
     # Substituted by the development fixture Compose file, not the service.
     "JAEGER_OTLP_PORT": "development fixture docker compose",
     "JAEGER_UI_PORT": "development fixture docker compose",
-    # Named in the port table as the place a Postgres port is embedded.
-    "DATABASE_URL": "port table prose",
 }
 
 _NAME = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")

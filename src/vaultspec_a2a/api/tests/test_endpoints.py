@@ -780,8 +780,6 @@ class TestHealth:
         app.state.sqlite_fallback_diagnostics = {
             "active": True,
             "busy_timeout_ms": 5000,
-            "production_certifying": False,
-            "limitations": ["sqlite_fallback_not_production_certifying"],
             "database": {"path": "test.db", "wal_enabled": True, "journal_mode": "wal"},
         }
 

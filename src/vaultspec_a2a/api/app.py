@@ -320,15 +320,9 @@ async def _initialize_gateway_database(app: FastAPI, *, armed: bool) -> AsyncEng
             checkpoint_path=settings.checkpoint_path,
         )
         await seat_sqlite_posture(engine)
-        logger.info(
-            "Desktop database schema validated (no migration performed, %s)",
-            settings.resolved_database_backend,
-        )
+        logger.info("Desktop database schema validated (no migration performed)")
     else:
-        logger.info(
-            "Database initialised (%s, migrations applied)",
-            settings.resolved_database_backend,
-        )
+        logger.info("Database initialised (migrations applied)")
     app.state.sqlite_fallback_diagnostics = build_sqlite_fallback_diagnostics()
     return engine
 
@@ -781,7 +775,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     5. httpx.AsyncClient for worker dispatch
     """
     logger.info("Starting gateway lifespan")
-    settings.validate_postgres_requirement()
     # A lane plugin this process cannot honour refuses the gateway here, at
     # startup, rather than at the first catalog read that resolves the lanes.
     registered_lanes()
@@ -795,10 +788,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # context, so the shutdown below waits for this app's own prunes while
         # the checkpointer they hold is still open.
         app.state.checkpoint_prunes = CheckpointPruneRegistry()
-        logger.info(
-            "LangGraph checkpointer initialised (%s)",
-            settings.resolved_checkpoint_backend,
-        )
+        logger.info("LangGraph checkpointer initialised")
 
         await _reconcile_gateway_startup(app, checkpointer)
 
@@ -963,10 +953,6 @@ def create_app(lifespan: Any | None = None) -> FastAPI:
             # The ungated health endpoint reports the live pid so a
             # lifecycle caller can confirm the discovery record's owner is alive.
             "pid": os.getpid(),
-            "production_certifying": (
-                settings.resolved_database_backend == "postgres"
-                and settings.resolved_checkpoint_backend == "postgres"
-            ),
         }
 
     return app

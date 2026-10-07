@@ -63,9 +63,9 @@ _SECRET = "s3cr3t-db-password"
 @pytest.mark.parametrize(
     "supplied",
     [
-        f"postgresql+asyncpg://postgres:{_SECRET}@db.example:5432/vaultspec",
-        f"postgresql+asyncpg://postgres@db.example:5432/vaultspec?password={_SECRET}",
-        f"postgresql+asyncpg://postgres@db.example/vaultspec?sslpassword={_SECRET}",
+        f"mysql+aiomysql://dbuser:{_SECRET}@db.example:3306/vaultspec",
+        f"mysql+aiomysql://dbuser@db.example:3306/vaultspec?password={_SECRET}",
+        f"mysql+aiomysql://dbuser@db.example/vaultspec?sslpassword={_SECRET}",
     ],
     ids=["userinfo", "query-password", "query-sslpassword"],
 )

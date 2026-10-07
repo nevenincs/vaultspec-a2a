@@ -15,7 +15,7 @@ from ..runtime_identity_repository import (
     record_provider_runtime_identity,
 )
 from ..thread_repository import create_thread
-from ._backends import downgrade, empty_database_url, synchronous_url, upgrade
+from ._migration_target import downgrade, empty_database_url, synchronous_url, upgrade
 
 if TYPE_CHECKING:
     from pathlib import Path

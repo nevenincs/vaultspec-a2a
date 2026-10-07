@@ -10,6 +10,7 @@ instances must not leave permanent orphans under the runtime dir.
 from __future__ import annotations
 
 import http.server
+import os
 import sys
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
@@ -67,10 +68,15 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
         still_up_log = worker_stderr_log_path(still_up_port)
         still_up_log.write_text("stale orphan output\n", encoding="utf-8")
 
+        # The stand-in occupant is a listener in THIS process, so naming this
+        # process as the ownership root is what the eviction gate needs to admit
+        # the request at all; provenance refusal is pinned in the provenance
+        # tests, and what this one is about is the log the eviction leaves.
         freed = await evict_stale_worker(
             f"http://127.0.0.1:{still_up_port}",
             still_up_port,
             internal_token=None,
+            owner_pid=os.getpid(),
             timeout=0.5,
         )
         assert freed is False
@@ -88,6 +94,7 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
             f"http://127.0.0.1:{torn_down_port}",
             torn_down_port,
             internal_token=None,
+            owner_pid=os.getpid(),
             timeout=1.0,
         )
         assert freed is True

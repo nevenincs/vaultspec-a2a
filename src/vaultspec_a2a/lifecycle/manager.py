@@ -28,8 +28,8 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 from ..utils import bearer_header
 from ..utils._process_tree import (
-    ListenerOwnership,
-    classify_listener_ownership,
+    PortClaim,
+    classify_port_claim,
     detached_spawn_kwargs,
     kill_pid_tree_async,
     pid_is_live,
@@ -743,19 +743,16 @@ def _listener_ready(
 
     Does not accept a bound port until the listener is confirmed to be held by the
     child or a descendant of it
-    (:func:`~vaultspec_a2a.utils._process_tree.classify_listener_ownership`). A
-    foreign holder of the port - an un-reaped orphan of a felled generation, or a
-    racer on a fixed resume/rerun port - therefore never reads as our process
-    being ready.
+    (:func:`~vaultspec_a2a.utils._process_tree.classify_port_claim`). A foreign
+    holder of the port - an un-reaped orphan of a felled generation, or a racer on
+    a fixed resume/rerun port - therefore never reads as our process being ready.
     """
-    if not port_has_listener(port, timeout=_PORT_PROBE_TIMEOUT_SECONDS):
-        return False
-    ownership = classify_listener_ownership(port, process.pid)
-    if ownership is ListenerOwnership.CONFIRMED:
+    claim = classify_port_claim(port, process.pid, timeout=_PORT_PROBE_TIMEOUT_SECONDS)
+    if claim is PortClaim.OURS:
         if health_probe is None:
             return True
         return health_probe(max(deadline - time.monotonic(), 0.001))
-    if ownership is ListenerOwnership.UNRESOLVED:
+    if claim is PortClaim.UNRESOLVED:
         if health_probe is None:
             # Generic roles remain listener-only. Failing a legitimate boot
             # because a pid could not be read would change their settled
@@ -782,7 +779,7 @@ def _await_listener(
 
     Returns ``False`` if the spawned child dies first, and does not accept a bound
     port until the listener is confirmed to be held by the child or a descendant of
-    it (:func:`~vaultspec_a2a.utils._process_tree.classify_listener_ownership`). A
+    it (:func:`~vaultspec_a2a.utils._process_tree.classify_port_claim`). A
     foreign holder of the port - an un-reaped orphan of a felled generation, or a
     racer on a fixed resume/rerun port - therefore never reads as our process
     being ready, so a record is not published pointing at a listener we do not

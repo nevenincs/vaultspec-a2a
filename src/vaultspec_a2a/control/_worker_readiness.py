@@ -7,7 +7,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..utils._process_tree import port_has_listener_async
 from ..utils.async_cleanup import complete_cleanup
 from ._worker_health import (
     build_worker_restart_detail,
@@ -119,15 +118,18 @@ async def _await_worker_ready_inner(
             await _reap_unready_worker(process, containment)
             return None
 
-        # Ready only when OUR worker answers: the port being open and healthy is not
-        # enough when a foreign orphan can squat a shared band port, so readiness
-        # requires the responding worker to declare THIS gateway as its target.
-        if await port_has_listener_async(
-            worker_port, timeout=0.5
-        ) and await worker_ready_and_ours(
+        # Ready only when OUR worker answers: the port being open and healthy is
+        # not enough when a foreign orphan can squat a shared band port, so
+        # readiness requires the listener to sit inside the tree of the process
+        # we just spawned - the narrowest root that can be ours - before the
+        # credentialed probe is sent at all, and then requires the responding
+        # worker to declare THIS gateway as its target.
+        if await worker_ready_and_ours(
             worker_url,
+            worker_port,
             current_generation=generation,
             internal_token=spec.internal_token,
+            owner_pid=process.pid,
         ):
             elapsed = asyncio.get_event_loop().time() - started
             logger.info(

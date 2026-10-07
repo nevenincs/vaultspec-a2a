@@ -23,14 +23,23 @@ from ...control.infra_config import INTERNAL_TOKEN_ENV
 from ...control.worker_management import LazyWorkerSpawner
 from ...testing import JsonReplyHandler, inherited_environment, serve_handler
 from ...utils import bearer_header
+from ...utils._process_tree import port_has_listener
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
 
-# The IPC secret the gateway under test presents when it evicts a foreign worker.
+# The IPC secret the gateway under test holds while it inspects a worker port.
 _EVICTION_TOKEN = "foreign-eviction-token"
+
+
+class _ReceivedRequest(TypedDict):
+    """One request the loopback occupant actually received."""
+
+    method: str
+    path: str
+    authorization: str | None
 
 
 class _ShutdownObservation(TypedDict):
@@ -41,15 +50,27 @@ class _ShutdownObservation(TypedDict):
 def _make_handler(
     body: dict[str, object] | None,
     shutdown_log: _ShutdownObservation,
+    received: list[_ReceivedRequest],
 ) -> type[http.server.BaseHTTPRequestHandler]:
     class _Handler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
+        def _record(self, method: str) -> None:
+            received.append(
+                {
+                    "method": method,
+                    "path": self.path,
+                    "authorization": self.headers.get("Authorization"),
+                }
+            )
+
         def do_GET(self) -> None:
+            self._record("GET")
             if self.path != "/health" or body is None:
                 self._reply_empty(404)
                 return
             self._reply(200, body)
 
         def do_POST(self) -> None:
+            self._record("POST")
             if self.path != "/admin/shutdown":
                 self._reply_empty(404)
                 return
@@ -64,9 +85,24 @@ def _make_handler(
 def _worker_like(
     body: dict[str, object] | None,
 ) -> Generator[tuple[str, int, _ShutdownObservation]]:
+    with _observed_worker_like(body) as (url, port, shutdown_log, _received):
+        yield url, port, shutdown_log
+
+
+@contextmanager
+def _observed_worker_like(
+    body: dict[str, object] | None,
+) -> Generator[tuple[str, int, _ShutdownObservation, list[_ReceivedRequest]]]:
+    """A real loopback occupant that records EVERY request it receives.
+
+    The request log is the evidence a credential-withholding assertion needs: a
+    probe the gateway never sent and a probe it sent without the bearer are
+    different facts, and only the full log tells them apart.
+    """
     shutdown_log: _ShutdownObservation = {"called": False, "authorization": None}
-    with serve_handler(_make_handler(body, shutdown_log)) as port:
-        yield f"http://127.0.0.1:{port}", port, shutdown_log
+    received: list[_ReceivedRequest] = []
+    with serve_handler(_make_handler(body, shutdown_log, received)) as port:
+        yield f"http://127.0.0.1:{port}", port, shutdown_log, received
 
 
 @pytest.mark.asyncio
@@ -171,19 +207,22 @@ async def test_ensure_worker_refuses_an_unreachable_worker_without_auto_spawn() 
 
 
 @pytest.mark.asyncio
-async def test_auto_spawn_refuses_retained_foreign_worker() -> None:
-    """A failed foreign-worker eviction stays unpaired instead of competing.
+async def test_an_unarmed_auto_spawn_gateway_never_evicts_a_foreign_worker() -> None:
+    """A foreign-targeted occupant is a conflict, not something to terminate.
 
-    The loopback worker accepts the gateway's normal authenticated shutdown
-    request but deliberately retains the port, reproducing the no-competitor
-    boundary through the public auto-spawn request.
+    The occupant here is a listener in THIS process, so the ownership gate reads
+    it as ours and the credentialed health probe is legitimate - which is the
+    point: what must not happen is the eviction. An unarmed gateway has no
+    authority to terminate another process on the worker port, so it refuses the
+    spawn and leaves the occupant running for whoever owns it (the dev-process
+    registry reaps a stale orphan).
     """
     body: dict[str, object] = {
         "status": "ok",
         "service": "worker",
         "gateway_url": "http://127.0.0.1:59999",
     }
-    with _worker_like(body) as (url, port, log):
+    with _observed_worker_like(body) as (url, port, log, received):
         spawner = LazyWorkerSpawner(
             worker_url=url,
             worker_port=port,
@@ -191,40 +230,41 @@ async def test_auto_spawn_refuses_retained_foreign_worker() -> None:
             internal_token=_EVICTION_TOKEN,
         )
         await spawner.ensure_worker()
+        sent_by_the_gateway = list(received)
         still_healthy = await probe_worker_health(url)
-    assert log == {
-        "called": True,
-        "authorization": bearer_header(_EVICTION_TOKEN)["Authorization"],
+    assert log == {"called": False, "authorization": None}
+    # The occupant is this process's own listener, so every probe it did receive
+    # legitimately carried the bearer; none of them reached /admin/shutdown.
+    assert {request["path"] for request in sent_by_the_gateway} == {"/health"}
+    assert {request["authorization"] for request in sent_by_the_gateway} == {
+        bearer_header(_EVICTION_TOKEN)["Authorization"]
     }
     assert still_healthy == WorkerHealthProbe(healthy=True, body=body)
     assert spawner.spawned is False
     assert spawner.process is None
 
 
-@pytest.mark.parametrize(
-    ("internal_token", "expected_authorization"),
-    [(None, None), ("evict-secret", "Bearer evict-secret")],
-)
-def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
+def test_subprocess_auto_spawn_withholds_every_credential_from_a_foreign_tree(
     tmp_path: Path,
-    internal_token: str | None,
-    expected_authorization: str | None,
 ) -> None:
-    """A fresh gateway process presents precisely its configured IPC credential.
+    """A gateway sends nothing at all to a worker port its own tree does not hold.
 
-    The parent owns the foreign worker's real loopback port. The child only uses
-    public worker-management APIs, attempts automatic foreign-worker eviction,
-    and proves that the retained foreign process was not adopted.
+    The parent owns the occupant's real loopback listener; the gateway under test
+    is a separate child process, so the listener sits outside that gateway's
+    process tree exactly as a squatter or another stack's worker would. Ownership
+    cannot be confirmed, so the port is a conflict: no credentialed probe, no
+    adoption, no eviction - the occupant receives no request whatsoever, and the
+    gateway refuses to spawn onto the held port.
     """
     body: dict[str, object] = {
         "status": "ok",
         "service": "worker",
         "gateway_url": "http://127.0.0.1:59999",
     }
-    with _worker_like(body) as (url, port, observer):
+    with _observed_worker_like(body) as (url, port, observer, received):
         child_environment = inherited_environment(
             {
-                INTERNAL_TOKEN_ENV: internal_token,
+                INTERNAL_TOKEN_ENV: "evict-secret",
                 "VAULTSPEC_A2A_ENVIRONMENT": "development",
             }
         )
@@ -232,23 +272,13 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
             f"""
             import asyncio
 
-            from vaultspec_a2a.control._worker_health import (
-                WorkerHealthProbe,
-                probe_worker_health,
-            )
             from vaultspec_a2a.control.config import settings
             from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 
 
             async def main() -> None:
-                worker_url = {url!r}
-                worker_body = {{
-                    "status": "ok",
-                    "service": "worker",
-                    "gateway_url": "http://127.0.0.1:59999",
-                }}
                 spawner = LazyWorkerSpawner(
-                    worker_url=worker_url,
+                    worker_url={url!r},
                     worker_port={port},
                     auto_spawn=True,
                     internal_token=settings.internal_token,
@@ -256,10 +286,6 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
                 await spawner.ensure_worker()
                 assert spawner.spawned is False
                 assert spawner.process is None
-                assert await probe_worker_health(worker_url) == WorkerHealthProbe(
-                    healthy=True,
-                    body=worker_body,
-                )
                 print("WORKER_PROVENANCE_SUBPROCESS_OK")
 
 
@@ -275,9 +301,12 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
             text=True,
             timeout=30,
         )
+        seen_by_the_occupant = list(received)
+        # Survival is read from the socket, not over HTTP, so confirming it
+        # cannot itself add a request to the log under assertion.
+        survived = port_has_listener(port, timeout=1.0)
     assert child.returncode == 0, child.stderr
     assert child.stdout == "WORKER_PROVENANCE_SUBPROCESS_OK\n"
-    assert observer == {
-        "called": True,
-        "authorization": expected_authorization,
-    }
+    assert observer == {"called": False, "authorization": None}
+    assert seen_by_the_occupant == []
+    assert survived is True

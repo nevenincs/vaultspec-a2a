@@ -36,6 +36,7 @@ from ._worker_health import (
     probe_worker_health,
     shared_worker_port_clear,
     sweep_orphan_worker_logs,
+    worker_credential_authorized,
     worker_liveness,
     worker_ready_and_ours,
     worker_stderr_log_path,
@@ -106,13 +107,21 @@ async def _spawn_worker(
     # never an adoption), and a FOREIGN or UNIDENTIFIED occupant refuses the
     # spawn loudly with no eviction - it may be serving someone else's runs,
     # and silence is not evidence of ownership.
+    # Pre-spawn the ownership root is this gateway process: a generation it still
+    # owns is one of its descendants, and anything else on the port is not ours
+    # to credential, adopt, or evict.
+    owner_pid = os.getpid()
     if settings.desktop_profile_armed:
         if not await desktop_worker_port_clear(
-            worker_url, worker_port, generation, internal_token=internal_token
+            worker_url,
+            worker_port,
+            generation,
+            internal_token=internal_token,
+            owner_pid=owner_pid,
         ):
             return None
     elif not await shared_worker_port_clear(
-        worker_url, worker_port, internal_token=internal_token
+        worker_url, worker_port, internal_token=internal_token, owner_pid=owner_pid
     ):
         return None
 
@@ -348,8 +357,10 @@ class LazyWorkerSpawner:
                 # auto-spawn is a misconfiguration and fails closed.
                 self._process_state.spawned = await worker_ready_and_ours(
                     self._config.url,
+                    self._config.port,
                     current_generation=self._synchronization.generation,
                     internal_token=self._config.internal_token,
+                    owner_pid=self.owner_pid,
                 )
                 if not self._process_state.spawned:
                     logger.warning(
@@ -382,8 +393,10 @@ class LazyWorkerSpawner:
             self._process_state.spawned = owned is not None or (
                 await worker_ready_and_ours(
                     self._config.url,
+                    self._config.port,
                     current_generation=self._synchronization.generation,
                     internal_token=self._config.internal_token,
+                    owner_pid=self.owner_pid,
                 )
             )
             if self._process_state.spawned:
@@ -418,6 +431,25 @@ class LazyWorkerSpawner:
     def internal_token(self) -> str | None:
         """The worker-IPC secret this spawner presents, or ``None`` when unset."""
         return self._config.internal_token
+
+    @property
+    def owner_pid(self) -> int | None:
+        """The pid whose tree must hold the worker listener before any credential.
+
+        The spawned worker itself while this gateway holds its handle, which is
+        the narrowest tree that can be ours; this gateway process otherwise,
+        because every worker it spawns or adopts is started as its own child, so
+        a surviving generation is still one of its descendants.
+
+        ``None`` for an externally managed worker (``auto_spawn_worker=False``):
+        the operator points this gateway at a process it never spawned, so
+        ancestry proves nothing about it and the credential rests on that
+        configuration instead of on a verdict this gateway can reach.
+        """
+        if not self._config.auto_spawn:
+            return None
+        process = self._process_state.process
+        return process.pid if process is not None else os.getpid()
 
     def next_generation(self) -> int:
         """Advance and return the spawn generation for a replacement worker.
@@ -612,7 +644,19 @@ class WorkerWatchdog:
         return proc is not None and proc.poll() is not None
 
     async def _probe_worker_ready(self) -> bool:
-        """Probe the worker HTTP health endpoint for status promotion checks."""
+        """Probe the worker HTTP health endpoint for status promotion checks.
+
+        Runs every tick, so it is also the path a squatter would be credentialed
+        on repeatedly once our worker died and something else took the port. The
+        ownership gate therefore leads the probe; an occupant this gateway cannot
+        confirm reads as not ready, which is the same verdict a dead port gives.
+        """
+        if not await worker_credential_authorized(
+            self._spawner.worker_port,
+            owner_pid=self._spawner.owner_pid,
+            action="a watchdog health probe",
+        ):
+            return False
         probe = await probe_worker_health(
             self._spawner.worker_url, internal_token=self._spawner.internal_token
         )
@@ -847,8 +891,10 @@ class WorkerWatchdog:
             # worker.
             if await worker_ready_and_ours(
                 self._spawner.worker_url,
+                self._spawner.worker_port,
                 current_generation=self._spawner.generation,
                 internal_token=self._spawner.internal_token,
+                owner_pid=self._spawner.owner_pid,
             ):
                 self._spawner.adopt_worker()
                 return True, attempt + 1

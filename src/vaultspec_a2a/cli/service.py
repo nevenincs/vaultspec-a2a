@@ -49,7 +49,12 @@ from ..lifecycle.discovery import (
     read_resident_service,
 )
 from ..lifecycle.manager import spawn, tree_kill
-from ..utils._process_tree import pid_is_live, wait_pid_gone
+from ..utils._process_tree import (
+    PortClaim,
+    classify_port_claim,
+    pid_is_live,
+    wait_pid_gone,
+)
 from ..utils.runtime_exec import self_command
 
 if TYPE_CHECKING:
@@ -72,6 +77,7 @@ _READY_TIMEOUT_SECONDS = 30.0
 _STOP_TIMEOUT_SECONDS = 20.0
 _SHUTDOWN_REQUEST_TIMEOUT_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.2
+_PORT_PROBE_TIMEOUT_SECONDS = 1.0
 
 
 class ServiceVerbError(RuntimeError):
@@ -249,6 +255,33 @@ def _lifecycle_capability(app_home: Path) -> str | None:
         return None
 
 
+def _drain_owned_resident(
+    home: Path, base_url: str, pid: int, *, timeout: float
+) -> bool:
+    """Ask the confirmed resident to drain; whether it then exited in *timeout*.
+
+    Presents the attach bearer and, when this home carries one, the
+    receipt-bound lifecycle capability. Reached only after the recorded process
+    is confirmed to own the listener, so neither credential can land on a
+    stranger.
+    """
+    headers = dict(gateway_auth_headers(base_url))
+    capability = _lifecycle_capability(home)
+    if capability is not None:
+        from ..api.dependencies import LIFECYCLE_CAPABILITY_HEADER
+
+        headers[LIFECYCLE_CAPABILITY_HEADER] = capability
+    try:
+        response = httpx.post(
+            f"{base_url}/admin/shutdown",
+            headers=headers,
+            timeout=_SHUTDOWN_REQUEST_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 202 and wait_pid_gone(pid, timeout=timeout)
+
+
 def stop_service(
     app_home: Path | None = None,
     *,
@@ -257,38 +290,44 @@ def stop_service(
     """Stop the resident gateway: authenticated drain first, tree kill fallback.
 
     Idempotent: no record or a dead pid reports the stopped state without
-    failing. A live resident is asked to drain through the authenticated
-    ``/admin/shutdown`` verb (attach bearer via the shared gateway-auth
-    resolution, plus the receipt-bound lifecycle capability when this home
-    carries one). When the authenticated path is unavailable, refused, or the
-    process outlives *timeout*, the whole process tree is felled - a stop verb
-    that can hang or silently fail would break the dashboard's restart
-    contract. Raises :class:`ServiceVerbError` only when the process survives
-    even the tree kill.
+    failing.
+
+    A live recorded pid is not yet a resident this verb may address. The
+    listener on the recorded endpoint must be held by that process or one of its
+    descendants first; only then is it asked to drain through the authenticated
+    ``/admin/shutdown`` verb, and only then may it be felled. When the
+    authenticated path is unavailable, refused, or the process outlives
+    *timeout*, the whole process tree is felled - a stop verb that can hang or
+    silently fail would break the dashboard's restart contract.
+
+    A recorded process that is alive while something ELSE holds the recorded
+    endpoint is a conflict, not a target: a pid-reused record, a crashed resident
+    whose port was taken, or an outright squatter all present this way, and none
+    of them may receive the attach bearer or the lifecycle capability, nor be
+    terminated on the strength of a record they do not match. That is reported as
+    a typed failure. An endpoint nobody holds has no occupant to credential, so
+    the recorded tree is felled directly.
+
+    Raises :class:`ServiceVerbError` when the endpoint is held in conflict, or
+    when the process survives even the tree kill.
     """
     home = _resolved_app_home(app_home)
     _, info = read_resident_service(home)
     if info is None or info.pid is None or not pid_is_live(info.pid):
         return service_status(home)
-    base_url = f"http://127.0.0.1:{info.port}"
-    headers = dict(gateway_auth_headers(base_url))
-    capability = _lifecycle_capability(home)
-    if capability is not None:
-        from ..api.dependencies import LIFECYCLE_CAPABILITY_HEADER
-
-        headers[LIFECYCLE_CAPABILITY_HEADER] = capability
-    accepted = False
-    try:
-        response = httpx.post(
-            f"{base_url}/admin/shutdown",
-            headers=headers,
-            timeout=_SHUTDOWN_REQUEST_TIMEOUT_SECONDS,
-        )
-        accepted = response.status_code == 202
-    except httpx.HTTPError:
-        accepted = False
-    if accepted and wait_pid_gone(info.pid, timeout=timeout):
+    claim = classify_port_claim(
+        info.port, info.pid, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+    )
+    if claim is PortClaim.OURS and _drain_owned_resident(
+        home, f"http://127.0.0.1:{info.port}", info.pid, timeout=timeout
+    ):
         return service_status(home)
+    if claim not in (PortClaim.OURS, PortClaim.FREE):
+        raise ServiceVerbError(
+            f"recorded gateway pid {info.pid} does not own the listener on port "
+            f"{info.port} (claim: {claim.value}); refusing to authenticate "
+            "against it or fell it - resolve the conflicting process first"
+        )
     if not tree_kill(info.pid):
         raise ServiceVerbError(
             f"gateway pid {info.pid} survived both the authenticated shutdown "

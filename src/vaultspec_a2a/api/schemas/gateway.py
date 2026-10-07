@@ -81,7 +81,7 @@ from ...thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
-from ...thread.snapshots import QueuedMessageCount, RepairReason, ThreadStateData
+from ...thread.snapshots import QueuedMessageCount, RepairReason, ThreadStateSnapshot
 
 __all__ = [
     "ActiveRunRecord",
@@ -669,7 +669,7 @@ class RunHistoryResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     run_id: PathSafeRunId
-    state: ThreadStateData
+    state: ThreadStateSnapshot
     metadata: ThreadMetadata | None = None
     transcript_available: bool
     transcript_status: TranscriptAvailability

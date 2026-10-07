@@ -20,13 +20,13 @@ from ..streaming.types import (
 )
 from ..thread.enums import DegradedReason
 from ..thread.snapshots import (
-    AgentData,
-    ArtifactData,
-    MessageData,
-    ThreadStateData,
+    AgentSnapshot,
+    ArtifactSnapshot,
+    MessageSnapshot,
+    ThreadStateSnapshot,
     ToolCallContent,
-    ToolCallData,
     ToolCallLocation,
+    ToolCallSnapshot,
     build_agent_descriptor,
     classify_message_role,
     derive_message_id,
@@ -60,8 +60,8 @@ def _is_valid_agent_descriptor(name: object, descriptor: object) -> bool:
     )
 
 
-def _checkpoint_messages(values: dict[str, Any]) -> list[MessageData]:
-    messages: list[MessageData] = []
+def _checkpoint_messages(values: dict[str, Any]) -> list[MessageSnapshot]:
+    messages: list[MessageSnapshot] = []
     for message in values.get("messages", []):
         role = classify_message_role(message)
         content = (
@@ -71,7 +71,7 @@ def _checkpoint_messages(values: dict[str, Any]) -> list[MessageData]:
         )
         stored_id: str | None = getattr(message, "id", None)
         messages.append(
-            MessageData(
+            MessageSnapshot(
                 message_id=derive_message_id(role, content, stored_id),
                 role=role,
                 content=content,
@@ -83,10 +83,10 @@ def _checkpoint_messages(values: dict[str, Any]) -> list[MessageData]:
 
 
 def _checkpoint_agents(
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     values: dict[str, Any],
     mirror: RunLiveStateMirror | None,
-) -> list[AgentData]:
+) -> list[AgentSnapshot]:
     raw_descriptors: object = values.get("agent_descriptors")
     node_summaries: list[dict[str, str]] = []
     if isinstance(raw_descriptors, dict):
@@ -133,7 +133,7 @@ _TOOL_CALL_LOCATIONS = TypeAdapter(list[ToolCallLocation])
 
 def _checkpoint_tool_call(
     call: ToolCall, answered_tool_ids: set[str]
-) -> ToolCallData | None:
+) -> ToolCallSnapshot | None:
     call_id = call.get("id")
     if not isinstance(call_id, str):
         return None
@@ -141,7 +141,7 @@ def _checkpoint_tool_call(
     detail = call.get("args") or {}
     if "status" in detail:
         content, locations = action_detail_projection(name, detail)
-        return ToolCallData(
+        return ToolCallSnapshot(
             tool_call_id=call_id,
             title=name,
             kind=classify_tool_kind(name),
@@ -149,7 +149,7 @@ def _checkpoint_tool_call(
             content=_TOOL_CALL_CONTENT.validate_python(content),
             locations=_TOOL_CALL_LOCATIONS.validate_python(locations),
         )
-    return ToolCallData(
+    return ToolCallSnapshot(
         tool_call_id=call_id,
         title=name,
         kind=classify_tool_kind(name),
@@ -163,13 +163,13 @@ def _checkpoint_tool_call(
 
 def _checkpoint_tool_calls(
     values: dict[str, Any],
-) -> tuple[list[ToolCallData], set[str]]:
+) -> tuple[list[ToolCallSnapshot], set[str]]:
     answered_tool_ids: set[str] = {
         message.tool_call_id
         for message in values.get("messages", [])
         if isinstance(message, ToolMessage)
     }
-    tool_calls: list[ToolCallData] = []
+    tool_calls: list[ToolCallSnapshot] = []
     checkpoint_ids: set[str] = set()
     for message in values.get("messages", []):
         if not isinstance(message, AIMessage) or not message.tool_calls:
@@ -185,8 +185,8 @@ def _checkpoint_tool_calls(
 
 def _live_tool_calls(
     mirror: RunLiveStateMirror, thread_id: str, checkpoint_ids: set[str]
-) -> list[ToolCallData]:
-    tool_calls: list[ToolCallData] = []
+) -> list[ToolCallSnapshot]:
+    tool_calls: list[ToolCallSnapshot] = []
     for call_id, state in mirror.get_tool_call_states(thread_id).items():
         if call_id in checkpoint_ids:
             continue
@@ -199,7 +199,7 @@ def _live_tool_calls(
         except ValueError:
             status = ToolCallStatus.PENDING
         tool_calls.append(
-            ToolCallData(
+            ToolCallSnapshot(
                 tool_call_id=call_id,
                 title=state.get("title", "unknown_tool"),
                 kind=kind,
@@ -210,14 +210,14 @@ def _live_tool_calls(
 
 
 def enrich_snapshot_from_state(
-    snapshot: ThreadStateData,
+    snapshot: ThreadStateSnapshot,
     state: Any,
     mirror: RunLiveStateMirror | None = None,
     expected_assignment_digest: str | None = None,
-) -> ThreadStateData:
+) -> ThreadStateSnapshot:
     """Populate snapshot fields from LangGraph checkpointer state.
 
-    Maps LangChain ``BaseMessage`` objects to ``MessageData`` and
+    Maps LangChain ``BaseMessage`` objects to ``MessageSnapshot`` and
     extracts ``checkpoint_id``, plan, artifacts from the state config.
     Populates live agents and tool calls from the gateway's relay *mirror*.
     """
@@ -230,7 +230,7 @@ def enrich_snapshot_from_state(
     plan_entries = normalize_plan_entries(state.values.get("current_plan", []))
 
     artifact_dicts = normalize_artifacts(state.values.get("artifacts", []))
-    artifact_data = [ArtifactData(**d) for d in artifact_dicts]
+    artifact_data = [ArtifactSnapshot(**d) for d in artifact_dicts]
 
     # Checkpoint-owned descriptors win; the thread-scoped live cache is used
     # only before the first descriptor checkpoint lands.

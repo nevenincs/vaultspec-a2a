@@ -49,25 +49,25 @@ __all__ = [
     "MODEL_ASSIGNMENT_DIGEST_CHARS",
     "PERMISSION_REQUEST_EVENT_TYPES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
-    "AgentData",
-    "ArtifactData",
+    "AgentSnapshot",
+    "ArtifactSnapshot",
     "CheckpointProjection",
     "ExecutionStateProjection",
-    "ExecutionTaskData",
+    "ExecutionTaskSnapshot",
     "LiveInterrupt",
-    "MessageData",
-    "PermissionData",
-    "PermissionOptionData",
+    "MessageSnapshot",
+    "PermissionOptionSnapshot",
+    "PermissionSnapshot",
     "ProjectedInterrupt",
     "QueuedMessageCount",
     "RepairReason",
-    "ThreadStateData",
+    "ThreadStateSnapshot",
     "ToolCallContent",
     "ToolCallContentDiff",
     "ToolCallContentTerminal",
     "ToolCallContentText",
-    "ToolCallData",
     "ToolCallLocation",
+    "ToolCallSnapshot",
     "build_agent_descriptor",
     "checkpoint_tuple_id",
     "classify_message_role",
@@ -341,7 +341,7 @@ ToolCallContent = ToolCallContentText | ToolCallContentDiff | ToolCallContentTer
 # Keyword-only so a field with no default can follow one that has one: fields
 # are declared in the order they are served.
 @dataclass(slots=True, kw_only=True)
-class MessageData:
+class MessageSnapshot:
     """Fully materialized message in a thread replay."""
 
     message_id: str
@@ -354,7 +354,7 @@ class MessageData:
 
 
 @dataclass(slots=True)
-class ToolCallData:
+class ToolCallSnapshot:
     """Fully materialized tool call (all incremental updates merged)."""
 
     tool_call_id: str
@@ -366,7 +366,7 @@ class ToolCallData:
 
 
 @dataclass(slots=True)
-class ArtifactData:
+class ArtifactSnapshot:
     """Fully materialized file artifact."""
 
     artifact_id: str
@@ -376,7 +376,7 @@ class ArtifactData:
 
 
 @dataclass(slots=True)
-class PermissionOptionData:
+class PermissionOptionSnapshot:
     """Permission option within a snapshot."""
 
     option_id: str
@@ -385,18 +385,18 @@ class PermissionOptionData:
 
 
 @dataclass(slots=True)
-class PermissionData:
+class PermissionSnapshot:
     """Outstanding permission request in a state snapshot."""
 
     request_id: str
     description: str
-    options: list[PermissionOptionData]
+    options: list[PermissionOptionSnapshot]
     tool_call: str | None = None
     tool_kind: ToolKind | None = None
 
 
 @dataclass(slots=True)
-class AgentData:
+class AgentSnapshot:
     """Canonical agent descriptor.
 
     Single declaration behind every agent-shaped surface: the REST team-status
@@ -421,7 +421,7 @@ class AgentData:
 
 
 @dataclass(slots=True)
-class ExecutionTaskData:
+class ExecutionTaskSnapshot:
     """Normalized execution task used in reconnect snapshots.
 
     The one declaration of an execution task: the worker emits it across the
@@ -446,12 +446,12 @@ class ExecutionStateProjection:
     task_count: int
     interrupt_count: int
     next_nodes: list[str] = field(default_factory=list)
-    execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
+    execution_tasks: list[ExecutionTaskSnapshot] = field(default_factory=list)
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
 
 
 @dataclass(slots=True, kw_only=True)
-class ThreadStateData:
+class ThreadStateSnapshot:
     """Complete thread state for reattaching to a run's event stream.
 
     The client fetches this via REST, notes ``last_sequence``, then discards any
@@ -465,16 +465,16 @@ class ThreadStateData:
 
     thread_id: str
     status: ThreadStatus
-    messages: list[MessageData] = field(default_factory=list)
-    tool_calls: list[ToolCallData] = field(default_factory=list)
-    pending_permissions: list[PermissionData] = field(default_factory=list)
+    messages: list[MessageSnapshot] = field(default_factory=list)
+    tool_calls: list[ToolCallSnapshot] = field(default_factory=list)
+    pending_permissions: list[PermissionSnapshot] = field(default_factory=list)
     # The questionnaire the run is parked on, read once from the checkpoint
     # projection as the producer's own model, so every surface serving this
     # snapshot discloses the same bounded request run-status does.
     pending_clarification: ClarificationRequest | None = None
-    artifacts: list[ArtifactData] = field(default_factory=list)
+    artifacts: list[ArtifactSnapshot] = field(default_factory=list)
     plan: list[PlanEntry] = field(default_factory=list)
-    agents: list[AgentData] = field(default_factory=list)
+    agents: list[AgentSnapshot] = field(default_factory=list)
     model_assignment_digest: _ModelAssignmentDigest | None = field(
         default=None, metadata={"pattern": _MODEL_ASSIGNMENT_DIGEST_PATTERN}
     )
@@ -511,7 +511,7 @@ class ThreadStateData:
     next_nodes: list[str] = field(default_factory=list)
     task_count: int = 0
     pending_interrupt_count: int = 0
-    execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
+    execution_tasks: list[ExecutionTaskSnapshot] = field(default_factory=list)
     snapshot_complete: bool = True
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
     replay_status: str = "unknown"
@@ -551,7 +551,7 @@ class ThreadStateData:
 # ---------------------------------------------------------------------------
 
 
-def record_repair_posture(snapshot: ThreadStateData, posture: str | None) -> None:
+def record_repair_posture(snapshot: ThreadStateSnapshot, posture: str | None) -> None:
     """Set *snapshot*'s repair posture together with the readiness it implies.
 
     Readiness is never judged on its own: a run is as fit to resume as its
@@ -585,14 +585,14 @@ def build_agent_descriptor(
     state: AgentLifecycleState,
     *,
     thread_id: str,
-) -> AgentData:
+) -> AgentSnapshot:
     """Project one node summary of the live-state mirror onto the canonical descriptor.
 
     The single seam shared by every agent-listing surface, so a field carried on
-    :class:`AgentData` reaches the REST route, the thread snapshot, and the
+    :class:`AgentSnapshot` reaches the REST route, the thread snapshot, and the
     broadcast together instead of being wired one caller at a time.
     """
-    return AgentData(
+    return AgentSnapshot(
         thread_id=thread_id,
         agent_id=summary.get("agent_id") or summary.get("node_name", ""),
         node_name=summary.get("node_name", ""),

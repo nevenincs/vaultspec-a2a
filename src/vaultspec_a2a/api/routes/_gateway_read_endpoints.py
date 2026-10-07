@@ -53,7 +53,7 @@ from ...thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
-from ...thread.snapshots import ThreadStateData
+from ...thread.snapshots import ThreadStateSnapshot
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import run_stream_resumability
 from ..dependencies import (
@@ -94,7 +94,7 @@ logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
 # assemble it from durable strings and live dicts, so it is validated on its way
 # out: enums resolve, nested blocks take their declared shape, and the declared
 # bounds hold, whatever a step assigned.
-_THREAD_STATE_ADAPTER = TypeAdapter(ThreadStateData)
+_THREAD_STATE_ADAPTER = TypeAdapter(ThreadStateSnapshot)
 
 
 class _ActiveRunsOptions(BaseModel):

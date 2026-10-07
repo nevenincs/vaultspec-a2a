@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ...thread.snapshots import ThreadStateData
+    from ...thread.snapshots import ThreadStateSnapshot
 
 
 async def _snapshot(
@@ -42,7 +42,7 @@ async def _snapshot(
     thread_id: str,
     relay_hub: RelayHub,
     checkpointer: AsyncSqliteSaver,
-) -> ThreadStateData | None:
+) -> ThreadStateSnapshot | None:
     """Project the live capture service to the snapshot these tests inspect."""
     capture = await capture_thread_state(
         session,

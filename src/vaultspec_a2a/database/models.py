@@ -340,7 +340,7 @@ class ThreadModel(Base):
     # at read time - so it only keeps step with the posture until it is dropped.
     execution_readiness: Mapped[str] = mapped_column(default=RepairStatus.HEALTHY)
     # The reconnect cursor a client compares against to discard already-seen
-    # SSE events (the ThreadStateData docstring in thread/snapshots.py):
+    # SSE events (the ThreadStateSnapshot docstring in thread/snapshots.py):
     # the highest frame number the gateway's sequence allocator issued the
     # run. The live counter is forgotten the moment a run settles
     # (RelayHub.clear_thread_state), so a REST read after settle - the only

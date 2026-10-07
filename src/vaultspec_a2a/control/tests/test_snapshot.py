@@ -26,7 +26,7 @@ from langchain_core.messages import AIMessageChunk, BaseMessageChunk
 from ...graph.enums import ToolCallStatus
 from ...providers._codex_protocol import _completed_action_chunk
 from ...thread.enums import ThreadStatus
-from ...thread.snapshots import ThreadStateData
+from ...thread.snapshots import ThreadStateSnapshot
 from ..snapshot import MinimalState, enrich_snapshot_from_state
 
 if TYPE_CHECKING:
@@ -50,8 +50,8 @@ def _state_with_messages(*messages: object) -> MinimalState:
     return MinimalState(values={"messages": list(messages)})
 
 
-def _snapshot(thread_id: str = "thread-1") -> ThreadStateData:
-    return ThreadStateData(
+def _snapshot(thread_id: str = "thread-1") -> ThreadStateSnapshot:
+    return ThreadStateSnapshot(
         thread_id=thread_id, status=ThreadStatus.COMPLETED, last_sequence=1
     )
 

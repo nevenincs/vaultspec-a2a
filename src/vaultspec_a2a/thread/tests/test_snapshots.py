@@ -12,7 +12,7 @@ from ..enums import RepairStatus, ThreadStatus
 from ..models import PlanEntry
 from ..snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
-    ThreadStateData,
+    ThreadStateSnapshot,
     build_agent_descriptor,
     classify_message_role,
     classify_permission_pause_reason,
@@ -211,8 +211,10 @@ def test_plan_approval_pause_causes_contains_both_variants() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _snapshot() -> ThreadStateData:
-    return ThreadStateData(thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0)
+def _snapshot() -> ThreadStateSnapshot:
+    return ThreadStateSnapshot(
+        thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0
+    )
 
 
 def test_record_repair_posture_writes_the_posture_and_its_readiness_together() -> None:

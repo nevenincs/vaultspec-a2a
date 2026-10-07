@@ -32,7 +32,7 @@ from ..thread.constants import (
 )
 from ..thread.enums import ControlActionType, DegradedReason
 from ..thread.executable_graph import FrozenGraphDefinition
-from ..thread.snapshots import ExecutionTaskData
+from ..thread.snapshots import ExecutionTaskSnapshot
 
 __all__ = [
     "DispatchApplicationReceiptPayload",
@@ -303,7 +303,7 @@ class ExecutionStateProjectionPayload(BaseModel):
     next_nodes: list[str] = Field(default_factory=list)
     interrupt_count: int = 0
     task_count: int = 0
-    tasks: list[ExecutionTaskData] = Field(default_factory=list)
+    tasks: list[ExecutionTaskSnapshot] = Field(default_factory=list)
     degraded_reasons: list[DegradedReason] = Field(default_factory=list)
 
 

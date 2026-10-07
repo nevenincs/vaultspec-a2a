@@ -140,7 +140,7 @@ async def _relay(
 
     graph, config = await _park_on_clarification(thread_id, request_id)
     emitted = await emit_interrupt_events(
-        thread_id, "supervisor", graph, config, aggregator.emitters
+        thread_id, "supervisor", graph, config, aggregator._emitters
     )
     assert emitted
 
@@ -205,7 +205,7 @@ async def test_a_clarification_is_not_filed_as_a_pending_permission() -> None:
     """
     aggregator, _received = await _relay("relay-not-permission")
 
-    assert aggregator.get_pending_permissions("relay-not-permission") == []
+    assert aggregator._emitters.get_pending_permissions("relay-not-permission") == []
 
 
 @pytest.mark.asyncio
@@ -259,7 +259,7 @@ async def test_a_run_parked_on_nothing_emits_no_nudge() -> None:
         "supervisor",
         cast("StreamableGraph", graph),
         cast("dict[str, Any]", config),
-        aggregator.emitters,
+        aggregator._emitters,
     )
 
     assert not emitted

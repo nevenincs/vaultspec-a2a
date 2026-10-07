@@ -72,11 +72,11 @@ async def _project(
     graph, config = await _suspend_on_permission(thread_id, acp_options)
 
     emitted = await emit_interrupt_events(
-        thread_id, "coder", graph, config, aggregator.emitters
+        thread_id, "coder", graph, config, aggregator._emitters
     )
     assert emitted
 
-    pending = aggregator.get_pending_permissions(thread_id)
+    pending = aggregator._emitters.get_pending_permissions(thread_id)
     assert len(pending) == 1
     return pending[0].options
 
@@ -234,7 +234,9 @@ def test_relayed_cache_keeps_a_denial_declared_under_an_approving_id() -> None:
         },
     )
 
-    pending = aggregator.get_pending_permissions("thread-denial-under-approving-id")
+    pending = aggregator._emitters.get_pending_permissions(
+        "thread-denial-under-approving-id"
+    )
     assert pending, "the request never reached the cache"
     option = pending[0].options[0]
     assert option["kind"] == str(PermissionOptionKind.REJECT_ONCE), (

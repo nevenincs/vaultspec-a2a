@@ -1173,7 +1173,7 @@ async def test_run_status_carries_reconnect_cursor(
 
     app, agg, _worker, _cp = make_app(session_factory, checkpointer)
     for _ in range(5):
-        agg.advance_sequence(run_id)
+        agg._emitters.next_sequence(run_id)
 
     await _handle_terminal_event(
         run_id,

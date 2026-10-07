@@ -13,8 +13,6 @@ from ..control.recovery_authority import (
 )
 from ..domain_config import domain_config
 from ..thread.enums import ThreadStatus
-from .permission_repository import prune_repair_journal
-from .session import begin_write_transaction
 from .thread_repository import list_non_terminal_threads
 
 if TYPE_CHECKING:
@@ -24,22 +22,12 @@ if TYPE_CHECKING:
 
 __all__ = ["reconcile_threads_on_startup"]
 
-_REPAIR_ROWS_PER_BOOT = 2
-"""Each boot appends one ``repair_started``/``repair_finished`` pair per thread."""
-
 
 async def reconcile_threads_on_startup(
     session: AsyncSession,
     checkpointer: Checkpointer,
-    *,
-    retain_repair_boots: int = 0,
 ) -> dict[str, int]:
-    """Request bounded checkpoint settlement before any worker demand gate.
-
-    ``retain_repair_boots`` bounds the startup-repair journal to its newest N
-    boots' worth of ``repair_started``/``repair_finished`` pairs, once settled.
-    Zero (the default) disables pruning, preserving unbounded journal growth.
-    """
+    """Request bounded checkpoint settlement before any worker demand gate."""
     rows = await list_non_terminal_threads(session)
     thread_ids = [row.id for row in rows]
     await session.commit()
@@ -65,17 +53,6 @@ async def reconcile_threads_on_startup(
         paused += int(observed.status is ThreadStatus.INPUT_REQUIRED)
         unavailable += int(observed.condition == "checkpoint_unavailable")
         owned += int(observed.condition in PROMOTION_OWNED_CONDITIONS)
-    if retain_repair_boots > 0 and thread_ids:
-        # The settlement loop above leaves whatever transaction it last opened;
-        # the prune reads before it deletes, so it takes a fresh one that holds
-        # the write lock from its first statement.
-        await session.commit()
-        await begin_write_transaction(session)
-        await prune_repair_journal(
-            session,
-            thread_ids=thread_ids,
-            keep_rows=retain_repair_boots * _REPAIR_ROWS_PER_BOOT,
-        )
     return {
         # A run a promoter is answerable for is not backlog: nobody has to
         # look at it, and counting it would make an ordinary multi-turn

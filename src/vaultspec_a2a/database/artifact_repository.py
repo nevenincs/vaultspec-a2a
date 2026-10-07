@@ -1,9 +1,8 @@
-"""Artifact repository — artifacts, permission logs, and cost tracking."""
+"""Artifact repository — permission logs and cost tracking."""
 
 from __future__ import annotations
 
 from decimal import Decimal
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, TypedDict, Unpack
 from uuid import uuid4
 
@@ -16,65 +15,15 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._helpers import save_model
-from .models import ArtifactModel, CostTrackingModel, PermissionLogModel
-
-
-def _validate_artifact_path(path: str) -> str:
-    """Ensure artifact path is relative and contains no traversal components."""
-    if not path:
-        raise ValueError("Artifact path must not be empty")
-    cleaned = path.replace("\\", "/")
-    normalized = PurePosixPath(cleaned)
-    if normalized.is_absolute() or (len(cleaned) >= 2 and cleaned[1] == ":"):
-        raise ValueError(f"Artifact path must be relative, got: {path!r}")
-    if ".." in normalized.parts:
-        raise ValueError(f"Artifact path must not contain '..', got: {path!r}")
-    return str(normalized)
-
+from .models import CostTrackingModel, PermissionLogModel
 
 __all__ = [
     "append_cost_record",
     "append_permission_log",
-    "create_artifact",
-    "get_artifact",
-    "get_artifacts_by_thread",
     "get_permission_logs_by_thread",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
 ]
-
-
-async def create_artifact(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    artifact_type: str,
-    path: str,
-    artifact_id: str | None = None,
-) -> ArtifactModel:
-    safe_path = _validate_artifact_path(path)
-    artifact = ArtifactModel(
-        id=artifact_id or uuid4().hex,
-        thread_id=thread_id,
-        type=artifact_type,
-        path=safe_path,
-    )
-    return await save_model(session, artifact)
-
-
-async def get_artifact(session: AsyncSession, artifact_id: str) -> ArtifactModel | None:
-    return await session.get(ArtifactModel, artifact_id)
-
-
-async def get_artifacts_by_thread(
-    session: AsyncSession, thread_id: str
-) -> Sequence[ArtifactModel]:
-    stmt = (
-        select(ArtifactModel)
-        .where(ArtifactModel.thread_id == thread_id)
-        .order_by(ArtifactModel.created_at)
-    )
-    return (await session.execute(stmt)).scalars().all()
 
 
 class _PermissionLogOptional(TypedDict, total=False):

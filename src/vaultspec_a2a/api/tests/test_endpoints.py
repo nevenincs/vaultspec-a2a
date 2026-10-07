@@ -30,7 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ...control.config import settings
 from ...database import (
     append_permission_log,
-    create_artifact,
     create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
@@ -606,14 +605,14 @@ class TestListThreads:
         assert thread["approval_status"] is None
         assert thread["approval_request_id"] is None
 
-    def test_list_threads_degrades_stale_execution_state_lineage(
+    def test_list_threads_degrades_execution_state_without_checkpoint(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Thread summaries must not keep healthy readiness on stale lineage."""
+        """Thread summaries must not keep healthy readiness on unbacked lineage."""
 
         async def _seed_stale_execution_state() -> None:
             async with session_factory() as session:
-                thread = await create_thread(
+                await create_thread(
                     session,
                     write_authority=make_test_write_authority(),
                     thread_id="thread-list-stale-state",
@@ -621,13 +620,11 @@ class TestListThreads:
                     repair_status="healthy",
                     execution_readiness="healthy",
                 )
-                thread.recovery_epoch = 5
                 session.add(
                     ThreadExecutionStateModel(
                         thread_id="thread-list-stale-state",
                         checkpoint_id="cp-list-stale-state",
                         parent_checkpoint_id=None,
-                        recovery_epoch=2,
                         task_count=1,
                         interrupt_count=0,
                         next_nodes_json='["worker"]',
@@ -675,7 +672,6 @@ class TestListThreads:
                         thread_id="thread-list-checkpoint-drift",
                         checkpoint_id="cp-list-stale",
                         parent_checkpoint_id=None,
-                        recovery_epoch=0,
                         task_count=1,
                         interrupt_count=0,
                         next_nodes_json='["worker"]',
@@ -966,10 +962,10 @@ class TestThreadState:
         assert data["repair_status"] == "operator_intervention_required"
         assert data["execution_readiness"] == "operator_intervention_required"
 
-    def test_state_degrades_stale_execution_state_lineage(
+    def test_state_degrades_checkpoint_mismatched_execution_state(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Stale durable execution-state rows must not leave `/state` healthy."""
+        """A row describing another checkpoint must not leave `/state` healthy."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_stale_execution_state() -> None:
@@ -992,15 +988,11 @@ class TestThreadState:
                     repair_status="healthy",
                     execution_readiness="healthy",
                 )
-                thread = await session.get(ThreadModel, "thread-stale-state-endpoint")
-                assert thread is not None
-                thread.recovery_epoch = 4
                 session.add(
                     ThreadExecutionStateModel(
                         thread_id="thread-stale-state-endpoint",
-                        checkpoint_id="cp-fresh-state-endpoint",
+                        checkpoint_id="cp-stale-state-endpoint",
                         parent_checkpoint_id=None,
-                        recovery_epoch=1,
                         task_count=1,
                         interrupt_count=0,
                         next_nodes_json='["worker"]',
@@ -2844,59 +2836,6 @@ class TestDeleteThread:
         assert asyncio.run(_checkpoint_exists()) is False
         assert asyncio.run(_child_checkpoint_exists()) is False
         assert asyncio.run(_checkpoint_history_count()) == 0
-
-    def test_deletes_workspace_artifact_files_for_terminal_thread(
-        self,
-        session_factory: SessionFactory,
-        checkpointer: AsyncSqliteSaver,
-        tmp_path: Path,
-    ) -> None:
-        """Hard delete must remove sandboxed artifact files owned by the thread."""
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-        workspace_root = tmp_path / "workspace"
-        artifact_path = workspace_root / "outputs" / "report.md"
-
-        async def _seed_thread() -> None:
-            await checkpointer.setup()
-            artifact_path.parent.mkdir(parents=True, exist_ok=True)
-            artifact_path.write_text("artifact body", encoding="utf-8")
-            async with session_factory() as session:
-                authority = make_test_write_authority()
-                await create_thread(
-                    session,
-                    write_authority=authority,
-                    thread_id="thread-delete-artifacts",
-                    status="completed",
-                    metadata=(
-                        '{"workspace_root": "'
-                        + workspace_root.as_posix()
-                        + '", "feature_tag": "artifact-delete"}'
-                    ),
-                )
-                await create_artifact(
-                    session,
-                    thread_id="thread-delete-artifacts",
-                    artifact_type="file",
-                    path="outputs/report.md",
-                )
-                await create_control_action(
-                    session,
-                    thread_id="thread-delete-artifacts",
-                    action_type=authority.action_type,
-                    idempotency_key=thread_create_action_key("thread-delete-artifacts"),
-                    dispatch_id=authority.action_receipt_id,
-                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-                )
-                await session.commit()
-
-        asyncio.run(_seed_thread())
-        assert artifact_path.exists() is True
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.delete("/v1/runs/thread-delete-artifacts")
-
-        assert resp.status_code == 204
-        assert artifact_path.exists() is False
 
     def test_plan_approval_response_succeeds_after_real_event_relay(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

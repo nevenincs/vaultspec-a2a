@@ -20,7 +20,6 @@ from ...database import (
     create_thread,
     record_permission_request,
     record_thread_execution_state,
-    set_thread_repair_state,
 )
 from ...database.models import ThreadExecutionStateModel
 from ...tests._write_authority import make_test_write_authority
@@ -350,7 +349,6 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
         thread_id="thread-1",
         checkpoint_id="cp-1",
         parent_checkpoint_id="cp-0",
-        recovery_epoch=2,
         task_count=1,
         interrupt_count=1,
         next_nodes_json='["supervisor"]',
@@ -393,7 +391,6 @@ def test_project_execution_state_model_recovers_valid_task_siblings() -> None:
         thread_id="thread-task-siblings",
         checkpoint_id="cp-task-siblings",
         parent_checkpoint_id=None,
-        recovery_epoch=0,
         task_count=2,
         interrupt_count=0,
         next_nodes_json="[]",
@@ -556,11 +553,11 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
 
 
 @pytest.mark.asyncio
-async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
+async def test_degraded_only_projection_keeps_the_prior_lineage(
     tmp_path: Path,
 ) -> None:
-    """A degraded-only projection must not refresh recovery_epoch on old state."""
-    case_dir = tmp_path / "api-test-projection-db-epoch"
+    """A degraded-only write must not overwrite the row's last real lineage."""
+    case_dir = tmp_path / "api-test-projection-db-degraded-only"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     materialize_schema(Path(db_file))
@@ -570,11 +567,11 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
-            thread_id="thread-epoch",
+            thread_id="thread-degraded-only",
         )
         await record_thread_execution_state(
             session,
-            thread_id="thread-epoch",
+            thread_id="thread-degraded-only",
             checkpoint_id="cp-good",
             parent_checkpoint_id=None,
             snapshot_created_at=None,
@@ -585,16 +582,9 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
             tasks=[],
             degraded_reasons=[],
         )
-        await set_thread_repair_state(
-            session,
-            "thread-epoch",
-            repair_status="needs_reconciliation",
-            execution_readiness="needs_reconciliation",
-            increment_recovery_epoch=True,
-        )
         await record_thread_execution_state(
             session,
-            thread_id="thread-epoch",
+            thread_id="thread-degraded-only",
             checkpoint_id=None,
             parent_checkpoint_id=None,
             snapshot_created_at=None,
@@ -606,10 +596,9 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
             degraded_reasons=["execution_state_projection_unavailable"],
         )
         await session.commit()
-        await session.refresh(thread)
 
         snapshot = ThreadStateData(
-            thread_id="thread-epoch",
+            thread_id="thread-degraded-only",
             status=thread.status,
             last_sequence=0,
         )
@@ -621,11 +610,12 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
             checkpoint_id=None,
         )
 
-        projection = await session.get(ThreadExecutionStateModel, "thread-epoch")
+        projection = await session.get(
+            ThreadExecutionStateModel, "thread-degraded-only"
+        )
 
     assert projection is not None
     assert projection.checkpoint_id == "cp-good"
-    assert projection.recovery_epoch == 0
     assert snapshot.snapshot_complete is False
     assert "execution_state_projection_stale" in snapshot.degraded_reasons
 
@@ -656,7 +646,6 @@ async def test_unreadable_execution_state_requires_operator_intervention(
                 thread_id="thread-corrupt-execution-state",
                 checkpoint_id="cp-1",
                 parent_checkpoint_id=None,
-                recovery_epoch=0,
                 task_count=0,
                 interrupt_count=0,
                 next_nodes_json="{",

@@ -32,7 +32,6 @@ from ...control.repositories import (
     create_deletion_saga,
 )
 from ...database import (
-    create_artifact,
     create_control_action,
     create_thread,
     get_thread,
@@ -192,9 +191,7 @@ class TestVersionedDeletionVerb:
         """Stranded state is reported, named by kind, and never by locator."""
         store = _detached_checkpoint_store(tmp_path / "detached-v1.db")
         workspace = tmp_path / "workspace"
-        (workspace / "outputs").mkdir(parents=True)
-        artifact_file = workspace / "outputs" / "report.md"
-        artifact_file.write_text("body", encoding="utf-8")
+        workspace.mkdir()
 
         app, _agg, _worker, _cp = make_app(session_factory, store)
 
@@ -205,12 +202,6 @@ class TestVersionedDeletionVerb:
                     thread_id="r-strand",
                     status="completed",
                     metadata=json.dumps({"workspace_root": workspace.as_posix()}),
-                )
-                await create_artifact(
-                    session,
-                    thread_id="r-strand",
-                    artifact_type="file",
-                    path="outputs/report.md",
                 )
                 await session.commit()
 
@@ -230,12 +221,8 @@ class TestVersionedDeletionVerb:
         assert body["run_id"] == "r-strand"
         assert body["cleanup_abandoned"] is True
         assert CleanupKind.CHECKPOINT.value in body["abandoned_kinds"]
-        # The removable artifact really went, so its kind is not named.
-        assert artifact_file.exists() is False
-        assert CleanupKind.ARTIFACT_FILE.value not in body["abandoned_kinds"]
         # Kinds only - no locator reaches the caller.
         assert workspace.as_posix() not in final.text
-        assert "report.md" not in final.text
 
 
 class TestDeletionSagaEndpoint:
@@ -377,20 +364,14 @@ class TestDeletionSagaEndpoint:
         """An unremovable checkpoint yields retries, then a success naming it.
 
         Nothing here is arranged after the fact: the manifest is captured by the
-        production path from the thread's own artifacts, the artifact file is
-        really unlinked, and the checkpoint item really fails against a detached
-        store on every pass. The first two requests are retryable because a
-        retry can still make progress; the third finalizes over the item the
-        saga has stopped retrying, and reports the kind it left behind. The
-        cleaned artifact kind is absent from that report - only stranded state
-        is named.
+        production path from the thread, and the checkpoint item really fails
+        against a detached store on every pass. The first two requests are
+        retryable because a retry can still make progress; the third finalizes
+        over the item the saga has stopped retrying, and reports the kind it
+        left behind - only stranded state is named.
         """
         store = _detached_checkpoint_store(tmp_path / "detached_checkpoints.db")
         app, _agg, _worker, _cp = make_app(session_factory, store)
-        workspace = tmp_path / "workspace"
-        (workspace / "outputs").mkdir(parents=True)
-        artifact_file = workspace / "outputs" / "report.md"
-        artifact_file.write_text("body", encoding="utf-8")
 
         async def _seed() -> None:
             async with session_factory() as session:
@@ -398,13 +379,6 @@ class TestDeletionSagaEndpoint:
                     session,
                     thread_id="t-strand",
                     status="completed",
-                    metadata=json.dumps({"workspace_root": workspace.as_posix()}),
-                )
-                await create_artifact(
-                    session,
-                    thread_id="t-strand",
-                    artifact_type="file",
-                    path="outputs/report.md",
                 )
                 await session.commit()
 
@@ -424,7 +398,6 @@ class TestDeletionSagaEndpoint:
             "cleanup_abandoned": True,
             "abandoned_kinds": [CleanupKind.CHECKPOINT.value],
         }
-        assert artifact_file.exists() is False
         assert replay.status_code == 404
 
     def test_the_abandonment_body_names_every_stranded_kind(

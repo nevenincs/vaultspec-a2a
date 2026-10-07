@@ -68,8 +68,7 @@ def _parse_thread_summary_metadata(
 
 
 @dataclass(frozen=True, slots=True)
-# Flat read-model fields match the thread-list response contract.
-class ThreadSummaryData:  # pylint: disable=too-many-instance-attributes
+class ThreadSummaryData:
     """Lightweight thread descriptor produced by :func:`list_threads_service`."""
 
     thread_id: str

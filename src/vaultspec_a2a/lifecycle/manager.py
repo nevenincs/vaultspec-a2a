@@ -211,13 +211,14 @@ def spawn(
         from pathlib import Path as _Path
 
         _rotate_log_if_over_cap(_Path(log_path))
-    log_handle = open(log_path, "ab") if log_path is not None else None  # noqa: SIM115
-    stdout: IO[bytes] | int = (
-        log_handle if log_handle is not None else subprocess.DEVNULL
-    )
     child_env = {**os.environ, **env} if env is not None else None
     flags = detached_spawn_kwargs()
-    try:
+    with contextlib.ExitStack() as owned:
+        stdout: IO[bytes] | int = (
+            owned.enter_context(open(log_path, "ab"))
+            if log_path is not None
+            else subprocess.DEVNULL
+        )
         return subprocess.Popen(
             command,
             cwd=str(cwd),
@@ -228,9 +229,6 @@ def spawn(
             start_new_session=flags.start_new_session,
             env=child_env,
         )
-    finally:
-        if log_handle is not None:
-            log_handle.close()
 
 
 def resolve(name: str, *, home: Path | None = None) -> ProcRecord:
@@ -710,10 +708,10 @@ class _UnresolvedOwnershipLogger:
             return
         logger.warning(
             "Readiness accepted port %d on the bound-port signal "
-            "alone: the listening pid could not be resolved, so it "
-            "was not confirmed to belong to pid %d. Ownership is "
-            "unverified for this boot; an orphan or a racer "
-            "holding the port would read as ready.",
+            "alone: the listener's owner could not be resolved, so it "
+            "was not confirmed to sit in the process tree of pid %d. "
+            "Ownership is unverified for this boot; an orphan or a "
+            "racer holding the port would read as ready.",
             self._port,
             self._pid,
         )
@@ -724,9 +722,9 @@ class _UnresolvedOwnershipLogger:
         if self._reported:
             return
         logger.warning(
-            "Readiness withheld on port %d: the listening pid could "
-            "not be resolved, so it was not confirmed to belong to "
-            "pid %d; the HTTP health probe was skipped.",
+            "Readiness withheld on port %d: the listener's owner could "
+            "not be resolved, so it was not confirmed to sit in the "
+            "process tree of pid %d; the HTTP health probe was skipped.",
             self._port,
             self._pid,
         )
@@ -743,7 +741,7 @@ def _listener_ready(
 ) -> bool:
     """One poll iteration's readiness verdict for *port*; ``False`` keeps waiting.
 
-    Does not accept a bound port until the listening pid is confirmed to be the
+    Does not accept a bound port until the listener is confirmed to be held by the
     child or a descendant of it
     (:func:`~vaultspec_a2a.utils._process_tree.classify_listener_ownership`). A
     foreign holder of the port - an un-reaped orphan of a felled generation, or a
@@ -783,7 +781,7 @@ def _await_listener(
     """Wait for a live listener on *port* that OUR child owns.
 
     Returns ``False`` if the spawned child dies first, and does not accept a bound
-    port until the listening pid is confirmed to be the child or a descendant of
+    port until the listener is confirmed to be held by the child or a descendant of
     it (:func:`~vaultspec_a2a.utils._process_tree.classify_listener_ownership`). A
     foreign holder of the port - an un-reaped orphan of a felled generation, or a
     racer on a fixed resume/rerun port - therefore never reads as our process

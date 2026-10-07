@@ -29,10 +29,6 @@ from ..thread.errors import (
     ConfigError,
 )
 from ..thread.snapshots import stamp_message_created_at
-from ._graph_lifecycle_options import (
-    GraphLifecycleOptions,
-    bind_graph_lifecycle_options,
-)
 from ._graph_lifecycle_state import GraphLifecyclePorts, GraphLifecycleState
 
 if TYPE_CHECKING:
@@ -46,6 +42,7 @@ if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from ..streaming.aggregator import EventAggregator
+    from ._graph_lifecycle_options import GraphLifecycleOptions
     from .authoring_binding import AuthoringBindingProvider
     from .ipc import WorkerBridge
 
@@ -169,7 +166,6 @@ class GraphLifecycleManager:
         checkpointer: Checkpointer,
         bridge: WorkerBridge,
         aggregator: EventAggregator,
-        *args: object,
         **options: Unpack[GraphLifecycleOptions],
     ) -> None:
         from ..database import get_session_factory
@@ -177,17 +173,13 @@ class GraphLifecycleManager:
         from .cost_port import SqlCostPort
         from .runtime_identity_port import SqlRuntimeIdentityPort
 
-        (
-            token_store,
-            catalog_store,
-            checkpoint_read_timeout_seconds,
-        ) = bind_graph_lifecycle_options(args, options)
+        checkpoint_read_timeout_seconds = options.get("checkpoint_read_timeout_seconds")
         self._ports = GraphLifecyclePorts(
             checkpointer=checkpointer,
             bridge=bridge,
             aggregator=aggregator,
-            token_store=token_store,
-            catalog_store=catalog_store,
+            token_store=options["token_store"],
+            catalog_store=options["catalog_store"],
             provider_factory=ProviderFactory(),
         )
         self._checkpoint_read_timeout_seconds = (

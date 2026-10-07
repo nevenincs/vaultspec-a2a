@@ -34,9 +34,7 @@ from langgraph.types import Command
 from ..thread.errors import (
     ConfigError,
 )
-from ..thread.state import (
-    TeamState,  # noqa: TC001 - LangGraph inspects route annotations
-)
+from ..thread.state import TeamState
 from ._compiler_models import resolve_supervisor_model
 from ._compiler_prompts import (
     build_supervisor_prompt,

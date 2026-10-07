@@ -91,8 +91,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-# Flat request fields are passed through the established admission contract.
-class ThreadCreationRequest:  # pylint: disable=too-many-instance-attributes
+class ThreadCreationRequest:
     """Bundled request fields for :func:`create_and_dispatch_thread`."""
 
     thread_id: str

@@ -1,4 +1,4 @@
-"""Regression protection for the entrypoint logging-lane wiring (P01.S05).
+"""Regression protection for the entrypoint logging-lane wiring.
 
 Real subprocesses and the real click group - no mocks. Two guarantees:
   1. The protocol lane keeps stdout a pure JSON-RPC channel (a WARNING rides stderr

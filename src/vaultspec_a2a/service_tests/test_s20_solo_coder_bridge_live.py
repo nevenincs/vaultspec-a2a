@@ -1,13 +1,12 @@
-"""Live S20 proof: a solo-coder invokes the bridged authoring tools mid-turn.
+"""Live proof: a solo-coder invokes the bridged authoring tools mid-turn.
 
-The a2a-edge-conformance S20 leg (which closes S18+S20 together): the production
-binding-construction site (task #40) arms the ``vaultspec-solo-coder`` preset's
+The production binding-construction site arms the ``vaultspec-solo-coder`` preset's
 authoring bridge, and the cold-start fix (7.58s -> 1.27s) lets the bridge's tools
 reach the model in time. This drives the real preset through the live loopback
 stack and witnesses the coder NATIVELY invoke an ``mcp__vaultspec-authoring__*``
 tool mid-turn - the agent-initiated authoring path the whole bridge exists for.
 
-Route (see the S20 exec record): the run-start bundle is minted per-agent_id and
+Route: the run-start bundle is minted per-agent_id and
 supplied at the GATEWAY seam (the pw7 pattern), keyed by ``vaultspec-coder``, so
 it satisfies the run_start coverage gate without depending on the engine's
 role-key minting (the dashboard role-key fix is unmerged at authoring time).
@@ -35,7 +34,7 @@ scan is retained solely as a diagnostic (never asserted).
 Infrastructure gate, not a masked failure: when no loopback stack is reachable,
 or the run's provider is credential/usage gated, the test skips with a runbook
 pointer. When the stack IS present the assertion is fail-loud - and it stays red
-until the bridge tools actually surface to the coder at runtime (the S18/S20
+until the bridge tools actually surface to the coder at runtime (the bridge
 surfacing work), which is the honest state of the proof.
 """
 
@@ -68,8 +67,8 @@ if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
 
 # Every real-provider service lane runs on the operator-configured served
-# selection. It used to name the committed all-low "fast" model profile; a
-# preset carries no model policy now, so the cost ceiling is the operator's
+# selection. A preset carries no model policy, so the cost ceiling is the
+# operator's
 # choice of a low-cost entry from the current catalog (the same thing the
 # provider-catalog live-selection prerequisite already asks for). The lane
 # claims no particular provider - it certifies the bridge/tool floor, not who
@@ -208,7 +207,7 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
         f"(diagnostic, not proof): {sorted(narrated_bridge_names)}"
     )
     assert delta == {"created": [], "modified": [], "deleted": []}, (
-        f"the S20 proof must not write to .vault, but the run changed it: {delta}"
+        f"the proof must not write to .vault, but the run changed it: {delta}"
     )
 
 

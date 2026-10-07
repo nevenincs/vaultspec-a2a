@@ -1094,7 +1094,7 @@ class TestThreadState:
 
         with TestClient(app, raise_server_exceptions=True) as client:
             # Relayed while the run has no durable row, so the gateway
-            # aggregator is the only place the request lives.
+            # relay hub is the only place the request lives.
             _relay_permission_request(
                 client,
                 thread_id="thread-state-aggregator-only",
@@ -1427,9 +1427,9 @@ class TestSendMessage:
 
         The negative side is the whole point: the turn is admitted and still
         dispatches nothing and installs no writer. Making the follow-up the
-        run's writer now is what used to refuse the executing turn's own
-        completion as superseded and quarantine the run, so an admission that
-        dispatched would be the same bug wearing a 202.
+        run's writer would refuse the executing turn's own completion as
+        superseded and quarantine the run, so an admission that dispatched
+        would be that bug wearing a 202.
         """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
@@ -1709,7 +1709,7 @@ class TestTeamStatus:
     def test_pending_permissions_do_not_surface_from_aggregator_without_durable_row(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Aggregator-only pending permissions must not appear in team status."""
+        """Pending permissions held only by the relay hub stay out of team status."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -1835,7 +1835,7 @@ class TestTeamStatus:
     def test_node_summaries_surface_as_agents(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Agents registered via aggregator node metadata appear in response."""
+        """Agents registered via relay hub node metadata appear in response."""
         agg = RelayHub()
         agg.sync_worker_event(
             "team-status-node-metadata",
@@ -2577,7 +2577,7 @@ class TestPermissionRespond:
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A reviewer comment on a locally-respondable verdict pause reaches the
-        resumed run's verdict payload untouched — the shape D6 unifies on.
+        resumed run's verdict payload untouched — the shape verdict pauses unify on.
         """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 

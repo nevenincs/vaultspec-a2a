@@ -135,7 +135,7 @@ async def _amain() -> int:
     if not (actor_token and run_id) or not (
         configured.relay_url or (base_url and bearer)
     ):
-        # R7: name the failure, never the values.
+        # Name the failure, never the values.
         print(
             "authoring stdio bridge: missing required engine env vars",
             file=sys.stderr,

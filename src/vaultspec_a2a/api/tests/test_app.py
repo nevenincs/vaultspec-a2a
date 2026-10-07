@@ -174,8 +174,8 @@ async def test_health_ready_for_adopted_worker_without_heartbeat(
     process (``worker_pid`` None) and no ``worker_last_heartbeat_ts`` (so
     ``worker_connected`` is False). The heartbeat-push gate is authoritative only for
     an owned worker; for an externally-managed one the probe-driven ``worker_status``
-    governs, so readiness must be True. Before the fix the
-    ``worker_spawned and not worker_connected`` term flipped this to not-ready.
+    governs, so readiness must be True: a
+    ``worker_spawned and not worker_connected`` term must not flip it to not-ready.
     """
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
     app.state.worker_state = WorkerState(worker_status="up")

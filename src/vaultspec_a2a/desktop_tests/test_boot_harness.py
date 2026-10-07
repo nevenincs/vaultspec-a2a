@@ -58,7 +58,7 @@ def test_a_gateway_that_never_becomes_ready_is_reaped(tmp_path: Path) -> None:
     - The failure is a plain readiness failure, NOT :class:`GatewayBootError`.
       That distinction is the whole point of the branch under test: a child that
       died on its own is retried and needs no reaping, while this one is alive
-      at the deadline and is the case that used to leak.
+      at the deadline and is the case that must be reaped.
     - The child was really alive when the helper gave up - asserted through the
       real operating-system liveness predicate before the deadline is reached,
       via a process that sleeps far longer than the test.

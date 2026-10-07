@@ -12,7 +12,7 @@ permission matcher, and a real model would make the one thing under test
 (whether a named path is read) depend on what the model decided to do.
 
 The contrast each test draws is between the spelling the lane writes and the
-spelling it used to write. The CLI reads a single leading slash as relative to
+single-leading-slash spelling. The CLI reads a single leading slash as relative to
 the session's primary working directory, so a rule that LOOKS like an absolute
 path names a directory beneath the workspace, and the rule matches nothing at
 the path it appears to name.

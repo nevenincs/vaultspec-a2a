@@ -268,11 +268,11 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
 def test_a_park_survives_a_post_run_state_read_that_times_out() -> None:
     """An interrupted run is never reported completed because a read failed.
 
-    The park used to be discovered only by reading the graph's state after
-    the stream ended, and that read returns nothing on timeout, after which
-    the run settled as though it had finished - writing a terminal for a run
-    that is sitting on a question. The stream reports the park itself now, so
-    the read decides only whether the question can be published.
+    The stream reports the park itself, so a post-run state read - which
+    returns nothing on timeout - never decides whether the run is finished:
+    were it to, the run would settle as though it had completed and write a
+    terminal for a run sitting on a question. The read decides only whether
+    the question can be published.
 
     The timeout knob is read once, when its module is imported, so this drives
     a real subprocess with the knob set below any real read's latency - the

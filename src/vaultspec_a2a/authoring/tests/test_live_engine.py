@@ -241,7 +241,7 @@ async def test_run_scoped_execute_of_read_tool(client: AuthoringClient) -> None:
 async def test_get_feedback_batch_reads_back_a_created_batch(
     client: AuthoringClient,
 ) -> None:
-    """The a2a read path retrieves a feedback batch by id, verbatim (S11).
+    """The a2a read path retrieves a feedback batch by id, verbatim.
 
     The dashboard creates the batch; the a2a worker consumes it read-path-only via
     ``AuthoringClient.get_feedback_batch``. This drives the real
@@ -320,7 +320,7 @@ async def test_get_feedback_batch_unknown_id_faults(client: AuthoringClient) -> 
 async def test_close_session_transitions_active_to_closed(
     client: AuthoringClient,
 ) -> None:
-    """The a2a submit-success caller closes its authoring session benignly (S13).
+    """The a2a submit-success caller closes its authoring session benignly.
 
     a2a-driven work leaves an Active session with no run (it proposes directly,
     never starts a run). At run-settle SUCCESS the worker closes it via

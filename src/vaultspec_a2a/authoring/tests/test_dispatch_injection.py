@@ -1,4 +1,4 @@
-"""Dispatch-side injection of the proposal lifecycle ids (S20 surfacing fix).
+"""Dispatch-side injection of the proposal lifecycle ids.
 
 The bridge dispatcher owns session_id / changeset_id / expected_revision and
 injects them run-scoped so the model never supplies them. These drive

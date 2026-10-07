@@ -308,7 +308,7 @@ class TestTeamConfigFromToml:
     def test_doc_editor_diverges_from_solo_coder_only_on_filesystem_write(
         self,
     ) -> None:
-        """agent-flow D2: doc-editor clones solo-coder's shape but flips write off.
+        """The doc-editor clones solo-coder's shape but flips write off.
 
         Both presets are pipeline topology, one worker, authoring_bridge=true; the
         ONE deliberate divergence is the worker's filesystem_write capability.
@@ -834,7 +834,7 @@ class TestAdrResearchTeamPreset:
     def test_adr_research_harness_opts_into_vaultspec_rag(self) -> None:
         """The live preset's effective harness declares the vaultspec-rag server.
 
-        The ``[team.harness]`` opt-in (P03.S12) is what makes the landed grounding
+        The ``[team.harness]`` opt-in is what makes the landed grounding
         composition effective for this preset's document-authoring workers: the
         loaded preset's effective harness must name ``vaultspec-rag`` in
         ``mcp_servers`` - and ONLY that server (read-only by construction; no

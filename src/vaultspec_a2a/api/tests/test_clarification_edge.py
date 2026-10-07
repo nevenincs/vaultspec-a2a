@@ -361,17 +361,16 @@ async def test_an_over_long_answer_is_refused_at_the_wire(
     it cannot be bypassed by a call path that forgets to apply it.
 
     Sized from :data:`MAX_ANSWER_CHARS` rather than from a literal, and asserting
-    BOTH sides of the ceiling. This test used to post a hardcoded ``"x" * 4096``,
-    which publishes the number 4096 next to the word "cap" in a file a consumer
-    reads to learn a2a's bounds - the engine adopted 4096 as this side's answer
-    cap and the dashboard mirrored the engine, while a2a has never enforced
-    anything but 2048.
+    BOTH sides of the ceiling. A hardcoded number would publish a cap next to the
+    word "cap" in a file a consumer reads to learn a2a's bounds, and would not
+    track what a2a actually enforces.
 
-    It also could not fail. It answered only the OPTIONAL ``notes`` question, so
-    the required ``dock_side`` was left blank: delete the length cap entirely and
-    the request still 422s, from the required-question check one layer later.
-    Both answers are supplied below so the length is the only thing left to
-    object to, which is what makes the refusal evidence about the cap.
+    Both the OPTIONAL ``notes`` question and the required ``dock_side`` are
+    answered below so the length is the only thing left to object to. Answering
+    only ``notes`` would leave ``dock_side`` blank, and the request would still
+    422 with the length cap deleted entirely, from the required-question check
+    one layer later; supplying both is what makes the refusal evidence about the
+    cap.
     """
     app, _agg, worker, cp = make_app(session_factory, checkpointer)
     async with httpx.AsyncClient(

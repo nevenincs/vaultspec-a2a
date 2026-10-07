@@ -2,7 +2,7 @@
 
 A run is bound to one project. These tests drive the production permission
 handler with the payload shapes the installed backends actually emit, and prove
-two things the handler previously did not do: it refuses a tool call whose
+two things the handler does: it refuses a tool call whose
 arguments name a project other than the run's, and under autonomy it refuses a
 call for a tool the run never declared instead of approving the first offered
 option.
@@ -350,7 +350,7 @@ async def test_an_undeclared_server_verb_is_refused_under_autonomy(
 
     These reach the permission rung precisely BECAUSE they are undeclared - the
     CLI's static pre-approval covers only the declared reads - and the branch
-    that used to receive them approved the first offered option unconditionally.
+    that receives them must not approve the first offered option unconditionally.
     """
     bound, _ = two_projects
     config = _config(workspace_root=str(bound))

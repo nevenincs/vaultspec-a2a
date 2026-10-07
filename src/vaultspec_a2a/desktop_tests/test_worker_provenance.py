@@ -1,6 +1,6 @@
 """Real-process proofs that the authenticated pairing verdict governs adoption.
 
-The enforcement decision (2026-07-24 codebase-health record): under the ARMED
+The enforcement rule: under the ARMED
 desktop profile a worker is adoptable only when its reported gateway lifetime
 and spawn generation classify as OWNED; blank evidence, the legacy declared
 gateway-URL echo, and a foreign lifetime all fail closed - no adoption, no
@@ -127,14 +127,14 @@ def _assert_refused_without_adoption_or_eviction(
 
 
 def test_plain_worker_health_never_authorizes_adoption(tmp_path: Path) -> None:
-    """S153: a bare healthy stranger on the worker port is never adopted."""
+    """A bare healthy stranger on the worker port is never adopted."""
     _assert_refused_without_adoption_or_eviction(
         tmp_path, {"status": "healthy"}, "run-provenance-plain-health"
     )
 
 
 def test_blank_worker_pairing_never_authorizes_adoption(tmp_path: Path) -> None:
-    """S154: explicitly blank pairing evidence classifies UNIDENTIFIED and refuses."""
+    """Explicitly blank pairing evidence classifies UNIDENTIFIED and refuses."""
     _assert_refused_without_adoption_or_eviction(
         tmp_path,
         {
@@ -147,7 +147,7 @@ def test_blank_worker_pairing_never_authorizes_adoption(tmp_path: Path) -> None:
 
 
 def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> None:
-    """S155: the retired lenient signal - an echoed gateway_url - no longer adopts.
+    """The retired lenient signal - an echoed gateway_url - no longer adopts.
 
     The squatter cannot know the gateway's port before boot, so it echoes a
     wildcard-free loopback URL for every port by reflecting the Host the
@@ -188,7 +188,7 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
 
 
 def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
-    """S95: a second armed gateway never adopts or evicts the first's worker.
+    """A second armed gateway never adopts or evicts the first's worker.
 
     Gateway A spawns and owns its REAL worker on the shared port; gateway B,
     armed over its own application home but pointed at the same worker port,

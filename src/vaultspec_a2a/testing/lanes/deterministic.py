@@ -586,7 +586,7 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         script = _script_of(self._agent_id)
         if script is _DeterministicScript.RELAY_BURST:
             for index in range(_RELAY_BURST_CHUNKS):
-                # One 4 KiB chunk reaches the production aggregator's immediate
+                # One 4 KiB chunk reaches the production event producer's immediate
                 # flush threshold, so every yield becomes one real progress frame.
                 # Yield control as well so the bounded subscriber queue can drain.
                 prefix = f"{index:04d}:"

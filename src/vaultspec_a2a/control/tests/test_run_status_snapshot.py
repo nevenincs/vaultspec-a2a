@@ -1,7 +1,7 @@
 """Run status must derive from one snapshot, not several.
 
-Every field used to read the checkpoint for itself. A run advancing between
-those reads produced a response carrying a status from one moment and a position
+No field reads the checkpoint for itself: a run advancing between such reads
+would produce a response carrying a status from one moment and a position
 from another - internally inconsistent, which is worse than a stale but coherent
 answer because a consumer cannot tell the difference.
 

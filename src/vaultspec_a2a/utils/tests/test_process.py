@@ -287,12 +287,12 @@ def test_await_listener_accepts_a_port_our_child_owns() -> None:
 
 
 def test_await_listener_rejects_a_foreign_port_holder() -> None:
-    """The fix: a foreign process holding the port never reads as our child ready.
+    """A foreign process holding the port never reads as our child ready.
 
     Stands in for a failed-eviction / racer scenario without an unkillable
     process: a real listener holds the port while a DIFFERENT live child (which
-    never bound it) is the one whose readiness we probe. Before the owner check
-    this returned ready on the stranger's listener; now it must time out to False
+    never bound it) is the one whose readiness we probe. Without the owner check
+    this would return ready on the stranger's listener; it must time out to False
     because the listening pid is outside the probed process's tree.
     """
     holder, port = _spawn_listener()

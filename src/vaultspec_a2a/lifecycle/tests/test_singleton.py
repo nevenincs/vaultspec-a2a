@@ -202,10 +202,8 @@ def test_malformed_record_reads_malformed(tmp_path: Path) -> None:
 def test_a_failed_owner_record_publication_leaves_no_temporary(tmp_path: Path) -> None:
     """A publication that cannot complete must not leave residue behind.
 
-    The owner record used to be published by a private copy of write-fsync-
-    rename that removed nothing when the rename failed, so every failed
-    publication left a temporary sitting beside the record for good. It now
-    routes through the package's audited writer; a directory standing where the
+    The owner record is published through the package's audited writer, which
+    removes its temporary when the rename fails; a directory standing where the
     record belongs makes the rename fail for real, and the assertion is that the
     runtime directory holds no residue afterwards.
     """

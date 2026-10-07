@@ -122,7 +122,7 @@ def test_collection_survives_with_and_without_claims(
 
     Undeclared tests are the bulk of the suite and take no group at all; this
     pins that the grouping pass stays a no-op for them rather than reaching the
-    lookup that previously raised.
+    lookup that would raise.
     """
     _write(
         tmp_path,

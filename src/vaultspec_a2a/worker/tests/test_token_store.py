@@ -1,7 +1,7 @@
-"""Token isolation and lifecycle for the worker-scoped actor token store (R7).
+"""Token isolation and lifecycle for the worker-scoped actor token store.
 
 Exercises the real :class:`ActorTokenBundle` and :class:`RunTokenStore` — no
-mocks, no monkeypatching. These assert the structural guarantees R7 demands:
+mocks, no monkeypatching. These assert the structural guarantees:
 each role only ever reads its own token, raw tokens never survive a repr/str
 (the log surface), an empty bundle registers nothing, and disposal is idempotent.
 The executor-driven end-to-end lifecycle (register-during-run, drop-at-run-end,

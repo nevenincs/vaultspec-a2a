@@ -286,8 +286,8 @@ def classify_worker_pairing(
 
     Fails closed on every ambiguity. Blank evidence is ``UNIDENTIFIED`` rather
     than assumed-ours, because a worker that reports nothing is exactly what a
-    process this gateway never started looks like - Compose, an operator, a test,
-    or another gateway's orphan. Treating silence as ownership is how dispatch
+    process this gateway never started looks like - an operator, a test, or
+    another gateway's orphan. Treating silence as ownership is how dispatch
     reached a foreign worker.
 
     A generation that does not parse, or that claims to be newer than any this

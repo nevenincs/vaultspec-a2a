@@ -297,7 +297,7 @@ def test_resume_restarts_a_died_record_on_its_original_port(tmp_path: Path) -> N
 def test_resume_that_never_becomes_ready_is_atomic(tmp_path: Path) -> None:
     """A respawn that never binds is felled and the prior record left unchanged.
 
-    Proves the S04/S07 readiness-gated single-generation commit against a real
+    Proves the readiness-gated single-generation commit against a real
     child: the serve exits immediately without binding, so resume must fail loud
     and NOT publish a record pointing at the dead pid - exactly one generation is
     committed, only once ready, and a failed resume is atomic.
@@ -322,7 +322,7 @@ def test_resume_that_never_becomes_ready_is_atomic(tmp_path: Path) -> None:
 def test_rerun_that_never_becomes_ready_is_atomic(tmp_path: Path) -> None:
     """A rerun whose respawn never binds raises without publishing a new pid.
 
-    Proves S107/S149 against real children: rerun fells the running tree, then the
+    Proves against real children that rerun fells the running tree, then the
     respawn (a serve that exits without binding) must fail loud and NOT rewrite the
     record with a not-ready generation. The record is left carrying the pre-rerun
     pid rather than a half-published dead new one.
@@ -360,7 +360,7 @@ def _hold_loopback_port() -> tuple[socket.socket, int]:
 
 
 def test_resume_kill_failure_leaves_the_generation_unchanged(tmp_path: Path) -> None:
-    """S97: a foreign holder on the record's port makes resume atomic.
+    """A foreign holder on the record's port makes resume atomic.
 
     Models a resume kill failure - the old generation (or an un-reaped orphan)
     still holds the port. The respawn stays alive but never OWNS that listener, so
@@ -391,7 +391,7 @@ def test_resume_kill_failure_leaves_the_generation_unchanged(tmp_path: Path) -> 
 
 
 def test_rerun_kill_failure_leaves_the_generation_unchanged(tmp_path: Path) -> None:
-    """S152: the rerun analogue of the foreign-holder atomicity proof.
+    """The rerun analogue of the foreign-holder atomicity proof.
 
     rerun fells the running tree, then a foreign holder on the record's port keeps
     the respawn from ever owning the listener, so the pid-ownership readiness gate
@@ -1281,7 +1281,7 @@ _BIND_AND_RECORD_PID = (
 def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
     tmp_path: Path,
 ) -> None:
-    """A commit failure after readiness reaps the ready owned process (S05).
+    """A commit failure after readiness reaps the ready owned process.
 
     Inject a REAL commit failure - no mock - by pre-occupying the record path with
     a directory so write_record raises. The serve binds its port (readiness

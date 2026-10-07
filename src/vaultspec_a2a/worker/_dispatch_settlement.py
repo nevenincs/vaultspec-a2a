@@ -398,7 +398,7 @@ class SettlementMixin(_SettlementHost):
             # the exception escaped around its own reporting rather than through
             # it, so it emitted no error frame either. Without this arm the run
             # settles as a bare "failed" on both channels - the exact blank
-            # terminal this campaign exists to remove. The condition is the
+            # terminal a failed run must never end on. The condition is the
             # floor because nothing here observed a provider.
             failure_reason = fallback_reason
             failure_condition = failure_condition or _EXECUTOR_CONDITION

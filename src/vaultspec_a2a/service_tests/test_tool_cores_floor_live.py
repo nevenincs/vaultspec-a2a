@@ -1,6 +1,6 @@
-"""Live proof of the tool-cores deterministic grounding floor (P01.S05).
+"""Live proof of the tool-cores deterministic grounding floor.
 
-The floor landed in P01.S01: an autonomous document-authoring role's ``session/new``
+The floor: an autonomous document-authoring role's ``session/new``
 auto-permits the spawned CLI's native ``Read``/``Grep``/``Glob`` built-ins by exact
 name. That wiring is proven deterministically against a real ACP subprocess in
 ``graph/tests/nodes/test_worker_native_read_tools.py``. THIS module proves the next
@@ -108,8 +108,8 @@ class _NamedAdrObservationOptions(TypedDict):
 
 
 # Every real-provider service lane runs on the operator-configured served
-# selection. It used to name the committed all-low "fast" model profile; a
-# preset carries no model policy now, so the cost ceiling is the operator's
+# selection. A preset carries no model policy, so the cost ceiling is the
+# operator's
 # choice of a low-cost entry from the current catalog (the same thing the
 # provider-catalog live-selection prerequisite already asks for). The lane
 # claims no particular provider - it certifies the bridge/tool floor, not who
@@ -386,10 +386,10 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
     )
 
 
-# --- Semantic tier (P03.S16 Claude / S17 Z.ai): agent invokes vaultspec-rag -------
+# --- Semantic tier (Claude / Z.ai): agent invokes vaultspec-rag ---------------
 
-# The rag MCP search tools the semantic tier surfaces (P03.S12 preset opt-in + S15
-# persona). The prompt directs the document agent to invoke them so the proof observes
+# The rag MCP search tools the semantic tier surfaces (preset opt-in + persona).
+# The prompt directs the document agent to invoke them so the proof observes
 # a real mid-turn rag invocation, not a native read.
 _RAG_TOOLS = (
     "mcp__vaultspec-rag__search_codebase",
@@ -506,11 +506,11 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
     resolve to real files in the engine-scoped, rag-indexed workspace. Zero document-dir
     writes: observed over the SSE stream and cancelled before any gate applies.
 
-    Corroborating live evidence (recorded in the exec record, not asserted here - the
+    Corroborating live evidence (observed in the service log, not asserted here - the
     daemon log is not a test surface): the rag service's access log shows the run's
     ``POST /search`` hitting :8766, a request native Read/Grep can never make.
 
-    Pre-flight (see the S17 exec record): the :8766 service must be discoverable
+    Pre-flight: the :8766 service must be discoverable
     (``~/.vaultspec-rag/service.json`` present) and the engine-scoped workspace must be
     indexed on it, or the search returns no hits / the service-down error and the
     assertions fail loud.
@@ -614,7 +614,7 @@ def test_cites_named_adr_accepts_filename_and_stem() -> None:
     stem = "2026-02-25-llm-context-provider-abstraction-adr"
     # Full .md filename cited.
     assert _cites_named_adr(f"EVIDENCE: `{name}` (Problem Statement)", name, stem)
-    # Bare stem cited (the paraphrase that broke the first Claude S05 run).
+    # Bare stem cited (the paraphrase that broke the first Claude run).
     assert _cites_named_adr(
         f"grounding in the llm-context-provider-abstraction ADR ({stem}) as decided",
         name,

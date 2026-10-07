@@ -8,8 +8,8 @@ certification presets do not.
 The dashboard-shaped fixture is deliberately not a release candidate.  It
 only carries a cross-repository component reference whose name and version are
 checked against standardized metadata from the built wheel.  Target capsule
-assembly and real CPython, Node.js, and ACP artifact digests belong to S13/S14;
-this gate neither substitutes host executables nor reimplements the future
+assembly and real CPython, Node.js, and ACP artifact digests are outside this
+gate; it neither substitutes host executables nor reimplements the future
 dashboard release-set verifier.
 """
 

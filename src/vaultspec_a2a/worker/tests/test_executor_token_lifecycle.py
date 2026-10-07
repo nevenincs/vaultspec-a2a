@@ -1,4 +1,4 @@
-"""Live proof of actor-token threading through a real Executor dispatch (R7).
+"""Live proof of actor-token threading through a real Executor dispatch.
 
 Drives a genuine ingest through the real ``Executor``, a real
 ``AsyncSqliteSaver`` checkpointer, a real ``WorkerBridge`` over an in-process

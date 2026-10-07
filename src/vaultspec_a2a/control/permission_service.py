@@ -407,8 +407,8 @@ async def _authorize_permission_response(
     # ------------------------------------------------------------------
     # A verdict-style pause (PLAN_APPROVAL_PAUSE_CAUSES) that is not locally
     # respondable is a document-approval pause: the engine review surface is
-    # the sole approval authority for it (the amended a2a-orchestration-edge
-    # contract — no second approval authority in A2A). Refusing here, before
+    # the sole approval authority for it (no second approval authority in
+    # A2A). Refusing here, before
     # the idempotency and transition logic runs, means no control action is
     # journalled and no resume value is ever constructed for this call.
     document_refusal = _document_approval_refusal(permission, thread_id)
@@ -818,7 +818,7 @@ async def _dispatch_permission_resume(
     On dispatch failure the recorded transition is reset and the failure is
     classified into the protocol-facing error and thread state. On success the
     requested projection remains parked until an exact worker application receipt
-    resolves the aggregator and moves the thread to running.
+    settles the request and moves the thread to running.
     """
     request_id = response.request_id
     thread_id = authorized.thread_id

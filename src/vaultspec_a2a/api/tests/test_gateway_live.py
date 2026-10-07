@@ -210,7 +210,7 @@ async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
 async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """Two reads-and-a-transition the transition surface used to hold alone.
+    """Archive and team status are both served on the versioned surface.
 
     Archiving is not deletion - the run survives, marked historical - so the
     test asserts it is still there afterwards rather than trusting the status
@@ -272,7 +272,7 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
     same run id is a REPLAY: it answers 201 with the ORIGINAL run and dispatches
     nothing, silently ignoring the new body. The follow-up verb refuses out
     loud, with a typed conflict naming the run's occupancy - and reserves
-    nothing while doing it, which is the point: admitting the turn used to make
+    nothing while doing it, which is the point: admitting the turn would make
     it the run's writer and strand the executing turn.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
@@ -342,11 +342,11 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
 async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """The versioned surface can now accept the answer to what it asks.
+    """The versioned surface accepts the answer to what it asks.
 
-    ``permission_request`` is already an enumerated frame on run-stream, so the
-    question is versioned while the answer used to exist only on the transition
-    surface. This drives the answer over a real socket and pins three things: it
+    ``permission_request`` is an enumerated frame on run-stream, so the question
+    is versioned and the answer is versioned with it. This drives the answer over
+    a real socket and pins three things: it
     works, it is at-most-once, and it is scoped to the run that raised it.
 
     The scoping case is the one that matters most. A request id names a request,

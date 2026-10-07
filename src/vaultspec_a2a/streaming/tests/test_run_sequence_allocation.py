@@ -350,11 +350,11 @@ async def test_two_first_touches_of_one_run_cannot_rewind_the_counter(
     """Seeding awaits the store, and a second touch arrives inside that await.
 
     Reachable without contriving anything: the worker bridge re-posts a batch
-    the gateway is still processing, or the WebSocket and HTTP ingest paths
-    carry one run at once. Both callers find the run unseeded, both read the
-    same mark, and the later assignment used to overwrite a counter the
-    earlier one had already advanced - so six frames went out under three
-    numbers and three of them were never stored.
+    the gateway is still processing, or two ingest requests carry one run at
+    once. Both callers find the run unseeded, both read the
+    same mark, and the later assignment must not overwrite a counter the
+    earlier one has already advanced - otherwise six frames go out under three
+    numbers and three of them are never stored.
     """
     await backend.seed_thread()
     hub = _numbered_hub(backend)

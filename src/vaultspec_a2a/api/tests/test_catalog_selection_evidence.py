@@ -49,7 +49,7 @@ async def test_frozen_selection_survives_real_gateway_restart(
 
     Evidence: restart durably reproduces the frozen execution authority and
     does not re-dispatch. A first app freezes and persists the explicit
-    selection; a SECOND app instance - fresh aggregator, circuit breaker, and
+    selection; a SECOND app instance - fresh relay hub, circuit breaker, and
     worker, but the same durable DB and checkpointer - serves run-status with
     the byte-identical freeze and dispatches nothing. The second instance
     never consults a catalog on this path, which is the drift-immunity claim

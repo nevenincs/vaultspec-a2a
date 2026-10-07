@@ -68,9 +68,9 @@ __all__ = [
 class CertifiedGateway(GatewayVerbs):
     """An authenticated handle to one running broker certification stack.
 
-    Every request presents the real gateway service credential; none uses the
-    test-only authentication bypass. The run reads, cancel, deletion and status
-    wait are the shared :class:`~vaultspec_a2a.testing.gateway_verbs.GatewayVerbs`.
+    Every request presents the real gateway service credential. The run reads,
+    cancel, deletion and status wait are the shared
+    :class:`~vaultspec_a2a.testing.gateway_verbs.GatewayVerbs`.
 
     Run-start requires an explicit catalog selection revalidated against the
     catalog served for the run's workspace, so the run-bearing verbs resolve

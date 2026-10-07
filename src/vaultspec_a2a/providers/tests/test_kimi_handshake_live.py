@@ -1,4 +1,4 @@
-"""Live keyless proof: the installed `kimi acp` speaks our ACP handshake (P02.S09).
+"""Live keyless proof: the installed `kimi acp` speaks our ACP handshake.
 
 No mocks. Spawns the REAL installed `kimi acp` subprocess via the production
 classifier + spawn path and drives `initialize` with our client's

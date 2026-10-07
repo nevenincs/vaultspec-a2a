@@ -94,7 +94,7 @@ def _assert_team_status_frame(frame: dict[str, object], raw: str, run_id: str) -
 async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S27/S99: an artifact body cannot cross the authenticated edge; identity does."""
+    """An artifact body cannot cross the authenticated edge; identity does."""
     app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
@@ -141,7 +141,7 @@ async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
 async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S27/S99: an edit diff cannot cross; the tool-call metadata does."""
+    """An edit diff cannot cross; the tool-call metadata does."""
     app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
@@ -194,7 +194,7 @@ async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
 async def test_authenticated_stream_bounds_the_token_delta(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S159: a message frame's token content is bounded, not relayed whole."""
+    """A message frame's token content is bounded, not relayed whole."""
     app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
     oversized = "T" * (MAX_PROGRESS_CONTENT_CHARS + 5000)
@@ -419,7 +419,7 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
 async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S160 (global): the connection cap holds even behind a valid bearer."""
+    """The global connection cap holds even behind a valid bearer."""
     limit = domain_config.max_stream_connections
     assert limit > 0, "the global stream limit must be enabled for this proof"
 
@@ -448,7 +448,7 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
 async def test_global_stream_quota_admits_the_authenticated_caller_below_capacity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S160 (global): the cap is the discriminator, not the bearer.
+    """The global cap is the discriminator, not the bearer.
 
     One slot below capacity the same authenticated request opens, proving the
     refusal above is the connection limit rather than an auth artefact.

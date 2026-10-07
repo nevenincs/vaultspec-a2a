@@ -18,7 +18,7 @@ import sys
 
 import pytest
 
-# The modules whose cold-import order previously formed the cycle. Each must
+# The modules whose cold-import order is prone to forming a cycle. Each must
 # import cleanly from an empty module cache.
 _COLD_IMPORT_TARGETS = [
     "vaultspec_a2a.context",

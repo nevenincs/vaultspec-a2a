@@ -2,8 +2,8 @@
 
 Pruning is a stand-in: the saver this project ships offers no pruning of its
 own, so the statements go straight at its tables. That is safe only while
-three conditions hold, and recognising the saver's CLASS - which is all the
-retention code used to do - establishes none of them.
+three conditions hold, and recognising the saver's CLASS alone establishes
+none of them.
 
 Each test here breaks exactly one condition against a real store and requires
 the store to come back untouched, because the failure mode is silent: the

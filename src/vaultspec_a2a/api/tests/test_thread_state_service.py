@@ -109,9 +109,9 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(
     assert snapshot.snapshot_complete is False
     assert snapshot.replay_status == "gap_detected"
     # The replay status and the repair classification must describe the same
-    # situation. A detected gap is a replay gap; it was previously reported as
-    # checkpoint-unavailable, which claims the checkpoint's contents are unknown
-    # when this path has established that there is no checkpoint at all.
+    # situation. A detected gap is a replay gap, not checkpoint-unavailable, which
+    # would claim the checkpoint's contents are unknown when this path has
+    # established that there is no checkpoint at all.
     assert snapshot.repair_status == "replay_gap"
     assert snapshot.execution_readiness == "replay_gap"
     assert "checkpoint_missing" in snapshot.degraded_reasons

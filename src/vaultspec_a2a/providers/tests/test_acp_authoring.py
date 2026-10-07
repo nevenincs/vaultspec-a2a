@@ -1,7 +1,7 @@
-"""Unit tests for the ACP authoring-tool binding and mcpServers builder (R4).
+"""Unit tests for the ACP authoring-tool binding and mcpServers builder.
 
 Pure tests over real catalog objects — no mocks, no network. They pin the
-loopback-only invariant, the no-vault-write-path guard, token redaction (R7),
+loopback-only invariant, the no-vault-write-path guard, token redaction,
 and the exact ``mcpServers`` entry shape the claude-agent-acp CLI consumes.
 """
 
@@ -88,7 +88,7 @@ def _binding(
 
 
 class TestWriteToolGuard:
-    """The binding refuses any raw filesystem-write tool (R2)."""
+    """The binding refuses any raw filesystem-write tool."""
 
     @pytest.mark.parametrize(
         "name",
@@ -118,7 +118,7 @@ class TestWriteToolGuard:
 
 
 class TestLoopbackInvariant:
-    """Only a loopback http(s) server URL is accepted (R4)."""
+    """Only a loopback http(s) server URL is accepted."""
 
     @pytest.mark.parametrize(
         "url",
@@ -148,7 +148,7 @@ class TestLoopbackInvariant:
 
 
 class TestTokenHygiene:
-    """Tokens never appear in repr (R7)."""
+    """Tokens never appear in repr."""
 
     def test_repr_redacts_tokens(self) -> None:
         binding = _binding(bearer="SECRET-BEARER", actor="SECRET-ACTOR")
@@ -225,7 +225,7 @@ def _stdio_binding(
 
 
 class TestConfigHomeAuthoringEntry:
-    """Admit the run's stdio authoring bridge into the isolated home (S18).
+    """Admit the run's stdio authoring bridge into the isolated home.
 
     Driven through the real seam: a real ``AuthoringToolBinding`` ->
     ``build_authoring_stdio_mcp_servers`` -> ``config_home_authoring_entry``, so a
@@ -355,7 +355,7 @@ class TestAuthoringVisibleButVaultWriteDenied:
 
     The config advertises the authoring MCP server (propose/read tools visible),
     yet the ACP fs write RPC still returns the value-typed forbidden_actor denial
-    for a ``.vault`` path — the two halves of R2 + R4 hold together.
+    for a ``.vault`` path — the two halves hold together.
     """
 
     @pytest.mark.asyncio

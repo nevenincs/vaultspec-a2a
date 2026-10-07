@@ -1855,7 +1855,7 @@ class TestRecursionLimitDetection:
 
 
 class TestGenericIngestExceptionDetection:
-    """Tests for the catch-all exception branch in ingest() (S37 resume fix)."""
+    """Tests for the catch-all exception branch in ingest()."""
 
     @pytest.mark.asyncio
     async def test_ingest_reports_the_real_exception_not_a_generic_message(
@@ -1863,12 +1863,11 @@ class TestGenericIngestExceptionDetection:
     ) -> None:
         """The emitted error names the actual failure, not a generic string.
 
-        Before this fix, every uncaught exception here was reported to
-        run-status/relay clients as the same fixed string regardless of
-        cause, so a resumed run that died on an expired authoring credential
-        was indistinguishable from any other unrelated ingest crash. Reproduced
-        through a real node raising the real exception, not a stub simulating
-        one.
+        Were every uncaught exception here reported to run-status/relay clients
+        as the same fixed string regardless of cause, a resumed run that died on
+        an expired authoring credential would be indistinguishable from any
+        other unrelated ingest crash. Reproduced through a real node raising the
+        real exception, not a stub simulating one.
         """
         queue = relayed_queue(producer, "thread-generic-fail")
 
@@ -2087,9 +2086,9 @@ def _failing_provider_graph(
 class TestProviderFailureReachesTheReason:
     """The end-to-end proof that a provider fault's identity survives to a client.
 
-    A provider fault used to reach a client as attribution alone - the worker
-    name, the model CLASS, and a message count - carrying none of the provider's
-    own type, message or protocol code. Every assertion here is on the reason
+    A provider fault reaches a client with the provider's own type, message and
+    protocol code, not as attribution alone (the worker name, the model CLASS,
+    and a message count). Every assertion here is on the reason
     ingest actually produced from a real refusal travelling the real path.
     """
 
@@ -2131,7 +2130,7 @@ class TestProviderFailureReachesTheReason:
         # lost between the raise site and the frame.
         assert error_events[-1].code == ProviderCondition.UNAUTHENTICATED.value
         # The provider's own identity: which exception, which protocol code, and
-        # what the provider actually said. None of the three used to survive.
+        # what the provider actually said. All three survive.
         assert "AcpPromptError" in reason
         assert str(_PROVIDER_ERROR_CODE) in reason
         assert _PROVIDER_REFUSAL in reason
@@ -2197,10 +2196,9 @@ class TestProviderFailureReachesTheReason:
 class TestRecoverabilityFollowsTheCondition:
     """The recoverable flag reports the failure, not the handler that caught it.
 
-    It used to be hardcoded false on the catch-all, which is where EVERY provider
-    fault lands. So a transient overload and a revoked credential were served to a
-    client identically unrecoverable, while a step timeout - a graph-infrastructure
-    fact - was served recoverable. The flag classified which ``except`` branch ran.
+    The catch-all is where EVERY provider fault lands, so the flag follows the
+    failure's condition rather than which ``except`` branch ran: a transient
+    overload and a revoked credential are not served to a client identically.
 
     Both cases below are driven through the real ACP simulator subprocess, so the
     condition is resolved by the lane from a real wire frame and the flag is read
@@ -2249,8 +2247,8 @@ class TestRecoverabilityFollowsTheCondition:
     ) -> None:
         """A rate refusal reaches the client as recoverable, because it is.
 
-        This is the case that used to be impossible: the branch hardcoded false,
-        so no provider failure of any kind could ever be reported recoverable.
+        The catch-all branch does not hardcode false, so a provider failure of a
+        recoverable kind is reported recoverable.
         """
         err = await self._error_frame(
             producer,
@@ -2348,7 +2346,7 @@ def _cancellable_stalling_graph(
 
 
 class TestIngestStallWatchdog:
-    """Tests for the S37 ingest-stall safety net (astream wedge)."""
+    """Tests for the ingest-stall safety net (astream wedge)."""
 
     @pytest.mark.asyncio
     async def test_stall_fails_loud_with_a_named_reason_not_a_silent_hang(
@@ -2463,7 +2461,7 @@ class TestIngestStallWatchdog:
         """The stall reason is exposed for the durable failure_reason column.
 
         Executor._settle_run reads this after ingest() returns to thread it
-        into emit_terminal_status(error_detail=...) — the S37 failure-reason
+        into emit_terminal_status(error_detail=...) — the failure-reason
         persistence path. A consumed reason must never be popped twice.
         """
         graph = build_error_injecting_graph()
@@ -2519,18 +2517,16 @@ class TestIngestStallWatchdog:
         """A silent stretch under the run's OWN step_timeout must not trip the
         watchdog, even when it exceeds the flat global default.
 
-        Reproduces the live incident this fix addresses: an ADR-authoring
-        node's ACP subprocess legitimately went quiet -- a long tool call, or
-        extended reasoning with no protocol frame to relay -- for longer than
-        the global default but comfortably inside the team preset's own much
-        larger step_timeout_seconds (1800s on the real preset that failed).
-        The unconditional outer bound, blind to that run's own configured
-        budget, killed a healthy run and reported "no event from the graph"
-        while the run was doing exactly the long-running work its own
-        configuration sanctioned. Fails on the unfixed code (the global
-        default alone bounds the wait, so the 0.3s quiet stretch below trips
-        it well before astream yields) and passes once the effective
-        bound is widened to the graph's own step_timeout.
+        An ADR-authoring node's ACP subprocess can legitimately go quiet -- a
+        long tool call, or extended reasoning with no protocol frame to relay
+        -- for longer than the global default but comfortably inside the team
+        preset's own much larger step_timeout_seconds (1800s on the real
+        preset). A bound blind to that run's own configured budget would kill
+        a healthy run and report "no event from the graph" while the run was
+        doing exactly the long-running work its own configuration sanctions.
+        The effective bound is the graph's own step_timeout, so the 0.3s quiet
+        stretch below does not trip it; the global default alone would trip it
+        well before astream yields.
         """
         graph = build_error_injecting_graph()
         # The compiler's own convention (``graph/compiler.py``): a team

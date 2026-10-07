@@ -4,7 +4,7 @@ The property is only real where a viewer can see it, so everything here is
 live: a real uvicorn gateway on a real socket, a real migrated SQLite
 application database, a real ``AsyncSqliteSaver``, a real LangGraph run for
 each turn's completion evidence, a real journal reservation through the
-production queue repository for the continuation, and a real SSE client on
+production continuation queue for the continuation, and a real SSE client on
 the published stream. The run and its queue are built by the helper the
 control-plane continuation suites use, through the same production verbs: a
 promotion staged by hand would prove nothing about the one the service

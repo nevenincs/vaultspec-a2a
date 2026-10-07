@@ -1,4 +1,4 @@
-"""Permission/resume certification against the real compose stack."""
+"""Permission/resume certification against the real service stack."""
 
 from __future__ import annotations
 

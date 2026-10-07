@@ -1,10 +1,10 @@
 """One real compiled graph whose single node's behaviour is chosen by input.
 
-Replaces seven hand-written ``StreamableGraph`` stubs this suite used to carry
-(``_SilentGraph``, ``_InterruptingGraph``, ``_RecursingGraph``, ``_FailingGraph``,
-``_ProviderCancelledGraph``, ``_StallingGraph``, ``_LongStepBudgetGraph``):
-forcing a different failure used to mean swapping in a different hand-rolled
-class, so a real protocol change was ten edits instead of one. Every scenario
+One graph covers the scenarios that hand-written ``StreamableGraph`` stubs would
+each need a class for (silent, interrupting, recursing, failing,
+provider-cancelled, stalling, long step budget): forcing a different failure
+changes one input rather than swapping in a hand-rolled class, so a real
+protocol change is one edit instead of ten. Every scenario
 below runs the SAME real ``StateGraph`` through a real ``InMemorySaver`` -
 only the instruction the one node reads off its input changes, and every
 error it raises (``RuntimeError``, ``AcpPromptCancelledError``,

@@ -33,7 +33,8 @@ Glossary
       An attached process whose lifetime and interruption belong to the caller.
 
    gateway
-      The request-facing Hypertext Transfer Protocol (HTTP) and WebSocket edge.
+      The request-facing Hypertext Transfer Protocol (HTTP) and server-sent
+      event (SSE) edge.
 
    worker
       The separate process that executes graphs delegated through the gateway.
@@ -78,8 +79,9 @@ Glossary
       selecting a newer dependency version.
 
    stack
-      A Docker Compose (Compose)-owned project that manages one or more related
-      services as a bounded lifecycle unit.
+      A Docker Compose (Compose)-owned development or test fixture project,
+      today only the Jaeger trace fixture, managed as a bounded lifecycle unit.
+      The gateway and worker are never part of a stack.
 
    Vaultspec sync
       The explicit Core operation that compares canonical inputs with managed

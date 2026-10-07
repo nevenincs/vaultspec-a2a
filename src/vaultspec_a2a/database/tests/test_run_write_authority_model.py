@@ -80,7 +80,7 @@ def test_authority_constructor_has_no_missing_value_defaults() -> None:
 async def test_current_authority_is_required_and_round_trips(
     session: AsyncSession,
 ) -> None:
-    """S77 maps every authority field without a missing-value default."""
+    """The model maps every authority field without a missing-value default."""
     authority = RunWriteAuthority(
         run_revision=0,
         writer_generation=1,

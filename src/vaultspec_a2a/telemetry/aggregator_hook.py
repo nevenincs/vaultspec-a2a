@@ -1,4 +1,4 @@
-"""Real OTel implementation of the TelemetryHook protocol for the aggregator."""
+"""Real OTel implementation of the TelemetryHook protocol for the run event stream."""
 
 from __future__ import annotations
 
@@ -19,8 +19,9 @@ class OTelAggregatorHook:
     """``TelemetryHook`` backed by OpenTelemetry.
 
     Lazily creates counters and histograms on first use so that only
-    metrics actually recorded by the aggregator are registered with the
-    OTel SDK.
+    metrics actually recorded by the worker's event producer and the gateway's
+    relay hub are registered with the OTel SDK. The default meter scope keeps
+    the name ``vaultspec_a2a.streaming.aggregator``.
 
     Satisfies the :class:`~vaultspec_a2a.graph.protocols.TelemetryHook`
     protocol.

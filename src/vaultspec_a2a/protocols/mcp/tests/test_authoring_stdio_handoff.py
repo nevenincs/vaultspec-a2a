@@ -3,8 +3,8 @@
 No mocks, no engine: the bridge is spawned with a handed catalog snapshot (env)
 and an UNREACHABLE engine base URL. If it writes its "serving tools=N" startup
 marker, it served ``list_tools`` from the handoff without an engine fetch at spawn
-- the cold-start fix that let the bridge's tools reach the model in time
-(a2a-edge-conformance S18). A fetch would have had to reach the unreachable engine
+- the cold-start fix that let the bridge's tools reach the model in time.
+A fetch would have had to reach the unreachable engine
 and could never serve.
 """
 

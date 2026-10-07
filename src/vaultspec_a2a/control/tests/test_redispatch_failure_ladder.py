@@ -383,7 +383,7 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
     and still not a project a dispatch can be sited on, because resolving it
     would anchor the run to whatever directory this process was started in. It
     is the case that reaches the minting rather than the type check, and the one
-    that used to raise inside the request constructor and abort the whole pass.
+    that must not raise inside the request constructor and abort the whole pass.
     """
     db_file = tmp_path / "redispatch-relative-project.db"
     await close_db()

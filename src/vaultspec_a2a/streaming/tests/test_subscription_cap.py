@@ -2,8 +2,8 @@
 
 The gateway's connection limit bounds how many stream clients exist. It says
 nothing about what each one costs: every subscription a client holds is matched
-against every broadcast event, so an authenticated caller could previously issue
-one `subscribe` with an arbitrarily long thread list and multiply the gateway's
+against every broadcast event, so one `subscribe` with an arbitrarily long
+thread list from an authenticated caller would multiply the gateway's
 per-event work without opening a second connection.
 
 These drive the real relay hub at its real shipped default rather than a

@@ -400,7 +400,7 @@ async def on_request_permission(
         )
         return _refused_outcome(rpc_id, options)
 
-    # Diagnostic (R7: tool name + option ids only, never rawInput/payloads):
+    # Diagnostic (tool name + option ids only, never rawInput/payloads):
     # this handler firing means the SDK's canUseTool rung was reached — i.e. no
     # allow-rule pre-empted the call. Logging it disambiguates which permission
     # rung resolved a bridged authoring tool during headless runs.
@@ -497,7 +497,7 @@ async def on_fs_write_text_file(
         # to the authoring tools. Reads (on_fs_read_text_file) stay permitted.
         if _targets_vault(file_path, config):
             logger.info(
-                "Denied .vault/ write via ACP fs (R2 forbidden_actor): %r",
+                "Denied .vault/ write via ACP fs (forbidden_actor): %r",
                 path,
             )
             return _vault_write_denial(rpc_id, path)

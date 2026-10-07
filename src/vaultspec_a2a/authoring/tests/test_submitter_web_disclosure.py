@@ -202,7 +202,7 @@ class TestRefusalThroughTheSubmitPath:
 
     @pytest.mark.asyncio
     async def test_strict_subset_is_refused_naming_only_the_hidden_url(self) -> None:
-        # Disclosing one of two retrievals is the defect D2 names explicitly.
+        # Disclosing only one of two retrievals is refused explicitly.
         with pytest.raises(DocumentConformanceError) as excinfo:
             await _submitter()(
                 _state(_DISCLOSES_A, [_web_finding(_URL_A, _URL_B)]),

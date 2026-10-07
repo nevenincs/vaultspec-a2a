@@ -740,7 +740,7 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
 
 @pytest.mark.asyncio
 async def test_plan_approval_node_no_longer_accepts_retired_approved_boolean() -> None:
-    """The plan gate speaks the verdict vocabulary now (D6) — the legacy
+    """The plan gate speaks the verdict vocabulary — the legacy
     ``{"approved": bool}`` resume shape is retired, not bridged. A resume in
     that shape carries no ``"verdict"`` and names no request, so it answers
     nothing: the gate parks again on the same request rather than reading it
@@ -777,7 +777,7 @@ async def test_plan_approval_node_no_longer_accepts_retired_approved_boolean() -
     assert "__interrupt__" in first
     request_id = first["__interrupt__"][0].value["request_id"]
 
-    # The retired shape used to mean "approved". It must not any more.
+    # The retired shape no longer means "approved".
     resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
     assert "__interrupt__" in resumed
     assert resumed["__interrupt__"][0].value["request_id"] == request_id

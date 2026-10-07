@@ -92,7 +92,7 @@ _ACCEPTED: Final[tuple[frozenset[str], ...]] = (
 # Reviewed groups in the TEST tier, held separately so the two floors stay
 # legible. The bar for accepting one here is the same: a reason, not a recording.
 _ACCEPTED_TESTS: Final[tuple[frozenset[str], ...]] = (
-    # Two tests of ONE endpoint differing in whether the aggregator is the only
+    # Two tests of ONE endpoint differing in whether the relay hub is the only
     # thing wired. The bodies rhyme because the arrangement does; collapsing
     # them into one parametrized case would hide which configuration failed.
     frozenset(

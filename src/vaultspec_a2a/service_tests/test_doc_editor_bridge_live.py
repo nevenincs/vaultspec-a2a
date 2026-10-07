@@ -17,7 +17,7 @@ were also present in its own prompt, which is the precise failure mode the
 elicitation defect hid behind. Tool names seen in the narration are retained here
 as a DIAGNOSTIC only, to help read a failure, and are never asserted on.
 
-This is the Codex-lane counterpart of the claude-lane S20 bridge proof, and both
+This is the Codex-lane counterpart of the claude-lane solo-coder bridge proof, and both
 run on the shared acceptance harness and its engine-side changeset reader rather
 than restating them, so the two lanes are certified against one definition of
 proof.

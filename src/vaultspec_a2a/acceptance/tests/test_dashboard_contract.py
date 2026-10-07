@@ -2,8 +2,7 @@
 
 Every scenario drives the versioned public surface of one real authenticated
 gateway - a real gateway process, a real gateway-owned worker, and real SQLite
-control and checkpoint stores - behind a real gateway service credential. None
-uses the test-only authentication bypass.
+control and checkpoint stores - behind a real gateway service credential.
 
 These certify the provider-INDEPENDENT gateway contract: run admission, run
 creation and addressability, the status snapshot's shape, cancellation routing,
@@ -45,7 +44,7 @@ if TYPE_CHECKING:
 def test_authenticated_prepare_reserves_without_run_or_token(
     gateway: CertifiedGateway,
 ) -> None:
-    """S78: a prepare reserves capacity but mints neither run nor token.
+    """A prepare reserves capacity but mints neither run nor token.
 
     Discriminating: the response carries a reservation, a non-secret lease, and
     the validated required-role set, but NO run id and NO actor tokens, and
@@ -93,7 +92,7 @@ def test_authenticated_prepare_reserves_without_run_or_token(
 def test_authenticated_start_creates_a_dispatched_run(
     gateway: CertifiedGateway,
 ) -> None:
-    """S170: a one-shot start creates a durable run that discovery then finds.
+    """A one-shot start creates a durable run that discovery then finds.
 
     Discriminating against the prepare above: start returns a run id and that run
     is immediately addressable through run-status (HTTP 200), whereas a prepare
@@ -145,7 +144,7 @@ def test_authenticated_start_creates_a_dispatched_run(
 def test_authenticated_status_snapshot_is_coherent_or_a_real_not_found(
     gateway: CertifiedGateway,
 ) -> None:
-    """S171: status is a coherent snapshot for a real run and a real 404 otherwise.
+    """Status is a coherent snapshot for a real run and a real 404 otherwise.
 
     Discriminating on snapshot SHAPE, which is independent of a run's eventual
     outcome: a real run resolves to a snapshot whose run id, topology preset, and
@@ -175,14 +174,14 @@ def test_authenticated_status_snapshot_is_coherent_or_a_real_not_found(
 def test_cancel_verb_routes_authenticated_and_reports_real_not_found(
     gateway: CertifiedGateway,
 ) -> None:
-    """S172: the versioned cancel verb is attach-gated and 404s an absent run.
+    """The versioned cancel verb is attach-gated and 404s an absent run.
 
     Discriminating on the provider-independent half of the cancel contract: an
     authenticated cancel of an unrelated run id returns a real 404 (not a blanket
     acceptance), and the identical cancel without the attach credential is refused
     401 - so the verb is genuinely routed and gated. Driving a live run all the
     way to a terminal CANCELLED status needs a run held non-terminal by the
-    deterministic provider and is certified in the Compose service suite.
+    deterministic provider and is certified in the service suite.
     """
     absent = gateway.cancel("run-contract-cancel-absent", idempotency_key="cancel-1")
     assert absent.status_code == 404, absent.text
@@ -211,7 +210,7 @@ async def _open_terminal_frame(
 async def test_authenticated_progress_stream_relays_bounded_lifecycle_frame(
     gateway: CertifiedGateway,
 ) -> None:
-    """S173: the authenticated progress channel opens, is gated, and relays a frame.
+    """The authenticated progress channel opens, is gated, and relays a frame.
 
     Discriminating: an unauthenticated stream open is refused 401; the
     authenticated open returns 200 with the SSE media type and relays the run's

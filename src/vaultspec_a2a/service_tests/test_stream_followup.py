@@ -1,4 +1,4 @@
-"""SSE and follow-up certification against the real compose stack."""
+"""SSE and follow-up certification against the real service stack."""
 
 from __future__ import annotations
 

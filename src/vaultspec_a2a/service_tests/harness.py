@@ -250,7 +250,7 @@ class ServiceStack:
         return [watched for name in names if (watched := owned[name]) is not None]
 
     def start(self) -> None:
-        """Bring the deterministic compose stack online and wait for readiness."""
+        """Bring the deterministic service stack online and wait for readiness."""
         self._ensure_runtime_dir()
         try:
             self._start_infra()
@@ -415,7 +415,7 @@ class ServiceStack:
         )
 
     def stop(self) -> None:
-        """Capture diagnostics and tear the compose stack down."""
+        """Capture diagnostics and tear the service stack down."""
         if self._stopped:
             self.record("teardown", {"status": "already_stopped"})
             return

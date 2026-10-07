@@ -1,7 +1,7 @@
 """Domain enums for the graph orchestration layer.
 
 These enums define domain-level discriminators and status types used by the
-graph compiler, event aggregator, and domain event dataclasses.
+graph compiler, event producer, and domain event dataclasses.
 
 ``Provider`` is the canonical Layer 1 lane discriminator. Concrete model
 values come only from served provider catalogs.

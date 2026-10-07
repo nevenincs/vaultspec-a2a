@@ -37,8 +37,8 @@ def _gateway_app() -> FastAPI:
     """Mount the production internal relay route on a real application.
 
     The route and the body-limit middleware in front of it are the gateway's own,
-    so the batch limit enforced is the shipped one. It is given a real event
-    aggregator and told explicitly that it has no database, which is the declared
+    so the batch limit enforced is the shipped one. It is given a real relay
+    hub and told explicitly that it has no database, which is the declared
     shape for a host that relays progress without persisting it - and progress is
     all these events are.
     """
@@ -118,10 +118,10 @@ class _SizeRecordingGateway:
 async def test_a_backlog_is_split_into_batches_the_gateway_accepts() -> None:
     """A buffer larger than one body is delivered, not refused whole.
 
-    The whole buffer used to go out as a single post. A backlog built while the
-    gateway was away therefore arrived over the limit, was refused, and was
-    re-queued unchanged - so it was refused again, indefinitely. It is now cut
-    into bodies that fit, in order, and the real route accepts every one.
+    The buffer is cut into bodies that fit, in order, and the real route accepts
+    every one. Sent as a single post, a backlog built while the gateway was away
+    would arrive over the limit, be refused, and be re-queued unchanged - refused
+    again, indefinitely.
     """
     with settings_override(internal_max_http_body_bytes=_SMALL_BODY_LIMIT):
         limit = settings.internal_max_event_batch_bytes
@@ -204,7 +204,7 @@ async def test_a_full_buffer_gives_up_progress_before_an_outcome() -> None:
 
     A terminal is stated once and nothing restates it, so a lost one leaves the
     gateway watching a run that never ends - and the flood of progress that
-    precedes a terminal is exactly what used to push it out of a full buffer.
+    precedes a terminal is exactly what would push it out of a full buffer.
     """
     gateway = _SizeRecordingGateway()
     with settings_override(ipc_max_event_buffer=4):
@@ -329,8 +329,8 @@ class _RefusingOnceGateway:
 async def test_a_backlog_the_cadence_flush_failed_is_driven_again() -> None:
     """A batch re-queued by the cadence flush itself is retried without new events.
 
-    The re-queue runs inside the flush task, which used to count as the pending
-    flush, so no redrive was armed and the backlog waited for an event that a
+    The re-queue runs inside the flush task, which must not count as the pending
+    flush, or no redrive is armed and the backlog waits for an event that a
     run which has just ended never sends.
     """
     gateway = _RefusingOnceGateway()
@@ -359,11 +359,11 @@ async def test_a_backlog_the_cadence_flush_failed_is_driven_again() -> None:
 async def test_two_flushes_never_overlap_on_the_wire() -> None:
     """The cadence flush and a terminal's immediate flush take turns.
 
-    They used to share no lock, so both could hold a slice of one buffer at once:
-    the gateway then had two posts in flight whose relative order nothing
-    established, and a failure in either re-queued events the other had already
-    delivered. The gateway is held mid-request here so the overlap, if there were
-    one, would be unmissable.
+    They share one lock; without it both could hold a slice of one buffer at once:
+    the gateway would have two posts in flight whose relative order nothing
+    established, and a failure in either would re-queue events the other had
+    already delivered. The gateway is held mid-request here so the overlap, if
+    there were one, would be unmissable.
     """
     gateway = _SizeRecordingGateway()
     gateway.gate = asyncio.Event()

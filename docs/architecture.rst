@@ -8,7 +8,8 @@ External boundaries
 -------------------
 
 :mod:`vaultspec_a2a.api` exposes application programming interface (API)
-schemas and Hypertext Transfer Protocol (HTTP) and WebSocket entry points.
+schemas and Hypertext Transfer Protocol (HTTP) and server-sent event (SSE)
+entry points.
 :mod:`vaultspec_a2a.protocols` adapts Model Context Protocol (MCP) traffic.
 :mod:`vaultspec_a2a.cli` exposes command-line interface (CLI) operator commands.
 

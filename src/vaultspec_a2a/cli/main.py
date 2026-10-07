@@ -272,8 +272,8 @@ def desktop_serve(
 
     Seats every mutable path under the explicit application home and binds the
     capsule assets root, then re-execs ``serve`` in a freshly armed interpreter
-    so the gateway boots with the desktop settings in force. Compose and plain
-    ``serve`` invocations are unaffected; no run-control lifecycle verb is added.
+    so the gateway boots with the desktop settings in force. Plain ``serve``
+    invocations are unaffected; no run-control lifecycle verb is added.
     """
     from ..desktop.profile import DesktopProfileError
 

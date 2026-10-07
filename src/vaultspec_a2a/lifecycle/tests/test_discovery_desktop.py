@@ -149,7 +149,7 @@ def test_classification_fresh_stale_absent_malformed(tmp_path: Path) -> None:
 
 
 def test_legacy_record_is_malformed_to_the_desktop_classifier(tmp_path: Path) -> None:
-    """An unversioned Compose record is not a valid desktop record."""
+    """An unversioned service record is not a valid desktop record."""
     path = tmp_path / "service.json"
     path.write_text(
         json.dumps({"port": 8000, "pid": 4321, "last_heartbeat": 1}),

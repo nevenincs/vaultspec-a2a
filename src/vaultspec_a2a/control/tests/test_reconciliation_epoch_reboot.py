@@ -95,7 +95,7 @@ async def test_unfinished_graph_survives_reboot_without_repair_journal_growth(
     assert after1.recovery_epoch == 0
     assert started1 is None
 
-    # Boot 2: the reboot that used to crash with an IntegrityError.
+    # Boot 2: a reboot must not crash with an IntegrityError.
     async with session_factory() as session:
         summary2 = await reconcile_threads_on_startup(session, checkpointer)
         await session.commit()

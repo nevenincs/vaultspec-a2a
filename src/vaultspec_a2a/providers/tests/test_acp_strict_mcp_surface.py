@@ -116,9 +116,9 @@ async def _armed_model(workspace: Path, rule: ExternalPrerequisiteRule) -> AcpCh
     """Arm the claude lane on the model the OPERATOR declared.
 
     Both tests below drive a real turn, so this is a billable lane and the
-    entry has to be named rather than chosen - a capability tier used to stand
-    in here, and production stopped accepting one because tiers carry no
-    cross-provider meaning. Absent a declaration the caller SKIPS with the
+    entry has to be named rather than chosen - production accepts no capability
+    tier here because tiers carry no cross-provider meaning. Absent a
+    declaration the caller SKIPS with the
     runbook reason instead of spending on a model nobody picked.
     """
     served, reason = await declared_lane_model_value(Provider.CLAUDE.value, workspace)

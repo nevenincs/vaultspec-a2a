@@ -31,7 +31,7 @@ def test_the_snapshot_declares_the_domain_type_itself() -> None:
     An identity check rather than a name check: a duplicate dataclass declared
     elsewhere would carry the same name, the same fields, and would serialize
     identically, so comparing ``__name__`` would pass against exactly the defect
-    this campaign retires.
+    a copied type introduces.
     """
     annotations = {f.name: f.type for f in dataclasses.fields(ThreadStateData)}
     (item_type,) = typing.get_args(annotations["plan"])

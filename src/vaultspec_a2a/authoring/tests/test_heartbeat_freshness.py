@@ -1,8 +1,8 @@
 """A present-but-unusable heartbeat must read as stale, never as fresh.
 
 This guard decides whether a peer is treated as running, so its failure
-direction is the whole point. It previously returned fresh for anything it could
-not parse, which meant a record claiming an infinite or far-future heartbeat read
+direction is the whole point. It never returns fresh for anything it cannot
+parse: a record claiming an infinite or far-future heartbeat would otherwise read
 as permanently live - exactly the shape a stale or forged record takes.
 
 Absence still means fresh, because the field is optional per the contract and its

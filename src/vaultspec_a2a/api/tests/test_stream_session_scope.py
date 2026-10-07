@@ -68,9 +68,10 @@ async def test_attached_viewers_hold_no_pooled_connection(
 ) -> None:
     """Every viewer's connection is back in the pool before its first frame.
 
-    Three viewers used to mean three connections checked out for the duration -
-    the pool has fifteen, so about fifteen viewers stalled run-start, run-status,
-    cancel and the event relay on the same engine. The count is read while the
+    A viewer holds no connection for the duration of its stream: the pool has
+    fifteen, so if each viewer kept one, about fifteen viewers would stall
+    run-start, run-status, cancel and the event relay on the same engine. The
+    count is read while the
     streams are demonstrably open, proven by the subscriber registrations rather
     than by a sleep.
     """

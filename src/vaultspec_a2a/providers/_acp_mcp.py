@@ -101,8 +101,7 @@ def resolve_harness_mcp_capabilities(
     The desktop profile admits only a registry entry explicitly marked desktop
     available. An omitted marker fails closed, and a runtime-acquired entry becomes
     an actionable, path-free unavailable capability instead of a launch spec.
-    Non-desktop resolution preserves the existing Compose and foreground-development
-    behavior.
+    Non-desktop resolution keeps the native foreground-development behavior.
 
     The caller must select *profile* explicitly. Runtime integration will pass the
     authoritative desktop profile once that authority exists; this seam never

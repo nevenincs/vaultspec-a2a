@@ -156,7 +156,7 @@ async def test_suppression_never_discards_the_last_good_catalog() -> None:
     """The served answer is unchanged; only the cost of producing it drops.
 
     A caller handles a failed refresh by falling back to ``peek``. If the negative
-    entry displaced the lane's last real catalog, this fix would have turned a
+    entry displaced the lane's last real catalog, the suppression would turn a
     stale-but-real answer into no answer at all - a behaviour change wearing a
     performance fix's clothes.
     """
@@ -254,9 +254,9 @@ async def test_a_zero_failure_ttl_disables_the_backoff_entirely() -> None:
 async def test_the_service_serves_a_failing_lane_warm_and_unchanged() -> None:
     """Through the real service: repeated reads cost one attempt, same answer.
 
-    Both halves matter. The count is the fix; the identical record is the proof
-    the fix is invisible to a client, which is the only way a caching change is
-    allowed to be correct.
+    Both halves matter. The count is the saving; the identical record is the
+    proof the saving is invisible to a client, which is the only way a caching
+    change is allowed to be correct.
 
     The failure is a real exception raised from a real registered coroutine.
     Only the lane inventory is pinned, because a host-dependent broken provider

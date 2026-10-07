@@ -216,7 +216,7 @@ async def test_only_the_branch_still_asking_is_disclosed() -> None:
 
     await _answer(graph, config, "request-alpha")
     state = await graph.aget_state(config)
-    # The snapshot has not changed its mind: this is what the fix reads past.
+    # The snapshot has not changed its mind: this is what the projection reads past.
     assert len(state.interrupts) == 2
 
     remaining = StateProjector.normalize_execution_state(

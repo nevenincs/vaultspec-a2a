@@ -231,7 +231,7 @@ def test_clarification_pending_carries_only_the_request_id() -> None:
     assert payload["type"] == "clarification_pending"
     assert payload["request_id"] == "abc123"
     # The questions themselves never cross the relay - a nudge to re-read
-    # run-status, never the source of the questions (D5(b)).
+    # run-status, never the source of the questions.
     assert "questions" not in payload
 
 

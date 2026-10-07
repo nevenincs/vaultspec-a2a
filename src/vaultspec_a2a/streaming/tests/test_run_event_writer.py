@@ -41,7 +41,7 @@ _ACTOR_TOKEN = "role-actor-token-must-never-be-stored"
 
 
 class _Harness:
-    """A real store, a real aggregator, and the writer bound between them."""
+    """A real store, a real relay hub, and the writer bound between them."""
 
     def __init__(
         self,

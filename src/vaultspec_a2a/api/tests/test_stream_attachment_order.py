@@ -1,7 +1,7 @@
 """What a viewer is told, and in what order, from the moment it attaches.
 
-Four properties of the attachment sequence, each of which was previously either
-absent or unobservable to a consumer:
+Four properties of the attachment sequence, each of which a consumer must be able
+to observe:
 
 - the subscription exists before the run's authority is reported, so an outcome
   relayed from that point on cannot fall between the two;

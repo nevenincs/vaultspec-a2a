@@ -117,8 +117,7 @@ class GatewayVerbs:
     """An authenticated handle to one gateway's versioned run reads and controls.
 
     *authorization* is the whole ``Authorization`` header every request
-    presents, the seated home's attach credential unless named; none uses a
-    test-only authentication bypass.
+    presents, the seated home's attach credential unless named.
     """
 
     base_url: str

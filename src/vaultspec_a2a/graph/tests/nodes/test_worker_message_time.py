@@ -1,8 +1,9 @@
 """A produced message carries the time it was produced, through the checkpoint.
 
-The transcript's timestamps used to be the time a snapshot read the messages,
-so every message of a run reported the same instant, later than the
-checkpoint that held it. A worker turn is driven through a real graph over a
+The transcript's timestamps are the time each message was produced, not the
+time a snapshot read the messages, so the messages of a run do not all report
+the same instant, later than the checkpoint that held them. A worker turn is
+driven through a real graph over a
 real checkpointer, and the snapshot projection reads its time back.
 """
 

@@ -199,9 +199,7 @@ class TestReplacePlan:
         assert result == new
 
     def test_empty_new_clears_plan(self) -> None:
-        """An empty list explicitly clears the plan
-        (T12 fix — was silently discarded).
-        """
+        """An empty list explicitly clears the plan instead of being discarded."""
         old = [{"step": "research", "status": "done", "agent": "planner"}]
         result = replace_plan(old, [])
         assert result == []
@@ -268,7 +266,7 @@ class TestStateJsonRoundTrip:
         }
         # Strip messages before JSON check (LangGraph handles these)
         serializable = {k: v for k, v in state.items() if k != "messages"}
-        # T3: actually verify the JSON round-trip produces valid output
+        # Actually verify the JSON round-trip produces valid output
         result = json.dumps(serializable)
         assert isinstance(result, str)
         parsed = json.loads(result)

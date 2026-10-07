@@ -275,10 +275,10 @@ class TestWorkerExecutionErrorRetainsItsCause:
     def test_the_wrapper_message_names_the_provider_failure(self) -> None:
         """``str`` carries attribution AND the wrapped provider fault.
 
-        This is the loss point the whole failure surface depended on: the
-        wrapper used to report only which worker and model died, so a client
-        received the same sentence for an expired credential, an overloaded
-        provider, and an empty credit balance.
+        This is the loss point the whole failure surface depends on: a wrapper
+        reporting only which worker and model died would give a client the same
+        sentence for an expired credential, an overloaded provider, and an
+        empty credit balance.
         """
         from ...providers.acp_exceptions import AcpErrorCode, AcpPromptError
 

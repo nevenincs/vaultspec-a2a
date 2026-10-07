@@ -72,7 +72,7 @@ async def test_an_explicit_engine_still_does_not_adopt_the_process(
 ) -> None:
     """``get_session_factory(engine)`` remains a local factory, not an adoption.
 
-    The counterpart that keeps the fix honest. Seating the singleton from
+    The counterpart that keeps the seating honest. Seating the singleton from
     ``init_db`` must not become "any explicit engine takes over the process":
     callers pass one to get a factory bound to a database of their own, and
     hijacking the singleton from there would point every uninjected durable

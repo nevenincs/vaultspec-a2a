@@ -2,11 +2,10 @@
 
 The four readers - the worker's ``graph_registered`` payload builder, the
 producer's node cache, the gateway mirror's relayed-payload sync that rebuilds
-that cache, and the team-status emitter - used to spell the same six fields out
-independently.
-They agreed only by repetition, so the direct path and the relayed path could
-drift apart on a field added to one. These tests drive the real seams (no
-mocks) and pin that agreement.
+that cache, and the team-status emitter - share one definition of the same six
+fields, so the direct path and the relayed path cannot drift apart on a field
+added to one. These tests drive the real seams (no mocks) and pin that
+agreement.
 """
 
 from __future__ import annotations

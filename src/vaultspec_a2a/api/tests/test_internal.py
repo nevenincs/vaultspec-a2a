@@ -649,7 +649,7 @@ class TestInternalEvents:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_with_aggregator_only_returns_ok(self) -> None:
-        """The batch HTTP path should accept events when only the aggregator exists."""
+        """The batch HTTP path accepts events when only the relay hub is wired."""
         app = _make_test_app(with_relay_hub=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -893,11 +893,11 @@ class TestAggregatorGCOnTerminal:
 
 
 class TestTerminalEventFailureReasonPersistence:
-    """S37 / failure-reason persistence: error_detail durably records on FAILED.
+    """Failure-reason persistence: error_detail durably records on FAILED.
 
-    012840a4 made the SSE relay surface the real exception text; these prove
-    the durable counterpart — a reloaded panel (run-status alone, never the
-    live stream) recovers the SAME reason, not a bare "failed".
+    The SSE relay surfaces the real exception text; these prove the durable
+    counterpart — a reloaded panel (run-status alone, never the live stream)
+    recovers the SAME reason, not a bare "failed".
     """
 
     @pytest.mark.asyncio(loop_scope="function")
@@ -1292,8 +1292,8 @@ def _worker_bridge_into(app: FastAPI) -> WorkerBridge:
 class TestNoFailedRunPersistsWithoutACondition:
     """The invariant, asserted on the path that fails a run without ingest.
 
-    A failed run carrying no condition is the blank terminal this campaign
-    exists to remove: a client sees ``failed`` and has nothing to act on. A
+    A failed run carrying no condition is a blank terminal: a client sees
+    ``failed`` and has nothing to act on. A
     worker rejection before the graph ran reaches that state without a provider
     ever being engaged, so it is asserted here rather than only the ingest path
     that already had coverage.

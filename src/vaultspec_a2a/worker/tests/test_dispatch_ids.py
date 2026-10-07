@@ -14,10 +14,10 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest, WorkerEventEnvelope
 from ...team.team_config import load_team_config
+from ...testing.catalog_authority import current_execution_metadata
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,

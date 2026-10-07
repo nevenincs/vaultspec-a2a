@@ -33,7 +33,6 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
@@ -44,6 +43,7 @@ from ...testing import (
     compile_test_graph,
     new_state_graph,
 )
+from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import (
     GraphActionReceipt,

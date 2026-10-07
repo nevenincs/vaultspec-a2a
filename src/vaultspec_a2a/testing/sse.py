@@ -7,28 +7,40 @@ text kept beside the parsed value so an assertion can bind to the encoded bytes
 and prove a forbidden body never crossed the edge - and bounds how long a test
 waits for the next frame on a live stream.
 
-``timeout`` is required on :func:`read_frame` rather than defaulted: how long a
-caller can afford to wait for one frame depends on what is on the other end of
-the stream - an in-process ASGI app answers in milliseconds, a certification
-stack booting a real subprocess tree does not - and a single silent default
-would be wrong for at least one caller.
+``timeout`` is required on :func:`read_frame` and :func:`read_frames_until`
+rather than defaulted: how long a caller can afford to wait depends on what is on
+the other end of the stream - an in-process ASGI app answers in milliseconds, a
+certification stack booting a real subprocess tree does not - and a single silent
+default would be wrong for at least one caller.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..graph.enums import ServerEventType
-from ..streaming.sse_frames import SseEvent, decode_sse_text, iter_sse_events
+from ..streaming.sse_frames import (
+    SseEvent,
+    decode_sse_lines,
+    decode_sse_text,
+    iter_sse_events,
+)
 from ..thread.snapshots import wire_event_type
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterable
+    from collections.abc import AsyncIterable, Callable, Iterable
 
-__all__ = ["SseFrame", "SseReader", "decode_frame", "read_frame"]
+__all__ = [
+    "SseFrame",
+    "SseReader",
+    "decode_frame",
+    "read_frame",
+    "read_frames_until",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,3 +135,34 @@ async def read_frame(
         )
 
     return await asyncio.wait_for(_scan(), timeout=timeout)
+
+
+def read_frames_until(
+    lines: Iterable[str],
+    stop_when: Callable[[dict[str, Any]], bool],
+    *,
+    timeout: float,
+) -> list[dict[str, Any]]:
+    """Collect frame payloads up to and including the first *stop_when* accepts.
+
+    The blocking counterpart of :meth:`SseReader.until`, for a test streaming
+    through a synchronous client. The deadline is checked between frames, so it
+    bounds a stream that keeps talking without ever producing the awaited frame;
+    a stream that falls silent is bounded by the client's read timeout instead.
+    The failure names every frame type the stream did carry, which is what tells
+    a missing frame apart from a stream that never got going.
+    """
+    deadline = time.monotonic() + timeout
+    payloads: list[dict[str, Any]] = []
+    for event in decode_sse_lines(lines):
+        payload = SseFrame.from_event(event).data
+        payloads.append(payload)
+        if stop_when(payload):
+            return payloads
+        if time.monotonic() > deadline:
+            break
+    seen = list(dict.fromkeys(wire_event_type(p) or "<untyped>" for p in payloads))
+    raise AssertionError(
+        f"no awaited frame within {timeout:.0f}s or before the stream closed; "
+        f"frame types seen: {seen or ['<none>']}"
+    )

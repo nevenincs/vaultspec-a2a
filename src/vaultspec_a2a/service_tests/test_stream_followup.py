@@ -2,25 +2,22 @@
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from typing import TYPE_CHECKING
 
-from ..streaming.sse_frames import decode_sse_lines
 from ..testing import wait_for_run_status
-from ..testing.tests._support.payloads import (
+from ..testing.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
 )
+from ..testing.sse import read_frames_until
 from ._state import select_option_id, thread_state
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    import httpx
 
     from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
@@ -43,25 +40,6 @@ def _is_replayed_terminal_event(event: JsonObject) -> bool:
 def _is_completed_state(state: JsonObject) -> bool:
     """Recognise the final state after the real permission resume."""
     return state.get("status") == "completed"
-
-
-def _read_sse_frames(
-    response: httpx.Response,
-    *,
-    stop_when: Callable[[JsonObject], bool],
-    timeout: float = 120.0,
-) -> list[JsonObject]:
-    deadline = time.monotonic() + timeout
-    events: list[JsonObject] = []
-    for event in decode_sse_lines(response.iter_lines()):
-        if time.monotonic() > deadline:
-            break
-        decoded: object = json.loads(event.data)
-        payload = json_object(decoded, at="SSE frame")
-        events.append(payload)
-        if stop_when(payload):
-            return events
-    raise AssertionError(f"timed out waiting for SSE event; events={events!r}")
 
 
 def _wait_for_pending_permission(
@@ -131,9 +109,8 @@ def _approve_during_initial_stream(
         client.stream("GET", f"/v1/runs/{thread_id}/stream") as stream,
     ):
         trigger = _trigger_after(0.5, _approve)
-        initial_events = _read_sse_frames(
-            stream,
-            stop_when=_is_terminal_event,
+        initial_events = read_frames_until(
+            stream.iter_lines(), _is_terminal_event, timeout=120.0
         )
         trigger.join(timeout=5.0)
 
@@ -189,9 +166,8 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
         service_stack.gateway_client(timeout=None) as client,
         client.stream("GET", f"/v1/runs/{thread_id}/stream") as stream,
     ):
-        follow_up_events = _read_sse_frames(
-            stream,
-            stop_when=_is_replayed_terminal_event,
+        follow_up_events = read_frames_until(
+            stream.iter_lines(), _is_replayed_terminal_event, timeout=120.0
         )
 
     assert any(event.get("type") == "thread_terminal" for event in follow_up_events)

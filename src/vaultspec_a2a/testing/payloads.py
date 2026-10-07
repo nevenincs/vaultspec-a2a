@@ -34,6 +34,12 @@ than the looser ``dict[str, object]`` several callers used: the loose adapter on
 ever proved "a dict with string keys", which is what the narrowing cast already
 does. For a payload decoded from real JSON the tightening is a no-op in practice,
 but it IS a tightening and is declared as one.
+
+:func:`json_list` and :func:`json_text` are the exception, and deliberately so:
+they are the array and string siblings of that narrowing cast, for a test already
+holding a ``JsonValue`` from it. They narrow rather than validate and raise
+``TypeError`` exactly as the cast does, so one walk down a provider response keeps
+one failure posture from its first step to its last.
 """
 
 from __future__ import annotations
@@ -42,20 +48,26 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter, ValidationError
 
-from ....providers._json_contract import JsonObject
+from ..providers._json_contract import JsonObject
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ..providers._json_contract import JsonValue
+
 __all__ = [
+    "json_list",
     "json_object",
     "json_object_list",
+    "json_text",
     "required_bool",
     "required_text",
+    "text_list",
 ]
 
 _JSON_OBJECT: Final[TypeAdapter[JsonObject]] = TypeAdapter(JsonObject)
 _JSON_OBJECT_LIST: Final[TypeAdapter[list[JsonObject]]] = TypeAdapter(list[JsonObject])
+_TEXT_LIST: Final[TypeAdapter[list[str]]] = TypeAdapter(list[str])
 
 
 def json_object(value: object, *, at: str) -> JsonObject:
@@ -72,6 +84,18 @@ def json_object_list(value: object, *, at: str) -> list[JsonObject]:
         return _JSON_OBJECT_LIST.validate_python(value)
     except ValidationError as exc:
         raise AssertionError(f"expected a JSON object list at {at}: {exc}") from exc
+
+
+def text_list(value: object, *, at: str) -> list[str]:
+    """Validate one decoded service payload as a list of strings.
+
+    Strict, so a number or a boolean is refused rather than coerced to its text:
+    a payload that carried one has already broken its contract.
+    """
+    try:
+        return _TEXT_LIST.validate_python(value, strict=True)
+    except ValidationError as exc:
+        raise AssertionError(f"expected a text list at {at}: {exc}") from exc
 
 
 def required_text(body: Mapping[str, object], field: str, *, at: str) -> str:
@@ -92,4 +116,20 @@ def required_bool(body: Mapping[str, object], field: str, *, at: str) -> bool:
     value = body.get(field)
     if not isinstance(value, bool):
         raise AssertionError(f"{at}.{field} was not boolean: {value!r}")
+    return value
+
+
+def json_list(value: JsonValue, *, at: str = "value") -> list[JsonValue]:
+    """Return *value* as a JSON array, or raise naming what it actually was."""
+    if not isinstance(value, list):
+        msg = f"expected a JSON array at {at}, got {type(value).__name__}"
+        raise TypeError(msg)
+    return value
+
+
+def json_text(value: JsonValue, *, at: str = "value") -> str:
+    """Return *value* as a JSON string, or raise naming what it actually was."""
+    if not isinstance(value, str):
+        msg = f"expected a JSON string at {at}, got {type(value).__name__}"
+        raise TypeError(msg)
     return value

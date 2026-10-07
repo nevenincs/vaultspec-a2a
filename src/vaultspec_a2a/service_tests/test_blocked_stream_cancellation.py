@@ -12,7 +12,7 @@ import pytest
 
 from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
 from ..testing import fetch_in_process_selection, wait_for_run_status
-from ..testing.tests._support.payloads import json_object, required_bool, required_text
+from ..testing.payloads import json_object, required_bool, required_text
 from ._state import thread_state
 from .harness import _spawn_process, _wait_for, build_service_stack
 

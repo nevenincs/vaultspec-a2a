@@ -56,7 +56,6 @@ from ...control.clarification_service import (
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
@@ -69,6 +68,7 @@ from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import async_catalog_run_fields, wait_for_run_status_async
+from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,

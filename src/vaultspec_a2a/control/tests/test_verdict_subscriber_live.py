@@ -88,6 +88,7 @@ from ...database import (
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing.catalog_authority import current_execution_metadata
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
@@ -96,7 +97,6 @@ from ...thread.idempotency import authoring_verdict_action_key, thread_create_ac
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
-from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator

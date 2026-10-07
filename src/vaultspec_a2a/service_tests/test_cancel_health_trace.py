@@ -5,31 +5,19 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter, ValidationError
-
 from ..testing import wait_for_run_status
-from ..testing.tests._support.payloads import (
+from ..testing.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
+    text_list,
 )
 from ._state import thread_state
 
 if TYPE_CHECKING:
     from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
-
-
-_TEXT_LIST = TypeAdapter(list[str])
-
-
-def _text_list(value: object, *, at: str) -> list[str]:
-    """Read a strict list of text values from a real public payload."""
-    try:
-        return _TEXT_LIST.validate_python(value, strict=True)
-    except ValidationError as exc:
-        raise TypeError(f"expected a text list at {at}: {exc}") from exc
 
 
 def _is_active(state: JsonObject) -> bool:
@@ -160,5 +148,5 @@ def test_health_and_trace_surface_are_observable(
     _assert_worker_ipc_trace(service_stack, start_us)
 
     services = json_object(service_stack.jaeger_services(), at="Jaeger services")
-    service_names = set(_text_list(services.get("data"), at="Jaeger services.data"))
+    service_names = set(text_list(services.get("data"), at="Jaeger services.data"))
     assert "vaultspec-a2a" in service_names

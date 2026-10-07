@@ -23,6 +23,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing.catalog_authority import current_execution_metadata
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -39,7 +40,6 @@ from ..config import settings
 from ..dispatch import safe_dispatch
 from ..execution_authority import resolve_execution_authority
 from ..worker_management import LazyWorkerSpawner
-from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

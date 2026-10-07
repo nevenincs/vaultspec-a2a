@@ -3,8 +3,8 @@
 Cancel reaches the worker through the same dispatch as every other run action,
 so its outcome is served by the same status mapping rather than by a copy of its
 own. These pin what that mapping does with the outcomes the cancel verb
-produces: the run it names, the reason it falls back to, and the idempotent
-second cancel that is not a refusal at all.
+produces: the run it names, and the idempotent second cancel that is not a
+refusal at all.
 """
 
 from __future__ import annotations
@@ -48,7 +48,9 @@ def _settled(status: str) -> ControlActionOutcome:
 
 def test_a_not_found_failure_is_404_naming_the_run() -> None:
     """The service's own noun is not the edge's; the verb names a run."""
-    refused = refused_outcome(_result(FailureType.NOT_FOUND, detail="Thread not found"))
+    refused = refused_outcome(
+        _result(FailureType.NOT_FOUND, detail="Thread disappeared during election")
+    )
 
     assert refused is not None
     assert refused.status_code == 404
@@ -64,16 +66,6 @@ def test_an_unreachable_worker_is_502() -> None:
     assert refused is not None
     assert refused.status_code == 502
     assert refused.detail == "worker exploded"
-
-
-def test_a_missing_error_detail_falls_back_to_the_reason_the_verb_supplies() -> None:
-    """A 502 must carry a reason even when the service left none."""
-    refused = refused_outcome(
-        _result(FailureType.UNREACHABLE), fallback_detail="the verb's own reason"
-    )
-
-    assert refused is not None
-    assert refused.detail == "the verb's own reason"
 
 
 def test_a_successful_cancel_is_not_refused() -> None:
@@ -154,14 +146,13 @@ class TestSettledRunIsNotAnUpstreamFailure:
         assert refused.status_code == 409
 
     def test_a_service_supplied_reason_survives_the_conflict(self) -> None:
-        """A reason the service already phrased is preferred to any fallback."""
+        """A reason the service already phrased is the one served."""
         refused = refused_outcome(
             _result(
                 FailureType.TERMINAL,
                 detail="Cannot cancel thread in 'failed' state",
                 thread_status="failed",
             ),
-            fallback_detail="the verb's own reason",
         )
 
         assert refused is not None

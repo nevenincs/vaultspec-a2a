@@ -45,6 +45,7 @@ from ..thread.idempotency import (
 )
 from .accepted_input import freeze_accepted_input, read_accepted_input
 from .action_lease import (
+    RUN_NOT_FOUND,
     ControlActionClaim,
     ControlActionClaimRequest,
     ControlActionOutcome,
@@ -243,7 +244,7 @@ def _run_not_found(request_id: str, thread_id: str) -> ControlActionOutcome:
     return ControlActionOutcome(
         request_id=request_id,
         thread_id=thread_id,
-        error_detail="Run not found",
+        error_detail=RUN_NOT_FOUND,
         error_status_code=404,
     )
 

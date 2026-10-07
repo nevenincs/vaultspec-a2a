@@ -513,6 +513,7 @@ async def test_definite_cancel_non_delivery_never_rolls_back_lifecycle_authority
     assert result.cancelled is False
     assert result.accepted is False
     assert result.failure_type is FailureType.AT_CAPACITY
+    assert result.error_detail == "Cancel dispatch failed"
     assert result.thread_status == ThreadStatus.CANCELLING.value
     async with session_factory() as db:
         action = await get_control_action_by_idempotency_key(

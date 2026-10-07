@@ -20,13 +20,12 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import HTTPException
 
+from ..control.action_lease import RUN_NOT_FOUND, ControlActionOutcome
 from ..thread.dispatch_policy import FailureType
 from .schemas.gateway import RunMessageRefusalCode, RunMessageRefusalDetail
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
-
-    from ..control.action_lease import ControlActionOutcome
 
 __all__ = [
     "CODED_REFUSALS",
@@ -46,7 +45,6 @@ class _ServedRefusal:
 
 
 _NOT_FOUND = _ServedRefusal(404, "No such run.")
-_RUN_NOT_FOUND = "Run not found"
 # Each says the run cannot take the work now and nothing was applied, so they
 # share one status and are told apart by the typed code in the body rather than
 # by parsing the message.
@@ -137,9 +135,7 @@ def refused_dispatch(failure_type: FailureType, detail: str | None) -> HTTPExcep
     return HTTPException(status_code=status_code, detail=detail)
 
 
-def refused_outcome(
-    outcome: ControlActionOutcome, *, fallback_detail: str | None = None
-) -> HTTPException | None:
+def refused_outcome(outcome: ControlActionOutcome) -> HTTPException | None:
     """Serve a run-control outcome's refusal, or ``None`` when the verb holds.
 
     Every run-control verb ends in the same record, so one reading serves them
@@ -153,9 +149,6 @@ def refused_outcome(
     that is already cancelled leaves the state the caller asked for in force, so
     the verb answers with the run's status rather than failing a second cancel
     purely for being second.
-
-    *fallback_detail* is the reason served when the service left a refusal none
-    of its own.
     """
     if outcome.error_status_code is not None:
         return HTTPException(
@@ -167,8 +160,8 @@ def refused_outcome(
     ):
         return None
     if failure_type is FailureType.NOT_FOUND:
-        return refused_dispatch(failure_type, _RUN_NOT_FOUND)
-    return refused_dispatch(failure_type, outcome.error_detail or fallback_detail)
+        return refused_dispatch(failure_type, RUN_NOT_FOUND)
+    return refused_dispatch(failure_type, outcome.error_detail)
 
 
 def refusal_responses(

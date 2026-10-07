@@ -17,9 +17,9 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...control.permission_dispatch import permission_resume_value
 from ...providers.team_selection import model_assignment_digest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...thread import permission_resume_value
 from ...thread.enums import ThreadStatus
 from ..executor import Executor
 from ..state_projection import ResumeRefusalCause

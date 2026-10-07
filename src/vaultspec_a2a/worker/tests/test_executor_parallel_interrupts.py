@@ -16,9 +16,9 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command, Send, interrupt
 
-from ...control.permission_dispatch import answered_permission_request
 from ...providers.team_selection import model_assignment_digest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...thread import PermissionAnswer
 from ..executor import Executor
 from ..state_projection import ResumeRefusalCause
 from .test_executor import (
@@ -51,11 +51,10 @@ def _install_two_gate_fan_out(
         given = interrupt({"type": "permission_request", "request_id": f"req-{branch}"})
         # Read through the production reader, so the shape a branch accepts is
         # the shape a dispatched answer really carries.
-        named = answered_permission_request(given)
+        named = PermissionAnswer.from_resume_value(given)
         assert named is not None, given
-        request_id, option_id = named
-        assert request_id == f"req-{branch}", named
-        answered[branch] = option_id
+        assert named.request_id == f"req-{branch}", named
+        answered[branch] = named.option_id
         return {"messages": [AIMessage(content=f"{branch} done")]}
 
     async def join(state: Any) -> dict[str, Any]:

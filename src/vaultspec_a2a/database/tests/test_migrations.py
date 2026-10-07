@@ -125,7 +125,7 @@ def _get_columns(db_path: Path, table: str) -> set[str]:
     conn = sqlite3.connect(str(db_path))
     try:
         return {
-            str(row[1])
+            str(row[0])
             for row in conn.execute("SELECT name FROM pragma_table_info(?)", (table,))
         }
     finally:

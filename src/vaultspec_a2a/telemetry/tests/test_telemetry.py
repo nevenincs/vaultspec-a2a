@@ -41,8 +41,8 @@ from .. import (
     configure_telemetry,
     get_meter,
     get_tracer,
-    inject_trace_context,
-    ws_span,
+    operation_span,
+    trace_headers,
 )
 
 # ---------------------------------------------------------------------------
@@ -454,102 +454,94 @@ def test_multiple_tracers_independent() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ws_span
+# operation_span
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_ws_span_yields_span() -> None:
-    """ws_span yields a valid OTel Span."""
-    async with ws_span("ws.test") as span:
+async def test_operation_span_yields_span() -> None:
+    """operation_span yields a valid OTel Span."""
+    async with operation_span("op.test") as span:
         assert span is not None
         assert hasattr(span, "set_attribute")
         span.set_attribute("test.attr", "hello")
 
 
 @pytest.mark.asyncio
-async def test_ws_span_with_thread_id() -> None:
-    """ws_span sets thread_id attribute when provided."""
-    async with ws_span("ws.subscribe", thread_id="abc-123") as span:
+async def test_operation_span_with_thread_id() -> None:
+    """operation_span sets thread_id attribute when provided."""
+    async with operation_span("op.dispatch", thread_id="abc-123") as span:
         span.set_attribute("extra", "value")
 
 
 @pytest.mark.asyncio
-async def test_ws_span_propagates_exception() -> None:
-    """ws_span re-raises exceptions after recording them."""
+async def test_operation_span_propagates_exception() -> None:
+    """operation_span re-raises exceptions after recording them."""
     with pytest.raises(RuntimeError, match="test error"):
-        async with ws_span("ws.error"):
+        async with operation_span("op.error"):
             raise RuntimeError("test error")
 
 
 @pytest.mark.asyncio
-async def test_ws_span_extra_attributes() -> None:
-    """ws_span passes extra kwargs as span attributes and yields a recording span."""
+async def test_operation_span_extra_attributes() -> None:
+    """operation_span sets extra kwargs as attributes on a recording span."""
     # This assertion requires an SDK provider and must not depend on an earlier
     # configure_telemetry test happening to share this xdist worker.
     configure_telemetry()
-    async with ws_span("ws.op", thread_id="t1", agent="coder", node="worker") as span:
+    async with operation_span(
+        "op.run", thread_id="t1", agent="coder", node="worker"
+    ) as span:
         assert span is not None
         assert span.is_recording()
         # ReadableSpan.name is available when the SDK is active
         if isinstance(span, ReadableSpan):
-            assert span.name == "ws.op"
+            assert span.name == "op.run"
 
 
 @pytest.mark.asyncio
-async def test_ws_span_no_thread_id() -> None:
-    """ws_span works without a thread_id argument."""
+async def test_operation_span_no_thread_id() -> None:
+    """operation_span works without a thread_id argument."""
     configure_telemetry()
-    async with ws_span("ws.ping") as span:
+    async with operation_span("op.ping") as span:
         assert span is not None
         assert span.is_recording()
         if isinstance(span, ReadableSpan):
-            assert span.name == "ws.ping"
+            assert span.name == "op.ping"
 
 
 # ---------------------------------------------------------------------------
-# inject_trace_context
+# trace_headers
 # ---------------------------------------------------------------------------
 
 
-def test_inject_trace_context_with_active_span() -> None:
-    """inject_trace_context injects real trace context (traceparent) when a
-    span is active under the real SDK."""
+def test_trace_headers_with_active_span() -> None:
+    """trace_headers carries real trace context (traceparent) when a span is
+    active under the real SDK, which is what continues a trace from gateway to
+    worker and back."""
     # Use a fresh SDK provider so the span is valid and the context propagator
     # has a real trace ID to inject.
     provider = TracerProvider(resource=Resource.create({"service.name": "test"}))
     tracer = provider.get_tracer(__name__)
     with tracer.start_as_current_span("inject-test") as span:
-        carrier: dict[str, str] = {}
-        inject_trace_context(carrier)
+        headers = trace_headers()
         # With the real SDK and an active sampled span, 'traceparent' must be
         # injected into the carrier by the W3C propagator.
         ctx = span.get_span_context()
         if ctx.is_valid:
-            assert "traceparent" in carrier, (
-                "inject_trace_context must populate 'traceparent' when a "
-                "valid span is active"
+            assert "traceparent" in headers, (
+                "trace_headers must populate 'traceparent' when a valid span is active"
             )
             # traceparent format: 00-{trace_id}-{span_id}-{flags}
-            parts = carrier["traceparent"].split("-")
-            assert len(parts) == 4, f"Malformed traceparent: {carrier['traceparent']}"
+            parts = headers["traceparent"].split("-")
+            assert len(parts) == 4, f"Malformed traceparent: {headers['traceparent']}"
             assert parts[0] == "00", "Version must be '00'"
             assert len(parts[1]) == 32, "trace_id must be 32 hex chars"
             assert len(parts[2]) == 16, "span_id must be 16 hex chars"
 
 
-def test_inject_trace_context_no_active_span() -> None:
-    """inject_trace_context is safe with no active span."""
-    carrier: dict[str, str] = {}
-    inject_trace_context(carrier)
-    assert isinstance(carrier, dict)
-
-
-def test_inject_trace_context_does_not_mutate_other_keys() -> None:
-    """inject_trace_context only adds OTel keys — does not remove existing ones."""
-    carrier: dict[str, str] = {"custom-key": "custom-value"}
-    inject_trace_context(carrier)
-    assert carrier["custom-key"] == "custom-value"
+def test_trace_headers_no_active_span() -> None:
+    """trace_headers carries no trace context when no span is active."""
+    assert "traceparent" not in trace_headers()
 
 
 # ---------------------------------------------------------------------------
@@ -647,40 +639,6 @@ def test_configure_telemetry_service_name_none_uses_default() -> None:
     cfg1 = configure_telemetry()
     cfg2 = configure_telemetry(service_name=None)
     assert cfg1.service_name == cfg2.service_name
-
-
-# ---------------------------------------------------------------------------
-# W3C trace context injection into dispatch HTTP calls
-# ---------------------------------------------------------------------------
-
-
-def test_trace_headers_produces_traceparent_under_real_span() -> None:
-    """_trace_headers() injects traceparent when a real SDK span is active.
-
-    Verifies the gateway-to-worker dispatch path propagates distributed traces.
-    Uses a fresh local TracerProvider so the test is isolated from the global
-    provider state. No exporter needed — the assertion is on propagate.inject(),
-    not on captured span data.
-    """
-    from opentelemetry import propagate
-
-    provider = TracerProvider(resource=Resource.create({"service.name": "gw-test"}))
-    tracer = provider.get_tracer("test.dispatch")
-
-    with tracer.start_as_current_span("gateway.dispatch") as span:
-        ctx = span.get_span_context()
-        if ctx.is_valid:
-            # Simulate what _trace_headers() does
-            carrier: dict[str, str] = {}
-            propagate.inject(carrier)
-            assert "traceparent" in carrier, (
-                "propagate.inject must produce 'traceparent' under a valid SDK span"
-            )
-            parts = carrier["traceparent"].split("-")
-            assert len(parts) == 4
-            assert parts[0] == "00"  # version
-            assert len(parts[1]) == 32  # trace_id hex
-            assert len(parts[2]) == 16  # span_id hex
 
 
 # The "none" exporter selection is read at import time like every other OTel

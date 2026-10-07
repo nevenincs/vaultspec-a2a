@@ -26,7 +26,7 @@ from ..team.team_config import (
     AgentConfig,
     TopologyType,
 )
-from ..telemetry import ws_span
+from ..telemetry import operation_span
 from ..thread.errors import (
     ConfigError,
 )
@@ -536,7 +536,7 @@ class GraphLifecycleManager:
                     self._state.graph_cache.move_to_end(cache_key)
                     return cached
 
-                async with ws_span(
+                async with operation_span(
                     "executor.compile_graph", thread_id=req.thread_id
                 ) as span:
                     span.set_attribute("team_preset", team_preset)

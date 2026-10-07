@@ -530,7 +530,7 @@ def test_classify_provider_command_resolves_codex(
     """When codex is installed, the provider command classifier resolves it."""
     external_prerequisite("codex-cli")
     command = classify_provider_command(Provider.CODEX)
-    assert command.resolved is True
+    assert Path(command.argv[0]).is_absolute()
     assert command.command_kind == "codex_cli"
     assert command.command_origin == "system_path_executable"
 

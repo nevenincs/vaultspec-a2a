@@ -162,13 +162,11 @@ def _command_readiness(provider: Provider) -> _ProviderReadiness:
     never surfaced in the served reason.
     """
     try:
-        command = classify_provider_command(provider)
+        classify_provider_command(provider)
     except (ValueError, ConfigError, FileNotFoundError) as exc:
         detail = str(exc)
     else:
-        if command.resolved:
-            return _ProviderReadiness(provider=provider, ready=True)
-        detail = f"{command.command_executable!r} not found on PATH"
+        return _ProviderReadiness(provider=provider, ready=True)
     logger.debug("provider %s command not resolvable: %s", provider.value, detail)
     return _ProviderReadiness(
         provider=provider,

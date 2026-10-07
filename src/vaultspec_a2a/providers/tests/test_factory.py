@@ -1,5 +1,6 @@
 """Tests for the provider factory."""
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,23 +16,23 @@ from ...testing import settings_override
 from ...thread.errors import ConfigError
 from .._factory_commands import (
     _BIN_PATH,
+    ProviderCommand,
     _build_kimi_env,
     _classify_acp_command,
-    _kimi_home_env,
     classify_provider_command,
     claude_acp_entry,
     kimi_temporary_model_configuration_reason,
 )
 from ..acp_chat_model import AcpChatModel
 from ..cli_resolution import (
+    SYSTEM_CLI_LANES,
     ProviderRuntimeUnavailableError,
     ProviderRuntimeUnavailableReason,
-    resolve_provider_cli_executable,
     resolve_service_executable,
 )
 from ..codex_chat_model import CodexChatModel
 from ..execution_modes import BINARY_BACKEND, NODE_BACKEND
-from ..factory import ProviderFactory, _zai_auth_env
+from ..factory import ProviderFactory, _zai_auth_env, kimi_binary_proof_reason
 from ..provider_catalog import (
     SELECTION_SCHEMA_VERSION,
     AuthenticationState,
@@ -260,39 +261,20 @@ def test_provider_factory_zai_refuses_without_current_turn_proof(
     assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
 
 
-def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
-    """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
-    if resolve_provider_cli_executable(Provider.KIMI) is None:
-        assert classify_provider_command(Provider.KIMI).resolved is False
-        return
-    model = ProviderFactory().create(Provider.KIMI, model=_FROZEN_KIMI_MODEL)
-    assert isinstance(model, AcpChatModel)
-    # Kimi drives its own agent, NOT the claude-agent-acp wrapper.
-    assert model.command[-1] == "acp"
-    assert "kimi" in model.command[0].lower()
-    assert model.command[1:] == ["-m", _FROZEN_KIMI_MODEL, "acp"]
-    assert model.provider == Provider.KIMI.value
-    # The backend family discriminator: kimi omits the Claude allowedTools _meta.
-    assert model.acp_family == "kimi"
-    assert model._config.acp_family == "kimi"
-    # A complete temporary definition is explicit and separate from `-m`.
-    if "KIMI_MODEL_API_KEY" in model.env_vars:
-        assert settings.kimi_api_key is not None
-        assert model.env_vars["KIMI_MODEL_API_KEY"] == (
-            settings.kimi_api_key.get_secret_value()
-        )
-        assert model.auth_mode == "temporary_model"
-        assert settings.kimi_api_key.get_secret_value() not in repr(model)
-    else:
-        assert model.auth_mode == "persisted_config"
-    assert "KIMI_API_KEY" not in model.env_vars
-    assert "KIMI_BASE_URL" not in model.env_vars
-    if settings.kimi_code_home and settings.kimi_code_home.strip():
-        assert model.env_vars["KIMI_CODE_HOME"] == settings.kimi_code_home.strip()
+def test_provider_factory_kimi_refuses_without_an_admitted_binary() -> None:
+    """An unenrolled Kimi lane is refused before any launcher is constructed.
 
-
-def test_kimi_persisted_configuration_injects_no_temporary_definition() -> None:
-    assert _kimi_home_env("C:/kimi-home") == {"KIMI_CODE_HOME": "C:/kimi-home"}
+    Kimi carries handshake coverage only, so it holds no completed-turn proof
+    and therefore no admitted binary identity. The refusal is the lane's own,
+    independent of whether the CLI happens to be installed on this host: a lane
+    with no proof has no version range a resolved binary could fall inside.
+    """
+    with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
+        ProviderFactory().create(Provider.KIMI, model=_FROZEN_KIMI_MODEL)
+    assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    assert kimi_binary_proof_reason() is (
+        ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    )
 
 
 def test_complete_kimi_temporary_definition_uses_current_names() -> None:
@@ -352,17 +334,81 @@ def test_every_partial_kimi_temporary_definition_fails_closed(
         _build_kimi_env(key, base_url, name)
 
 
-def test_classify_provider_command_kimi_resolves_or_flags_unresolved() -> None:
-    """Kimi classifies to the installed Kimi Code ACP executable."""
-    installed = resolve_provider_cli_executable(Provider.KIMI)
-    command = classify_provider_command(Provider.KIMI)
-    assert command.command_kind == "kimi_cli"
-    if installed is None:
-        assert command.resolved is False
-        return
-    assert command.resolved is True
+def _staged_cli(directory: Path, provider: Provider) -> Path:
+    """Install one executable-shaped file the service-path search will find."""
+    name = SYSTEM_CLI_LANES[provider]
+    staged = directory / (f"{name}.cmd" if os.name == "nt" else name)
+    staged.write_text("", encoding="utf-8")
+    staged.chmod(0o755)
+    return staged
+
+
+@pytest.mark.parametrize("provider", [Provider.CODEX, Provider.KIMI])
+def test_a_system_cli_lane_classifies_to_an_absolute_launcher(
+    tmp_path: Path, provider: Provider
+) -> None:
+    """The classified launcher is the absolute file the search found.
+
+    The search path is stated rather than inherited, so this pins the resolution
+    production performs on a host where exactly one answer exists.
+    """
+    staged = _staged_cli(tmp_path, provider)
+    command = classify_provider_command(provider, search_path=str(tmp_path))
+    assert command.command_kind == f"{provider.value}_cli"
     assert command.command_origin == "system_path_executable"
-    assert command.argv == (installed, "acp")
+    assert Path(command.argv[0]).is_absolute()
+    assert os.path.normcase(command.argv[0]) == os.path.normcase(str(staged))
+
+
+@pytest.mark.parametrize("provider", [Provider.CODEX, Provider.KIMI])
+def test_an_unresolved_system_cli_lane_is_refused_not_given_a_bare_name(
+    tmp_path: Path, provider: Provider
+) -> None:
+    """No launcher means no command, rather than a name a child would resolve.
+
+    A bare name is resolved by whoever launches it - Windows ``cmd.exe`` reads
+    the working directory first, and that directory is the agent's own
+    workspace - so a classification that produced one handed the choice of
+    binary to the agent.
+    """
+    with pytest.raises(ConfigError, match="not installed"):
+        classify_provider_command(provider, search_path=str(tmp_path))
+
+
+def test_a_relative_launcher_cannot_be_classified_at_all(tmp_path: Path) -> None:
+    """The absolute-launcher rule is enforced where commands are built.
+
+    Every origin - the system CLIs, the node entry, the packaged binary, the
+    capsule - passes through this one constructor, so the invariant is stated
+    once here rather than re-checked per lane or at spawn.
+    """
+    with pytest.raises(ValueError, match="absolute"):
+        ProviderCommand(
+            argv=("kimi", "acp"),
+            runtime_authority="system_cli",
+            command_origin="system_path_executable",
+            command_kind="kimi_cli",
+            command_executable="kimi",
+            command_target="kimi",
+        )
+    with pytest.raises(ValueError, match="at least one argument"):
+        ProviderCommand(
+            argv=(),
+            runtime_authority="system_cli",
+            command_origin="system_path_executable",
+            command_kind="kimi_cli",
+            command_executable="kimi",
+            command_target="kimi",
+        )
+    absolute = str(tmp_path / "kimi")
+    assert ProviderCommand(
+        argv=(absolute, "acp"),
+        runtime_authority="system_cli",
+        command_origin="system_path_executable",
+        command_kind="kimi_cli",
+        command_executable="kimi",
+        command_target=absolute,
+    ).argv == (absolute, "acp")
 
 
 def test_classify_provider_command_zai_returns_acp_meta() -> None:
@@ -426,16 +472,26 @@ def test_factory_applies_exact_codex_model_scoped_controls() -> None:
     assert model.service_tier == "priority"
 
 
-def test_factory_applies_exact_kimi_model_scoped_effort() -> None:
-    model = ProviderFactory().create(
-        Provider.KIMI,
-        model="configured-alias",
-        execution_mode="kimi-code-acp",
-        native_controls={"thinking_effort:entry": "deep"},
+def test_the_kimi_model_scoped_effort_rides_the_launch_environment() -> None:
+    """The selected native control reaches the CLI's own variable.
+
+    Asserted on the environment builder rather than through a constructed
+    model: the lane carries no completed-turn proof, so a served construction
+    is refused before any environment is composed - and that refusal is pinned
+    by ``test_provider_factory_kimi_refuses_without_an_admitted_binary``.
+    """
+    env = _build_kimi_env(
+        kimi_api_key="temporary-key",
+        kimi_base_url="https://kimi.example.invalid/v1",
+        kimi_temporary_model_name="configured-alias",
+        kimi_thinking_effort="deep",
     )
-    assert isinstance(model, AcpChatModel)
-    assert model.command[1:3] == ["-m", "configured-alias"]
-    assert model.env_vars["KIMI_MODEL_THINKING_EFFORT"] == "deep"
+    assert env["KIMI_MODEL_THINKING_EFFORT"] == "deep"
+    assert env["KIMI_MODEL_NAME"] == "configured-alias"
+    # The control is independent of the tuple, exactly as the launch path emits it.
+    assert _build_kimi_env(kimi_thinking_effort="deep") == {
+        "KIMI_MODEL_THINKING_EFFORT": "deep"
+    }
 
 
 def test_factory_refuses_unproven_acp_session_controls(

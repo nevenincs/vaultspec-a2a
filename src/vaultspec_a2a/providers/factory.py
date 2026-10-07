@@ -43,7 +43,6 @@ from ._factory_commands import (
     KIMI_API_KEY_ENV,
     ProviderCommand,
     _build_kimi_env,
-    _kimi_home_env,
     acp_launch_options,
     classify_provider_command,
     foreign_credential,
@@ -208,28 +207,69 @@ def binary_proof_reason(
     return None
 
 
+def _system_cli_binary_proof_reason(
+    provider: Provider,
+    command: ProviderCommand | None,
+    *,
+    native_authority: NativeLaunchAuthority | None = None,
+    workspace_root: Path | None = None,
+) -> ProviderRuntimeUnavailableReason | None:
+    """Probe the service-path launcher a system-CLI lane would hand its child.
+
+    ``command`` is the classification a model already holds; without one the
+    lane is classified here, once. The lane's own proof is read FIRST, so an
+    unenrolled lane is refused without resolving or spawning anything - which
+    also makes the refusal independent of whether the CLI is installed here.
+    """
+    if provider not in PROVEN_TURN_LANES:
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    if command is None:
+        try:
+            command = classify_provider_command(provider)
+        except ConfigError:
+            return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
+    return binary_proof_reason(
+        provider,
+        command.argv[0],
+        "service_path",
+        native_authority=native_authority,
+        workspace_root=workspace_root,
+    )
+
+
 def codex_binary_proof_reason(
     command: ProviderCommand | None = None,
     *,
     native_authority: NativeLaunchAuthority | None = None,
     workspace_root: Path | None = None,
 ) -> ProviderRuntimeUnavailableReason | None:
-    """Probe the service-path Codex launcher selected by the factory.
-
-    ``command`` is the classification a model already holds; without one the
-    lane is classified here, once. An unresolved classification is refused
-    unprobed, so a bare name is never looked up again.
-    """
-    if Provider.CODEX not in PROVEN_TURN_LANES:
-        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
-    if command is None:
-        command = classify_provider_command(Provider.CODEX)
-    if not command.resolved:
-        return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
-    return binary_proof_reason(
+    """Probe the service-path Codex launcher selected by the factory."""
+    return _system_cli_binary_proof_reason(
         Provider.CODEX,
-        command.argv[0],
-        "service_path",
+        command,
+        native_authority=native_authority,
+        workspace_root=workspace_root,
+    )
+
+
+def kimi_binary_proof_reason(
+    command: ProviderCommand | None = None,
+    *,
+    native_authority: NativeLaunchAuthority | None = None,
+    workspace_root: Path | None = None,
+) -> ProviderRuntimeUnavailableReason | None:
+    """Probe the service-path Kimi launcher selected by the factory.
+
+    Kimi is unenrolled - its live coverage is a handshake, which proves spawn
+    and not work - so this answers ``BINARY_PROOF_MISSING`` today for every
+    host. It is the same gate the Claude and Codex lanes pass through rather
+    than a lane-specific refusal: when a completed turn is recorded against a
+    Kimi binary identity, this lane is served exactly within that version
+    range and no further.
+    """
+    return _system_cli_binary_proof_reason(
+        Provider.KIMI,
+        command,
         native_authority=native_authority,
         workspace_root=workspace_root,
     )
@@ -380,8 +420,9 @@ async def _discover_claude_catalog(
 async def _discover_codex_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
-    command = classify_provider_command(Provider.CODEX)
-    if not command.resolved:
+    try:
+        command = classify_provider_command(Provider.CODEX)
+    except ConfigError:
         return unavailable_discovery(
             key,
             reason="provider catalog command is unavailable",
@@ -449,23 +490,24 @@ async def _discover_antigravity_catalog(
 async def _discover_kimi_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
-    command = classify_provider_command(Provider.KIMI)
+    from .kimi_config_home import KIMI_CODE_HOME_ENV, resolve_kimi_base_home
+
     configuration = probe_provider_configuration(Provider.KIMI)
-    if configuration.reason is not None:
-        return unavailable_discovery(
-            key,
-            reason=configuration.reason,
-            configured=configuration.state,
-            transport=(
-                HealthState.AVAILABLE if command.resolved else HealthState.UNAVAILABLE
-            ),
-        )
-    if not command.resolved:
+    try:
+        command = classify_provider_command(Provider.KIMI)
+    except ConfigError:
         return unavailable_discovery(
             key,
             reason="provider catalog command is unavailable",
             configured=configuration.state,
             transport=HealthState.UNAVAILABLE,
+        )
+    if configuration.reason is not None:
+        return unavailable_discovery(
+            key,
+            reason=configuration.reason,
+            configured=configuration.state,
+            transport=HealthState.AVAILABLE,
         )
     api_key = (
         settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
@@ -484,7 +526,10 @@ async def _discover_kimi_catalog(
             ),
         )
     )
-    env.update(_kimi_home_env(settings.kimi_code_home))
+    # Discovery enumerates the models the OPERATOR configured, so it reads the
+    # operator's own home, named rather than left to the CLI's default. Only a
+    # served turn is isolated, and this command opens no agent session.
+    env[KIMI_CODE_HOME_ENV] = str(resolve_kimi_base_home(settings.kimi_code_home))
     # Discovery is a sibling command, never `kimi acp provider list`.
     discovered = await discover_kimi_catalog(
         (command.argv[0],),
@@ -775,7 +820,11 @@ def _create_kimi_model(
     selected_controls: dict[str, str],
 ) -> BaseChatModel:
     from .acp_chat_model import AcpChatModel
+    from .kimi_config_home import KIMI_CODE_HOME_ENV, build_kimi_config_home
 
+    # The lane's own proof first, before a launcher is resolved or a home is
+    # created: Kimi is unenrolled, so this refuses every construction today.
+    require_binary_proof(kimi_binary_proof_reason(workspace_root=workspace_root))
     # The exact catalog alias travels through Kimi's own -m option.
     classified = classify_provider_command(Provider.KIMI)
     command = [classified.argv[0], "-m", model_name, *classified.argv[1:]]
@@ -790,17 +839,26 @@ def _create_kimi_model(
             settings.kimi_temporary_model_max_context_size
         ),
         kimi_temporary_model_capabilities=settings.kimi_temporary_model_capabilities,
+        kimi_thinking_effort=_native_control_fields(selected_controls).get(
+            "thinking_effort"
+        ),
     )
-    env_vars.update(_kimi_home_env(settings.kimi_code_home))
-    kimi_effort = _native_control_fields(selected_controls).get("thinking_effort")
-    if kimi_effort is not None:
-        env_vars["KIMI_MODEL_THINKING_EFFORT"] = kimi_effort
-    temporary_definition = KIMI_API_KEY_ENV in env_vars
-    logger.debug(
-        "[%s] Instantiating Kimi ACP agent. Temporary definition present: %s",
-        Provider.KIMI,
-        temporary_definition,
-    )
+    if KIMI_API_KEY_ENV not in env_vars:
+        # A served run reads an isolated home that carries no persisted login,
+        # so there is no configuration for a run to authenticate from. Refused
+        # before spawn rather than left to fail inside the child, and never by
+        # handing the child the operator's own home back.
+        raise ProviderRuntimeUnavailableError(
+            "the Kimi lane runs in a per-run configuration home, which carries "
+            "no persisted login: configure the temporary model definition "
+            "(KIMI_MODEL_NAME, KIMI_MODEL_API_KEY, KIMI_MODEL_BASE_URL) for this "
+            "lane to authenticate"
+        )
+    # Per-run isolation: the operator's home holds their own provider table and
+    # every ambient MCP server they configured, and an agent's tool surface must
+    # be exactly the declared set.
+    env_vars[KIMI_CODE_HOME_ENV] = str(build_kimi_config_home())
+    logger.debug("[%s] Instantiating Kimi ACP agent.", Provider.KIMI)
     return AcpChatModel(
         command=command,
         env_vars=env_vars,
@@ -810,7 +868,7 @@ def _create_kimi_model(
         execution_mode=EXTERNAL_EXECUTION_MODES[Provider.KIMI],
         acp_family="kimi",
         provider_command=classified,
-        auth_mode="temporary_model" if temporary_definition else "persisted_config",
+        auth_mode="temporary_model",
     )
 
 

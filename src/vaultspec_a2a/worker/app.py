@@ -170,8 +170,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Worker lifespan: initialise checkpointer, bridge, executor, heartbeat.
 
     Startup sequence:
-    1. Open the configured backend-selectable checkpointer (SQLite or Postgres) via
-       ``open_checkpointer()``.
+    1. Open the SQLite checkpointer via ``open_checkpointer()``.
     2. Create the ``WorkerBridge`` HTTP client.
     3. Instantiate the ``Executor`` with checkpointer + bridge.
     4. Launch the heartbeat loop as a background task.
@@ -182,7 +181,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     worker_id = uuid4().hex[:8]
     logger.info("Worker %s starting", worker_id)
-    settings.validate_postgres_requirement()
 
     # Configure OTel with the worker service name so spans are
     # attributed separately from the gateway in Jaeger/OTLP backends.
@@ -523,9 +521,8 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
                 app.state, "gateway_pairing_warning", None
             ),
             "worker_port": settings.worker_port,
-            "database_backend": settings.resolved_database_backend,
-            "checkpoint_backend": settings.resolved_checkpoint_backend,
-            "postgres_required": settings.postgres_required,
+            "database_backend": settings.database_backend,
+            "checkpoint_backend": settings.checkpoint_backend,
             # Pairing identity, reported not asserted. A URL cannot distinguish a
             # gateway from its own restart on the same port, so a worker naming
             # only its target looks correctly paired to a gateway that no longer

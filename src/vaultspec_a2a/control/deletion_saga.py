@@ -528,11 +528,8 @@ async def advance_deletion_cleanup_item(
     bytes this call read - so a write built on a stale read is rejected and
     rebuilt rather than applied over a concurrent one.
 
-    Compare-and-swap rather than a row lock because the lock does not reach the
-    default backend: SQLAlchemy's SQLite dialect silently discards ``FOR
-    UPDATE``. The read still takes the lock where the backend honours it, so on
-    Postgres contention serialises instead of retrying, but correctness rests
-    on the swap, which holds on both.
+    Compare-and-swap rather than a row lock because SQLAlchemy's SQLite dialect
+    silently discards ``FOR UPDATE``: correctness rests on the swap.
     """
     for _ in range(_MAX_ADVANCE_ATTEMPTS):
         witnessed = await read_cleanup_ledger(session, thread_id)

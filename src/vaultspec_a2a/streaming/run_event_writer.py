@@ -250,10 +250,9 @@ class RunEventWriter:
         """Log a refused flush, and drop the ring when it can never succeed.
 
         The permanence test is the run's own existence rather than the shape
-        of the error, so it reads the same on both backends: a foreign-key
-        violation and a connection drop arrive as different exceptions from
-        different drivers, but a run whose thread is gone can never take a
-        row again under either. A store too unwell to answer the question is
+        of the error: a foreign-key violation and a dropped connection arrive as
+        different exceptions, but a run whose thread is gone can never take a
+        row again. A store too unwell to answer the question is
         treated as transient, which is the safe direction - the records stay
         where a resume can read them.
         """

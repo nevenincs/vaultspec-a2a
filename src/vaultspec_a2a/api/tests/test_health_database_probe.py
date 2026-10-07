@@ -18,7 +18,6 @@ import pytest
 from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...control.config import settings
 from ...control.health import assemble_desktop_readiness
 from ...testing import armed_desktop_app_home as _armed_desktop
 from ...testing import settings_override
@@ -164,8 +163,6 @@ async def test_health_reports_live_journal_mode_and_storage_footprint(
 
     database_url = f"sqlite+aiosqlite:///{db_file.as_posix()}"
     with settings_override(
-        database_backend="sqlite",
-        checkpoint_backend="sqlite",
         database_url=database_url,
         checkpoint_database_url=None,
     ):
@@ -192,10 +189,6 @@ async def test_health_reports_live_journal_mode_and_storage_footprint(
     assert body["checks"]["database"]["journal_mode"] == "wal"
 
     storage = body["storage"]
-    if settings.resolved_database_backend == "sqlite":
-        assert storage["database"]["size_bytes"] >= 0
-        assert storage["volume"]["free_bytes"] > 0
-        assert storage["volume"]["total_bytes"] >= storage["volume"]["free_bytes"]
-    else:
-        # A remote backend's capacity is not this process's filesystem to measure.
-        assert storage is None or "database" not in storage
+    assert storage["database"]["size_bytes"] >= 0
+    assert storage["volume"]["free_bytes"] > 0
+    assert storage["volume"]["total_bytes"] >= storage["volume"]["free_bytes"]

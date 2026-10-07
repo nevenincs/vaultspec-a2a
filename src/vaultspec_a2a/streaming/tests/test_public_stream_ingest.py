@@ -207,13 +207,14 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
     """
     import asyncio
     import json
-    from typing import Any, TypedDict, cast
+    from typing import Any, TypedDict
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    from langgraph.graph import END, START, StateGraph
+    from langgraph.graph import END, START
     from langgraph.types import interrupt
 
     from vaultspec_a2a.streaming.aggregator import EventAggregator
+    from vaultspec_a2a.testing import add_test_node, compile_test_graph, new_state_graph
 
 
     class S(TypedDict, total=False):
@@ -228,11 +229,11 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
     async def main() -> dict[str, object]:
         async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             await saver.setup()
-            builder = StateGraph(cast(Any, S))
-            builder.add_node("gate", gate)
+            builder = new_state_graph(S)
+            add_test_node(builder, "gate", gate)
             builder.add_edge(START, "gate")
             builder.add_edge("gate", END)
-            graph = builder.compile(checkpointer=saver)
+            graph = compile_test_graph(builder, checkpointer=saver)
             aggregator = EventAggregator()
             queue = aggregator.add_subscriber("c")
             aggregator.subscribe("c", ["t"])

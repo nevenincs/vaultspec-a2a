@@ -38,7 +38,7 @@ gateway_bearer_scheme = HTTPBearer(
 
 
 def verify_attach_bearer(
-    authorization: str | None, *, expected: object, test_bypass: bool
+    authorization: str | None, *, expected: object
 ) -> BearerVerdict:
     """Verify an ``Authorization`` header against the gateway's attach credential.
 
@@ -60,12 +60,8 @@ def verify_attach_bearer(
     ``expected`` is read from application state and so is typed as unknown: a
     gateway whose credential is missing or not a string is corrupted runtime
     state, reported as ``MISCONFIGURED`` rather than silently treated as an
-    absent credential that anything could match. The test-only bypass is checked
-    FIRST and short-circuits, because a test app is created without a credential
-    and would otherwise be indistinguishable from that corruption.
+    absent credential that anything could match.
     """
-    if test_bypass:
-        return BearerVerdict.OK
     if not isinstance(expected, str) or not expected:
         return BearerVerdict.MISCONFIGURED
     # Constant-time compare so verifying the attach credential never leaks its
@@ -92,8 +88,7 @@ async def authenticate_request(
     non-secret reference. The comparison itself belongs to
     :func:`verify_attach_bearer`; what stays here is this surface's mapping of
     the verdict — corrupted runtime state fails closed as a 503, a bad credential
-    is a 401 carrying the ``WWW-Authenticate`` challenge, and only an app created
-    with the explicit test-only bypass may run without a token.
+    is a 401 carrying the ``WWW-Authenticate`` challenge.
 
     The two credential parameters are one credential read twice, for two different
     consumers. ``authorization`` is the raw header the verifier actually compares,
@@ -106,9 +101,6 @@ async def authenticate_request(
     verdict = verify_attach_bearer(
         authorization,
         expected=getattr(request.app.state, "v1_service_token", None),
-        test_bypass=bool(
-            getattr(request.app.state, "allow_unauthenticated_v1_for_testing", False)
-        ),
     )
     if verdict is BearerVerdict.MISCONFIGURED:
         raise HTTPException(

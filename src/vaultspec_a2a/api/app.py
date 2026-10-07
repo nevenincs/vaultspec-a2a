@@ -291,9 +291,6 @@ def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
     verdict = verify_attach_bearer(
         request.headers.get("authorization"),
         expected=getattr(app.state, "v1_service_token", None),
-        test_bypass=bool(
-            getattr(app.state, "allow_unauthenticated_v1_for_testing", False)
-        ),
     )
     return verdict is BearerVerdict.OK
 
@@ -878,21 +875,16 @@ def main() -> None:
     server.run()
 
 
-def create_app(
-    lifespan: Any | None = None,
-    *,
-    allow_unauthenticated_v1_for_testing: bool = False,
-) -> FastAPI:
+def create_app(lifespan: Any | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
+
+    The application snapshots a configured gateway token or generates a
+    per-process token; corrupted runtime state with no token fails closed on
+    every ``/v1`` request while ``/health`` remains available.
 
     Args:
         lifespan: Optional lifespan override for testing. When ``None``
             the production ``_lifespan`` is used.
-        allow_unauthenticated_v1_for_testing: Explicit test-only escape hatch
-            for legacy route-behaviour tests. Production callers must leave it
-            false. Production snapshots a configured gateway token or generates
-            a per-process token; corrupted runtime state with no token fails
-            closed on every ``/v1`` request while ``/health`` remains available.
 
     Returns:
         A fully configured ``FastAPI`` instance ready for ``uvicorn.run()``.
@@ -906,14 +898,11 @@ def create_app(
     # immutable for this app generation, published only through the owner-restricted
     # handoff file, and never logged.
     app.state.v1_service_token = settings.gateway_service_token or secrets.token_hex(32)
-    app.state.allow_unauthenticated_v1_for_testing = (
-        allow_unauthenticated_v1_for_testing
-    )
     app.add_exception_handler(RequestValidationError, _bounded_request_validation_error)
     # The receipt-bound lifecycle ownership capability is only present under the
     # armed desktop profile; unarmed profiles never carry one.
     app.state.lifecycle_capability = None
-    if settings.desktop_profile_armed and not allow_unauthenticated_v1_for_testing:
+    if settings.desktop_profile_armed:
         # Armed desktop: replace the generated attach token with the
         # dashboard-created attach credential, load the ownership capability, and
         # mint the worker IPC secret. Fails closed if a dashboard file is absent.

@@ -108,12 +108,13 @@ async def test_armed_liveness_answer_stays_constant_without_the_attach_credentia
     engine = create_async_engine(f"sqlite+aiosqlite:///{store_dir / 'gateway.db'}")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    app, _aggregator, _worker, _checkpointer = make_app(factory, checkpointer)
+    # This test is about the unauthenticated branch, so no credential may ride
+    # along with its requests.
+    app, _aggregator, _worker, _checkpointer = make_app(
+        factory, checkpointer, stamp_credentials=False
+    )
     app.state.db_engine = engine
     app.state.db_session_factory = factory
-    # The explicit test bypass would authorise every caller; this test is about
-    # the unauthenticated branch, so the real gate has to be in force.
-    app.state.allow_unauthenticated_v1_for_testing = False
 
     with _armed_desktop(tmp_path / "liveness-home"):
         async with httpx.AsyncClient(

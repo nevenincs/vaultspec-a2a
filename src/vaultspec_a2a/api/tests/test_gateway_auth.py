@@ -8,9 +8,8 @@ import httpx
 import pytest
 
 from ...control.config import Settings
-from .conftest import make_app
+from .conftest import SEATED_ATTACH_TOKEN, make_app
 
-_SERVICE_TOKEN = "discovery-service-token"
 _ROUTE_CLASSES: tuple[tuple[str, str, dict[str, Any], int], ...] = (
     (
         "POST",
@@ -28,10 +27,10 @@ _ROUTE_CLASSES: tuple[tuple[str, str, dict[str, Any], int], ...] = (
 
 
 def _secured_app(session_factory: Any, checkpointer: Any) -> Any:
-    """Build the real gateway fixture and arm its production auth boundary."""
-    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
-    app.state.v1_service_token = _SERVICE_TOKEN
-    app.state.allow_unauthenticated_v1_for_testing = False
+    """Build the real gateway fixture, presenting no credential of its own."""
+    app, _aggregator, _worker, _checkpointer = make_app(
+        session_factory, checkpointer, stamp_credentials=False
+    )
     return app
 
 
@@ -47,7 +46,7 @@ async def test_every_v1_route_class_accepts_discovery_bearer(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
     ) as client:
         response = await client.request(method, path, **kwargs)
 
@@ -85,9 +84,10 @@ async def test_v1_fails_closed_without_configured_token_but_health_stays_public(
     checkpointer: Any,
     configured_token: str | None,
 ) -> None:
-    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
+    app, _aggregator, _worker, _checkpointer = make_app(
+        session_factory, checkpointer, stamp_credentials=False
+    )
     app.state.v1_service_token = configured_token
-    app.state.allow_unauthenticated_v1_for_testing = False
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
@@ -99,23 +99,6 @@ async def test_v1_fails_closed_without_configured_token_but_health_stays_public(
     assert refused.json() == {"detail": "Gateway service token is not configured"}
     assert health.status_code == 200
     assert health.json()["service"] == "gateway"
-
-
-@pytest.mark.asyncio(loop_scope="function")
-async def test_explicit_test_mode_is_the_only_tokenless_v1_bypass(
-    session_factory: Any,
-    checkpointer: Any,
-) -> None:
-    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
-    app.state.v1_service_token = None
-    assert app.state.allow_unauthenticated_v1_for_testing is True
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://gateway.test",
-    ) as client:
-        response = await client.get("/v1/runs")
-
-    assert response.status_code == 200
 
 
 def test_gateway_default_bind_is_loopback() -> None:

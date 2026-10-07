@@ -30,7 +30,7 @@ import uvicorn
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ...api.tests.conftest import make_app
+from ...api.tests.conftest import SEATED_ATTACH_TOKEN, make_app
 from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
 from ...testing import fetch_in_process_selection_at
@@ -97,7 +97,9 @@ class _GatewayFixture:
             str(self._tmp / "checkpoints.db")
         )
         checkpointer = self._loop.run_until_complete(self._cp_cm.__aenter__())
-        self.app, _agg, self.worker, _cp = make_app(session_factory, checkpointer)
+        self.app, _agg, self.worker, _cp = make_app(
+            session_factory, checkpointer, stamp_credentials=False
+        )
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -126,21 +128,40 @@ def _in_process_lane_arguments(base: str) -> dict[str, str]:
     reads the catalog and supplies the revision, and that resolution is part of
     what this test exercises; handing it a revision would skip it.
     """
-    selection = fetch_in_process_selection_at(base, str(Path.cwd()))
+    selection = fetch_in_process_selection_at(
+        base,
+        str(Path.cwd()),
+        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+    )
     return {
         key: str(selection[key])
         for key in ("provider_id", "execution_mode", "entry_id")
     }
 
 
+def _configured_environment() -> dict[str, str]:
+    """Return the ambient environment configured with the seated attach token.
+
+    A configured token is the CLI's authoritative credential, so a child run in
+    this environment authenticates against a gateway built by ``make_app``.
+    """
+    environment = os.environ.copy()
+    environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
+    environment["VAULTSPEC_A2A_GATEWAY_TOKEN"] = SEATED_ATTACH_TOKEN
+    return environment
+
+
 def _run_cli(
     *args: str,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Invoke the operator CLI as a real child process."""
+    """Invoke the operator CLI as a real child process.
+
+    Without an explicit *env* the child holds the seated attach token.
+    """
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
-        env=env,
+        env=_configured_environment() if env is None else env,
         capture_output=True,
         text=True,
         timeout=30,
@@ -153,7 +174,6 @@ def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
     token = "cli-discovery-token"
     with _GatewayFixture(tmp_path) as gw:
         gw.app.state.v1_service_token = token
-        gw.app.state.allow_unauthenticated_v1_for_testing = False
         with _ThreadedServer(gw.app) as srv:
             port = int(srv.base.rsplit(":", 1)[1])
             a2a_home = tmp_path / "cli-a2a-home"
@@ -177,7 +197,6 @@ def test_configured_cli_token_precedes_matching_discovery_token(tmp_path: Any) -
     configured = "configured-cli-token"
     with _GatewayFixture(tmp_path) as gw:
         gw.app.state.v1_service_token = configured
-        gw.app.state.allow_unauthenticated_v1_for_testing = False
         with _ThreadedServer(gw.app) as srv:
             port = int(srv.base.rsplit(":", 1)[1])
             a2a_home = tmp_path / "configured-cli-a2a-home"

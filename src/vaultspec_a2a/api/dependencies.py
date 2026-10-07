@@ -53,11 +53,8 @@ async def require_lifecycle_capability(
     The capability the gateway holds is loaded from the dashboard-created ownership
     file that discovery never references. A missing runtime capability is corrupted
     application state and fails closed; a mismatch is redacted so neither presence
-    nor shape of the expected value leaks. Only an app created with the explicit
-    test-only bypass may run without one.
+    nor shape of the expected value leaks.
     """
-    if bool(getattr(request.app.state, "allow_unauthenticated_v1_for_testing", False)):
-        return
     expected = getattr(request.app.state, "lifecycle_capability", None)
     if not isinstance(expected, str) or not expected:
         raise HTTPException(

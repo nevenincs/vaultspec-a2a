@@ -43,6 +43,31 @@ class RunScopedRegistry[T]:
         """Drop *thread_id*'s value at run end. Idempotent."""
         self._entries.pop(thread_id, None)
 
+    def drop_held(self, thread_id: str, value: T) -> bool:
+        """Drop *thread_id*'s entry only while it is still exactly *value*.
+
+        The check is identity, not equality: a holder whose window already
+        ended, and whose thread has since been given a fresh value, must not
+        release that newer window by acting late. Returns whether the entry
+        was dropped.
+        """
+        if self._entries.get(thread_id) is not value:
+            return False
+        del self._entries[thread_id]
+        return True
+
+    def thread_ids(self) -> set[str]:
+        """Return a copy of the thread ids that currently hold a value."""
+        return set(self._entries)
+
+    def __contains__(self, thread_id: object) -> bool:
+        """Whether *thread_id* currently holds a value."""
+        return thread_id in self._entries
+
+    def __len__(self) -> int:
+        """The number of runs that currently hold a value."""
+        return len(self._entries)
+
     @override
     def __repr__(self) -> str:
         """Redacted representation: reports only the active-run count."""

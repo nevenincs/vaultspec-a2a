@@ -196,16 +196,16 @@ async def test_the_run_is_reported_as_awaiting_input() -> None:
 
 @pytest.mark.asyncio
 async def test_a_clarification_is_not_filed_as_a_pending_permission() -> None:
-    """A question is not a tool approval, and must not appear as one.
+    """A question is not a tool approval, and must not be filed as one.
 
-    The pending-permission registry backs surfaces that offer an answerable
-    option list and reconcile against durable permission rows. A clarification
-    has neither, so filing it there would strand an unanswerable entry on
-    team-status that no permission verb could ever resolve.
+    The pending-permission registry holds permission requests only: it is what
+    the interrupt inspection checks before projecting a parked request again. A
+    clarification has no option list and is answered through its own verb, so it
+    has no entry there.
     """
     aggregator, _received = await _relay("relay-not-permission")
 
-    assert aggregator._emitters.get_pending_permissions("relay-not-permission") == []
+    assert not aggregator._emitters.has_pending_permission(_REQUEST_ID)
 
 
 @pytest.mark.asyncio

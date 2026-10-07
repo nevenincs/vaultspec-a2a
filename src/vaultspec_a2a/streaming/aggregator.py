@@ -197,9 +197,6 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
             thread_id, agent_id, node_name, state, detail
         )
 
-    def resolve_permission(self, request_id: str) -> None:
-        self._emitters.resolve_permission(request_id)
-
     def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
         return self._emitters.prune_stale_permissions(max_age_seconds)
 

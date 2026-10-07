@@ -454,8 +454,8 @@ class TestEventEmission:
             options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
         )
 
-        pending = aggregator._emitters.get_pending_permissions("thread-1")
-        assert [event.request_id for event in pending] == ["perm-new"]
+        assert not aggregator._emitters.has_pending_permission("perm-old")
+        assert aggregator._emitters.has_pending_permission("perm-new")
 
     @pytest.mark.asyncio
     async def test_expire_thread_permissions_drops_a_freshly_recorded_request(
@@ -485,12 +485,9 @@ class TestEventEmission:
         assert aggregator.prune_stale_permissions() == 0
 
         assert aggregator._emitters.expire_thread_permissions("thread-1") == 1
-        assert aggregator._emitters.get_pending_permissions("thread-1") == []
+        assert not aggregator._emitters.has_pending_permission("perm-fresh")
         # A sibling thread's pending request is untouched.
-        assert [
-            event.request_id
-            for event in aggregator._emitters.get_pending_permissions("thread-2")
-        ] == ["perm-other-thread"]
+        assert aggregator._emitters.has_pending_permission("perm-other-thread")
 
     @pytest.mark.asyncio
     async def test_emit_error(self, aggregator: EventAggregator) -> None:

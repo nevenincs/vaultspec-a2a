@@ -37,7 +37,7 @@ from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from .buffering import BufferingManager
 from .node_metadata import node_metadata_fields
 from .subscribers import SubscriberManager
-from .types import SequencedEvent, classify_tool_kind, resolve_acp_option_kind
+from .types import SequencedEvent, classify_tool_kind
 
 logger = logging.getLogger(__name__)
 
@@ -197,10 +197,6 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
     # Permission management
     # ------------------------------------------------------------------
 
-    def resolve_permission(self, request_id: str) -> None:
-        """Remove a permission request from the pending set."""
-        self._pending_permissions.pop(request_id, None)
-
     def _replace_thread_pending_permission(
         self,
         *,
@@ -245,19 +241,6 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         if stale:
             logger.info("Pruned %d stale permission request(s)", len(stale))
         return len(stale)
-
-    def get_pending_permissions(
-        self,
-        thread_id: str | None = None,
-    ) -> list[PermissionRequest]:
-        """Return pending permissions, optionally filtered by thread."""
-        if thread_id is None:
-            return [evt for evt, _ts in self._pending_permissions.values()]
-        return [
-            evt
-            for evt, _ts in self._pending_permissions.values()
-            if evt.thread_id == thread_id
-        ]
 
     def bind_buffering(self, buffering: BufferingManager) -> None:
         """Wire the buffering manager after both sides finish constructing.
@@ -532,11 +515,10 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         """Emit the nudge that a run has parked on a questionnaire.
 
         Deliberately NOT registered in ``_pending_permissions``. That registry
-        backs the permission surfaces - team-status' pending list and the durable
-        permission reconciliation - and a clarification is not a permission: it
-        has no options to choose and is answered through its own verb. Filing it
-        there would make it show up as an unanswered tool approval on surfaces
-        that could never resolve it.
+        holds permission requests only - it is what the interrupt inspection
+        checks before projecting a parked request again - and a clarification is
+        not a permission: it has no options to choose and is answered through its
+        own verb.
 
         The signature takes no question material because there is none to take.
         """
@@ -707,59 +689,6 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
             self._agent_states[(thread_id, agent_id)] = lifecycle
         self.next_sequence(thread_id)
 
-    def _sync_permission_request(self, thread_id: str, payload: dict[str, Any]) -> None:
-        request_id = payload.get("request_id", "")
-        if not request_id:
-            return
-        description = payload.get("description", "")
-        options = payload.get("options", [])
-        tool_call = payload.get("tool_call")
-        perm_options: list[dict[str, str]] = []
-        for opt in options:
-            perm_options.append(
-                {
-                    "option_id": opt.get("option_id", ""),
-                    "name": opt.get("name", ""),
-                    # Resolve from the DECLARED kind the relayed payload already
-                    # carries, not from the id. The id is free-form and
-                    # provider-defined, so deriving from it discards the one
-                    # field that says whether the option denies - which is how a
-                    # rejecting option under an id spelling neither "deny" nor
-                    # "reject" was once persisted as an approval. The resolver
-                    # still falls back to the id heuristic when the declaration
-                    # is missing or malformed, so nothing is lost when a payload
-                    # genuinely carries no kind.
-                    "kind": str(
-                        resolve_acp_option_kind(
-                            opt.get("kind"), opt.get("option_id", "")
-                        )
-                    ),
-                }
-            )
-        event = PermissionRequest(
-            thread_id=thread_id,
-            agent_id=payload.get("agent_id", ""),
-            timestamp=datetime.now(UTC).timestamp(),
-            request_id=request_id,
-            description=description,
-            options=perm_options,
-            tool_call=str(tool_call) if tool_call is not None else None,
-        )
-        self._replace_thread_pending_permission(
-            thread_id=thread_id,
-            request_id=request_id,
-            event=event,
-        )
-        self.next_sequence(thread_id)
-
-    def _sync_permission_resolved(
-        self, thread_id: str, payload: dict[str, Any]
-    ) -> None:
-        request_id = payload.get("request_id", "")
-        if request_id:
-            self._pending_permissions.pop(request_id, None)
-        self.next_sequence(thread_id)
-
     def _sync_graph_registered(self, thread_id: str, payload: dict[str, Any]) -> None:
         nodes_raw: object = payload.get("nodes", {})
         if isinstance(nodes_raw, dict):
@@ -829,8 +758,6 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
     # the trailing catch-all in sync_worker_event.
     _SYNC_EVENT_HANDLERS: ClassVar[dict[str, str]] = {
         "agent_status": "_sync_agent_status",
-        "permission_request": "_sync_permission_request",
-        "permission_resolved": "_sync_permission_resolved",
         "graph_registered": "_sync_graph_registered",
         "plan_update": "_sync_plan_update",
         "artifact_update": "_sync_artifact_update",

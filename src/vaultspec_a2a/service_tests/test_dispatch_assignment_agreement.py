@@ -85,13 +85,7 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
         tmp_path,
         VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
-        verbs = replace(
-            gateway.runs,
-            team_preset=_PRESET,
-            workspace_root=str(tmp_path),
-            selection=gateway.served_in_process_selection,
-            tokens=role_tokens(roles),
-        )
+        verbs = replace(gateway.runs, team_preset=_PRESET, tokens=role_tokens(roles))
         started = verbs.start(run_id, message="Do the task and stop.")
         assert started.status_code == 201, started.text
         frozen = started.json()["frozen_assignment"]

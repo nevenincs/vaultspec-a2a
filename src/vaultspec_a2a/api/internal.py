@@ -14,7 +14,7 @@ size is bounded before routing by ``ipc.body_limit``, not by these routes.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import replace
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +37,8 @@ from ._replay_writer_seat import seated_replay_writer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from ..streaming import RelayHub
 
 __all__ = ["internal_router"]
 
@@ -148,41 +150,31 @@ internal_router = APIRouter(
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _RelayContext:
-    agg: Any
-    session_factory: Any
-    checkpointer: Any
-    drain_gate: Any
-    prune_registry: Any
-    # The seated replay recorder, resolved once per ingest rather than per
-    # event: seating it is also what binds the run-sequence authority, so an
-    # ingest that reaches the relay hub has either both or neither.
-    replay: Any = None
-
-    @classmethod
-    def of(cls, app: Any, agg: Any, *, replay: Any = None) -> _RelayContext:
-        """Read one app's relay collaborators off the state it seated them on."""
-        return cls(
-            agg,
-            _app_session_factory(app),
-            getattr(app.state, "checkpointer", None),
-            # Read, never get-or-created: a gate or a prune registry that was
-            # never seated has admitted and started nothing.
-            getattr(app.state, "drain_gate", None),
-            getattr(app.state, "checkpoint_prunes", None),
-            replay,
-        )
+def _relay_services(app: Any, relay_hub: RelayHub) -> RelayServices:
+    """Read one app's relay collaborators off the state it seated them on."""
+    return RelayServices(
+        relay_hub=relay_hub,
+        session_factory=_app_session_factory(app),
+        checkpointer=getattr(app.state, "checkpointer", None),
+        # Read, never get-or-created: a gate or a prune registry that was
+        # never seated has admitted and started nothing.
+        drain_gate=getattr(app.state, "drain_gate", None),
+        prune_registry=getattr(app.state, "checkpoint_prunes", None),
+    )
 
 
 async def _relay_single_event(
-    thread_id: str, payload: dict[str, Any], context: _RelayContext
+    thread_id: str,
+    payload: dict[str, Any],
+    relay_hub: RelayHub,
+    services: RelayServices,
 ) -> None:
     """Relay a single worker event through the gateway's relay hub.
 
-    *drain_gate* is the process-wide run-admission gate seated on ``app.state``;
-    it travels to the terminal handler, which releases the run from it, exactly
-    as *agg* and *session_factory* travel to their handlers.
+    *services* is the ingest's collaborator bundle. Its run-admission gate is the
+    process-wide one seated on ``app.state``; it travels to the terminal handler,
+    which releases the run from it, exactly as the relay hub and session factory
+    travel to their handlers.
 
     One frame is relayed differently. A terminal says the RUN ended, and only
     the control plane knows whether it did: a run with a continuation waiting
@@ -195,48 +187,32 @@ async def _relay_single_event(
     payload = normalize_wire_event_type(payload)
     if payload.get("type") == "execution_state_projection":
         await _handle_execution_state_event(
-            thread_id, payload, session_factory=context.session_factory
+            thread_id, payload, session_factory=services.session_factory
         )
         return
     if payload.get("type") == "dispatch_applied":
         # Application receipts are a private worker->gateway settlement signal.
         # They deliberately bypass the public relay-hub/SSE projection so the
         # stable dispatch identity never becomes a progress-frame field.
-        await relay_event(
-            thread_id,
-            payload,
-            services=RelayServices(
-                session_factory=context.session_factory,
-                checkpointer=context.checkpointer,
-                drain_gate=context.drain_gate,
-                prune_registry=context.prune_registry,
-            ),
-        )
+        await relay_event(thread_id, payload, services=services)
         return
 
     publish_terminal: Callable[[], None] | None = None
     # Establishes the run's durable numbering before the synchronous
     # chokepoint needs it; a no-op once seeded, and on a gateway that
     # numbers nothing.
-    await context.agg.prepare_run(thread_id)
+    await relay_hub.prepare_run(thread_id)
     if is_terminal_event(payload):
-        publish_terminal = partial(context.agg.relay_payload, thread_id, payload)
+        publish_terminal = partial(relay_hub.relay_payload, thread_id, payload)
     else:
-        context.agg.relay_payload(thread_id, payload)
+        relay_hub.relay_payload(thread_id, payload)
     # Mirrors the event into the relay hub's agent, tool-call and node state
     # before the handlers below, whose settled path purges that state.
-    context.agg.sync_worker_event(thread_id, payload)
+    relay_hub.sync_worker_event(thread_id, payload)
     await relay_event(
         thread_id,
         payload,
-        services=RelayServices(
-            aggregator=context.agg,
-            session_factory=context.session_factory,
-            checkpointer=context.checkpointer,
-            drain_gate=context.drain_gate,
-            prune_registry=context.prune_registry,
-            publish_terminal=publish_terminal,
-        ),
+        services=replace(services, publish_terminal=publish_terminal),
     )
 
 
@@ -265,18 +241,21 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     # even if the batch was assembled out of order.
     events = sorted(batch.events, key=lambda event: event.ts)
 
-    agg = getattr(request.app.state, "aggregator", None)
-    if agg is None:
+    relay_hub = getattr(request.app.state, "relay_hub", None)
+    if relay_hub is None:
         raise HTTPException(
             status_code=503,
             detail="No relay target available -- gateway not ready",
         )
 
-    replay = seated_replay_writer(request.app, _app_session_factory(request.app))
-    context = _RelayContext.of(request.app, agg, replay=replay)
+    services = _relay_services(request.app, relay_hub)
+    # Resolved once per ingest rather than per event: seating the recorder is
+    # also what binds the run-sequence authority, so an ingest that reaches the
+    # relay hub has either both or neither.
+    replay = seated_replay_writer(request.app, services.session_factory)
 
     for event in events:
-        await _relay_single_event(event.thread_id, event.payload, context)
+        await _relay_single_event(event.thread_id, event.payload, relay_hub, services)
 
     # Behind the fan-out, once per ingested batch: every frame above already
     # reached its subscribers, and this is the round trip that makes them

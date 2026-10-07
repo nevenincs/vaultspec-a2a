@@ -90,7 +90,7 @@ async def test_team_status_reports_the_resolved_provider_and_model(
 
     async with session_factory() as db:
         status = await build_team_status(
-            db=db, aggregator=aggregator, heartbeat_threads=["thread-team-status"]
+            db=db, relay_hub=aggregator, heartbeat_threads=["thread-team-status"]
         )
     agents = {agent.agent_id: agent for agent in status.agents}
     assert _WORKER_ID in agents, f"compiled worker missing from {list(agents)}"
@@ -128,7 +128,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
     )
 
     app, _agg, _worker, _cp = make_app(
-        session_factory, checkpointer, aggregator=aggregator
+        session_factory, checkpointer, relay_hub=aggregator
     )
 
     await checkpointer.setup()
@@ -286,7 +286,7 @@ async def test_team_status_reports_unknown_assignment_as_null(
 
     async with session_factory() as db:
         status = await build_team_status(
-            db=db, aggregator=aggregator, heartbeat_threads=["thread-unresolved"]
+            db=db, relay_hub=aggregator, heartbeat_threads=["thread-unresolved"]
         )
 
     agent = status.agents[0]

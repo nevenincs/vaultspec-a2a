@@ -31,9 +31,9 @@ LIFECYCLE_CAPABILITY_HEADER = "X-Vaultspec-Lifecycle-Capability"
 
 __all__ = [
     "LIFECYCLE_CAPABILITY_HEADER",
-    "get_aggregator",
     "get_checkpointer",
     "get_circuit_breaker",
+    "get_relay_hub",
     "get_services",
     "get_worker_client",
     "get_worker_spawner",
@@ -69,12 +69,12 @@ async def require_lifecycle_capability(
         )
 
 
-def get_aggregator(request: Request) -> RelayHub:
+def get_relay_hub(request: Request) -> RelayHub:
     """FastAPI dependency for the gateway's relay hub singleton."""
-    aggregator: RelayHub | None = getattr(request.app.state, "aggregator", None)
-    if aggregator is None:
+    relay_hub: RelayHub | None = getattr(request.app.state, "relay_hub", None)
+    if relay_hub is None:
         raise RuntimeError("Relay hub not initialised in app state")
-    return aggregator
+    return relay_hub
 
 
 def get_checkpointer(request: Request) -> Checkpointer:
@@ -111,7 +111,7 @@ def get_worker_spawner(request: Request) -> Any:
 
 async def get_services(
     db: AsyncSession = Depends(get_db),
-    aggregator: RelayHub = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     checkpointer: Checkpointer = Depends(get_checkpointer),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
 ) -> tuple[AsyncSession, RelayHub, Checkpointer, httpx.AsyncClient]:
@@ -120,4 +120,4 @@ async def get_services(
     No longer includes GraphRegistry or TaskGroup -- the worker owns
     graph lifecycle, and the gateway does not run background agent tasks.
     """
-    return db, aggregator, checkpointer, worker_client
+    return db, relay_hub, checkpointer, worker_client

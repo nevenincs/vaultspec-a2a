@@ -100,7 +100,7 @@ def resume_position(cursor: str, thread_id: str) -> ResumePosition | None:
     return ResumePosition(after_sequence=int(decimal), from_window_start=False)
 
 
-def replay_is_served(aggregator: RelayHub, thread_id: str) -> bool:
+def replay_is_served(relay_hub: RelayHub, thread_id: str) -> bool:
     """Whether this run's outgoing frames can be replayed to a reconnect.
 
     Two conditions, and both are about this gateway rather than this stream.
@@ -113,7 +113,7 @@ def replay_is_served(aggregator: RelayHub, thread_id: str) -> bool:
     """
     if not settings.stream_replay_enabled:
         return False
-    allocator = aggregator.sequence_allocator
+    allocator = relay_hub.sequence_allocator
     return allocator is not None and allocator.is_numbered(thread_id)
 
 

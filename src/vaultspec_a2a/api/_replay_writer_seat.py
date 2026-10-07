@@ -6,7 +6,7 @@ the app state that binds them to one gateway. Assembling them here keeps that
 dependency pointing the right way and keeps the relay route to a few lines.
 
 Seated lazily on first relay rather than at startup, deliberately: the
-recorder needs the aggregator and the application session factory, both of
+recorder needs the relay hub and the application session factory, both of
 which the lifespan seats, and reaching for them when the first frame arrives
 avoids a second startup ordering to get wrong.
 """
@@ -42,7 +42,7 @@ def seated_replay_writer(app: Any, session_factory: Any) -> RunEventWriter | Non
 
     ``None`` whenever the feature is off or the app has nothing to write
     into - a host embedding the relay router without a store, or a gateway
-    whose lifespan has not seated its aggregator yet. The numbering authority
+    whose lifespan has not seated its relay hub yet. The numbering authority
     is bound in the same act, so a gateway either numbers and retains or does
     neither, and never hands out an id it cannot resume from.
 
@@ -60,12 +60,12 @@ def seated_replay_writer(app: Any, session_factory: Any) -> RunEventWriter | Non
     if seated is not None:
         return cast("RunEventWriter", seated)
 
-    aggregator = getattr(app.state, "aggregator", None)
-    if session_factory is None or aggregator is None:
+    relay_hub = getattr(app.state, "relay_hub", None)
+    if session_factory is None or relay_hub is None:
         return None
 
     store = RunEventStore(session_factory)
     writer = RunEventWriter(store, window=settings.stream_replay_window_events)
-    aggregator.bind_sequence_allocator(RunSequenceAllocator(store), sink=writer)
+    relay_hub.bind_sequence_allocator(RunSequenceAllocator(store), sink=writer)
     setattr(app.state, _STATE_ATTRIBUTE, writer)
     return writer

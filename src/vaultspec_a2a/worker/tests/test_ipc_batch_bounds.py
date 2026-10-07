@@ -48,7 +48,7 @@ def _gateway_app() -> FastAPI:
     )
     app.include_router(internal_router)
     app.state.internal_token = None
-    app.state.aggregator = RelayHub()
+    app.state.relay_hub = RelayHub()
     app.state.db_session_factory = None
     app.state.checkpointer = None
     return app

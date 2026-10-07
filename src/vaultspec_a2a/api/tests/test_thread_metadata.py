@@ -56,11 +56,11 @@ def _run_workspace():
 def _make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    aggregator: RelayHub | None = None,
+    relay_hub: RelayHub | None = None,
 ) -> tuple[FastAPI, RelayHub]:
     """Shim: forwards to shared make_app(), dropping extra returns."""
     app, agg, _worker, _cp = _make_app_4(
-        session_factory, checkpointer, aggregator=aggregator
+        session_factory, checkpointer, relay_hub=relay_hub
     )
     return app, agg
 

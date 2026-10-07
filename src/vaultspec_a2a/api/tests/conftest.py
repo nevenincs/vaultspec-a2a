@@ -269,7 +269,7 @@ def _session_catalog_service() -> ProviderCatalogService:
 def make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    aggregator: RelayHub | None = None,
+    relay_hub: RelayHub | None = None,
     *,
     stamp_credentials: bool = True,
 ) -> AppFixture:
@@ -286,7 +286,7 @@ def make_app(
     and so must present exactly what it chooses, or nothing.
 
     Returns:
-        Tuple of (app, aggregator, worker, checkpointer).
+        Tuple of (app, relay_hub, worker, checkpointer).
     """
 
     @asynccontextmanager
@@ -299,8 +299,8 @@ def make_app(
     if stamp_credentials:
         app.add_middleware(cast("Any", _SeatedCredentials), owner=app)
 
-    if aggregator is None:
-        aggregator = RelayHub()
+    if relay_hub is None:
+        relay_hub = RelayHub()
 
     worker = _InProcessWorker(app.state.internal_token)
 
@@ -319,7 +319,7 @@ def make_app(
     app.state.provider_catalog_service = _session_catalog_service()
 
     # Store singletons in app.state so WebSocket handlers can read them
-    app.state.aggregator = aggregator
+    app.state.relay_hub = relay_hub
     app.state.checkpointer = checkpointer
     # The gateway lifespan seats one beside the store it prunes through, and a
     # relayed terminal schedules nothing without it.
@@ -340,4 +340,4 @@ def make_app(
     app.state.worker_spawner = spawner
     app.state.db_session_factory = session_factory
 
-    return app, aggregator, worker, checkpointer
+    return app, relay_hub, worker, checkpointer

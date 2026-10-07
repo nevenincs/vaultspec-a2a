@@ -59,8 +59,12 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..database import ControlActionModel, ThreadModel, ThreadStatusElectionOutcome
-    from ..database.checkpoints import Checkpointer
+    from ..database import (
+        Checkpointer,
+        ControlActionModel,
+        ThreadModel,
+        ThreadStatusElectionOutcome,
+    )
     from ..streaming import RelayHub
     from .drain import DrainGate
     from .terminal_settlement import TerminalEvidence
@@ -103,7 +107,7 @@ class RelayServices:
     or relay hub there is nothing to release.
     """
 
-    aggregator: RelayHub | None = None
+    relay_hub: RelayHub | None = None
     session_factory: async_sessionmaker[AsyncSession] | None = None
     checkpointer: Checkpointer | None = None
     drain_gate: DrainGate | None = None
@@ -316,7 +320,7 @@ def _schedule_terminal_settlement(
     slow or unreachable dashboard never stalls worker event relay; the emitter is
     itself bounded and never raises.
     """
-    from ..control.config import settings
+    from .config import settings
 
     if not settings.desktop_profile_armed:
         return
@@ -632,7 +636,7 @@ async def _prune_settled_history(
     """
     if checkpointer is None:
         return
-    from ..database.checkpoint_retention import prune_settled_checkpoints
+    from ..database import prune_settled_checkpoints
     from ..domain_config import domain_config
 
     try:
@@ -721,7 +725,7 @@ async def _handle_terminal_event(
     relay hub purge that would otherwise make the frame undeliverable.
     """
     resolved = services or RelayServices()
-    aggregator = resolved.aggregator
+    relay_hub = resolved.relay_hub
     checkpointer = resolved.checkpointer
     drain_gate = resolved.drain_gate
     prune_registry = resolved.prune_registry
@@ -730,7 +734,7 @@ async def _handle_terminal_event(
     # Capture before the durable write and before relay hub state is pruned.
     # ``None`` - nothing numbers this run - leaves the settled cursor unwritten.
     last_sequence = (
-        aggregator.issued_sequence(thread_id) if aggregator is not None else None
+        relay_hub.issued_sequence(thread_id) if relay_hub is not None else None
     )
     terminal_status = _validated_terminal_status(thread_id, payload)
     if terminal_status is None:
@@ -754,8 +758,8 @@ async def _handle_terminal_event(
         prune_registry.schedule(thread_id, checkpointer)
     if drain_gate is not None:
         await drain_gate.release(thread_id)
-    if aggregator is not None:
-        aggregator.clear_thread_state(thread_id)
+    if relay_hub is not None:
+        relay_hub.clear_thread_state(thread_id)
 
 
 #: The approval gates record the pause they relay as itself; a tool permission

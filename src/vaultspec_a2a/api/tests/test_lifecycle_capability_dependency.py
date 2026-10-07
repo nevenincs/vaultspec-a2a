@@ -82,7 +82,7 @@ def test_dependencies_offers_no_second_spelling_of_the_attach_gate() -> None:
 
     assert "require_lifecycle_capability" in dependencies.__all__
     assert "LIFECYCLE_CAPABILITY_HEADER" in dependencies.__all__
-    assert "get_aggregator" in dependencies.__all__
+    assert "get_relay_hub" in dependencies.__all__
 
 
 @pytest.mark.asyncio

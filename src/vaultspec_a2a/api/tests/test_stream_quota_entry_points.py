@@ -65,7 +65,7 @@ async def test_a_stream_refused_at_registration_is_told_why(
         async for frame in _stream_thread_events(
             ThreadStreamRequest(
                 thread_id="run-1",
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=session_factory,
             )
         )
@@ -100,7 +100,7 @@ async def test_a_served_stream_gives_its_slot_back_and_spares_the_held_ones(
         async for frame in _stream_thread_events(
             ThreadStreamRequest(
                 thread_id="run-terminal",
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=session_factory,
             )
         )

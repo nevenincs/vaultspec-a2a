@@ -49,7 +49,7 @@ def _gateway_app() -> FastAPI:
     # guess about. The internal token is seated as None, which the development
     # environment reads as no authentication.
     app.state.internal_token = None
-    app.state.aggregator = None
+    app.state.relay_hub = None
     app.state.db_session_factory = None
     return app
 

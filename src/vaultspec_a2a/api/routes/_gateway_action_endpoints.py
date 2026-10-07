@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 from fastapi import (
@@ -17,6 +17,7 @@ from fastapi import (
     Query,
     Request,
 )
+from fastapi import Path as PathParam
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,7 +57,10 @@ from ...thread.clarification import (
 )
 from ...thread.constants import (
     DEFAULT_SUPERVISOR_ID,
+    MAX_APPROVAL_REQUEST_ID_CHARS,
+    MAX_REQUEST_ID_CHARS,
     MAX_WORKSPACE_ROOT_LENGTH,
+    REQUEST_ID_PATTERN,
 )
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import TERMINAL_STATUSES
@@ -108,6 +112,37 @@ from .gateway import (
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
 
+#: The permission or approval handle a respond verb answers, bounded at the
+#: width the run record REPORTS it at rather than at the width this service
+#: mints: a document approval is answered by an id the authoring engine minted
+#: and this service only transports, so a bound below the reported width would
+#: refuse a handle a caller read from this service's own read surface. For the
+#: same reason it carries no grammar - an opaque foreign id is not this side's
+#: to shape.
+_PathApprovalRequestId = Annotated[
+    str, PathParam(min_length=1, max_length=MAX_APPROVAL_REQUEST_ID_CHARS)
+]
+
+#: The clarification handle, bounded and shaped by the grammar this service
+#: mints it in. The resolution model already refused anything else, one layer
+#: too late: its validation error left the service as a 500, reporting a
+#: caller's malformed path as a server fault.
+_PathClarificationRequestId = Annotated[
+    str,
+    PathParam(
+        min_length=1, max_length=MAX_REQUEST_ID_CHARS, pattern=REQUEST_ID_PATTERN
+    ),
+]
+
+#: What a client may send as the shared idempotency header. One published
+#: width for every verb that takes it: the follow-up verb bounded it and the
+#: others did not, so the same header name meant a bounded value on one route
+#: and an unbounded one on the next.
+_IdempotencyKeyHeader = Annotated[
+    str | None,
+    Header(alias="Idempotency-Key", max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+]
+
 
 @dataclass(frozen=True, slots=True)
 class _ActionEndpointDependencies:
@@ -157,7 +192,7 @@ def _get_action_endpoint_context(
     dependencies: _ActionEndpointDependencies = Depends(
         _get_action_endpoint_dependencies
     ),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: _IdempotencyKeyHeader = None,
 ) -> _ActionEndpointContext:
     """Collect request-scoped action inputs while retaining their route metadata."""
     return _ActionEndpointContext(
@@ -321,7 +356,7 @@ async def run_message_endpoint(
 
 async def run_permission_respond_endpoint(
     run_id: PathSafeRunId,
-    request_id: str,
+    request_id: _PathApprovalRequestId,
     body: RunPermissionRespondRequest,
     context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
     checkpointer: Checkpointer = Depends(get_checkpointer),
@@ -381,7 +416,7 @@ async def run_permission_respond_endpoint(
 
 async def run_clarification_respond_endpoint(
     run_id: PathSafeRunId,
-    request_id: str,
+    request_id: _PathClarificationRequestId,
     body: RunClarificationRespondRequest,
     context: _ClarificationEndpointContext = Depends(
         _get_clarification_endpoint_context

@@ -60,21 +60,13 @@ def _body(path: str, size: int) -> bytes:
     return encoded + b" " * (size - len(encoded))
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("path", _ROUTES)
-@pytest.mark.parametrize(
-    "framing",
-    ["missing", "chunked", "underreported", "malformed", "negative", "duplicate"],
-)
-async def test_internal_streamed_body_cannot_bypass_limit(
-    path: str, framing: str
-) -> None:
+async def _send_framed(
+    path: str, framing: str, *, consumed: list[int]
+) -> httpx.Response:
+    """Send one oversized body to *path* under the named Content-Length framing."""
     app = _app(path)
-    liveness = worker_liveness(app.state)
-    before = liveness.last_contact_ts
     cap = 1024 if path.endswith("/batch") else 256
     body = _body(path, cap + 1)
-    consumed: list[int] = []
 
     async def chunks() -> AsyncIterator[bytes]:
         consumed.append(1)
@@ -92,6 +84,8 @@ async def test_internal_streamed_body_cannot_bypass_limit(
         headers["content-length"] = "invalid"
     elif framing == "negative":
         headers["content-length"] = "-1"
+    elif framing == "separated":
+        headers["content-length"] = "1_2"
     with settings_override(internal_token=_TOKEN, internal_max_http_body_bytes=256):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -110,10 +104,56 @@ async def test_internal_streamed_body_cannot_bypass_limit(
                     ]
                 )
             response = await client.send(request)
+    response.extensions["app"] = app
+    return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _ROUTES)
+@pytest.mark.parametrize("framing", ["missing", "chunked", "underreported"])
+async def test_internal_streamed_body_cannot_bypass_limit(
+    path: str, framing: str
+) -> None:
+    """A readable framing that under-declares is still caught by the counter."""
+    consumed: list[int] = []
+    response = await _send_framed(path, framing, consumed=consumed)
+    app = response.extensions["app"]
+    liveness = worker_liveness(app.state)
 
     assert response.status_code == 413
     assert consumed == [1, 2]
-    assert liveness.last_contact_ts == before
+    assert liveness.last_contact_ts is None
+    if path == "/dispatch":
+        assert len(app.state.dispatch_ids) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _ROUTES)
+@pytest.mark.parametrize("framing", ["malformed", "negative", "separated", "duplicate"])
+async def test_an_unreadable_declared_length_is_a_bad_request(
+    path: str, framing: str
+) -> None:
+    """A Content-Length this layer cannot read is refused, and nothing is received.
+
+    Four ways to be unreadable, and each used to be discarded as though the
+    header were absent: a value that is not a number, a negative one that no
+    comparison against a cap could ever refuse, Python's own digit separator
+    that ``int`` accepts and HTTP does not, and two headers making different
+    claims about one body. Each left the bound resting on the stream counter
+    alone, which is the half a caller controls.
+
+    413 would be the wrong answer and 500 worse still: the request is not too
+    large and nothing failed inside the service - the framing is malformed,
+    which is a client's own fault to fix.
+    """
+    consumed: list[int] = []
+    response = await _send_framed(path, framing, consumed=consumed)
+    app = response.extensions["app"]
+
+    assert response.status_code == 400, response.text
+    assert "Content-Length" in response.json()["detail"]
+    assert consumed == [], "an unreadable declaration must be refused unread"
+    assert worker_liveness(app.state).last_contact_ts is None
     if path == "/dispatch":
         assert len(app.state.dispatch_ids) == 0
 

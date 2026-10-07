@@ -423,7 +423,7 @@ async def probe_worker_health(
     timeout: float = 2.0,
     *,
     client: httpx.AsyncClient | None = None,
-    internal_token: str | None = None,
+    internal_token: str | None,
 ) -> WorkerHealthProbe:
     """Probe the worker's ``GET /health`` once.
 
@@ -434,6 +434,11 @@ async def probe_worker_health(
     a self-contained one-shot client that presents *internal_token* as the same
     bearer, so a worker that enforces the credential on ``/health`` still answers
     its owner. *internal_token* is not read when a *client* is supplied.
+
+    *internal_token* is required, with no default: a credential this probe was
+    never handed and one the caller holds but forgot to pass produce the same
+    unauthenticated request, and the second is a defect that reads as a worker
+    refusing its owner. Naming ``None`` is how a caller says it has none.
 
     The health verdict is an exact ``200`` and nothing else, so every caller
     agrees and ``/health`` can never silently diverge from the watchdog's

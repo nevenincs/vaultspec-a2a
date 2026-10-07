@@ -96,7 +96,10 @@ def _crashed_owned_watchdog() -> Generator[
     crashed.wait(timeout=30)
     port = free_port()
     spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=True
+        worker_url=f"http://127.0.0.1:{port}",
+        worker_port=port,
+        auto_spawn=True,
+        internal_token=None,
     )
     spawner.replace_process(crashed, containment)
     worker_state = WorkerState()

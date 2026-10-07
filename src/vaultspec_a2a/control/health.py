@@ -734,6 +734,7 @@ async def _worker_health_check(
         settings.worker_url,
         timeout=SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
         client=worker_client,
+        internal_token=None,
     )
     if worker_probe.healthy:
         worker_check = {"status": "ok"}

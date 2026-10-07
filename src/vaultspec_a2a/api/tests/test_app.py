@@ -107,6 +107,7 @@ def test_lazy_worker_spawner_avoids_stderr_log_path_when_auto_spawn_disabled() -
         worker_url="http://worker:8001",
         worker_port=8001,
         auto_spawn=False,
+        internal_token=None,
     )
 
     assert spawner.stderr_log_path is None
@@ -118,6 +119,7 @@ def test_worker_watchdog_keeps_stderr_log_path_null_when_auto_spawn_disabled() -
         worker_url="http://worker:8001",
         worker_port=8001,
         auto_spawn=False,
+        internal_token=None,
     )
     app_state = SimpleNamespace()
     worker_state = WorkerState()

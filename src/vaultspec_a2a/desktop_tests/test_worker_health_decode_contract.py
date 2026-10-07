@@ -157,14 +157,16 @@ async def test_an_unreadable_worker_is_up_present_and_not_ours(
     with _malformed_worker(tmp_path) as (url, port):
         # The health verdict is the status code and nothing else: an unreadable
         # body cannot turn a healthy worker unhealthy.
-        probe = await probe_worker_health(url)
+        probe = await probe_worker_health(url, internal_token=None)
         assert probe == WorkerHealthProbe(healthy=True, body=None)
 
-        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=True)
+        spawner = LazyWorkerSpawner(
+            worker_url=url, worker_port=port, auto_spawn=True, internal_token=None
+        )
         await spawner.ensure_worker()
         async with httpx.AsyncClient() as client:
             incumbent = await client.get(f"{url}/health")
-        second_probe = await probe_worker_health(url)
+        second_probe = await probe_worker_health(url, internal_token=None)
 
     assert incumbent.status_code == 200
     assert spawner.spawned is False
@@ -181,7 +183,7 @@ async def test_nothing_listening_is_reported_absent(tmp_path: Path) -> None:
     vacuous. Port 9 (discard) refuses the connection outright.
     """
     dead = "http://127.0.0.1:9"
-    probe = await probe_worker_health(dead)
+    probe = await probe_worker_health(dead, internal_token=None)
     assert probe == WorkerHealthProbe(healthy=False, body=None)
     # A refused connection is an OBSERVATION of absence, not a failure to observe.
     assert probe.indeterminate is False
@@ -202,7 +204,7 @@ async def test_a_stalled_worker_is_unhealthy_but_not_observed_absent() -> None:
     the port is closed - which is precisely the distinction under proof.
     """
     with _stalled_worker() as url:
-        probe = await probe_worker_health(url, timeout=1.0)
+        probe = await probe_worker_health(url, timeout=1.0, internal_token=None)
 
     assert probe.healthy is False, "a worker that never answered is not healthy"
     assert probe.indeterminate is True, (

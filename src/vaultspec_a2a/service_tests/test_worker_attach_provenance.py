@@ -43,7 +43,9 @@ def test_provenance_mismatch_fails_closed_without_eviction(
 
     request_log = tmp_path / f"worker-requests-{port}.log"
     with foreign_worker(port, body, request_log=request_log) as worker:
-        spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
+        spawner = LazyWorkerSpawner(
+            f"http://127.0.0.1:{port}", port, auto_spawn=False, internal_token=None
+        )
         asyncio.run(spawner.ensure_worker())
 
         # Fails closed: the foreign-gateway worker is not adopted as ours.
@@ -75,7 +77,9 @@ def test_matching_provenance_attaches(tmp_path: Path) -> None:
 
     request_log = tmp_path / f"worker-requests-{port}.log"
     with foreign_worker(port, body, request_log=request_log) as worker:
-        spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
+        spawner = LazyWorkerSpawner(
+            f"http://127.0.0.1:{port}", port, auto_spawn=False, internal_token=None
+        )
         asyncio.run(spawner.ensure_worker())
 
         assert spawner.spawned is True

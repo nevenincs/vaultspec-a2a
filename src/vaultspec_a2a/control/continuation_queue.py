@@ -44,8 +44,7 @@ from ..database import (
 )
 from ..domain_config import domain_config
 from ..thread.enums import ControlActionResultStatus, ControlActionType
-from ..thread.executable_graph import FrozenGraphDefinition
-from .accepted_input import AcceptedActionInput
+from .accepted_input import read_accepted_input
 from .action_lease import take_action_lease
 
 if TYPE_CHECKING:
@@ -162,18 +161,14 @@ def promoted_turn_deadline(
     usable ingest turn, which is a refusal to promote rather than a deadline
     to invent.
     """
-    if action.payload_json is None:
-        return None
     try:
-        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
-        if accepted.dispatch["action"] != "ingest":
-            return None
-        definition = FrozenGraphDefinition.model_validate(
-            accepted.dispatch["graph_definition"]
-        )
-        timeout = definition.run_timeout_seconds
+        accepted = read_accepted_input(action)
     except (ValidationError, ValueError):
         return None
+    definition = accepted.graph_definition
+    if accepted.dispatch["action"] != "ingest" or definition is None:
+        return None
+    timeout = definition.run_timeout_seconds
     return min(promoted_at + timedelta(seconds=timeout), lifetime_deadline_at)
 
 

@@ -124,11 +124,6 @@ jobs:
         continue-on-error: true
         run: just check-size
 
-      - name: Run advisory production JSCPD clone detection
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just audit-duplication
-
       # The environment synchronized above carries --extra otlp, which
       # installs the OTLP exporter, so no step before this one can observe a
       # base-only installation. This gate builds its own isolated default-deps

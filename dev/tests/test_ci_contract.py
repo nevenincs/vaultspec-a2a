@@ -119,14 +119,22 @@ def test_ci_contract() -> None:
         assert workflow_step.get("if") == "${{ !cancelled() }}"
         assert workflow_step.get("continue-on-error") is (name not in lint_all_targets)
 
-    duplication = AUDIT.find("duplication")
-    assert duplication is not None
-    assert not duplication.advisory
-    assert "duplication" not in lint_all_targets
-    duplication_steps = _run_steps(steps, "just audit-duplication")
-    assert len(duplication_steps) == 1
-    assert duplication_steps[0].get("if") == "${{ !cancelled() }}"
-    assert duplication_steps[0].get("continue-on-error") is True
+    # The advisory production-only measurement (AUDIT.duplication) is
+    # unchanged. Q.2's blocking gate (LINT.duplication) graduated into
+    # `lint all` on arrival - zero new, zero stale against its baseline from
+    # the run that wrote it - so, like every other STRICT_SENTINELS
+    # graduation, it carries no standalone CI step: `just ci` already runs
+    # it.
+    audit_duplication = AUDIT.find("duplication")
+    assert audit_duplication is not None
+    assert not audit_duplication.advisory
+
+    lint_duplication = LINT.find("duplication")
+    assert lint_duplication is not None
+    assert not lint_duplication.advisory
+    assert "duplication" in lint_all_targets
+    assert _run_steps(steps, "just check-duplication") == []
+    assert _run_steps(steps, "just audit-duplication") == []
 
     type_platforms = LINT.find("type-platforms")
     assert type_platforms is not None

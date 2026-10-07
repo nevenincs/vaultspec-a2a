@@ -81,7 +81,7 @@ def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
 
 
 def _compose_base_command(project_name: str) -> list[str]:
-    docker = _resolve_docker_executable()
+    docker = resolve_docker_executable()
     return [
         docker,
         "compose",
@@ -92,7 +92,7 @@ def _compose_base_command(project_name: str) -> list[str]:
     ]
 
 
-def _resolve_docker_executable() -> str:
+def resolve_docker_executable() -> str:
     """Resolve Docker from PATH only."""
     for candidate in ("docker", "docker.exe"):
         resolved = shutil.which(candidate)
@@ -892,28 +892,6 @@ class ServiceStack:
             payload = resp.json()
             self.record(f"thread-state:{thread_id}", payload)
             return payload["state"]
-
-    def send_message(
-        self,
-        thread_id: str,
-        *,
-        content: str,
-        idempotency_key: str,
-        agent_id: str | None = None,
-    ) -> dict[str, Any]:
-        body: dict[str, Any] = {"content": content}
-        if agent_id is not None:
-            body["agent_id"] = agent_id
-        with self._client(timeout=30.0) as client:
-            resp = client.post(
-                f"/v1/runs/{thread_id}/messages",
-                json=body,
-                headers={"Idempotency-Key": idempotency_key},
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-            self.record(f"send-message:{thread_id}", payload)
-            return payload
 
     def respond_permission(
         self,

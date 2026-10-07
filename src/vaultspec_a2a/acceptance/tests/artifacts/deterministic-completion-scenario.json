@@ -1,5 +1,5 @@
 {
-  "scenario_id": "w01-p02-s05-deterministic-research-adr",
+  "scenario_id": "deterministic-research-adr",
   "team_preset": "vaultspec-adr-research-deterministic",
   "feature_tag": "acceptance-harness",
   "message": "Run the deterministic research-to-ADR completion scenario.",

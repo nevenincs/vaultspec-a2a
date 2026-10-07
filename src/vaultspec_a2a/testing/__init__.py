@@ -57,12 +57,7 @@ if TYPE_CHECKING:
         measured_child_startup_s,
         run_child,
     )
-    from .endpoints import (
-        ResolvedService,
-        resolve_gateway_url,
-        resolve_service,
-        resolve_worker_url,
-    )
+    from .endpoints import ResolvedService, resolve_gateway_url, resolve_service
     from .environment import (
         armed_desktop_app_home,
         armed_environment,
@@ -236,7 +231,6 @@ _LAZY_EXPORTS = {
         "resolve_gateway_url",
     ),
     "resolve_service": ("vaultspec_a2a.testing.endpoints", "resolve_service"),
-    "resolve_worker_url": ("vaultspec_a2a.testing.endpoints", "resolve_worker_url"),
     "armed_desktop_app_home": (
         "vaultspec_a2a.testing.environment",
         "armed_desktop_app_home",
@@ -414,7 +408,6 @@ __all__ = [
     "resolve_gateway_url",
     "resolve_service",
     "resolve_spec",
-    "resolve_worker_url",
     "run_child",
     "selection_from_served_catalog",
     "session_scratch_dir",

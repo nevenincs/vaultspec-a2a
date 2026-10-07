@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from ..control.infra_config import GATEWAY_URL_ENV, WORKER_URL_ENV
+from ..control.infra_config import GATEWAY_URL_ENV
 from ..lifecycle import (
     ProcsConfig,
     ProcsConfigError,
@@ -44,7 +44,6 @@ __all__ = [
     "ResolvedService",
     "resolve_gateway_url",
     "resolve_service",
-    "resolve_worker_url",
 ]
 
 
@@ -118,18 +117,6 @@ def resolve_gateway_url(
     return resolve_service(
         "gateway-dev",
         env_var=GATEWAY_URL_ENV,
-        home=home,
-        health_timeout_s=health_timeout_s,
-    )
-
-
-def resolve_worker_url(
-    *, home: Path | None = None, health_timeout_s: float = 3.0
-) -> ResolvedService | None:
-    """The a2a worker: explicit override, else the registry's live worker-dev."""
-    return resolve_service(
-        "worker-dev",
-        env_var=WORKER_URL_ENV,
         home=home,
         health_timeout_s=health_timeout_s,
     )

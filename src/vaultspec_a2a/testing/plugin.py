@@ -20,10 +20,8 @@ Wires the declaration vocabulary into pytest so that:
   with a declared backstop is raised to it, replacing the one arbitrary global
   clock for live tests; progress deadlines (``testing.progress``) remain the
   real arbiter of a hung wait.
-- **Acquisition goes through the real machinery.** ``gateway_endpoint`` and
-  ``worker_endpoint`` resolve through the dev-process registry, and
-  ``leased_port`` allocates from the scratch band with the registry's own
-  race-free reservation - never a hardcoded default.
+- **Acquisition goes through the real machinery.** ``gateway_endpoint``
+  resolves through the dev-process registry - never a hardcoded default.
 """
 
 from __future__ import annotations
@@ -382,39 +380,3 @@ def gateway_endpoint(request: pytest.FixtureRequest) -> ResolvedService:
             "record in the dev-process registry",
         )
     return resolved
-
-
-@pytest.fixture
-def worker_endpoint(request: pytest.FixtureRequest) -> ResolvedService:
-    """The live a2a worker, resolved through the dev-process registry."""
-    _require_declaration(request, "loopback-stack")
-    from .endpoints import resolve_worker_url
-
-    resolved = resolve_worker_url()
-    if resolved is None:
-        rule: ExternalPrerequisiteRule = request.getfixturevalue(
-            "external_prerequisite"
-        )
-        rule.absent(
-            "loopback-stack",
-            "no environment override and no LIVE, health-answering worker-dev "
-            "record in the dev-process registry",
-        )
-    return resolved
-
-
-@pytest.fixture
-def leased_port() -> Iterator[int]:
-    """An exclusively-reserved scratch-band port, via the one canonical helper.
-
-    Delegates to ``testing.ports.reserved_port`` - the registry's race-free
-    ``O_EXCL`` reserve in the machine-global procs home - so two concurrent
-    claimants (workers, sessions, agents) can never receive the same port.
-    Released at teardown. Suited to binds held for the test's duration; the
-    reservation's TTL backstop assumes bounded holds, so a test holding one
-    for longer than a few minutes should boot through ``serve_up`` instead.
-    """
-    from .ports import reserved_port
-
-    with reserved_port() as port:
-        yield port

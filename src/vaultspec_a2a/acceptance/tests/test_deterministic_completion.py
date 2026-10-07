@@ -7,9 +7,10 @@ remain real.  Unlike the tape-backed completion test, there is no optional
 network backend and no skip path: a missing scenario, failed run, history, or
 emitted review artifact is a test failure.
 
-The automated lane writes a run-bound review bundle containing the authored
-output and durable execution evidence.  It deliberately records the manual
-review as pending: approving that bundle belongs to the separate S31 step.
+The automated lane writes a run-bound review bundle, under the test's scratch
+directory, containing the authored output and durable execution evidence.  It
+deliberately records the manual review as pending: approving a bundle is a
+separate, human act.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -37,13 +37,11 @@ if TYPE_CHECKING:
     from ...authoring.discovery import EngineEndpoint
     from ._harness import CertifiedGateway
 
-_BUNDLE_ROOT_ENV = "VAULTSPEC_A2A_ACCEPTANCE_BUNDLE_DIR"
 _SCENARIO_PATH = (
     Path(__file__).resolve().parent
     / "artifacts"
     / "deterministic-completion-scenario.json"
 )
-_DURABLE_BUNDLE_ROOT = _SCENARIO_PATH.parent / "runs"
 
 
 def _required_object(value: object, *, at: str) -> dict[str, object]:
@@ -92,22 +90,6 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(
         json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-
-
-def _bundle_root() -> Path:
-    """Return the required durable root for committed review evidence."""
-    configured = os.environ.get(_BUNDLE_ROOT_ENV)
-    assert configured, (
-        "deterministic completion requires VAULTSPEC_A2A_ACCEPTANCE_BUNDLE_DIR; "
-        "an ephemeral test-only review bundle is not S05 evidence"
-    )
-    root = Path(configured).resolve()
-    assert root == _DURABLE_BUNDLE_ROOT.resolve(), (
-        "deterministic completion review evidence must be emitted under the "
-        f"committed artifact root {_DURABLE_BUNDLE_ROOT}, not {root}"
-    )
-    assert root.is_dir(), f"required durable review-bundle root is absent: {root}"
-    return root
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,10 +179,7 @@ def _verify_bundle_manifest(
         f"{scenario_id}:{run_id}"
     )
     review = _required_object(manifest.get("review"), at="manifest.review")
-    assert review == {
-        "status": "pending",
-        "required_step": "W01.P02.S31",
-    }
+    assert review == {"status": "pending"}
     artifacts = _required_object(manifest.get("artifacts"), at="manifest.artifacts")
     for name, identity in artifacts.items():
         assert isinstance(name, str)
@@ -223,7 +202,7 @@ def _emit_review_bundle(bundle_root: Path, evidence: _ReviewBundleInput) -> Path
             "bundle_id": f"{scenario_id}:{evidence.run_id}",
             "scenario_id": scenario_id,
             "run_id": evidence.run_id,
-            "review": {"status": "pending", "required_step": "W01.P02.S31"},
+            "review": {"status": "pending"},
             "artifacts": _bundle_artifacts(files),
         },
     )
@@ -250,7 +229,7 @@ async def _set_autonomous_mode(client: AuthoringClient, reviewer_token: str) -> 
         "/v1/mode",
         "set_operation_mode",
         {"mode": "autonomous"},
-        idempotency_key="idk-s05-deterministic-mode",
+        idempotency_key="idk-deterministic-completion-mode",
         actor_token=reviewer_token,
     )
     if isinstance(result, Denial):
@@ -299,7 +278,7 @@ def _build_completion_plan(live_engine: EngineEndpoint) -> _CompletionPlan:
     scenario = _read_scenario()
     preset = _required_text(scenario.get("team_preset"), at="scenario.team_preset")
     run_id = f"deterministic-completion-{uuid.uuid4().hex}"
-    feature_tag = f"s05-deterministic-{run_id.rsplit('-', 1)[-1]}"
+    feature_tag = f"deterministic-{run_id.rsplit('-', 1)[-1]}"
     team_config = load_team_config(preset)
     roles = tuple(required_role_ids(team_config))
     assert roles, f"deterministic preset {preset!r} declares no required roles"
@@ -462,5 +441,5 @@ async def test_deterministic_completion_emits_a_run_bound_review_bundle(
     plan = _build_completion_plan(live_engine)
     evidence = await _run_completion(tmp_path, plan)
 
-    bundle = _emit_review_bundle(_bundle_root(), evidence)
+    bundle = _emit_review_bundle(tmp_path / "review-bundles", evidence)
     assert bundle.is_dir(), f"review bundle was not emitted: {bundle}"

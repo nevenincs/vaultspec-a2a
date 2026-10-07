@@ -82,7 +82,6 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
     "api/tests": _INFRASTRUCTURE,  # real SQLite and ASGI fixtures
     "cli/tests": _INFRASTRUCTURE,
     "control/cleanup/tests": _INFRASTRUCTURE,
-    "control/repositories/tests": _INFRASTRUCTURE,
     "control/tests": _INFRASTRUCTURE,
     "database/tests": _INFRASTRUCTURE,
     "protocols/mcp/tests": _INFRASTRUCTURE,

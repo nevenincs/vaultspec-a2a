@@ -35,15 +35,14 @@ from __future__ import annotations
 
 import contextlib
 import importlib
-import os
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from ...graph.enums import Provider
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from pathlib import Path
 
     from langchain_core.language_models import BaseChatModel
 
@@ -91,12 +90,6 @@ def __getattr__(name: str) -> object:
     raise AttributeError(msg)
 
 
-# The environment variable naming the file a hold-then-complete turn waits on.
-# It is read where the lane builds its model, so it reaches a worker the same way
-# the lane arming does: through the environment the child is spawned with.
-_HOLD_GATE_ENVIRON: Final = "VAULTSPEC_A2A_TEST_HOLD_GATE"
-
-
 @dataclass(frozen=True, slots=True)
 class _DeterministicLane:
     """The deterministic lane's identity, selectors and model."""
@@ -111,11 +104,14 @@ class _DeterministicLane:
     model_values: tuple[str, ...] = ("deterministic",)
 
     def create_model(self, agent_config: AgentConfig | None) -> BaseChatModel:
+        # The hold gate is read where the model is built, so it reaches a worker
+        # the way the lane arming does: through the environment it was spawned
+        # with.
+        from ..session_root import TestSessionSettings
         from .deterministic import DeterministicResearchAdrChatModel
 
-        gate = os.environ.get(_HOLD_GATE_ENVIRON)
         return DeterministicResearchAdrChatModel(
-            agent_config=agent_config, hold_gate=Path(gate) if gate else None
+            agent_config=agent_config, hold_gate=TestSessionSettings().hold_gate
         )
 
 
@@ -198,19 +194,21 @@ def deterministic_model_assignment(
 def armed_lane_environment(*, hold_gate: Path | None = None) -> dict[str, str]:
     """Return the environment that serves these lanes from a child process.
 
-    Both settings are named through the settings schema, so the spelling a
-    child reads is the one the service declares. *hold_gate* is the file the
+    Every name is taken from the settings schema that reads it, so the spelling
+    a child reads is the one its settings declare. *hold_gate* is the file the
     child's hold-then-complete turns wait on; without it that scenario refuses
     its turn rather than complete one its test meant to hold.
     """
     from ...control.config import setting_env
+    from ...control.settings_base import env_name
+    from ..session_root import TestSessionSettings
 
     environment = {
         setting_env("serve_in_process_lanes"): "true",
         setting_env("lane_plugins"): __name__,
     }
     if hold_gate is not None:
-        environment[_HOLD_GATE_ENVIRON] = str(hold_gate)
+        environment[env_name(TestSessionSettings, "hold_gate")] = str(hold_gate)
     return environment
 
 

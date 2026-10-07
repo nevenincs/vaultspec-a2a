@@ -1,6 +1,6 @@
 """Async database session management and engine configuration.
 
-Provides backend-selectable ``create_async_engine`` wiring,
+Provides ``create_async_engine`` wiring for the SQLite store,
 ``async_sessionmaker`` for FastAPI dependency injection, and schema
 initialisation through Alembic.
 """
@@ -128,7 +128,6 @@ async def begin_write_transaction(session: AsyncSession) -> None:
     read, the upgrade to a write fails at once with ``database is locked`` and
     ``busy_timeout`` is never consulted. ``BEGIN IMMEDIATE`` takes the write lock
     before the first read, so contention waits inside ``busy_timeout`` instead.
-    Other dialects ignore the option.
 
     Raises:
         RuntimeError: If *session* already has a transaction open, whose begin
@@ -168,7 +167,7 @@ async def retry_write_contention[T](
     rollback and may settle the call with a result of its own instead of another
     attempt: the durable winner of a race the refused attempt lost. An error that
     is not write contention propagates at once, and the last refusal propagates
-    once the attempts are spent. Other dialects never match, so they never retry.
+    once the attempts are spent.
     """
     retries = 0
     while True:
@@ -315,9 +314,8 @@ def _with_sqlite_parent(url: str) -> str:
     """Create a SQLite URL's file directory; return the URL unchanged."""
     from sqlalchemy.engine.url import make_url
 
-    parsed = make_url(url)
-    database = parsed.database
-    if parsed.get_backend_name() == "sqlite" and database and database != ":memory:":
+    database = make_url(url).database
+    if database and database != ":memory:":
         settings.prepare_state_dir(Path(database).parent)
     return url
 
@@ -353,17 +351,8 @@ def get_engine(
             raise RuntimeError(msg)
         return _engine
 
-    engine_kwargs: dict[str, object] = {"echo": echo}
-    if url.startswith("postgresql"):
-        engine_kwargs["pool_pre_ping"] = True
-        engine_kwargs["pool_size"] = settings.db_pool_size
-        engine_kwargs["max_overflow"] = settings.db_pool_max_overflow
-
-    _engine = create_async_engine(url, **engine_kwargs)
-
-    if url.startswith("sqlite"):
-        configure_sqlite_engine(_engine)
-
+    _engine = create_async_engine(url, echo=echo)
+    configure_sqlite_engine(_engine)
     return _engine
 
 
@@ -469,10 +458,9 @@ async def seat_sqlite_posture(engine: AsyncEngine) -> None:
     on a rollback journal until its first connection, and anything inspecting the
     file before then reads a mode the store will not serve in. This writes the
     database header, so a caller that must not mutate a store calls it only once
-    the store is accepted. Other dialects and in-memory stores are left alone.
+    the store is accepted. In-memory stores are left alone.
     """
-    url = str(engine.url)
-    if engine.dialect.name != "sqlite" or url == "sqlite+aiosqlite:///:memory:":
+    if str(engine.url) == "sqlite+aiosqlite:///:memory:":
         return
     async with engine.connect():
         pass
@@ -521,9 +509,6 @@ async def verify_wal_mode(engine: AsyncEngine) -> str:
     Returns:
         The current journal mode string (should be ``'wal'``).
     """
-    if engine.dialect.name != "sqlite":
-        msg = "verify_wal_mode() is only valid for SQLite engines."
-        raise ValueError(msg)
     async with engine.connect() as conn:
         result = await conn.execute(text("PRAGMA journal_mode"))
         row = result.scalar_one()
@@ -531,7 +516,7 @@ async def verify_wal_mode(engine: AsyncEngine) -> str:
 
 
 def inspect_sqlite_database(path: Path) -> dict[str, object]:
-    """Inspect a SQLite file for fallback-mode diagnostics."""
+    """Inspect a SQLite file for storage diagnostics."""
     diagnostics: dict[str, object] = {
         "path": str(path),
         "exists": path.exists(),

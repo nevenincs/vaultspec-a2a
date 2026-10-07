@@ -55,7 +55,6 @@ from .write_authority_schema import (
 )
 
 __all__ = [
-    "MONEY_PRECISION",
     "MONEY_SCALE",
     "ArtifactModel",
     "AuthoringEventCursorModel",
@@ -73,15 +72,6 @@ __all__ = [
     "ThreadModel",
     "utcnow",
 ]
-
-#: Total significant digits stored for a monetary amount.
-#:
-#: Chosen so both backends represent the SAME domain rather than leaving the
-#: SQLite lane a silently narrower second-class citizen: the SQLite
-#: representation is an ``int64`` of :data:`MONEY_SCALE`-scaled units, whose
-#: ceiling (``2**63 - 1`` scaled down, about 922 million) sits just inside the
-#: nine integer digits ``19 - 10`` leaves on Postgres.
-MONEY_PRECISION = 19
 
 #: Decimal places kept for a monetary amount.
 #:
@@ -114,8 +104,8 @@ def _named_checks(checks: Mapping[str, str]) -> tuple[CheckConstraint, ...]:
 class UTCDateTime(TypeDecorator[datetime]):
     """Persist timezone-aware timestamps as naive UTC and restore UTC on read.
 
-    This keeps one portable schema across SQLite and Postgres while preserving
-    UTC-aware datetimes at the application boundary.
+    The stored form is naive UTC, so the UTC-aware datetime is restored at the
+    application boundary.
     """
 
     impl = DateTime
@@ -144,26 +134,25 @@ class UTCDateTime(TypeDecorator[datetime]):
 
 
 class MoneyAmount(TypeDecorator[Decimal]):
-    """Persist a monetary amount exactly on both backends, never via float.
+    """Persist a monetary amount exactly, never via float.
 
-    The sibling of :class:`UTCDateTime`: one portable schema across SQLite and
-    Postgres, with the precise Python type restored at the application
-    boundary. Here the hazard is IEEE-754 rather than tz-naivety.
+    The sibling of :class:`UTCDateTime`: the precise Python type is restored at
+    the application boundary. Here the hazard is IEEE-754 rather than
+    tz-naivety.
 
-    Postgres stores a native ``NUMERIC`` and needs no help. SQLite has no
-    decimal type, and SQLAlchemy's plain ``Numeric`` copes by round-tripping
-    through ``float`` — which is precisely the defect this type exists to
-    remove, and which SQLAlchemy itself warns about at runtime. So the SQLite
-    lane stores a scaled ``int64`` instead: an exact integer count of
-    1e-:data:`MONEY_SCALE` dollar units.
+    SQLite has no decimal type, and SQLAlchemy's plain ``Numeric`` copes by
+    round-tripping through ``float`` — which is precisely the defect this type
+    exists to remove, and which SQLAlchemy itself warns about at runtime. So
+    the amount is stored as a scaled ``int64`` instead: an exact integer count
+    of 1e-:data:`MONEY_SCALE` dollar units.
 
     Integer storage buys more than lossless round-tripping. ``SUM()`` over
     these rows is evaluated inside the database, and SQLite sums integers
     exactly while it accumulates binary error over floats. Because SQLAlchemy
     infers an aggregate's type from its argument, ``func.sum()`` over this
     column returns through :meth:`process_result_value` and therefore yields a
-    ``Decimal`` on both backends — the aggregate is exact end to end, not just
-    the individual row.
+    ``Decimal`` — the aggregate is exact end to end, not just the individual
+    row.
     """
 
     impl = Numeric
@@ -171,18 +160,14 @@ class MoneyAmount(TypeDecorator[Decimal]):
 
     @override
     def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
-        """Select scaled-integer storage on SQLite, native NUMERIC elsewhere."""
-        if dialect.name == "sqlite":
-            return dialect.type_descriptor(BigInteger())
-        return dialect.type_descriptor(
-            Numeric(precision=MONEY_PRECISION, scale=MONEY_SCALE, asdecimal=True)
-        )
+        """Select scaled-integer storage."""
+        return dialect.type_descriptor(BigInteger())
 
     @override
     def process_bind_param(
         self, value: Decimal | int | float | str | None, dialect: Dialect
-    ) -> Decimal | int | None:
-        """Quantize to the stored scale, scaling to integer units on SQLite.
+    ) -> int | None:
+        """Quantize to the stored scale, scaling to integer units.
 
         ``float`` is accepted but converted through ``str`` so the decimal
         literal the caller wrote is preserved instead of its binary expansion:
@@ -199,22 +184,16 @@ class MoneyAmount(TypeDecorator[Decimal]):
             msg = f"MoneyAmount requires a finite amount, got: {value!r}"
             raise ValueError(msg)
         quantized = amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_EVEN)
-        if dialect.name == "sqlite":
-            return int(quantized.scaleb(MONEY_SCALE))
-        return quantized
+        return int(quantized.scaleb(MONEY_SCALE))
 
     @override
     def process_result_value(
         self, value: Decimal | int | float | str | None, dialect: Dialect
     ) -> Decimal | None:
-        """Restore an exact ``Decimal``, unscaling the SQLite integer form."""
+        """Restore an exact ``Decimal``, unscaling the stored integer form."""
         if value is None:
             return None
-        if dialect.name == "sqlite":
-            return (Decimal(int(value)) / _MONEY_UNITS_PER_DOLLAR).quantize(
-                _MONEY_QUANTUM
-            )
-        return Decimal(str(value)) if not isinstance(value, Decimal) else value
+        return (Decimal(int(value)) / _MONEY_UNITS_PER_DOLLAR).quantize(_MONEY_QUANTUM)
 
 
 class Base(DeclarativeBase):
@@ -284,7 +263,6 @@ class ThreadModel(Base):
             "created_at",
             "id",
             sqlite_where=text("is_active IS 1"),
-            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_workspace_order",
@@ -292,7 +270,6 @@ class ThreadModel(Base):
             "created_at",
             "id",
             sqlite_where=text("is_active IS 1"),
-            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_feature_order",
@@ -300,7 +277,6 @@ class ThreadModel(Base):
             "created_at",
             "id",
             sqlite_where=text("is_active IS 1"),
-            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_workspace_feature_order",
@@ -309,7 +285,6 @@ class ThreadModel(Base):
             "created_at",
             "id",
             sqlite_where=text("is_active IS 1"),
-            postgresql_where=text("is_active IS true"),
         ),
     )
 
@@ -552,7 +527,6 @@ class ControlActionModel(Base):
             "queue_position",
             unique=True,
             sqlite_where=text(QUEUED_ROW_PREDICATE),
-            postgresql_where=text(QUEUED_ROW_PREDICATE),
         ),
         UniqueConstraint(
             "thread_id",
@@ -805,8 +779,8 @@ class RunEventModel(Base):
     # ON DELETE CASCADE at the database rather than an ORM relationship, and
     # deliberately: a thread carries up to its whole retention window of these
     # rows, and an ORM cascade would load every one of them into the session to
-    # delete a single thread. Both backends enforce it natively (SQLite under
-    # the ``PRAGMA foreign_keys=ON`` the session layer sets on every connection).
+    # delete a single thread. SQLite enforces it natively under the
+    # ``PRAGMA foreign_keys=ON`` the session layer sets on every connection.
     thread_id: Mapped[str] = mapped_column(
         ForeignKey("threads.id", ondelete="CASCADE"), primary_key=True
     )

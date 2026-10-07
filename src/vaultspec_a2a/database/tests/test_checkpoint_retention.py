@@ -1,37 +1,28 @@
-"""A settled thread keeps only its latest checkpoint, on every shipped saver.
+"""A settled thread keeps only its latest checkpoint.
 
-Real graphs run to completion (and to failure) on a real SQLite file and on a
-real PostgreSQL server - through a single connection, through a connection
-pool, and through the selector-thread saver Windows uses - and the pruned
-thread must read back exactly as it did before, resume where it stood, and
-leave every other thread alone.
+Real graphs run to completion (and to failure) on a real SQLite file, and the
+pruned thread must read back exactly as it did before, resume where it stood,
+and leave every other thread alone.
 """
 
 from __future__ import annotations
 
 import operator
-import os
 import sqlite3
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from langgraph.graph import END, START
 
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ..checkpoints import _SelectorThreadPostgresCheckpointer, prune_settled_thread
+from ..checkpoints import prune_settled_thread
 from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
-
-_POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
 
 
 class _Log(TypedDict):
@@ -222,96 +213,3 @@ async def test_an_unrecognised_saver_is_left_untouched() -> None:
 
     assert await prune_settled_thread(saver, "memory") is False
     assert await stored_history(saver, "memory") == before
-
-
-@pytest_asyncio.fixture(params=["connection", "pool", "selector-thread"])
-async def postgres_saver(
-    request: pytest.FixtureRequest, external_prerequisite: ExternalPrerequisiteRule
-) -> AsyncIterator[Checkpointer]:
-    external_prerequisite("postgres")
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-    from psycopg.rows import dict_row
-    from psycopg_pool import AsyncConnectionPool
-
-    url = os.environ[_POSTGRES_URL_ENV]
-    if request.param == "connection":
-        async with AsyncPostgresSaver.from_conn_string(url) as saver:
-            await saver.setup()
-            yield saver
-    elif request.param == "pool":
-        pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
-            url,
-            open=False,
-            kwargs={
-                "autocommit": True,
-                "prepare_threshold": 0,
-                "row_factory": dict_row,
-            },
-        )
-        await pool.open()
-        try:
-            saver = AsyncPostgresSaver(pool)
-            await saver.setup()
-            yield saver
-        finally:
-            await pool.close()
-    else:
-        wrapped = _SelectorThreadPostgresCheckpointer(url)
-        await wrapped.start()
-        try:
-            await wrapped.setup()
-            yield wrapped
-        finally:
-            await wrapped.close()
-
-
-async def _blob_count(thread_id: str) -> int:
-    import psycopg
-
-    async with await psycopg.AsyncConnection.connect(
-        os.environ[_POSTGRES_URL_ENV]
-    ) as connection:
-        cursor = await connection.execute(
-            "SELECT count(*) FROM checkpoint_blobs WHERE thread_id = %s", (thread_id,)
-        )
-        row = await cursor.fetchone()
-    assert row is not None
-    return int(row[0])
-
-
-@pytest.mark.asyncio
-async def test_postgres_keeps_only_the_latest_checkpoint_of_a_settled_thread(
-    postgres_saver: Checkpointer,
-) -> None:
-    await _prove_a_settled_thread_keeps_only_its_latest(postgres_saver)
-
-
-@pytest.mark.asyncio
-async def test_postgres_keeps_the_error_writes_of_a_failed_thread(
-    postgres_saver: Checkpointer,
-) -> None:
-    await _prove_a_failed_thread_keeps_its_error_writes(postgres_saver)
-
-
-@pytest.mark.asyncio
-async def test_postgres_drops_the_blobs_only_superseded_checkpoints_named(
-    postgres_saver: Checkpointer,
-) -> None:
-    graph = _settling_graph(postgres_saver)
-    thread_id = f"blobs-{uuid4()}"
-    try:
-        for turn in ("one", "two", "three"):
-            await graph.ainvoke(
-                cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
-            )
-        settled = (await graph.aget_state(cast("Any", config_for(thread_id)))).values
-        blobs_before = await _blob_count(thread_id)
-
-        assert await prune_settled_thread(postgres_saver, thread_id) is True
-
-        assert 0 < await _blob_count(thread_id) < blobs_before
-        assert (
-            await graph.aget_state(cast("Any", config_for(thread_id)))
-        ).values == settled
-    finally:
-        await postgres_saver.adelete_thread(thread_id)

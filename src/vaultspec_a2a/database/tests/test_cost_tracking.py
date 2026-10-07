@@ -31,7 +31,7 @@ from alembic.config import Config
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.messages.ai import UsageMetadata
 from sqlalchemy import select
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.dialects import sqlite
 from sqlalchemy.exc import SAWarning, StatementError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -67,7 +67,6 @@ from ..artifact_repository import (
     sum_cost_by_thread,
 )
 from ..models import (
-    MONEY_PRECISION,
     MONEY_SCALE,
     Base,
     CostTrackingModel,
@@ -285,12 +284,7 @@ async def _add_costs(
 
 
 class TestMoneyAmountPortability:
-    """One portable model must render the right exact type on each backend."""
-
-    def test_postgres_renders_native_numeric(self) -> None:
-        """Postgres gets a native NUMERIC at the declared precision and scale."""
-        ddl = str(CreateTable(_cost_table()).compile(dialect=postgresql.dialect()))
-        assert f"NUMERIC({MONEY_PRECISION}, {MONEY_SCALE})" in ddl
+    """The model must render exact integer storage and resolve cheap tokens."""
 
     def test_sqlite_renders_scaled_integer(self) -> None:
         """SQLite, which has no decimal type, gets exact integer storage."""

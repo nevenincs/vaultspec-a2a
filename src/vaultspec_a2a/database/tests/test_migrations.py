@@ -5,7 +5,6 @@ Verifies:
 2. Downgrade base removes all app-owned tables
 3. LangGraph checkpoint tables are excluded from migrations
 4. run_migrations() programmatic API works
-5. (Postgres) upgrade/downgrade/column/data-migration on a real Postgres instance
 """
 
 import asyncio
@@ -404,20 +403,9 @@ class TestPackageResourceResolution:
             "sqlite+aiosqlite:///runtime.db"
         )
 
-    @pytest.mark.parametrize(
-        "database_url",
-        [
-            "sqlite+aiosqlite:///C:/Vault%20Spec/runtime%25.db",
-            (
-                "postgresql+asyncpg://operator:p%40ss@localhost/vaultspec"
-                "?application_name=desktop%25capsule"
-            ),
-        ],
-    )
-    def test_runtime_config_preserves_percent_encoded_urls(
-        self, database_url: str
-    ) -> None:
-        """Alembic interpolation preserves Windows and PostgreSQL URL escapes."""
+    def test_runtime_config_preserves_percent_encoded_urls(self) -> None:
+        """Alembic interpolation preserves Windows URL escapes."""
+        database_url = "sqlite+aiosqlite:///C:/Vault%20Spec/runtime%25.db"
         cfg = build_migration_config(database_url)
 
         assert cfg.get_main_option("sqlalchemy.url") == database_url

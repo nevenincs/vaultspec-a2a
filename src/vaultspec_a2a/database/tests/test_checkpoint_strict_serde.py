@@ -1,31 +1,27 @@
-"""Every checkpoint store reads back only the types it is configured to admit.
+"""The checkpoint store reads back only the types it is configured to admit.
 
 A checkpoint store is an execution surface on the READ side: the permissive
 default imports and calls whatever type a stored value names, so anything able
 to write the store decides what this process constructs on load. Configuring
-the savers against that makes one claim with two halves, and neither half is
+the saver against that makes one claim with two halves, and neither half is
 worth anything alone - a store that refuses everything is safe and useless.
-So each backend is held to both: the shipped research preset parks at a real
+So the store is held to both: the shipped research preset parks at a real
 human gate, is read back through a SECOND saver over the same store, and must
 come back whole with nothing blocked; and the same store must decline to
 rebuild a type the graph never writes.
 
-Everything runs through the production ``open_checkpointer`` factory - the
-real SQLite file the desktop profile uses, a real PostgreSQL server, and the
-selector-thread bridge Windows loads with the sibling savers taken off it.
+Everything runs through the production ``open_checkpointer`` factory, over the
+real SQLite file the desktop profile uses.
 """
 
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 from enum import Enum
 from typing import TYPE_CHECKING, Any, TypedDict, cast
-from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.serde.event_hooks import register_serde_event_listener
 from langgraph.graph import END, START
@@ -46,23 +42,15 @@ from ...thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
-from ..checkpoints import (
-    _open_selector_thread_checkpointer,
-    _SelectorThreadPostgresCheckpointer,
-    concurrent_checkpointer,
-    open_checkpointer,
-)
+from ..checkpoints import open_checkpointer
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Generator
+    from collections.abc import Generator
     from pathlib import Path
 
     from langgraph.checkpoint.serde.event_hooks import SerdeEvent
 
-    from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
-
-_POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
 
 _PRESET = "vaultspec-adr-research-deterministic"
 
@@ -85,12 +73,6 @@ def _recorded_serde_events() -> Generator[list[SerdeEvent]]:
 
 def _config(thread_id: str) -> dict[str, Any]:
     return {"configurable": {"thread_id": thread_id}}
-
-
-def _with_database(url: str, name: str) -> str:
-    """Point *url* at another database on the same server."""
-    parts = urlsplit(url)
-    return urlunsplit(parts._replace(path=f"/{name}"))
 
 
 # ---------------------------------------------------------------------------
@@ -182,15 +164,7 @@ async def _resume_the_parked_preset(
 
 
 class _LeakedPhase(Enum):
-    """A type outside the safe set, of the kind a node leaks into state.
-
-    A plain ``Enum`` and not a ``StrEnum``, because the served saver inlines
-    ``str``, ``int``, ``float`` and ``bool`` channel values into the checkpoint
-    row instead of serializing them, and a ``str`` subclass reaches the store
-    as a bare string on that backend without the serializer ever seeing its
-    type. Proving a READ posture takes a value both backends actually hand to
-    the serializer.
-    """
+    """A type outside the safe set, of the kind a node leaks into state."""
 
     RESEARCH = "research"
 
@@ -289,100 +263,3 @@ async def test_the_desktop_store_admits_the_preset_and_refuses_what_it_never_wro
                 saver, reader, thread_id
             )
             await _prove_the_store_will_not_rebuild_an_unsafe_type(saver)
-
-
-# ---------------------------------------------------------------------------
-# The served store, and the savers taken off it
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def postgres_url(
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> AsyncIterator[str]:
-    """Create a database of this module's own, and drop it afterwards."""
-    external_prerequisite("postgres")
-    import psycopg
-    from psycopg import sql
-
-    server = os.environ[_POSTGRES_URL_ENV]
-    name = f"a2a_strict_{uuid4().hex[:12]}"
-    # Composed as an identifier rather than interpolated, so the quoting is the
-    # driver's rather than this test's.
-    database = sql.Identifier(name)
-    async with await psycopg.AsyncConnection.connect(server, autocommit=True) as admin:
-        await admin.execute(sql.SQL("CREATE DATABASE {}").format(database))
-    try:
-        yield _with_database(server, name)
-    finally:
-        async with await psycopg.AsyncConnection.connect(
-            server, autocommit=True
-        ) as admin:
-            await admin.execute(
-                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(database)
-            )
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_prerequisites("postgres")
-async def test_the_served_store_admits_the_preset_and_refuses_what_it_never_wrote(
-    postgres_url: str,
-) -> None:
-    """The pooled PostgreSQL saver, held to the same pair of claims."""
-    thread_id = f"strict-served-{uuid4().hex}"
-    with _settings_override(
-        checkpoint_backend="postgres",
-        checkpoint_database_url=postgres_url,
-    ):
-        async with open_checkpointer() as saver, open_checkpointer() as reader:
-            await _prove_the_store_hands_a_parked_preset_back_whole(
-                saver, reader, thread_id
-            )
-            await _prove_the_store_will_not_rebuild_an_unsafe_type(saver)
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_prerequisites("postgres")
-async def test_a_saver_taken_off_a_served_store_reads_it_the_same_way(
-    postgres_url: str,
-) -> None:
-    """Concurrency must not be a way around the store's posture.
-
-    A run writing its own checkpoints and a page of status probes each take a
-    saver of their own over the one pool, and on Windows those come off the
-    selector bridge rather than the pooled saver. A sibling that read the store
-    permissively would leave the posture depending on which caller got there.
-    """
-    with _settings_override(
-        checkpoint_backend="postgres",
-        checkpoint_database_url=postgres_url,
-    ):
-        async with open_checkpointer() as saver:
-            sibling = await concurrent_checkpointer(saver)
-            assert sibling is not saver
-            await _prove_the_store_will_not_rebuild_an_unsafe_type(sibling)
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_prerequisites("postgres")
-async def test_the_selector_bridge_carries_the_store_posture_to_its_clones(
-    postgres_url: str,
-) -> None:
-    """Windows reaches the served store through the bridge and nothing else.
-
-    The bridge is what the Windows branch yields, and every saver a run or a
-    probe takes on that platform is cloned off it - a sibling on the same pool,
-    or a clone narrowed for one compiled graph. A posture set only on the
-    pooled saver would be absent from the whole platform.
-    """
-    async with _open_selector_thread_checkpointer(postgres_url) as bridge:
-        assert isinstance(bridge, _SelectorThreadPostgresCheckpointer)
-        await _prove_the_store_will_not_rebuild_an_unsafe_type(bridge)
-        await _prove_the_store_will_not_rebuild_an_unsafe_type(
-            await concurrent_checkpointer(bridge)
-        )
-        # Narrowing for a compiled graph adds to the safe set; it must not
-        # reopen it.
-        await _prove_the_store_will_not_rebuild_an_unsafe_type(
-            bridge.with_allowlist([("builtins", "set")])
-        )

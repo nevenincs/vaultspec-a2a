@@ -673,6 +673,10 @@ def test_migrate_compact_refuses_while_an_authenticated_service_holds_a_port(
 
     holder = sqlite3.connect(str(database), isolation_level=None)
     try:
+        # A connection that has never run a statement has not attached to the
+        # log, so the writer closing last would checkpoint it away; the service
+        # this stands in for holds the store open, so the holder reads once.
+        holder.execute("SELECT count(*) FROM threads").fetchone()
         _write_threads(database, 16)
         grown = _wal_bytes(database)
 

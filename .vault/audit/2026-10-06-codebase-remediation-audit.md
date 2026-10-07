@@ -3,13 +3,12 @@ tags:
   - '#audit'
   - '#codebase-remediation'
 date: '2026-10-06'
-modified: '2026-10-06'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:45bf16ad788f48962f69fe64d33bb8f8a1e07c4f0ff46ed015240501d60b500c'
+body_hash: 'sha256:10d3280d41c5f35edae4da46ecb61b1d0b0bc945ed6215666c0daca70b05039b'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
-
 # `codebase-remediation` audit: `remediation finding ledger`
 
 ## Scope
@@ -992,3 +991,215 @@ Routine choices, recorded in the owning Step's ledger note rather than an ADR:
 - D25 (owner O6): delete branches `fix/desktop-private-state` and `fix/internal-http-body-limit`.
 - D26 (Y.2/S96): delete `StateLayout.receipts_dir` and `snapshots_dir` only if P22 shows the dashboard never writes them.
 - D27 (DL.8/S27, owner O4): relocate approved bundle `c0e019c2` to the owner-named evidence home and delete the four unapproved bundles.
+
+## Round 4 - orchestrator residue and backlog
+
+These entries come from the orchestrator-owned round-4 ledgers `tmp/codebase-briefing/stage4/RESIDUE.md` (sites agents found outside their assigned scope) and `tmp/codebase-briefing/stage4/BACKLOG.md` (items not yet assigned to a round). Both ledgers state line numbers are from the reporting branch; re-locate with `rg` before acting. Topics prefixed `r4-` come from RESIDUE; `bk-` from BACKLOG. Entries marked `recorded` are owner rulings or wire-behaviour notices to pass on, not open work items.
+
+### r4-role-grammar-fifth-copy | high | A fifth role-id regex copy uses `.match` with trailing `$`, admitting a newline
+
+Status: open. Type: duplication. `team/team_config.py:49,763,797` (line numbers from the reporting branch) validates role ids with `re.match(..., "$")`, which a trailing `\n` satisfies, unlike `thread.constants.ROLE_ID_PATTERN.fullmatch`. Fold onto the shared pattern with `fullmatch` so this identity-grammar copy cannot admit role ids the canonical grammar rejects. Related to the r1-f4-restated-bounds identifier-grammar cluster but a distinct site not in its evidence.
+
+### r4-seed-transcript-cap | medium | Seed transcript length cap is restated with two different validator syntaxes
+
+Status: open. Type: duplication. `domain_config.py:227` (`le=100`) and `ipc/schemas.py:192` (`max_length=100`) restate the same 100-item cap independently (line numbers from the reporting branch). Fold onto one shared bound constant so the two layers cannot drift. Not previously captured in the audit's bounds clusters (r1-f3, r1-f4).
+
+### r4-catalog-lane-cap | medium | Provider catalog cache restates MAX_PROVIDER_LANES behind a circular import
+
+Status: open. Type: duplication. `providers/_provider_catalog_cache.py:86` hardcodes `max_lanes=128`, restating `MAX_PROVIDER_LANES` because importing it today would be circular (line numbers from the reporting branch). Move the constant to a leaf module both can import, then fold the literal onto it.
+
+### r4-gateway-schema-literals | medium | Gateway schema repeats several numeric bounds as literals
+
+Status: open. Type: duplication. `api/schemas/gateway.py` restates title max 200 twice (`:182`, `:423`); team_preset bound 64 twice against 128 in `ipc/schemas.py:182`; feedback_batch_id 256 also in `ipc/schemas.py:201`; approval_request_id 256 against `MAX_REQUEST_ID_CHARS` 128; permission option id 64 duplicated between `streaming/sse_frames.py:379` and `api/schemas/gateway.py:834` (line numbers from the reporting branch). The approval_request_id/MAX_REQUEST_ID_CHARS mismatch is a real bound disagreement, not just a style duplicate. Fold onto shared bound constants in the bounds-consolidation Step (E.1/S52).
+
+### r4-public-id-control-char-rule | medium | Public-id control-character validation is implemented twice with different rules
+
+Status: open. Type: duplication. `provider_catalog_service._valid_public_id` uses `str.isprintable()` while the schema pattern uses `^[^\x00-\x1f\x7f]+$`; the two admit different character sets (file-local to the reporting branch). Fold onto one validator before either diverges further from the other.
+
+### r4-max-tool-call-chars-test-import | low | A schema-integrity test will import a deleted module once bounds consolidation lands
+
+Status: open - owned by the remediation schedule's later rounds (tied to r1-f3-permission-bounds, Step DL.3/S19). Type: test-integrity. `database/tests/test_schema_integrity.py:52,370-374` (line numbers from the reporting branch) asserts `MAX_TOOL_CALL_CHARS` of 128 by importing from `api/schemas/events.py`, which DL.3/S19 deletes; the test must switch its import to `thread.constants` before that Step lands or it breaks.
+
+### r4-receipt-bound-raw | medium | A receipt-id bound and an ownership join are restated as raw literals in compatibility code
+
+Status: open. Type: duplication. `database/compatibility.py:209` (line numbers from the reporting branch) spells the receipt-id bound as a raw `> 64` instead of `RECEIPT_ID_MAX_LENGTH`; `:217-224` restates the writer/journal ownership join that `database.thread_owned_by` already encodes. Fold both onto their named helpers.
+
+### r4-degraded-reasons-residue | medium | Degraded-reason helpers and typing need to move/narrow outside the already-tracked ownership split
+
+Status: open - decision pending (ties to r2-f11-degraded-reasons, Step M.4/S61; D17). Type: duplication. `thread/snapshots.py`'s `finalize_snapshot_replay_status` and `classify_transcript_availability` need to move to `control/` so the `CHECKPOINT_MISSING` append goes through `mark_degraded`; `ipc/schemas.py:369` and `database/thread_repository.py:892,919` type degraded reasons as `list[str]` and should narrow to `DegradedReason`; `worker/state_projection.py:774-791` passes `.value` instead of the enum (line numbers from the reporting branch). The `control/_permission_response_contract.py:62-65` and `control/team_service.py` sub-items in the same residue note are already tracked as r4-f25-options-decode and r4-f17-actionable-permissions and are not repeated here.
+
+### r4-acp-test-peer-inline-params | medium | ACP permission-request and initialize-result params are hand-built inline across many test files
+
+Status: open. Type: duplication. `session/request_permission` params are built inline at `test_acp_callback_ownership.py:321`, `test_acp_permission_option_ids.py:60,76`, `test_kimi_permission.py:70,225`, `test_project_confinement.py:115`; client-side request writes repeat in `test_kimi_handshake_live.py:50`, `test_acp_migration_surface.py:61,123,225,255`, `test_acp_authoring_bridge.py:160,182`, `test_launcher_confinement.py`, `test_acp_fs_read_limits.py:286`; `initialize` result literals repeat in `test_acp_model_selection.py:153-226`, `test_claude_binary_identity.py:372` (line numbers from the reporting branch). Distinct from r6-f23-acp-fixtures' evidence set; needs its own ACP test-peer helper.
+
+### r4-catalog-test-support-residue | medium | Catalog test support has its own picker, an undeclared path constant and a repeated schema-version literal
+
+Status: open. Type: duplication. `service_tests/test_provider_condition_live.py:127-190,244` keeps its own billable-lane picker by design; `schema_version: 1` is a repeated literal in `api/tests/test_run_selection_schema.py:22` and `providers/tests/test_factory.py:468`; the `/v1/provider-catalog` path has no production constant (line numbers from the reporting branch). Distinct sites from r6-f7-catalog-selection's evidence.
+
+### r4-native-command-catalog-write-only | medium | The ACP native-command advertisement path has no reader, only a writer
+
+Status: open (C11b). Type: dead-code. Production only writes `AcpNativeCommandCatalog` (`providers/_acp_protocol.py` ~:131, ~:503-528, ~:594-596; `providers/_acp_native_commands.py` et al.; `active_native_control_targets` registry - line numbers from the reporting branch). Candidate for deletion: `AcpNativeCommandCatalog`, `NativeCommandAvailability`, `NativeCommandDisposition` (`_acp_types.py`), `AcpSessionContext.native_command_catalogs`/`native_commands_for`, `MAX_NATIVE_COMMAND_NAME_LENGTH`, `MAX_SESSION_COMMAND_CATALOGS`, `--advertise-commands` (`testing/acp.py` ~:247, ~:388-395), `providers/tests/test_acp_command_advertisements.py`, and the catalog assertion in `providers/tests/test_resource_lifetimes.py` ~:86. Distinct from r4-f35-native-control's invocation-path evidence; sequence after H06/H07 merge (both touch `_acp_types.py`).
+
+### r4-execution-state-projection-suppression-stale | low | A pylint suppression on ExecutionStateProjection is now unnecessary
+
+Status: open (Y01). Type: doc-drift. `ExecutionStateProjection`'s `pylint: disable=too-many-instance-attributes` becomes unnecessary once D7's project-wide R0902 disable lands (file-local to the reporting branch); remove the stale per-class suppression when D7 is applied.
+
+### r4-eviction-outside-armed-desktop | high | Worker-port eviction fires on a URL mismatch alone, contradicting the ADR's owner-authorized-desktop rule
+
+Status: open - decision pending (ties to r7-f1-bearer-disclosure, Step FX.5/S15). Type: decision. `control/_worker_health.py:627-684` `_shared_worker_port_clear` (line numbers from the reporting branch) evicts whenever `gateway_url` mismatches, but the governing ADR restricts eviction to an owner-authorized desktop gateway. Options: (a) gate eviction on desktop-armed plus owner-authorized state before any URL-mismatch clear; (b) keep URL-mismatch eviction and amend the ADR to permit it. Recommended: (a), folded into FX.5/S15 alongside the bearer-disclosure fix.
+
+### r4-oauth-token-channel-retired-consumer | medium | The oauth_token channel's only consumer, the headless container, is retired
+
+Status: open - decision pending (provider-binary-policy D4). Type: decision. The `oauth_token` channel's consuming headless-container path was retired by the native-only remediation (file-local to the reporting branch). Options: (a) drop the channel and its plumbing now that no consumer remains; (b) keep it dormant for a future consumer. Recommended: (a), owner call.
+
+### r4-compose-wording-pass3-residue | low | A further batch of ADRs still carries Compose-scoped wording
+
+Status: open. Type: doc-drift. `2026-07-15-agent-harness-provisioning-adr:174`, `2026-10-04-workspace-root-authority-desktop-native-admission-adr`, `-desktop-workspace-boundary-adr`, `2026-08-05-served-capability-contract-adr`, `2026-07-17-kimi-provider-adr`, and `2026-07-17-tool-cores-adr` still name the retired Compose profile (line references from the reporting branch, document-local); `2026-07-24-codebase-health-adr` also overlaps `2026-07-19-codebase-health-adr`, a separate naming-collision worth resolving in the same pass. Distinct ADR set from the BACKLOG Pass-3 list (bk-compose-wording-pass3-adrs).
+
+### r4-agent-id-run-id-bound-mismatch | high | Published-contract bound mismatches between agent_id, role grammar and RelayCall.run_id
+
+Status: open - decision pending. Type: contract-drift. `agent_id`'s max length (128) exceeds the role grammar's 63-char bound though both describe the same published identifier contract; `RelayCall.run_id`'s 160-char bound exceeds the run-id grammar's bound too (file-local to the reporting branch). Options: (a) narrow the looser bound to match the grammar; (b) widen the grammar to match the looser bound and republish. Recommended: (a), since the grammar is the validating authority; fold into the bounds-consolidation Step (E.1/S52).
+
+### r4-dispatch-id-bound-mismatch | medium | dispatch_id's declared bound disagrees with its design-draft bound
+
+Status: open - decision pending. Type: contract-drift. `dispatch_id` is bounded at 128 in the shipped schema against 64 in the design draft (file-local to the reporting branch); unlike r4-agent-id-run-id-bound-mismatch this is pre-publication, lowering urgency. Options: (a) adopt the draft's 64; (b) adopt the shipped 128 and update the draft. Recommended: (a) before the draft is finalized.
+
+### r4-codex-test-only-seams | medium | Codex app-server client carries test-only seams, a module lacks __all__, and packaging docs name a deleted check
+
+Status: open. Type: dead-code. `_CodexAppServerClient._process`/`_reader_task`/`_stderr_task` (`providers/_codex_app_server_client.py` ~:166-181) exist only for tests; `_acp_model_state.py` lacks `__all__`, against the project's public-API-exposure convention; `packaging/README.md:83` names a lifecycle check that no longer exists (line numbers from the reporting branch). None of these sites appear in r3-f19-test-only-methods' evidence.
+
+### r4-terminal-settlement-residue | medium | Terminal settlement is re-derived inline outside its three already-tracked copies
+
+Status: open - decision pending (ties to r3-f7-terminal-settlement, Step A.2/S65). Type: duplication (A02). `control/terminal_settlement.py` ~:146-151 writes a repair value inline that belongs in `thread/repair_policy.py` (A03 must own `control/terminal_settlement.py`); `control/dispatch.py` ~:396 `_refuse_incompatible_authority` and ~:438 `_refuse_missing_project` partly repeat settlement; `recovery_authority.py` ~:227 duplicates a queue refusal (line numbers from the reporting branch). None of these files/lines appear in r3-f7's evidence. Recommended: route all three through `settle_terminal`.
+
+### r4-resume-value-residue | medium | Resume-value helpers are duplicated outside the already-tracked codec split
+
+Status: open - decision pending (ties to r4-f22-resume-codecs, Step C.5/S103). Type: duplication (C05). `control/verdict_subscriber.py` ~:129 `_verdict_resume_payload` duplicates `ApprovalVerdict.as_resume_value()`; `worker/state_projection.py` ~:96 `answered_request_id` duplicates the private `_named_request` in `thread/resume_values.py` (line numbers from the reporting branch). Recommended: fold the first at merge with C07; make `_named_request` public and migrate the second caller.
+
+### r4-per-run-registries-residue | medium | Per-run registries exist beyond the already-tracked token/catalog-store pair
+
+Status: open - decision pending (design call, lock-coupled; ties to r3-f25-run-registry, Step Y.1/S106). Type: duplication (Y04). `worker/_executor_state.py` ~:45-47 keeps three per-thread dicts plus ~:80 `RunControlRegistry._controls`; `worker/authoring_binding.py` ~:55 `_fetch_locks` is a fourth (line numbers from the reporting branch). None of these appear in r3-f25's evidence (`worker/token_store.py`, `worker/catalog_store.py`).
+
+### r4-native-isolation-residue | medium | Native isolation residue: a thrice-copied refusal check and a second hard-coded permission bit
+
+Status: open (H08). Type: duplication. `scripts/build_linux_isolation.py` repeats its `S_ISREG` plus nlink refusal three times (~:55, ~:82, ~:113); `desktop/_linux_resolver.py` ~:156, ~:213 hard-codes `0o022` a second time, separate from the `desktop/_linux_helper.py` site r7-f9-native-isolation already cites (line numbers from the reporting branch).
+
+### r4-fixtures-docker-lookup-residue | medium | Docker-lookup is hand-rolled outside the already-tracked fixture resolver, and reserved_port is test-only
+
+Status: open (X01). Type: duplication. `testing/ports.py` ~:90 `reserved_port` is now test-only; Docker lookup is hand-rolled again at `conftest.py` ~:266, `service_tests/test_telemetry_request_privacy.py` ~:68 and `dev/runner.py` ~:146 (line numbers from the reporting branch) - distinct sites from r6-f25-fixture-boundary-test's `service_tests/harness.py:98-105`.
+
+### r4-vault-citations-in-docstrings | low | Code and test docstrings cite vault finding ids, against the code-stands-alone rule
+
+Status: open (R01a/E10). Type: doc-drift. `streaming/tests/test_aggregator.py` ~:1274, ~:1345, ~:1475 cite finding F17; `control/tests/test_terminal_sequence_capture.py:1` cites F19 (line numbers from the reporting branch). Source must not cite the project's own development records; sweep the tree for `R\d-F\d+|\bF\d{2}\b|W\d\d\.P\d\d|ADR|\.vault` in comments and docstrings (Step E10) and strip every hit.
+
+### r4-streaming-residue-hygiene | low | Streaming modules lack __all__, carry a stale pylint disable and a stale middleware docstring
+
+Status: open (R01a). Type: dead-code. `streaming/transformer.py` and `streaming/buffering.py` lack `__all__`; the `pylint: disable` on `EventAggregator`/`EventEmitters` is obviated by the class split (R01d); `telemetry/middleware.py` ~:195 describes a removed WebSocket path (line numbers from the reporting branch).
+
+### r4-stream-resumability-residue | medium | Sequence-seeding failure has no public unseedable signal, and two resumability sites carry stale text
+
+Status: open - decision pending (ties to r2-f20-resumability, Step R.2/S56). Type: decision (R02). Whether a run whose sequence seeding failed should report `stream_resumable=False` needs a public "unseedable" query on `RunSequenceAllocator`, which does not exist today; S01e's `retained_high_water_mark` deep import now sits at `api/_stream_replay.py` ~:21; `streaming/fanout.py:1-21` and `streaming/tests/test_fanout.py:3` carry stale text (line numbers from the reporting branch). Options: (a) add the public query and report `False` on seeding failure; (b) leave `stream_resumable` computed independently of seeding outcome. Recommended: (a).
+
+### r4-replay-digest-stale-comments | low | Two replay-digest comments may now be stale
+
+Status: open (G02). Type: doc-drift. `api/routes/_gateway_run_start.py` ~:277-284 and `api/run_admission.py` ~:140 (`continues_run_id`) carry comments that may no longer match behavior (line numbers from the reporting branch, distinct lines from r3-f22-r1-digest's evidence). Verify and correct at the same pass as DL.6/S24.
+
+### r4-auth-bypass-doc-drift | low | Docs and test comments will go stale once the test-only auth bypass is removed
+
+Status: open - owned by the remediation schedule's later rounds (follows r1-f9-auth-bypass, Step DL.4/S20). Type: doc-drift (E06). `docs/api/modules.rst` ~:136-138, `docs/operations.rst` ~:200-201, a comment in `service_tests/test_pw7_acceptance.py` ~:153-155, and wording in `api/tests/test_progress_allowlist.py:11` describe the bypass (line numbers from the reporting branch); correct all four once DL.4/S20 lands.
+
+### r4-marker-purity-residue | medium | pytest.fail-based prerequisite checks and mismarked "unit" tests extend the marker-purity problem
+
+Status: open - decision pending (ties to r6-f12-marker-hooks and r6-f16-adhoc-skips, Steps FX.11/S16, K.5/S50, K.3/S48). Type: test-integrity (ts-markers). `claude-acp-adapter` availability is checked via `pytest.fail` at `test_acp_catalog_live.py` ~:33,91 and `test_acp_migration_surface.py` ~:203, plus `providers/tests/conftest.py` `installed_acp_adapter`; `test_discovery_unit.py`, `test_authoring_scope_binding.py`, `test_engine_discovery_security.py` and `test_client_reresolve.py` are marked `unit` but start loopback servers, a wrong purity claim; `_installed_vocabulary.py` conflates a missing install with shape drift (line numbers from the reporting branch). Extend `tests/test_prerequisite_rule.py` to catch all of these.
+
+### r4-assignment-residue-hardcoded-strings | medium | Lane names and execution-mode sets are hardcoded or restated outside the tracked factory cluster
+
+Status: open - decision pending (ties to r5-f7-factory-rules, Step L.2/S77). Type: duplication (assign). `conftest.py` ~:423 hardcodes `"antigravity-cli"`; `factory._admit_execution_mode` restates `{"node","binary"}` against `infra_config.py` ~:723; `gateway._modern_frozen_disclosure` and `_RunDispatchResult.frozen` are typed `Any` (line numbers from the reporting branch). Fold the hardcoded strings onto named constants and give the disclosure fields a real type.
+
+### r4-hmac-compare-digest-nonascii-crash | high | hmac.compare_digest raises instead of returning False on a non-ASCII stored digest
+
+Status: open. Type: contract-drift (assign). A stored digest containing non-ASCII bytes makes `hmac.compare_digest` raise instead of returning a safe `False` (file-local to the reporting branch), turning a security-boundary equality check into an unhandled exception path on malformed input. Validate or sanitize the stored digest before comparison, or catch and treat as non-match.
+
+### r4-l07-cancelled | medium | Owner cancelled L07: OpenAI-compatible and Zhipu/Z.ai lanes stay
+
+Status: recorded - owner informed (2026-10-07). Type: decision. The owner ruled "openai, z ai, agy are not dead lanes ... do not drop support for these"; the kept lane set is Codex, Claude, Z.ai, Kimi and Agy. Z.ai is Zhipu's brand. Neither the OpenAI-compatible lane nor Zhipu is retired, superseding the removal direction in r5-f8-unservable-lanes/D3 for those two lanes and the BACKLOG's "OpenAI-compatible hosted lane and Zhipu" removal-schedule note. tool-cores P02.S19-S21/P03.S18 stay with their owning plan.
+
+### r4-cli-subprocess-runner-residue | medium | A CLI subprocess runner is hand-built across four test files beside testing.run_cli
+
+Status: open (S08). Type: duplication. `cli/tests/test_cli_live.py` ~:136 `_run_cli`, `cli/tests/test_desktop_serve.py` ~:44 `_run_cli`, `tests/gateway_boot.py` ~:135, ~:521 (hand-built migrate argv; `_MIGRATE_MODULE` duplicates `utils.runtime_exec.CLI_MODULE`), `desktop_tests/test_ownership_prerequisites.py` ~:81, ~:123, ~:235 (`_CLI_MODULE`), and `api/tests/test_active_run_discovery_live.py` ~:77 (line numbers from the reporting branch) all re-implement the CLI subprocess runner. Fold onto `testing.run_cli`.
+
+### r4-sqlite-only-residue-d1 | medium | SQLite-only residue sites beyond r3-f12-postgres's evidence, pending D1
+
+Status: open - decision pending (D1). Type: dead-code. `.env.example` ~:176-190 still carries a Postgres block; `control/infra_config.py:61-96` `_synchronous_url`/`_SYNC_DRIVERNAMES` has no production consumer after `admin.py` is removed, only `database/tests/_backends.py` ~:100; `control/tests/test_storage_paths.py:202` and the remainder of `control/tests/test_sync_url_derivation.py` carry Postgres-era docstrings (line numbers from the reporting branch). Clean up once D1 accepts SQLite-only.
+
+### r4-compaction-followup-decision | medium | migrate --compact does not reach the checkpoint store or custom dev database URLs
+
+Status: open - decision pending (follows D19). Type: decision. The checkpoint store is not compacted by `migrate --compact`; a custom `VAULTSPEC_A2A_DATABASE_URL` dev store cannot be compacted at all (file-local to the reporting branch). Options: (a) extend `--compact` to the checkpoint store and support custom URLs; (b) document both as known gaps. Recommended: (a) for the checkpoint store at minimum, since it is part of the same durable state D19 already targets.
+
+### r4-stategraph-inline-subprocess-probe | low | A StateGraph is built inline inside a subprocess probe string
+
+Status: open - owned by the remediation schedule's later rounds (folds into r6-f11-stategraph-boundary, Step K.4/S49). Type: duplication (K10b). `streaming/tests/test_public_stream_ingest.py` ~:213-235 (line numbers from the reporting branch) constructs a `StateGraph` as inline source inside a subprocess probe string, a site not in r6-f11's evidence and a notably fragile pattern beyond ordinary duplication.
+
+### r4-document-approval-request-literal | medium | The "document_approval_request" string is a repeated literal with no shared constant
+
+Status: open (C07). Type: duplication. The literal `"document_approval_request"` recurs without a shared constant at `control/event_handlers.py` ~:829,844, `streaming/_interrupt_projection.py` ~:46,167, `thread/snapshots.py` ~:97,108,179, `control/projection.py` ~:333, `graph/nodes/phase_gate.py` ~:295, `control/verdict_subscriber.py` ~:160, and a private copy in `database/permission_repository.py` (line numbers from the reporting branch); `settle_verdict_dispatch_receipt` also filters pending rows in Python instead of SQL. `test_verdict_subscriber_live.py` ~:595 seeds gate rows under a non-proposal id, worth fixing in the same pass.
+
+### r4-wire-behaviour-notices | medium | Wire-behaviour changes the dashboard must be told about
+
+Status: recorded - owner informed. Type: contract-drift. Four behavior changes ship or are planned: the permission description cap moves from 512 to 4096; a plan-approval response with no valid options now reports `approval_status: null` instead of a fabricated value; undeclared `incompatible_execution_authority_*` strings are no longer emitted; `DispatchRequest.model_assignment` now carries `provider_id`, and accepted-action payloads persisted before that upgrade are refused as incompatible. These extend the bound work in r1-f3-permission-bounds and the Round-2/3 "Assignment" residue; recorded here for dashboard-lockstep tracking per the edge's mutual-reference discipline.
+
+### bk-compose-era-comments-reword | low | Five Compose-era source comments need rewording to "registry-managed or externally attached"
+
+Status: open. Type: doc-drift. `control/_worker_health.py:507`, `control/config.py:151,371`, `desktop/settlement.py:18`, `control/health.py:834` and `worker/app.py:526` (line numbers from the reporting branch) describe Compose-era lifecycle ownership that no longer applies; reword each to "registry-managed or externally attached."
+
+### bk-compose-profile-legacy-label | medium | control/health.py serves profile="compose" for an unarmed gateway, a legacy label
+
+Status: open - decision pending. Type: decision. `control/health.py:667` (line reference from the reporting branch) serves `profile="compose"` for an unarmed gateway; the label is a leftover from the retired Compose profile and renaming it is a wire change requiring dashboard lockstep. Options: (a) rename to a native-accurate label under the contract-event batching discipline; (b) keep the string and document it as a stable legacy value. Recommended: (a), batched with the next contract-event window.
+
+### bk-upward-imports-layering | medium | Control and utils modules import upward across the layering boundary
+
+Status: open - decision pending (D5 D-04; ties to D5 and r3-f9-repository-layering). Type: contract-drift. `control/health.py:516` and `control/admission.py:43` import `api.schemas.gateway_readiness`; `utils/logging.py:39,420` imports `control` (line numbers from the reporting branch). Both invert the intended dependency direction. Distinct sites from r3-f9's SQL-layering evidence. Recommended default: move the shared readiness shape to a leaf both api and control import, and give utils/logging a narrow control-free hook.
+
+### bk-stop-service-bearer-pid-check | high | cli stop_service sends the attach bearer after only a pid-alive check
+
+Status: open - decision pending (D13 desktop amendment; ties to r7-f1-bearer-disclosure). Type: contract-drift. `cli/service.py:285-305` (line numbers from the reporting branch) sends the attach bearer and capability to a process verified only by a pid-alive check, not the descendant-ownership proof D13 establishes elsewhere. Recommended default: gate the bearer send on the same descendant-ownership check D13 adopts for eviction, before any credential leaves the CLI.
+
+### bk-auto-spawn-worker-bearer-disclosure | high | auto_spawn_worker=False sends the bearer to whatever answers on the port
+
+Status: recorded - owner informed (explicitly out of scope per D13; record only). Type: contract-drift. `control/worker_management.py:331-348` (line numbers from the reporting branch) sends the IPC bearer to whatever process answers when `auto_spawn_worker=False`, without the descendant-ownership check D13 applies to the spawn-and-verify path. The orchestrator ledger marks this record-only and out of scope for the current remediation; no action is requested here beyond this audit entry.
+
+### bk-compose-wording-pass3-adrs | low | A second batch of ADRs needs the Compose-scoped wording pass
+
+Status: open. Type: doc-drift. `2026-07-19-codebase-health-adr.md:96`, `2026-10-01-provider-binary-policy-adr.md:146`, `2026-09-21-workspace-root-authority-compose-provider-boundary-adr` and the proposed `2026-09-22-service-lifecycle-architecture-container-api-boundary-adr` (line/document references from the reporting branch) still carry Compose-scoped wording. Distinct ADR set from r4-compose-wording-pass3-residue's RESIDUE-sourced list; both batches belong to the same reconciliation pass.
+
+### bk-plan-pass3-corrections | low | The remediation plan itself needs a dedup-first restructure and several row corrections
+
+Status: open. Type: doc-drift. The plan needs: the approval line; a dedup-first restructure; absorbed other-plan findings; and row corrections at W01.P02.S04 (linked-proposal wording), W04.P09.S42 (the settings ADR is an amendment, not a new record), H.2 (create_time), E.2 (heartbeat with no ISO fallback), and the writer-reported SP7/SP9/lane-delta/L.3/Z.1 gaps (identifiers as given in the reporting branch's plan). These are plan-document corrections rather than code findings; recorded here per the backlog's own instruction to append them.
+
+### bk-redrive-actions-dead-return | medium | redrive_direct_control_actions and redrive_clarification_actions return values are now unused
+
+Status: open. Type: dead-code. Both functions' return values are unused at their only caller, `api/app.py` (file-local to the reporting branch), so their summary return types may be dead weight. Fold the cleanup into the control-pipeline recovery-owner task.
+
+### bk-thread-models-docstring-stale | low | thread/models.py docstring and openapi.json name a module that moved
+
+Status: open. Type: doc-drift. `thread/models.py:24-25` and `openapi.json:2406` (line numbers from the reporting branch) name `api.schemas.enums`; fix the docstring, then regenerate `openapi.json` in the verification phase.
+
+### bk-thread-constants-docstring-stale | low | thread/constants.py docstring names a module scheduled for deletion
+
+Status: open. Type: doc-drift. `thread/constants.py:32` (line reference from the reporting branch) names `api/schemas/events`, which DL.3/S19 deletes; fix the docstring in the bounds merge or a follow-up, distinct from r1-f3-permission-bounds' bound-mismatch finding at an overlapping line range.
+
+### bk-subscriber-manager-broadcast-dead-sequencedevent | low | SubscriberManager.broadcast still serves a gateway SequencedEvent with no remaining reader
+
+Status: open - owned by the remediation schedule's later rounds (Step R.1/S55; ties to r2-f6-aggregator-split/r2-f9-aggregator-forwarders). Type: dead-code. `streaming/subscribers.py:598-650` (line numbers from the reporting branch) keeps `SubscriberManager.broadcast` serving a gateway `SequencedEvent`; delete it in the relay-split task. Site not previously cited in r2-f6/r2-f9's evidence.
+
+### bk-permission-description-test-pending | low | A persisted-description test is expected to fail until the bounds Step lands
+
+Status: open (ties to r1-f3-permission-bounds, Step E.1/S52). Type: test-integrity. `test_persisted_description_matches_what_the_stream_showed` (file-local to the reporting branch) fails today because the catalog cap is 512 and must equal `MAX_PERMISSION_DESCRIPTION_CHARS`; this is a known, tracked failure, not a hidden one, pending E.1/S52.
+
+### bk-openapi-json-hand-edited | medium | openapi.json was hand-edited for one description instead of regenerated
+
+Status: open. Type: contract-drift. `openapi.json` (file-local to the reporting branch) carries a hand-edited description rather than a regenerated one, risking silent drift from the real schema; regenerate it at the verification phase instead of hand-maintaining it.
+
+### bk-dead-dev-code-symbols | low | Three dev-tooling symbols have no non-default or real caller
+
+Status: open. Type: dead-code. `Target.findings_codes`, `advisory_result(findings=...)` and `dev/__main__.py:128` have no non-default user; `configured_script_imports` (`dev/audit/unreachable_code.py:447`) matches no real `procs.toml` script (line numbers from the reporting branch).

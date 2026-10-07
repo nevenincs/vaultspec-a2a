@@ -26,13 +26,12 @@ from ..ipc.schemas import (
 from ..providers import ProviderCondition
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
-from ..thread.enums import ThreadStatus
+from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..thread.permission_fsm import (
     compute_permission_request_effects,
 )
 from ..thread.snapshots import (
-    TERMINAL_STATUS_MAP,
     classify_permission_pause_reason,
     is_permission_event,
     is_terminal_event,
@@ -72,8 +71,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-_TERMINAL_STATUS_MAP = TERMINAL_STATUS_MAP
 
 
 def _time_now_utc() -> datetime:
@@ -616,14 +613,11 @@ def _validated_terminal_status(
 ) -> ThreadStatus | None:
     """Reject evidence attached to a different terminal outcome."""
     payload_status = payload.get("status")
-    status_str = (
-        _TERMINAL_STATUS_MAP.get(payload_status)
-        if isinstance(payload_status, str)
-        else None
-    )
-    if not status_str:
+    if not isinstance(payload_status, str) or payload_status not in (
+        TERMINAL_STATUS_VALUES
+    ):
         return None
-    status = ThreadStatus(status_str)
+    status = ThreadStatus(payload_status)
     if (
         payload.get("cancellation_evidence") is not None
         and status is not ThreadStatus.CANCELLED

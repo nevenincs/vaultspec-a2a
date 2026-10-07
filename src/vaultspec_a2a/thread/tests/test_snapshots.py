@@ -9,13 +9,12 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ...graph.enums import AgentLifecycleState, Provider
-from ..enums import TERMINAL_STATUSES, RepairStatus
+from ..enums import RepairStatus
 from ..models import PlanEntry
 from ..snapshots import (
     CHECKPOINT_ERROR_REPAIR_MAP,
     CLARIFICATION_REQUEST_INTERRUPT_TYPE,
     PLAN_APPROVAL_PAUSE_CAUSES,
-    TERMINAL_STATUS_MAP,
     AgentData,
     ArtifactData,
     ClarificationQuestionData,
@@ -416,10 +415,6 @@ def test_clarification_data_from_interrupt_unknown_kind_falls_back_to_text() -> 
 def test_plan_approval_pause_causes_contains_both_variants() -> None:
     assert "plan_approval" in PLAN_APPROVAL_PAUSE_CAUSES
     assert "plan_approval_request" in PLAN_APPROVAL_PAUSE_CAUSES
-
-
-def test_terminal_status_map_keys() -> None:
-    assert set(TERMINAL_STATUS_MAP) == {status.value for status in TERMINAL_STATUSES}
 
 
 # ---------------------------------------------------------------------------

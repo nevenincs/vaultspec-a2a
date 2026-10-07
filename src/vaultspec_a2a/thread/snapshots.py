@@ -17,9 +17,14 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.base import WRITES_IDX_MAP
 from langgraph.checkpoint.serde.types import INTERRUPT
 
-from ..graph.enums import AgentLifecycleState, PermissionType, Provider
+from ..graph.enums import (
+    AgentLifecycleState,
+    PermissionType,
+    Provider,
+    StreamFrameKind,
+)
 from .enums import (
-    TERMINAL_STATUSES,
+    TERMINAL_STATUS_VALUES,
     DegradedReason,
     RepairStatus,
     ReplayStatus,
@@ -36,7 +41,6 @@ __all__ = [
     "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
-    "TERMINAL_STATUS_MAP",
     "AgentData",
     "ArtifactData",
     "CheckpointProjection",
@@ -103,13 +107,6 @@ PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
 # respond-route gating.
 LOCALLY_RESPONDABLE_PAUSE_CAUSES: frozenset[str] = PLAN_APPROVAL_PAUSE_CAUSES - {
     "document_approval_request"
-}
-
-# Map aggregator outcome strings to ThreadStatus enum values. Derived from the
-# TERMINAL_STATUSES authority (thread/enums.py) rather than restated, so a
-# status added there cannot silently miss this map.
-TERMINAL_STATUS_MAP: dict[str, str] = {
-    status.value: status.value for status in TERMINAL_STATUSES
 }
 
 # Checkpoint error → repair status mapping.  Used by snapshot replay
@@ -188,8 +185,8 @@ def normalize_wire_event_type(payload: Mapping[str, Any]) -> dict[str, Any]:
 def is_terminal_event(payload: dict[str, Any]) -> bool:
     """Return True if the payload represents a thread-terminal event."""
     return (
-        wire_event_type(payload) == "thread_terminal"
-        and payload.get("status", "") in TERMINAL_STATUS_MAP
+        wire_event_type(payload) == StreamFrameKind.THREAD_TERMINAL
+        and payload.get("status", "") in TERMINAL_STATUS_VALUES
     )
 
 

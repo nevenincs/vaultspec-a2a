@@ -22,7 +22,6 @@ branch - starving exactly the liveness signal the first property protects.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import httpx
@@ -36,7 +35,7 @@ from ...control._worker_health import WorkerLiveness, WorkerState, worker_livene
 from ...control.config import settings
 from ...control.health import assemble_health_status
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
-from ...graph.enums import ServerEventType
+from ...graph.enums import ServerEventType, StreamFrameKind
 from ...testing.ports import free_port
 from ...worker.ipc import WorkerBridge
 from ..circuit_breaker import WorkerCircuitBreaker
@@ -302,8 +301,7 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
     positive case leans on it. A catalog that passed everything through would
     otherwise satisfy the survival assertion while enforcing nothing.
     """
-    from ...api.schemas.events import HeartbeatEvent
-    from ...streaming.sse_frames import encode_sse_frame, enforce_progress_allowlist
+    from ...streaming.sse_frames import enforce_progress_allowlist, transport_frame
 
     uncatalogued = enforce_progress_allowlist(
         {"type": "definitely_not_catalogued", "server_uptime_seconds": 99.5}
@@ -324,15 +322,12 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
             f"catalog lookup missed for {probe!r} - frame would arrive empty"
         )
 
-    # The real producer's own frame, through the real encode boundary.
-    heartbeat = HeartbeatEvent(
-        timestamp=datetime.now(UTC),
+    # The real producer's own builder, through the real encode boundary.
+    raw = transport_frame(
+        ServerEventType.HEARTBEAT,
+        "t-probe",
+        timestamp=1_700_000_000.25,
         server_uptime_seconds=42.5,
-    )
-    raw = encode_sse_frame(
-        heartbeat.model_dump(mode="json"),
-        event=ServerEventType.HEARTBEAT,
-        thread_id="t-probe",
     )
     text = raw.decode("utf-8")
     decoded = json.loads(
@@ -344,6 +339,8 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
     )
     assert decoded["server_uptime_seconds"] == 42.5
     assert decoded["type"] == ServerEventType.HEARTBEAT.value
+    assert decoded["event_type"] == ServerEventType.HEARTBEAT.value
+    assert decoded["timestamp"] == 1_700_000_000.25
 
 
 def test_no_declared_event_kind_is_catalogued_under_a_hand_copied_literal() -> None:
@@ -351,10 +348,10 @@ def test_no_declared_event_kind_is_catalogued_under_a_hand_copied_literal() -> N
     from ...streaming.sse_frames import PROGRESS_CATALOG
 
     assert ServerEventType.HEARTBEAT in PROGRESS_CATALOG
-    declared = set(ServerEventType)
+    declared = set(ServerEventType) | set(StreamFrameKind)
     for key in PROGRESS_CATALOG:
         if key in declared:
-            assert isinstance(key, ServerEventType), (
+            assert isinstance(key, ServerEventType | StreamFrameKind), (
                 f"{key!r} is a declared event kind keyed by a hand-copied literal"
             )
 

@@ -12,10 +12,8 @@ from __future__ import annotations
 
 import asyncio
 
-from ...graph.events import ErrorOccurred
 from ...providers.conditions import ProviderCondition
 from ..fanout import deliver_bounded
-from ..types import SequencedEvent
 
 
 def _drain(queue: asyncio.Queue[object]) -> list[object]:
@@ -84,19 +82,19 @@ def test_structured_context_is_accepted_without_changing_the_outcome() -> None:
     assert _drain(queue) == ["newest"]
 
 
-def _error_event(sequence: int) -> SequencedEvent:
-    """Build the in-process failure event, unprojected, as the relay carries it."""
-    return SequencedEvent(
-        event=ErrorOccurred(
-            thread_id="t1",
-            agent_id="supervisor",
-            timestamp=float(sequence),
-            code=ProviderCondition.THROTTLED.value,
-            message="RateLimitError: too many requests",
-            recoverable=False,
-        ),
-        sequence=sequence,
-    )
+def _error_event(sequence: int) -> dict[str, object]:
+    """Build the relayed failure payload, in the wire shape it arrives in."""
+    return {
+        "type": "error",
+        "event_type": "error",
+        "thread_id": "t1",
+        "agent_id": "supervisor",
+        "timestamp": float(sequence),
+        "sequence": sequence,
+        "code": ProviderCondition.THROTTLED.value,
+        "message": "RateLimitError: too many requests",
+        "recoverable": False,
+    }
 
 
 def _terminal_frame() -> dict[str, object]:
@@ -137,11 +135,7 @@ def test_a_terminal_outlives_a_flood_of_progress() -> None:
 
 
 def test_an_error_outlives_a_flood_of_progress() -> None:
-    """The failure that explains the terminal survives on the same terms.
-
-    Recognised as a domain event rather than by a wire type string, because the
-    in-process path enqueues it before anything projects it onto the wire.
-    """
+    """The failure that explains the terminal survives on the same terms."""
     queue: asyncio.Queue[object] = asyncio.Queue(maxsize=3)
     failure = _error_event(1)
     queue.put_nowait(failure)

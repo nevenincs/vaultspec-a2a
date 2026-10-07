@@ -34,8 +34,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -43,10 +42,9 @@ from fastapi.responses import StreamingResponse
 
 from ..control.config import settings
 from ..database import get_thread
-from ..graph.enums import ServerEventType
+from ..graph.enums import ServerEventType, StreamFrameKind
 from ..providers.conditions import ProviderCondition
-from ..streaming.sse_frames import encode_sse_frame
-from ..streaming.types import SequencedEvent
+from ..streaming.sse_frames import encode_sse_frame, transport_frame
 from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
 from ..thread.errors import EventAggregatorError
 from ._stream_replay import (
@@ -55,8 +53,6 @@ from ._stream_replay import (
     resume_position,
     retained_sequence,
 )
-from .event_adapter import sequenced_to_positive_payload
-from .schemas.events import HeartbeatEvent
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Iterator
@@ -175,9 +171,7 @@ async def _read_durable_state(
 
 
 def _queue_progress_payload(item: object) -> dict[str, object] | None:
-    """Decode either producer shape held by the shared subscriber queue."""
-    if isinstance(item, SequencedEvent):
-        return sequenced_to_positive_payload(item)
+    """Narrow a queued item to the relayed wire mapping the gateway enqueues."""
     if isinstance(item, dict):
         return cast("dict[str, object]", item)
     return None
@@ -185,16 +179,7 @@ def _queue_progress_payload(item: object) -> dict[str, object] | None:
 
 def _snapshot_frame(thread_id: str, status: str) -> bytes:
     """The first frame of every stream: where the run stood at attachment."""
-    return encode_sse_frame(
-        {
-            "type": "stream_snapshot",
-            "event_type": "stream_snapshot",
-            "thread_id": thread_id,
-            "status": status,
-        },
-        event="stream_snapshot",
-        thread_id=thread_id,
-    )
+    return transport_frame(StreamFrameKind.STREAM_SNAPSHOT, thread_id, status=status)
 
 
 def _backpressure_frame(thread_id: str, dropped: int) -> bytes:
@@ -206,16 +191,11 @@ def _backpressure_frame(thread_id: str, dropped: int) -> bytes:
     cause and the count, and the consumer's remedy is always the same - re-read
     run-status, which is the authority these frames never were.
     """
-    return encode_sse_frame(
-        {
-            "type": "progress_dropped",
-            "event_type": "progress_dropped",
-            "thread_id": thread_id,
-            "reason": "backpressure",
-            "dropped_count": dropped,
-        },
-        event="progress_dropped",
-        thread_id=thread_id,
+    return transport_frame(
+        StreamFrameKind.PROGRESS_DROPPED,
+        thread_id,
+        reason="backpressure",
+        dropped_count=dropped,
     )
 
 
@@ -228,29 +208,15 @@ def _replay_gap_frame(thread_id: str, reason: str, first_sequence: int | None) -
     no id of its own; the position a client resumes from is the next retained
     frame, not the notice that something before it is missing.
     """
-    frame: dict[str, object] = {
-        "type": "progress_dropped",
-        "event_type": "progress_dropped",
-        "thread_id": thread_id,
-        "reason": reason,
-    }
+    fields: dict[str, object] = {"reason": reason}
     if first_sequence is not None:
-        frame["first_sequence"] = first_sequence
-    return encode_sse_frame(frame, event="progress_dropped", thread_id=thread_id)
+        fields["first_sequence"] = first_sequence
+    return transport_frame(StreamFrameKind.PROGRESS_DROPPED, thread_id, **fields)
 
 
 def _rejection_frame(thread_id: str, reason: str) -> bytes:
     """Close a stream that cannot be served, in the client's own vocabulary."""
-    return encode_sse_frame(
-        {
-            "type": "stream_rejected",
-            "event_type": "stream_rejected",
-            "thread_id": thread_id,
-            "reason": reason,
-        },
-        event="stream_rejected",
-        thread_id=thread_id,
-    )
+    return transport_frame(StreamFrameKind.STREAM_REJECTED, thread_id, reason=reason)
 
 
 def _terminal_replay_frames(thread_id: str, state: _DurableRunState) -> Iterator[bytes]:
@@ -262,28 +228,17 @@ def _terminal_replay_frames(thread_id: str, state: _DurableRunState) -> Iterator
     if state.status == ThreadStatus.FAILED.value and (
         state.failure_reason or state.provider_condition
     ):
-        yield encode_sse_frame(
-            {
-                "type": "error",
-                "event_type": "error",
-                "thread_id": thread_id,
-                "code": state.provider_condition or ProviderCondition.UNKNOWN.value,
-                "message": state.failure_reason or _UNRECORDED_REASON,
-                "recoverable": False,
-            },
-            event="error",
-            thread_id=thread_id,
+        yield transport_frame(
+            ServerEventType.ERROR,
+            thread_id,
+            code=state.provider_condition or ProviderCondition.UNKNOWN.value,
+            message=state.failure_reason or _UNRECORDED_REASON,
+            recoverable=False,
         )
-    terminal: dict[str, object] = {
-        "type": "thread_terminal",
-        "event_type": "thread_terminal",
-        "thread_id": thread_id,
-        "status": state.status,
-        "replay": True,
-    }
+    terminal: dict[str, object] = {"status": state.status, "replay": True}
     if state.failure_reason:
         terminal["error_detail"] = state.failure_reason
-    yield encode_sse_frame(terminal, event="thread_terminal", thread_id=thread_id)
+    yield transport_frame(StreamFrameKind.THREAD_TERMINAL, thread_id, **terminal)
 
 
 def _replay_frame_bytes(thread_id: str, frame: ReplayFrame) -> bytes:
@@ -381,7 +336,7 @@ class _ThreadStream:
         )
         return _rejection_frame(self._thread_id, _FOREIGN_RUN_REASON)
 
-    def _attach(self) -> asyncio.Queue[SequencedEvent] | None:
+    def _attach(self) -> asyncio.Queue[Any] | None:
         """Take one of the gateway's bounded stream slots, or ``None`` at capacity.
 
         The route refuses at capacity before the thread lookup, but that check
@@ -408,7 +363,7 @@ class _ThreadStream:
         return queue
 
     async def _serve(
-        self, resume: ResumePosition | None, queue: asyncio.Queue[SequencedEvent]
+        self, resume: ResumePosition | None, queue: asyncio.Queue[Any]
     ) -> AsyncGenerator[bytes]:
         """Snapshot, replay, then either the durable terminal or the live loop."""
         self._aggregator.subscribe(self._client_id, [self._thread_id])
@@ -461,7 +416,7 @@ class _ThreadStream:
         for frame in window.frames:
             yield _replay_frame_bytes(self._thread_id, frame)
             self._highest_emitted = frame.sequence
-            if frame.event_type == "thread_terminal":
+            if frame.event_type == StreamFrameKind.THREAD_TERMINAL:
                 # The run ended inside the replayed window. Closing on the
                 # retained frame rather than on the durable terminal keeps the
                 # terminal's own sequence in the delivered set, so the union
@@ -483,9 +438,7 @@ class _ThreadStream:
             },
         )
 
-    async def _live(
-        self, queue: asyncio.Queue[SequencedEvent]
-    ) -> AsyncGenerator[bytes]:
+    async def _live(self, queue: asyncio.Queue[Any]) -> AsyncGenerator[bytes]:
         """Relay queued events until the run ends, beating while it is idle.
 
         The resynchronization notice leads every turn, idle or not, so a drop
@@ -498,7 +451,7 @@ class _ThreadStream:
             for frame in await self._turn_frames(item):
                 yield frame
 
-    async def _next_item(self, queue: asyncio.Queue[SequencedEvent]) -> object:
+    async def _next_item(self, queue: asyncio.Queue[Any]) -> object:
         """The next queued event, or the idle sentinel when the beat elapses first."""
         try:
             return await asyncio.wait_for(
@@ -529,27 +482,24 @@ class _ThreadStream:
         if settled is not None and settled.terminal:
             self._closed = True
             return list(_terminal_replay_frames(self._thread_id, settled))
-        heartbeat = HeartbeatEvent(
-            timestamp=datetime.now(UTC),
-            server_uptime_seconds=time.monotonic() - self._start_time,
-        )
+        # Epoch seconds, the encoding every relayed progress frame carries, so
+        # one stream holds one timestamp form.
         return [
-            encode_sse_frame(
-                heartbeat.model_dump(mode="json"),
-                event=ServerEventType.HEARTBEAT,
-                thread_id=self._thread_id,
+            transport_frame(
+                ServerEventType.HEARTBEAT,
+                self._thread_id,
+                timestamp=time.time(),
+                server_uptime_seconds=time.monotonic() - self._start_time,
             )
         ]
 
     def _live_frame(self, item: object) -> bytes | None:
         """Encode one queued event, or ``None`` when this viewer is not served it.
 
-        In-process events are projected onto the positive progress allowlist
-        here; relayed worker payloads were already projected at the relay seam.
-        The encode boundary re-applies the allowlist to both, so a forbidden
-        body cannot cross by either path. Local domain events carry sequence
-        wrappers; worker relay events have already crossed the positive
-        projection as plain mappings.
+        Every queued item is a relayed worker payload, already projected onto
+        the positive progress allowlist at the relay seam. The encode boundary
+        re-applies the allowlist, so a forbidden body cannot cross even if that
+        projection were bypassed.
         """
         payload = _queue_progress_payload(item)
         if payload is None:
@@ -576,7 +526,7 @@ class _ThreadStream:
             self._highest_emitted = sequence
 
         event_type = payload.get("type")
-        if event_type == "thread_terminal":
+        if event_type == StreamFrameKind.THREAD_TERMINAL:
             self._closed = True
         return encode_sse_frame(
             payload,

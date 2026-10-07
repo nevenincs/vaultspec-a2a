@@ -49,13 +49,14 @@ from typing import Final, TypeGuard, cast
 # phase mapping is what run-status also reads, and it keeps the owner's spelling
 # here: the qualifier names the ONE topology it maps, and a shorter local name
 # would read as though it applied to any node.
-from ..graph.enums import ServerEventType, research_adr_semantic_phase
+from ..graph.enums import ServerEventType, StreamFrameKind, research_adr_semantic_phase
 
 # The wire event-type key pair is owned by ``thread.snapshots`` - the one layer
-# every producer and consumer of a relayed payload can import. Reading the frame
-# type through it keeps this catalog and the relay predicates on one rule.
+# every producer and consumer of a relayed payload can import. Reading and
+# stamping the frame type through it keeps this catalog, the frames this module
+# mints, and the relay predicates on one rule.
 from ..thread.clarification import MAX_REQUEST_ID_CHARS
-from ..thread.snapshots import wire_event_type
+from ..thread.snapshots import normalize_wire_event_type, wire_event_type
 
 __all__ = [
     "ALWAYS_SAFE_KEYS",
@@ -66,6 +67,7 @@ __all__ = [
     "catalog_worst_case_frame_bytes",
     "encode_sse_frame",
     "enforce_progress_allowlist",
+    "transport_frame",
 ]
 
 SSE_FRAME_VERSION = "v1"
@@ -289,13 +291,10 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 # uncatalogued rather than enumerated because nothing on the subscriber side
 # needs it; that judgement should be revisited if a consumer ever does.
 #
-# Keys are ``ServerEventType`` members wherever a member exists, so a value
-# respelled at the enum carries this catalog with it rather than silently
-# stranding an entry that can then never match. The four bare literals below -
-# ``stream_snapshot``, ``thread_terminal``, ``stream_rejected``,
-# ``progress_dropped`` - are transport frame kinds the stream itself mints, which
-# no graph event produces and the enum therefore does not declare. Their spelling
-# here is the mixture reading correctly, not a conversion left half finished.
+# Keys are enum members throughout, so a value respelled at its declaration
+# carries this catalog with it rather than silently stranding an entry that can
+# then never match. Graph event kinds are ``ServerEventType`` members; the
+# transport kinds no graph event produces are ``StreamFrameKind`` members.
 PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     ServerEventType.MESSAGE_CHUNK: {
         "content": _Text(MAX_PROGRESS_CONTENT_CHARS),
@@ -343,15 +342,15 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     # arrived. It carries the status and nothing else, deliberately - it is a
     # relay frame like the rest, so it says where to go for authority rather
     # than trying to be it.
-    "stream_snapshot": {"status": _ENUM},
-    "thread_terminal": {
+    StreamFrameKind.STREAM_SNAPSHOT: {"status": _ENUM},
+    StreamFrameKind.THREAD_TERMINAL: {
         "status": _ENUM,
         "replay": _Flag(),
         "error_detail": _Text(512),
     },
     ServerEventType.HEARTBEAT: {"server_uptime_seconds": _Number()},
-    "stream_rejected": {"reason": _Text(64)},
-    "progress_dropped": {
+    StreamFrameKind.STREAM_REJECTED: {"reason": _Text(64)},
+    StreamFrameKind.PROGRESS_DROPPED: {
         "reason": _Text(64),
         "dropped_type": _Text(64),
         "dropped_count": _Integer(),
@@ -549,6 +548,25 @@ def _resume_event_id(thread_id: str, sequence: int) -> str:
     return f"{thread_id}:{sequence}"
 
 
+def _transport_payload(
+    kind: StreamFrameKind | ServerEventType,
+    thread_id: str | None,
+    fields: Mapping[str, object],
+) -> dict[str, object]:
+    """Build a minted frame's body: its kind under both wire keys, run, fields.
+
+    The key pair is stamped through the relay's own mirroring rule rather than
+    written out, so a frame the stream mints and a frame it relays cannot
+    disagree about which keys carry the kind. Shared with the oversized-frame
+    sentinel, which is encoded below the public builder because it must keep
+    the id of the frame it replaces.
+    """
+    identity: dict[str, object] = {"type": kind}
+    if thread_id is not None:
+        identity["thread_id"] = thread_id
+    return normalize_wire_event_type({**identity, **fields})
+
+
 def encode_sse_frame(
     payload: Mapping[str, object],
     *,
@@ -577,11 +595,11 @@ def encode_sse_frame(
     )
     versioned = _stamp_semantic_phase(versioned)
     # Final, authoritative gate: project every outgoing frame onto the catalog
-    # regardless of how it was produced (in-process wire dump or relayed worker
-    # payload), so a forbidden body cannot cross the encoded boundary even if an
-    # upstream projection call site is bypassed. The catalog itself is one
-    # deliberately shared authority rather than a per-layer copy, so this layer
-    # backstops a missing call, not a gap in the catalog.
+    # regardless of how it was produced (a transport frame minted here or a
+    # relayed worker payload), so a forbidden body cannot cross the encoded
+    # boundary even if an upstream projection call site is bypassed. The catalog
+    # itself is one deliberately shared authority rather than a per-layer copy,
+    # so this layer backstops a missing call, not a gap in the catalog.
     versioned = enforce_progress_allowlist(versioned)
     event_id = (
         _resume_event_id(thread_id, sequence)
@@ -592,13 +610,29 @@ def encode_sse_frame(
     if len(encoded) <= MAX_SSE_FRAME_BYTES:
         return encoded
 
-    sentinel: dict[str, object] = {
-        "api_version": SSE_FRAME_VERSION,
-        "type": "progress_dropped",
-        "event_type": "progress_dropped",
-        "reason": "frame_exceeds_cap",
-        "dropped_type": versioned.get("type"),
-    }
-    if thread_id is not None:
-        sentinel["thread_id"] = thread_id
-    return _encode(sentinel, "progress_dropped", event_id)
+    sentinel = _transport_payload(
+        StreamFrameKind.PROGRESS_DROPPED,
+        thread_id,
+        {"reason": "frame_exceeds_cap", "dropped_type": versioned.get("type")},
+    )
+    return _encode(
+        {"api_version": SSE_FRAME_VERSION, **sentinel},
+        StreamFrameKind.PROGRESS_DROPPED,
+        event_id,
+    )
+
+
+def transport_frame(
+    kind: StreamFrameKind | ServerEventType, thread_id: str, **fields: object
+) -> bytes:
+    """Encode one frame the stream mints itself rather than relays.
+
+    The kind is stated once, here, and stamped three times from that one
+    argument - both wire keys and the SSE ``event`` line - so no producer
+    writes a kind by hand and no frame can name two. A minted frame carries no
+    id: nothing retained it, so it is not a position a reconnect can resume
+    from.
+    """
+    return encode_sse_frame(
+        _transport_payload(kind, thread_id, fields), event=kind, thread_id=thread_id
+    )

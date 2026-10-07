@@ -21,6 +21,7 @@ import tomllib
 from enum import StrEnum
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -41,6 +42,9 @@ from ..thread.errors import (
     ConfigError,
     TeamConfigNotFoundError,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "DEFAULT_AUTHORING_SURFACES",
@@ -177,7 +181,10 @@ class DocumentCapability(StrEnum):
     PLAN_DOCUMENT = "plan_document"
 
 
-def authoring_capability(team_config: "TeamConfig") -> AuthoringCapability:
+def authoring_capability(
+    team_config: "TeamConfig",
+    agents: "Mapping[str, AgentConfig] | None" = None,
+) -> AuthoringCapability:
     """Return the coarse authoring capability a preset delivers.
 
     Keyed on the DECLARED ROLES of the preset's workers, not on its topology. A
@@ -199,20 +206,31 @@ def authoring_capability(team_config: "TeamConfig") -> AuthoringCapability:
     the symptom of one key answering both questions, and answering one of them
     wrongly.
 
-    Fails closed toward ``coding``: a worker whose agent config cannot be loaded
-    is skipped rather than raised on, matching the role-based predicate the
-    run-status projection already uses. A preset that is entirely unloadable
-    never reaches this function - the listing reports it ``loadable=False`` with
-    no descriptive fields at all - so the fail-closed path here covers only the
-    narrower case of one bad agent reference inside an otherwise valid preset.
-    The consequence is an understatement (``coding`` for a preset that may
-    author), never a false authoring claim.
+    *agents* maps worker ids to their agent configs. A run's frozen definition
+    passes the agents it was accepted with, so the answer is the one the run
+    executes under and no config file is read; left out, each worker's bundled
+    config is loaded.
+
+    Fails closed toward ``coding``: a worker whose agent config cannot be loaded,
+    or that *agents* does not carry, is skipped rather than raised on, so the
+    run-status completion check never breaks a read over a config problem. A
+    preset that is entirely unloadable never reaches this function - the listing
+    reports it ``loadable=False`` with no descriptive fields at all - so the
+    fail-closed path here covers only the narrower case of one bad agent
+    reference inside an otherwise valid preset. The consequence is an
+    understatement (``coding`` for a preset that may author), never a false
+    authoring claim.
     """
     for worker in team_config.workers:
-        try:
-            agent_config = load_agent_config(worker.agent_id)
-        except (ConfigError, ValidationError):
-            continue
+        if agents is None:
+            try:
+                agent_config = load_agent_config(worker.agent_id)
+            except (ConfigError, ValidationError):
+                continue
+        else:
+            agent_config = agents.get(worker.agent_id)
+            if agent_config is None:
+                continue
         if is_document_authoring_role(agent_config.role):
             return AuthoringCapability.DOCUMENT_AUTHORING
     return AuthoringCapability.CODING

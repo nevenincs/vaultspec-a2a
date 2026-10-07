@@ -13,10 +13,9 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...context.metadata import ThreadMetadata
 from ...control._worker_health import worker_liveness
 from ...control.execution_authority import read_frozen_team_selection
 from ...control.run_discovery_service import discover_active_runs
@@ -28,14 +27,12 @@ from ...control.thread_service import (
 )
 from ...control.thread_state_service import (
     capture_thread_state,
-    derive_run_authoring_ids,
     derive_run_semantic_context,
     project_semantic_phase,
 )
 from ...database import (
     get_db,
     get_permission_logs_by_thread,
-    get_thread_metadata,
     resolve_session_factory,
 )
 from ...database.checkpoints import Checkpointer
@@ -84,10 +81,10 @@ from ..thread_stream import (
 )
 from ..workspace import require_existing_workspace_root
 from .gateway import (
+    _decoded_lease_binding,
+    _decoded_lease_id,
     _modern_frozen_disclosure,
     _optional_enum,
-    _persisted_lease_binding,
-    _persisted_lease_id,
     router,
 )
 
@@ -264,27 +261,21 @@ async def run_status_endpoint(
         raise HTTPException(status_code=404, detail="Run not found")
 
     snapshot = capture.snapshot
-    proposal_ids, changeset_ids = derive_run_authoring_ids(
-        capture.checkpoint_projection
-    )
     semantic = derive_run_semantic_context(capture.checkpoint_projection)
     semantic_phase = project_semantic_phase(
         status=snapshot.status,
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
-    modern_frozen = read_frozen_team_selection(capture.thread_metadata)
-
-    metadata = None
-    if capture.thread_metadata:
-        try:
-            metadata = ThreadMetadata.model_validate_json(capture.thread_metadata)
-        except ValidationError:
-            logger.warning("run status: stored metadata for %s is unreadable", run_id)
+    modern_frozen = read_frozen_team_selection(capture.metadata.text)
+    provenance = capture.metadata.provenance
+    lease_binding = _decoded_lease_binding(capture.metadata.fields)
 
     return RunStatusResponse(
         run_id=snapshot.thread_id,
-        continues_run_id=metadata.continues_run_id if metadata is not None else None,
+        continues_run_id=(
+            provenance.continues_run_id if provenance is not None else None
+        ),
         status=ThreadStatus(snapshot.status),
         semantic_phase=semantic_phase,
         feature_tag=semantic.feature_tag,
@@ -303,8 +294,8 @@ async def run_status_endpoint(
             )
             for agent in snapshot.agents
         ],
-        proposal_ids=proposal_ids,
-        changeset_ids=changeset_ids,
+        proposal_ids=capture.proposal_ids,
+        changeset_ids=capture.changeset_ids,
         approval_status=_optional_enum(ApprovalStatus, snapshot.approval_status),
         approval_request_id=snapshot.approval_request_id,
         checkpoint_id=snapshot.checkpoint_id,
@@ -335,12 +326,9 @@ async def run_status_endpoint(
         # unreadable - recorded for nobody.
         repair_reason=snapshot.repair_reason,
         frozen_assignment=_modern_frozen_disclosure(modern_frozen),
-        lease_id=_persisted_lease_id(capture.thread_metadata),
+        lease_id=_decoded_lease_id(capture.metadata.fields),
         reservation_id=(
-            binding.reservation_id
-            if (binding := _persisted_lease_binding(capture.thread_metadata))
-            is not None
-            else None
+            lease_binding.reservation_id if lease_binding is not None else None
         ),
         # Read from the SAME capture as every other field above - the snapshot
         # computed it once from the capture's checkpoint projection - so a
@@ -503,28 +491,6 @@ async def run_history_endpoint(
             capture.transcript.value,
         )
 
-    # Absent metadata is stored as null OR as an empty string depending on how
-    # the run was created, and an empty string is not parseable JSON - so the
-    # guard is truthiness, not "is not None".
-    #
-    # Unparseable metadata is reported as absent rather than failing the read.
-    # Not defensive padding: the stored blob and the metadata model genuinely
-    # disagree today - a run started without a workspace root persists metadata
-    # the model rejects as incomplete - and this is the WIDE read, whose job is
-    # to report the record, not to enforce a schema on it. Failing here would
-    # cost a caller the whole transcript over one unrelated field. The
-    # disagreement is queued as its own finding.
-    metadata_json = await get_thread_metadata(db, run_id)
-    metadata: ThreadMetadata | None = None
-    if metadata_json:
-        try:
-            metadata = ThreadMetadata.model_validate_json(metadata_json)
-        except ValidationError:
-            logger.warning(
-                "run history: stored metadata for %s does not satisfy the "
-                "metadata model; reporting it absent",
-                run_id,
-            )
     # The settled counterpart to the snapshot's PENDING permissions. A gate leaves
     # the pending list as soon as it is answered, and a terminal run expires
     # whatever was still outstanding, so a decision a human actually made was
@@ -535,7 +501,7 @@ async def run_history_endpoint(
     return RunHistoryResponse(
         run_id=run_id,
         state=snapshot_to_wire(snapshot),
-        metadata=metadata,
+        metadata=capture.metadata.provenance,
         transcript_available=capture.transcript is TranscriptAvailability.AVAILABLE,
         transcript_status=capture.transcript,
         permission_decisions=[

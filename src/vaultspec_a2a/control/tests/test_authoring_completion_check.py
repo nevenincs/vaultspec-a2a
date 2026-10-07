@@ -17,16 +17,24 @@ production path rather than a hand-set snapshot field.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ...control.accepted_input import freeze_accepted_input
+from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.thread_state_service import capture_thread_state
-from ...database import create_thread
+from ...database import create_control_action, create_thread, update_thread_status
+from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
+from ...team.team_config import load_team_config
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
+from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -67,7 +75,12 @@ async def _seed_completed_thread(
     checkpointer: AsyncSqliteSaver,
     seed: _ThreadSeed,
 ) -> None:
-    """Seed a thread whose checkpoint carries the given authoring id lists."""
+    """Seed a thread whose checkpoint carries the given authoring id lists.
+
+    The run is accepted as a real one is - its initial action journaled with the
+    frozen definition and its receipt - while it is still active, because a
+    receipt is only prepared for an active run; it then moves to the seeded status.
+    """
     await checkpointer.setup()
     config: RunnableConfig = {
         "configurable": {"thread_id": seed.thread_id, "checkpoint_ns": ""}
@@ -82,15 +95,48 @@ async def _seed_completed_thread(
         {"source": "loop", "step": 1, "parents": {}},
         {},
     )
+    workspace = Path(__file__).resolve().parent
+    authority = make_test_write_authority()
     async with session_factory() as session:
         await create_thread(
             session,
-            write_authority=make_test_write_authority(),
+            write_authority=authority,
             thread_id=seed.thread_id,
             team_preset=seed.team_preset,
-            status=seed.status,
+            status=ThreadStatus.RUNNING,
             repair_status="healthy",
         )
+        dispatch = DispatchRequest(
+            action="ingest",
+            thread_id=seed.thread_id,
+            content="authoring completion fixture",
+            workspace_root=str(workspace),
+            team_preset=seed.team_preset,
+            graph_definition=freeze_graph_definition(
+                load_team_config(seed.team_preset, workspace_root=workspace),
+                workspace_root=workspace,
+            ),
+            recursion_limit=25,
+        )
+        await create_control_action(
+            session,
+            thread_id=seed.thread_id,
+            action_type=authority.action_type,
+            idempotency_key=thread_create_action_key(seed.thread_id),
+            dispatch_id=authority.action_receipt_id,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+            payload=freeze_accepted_input(
+                dispatch, intent={"content": "authoring completion fixture"}
+            ),
+        )
+        receipt = await prepare_graph_action_receipt(
+            session,
+            thread_id=seed.thread_id,
+            dispatch_id=authority.action_receipt_id,
+        )
+        assert receipt is not None
+        if seed.status is not ThreadStatus.RUNNING:
+            await update_thread_status(session, seed.thread_id, seed.status)
         await session.commit()
 
 

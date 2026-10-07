@@ -792,6 +792,7 @@ __all__ = [
     "initialize_request",
     "initialize_result",
     "is_live_lane",
+    "is_selectable",
     "is_terminal",
     "json_list",
     "json_object",

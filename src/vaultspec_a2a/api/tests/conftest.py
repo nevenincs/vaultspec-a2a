@@ -14,34 +14,36 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, Request
 from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ...control._worker_health import _internal_auth_headers
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.event_handlers import CheckpointPruneRegistry
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import create_thread
-from ...providers.factory import ProviderCatalogRegistration, ProviderFactory
-from ...providers.in_process_catalog import served_in_process_lanes
+from ...providers.in_process_catalog import in_process_catalog_key, in_process_lanes
 from ...streaming.aggregator import EventAggregator
+from ...testing.factories import LaneInventoryFactory
 from ...tests._write_authority import make_test_write_authority
+from ...worker._dispatch_contract import CAPACITY_FULL
+from ...worker.app import _capacity_refusal, _verify_dispatch_token
 from ..app import create_app
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..internal import internal_router
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-    from pathlib import Path
 
     from starlette.types import ASGIApp, Receive, Scope, Send
 
+    from ...providers.factory import ProviderCatalogRegistration
     from ...providers.provider_catalog_service import ProviderCatalogService
     from ...thread.enums import ThreadStatus
 
@@ -95,6 +97,11 @@ class _InProcessWorker:
     HTTP serialisation and Pydantic validation are exercised on every request.
     Not a mock, not a fake transport handler, not ``unittest.mock``.
 
+    The dispatch route is guarded by the worker's own bearer dependency and
+    refuses at capacity with the worker's own refusal, so the gateway classifies
+    a genuine definite non-delivery from the response the real worker sends.
+    The client presents the gateway's own worker-IPC header.
+
     Attributes:
         dispatches: All dispatch request bodies received so far.
     """
@@ -108,30 +115,13 @@ class _InProcessWorker:
 
         _app = FastAPI()
 
-        async def _dispatch(request: Request) -> JSONResponse | dict[str, str]:
-            expected = settings.internal_token
-            if expected is not None:
-                authorization = request.headers.get("authorization")
-                if authorization != f"Bearer {expected}":
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "Invalid internal token"},
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
+        async def _dispatch(request: Request) -> dict[str, str]:
             body = cast("DispatchPayload", await request.json())
             self.dispatches.append(body)
             self.dispatch_received.set()
             await self.release_dispatch.wait()
             if self._at_capacity:
-                # Byte-for-byte the refusal the real worker returns once its
-                # concurrent-thread cap is reached, so the gateway classifies a
-                # genuine definite non-delivery from a genuine HTTP response.
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "Worker at capacity — too many concurrent threads"
-                    },
-                )
+                raise _capacity_refusal(CAPACITY_FULL)
             thread_id = body.get("thread_id", "")
             if not isinstance(thread_id, str):
                 thread_id = ""
@@ -145,17 +135,14 @@ class _InProcessWorker:
             _dispatch,
             methods=["POST"],
             response_model=None,
+            dependencies=[Depends(_verify_dispatch_token)],
         )
         _app.add_api_route("/health", _health, methods=["GET"])
 
         self._client = httpx.AsyncClient(
             transport=ASGITransport(app=_app),
             base_url="http://test-worker:8001",
-            headers=(
-                {"Authorization": f"Bearer {settings.internal_token}"}
-                if settings.internal_token is not None
-                else None
-            ),
+            headers=_internal_auth_headers(),
         )
 
     @property
@@ -236,27 +223,14 @@ class _SeatedCredentials:
 _session_catalog_service_cache: ProviderCatalogService | None = None
 
 
-class _InProcessCatalogFactory(ProviderFactory):
-    """Use production registrations without probing external provider CLIs."""
-
-    @override
-    def catalog_registrations(
-        self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
-    ) -> tuple[ProviderCatalogRegistration, ...]:
-        registrations = super().catalog_registrations(
-            workspace_root, serve_in_process_lanes=serve_in_process_lanes
-        )
-        in_process = set(
-            served_in_process_lanes(
-                armed=bool(serve_in_process_lanes),
-                mock_api_base=settings.mock_api_base,
-            )
-        )
-        return tuple(
-            registration
-            for registration in registrations
-            if registration.key in in_process
-        )
+def _in_process_only(
+    served: tuple[ProviderCatalogRegistration, ...],
+) -> tuple[ProviderCatalogRegistration, ...]:
+    """Keep production's in-process registrations, so no provider CLI is probed."""
+    in_process = {in_process_catalog_key(lane) for lane in in_process_lanes()}
+    return tuple(
+        registration for registration in served if registration.key in in_process
+    )
 
 
 def _session_catalog_service() -> ProviderCatalogService:
@@ -284,7 +258,7 @@ def _session_catalog_service() -> ProviderCatalogService:
         from ...providers.provider_catalog_service import ProviderCatalogService
 
         _session_catalog_service_cache = ProviderCatalogService(
-            factory=_InProcessCatalogFactory(),
+            factory=LaneInventoryFactory(_in_process_only),
             ttl=timedelta(hours=6),
             serve_in_process_lanes=True,
         )

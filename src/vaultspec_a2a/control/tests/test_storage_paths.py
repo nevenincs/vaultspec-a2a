@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
@@ -27,6 +27,7 @@ from pydantic import ValidationError
 from ...control.config import Settings
 from ...desktop.profile import derive_state_paths
 from ...testing import armed_environment as _environment
+from ...testing.factories import build_settings
 from ..state_layout import DEFAULT_HOME
 
 if TYPE_CHECKING:
@@ -47,15 +48,6 @@ _PATH_NAMES = (
 )
 
 
-class _SettingsEnvFileFactory(Protocol):
-    def __call__(self, *, _env_file: Path | None) -> Settings: ...
-
-
-def _settings() -> Settings:
-    """Construct with dotenv discovery disabled, typed for the type checker."""
-    return cast("_SettingsEnvFileFactory", Settings)(_env_file=None)
-
-
 @contextmanager
 def _project(root: Path, **values: str | None) -> Generator[Path]:
     """Serve ``root`` as the project, with every path setting cleared first."""
@@ -73,7 +65,7 @@ def _sqlite(path: Path) -> str:
 
 def test_the_default_home_and_stores_live_in_the_project(tmp_path: Path) -> None:
     with _project(tmp_path / "project") as root:
-        settings = _settings()
+        settings = build_settings(env_file=None)
 
     home = root / DEFAULT_HOME
     assert settings.a2a_home == home
@@ -100,9 +92,9 @@ def test_a_relative_home_resolves_against_the_project_not_the_launch_folder(
     with _project(tmp_path / "project", VAULTSPEC_A2A_HOME="state-here") as root:
         try:
             os.chdir(launch_a)
-            from_a = _settings()
+            from_a = build_settings(env_file=None)
             os.chdir(launch_b)
-            from_b = _settings()
+            from_b = build_settings(env_file=None)
         finally:
             os.chdir(prior)
 
@@ -116,7 +108,7 @@ def test_an_absolute_home_is_taken_as_is_and_carries_the_stores(
 ) -> None:
     elsewhere = tmp_path / "elsewhere"
     with _project(tmp_path / "project", VAULTSPEC_A2A_HOME=str(elsewhere)):
-        settings = _settings()
+        settings = build_settings(env_file=None)
 
     assert settings.a2a_home == elsewhere
     assert settings.database_url == _sqlite(elsewhere / "state" / "vaultspec.db")
@@ -128,7 +120,7 @@ def test_a_relative_sqlite_url_resolves_against_the_project(tmp_path: Path) -> N
         tmp_path / "project",
         VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///data/store.db",
     ) as root:
-        settings = _settings()
+        settings = build_settings(env_file=None)
 
     assert settings.database_url == _sqlite(root / "data" / "store.db")
     assert settings.checkpoint_database_url is None
@@ -142,7 +134,7 @@ def test_a_relative_checkpoint_url_resolves_against_the_project(
         tmp_path / "project",
         VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL="sqlite+aiosqlite:///cp.db",
     ) as root:
-        settings = _settings()
+        settings = build_settings(env_file=None)
 
     assert settings.checkpoint_database_url == _sqlite(root / "cp.db")
 
@@ -160,7 +152,7 @@ def test_every_other_path_setting_follows_the_same_rule(
     tmp_path: Path, name: str, field: str
 ) -> None:
     with _project(tmp_path / "project", **{name: "relative/value"}) as root:
-        settings = _settings()
+        settings = build_settings(env_file=None)
 
     assert getattr(settings, field) == root / "relative" / "value"
 
@@ -173,7 +165,7 @@ def test_an_absolute_posix_path_is_accepted_on_any_host(tmp_path: Path) -> None:
         VAULTSPEC_A2A_WORKSPACE_ROOT="/app/workspaces",
         VAULTSPEC_A2A_HOME="/app/state",
     ):
-        settings = _settings()
+        settings = build_settings(env_file=None)
 
     assert settings.database_url == "sqlite+aiosqlite:////app/data/vaultspec.db"
     assert settings.a2a_home == Path("/app/state")
@@ -187,13 +179,13 @@ def test_server_and_in_memory_urls_are_left_alone(tmp_path: Path) -> None:
         VAULTSPEC_A2A_DATABASE_BACKEND="postgres",
         VAULTSPEC_A2A_CHECKPOINT_BACKEND="postgres",
     ):
-        assert _settings().database_url == url
+        assert build_settings(env_file=None).database_url == url
 
     with _project(
         tmp_path / "project",
         VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///:memory:",
     ):
-        assert _settings().database_path == Path(":memory:")
+        assert build_settings(env_file=None).database_path == Path(":memory:")
 
 
 def test_backend_and_url_disagreement_is_refused_at_construction(
@@ -208,7 +200,7 @@ def test_backend_and_url_disagreement_is_refused_at_construction(
         ),
         pytest.raises(ValidationError, match="VAULTSPEC_A2A_DATABASE_BACKEND=postgres"),
     ):
-        _settings()
+        build_settings(env_file=None)
 
 
 def test_a_postgres_checkpoint_backend_over_a_sqlite_default_is_refused(
@@ -221,7 +213,7 @@ def test_a_postgres_checkpoint_backend_over_a_sqlite_default_is_refused(
             ValidationError, match="VAULTSPEC_A2A_CHECKPOINT_BACKEND=postgres"
         ),
     ):
-        _settings()
+        build_settings(env_file=None)
 
 
 def test_an_armed_desktop_profile_seats_everything_under_its_home(
@@ -236,7 +228,7 @@ def test_an_armed_desktop_profile_seats_everything_under_its_home(
         VAULTSPEC_A2A_DATABASE_URL="sqlite+aiosqlite:///vaultspec.db",
         VAULTSPEC_A2A_WORKSPACE_ROOT="./workspaces",
     ):
-        armed = _settings()
+        armed = build_settings(env_file=None)
 
     assert armed.a2a_home == app_home
     assert armed.database_url == _sqlite(state.database_path)
@@ -250,7 +242,7 @@ def test_a_relative_desktop_app_home_resolves_against_the_project(
     with _project(
         tmp_path / "project", VAULTSPEC_A2A_DESKTOP_APP_HOME="app-home"
     ) as root:
-        armed = _settings()
+        armed = build_settings(env_file=None)
 
     assert armed.a2a_home == root / "app-home"
     assert armed.database_path.is_relative_to(root / "app-home")
@@ -265,7 +257,7 @@ def test_the_defaults_do_not_depend_on_a_discoverable_dotenv(tmp_path: Path) -> 
         try:
             for directory in (prior, tmp_path):
                 os.chdir(directory)
-                resolved.append(_settings().database_url)
+                resolved.append(build_settings(env_file=None).database_url)
                 resolved.append(Settings().database_url)
         finally:
             os.chdir(prior)

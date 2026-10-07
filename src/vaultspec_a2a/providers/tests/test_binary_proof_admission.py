@@ -6,13 +6,14 @@ import os
 import shlex
 import sys
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage
 
 from ...graph.enums import Provider
 from ...testing import settings_override
+from ...testing.factories import LaneInventoryFactory
 from .. import factory as factory_module
 from .._catalog_discovery import ProviderCatalogDiscovery
 from ..acp_chat_model import AcpChatModel
@@ -46,40 +47,6 @@ if TYPE_CHECKING:
 _CODEX = ProviderCatalogKey("codex", "codex-app-server")
 
 
-class _CodexProofFactory(ProviderFactory):
-    def __init__(self, binary: Path) -> None:
-        super().__init__()
-        self.binary = binary
-        self.discoveries = 0
-
-    @override
-    def catalog_registrations(
-        self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
-    ) -> tuple[ProviderCatalogRegistration, ...]:
-        async def discover() -> ProviderCatalogDiscovery:
-            self.discoveries += 1
-            return ProviderCatalogDiscovery(
-                catalog=ProviderCatalog(
-                    _CODEX,
-                    CatalogState(CatalogStatus.AVAILABLE, datetime.now(UTC), "rev"),
-                    (ModelCatalogEntry("entry", "model", "Model"),),
-                ),
-                authentication=AuthenticationState.AUTHENTICATED,
-                configured=HealthState.AVAILABLE,
-                transport=HealthState.AVAILABLE,
-            )
-
-        return (
-            ProviderCatalogRegistration(
-                _CODEX,
-                discover,
-                lambda: binary_proof_reason(
-                    Provider.CODEX, str(self.binary), "service_path"
-                ),
-            ),
-        )
-
-
 @pytest.mark.asyncio
 async def test_catalog_rechecks_version_beside_cached_models(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -92,8 +59,31 @@ async def test_catalog_rechecks_version_beside_cached_models(
         return version[0]
 
     monkeypatch.setattr(factory_module, "probe_binary_version", report)
-    factory = _CodexProofFactory(tmp_path / "codex")
-    service = ProviderCatalogService(factory=factory)
+    binary = tmp_path / "codex"
+    discoveries = 0
+
+    async def discover() -> ProviderCatalogDiscovery:
+        nonlocal discoveries
+        discoveries += 1
+        return ProviderCatalogDiscovery(
+            catalog=ProviderCatalog(
+                _CODEX,
+                CatalogState(CatalogStatus.AVAILABLE, datetime.now(UTC), "rev"),
+                (ModelCatalogEntry("entry", "model", "Model"),),
+            ),
+            authentication=AuthenticationState.AUTHENTICATED,
+            configured=HealthState.AVAILABLE,
+            transport=HealthState.AVAILABLE,
+        )
+
+    codex = ProviderCatalogRegistration(
+        _CODEX,
+        discover,
+        lambda: binary_proof_reason(Provider.CODEX, str(binary), "service_path"),
+    )
+    service = ProviderCatalogService(
+        factory=LaneInventoryFactory(lambda _served: (codex,))
+    )
 
     rejected = (await service.records(str(tmp_path)))[0]
     assert rejected.health.admission is AdmissionState.NOT_ADMITTED
@@ -104,7 +94,7 @@ async def test_catalog_rechecks_version_beside_cached_models(
 
     version[0] = proof.proved_version
     admitted = (await service.records(str(tmp_path)))[0]
-    assert factory.discoveries == 1
+    assert discoveries == 1
     assert admitted.health.admission is AdmissionState.ADMITTED
     assert admitted.health.selectable is True
 

@@ -16,30 +16,14 @@ from __future__ import annotations
 import ast
 import pathlib
 import tomllib
-from typing import Protocol, cast
+from typing import cast
 
 import pytest
 from packaging.requirements import Requirement
 from pydantic import ValidationError
 
-from ...control.config import Settings
 from ...testing import armed_environment as _environment
-
-
-class _SettingsEnvFileFactory(Protocol):
-    def __call__(self, *, _env_file: pathlib.Path | None) -> Settings: ...
-
-
-def _settings() -> Settings:
-    """Construct with dotenv discovery disabled, typed for basedpyright.
-
-    ``BaseSettings.__init__`` accepts ``_env_file``, but pydantic's
-    dataclass-transform ``__init__`` synthesis for subclasses hides it from
-    static analysis; the cast recovers the real constructor signature (the
-    same pattern used in ``test_absolute_path_requirement.py``).
-    """
-    return cast("_SettingsEnvFileFactory", Settings)(_env_file=None)
-
+from ...testing.factories import build_settings
 
 _ENV_EXAMPLE = pathlib.Path(__file__).resolve().parents[3].parent / ".env.example"
 _PROJECT_ROOT = _ENV_EXAMPLE.parent
@@ -117,7 +101,7 @@ def test_an_unconvertible_url_fails_at_settings_construction() -> None:
             match="VAULTSPEC_A2A_DATABASE_URL is not a parseable SQLAlchemy URL",
         ),
     ):
-        _settings()
+        build_settings(env_file=None)
 
 
 def test_a_backend_without_a_synchronous_driver_fails_at_construction() -> None:
@@ -132,7 +116,7 @@ def test_a_backend_without_a_synchronous_driver_fails_at_construction() -> None:
         ),
         pytest.raises(ValueError, match="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL"),
     ):
-        _settings()
+        build_settings(env_file=None)
 
 
 def test_the_construction_failure_never_echoes_the_credential() -> None:
@@ -153,7 +137,7 @@ def test_the_construction_failure_never_echoes_the_credential() -> None:
         ),
         pytest.raises(ValidationError) as raised,
     ):
-        _settings()
+        build_settings(env_file=None)
 
     messages = [error["msg"] for error in raised.value.errors()]
     assert any("not a parseable SQLAlchemy URL" in message for message in messages)
@@ -202,7 +186,7 @@ def test_the_shipped_postgres_example_constructs_valid_settings() -> None:
     }, block
 
     with _environment(VAULTSPEC_A2A_DESKTOP_APP_HOME=None, **block):
-        settings = _settings()
+        settings = build_settings(env_file=None)
         assert settings.resolved_database_backend == "postgres"
         assert settings.resolved_checkpoint_backend == "postgres"
         # The LangGraph saver takes the driverless DSN form of the same URL.

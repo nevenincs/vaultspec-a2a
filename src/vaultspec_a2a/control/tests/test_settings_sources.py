@@ -14,13 +14,14 @@ import sys
 import sysconfig
 import venv
 from pathlib import Path
-from typing import Protocol, cast
+from typing import cast
 
 import pytest
 import vaultspec_core
 from vaultspec_core.config import ConfigurationError
 
 from ...testing import armed_environment
+from ...testing.factories import build_settings
 from ..config import Settings
 from ..env_registry import CREDENTIAL_VARIABLES
 from ..settings_base import (
@@ -65,12 +66,6 @@ print(
     )
 )
 """
-
-
-class _SettingsEnvFileFactory(Protocol):
-    """``Settings`` called with pydantic-settings' private ``_env_file`` argument."""
-
-    def __call__(self, *, _env_file: Path) -> Settings: ...
 
 
 def _workspace_dotenv(root: Path) -> None:
@@ -262,7 +257,7 @@ def test_a_file_the_construction_call_names_that_is_not_there_is_refused(
         armed_environment(**{PROJECT_ROOT_ENV: str(tmp_path), ENV_FILE_ENV: None}),
         pytest.raises(ConfigurationError) as refusal,
     ):
-        cast("_SettingsEnvFileFactory", Settings)(_env_file=absent)
+        build_settings(env_file=absent)
     assert str(absent) in str(refusal.value)
 
 

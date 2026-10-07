@@ -30,9 +30,8 @@ from ...authoring import AuthoringClient, AuthoringResponse, Denial, mint_actor_
 from ...control.config import setting_env, settings
 from ...control.run_start_policy import required_role_ids
 from ...team.team_config import load_team_config
-from ...thread.enums import TERMINAL_STATUS_VALUES
+from ...testing import ok_body, wait_for_run_status
 from ._harness import certified_gateway
-from .conftest import wait_for_run_status
 
 if TYPE_CHECKING:
     from ...authoring.discovery import EngineEndpoint
@@ -436,10 +435,9 @@ async def _run_completion(tmp_path: Path, plan: _CompletionPlan) -> _ReviewBundl
             )
             terminal = await asyncio.to_thread(
                 wait_for_run_status,
-                gateway,
-                plan.run_id,
-                lambda body: body.get("status") in TERMINAL_STATUS_VALUES,
+                lambda: ok_body(gateway.status(plan.run_id)),
                 timeout=180.0,
+                label=f"run {plan.run_id}",
             )
             assert terminal["status"] == "completed", terminal
             history = _read_completion_history(gateway, plan.run_id)

@@ -16,9 +16,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 from ..control.accepted_input import AcceptedActionInput, restore_accepted_dispatch
+from ..testing import wait_for_run_status
 from ..testing.tests._support.payloads import json_object, json_object_list
 from ..thread.action_receipts import GraphActionReceipt
-from ._state import wait_for_state
+from ._state import thread_state
 from .harness import build_service_stack
 from .test_stream_followup import _read_sse_frames
 
@@ -205,8 +206,9 @@ def _assert_queued_turn_runs_after_a_live_turn_with_one_terminal(
         assert full.status_code == 409, full.text
         assert full.json()["detail"]["code"] == "queue_full"
 
-    completed = wait_for_state(
-        stack, run_id, lambda state: state.get("status") == "completed"
+    completed = wait_for_run_status(
+        lambda: thread_state(stack, run_id),
+        lambda state: state.get("status") == "completed",
     )
     assert completed["status"] == "completed"
     assert completed["repair_status"] != "needs_reconciliation"
@@ -284,9 +286,8 @@ def _assert_admission_at_the_worker_completion_boundary_has_one_outcome(
     else:
         assert admission.json()["detail"]["code"] == "terminal"
 
-    completed = wait_for_state(
-        stack,
-        run_id,
+    completed = wait_for_run_status(
+        lambda: thread_state(stack, run_id),
         lambda state: state.get("status") == "completed",
         timeout=180.0,
     )
@@ -347,8 +348,10 @@ def _assert_busy_worker_retains_the_accepted_run(stack: ServiceStack) -> None:
     finally:
         stack.resume_mock_service()
 
-    completed = wait_for_state(
-        stack, run_id, lambda state: state.get("status") == "completed", timeout=180.0
+    completed = wait_for_run_status(
+        lambda: thread_state(stack, run_id),
+        lambda state: state.get("status") == "completed",
+        timeout=180.0,
     )
     assert completed["repair_status"] != "needs_reconciliation"
     users = [
@@ -406,9 +409,8 @@ def test_gateway_restart_promotes_queued_turn_once(
     ) == ("queued", None)
     service_stack.restart_gateway()
 
-    completed = wait_for_state(
-        service_stack,
-        run_id,
+    completed = wait_for_run_status(
+        lambda: thread_state(service_stack, run_id),
         lambda state: state.get("status") == "completed",
         timeout=180.0,
     )
@@ -463,8 +465,10 @@ def test_postgres_gateway_restart_promotes_queued_turn_once(
     )
     stack.restart_gateway()
 
-    completed = wait_for_state(
-        stack, run_id, lambda state: state.get("status") == "completed", timeout=180.0
+    completed = wait_for_run_status(
+        lambda: thread_state(stack, run_id),
+        lambda state: state.get("status") == "completed",
+        timeout=180.0,
     )
     assert completed["repair_status"] != "needs_reconciliation"
     users = [

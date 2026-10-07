@@ -7,13 +7,14 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+from ..testing import wait_for_run_status
 from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
 )
-from ._state import select_option_id, thread_state, wait_for_state
+from ._state import select_option_id, thread_state
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -100,7 +101,11 @@ def _wait_for_pending_permission(
             and state.get("snapshot_complete") is True
         )
 
-    return wait_for_state(stack, thread_id, _is_resumable_permission, timeout=timeout)
+    return wait_for_run_status(
+        lambda: thread_state(stack, thread_id),
+        _is_resumable_permission,
+        timeout=timeout,
+    )
 
 
 def _trigger_after(
@@ -185,10 +190,8 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     assert any(event.get("status") == "completed" for event in initial_events)
     service_stack.record(f"sse-initial:{thread_id}", initial_events)
 
-    completed = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed_state,
+    completed = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed_state
     )
     service_stack.record(f"sse-completed:{thread_id}", completed)
     assistant_messages = [

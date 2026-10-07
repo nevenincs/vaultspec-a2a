@@ -7,13 +7,14 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
+from ..testing import wait_for_run_status
 from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
 )
-from ._state import wait_for_state
+from ._state import thread_state
 
 if TYPE_CHECKING:
     from ..providers._json_contract import JsonObject
@@ -106,11 +107,8 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
         json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
-    active = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_active,
-        timeout=30.0,
+    active = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_active, timeout=30.0
     )
     service_stack.record(f"cancel-active:{thread_id}", active)
 
@@ -120,10 +118,8 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
     assert required_bool(cancelling, "cancelled", at="cancel response") is True
     assert required_text(cancelling, "status", at="cancel response") == "cancelling"
 
-    cancelled = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_cancelled,
+    cancelled = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_cancelled
     )
     service_stack.record(f"cancelled-state:{thread_id}", cancelled)
 
@@ -155,11 +151,8 @@ def test_health_and_trace_surface_are_observable(
     thread_id = required_text(
         json_object(created, at="created thread"), "run_id", at="created thread"
     )
-    traced_thread = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed,
-        timeout=60.0,
+    traced_thread = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed, timeout=60.0
     )
     service_stack.record(f"trace-probe:{thread_id}", traced_thread)
 

@@ -2,7 +2,7 @@
 
 Extracts the 95-line orchestration from the ``/threads/{id}/state``
 endpoint into a testable, protocol-agnostic function.  The route
-handler validates input and converts the result to a Pydantic wire model.
+handler validates input and serves the result.
 """
 
 from __future__ import annotations
@@ -425,10 +425,8 @@ async def capture_thread_state(
         return None
     snapshot = ThreadStateData(
         thread_id=thread_id,
-        status=thread.status,
+        status=ThreadStatus(thread.status),
         last_sequence=await _served_last_sequence(db, thread, aggregator),
-        approval_status=thread.approval_status,
-        approval_request_id=thread.approval_request_id,
         failure_reason=thread.failure_reason,
         provider_condition=thread.provider_condition,
         repair_reason=thread.repair_reason,

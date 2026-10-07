@@ -3,40 +3,50 @@
 Layer 1 module — no imports from ``api/`` or ``control/``.  Infrastructure
 services in ``control/`` construct these types and delegate classification
 to the pure functions defined here.
+
+The read-model dataclasses are also the wire declaration: the api edge validates
+and serves them directly, so their annotations are evaluated eagerly (this
+module deliberately omits ``from __future__ import annotations``) and their
+wire bounds ride along as ``Annotated`` metadata.
 """
 
-from __future__ import annotations
-
 import contextlib
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import Annotated, Any, Literal, cast
 
+from annotated_types import Ge, MaxLen, MinLen
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.base import WRITES_IDX_MAP
 from langgraph.checkpoint.serde.types import INTERRUPT
 
 from ..graph.enums import (
     AgentLifecycleState,
+    PermissionOptionKind,
     PermissionType,
     Provider,
     StreamFrameKind,
+    ToolCallStatus,
+    ToolKind,
 )
 from .action_receipts import sha256_hex
+from .clarification import ClarificationRequest
 from .enums import (
     TERMINAL_STATUS_VALUES,
+    ApprovalStatus,
     DegradedReason,
     InterruptType,
+    RepairStatus,
+    ThreadStatus,
 )
 from .models import PlanEntry
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
-
-    from .clarification import ClarificationRequest
-
 __all__ = [
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
+    "MAX_REPAIR_REASON_CHARS",
+    "MODEL_ASSIGNMENT_DIGEST_CHARS",
+    "MODEL_ASSIGNMENT_DIGEST_PATTERN",
     "PERMISSION_REQUEST_EVENT_TYPES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "AgentData",
@@ -46,11 +56,19 @@ __all__ = [
     "ExecutionTaskData",
     "LiveInterrupt",
     "MessageData",
+    "ModelAssignmentDigest",
     "PermissionData",
     "PermissionOptionData",
     "ProjectedInterrupt",
+    "QueuedMessageCount",
+    "RepairReason",
     "ThreadStateData",
+    "ToolCallContent",
+    "ToolCallContentDiff",
+    "ToolCallContentTerminal",
+    "ToolCallContentText",
     "ToolCallData",
+    "ToolCallLocation",
     "build_agent_descriptor",
     "classify_message_role",
     "classify_permission_pause_reason",
@@ -229,8 +247,7 @@ class LiveInterrupt:
 
 
 @dataclass(slots=True)
-# Flat projection matches the durable checkpoint read model.
-class CheckpointProjection:  # pylint: disable=too-many-instance-attributes
+class CheckpointProjection:
     """Gateway-side normalized checkpoint projection."""
 
     channel_values: dict[str, Any]
@@ -254,51 +271,104 @@ class CheckpointProjection:  # pylint: disable=too-many-instance-attributes
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
 
 
-@dataclass(slots=True)
-# Flat projection matches the execution-state response model.
-class ExecutionStateProjection:  # pylint: disable=too-many-instance-attributes
-    """Normalized durable execution-state read model."""
-
-    task_count: int
-    interrupt_count: int
-    next_nodes: list[str] = field(default_factory=list)
-    execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
-    degraded_reasons: list[DegradedReason] = field(default_factory=list)
-
-
 # ---------------------------------------------------------------------------
-# Layer 1 snapshot dataclasses mirroring api/schemas/snapshots Pydantic
+# Run read model: the one declaration the api edge validates and serves
 # ---------------------------------------------------------------------------
 
+#: Longest repair reason a run discloses.
+MAX_REPAIR_REASON_CHARS: int = 500
 
-@dataclass(slots=True)
+#: Length of the model-assignment digest a run discloses: the bare hex SHA-256
+#: the checkpoint-binding digest is computed with.
+MODEL_ASSIGNMENT_DIGEST_CHARS: int = len(sha256_hex(b""))
+
+#: The spelling of that digest. Carried as dataclass field metadata rather than
+#: ``Annotated``, which has no vocabulary for a pattern.
+MODEL_ASSIGNMENT_DIGEST_PATTERN: str = rf"^[a-f0-9]{{{MODEL_ASSIGNMENT_DIGEST_CHARS}}}$"
+
+#: The digest binding a run's checkpoints to the model assignment they ran under.
+ModelAssignmentDigest = Annotated[
+    str,
+    MinLen(MODEL_ASSIGNMENT_DIGEST_CHARS),
+    MaxLen(MODEL_ASSIGNMENT_DIGEST_CHARS),
+]
+
+#: A follow-up turn count: never negative.
+QueuedMessageCount = Annotated[int, Ge(0)]
+
+#: Why an operation did not take on a run that is still alive, capped so the
+#: disclosure stays a sentence rather than a log.
+RepairReason = Annotated[str, MaxLen(MAX_REPAIR_REASON_CHARS)]
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallLocation:
+    """File location associated with a tool call."""
+
+    path: str
+    line: int | None = None
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallContentText:
+    """Plain text content block within a tool call."""
+
+    content_type: Literal["text"] = "text"
+    text: str
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallContentDiff:
+    """Diff content block within a tool call."""
+
+    content_type: Literal["diff"] = "diff"
+    path: str
+    old_text: str | None = None
+    new_text: str
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallContentTerminal:
+    """Terminal output content block within a tool call."""
+
+    content_type: Literal["terminal"] = "terminal"
+    terminal_id: str
+
+
+#: The tool-call content blocks, told apart by their ``content_type`` literal.
+ToolCallContent = ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal
+
+
+# Keyword-only so a field with no default can follow one that has one: fields
+# are declared in the order they are served.
+@dataclass(slots=True, kw_only=True)
 class MessageData:
-    """Layer 1 equivalent of ``MessageSnapshot``."""
+    """Fully materialized message in a thread replay."""
 
     message_id: str
     role: str
     content: str
+    agent_id: str | None = None
     # None when the message carries no production time: an older run's
     # history, recorded before messages were stamped.
     timestamp: datetime | None
-    agent_id: str | None = None
 
 
 @dataclass(slots=True)
 class ToolCallData:
-    """Layer 1 equivalent of ``ToolCallSnapshot``."""
+    """Fully materialized tool call (all incremental updates merged)."""
 
     tool_call_id: str
     title: str
-    kind: str
-    status: str
-    locations: list[Any] = field(default_factory=list)
-    content: list[Any] = field(default_factory=list)
+    kind: ToolKind
+    status: ToolCallStatus
+    locations: list[ToolCallLocation] = field(default_factory=list)
+    content: list[ToolCallContent] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class ArtifactData:
-    """Layer 1 equivalent of ``ArtifactSnapshot``."""
+    """Fully materialized file artifact."""
 
     artifact_id: str
     filename: str
@@ -308,27 +378,26 @@ class ArtifactData:
 
 @dataclass(slots=True)
 class PermissionOptionData:
-    """Layer 1 equivalent of ``PermissionOptionSnapshot``."""
+    """Permission option within a snapshot."""
 
     option_id: str
     name: str
-    kind: str
+    kind: PermissionOptionKind
 
 
 @dataclass(slots=True)
 class PermissionData:
-    """Layer 1 equivalent of ``PermissionSnapshot``."""
+    """Outstanding permission request in a state snapshot."""
 
     request_id: str
     description: str
-    options: list[PermissionOptionData] = field(default_factory=list)
+    options: list[PermissionOptionData]
     tool_call: str | None = None
-    tool_kind: str | None = None
+    tool_kind: ToolKind | None = None
 
 
 @dataclass(slots=True)
-# Flat data mirrors the public agent snapshot schema.
-class AgentData:  # pylint: disable=too-many-instance-attributes
+class AgentData:
     """Canonical agent descriptor.
 
     Single declaration behind every agent-shaped surface: the REST team-status
@@ -353,9 +422,12 @@ class AgentData:  # pylint: disable=too-many-instance-attributes
 
 
 @dataclass(slots=True)
-# Flat data mirrors the public task snapshot schema.
-class ExecutionTaskData:  # pylint: disable=too-many-instance-attributes
-    """Layer 1 equivalent of ``ExecutionTaskSnapshot``."""
+class ExecutionTaskData:
+    """Normalized execution task used in reconnect snapshots.
+
+    The one declaration of an execution task: the worker emits it across the
+    gateway-worker wire, the gateway persists it, and the snapshot serves it.
+    """
 
     task_id: str
     name: str
@@ -369,13 +441,31 @@ class ExecutionTaskData:  # pylint: disable=too-many-instance-attributes
 
 
 @dataclass(slots=True)
-# Flat data mirrors the public thread snapshot schema.
-class ThreadStateData:  # pylint: disable=too-many-instance-attributes
-    """Layer 1 equivalent of ``ThreadStateSnapshot``."""
+class ExecutionStateProjection:
+    """Normalized durable execution-state read model."""
+
+    task_count: int
+    interrupt_count: int
+    next_nodes: list[str] = field(default_factory=list)
+    execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = field(default_factory=list)
+
+
+@dataclass(slots=True, kw_only=True)
+class ThreadStateData:
+    """Complete thread state for reattaching to a run's event stream.
+
+    The client fetches this via REST, notes ``last_sequence``, then discards any
+    streamed frame with ``sequence <= last_sequence``.
+
+    This is the run read model's single declaration: the api edge validates and
+    serves it directly, so a field added here reaches run-history with no
+    second declaration to keep in step. Fields are keyword-only and declared in
+    the order they are served.
+    """
 
     thread_id: str
-    status: str
-    last_sequence: int
+    status: ThreadStatus
     messages: list[MessageData] = field(default_factory=list)
     tool_calls: list[ToolCallData] = field(default_factory=list)
     pending_permissions: list[PermissionData] = field(default_factory=list)
@@ -386,16 +476,39 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
     artifacts: list[ArtifactData] = field(default_factory=list)
     plan: list[PlanEntry] = field(default_factory=list)
     agents: list[AgentData] = field(default_factory=list)
-    model_assignment_digest: str | None = None
+    model_assignment_digest: ModelAssignmentDigest | None = field(
+        default=None, metadata={"pattern": MODEL_ASSIGNMENT_DIGEST_PATTERN}
+    )
+    last_sequence: int
     checkpoint_id: str | None = None
     checkpoint_created_at: datetime | None = None
-    checkpoint_parent_id: str | None = None
+    checkpoint_parent_id: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "The parent the current checkpoint records. It may name a "
+                "checkpoint that no longer exists: once a run settles, its "
+                "superseded history is pruned and only this reference to it "
+                "remains. Do not read it as a checkpoint that can be fetched."
+            )
+        },
+    )
     checkpoint_source: str | None = None
     checkpoint_step: int | None = None
     checkpoint_updated_channels: list[str] = field(default_factory=list)
     pending_write_channels: list[str] = field(default_factory=list)
     pending_write_count: int = 0
-    history_depth: int | None = None
+    history_depth: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "How deep the current checkpoint's recorded ancestry goes: 2 when "
+                "it names a parent, 1 when it is the first of its thread, null "
+                "when no checkpoint was read. Recorded ancestry, not stored rows - "
+                "a settled run's history is pruned and its depth does not fall."
+            )
+        },
+    )
     next_nodes: list[str] = field(default_factory=list)
     task_count: int = 0
     pending_interrupt_count: int = 0
@@ -403,10 +516,10 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
     snapshot_complete: bool = True
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
     replay_status: str = "unknown"
-    repair_status: str | None = None
-    execution_readiness: str | None = None
+    repair_status: RepairStatus | None = None
+    execution_readiness: RepairStatus | None = None
     pause_cause: str | None = None
-    approval_status: str | None = None
+    approval_status: ApprovalStatus | None = None
     approval_request_id: str | None = None
     # The capped, single-line reason this run last failed, or None (never
     # failed, or the durable record predates the failure_reason column).
@@ -425,13 +538,13 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
     # writers decline to set the two fields above precisely because the run
     # survives, so this is the only channel their account has, and a client that
     # rendered it as a failure would report a death that did not happen.
-    repair_reason: str | None = None
+    repair_reason: RepairReason | None = None
     # How many follow-up turns this run is holding behind the one it is
     # running. Counted from the durable journal, never from a stream: a client
     # that reloaded without one has no other way to learn that a turn it sent
     # is still waiting, and the quiet boundary between two turns looks exactly
     # like a run that has gone idle. Bounded by the configured per-run depth.
-    queued_messages: int = 0
+    queued_messages: QueuedMessageCount = 0
 
 
 # ---------------------------------------------------------------------------
@@ -444,10 +557,12 @@ def record_repair_posture(snapshot: ThreadStateData, posture: str | None) -> Non
 
     Readiness is never judged on its own: a run is as fit to resume as its
     repair posture says, so every write of the posture writes the served
-    readiness with it and the two cannot disagree.
+    readiness with it and the two cannot disagree. A posture outside the closed
+    vocabulary raises, so an unrecognised string never reaches a served field.
     """
-    snapshot.repair_status = posture
-    snapshot.execution_readiness = posture
+    resolved = None if posture is None else RepairStatus(posture)
+    snapshot.repair_status = resolved
+    snapshot.execution_readiness = resolved
 
 
 def coerce_provider(value: object) -> Provider | None:

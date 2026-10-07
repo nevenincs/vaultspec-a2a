@@ -80,7 +80,7 @@ from ...thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
-from .snapshots import ThreadStateSnapshot
+from ...thread.snapshots import QueuedMessageCount, RepairReason, ThreadStateData
 
 __all__ = [
     "ActiveRunRecord",
@@ -542,7 +542,7 @@ class RunStatusResponse(BaseModel):
     # turns is indistinguishable from a run that has gone idle. Bounded by the
     # configured per-run continuation depth, so it is a small count and never
     # a list. Zero for every run that holds nothing, which is most of them.
-    queued_messages: int = Field(default=0, ge=0)
+    queued_messages: QueuedMessageCount = 0
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     degraded_reasons: list[DegradedReason] = Field(default_factory=list)
@@ -579,7 +579,7 @@ class RunStatusResponse(BaseModel):
     # undelivered clarification resume - deliberately decline to stamp
     # failure_reason precisely BECAUSE the run survives. Without this field that
     # account reached no client at all: durable, and readable by nobody.
-    repair_reason: str | None = Field(default=None, max_length=500)
+    repair_reason: RepairReason | None = None
     frozen_assignment: FrozenTeamAssignmentSummary | None = None
     # Non-secret staged-admission lease identity. It lets the dashboard repair
     # a locally reserved hash bundle after a process crash that followed remote
@@ -656,7 +656,7 @@ class RunHistoryResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     run_id: PathSafeRunId
-    state: ThreadStateSnapshot
+    state: ThreadStateData
     metadata: ThreadMetadata | None = None
     transcript_available: bool
     transcript_status: TranscriptAvailability

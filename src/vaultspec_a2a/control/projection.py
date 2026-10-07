@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 from ..graph.acp_options import option_id_of, option_kind
 from ..graph.enums import PermissionType
-from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
 from ..thread.clarification import pending_clarification
 from ..thread.enums import (
@@ -61,8 +60,6 @@ __all__ = [
     "durable_approval",
     "enrich_snapshot_from_durable_state",
     "enrich_snapshot_from_execution_state",
-    "escalate_repair_posture",
-    "execution_state_is_stale",
     "finalize_snapshot_replay_status",
     "mark_degraded",
     "project_execution_state_model",
@@ -70,10 +67,11 @@ __all__ = [
 ]
 
 _JSON_LIST_ADAPTER = TypeAdapter(list[object])
+_EXECUTION_TASK_ADAPTER = TypeAdapter(ExecutionTaskData)
 
 #: How far each degraded repair posture holds a run back. The postures absent
 #: here (healthy, paused, cancel pending) demand nothing and yield to all of them.
-_REPAIR_SEVERITY: dict[str, int] = {
+_REPAIR_SEVERITY: dict[RepairStatus, int] = {
     RepairStatus.REPLAY_GAP: 1,
     RepairStatus.NEEDS_RECONCILIATION: 2,
     RepairStatus.CHECKPOINT_UNAVAILABLE: 3,
@@ -97,7 +95,9 @@ def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
         raise ValueError(msg) from exc
 
 
-def escalate_repair_posture(current: str | None, demanded: RepairStatus) -> str:
+def escalate_repair_posture(
+    current: RepairStatus | None, demanded: RepairStatus
+) -> RepairStatus:
     """Apply a demanded repair posture to *current*, fail-closed.
 
     The posture moves to *demanded* unless it already demands at least as much,
@@ -106,7 +106,7 @@ def escalate_repair_posture(current: str | None, demanded: RepairStatus) -> str:
     """
     demanded_severity = _REPAIR_SEVERITY.get(demanded, 0)
     if current is None or _REPAIR_SEVERITY.get(current, 0) < demanded_severity:
-        return demanded.value
+        return demanded
     return current
 
 
@@ -313,7 +313,7 @@ def _permission_data_from_pending(
             PermissionOptionData(
                 option_id=option_id_of(option) or "",
                 name=str(option.get("name", "")),
-                kind=str(option_kind(option)),
+                kind=option_kind(option),
             )
         )
     return PermissionData(
@@ -321,7 +321,7 @@ def _permission_data_from_pending(
         description=permission.description,
         options=options,
         tool_call=tool_call,
-        tool_kind=str(classify_tool_kind(tool_call)) if tool_call else None,
+        tool_kind=classify_tool_kind(tool_call) if tool_call else None,
     )
 
 
@@ -419,24 +419,13 @@ def project_execution_state_model(
         if task_data is None:
             continue
         try:
-            persisted_task = ExecutionTaskProjectionPayload.model_validate(
-                {"task_id": "", "name": "", **task_data}
+            execution_tasks.append(
+                _EXECUTION_TASK_ADAPTER.validate_python(
+                    {"task_id": "", "name": "", **task_data}
+                )
             )
         except ValidationError:
             continue
-        execution_tasks.append(
-            ExecutionTaskData(
-                task_id=persisted_task.task_id,
-                name=persisted_task.name,
-                path=persisted_task.path,
-                has_error=persisted_task.has_error,
-                error_type=persisted_task.error_type,
-                interrupt_ids=persisted_task.interrupt_ids,
-                interrupt_types=persisted_task.interrupt_types,
-                has_nested_state=persisted_task.has_nested_state,
-                has_result=persisted_task.has_result,
-            )
-        )
     # A reason outside the vocabulary makes the row unreadable here, at the
     # trust boundary, rather than failing the narrowed field it would reach.
     degraded_reasons = [
@@ -521,7 +510,8 @@ async def enrich_snapshot_from_durable_state(
 ) -> ThreadStateData:
     """Merge durable gateway-owned state into a reconnect snapshot."""
     record_repair_posture(snapshot, thread.repair_status)
-    snapshot.approval_status = thread.approval_status
+    approval = thread.approval_status
+    snapshot.approval_status = None if approval is None else ApprovalStatus(approval)
     snapshot.approval_request_id = thread.approval_request_id
     # Read before the terminal branch below returns, so a settled run reports
     # the truth rather than inheriting the default: a run that ends with

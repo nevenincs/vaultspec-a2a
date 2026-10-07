@@ -32,13 +32,13 @@ from ..thread.constants import (
 )
 from ..thread.enums import ControlActionType, DegradedReason
 from ..thread.executable_graph import FrozenGraphDefinition
+from ..thread.snapshots import ExecutionTaskData
 
 __all__ = [
     "DispatchApplicationReceiptPayload",
     "DispatchRequest",
     "DispatchResponse",
     "ExecutionStateProjectionPayload",
-    "ExecutionTaskProjectionPayload",
     "HeartbeatRequest",
     "WorkerEventBatch",
     "WorkerEventEnvelope",
@@ -282,20 +282,6 @@ class DispatchApplicationReceiptPayload(BaseModel):
     checkpoint_id: str = Field(min_length=1, max_length=128)
 
 
-class ExecutionTaskProjectionPayload(BaseModel):
-    """Normalized task summary emitted internally by the worker."""
-
-    task_id: str
-    name: str
-    path: list[str] = Field(default_factory=list)
-    has_error: bool = False
-    error_type: str | None = None
-    interrupt_ids: list[str] = Field(default_factory=list)
-    interrupt_types: list[str] = Field(default_factory=list)
-    has_nested_state: bool = False
-    has_result: bool = False
-
-
 class ExecutionStateProjectionPayload(BaseModel):
     """Normalized execution-state snapshot emitted by the worker."""
 
@@ -307,7 +293,7 @@ class ExecutionStateProjectionPayload(BaseModel):
     interrupt_types: list[str] = Field(default_factory=list)
     interrupt_count: int = 0
     task_count: int = 0
-    tasks: list[ExecutionTaskProjectionPayload] = Field(default_factory=list)
+    tasks: list[ExecutionTaskData] = Field(default_factory=list)
     degraded_reasons: list[DegradedReason] = Field(default_factory=list)
 
 

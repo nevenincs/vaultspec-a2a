@@ -13,7 +13,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control._worker_health import worker_liveness
@@ -50,6 +50,7 @@ from ...thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
+from ...thread.snapshots import ThreadStateData
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import run_stream_resumability
 from ..dependencies import (
@@ -73,7 +74,6 @@ from ..schemas.gateway import (
     TeamStatusV1Response,
     TopologyPosition,
 )
-from ..schemas.snapshots import ThreadStateSnapshot
 from ..thread_stream import (
     ThreadStreamRequest,
     build_thread_stream_response,
@@ -89,6 +89,12 @@ from .gateway import (
 )
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
+
+# The run-history state is the Layer-1 snapshot itself. The projection steps
+# assemble it from durable strings and live dicts, so it is validated on its way
+# out: enums resolve, nested blocks take their declared shape, and the declared
+# bounds hold, whatever a step assigned.
+_THREAD_STATE_ADAPTER = TypeAdapter(ThreadStateData)
 
 
 class _ActiveRunsOptions(BaseModel):
@@ -106,7 +112,7 @@ class _ActiveRunsOptions(BaseModel):
     offset: int = Query(default=0, ge=0)
 
 
-__all__ = ["_active_role", "snapshot_to_wire"]
+__all__ = ["_active_role"]
 
 # ---------------------------------------------------------------------------
 # active-run discovery
@@ -276,7 +282,7 @@ async def run_status_endpoint(
         continues_run_id=(
             provenance.continues_run_id if provenance is not None else None
         ),
-        status=ThreadStatus(snapshot.status),
+        status=snapshot.status,
         semantic_phase=semantic_phase,
         feature_tag=semantic.feature_tag,
         authoring_session_id=semantic.authoring_session_id,
@@ -296,7 +302,7 @@ async def run_status_endpoint(
         ],
         proposal_ids=capture.proposal_ids,
         changeset_ids=capture.changeset_ids,
-        approval_status=_optional_enum(ApprovalStatus, snapshot.approval_status),
+        approval_status=snapshot.approval_status,
         approval_request_id=snapshot.approval_request_id,
         checkpoint_id=snapshot.checkpoint_id,
         last_sequence=snapshot.last_sequence,
@@ -309,8 +315,8 @@ async def run_status_endpoint(
         # ended with a continuation waiting is RUNNING with a quiet stream,
         # and this is the only field that distinguishes that from idle.
         queued_messages=snapshot.queued_messages,
-        repair_status=_optional_enum(RepairStatus, snapshot.repair_status),
-        execution_readiness=_optional_enum(RepairStatus, snapshot.execution_readiness),
+        repair_status=snapshot.repair_status,
+        execution_readiness=snapshot.execution_readiness,
         degraded_reasons=snapshot.degraded_reasons,
         failure_reason=snapshot.failure_reason,
         # Named explicitly beside the reason because this response is built with
@@ -430,17 +436,6 @@ _TRANSCRIPT_FAULTS: frozenset[TranscriptAvailability] = frozenset(
 )
 
 
-def snapshot_to_wire(data: Any) -> ThreadStateSnapshot:
-    """Project the domain run-state snapshot onto its wire model.
-
-    Named rather than inlined so the conversion has a single production seam a
-    parity test can drive directly. A field added to the domain snapshot but
-    absent from the wire model is dropped silently here, which is exactly the
-    kind of loss a test that re-derives the conversion cannot catch.
-    """
-    return ThreadStateSnapshot.model_validate(asdict(data))
-
-
 @router.get("/runs/{run_id}/history", response_model=RunHistoryResponse)
 async def run_history_endpoint(
     run_id: PathSafeRunId,
@@ -500,7 +495,7 @@ async def run_history_endpoint(
 
     return RunHistoryResponse(
         run_id=run_id,
-        state=snapshot_to_wire(snapshot),
+        state=_THREAD_STATE_ADAPTER.validate_python(asdict(snapshot)),
         metadata=capture.metadata.provenance,
         transcript_available=capture.transcript is TranscriptAvailability.AVAILABLE,
         transcript_status=capture.transcript,

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import time
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ...control.config import settings
-from ...testing import settings_override
+from ...testing import JsonReplyHandler, serve_handler, settings_override
 from ..discovery import EngineEndpoint, resolve_engine
 from ._engine_peer import (
     TEST_BEARER,
@@ -92,14 +92,13 @@ def test_retry_resolves_after_a_transient_stall_window(
     healthy engine. The retry variant polls across the window and succeeds;
     the one-shot ``resolve_engine`` against the same stalling listener misses.
     """
-    import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     from ..discovery import resolve_engine_with_retry
 
     hits = {"count": 0}
 
-    class _StallingHealth(BaseHTTPRequestHandler):
+    class _StallingHealth(JsonReplyHandler, BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             assert isinstance(self.server, ThreadingHTTPServer)
             hits["count"] += 1
@@ -114,16 +113,9 @@ def test_retry_resolves_after_a_transient_stall_window(
             )
             self.end_headers()
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _StallingHealth)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_handler(_StallingHealth) as port:
         service_json = secure_engine_dir / "service.json"
-        write_engine_record(service_json, server.server_port)
+        write_engine_record(service_json, port)
         set_service_json(service_json)
 
         # The one-shot probe lands in the stall window and misses this
@@ -139,10 +131,6 @@ def test_retry_resolves_after_a_transient_stall_window(
         assert isinstance(endpoint, EngineEndpoint)
         assert endpoint.bearer_token == TEST_BEARER
         assert hits["count"] == 3  # two stalled probes, third succeeded
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
 
 
 def test_retry_returns_none_when_the_engine_stays_unreachable(

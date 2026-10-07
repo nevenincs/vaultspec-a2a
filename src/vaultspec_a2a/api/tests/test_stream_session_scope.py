@@ -16,8 +16,9 @@ import httpx
 import pytest
 
 from ...streaming.aggregator import EventAggregator
+from ...testing import serve_on_loopback
 from .conftest import make_app
-from .test_gateway_live import _live_server, _seed_live_thread
+from .test_gateway_live import _seed_live_thread
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -77,7 +78,7 @@ async def test_attached_viewers_hold_no_pooled_connection(
     assert isinstance(pool, _CheckedOutPool)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         streams = [
@@ -142,7 +143,7 @@ async def test_a_resuming_viewer_hands_its_replay_connection_back(
     assert isinstance(pool, _CheckedOutPool)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         relayed = await client.post(

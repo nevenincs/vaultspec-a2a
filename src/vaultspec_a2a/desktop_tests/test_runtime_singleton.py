@@ -17,10 +17,6 @@ expected failure is used; children are always torn down in a ``finally``.
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
-import time
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from ..lifecycle.discovery import (
@@ -32,18 +28,11 @@ from ..lifecycle.singleton import (
     SingletonState,
     classify_app_home,
 )
+from ..testing import SignalledChild, spawn_signalled
+from ..testing.ports import free_port
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-class _GatewayHandle(TypedDict):
-    """Signal files and process handle for a spawned gateway child."""
-
-    proc: subprocess.Popen[bytes]
-    ready: Path
-    stop: Path
-    outcome: Path
 
 
 class _ReadyPayload(TypedDict):
@@ -62,7 +51,7 @@ import sys, os, json
 from pathlib import Path
 from vaultspec_a2a.lifecycle.singleton import acquire_singleton, SingletonConflictError
 from vaultspec_a2a.lifecycle.discovery import write_desktop_discovery, service_json_path
-app_home, owner, port, ready, stop, outcome = (
+app_home, owner, port, outcome, ready, stop = (
     Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]),
     Path(sys.argv[4]), Path(sys.argv[5]), Path(sys.argv[6]),
 )
@@ -86,67 +75,43 @@ finally:
 
 def _spawn_gateway(
     tmp_path: Path, app_home: Path, owner: str, port: int, tag: str
-) -> _GatewayHandle:
-    """Spawn a gateway child and return handles plus its signal files."""
-    ready = tmp_path / f"{tag}.ready"
-    stop = tmp_path / f"{tag}.stop"
+) -> tuple[SignalledChild, Path]:
+    """Spawn a gateway child; return it and the file it records a conflict in."""
     outcome = tmp_path / f"{tag}.outcome"
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            _GATEWAY,
-            str(app_home),
-            owner,
-            str(port),
-            str(ready),
-            str(stop),
-            str(outcome),
-        ],
-        env=os.environ.copy(),
+    child = spawn_signalled(
+        _GATEWAY,
+        str(app_home),
+        owner,
+        str(port),
+        str(outcome),
+        signal_dir=tmp_path,
+        tag=tag,
     )
-    return {"proc": proc, "ready": ready, "stop": stop, "outcome": outcome}
-
-
-def _await(path: Path, *, timeout: float = 25.0) -> str:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.exists():
-            text = path.read_text()
-            if text:
-                return text
-        time.sleep(0.05)
-    raise AssertionError(f"timed out waiting for {path}")
-
-
-def _stop(handle: _GatewayHandle, *, timeout: float = 25.0) -> int:
-    handle["stop"].touch()
-    try:
-        return handle["proc"].wait(timeout=timeout)
-    except subprocess.TimeoutExpired:  # pragma: no cover - defensive teardown
-        handle["proc"].kill()
-        return handle["proc"].wait(timeout=timeout)
+    return child, outcome
 
 
 def test_second_gateway_cannot_own_or_overwrite_the_home(tmp_path: Path) -> None:
     """A second gateway fails loud and leaves the first's discovery record intact."""
     app_home = tmp_path / "app"
-    first = _spawn_gateway(tmp_path, app_home, "owner-a", 8300, "first")
+    port = free_port()
+    first, _first_outcome = _spawn_gateway(tmp_path, app_home, "owner-a", port, "first")
     try:
-        first_ready = cast("_ReadyPayload", json.loads(_await(first["ready"])))
+        first_ready = cast("_ReadyPayload", json.loads(first.payload()))
         # Certify via the published record's process identity, not the launch pid.
         record_before = classify_desktop_discovery(service_json_path(app_home))[1]
         assert record_before is not None
         assert record_before.pid == first_ready["pid"]
-        assert record_before.port == 8300
+        assert record_before.port == port
         assert record_before.owner == "owner-a"
         assert classify_app_home(app_home, owner="owner-a")[0] is SingletonState.HELD
 
         # A second gateway on the same home must fail loud at acquisition.
-        second = _spawn_gateway(tmp_path, app_home, "owner-b", 8301, "second")
-        second_code = second["proc"].wait(timeout=25)
+        second, second_outcome = _spawn_gateway(
+            tmp_path, app_home, "owner-b", free_port(), "second"
+        )
+        second_code = second.process.wait(timeout=25)
         assert second_code == 3
-        outcome = cast("dict[str, str]", json.loads(second["outcome"].read_text()))
+        outcome = cast("dict[str, str]", json.loads(second_outcome.read_text()))
         assert outcome["result"] == "conflict"
 
         # The first gateway's record is untouched: the failed contender never
@@ -154,19 +119,21 @@ def test_second_gateway_cannot_own_or_overwrite_the_home(tmp_path: Path) -> None
         record_after = classify_desktop_discovery(service_json_path(app_home))[1]
         assert record_after == record_before
     finally:
-        _stop(first)
+        first.request_stop()
 
 
 def test_owner_restart_after_real_kill_reclaims_via_stale(tmp_path: Path) -> None:
     """After the owner is killed, a same-owner restart reclaims through STALE."""
     app_home = tmp_path / "app"
-    first = _spawn_gateway(tmp_path, app_home, "owner-a", 8302, "first")
+    first, _first_outcome = _spawn_gateway(
+        tmp_path, app_home, "owner-a", free_port(), "first"
+    )
     first_pid = 0
     try:
-        first_pid = cast("_ReadyPayload", json.loads(_await(first["ready"])))["pid"]
+        first_pid = cast("_ReadyPayload", json.loads(first.payload()))["pid"]
     finally:
-        first["proc"].terminate()
-        first["proc"].wait(timeout=25)
+        first.process.terminate()
+        first.process.wait(timeout=25)
 
     # The killed gateway's runtime singleton is now stale (recorded process dead).
     state, record = classify_app_home(app_home, owner="owner-a")
@@ -174,15 +141,18 @@ def test_owner_restart_after_real_kill_reclaims_via_stale(tmp_path: Path) -> Non
     assert record is not None and record.pid == first_pid
 
     # A same-owner restart takes over and republishes its own discovery record.
-    restart = _spawn_gateway(tmp_path, app_home, "owner-a", 8303, "restart")
+    restart_port = free_port()
+    restart, _restart_outcome = _spawn_gateway(
+        tmp_path, app_home, "owner-a", restart_port, "restart"
+    )
     try:
-        restart_ready = cast("_ReadyPayload", json.loads(_await(restart["ready"])))
+        restart_ready = cast("_ReadyPayload", json.loads(restart.payload()))
         assert restart_ready["pid"] != first_pid
         new_state, new_record = classify_desktop_discovery(service_json_path(app_home))
         assert new_state is DesktopDiscoveryState.FRESH
         assert new_record is not None
         assert new_record.pid == restart_ready["pid"]
-        assert new_record.port == 8303
+        assert new_record.port == restart_port
         assert classify_app_home(app_home, owner="owner-a")[0] is SingletonState.HELD
     finally:
-        _stop(restart)
+        restart.request_stop()

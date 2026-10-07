@@ -22,12 +22,12 @@ from ...database.run_event_repository import RunEventStore
 from ...streaming.aggregator import EventAggregator
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
-from ...testing import settings_override
+from ...testing import serve_on_loopback, settings_override
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import ResumePosition, replay_window
 from ._sse_reader import SseReader
-from .conftest import _live_server, make_app, seed_run_with_status
+from .conftest import make_app, seed_run_with_status
 from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 from .test_stream_resume_replay import _progress_event, _relay, _terminal_event
 
@@ -68,7 +68,7 @@ async def test_a_cursor_behind_the_trimmed_window_is_told_where_the_replay_start
 
     with settings_override(stream_replay_window_events=_RETAINED):
         async with (
-            _live_server(producer) as producer_base,
+            serve_on_loopback(producer) as producer_base,
             httpx.AsyncClient(base_url=producer_base, timeout=10.0) as relay_client,
         ):
             await _relay(
@@ -80,7 +80,7 @@ async def test_a_cursor_behind_the_trimmed_window_is_told_where_the_replay_start
         )
 
         async with (
-            _live_server(viewer) as viewer_base,
+            serve_on_loopback(viewer) as viewer_base,
             httpx.AsyncClient(base_url=viewer_base, timeout=10.0) as client,
             client.stream(
                 "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:1"}
@@ -117,7 +117,7 @@ async def test_a_resume_with_the_feature_off_is_told_the_replay_is_unavailable(
 
     with settings_override(stream_replay_enabled=False):
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
             client.stream(
                 "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": "-"}
@@ -150,7 +150,7 @@ async def test_a_store_that_cannot_answer_is_reported_rather_than_assumed_empty(
         await session.commit()
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:3"}
@@ -174,7 +174,7 @@ async def test_a_run_with_nothing_retained_cannot_serve_a_cursor(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:9"}
@@ -216,7 +216,7 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
     await _record_completed_checkpoint(checkpointer, receipt)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         await _relay(client, [_progress_event(_RUN, index) for index in (1, 2, 3)])
@@ -258,7 +258,7 @@ async def test_a_caught_up_resume_is_given_no_notice_at_all(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         await _relay(client, [_progress_event(_RUN, index) for index in (1, 2)])

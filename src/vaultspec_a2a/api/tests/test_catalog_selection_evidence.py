@@ -27,8 +27,9 @@ import httpx
 import pytest
 
 from ...database import get_thread
+from ...testing import serve_on_loopback
 from .conftest import SessionFactory, make_app
-from .test_gateway_live import _PRESET, _live_server, _run_fields
+from .test_gateway_live import _PRESET, _run_fields
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -51,7 +52,7 @@ async def test_frozen_selection_survives_real_gateway_restart(
     """
     app1, _agg1, _worker1, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app1) as base1,
+        serve_on_loopback(app1) as base1,
         httpx.AsyncClient(base_url=base1, timeout=10.0) as client1,
     ):
         start = await client1.post(
@@ -72,7 +73,7 @@ async def test_frozen_selection_survives_real_gateway_restart(
     # Second gateway instance on the SAME durable stores: a genuine restart.
     app2, _agg2, worker2, _cp2 = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app2) as base2,
+        serve_on_loopback(app2) as base2,
         httpx.AsyncClient(base_url=base2, timeout=10.0) as client2,
     ):
         status = await client2.get("/v1/runs/evidence-restart")
@@ -101,7 +102,7 @@ async def test_launch_freezes_the_served_catalog_entry(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         fields = await _run_fields(client)
@@ -156,7 +157,7 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
     """Retired policy, provider and mode inputs never reach construction."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         current = await _run_fields(client)
@@ -280,7 +281,7 @@ async def test_validation_errors_remain_actionable_without_reflecting_input(
     """The bounded 422 retains type, field location and a safe message."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         fields = await _run_fields(client)
@@ -327,7 +328,7 @@ async def test_run_start_persists_no_secrets_in_db_row(
     token_value = "tok-secret-coder-value"
     bearer_value = "bearer-secret-value"
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(

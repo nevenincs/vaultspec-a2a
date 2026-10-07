@@ -6,7 +6,10 @@ processes and sessions (``leases``), progress-based deadlines that fail on
 death or stall rather than on elapsed wall clock (``progress``), registry-
 backed service endpoint resolution (``endpoints``), and the pytest plugin
 (``plugin``) that derives scheduling groups, timeout backstops, and lease
-acquisition from the declarations.
+acquisition from the declarations. Beside it sits the real-process support every
+test tier composes rather than retypes: the gateway boot and its peers
+(``boot``), the loopback listeners a test points code at (``http``), and the
+run-start verb shaped once (``verbs``).
 
 The plugin is loaded by the repository-root ``conftest.py``, which is the one
 channel that neither an ``addopts`` override can strip nor a consumer
@@ -19,12 +22,44 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .boot import (
+        DEFAULT_ATTACH_CREDENTIAL,
+        DEFAULT_OWNERSHIP_CAPABILITY,
+        FIRST_DEMAND_TIMEOUT,
+        FOREIGN_WORKER_PROGRAM,
+        LOOPBACK_TIMEOUT,
+        READINESS_TIMEOUT,
+        BootedGateway,
+        GatewayBootError,
+        SignalledChild,
+        WatchedProcess,
+        armed_gateway_env,
+        await_gateway_ready,
+        await_ready,
+        booted_gateway,
+        broker_gateway_env,
+        clean_subprocess_environment,
+        desktop_workspace,
+        foreign_worker,
+        gateway_process_env,
+        gateway_script,
+        log_tail,
+        loopback_callback_bridge,
+        reap_process,
+        seat_app_home,
+        spawn_gateway,
+        spawn_logged,
+        spawn_signalled,
+        spawn_until_ready,
+        worker_lifecycle_gateway_script,
+    )
     from .children import (
         DEFAULT_IDLE_WINDOW_S,
         await_child,
         child_tree_progress,
         file_size_fingerprint,
         measured_child_startup_s,
+        reap_tree,
         run_child,
     )
     from .endpoints import (
@@ -39,6 +74,15 @@ if TYPE_CHECKING:
         settings_override,
     )
     from .harness_names import CPU_BUDGET_ENV
+    from .http import (
+        JsonReplyHandler,
+        health_listener,
+        loopback_uvicorn,
+        serve_handler,
+        serve_on_loopback,
+        serve_on_loopback_in_thread,
+        uvicorn_started,
+    )
     from .leases import (
         LEASE_TTL_MS,
         Lease,
@@ -82,13 +126,17 @@ if TYPE_CHECKING:
         exclusive_keys,
         resolve_spec,
     )
-    from .session_root import session_scratch_dir
+    from .session_root import prune_stale_dirs, session_scratch_dir
     from .sessions import (
         SESSION_LEASE_KEY,
         effective_worker_count,
         live_peer_sessions,
         machine_cpu_budget,
         register_session,
+    )
+    from .verbs import (
+        RunVerbs,
+        status_and_json,
     )
 
 
@@ -101,6 +149,50 @@ if TYPE_CHECKING:
 #: naming ``vaultspec_a2a.testing.children``, leaving every submodule this
 #: facade lazily loads misreported as reachable only through type checking.
 _LAZY_EXPORTS = {
+    "DEFAULT_ATTACH_CREDENTIAL": (
+        "vaultspec_a2a.testing.boot",
+        "DEFAULT_ATTACH_CREDENTIAL",
+    ),
+    "DEFAULT_OWNERSHIP_CAPABILITY": (
+        "vaultspec_a2a.testing.boot",
+        "DEFAULT_OWNERSHIP_CAPABILITY",
+    ),
+    "FIRST_DEMAND_TIMEOUT": ("vaultspec_a2a.testing.boot", "FIRST_DEMAND_TIMEOUT"),
+    "FOREIGN_WORKER_PROGRAM": ("vaultspec_a2a.testing.boot", "FOREIGN_WORKER_PROGRAM"),
+    "LOOPBACK_TIMEOUT": ("vaultspec_a2a.testing.boot", "LOOPBACK_TIMEOUT"),
+    "READINESS_TIMEOUT": ("vaultspec_a2a.testing.boot", "READINESS_TIMEOUT"),
+    "BootedGateway": ("vaultspec_a2a.testing.boot", "BootedGateway"),
+    "GatewayBootError": ("vaultspec_a2a.testing.boot", "GatewayBootError"),
+    "SignalledChild": ("vaultspec_a2a.testing.boot", "SignalledChild"),
+    "WatchedProcess": ("vaultspec_a2a.testing.boot", "WatchedProcess"),
+    "armed_gateway_env": ("vaultspec_a2a.testing.boot", "armed_gateway_env"),
+    "await_gateway_ready": ("vaultspec_a2a.testing.boot", "await_gateway_ready"),
+    "await_ready": ("vaultspec_a2a.testing.boot", "await_ready"),
+    "booted_gateway": ("vaultspec_a2a.testing.boot", "booted_gateway"),
+    "broker_gateway_env": ("vaultspec_a2a.testing.boot", "broker_gateway_env"),
+    "clean_subprocess_environment": (
+        "vaultspec_a2a.testing.boot",
+        "clean_subprocess_environment",
+    ),
+    "desktop_workspace": ("vaultspec_a2a.testing.boot", "desktop_workspace"),
+    "foreign_worker": ("vaultspec_a2a.testing.boot", "foreign_worker"),
+    "gateway_process_env": ("vaultspec_a2a.testing.boot", "gateway_process_env"),
+    "gateway_script": ("vaultspec_a2a.testing.boot", "gateway_script"),
+    "log_tail": ("vaultspec_a2a.testing.boot", "log_tail"),
+    "loopback_callback_bridge": (
+        "vaultspec_a2a.testing.boot",
+        "loopback_callback_bridge",
+    ),
+    "reap_process": ("vaultspec_a2a.testing.boot", "reap_process"),
+    "seat_app_home": ("vaultspec_a2a.testing.boot", "seat_app_home"),
+    "spawn_gateway": ("vaultspec_a2a.testing.boot", "spawn_gateway"),
+    "spawn_logged": ("vaultspec_a2a.testing.boot", "spawn_logged"),
+    "spawn_signalled": ("vaultspec_a2a.testing.boot", "spawn_signalled"),
+    "spawn_until_ready": ("vaultspec_a2a.testing.boot", "spawn_until_ready"),
+    "worker_lifecycle_gateway_script": (
+        "vaultspec_a2a.testing.boot",
+        "worker_lifecycle_gateway_script",
+    ),
     "DEFAULT_IDLE_WINDOW_S": (
         "vaultspec_a2a.testing.children",
         "DEFAULT_IDLE_WINDOW_S",
@@ -115,6 +207,7 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.children",
         "measured_child_startup_s",
     ),
+    "reap_tree": ("vaultspec_a2a.testing.children", "reap_tree"),
     "run_child": ("vaultspec_a2a.testing.children", "run_child"),
     "ResolvedService": ("vaultspec_a2a.testing.endpoints", "ResolvedService"),
     "resolve_gateway_url": (
@@ -127,6 +220,7 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.environment",
         "armed_desktop_app_home",
     ),
+    "prune_stale_dirs": ("vaultspec_a2a.testing.session_root", "prune_stale_dirs"),
     "session_scratch_dir": (
         "vaultspec_a2a.testing.session_root",
         "session_scratch_dir",
@@ -187,6 +281,18 @@ _LAZY_EXPORTS = {
     "live_peer_sessions": ("vaultspec_a2a.testing.sessions", "live_peer_sessions"),
     "machine_cpu_budget": ("vaultspec_a2a.testing.sessions", "machine_cpu_budget"),
     "register_session": ("vaultspec_a2a.testing.sessions", "register_session"),
+    "JsonReplyHandler": ("vaultspec_a2a.testing.http", "JsonReplyHandler"),
+    "health_listener": ("vaultspec_a2a.testing.http", "health_listener"),
+    "loopback_uvicorn": ("vaultspec_a2a.testing.http", "loopback_uvicorn"),
+    "serve_handler": ("vaultspec_a2a.testing.http", "serve_handler"),
+    "serve_on_loopback": ("vaultspec_a2a.testing.http", "serve_on_loopback"),
+    "serve_on_loopback_in_thread": (
+        "vaultspec_a2a.testing.http",
+        "serve_on_loopback_in_thread",
+    ),
+    "uvicorn_started": ("vaultspec_a2a.testing.http", "uvicorn_started"),
+    "RunVerbs": ("vaultspec_a2a.testing.verbs", "RunVerbs"),
+    "status_and_json": ("vaultspec_a2a.testing.verbs", "status_and_json"),
 }
 
 
@@ -208,15 +314,24 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "CPU_BUDGET_ENV",
+    "DEFAULT_ATTACH_CREDENTIAL",
     "DEFAULT_IDLE_WINDOW_S",
+    "DEFAULT_OWNERSHIP_CAPABILITY",
+    "FIRST_DEMAND_TIMEOUT",
+    "FOREIGN_WORKER_PROGRAM",
     "IMPURE_FIXTURES",
     "LEASE_TTL_MS",
+    "LOOPBACK_TIMEOUT",
     "MARKER_NAME",
+    "READINESS_TIMEOUT",
     "RESOURCES",
     "SCRATCH_PREFIX",
     "SCRATCH_ROLE",
     "SERVICE_MARKER",
     "SESSION_LEASE_KEY",
+    "BootedGateway",
+    "GatewayBootError",
+    "JsonReplyHandler",
     "Lease",
     "LeaseAcquisitionTimeoutError",
     "LivenessWatch",
@@ -228,25 +343,45 @@ __all__ = [
     "ResourceDeclarationError",
     "ResourceDiedError",
     "ResourceSpec",
+    "RunVerbs",
+    "SignalledChild",
+    "WatchedProcess",
     "allocate_free_ports",
     "apply_layer_markers",
     "armed_desktop_app_home",
     "armed_environment",
+    "armed_gateway_env",
     "await_child",
+    "await_gateway_ready",
+    "await_ready",
+    "booted_gateway",
+    "broker_gateway_env",
     "child_tree_progress",
+    "clean_subprocess_environment",
     "declared_claims",
+    "desktop_workspace",
     "effective_worker_count",
     "exclusive_keys",
     "file_size_fingerprint",
+    "foreign_worker",
     "forfeits_purity",
     "free_port",
+    "gateway_process_env",
+    "gateway_script",
+    "health_listener",
     "hold_for_process_lifetime",
     "hold_lease",
     "lease_home",
     "live_peer_sessions",
+    "log_tail",
+    "loopback_callback_bridge",
+    "loopback_uvicorn",
     "machine_cpu_budget",
     "measured_child_startup_s",
     "plant_link_to_file",
+    "prune_stale_dirs",
+    "reap_process",
+    "reap_tree",
     "register_session",
     "registry_watch",
     "reserve_scratch_ports",
@@ -256,8 +391,19 @@ __all__ = [
     "resolve_spec",
     "resolve_worker_url",
     "run_child",
+    "seat_app_home",
+    "serve_handler",
+    "serve_on_loopback",
+    "serve_on_loopback_in_thread",
     "session_scratch_dir",
     "settings_override",
+    "spawn_gateway",
+    "spawn_logged",
+    "spawn_signalled",
+    "spawn_until_ready",
+    "status_and_json",
     "uses_impure_fixture",
+    "uvicorn_started",
     "wait_for",
+    "worker_lifecycle_gateway_script",
 ]

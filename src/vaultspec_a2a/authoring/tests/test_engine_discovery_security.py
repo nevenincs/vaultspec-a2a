@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import time
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, override
+from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ...control.config import settings
 from ...desktop._platform_acl import harden_credential_path
-from ...testing import armed_environment, settings_override
+from ...testing import (
+    JsonReplyHandler,
+    armed_environment,
+    health_listener,
+    serve_handler,
+    settings_override,
+)
 from ...testing.links import plant_link_to_file
-from ...testing.tests._support.listeners import health_listener
 from ..discovery import resolve_engine
 from ._engine_peer import (
     TEST_BEARER,
@@ -37,7 +41,7 @@ def attacker_listener(
     """Capture real incoming headers from a listener without the engine's secret."""
     requests: list[dict[str, str]] = []
 
-    class _Attacker(BaseHTTPRequestHandler):
+    class _Attacker(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def do_GET(self) -> None:
@@ -52,19 +56,8 @@ def attacker_listener(
         def do_POST(self) -> None:
             self.do_GET()
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", port), _Attacker)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server.server_address[1], requests
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
+    with serve_handler(_Attacker, port=port) as bound:
+        yield bound, requests
 
 
 def test_workspace_legacy_record_cannot_select_an_authoring_endpoint(

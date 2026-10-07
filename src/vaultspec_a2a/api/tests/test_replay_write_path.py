@@ -34,10 +34,11 @@ from ...database.thread_repository import create_thread
 from ...streaming.aggregator import EventAggregator
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import RunSequenceAllocator
+from ...testing import serve_on_loopback
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
-from .conftest import _live_server, make_app, seed_run_with_status
+from .conftest import make_app, seed_run_with_status
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -165,7 +166,7 @@ async def test_a_frame_relayed_over_the_worker_websocket_is_retained(
 
     try:
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             connect(base.replace("http://", "ws://") + "/internal/ws") as ws,
         ):
             for sequence in (41, 42):
@@ -203,7 +204,7 @@ async def test_deleting_a_run_releases_the_frames_its_recorder_still_holds(
     await _seed_deletable_run(session_factory, _DELETED_RUN)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         relayed = await client.post(

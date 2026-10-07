@@ -60,19 +60,21 @@ from ..lifecycle.singleton import (
     recorded_process_is_live,
     singleton_record_path,
 )
-from ..testing.ports import free_port
-from ..tests.gateway_boot import (
-    READINESS_TIMEOUT,
+from ..testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_OWNERSHIP_CAPABILITY,
+    RunVerbs,
     armed_gateway_env,
+    booted_gateway,
     broker_gateway_env,
     desktop_workspace,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_until_ready,
+    reap_process,
+    seat_app_home,
+    spawn_logged,
+    status_and_json,
 )
+from ..testing.ports import free_port
 from ._catalog import catalog_selection
-from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -80,6 +82,7 @@ if TYPE_CHECKING:
 
 _CLI_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
+_AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 # Raised by the runtime singleton when a second gateway contends one home.
 _CONFLICT_REFUSAL = "refusing to start a second gateway on one application home"
 
@@ -97,43 +100,18 @@ def _serve(
     records instead.
     """
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-    log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
-
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        if desktop:
-            env = armed_gateway_env(
-                app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-                auto_spawn_worker=auto_spawn,
-            )
-        else:
-            env = broker_gateway_env(
-                app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-                gateway_token=_ATTACH,
-            )
-            env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = str(auto_spawn).lower()
-        return subprocess.Popen(
-            [sys.executable, "-m", _CLI_MODULE, "serve"],
-            env=env,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
+    seat_app_home(app_home)
+    env = (
+        armed_gateway_env(app_home, auto_spawn_worker=auto_spawn)
+        if desktop
+        else broker_gateway_env(
+            app_home,
+            gateway_token=DEFAULT_ATTACH_CREDENTIAL,
+            auto_spawn_worker=auto_spawn,
         )
-
-    proc, gateway_port, worker_port, base = spawn_until_ready(
-        _spawn, log_path=log_path, timeout=READINESS_TIMEOUT
     )
-    try:
-        yield app_home, gateway_port, worker_port, base
-    finally:
-        reap_gateway(proc)
-        log_handle.close()
+    with booted_gateway(env, log_path=tmp_path / "gateway.log", script=None) as gateway:
+        yield app_home, gateway.gateway_port, gateway.worker_port, gateway.base_url
 
 
 def _worker_ipc_secret(app_home: Path) -> str:
@@ -148,27 +126,40 @@ def _worker_ipc_secret(app_home: Path) -> str:
 
 def _prepare(base: str, run_id: str) -> tuple[int, dict[str, Any]]:
     """Drive one authenticated prepare, which spawns the gateway-owned worker."""
-    auth = f"Bearer {_ATTACH}"
-    workspace = desktop_workspace(base)
-    with httpx.Client(base_url=base, timeout=120.0) as client:
-        resp = client.post(
-            "/v1/runs",
-            headers={"Authorization": auth},
-            json={
-                "team_preset": _PRESET,
-                "stage": "prepare",
-                "autonomous": True,
-                "run_id": run_id,
-                # The workspace anchors the selection, which run start
-                # revalidates against the catalog served for it.
-                "metadata": {"workspace_root": workspace},
-                "selection": catalog_selection(base, auth, workspace),
-            },
-        )
-    try:
-        return resp.status_code, resp.json()
-    except ValueError:
-        return resp.status_code, {"raw": resp.text}
+    verbs = RunVerbs(
+        base_url=base,
+        authorization=_AUTH,
+        team_preset=_PRESET,
+        workspace_root=desktop_workspace(base),
+        selection=lambda workspace: catalog_selection(base, _AUTH, workspace),
+    )
+    return status_and_json(verbs.prepare(run_id))
+
+
+def _spawn_stray_worker(
+    app_home: Path,
+    *,
+    gateway_port: int,
+    worker_port: int,
+    secret: str,
+    log_path: Path,
+) -> subprocess.Popen[bytes]:
+    """Start a real production worker that no gateway spawned.
+
+    It holds the gateway-minted IPC *secret* over the same application home and
+    derives the same gateway URL, so it matches the gateway's own worker on every
+    credential and addressing fact. The two pairing variables are cleared so an
+    inherited value from the test host cannot forge the evidence at issue.
+    """
+    env = armed_gateway_env(app_home, auto_spawn_worker=False)(
+        gateway_port, worker_port
+    )
+    env["VAULTSPEC_A2A_INTERNAL_TOKEN"] = secret
+    env.pop(setting_env("gateway_lifetime_id"), None)
+    env.pop(setting_env("worker_generation"), None)
+    return spawn_logged(
+        [sys.executable, "-m", "vaultspec_a2a.worker"], env=env, log_path=log_path
+    )
 
 
 def _worker_health(port: int, secret: str, *, timeout: float = 60.0) -> dict[str, Any]:
@@ -227,11 +218,8 @@ def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
         # A second gateway, same home, DIFFERENT port: refused at acquisition.
         second = subprocess.run(
             [sys.executable, "-m", _CLI_MODULE, "serve"],
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=free_port(),
-                worker_port=free_port(),
-                auto_spawn_worker=False,
+            env=armed_gateway_env(app_home, auto_spawn_worker=False)(
+                free_port(), free_port()
             ),
             capture_output=True,
             text=True,
@@ -261,9 +249,10 @@ def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
 
         minted = _worker_ipc_secret(app_home)
         assert minted, "the gateway minted no worker IPC secret"
-        assert minted not in (_ATTACH, _OWNERSHIP), (
-            "the gateway-minted worker IPC secret must not reuse a dashboard plane"
-        )
+        assert minted not in (
+            DEFAULT_ATTACH_CREDENTIAL,
+            DEFAULT_OWNERSHIP_CAPABILITY,
+        ), "the gateway-minted worker IPC secret must not reuse a dashboard plane"
 
 
 def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None:
@@ -317,21 +306,12 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
         # gateway-minted credential. The two pairing variables are cleared so an
         # inherited value from the test host cannot forge the evidence at issue.
         stray_port = free_port()
-        stray_env = armed_gateway_env(
+        stray = _spawn_stray_worker(
             app_home,
             gateway_port=port,
             worker_port=stray_port,
-            auto_spawn_worker=False,
-        )
-        stray_env["VAULTSPEC_A2A_INTERNAL_TOKEN"] = secret
-        stray_env.pop(setting_env("gateway_lifetime_id"), None)
-        stray_env.pop(setting_env("worker_generation"), None)
-        stray_log = (tmp_path / "stray-worker.log").open("wb")
-        stray = subprocess.Popen(
-            [sys.executable, "-m", "vaultspec_a2a.worker"],
-            env=stray_env,
-            stdout=stray_log,
-            stderr=subprocess.STDOUT,
+            secret=secret,
+            log_path=tmp_path / "stray-worker.log",
         )
         try:
             stranger = _worker_health(stray_port, secret)
@@ -396,5 +376,4 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
                 is WorkerPairingVerdict.FOREIGN
             )
         finally:
-            reap_gateway(stray)
-            stray_log.close()
+            reap_process(stray)

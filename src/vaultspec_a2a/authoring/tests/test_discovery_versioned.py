@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...control.config import settings
-from ...testing import settings_override
-from ...testing.tests._support.listeners import health_listener
+from ...testing import health_listener, settings_override
 from ..discovery import resolve_engine
 
 if TYPE_CHECKING:

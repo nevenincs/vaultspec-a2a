@@ -20,7 +20,6 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,7 +27,6 @@ from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 import httpx
 import pytest
-import uvicorn
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
@@ -44,6 +42,7 @@ from ...database import (
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...testing import serve_on_loopback
 from ...testing.tests._support.catalog_selection import in_process_selection
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -53,9 +52,8 @@ from ..routes.gateway import admission_gate
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+    from collections.abc import AsyncIterator, Callable, Mapping
 
-    from fastapi import FastAPI
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -245,7 +243,7 @@ async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
@@ -296,7 +294,7 @@ async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
@@ -354,7 +352,7 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
@@ -434,7 +432,7 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
 
@@ -539,7 +537,7 @@ async def test_legacy_lease_only_metadata_remains_status_visible(
 
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         valid_status = await client.get(f"/v1/runs/{valid.id}")
@@ -599,7 +597,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     try:
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
             response = await client.get(f"/v1/runs/{thread_id}")
@@ -675,27 +673,6 @@ async def _await_service_worker_ready(client: httpx.AsyncClient) -> JsonObject:
         is_ready=lambda body: body.get("worker_ready") is True,
         what="service-state worker readiness",
     )
-
-
-@asynccontextmanager
-async def _live_server(app: FastAPI) -> AsyncGenerator[str]:
-    """Serve *app* on an ephemeral port and yield its base URL."""
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
-    )
-    server = uvicorn.Server(config)
-    task = asyncio.create_task(server.serve())
-    try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "uvicorn did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        await asyncio.wait_for(task, timeout=5.0)
 
 
 async def _wait_until(
@@ -1029,7 +1006,7 @@ async def test_five_verbs_over_live_socket(
 ) -> None:
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         await _exercise_five_verbs(client, worker)
@@ -1050,7 +1027,7 @@ async def test_service_state_degrades_when_circuit_breaker_opens(
     app.state.circuit_breaker.force_open()
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get("/v1/service")
@@ -1071,7 +1048,7 @@ async def test_service_state_degrades_when_recovery_owner_fails(
     app.state.direct_control_recovery_error = "recovery_pass_failed"
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get("/v1/service")
@@ -1110,7 +1087,7 @@ async def test_service_state_deadline_returns_degraded_for_locked_real_checkpoin
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         # Budgeted well above the contract under proof: the contract is proven
         # from the server's own measurement below, and a client timeout here
         # would only re-introduce the host-speed coupling this removes.
@@ -1223,7 +1200,7 @@ async def test_run_status_carries_reconnect_cursor(
     assert agg.get_sequence(run_id) == 0
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get(f"/v1/runs/{run_id}")
@@ -1242,7 +1219,7 @@ async def test_service_state_is_probe_backed_and_distinguishes_readiness(
     """service-state reports truthful probe-derived readiness fields."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         body = await _await_service_worker_ready(client)
@@ -1285,7 +1262,7 @@ async def test_presets_list_is_truthful_and_resilient(
 
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
@@ -1361,7 +1338,10 @@ async def test_presets_list_refuses_workspace_model_policy(
         encoding="utf-8",
     )
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-    async with _live_server(app) as base, httpx.AsyncClient(base_url=base) as client:
+    async with (
+        serve_on_loopback(app) as base,
+        httpx.AsyncClient(base_url=base) as client,
+    ):
         response = await client.get(
             "/v1/presets", params={"workspace_root": str(tmp_path)}
         )
@@ -1390,7 +1370,7 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
@@ -1420,7 +1400,7 @@ async def test_run_start_without_feedback_batch_id_dispatches_none(
     """A run with no feedback batch dispatches a null id (non-feedback run)."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
@@ -1445,7 +1425,7 @@ async def test_run_start_refusals_over_live_socket(
     """The v1 run-start refuses invalid requests before dispatch."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         # Empty prompt -> 422, no dispatch.
@@ -1554,7 +1534,7 @@ async def test_run_start_client_id_is_dispatch_exactly_once(
     """A retry with the same client run id returns the same run, dispatched once."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         payload = {
@@ -1595,7 +1575,7 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
         "run_id": "run-0123456789abcdef0123456789abcdef",
     }
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         first = asyncio.create_task(
@@ -1634,7 +1614,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
     run_id, _receipt = await _seed_live_thread(session_factory, title="live")
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -1703,7 +1683,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     run_id, _receipt = await _seed_live_thread(session_factory, title="live")
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -1795,7 +1775,7 @@ async def test_run_stream_verb_reserves_versioned_frames(
     run_id, _receipt = await _seed_live_thread(session_factory, title="run")
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -1846,7 +1826,7 @@ async def test_run_stream_unknown_run_is_404(
     """Streaming an unknown run id is a clean 404 in run vocabulary."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get("/v1/runs/does-not-exist/stream")
@@ -1887,7 +1867,7 @@ async def test_run_start_freezes_and_discloses_catalog_selection(
     """Run start freezes the served selection and threads it to dispatch."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
@@ -1937,7 +1917,7 @@ async def test_run_start_rejects_retired_profile_field(
     """A retired profile field is refused with a 422 and never dispatched."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.post(
@@ -1966,7 +1946,7 @@ async def test_run_start_conflicts_on_selection_request_change_retry(
     """A retry with changed work is a conflict rather than a silent replay."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         payload = {
@@ -2024,7 +2004,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         # Every post below shares this run id ON PURPOSE: the test is about
@@ -2103,7 +2083,7 @@ async def test_run_start_idempotency_is_race_safe(
     """Concurrent same-run_id retries never 500: insert-or-return is atomic."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         payload = {"team_preset": _PRESET, "message": "go", "run_id": "rid-race"}
@@ -2143,7 +2123,7 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
 
     with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.routes.gateway"):
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
             selection, workspace_root = await _in_process_catalog_selection(client)
@@ -2210,7 +2190,7 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
 
     with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.routes.gateway"):
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
             race = await _run_different_body_race(
@@ -2259,7 +2239,7 @@ async def test_pairing_identity_is_authenticated_surface_only(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         # The ungated probe surface, serving the unarmed full body rather than a

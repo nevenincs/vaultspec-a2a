@@ -24,10 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ..lifecycle.discovery import is_pid_alive
-from ..tests.gateway_boot import (
-    GatewayBootError,
-    spawn_until_ready,
-)
+from ..testing import GatewayBootError, spawn_until_ready
 
 if TYPE_CHECKING:
     from pathlib import Path

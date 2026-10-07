@@ -17,8 +17,7 @@ would answer 500 instead of exercising the credential planes under test.
 
 The valid database is seated by the real ``migrate`` entrypoint in a
 separate process; the gateway is a second real process. No mock, monkeypatch,
-stub, skip, or expected failure is used; the child is always torn down in a
-``finally``.
+stub, skip, or expected failure is used; the child is always torn down.
 """
 
 from __future__ import annotations
@@ -30,23 +29,19 @@ import httpx
 from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
 )
-from ..tests.gateway_boot import (
+from ..testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_OWNERSHIP_CAPABILITY,
     LOOPBACK_TIMEOUT,
     armed_gateway_env,
+    booted_gateway,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    seat_app_home,
 )
 
 if TYPE_CHECKING:
-    import subprocess
     from pathlib import Path
 
-_ATTACH = "attach-credential-token-1234567890abcdef"
-_OWNERSHIP = "ownership-capability-token-fedcba0987654321"
 _LIFECYCLE_HEADER = "X-Vaultspec-Lifecycle-Capability"
 
 
@@ -56,16 +51,17 @@ def _assert_credential_planes(
     worker_ipc: str,
 ) -> None:
     """Assert the attach, worker IPC, and lifecycle credentials stay isolated."""
+    secrets = (DEFAULT_ATTACH_CREDENTIAL, DEFAULT_OWNERSHIP_CAPABILITY, worker_ipc)
     # --- Discovery record carries no secret, only the ACL-protected ref ---
     discovery_text = (app_home / "service.json").read_text(encoding="utf-8")
-    for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
+    for secret in secrets:
         assert secret not in discovery_text
     assert ATTACH_CREDENTIAL_NAME in discovery_text  # the reference path
 
     # --- Unauthenticated liveness discloses nothing ---
     live = client.get("/health")
     assert live.status_code == 200
-    for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
+    for secret in secrets:
         assert secret not in live.text
 
     # --- Attach plane: only the attach credential authenticates ---
@@ -78,22 +74,23 @@ def _assert_credential_planes(
     )
     assert (
         client.get(
-            "/v1/service", headers={"Authorization": f"Bearer {_OWNERSHIP}"}
+            "/v1/service",
+            headers={"Authorization": f"Bearer {DEFAULT_OWNERSHIP_CAPABILITY}"},
         ).status_code
         == 401
     )
     attach_ok = client.get(
-        "/v1/service", headers={"Authorization": f"Bearer {_ATTACH}"}
+        "/v1/service", headers={"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"}
     )
     assert attach_ok.status_code == 200, attach_ok.text
-    for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
+    for secret in secrets:
         assert secret not in attach_ok.text
 
     # --- Worker IPC plane: attach is rejected, worker IPC is accepted ---
     assert (
         client.get(
             "/internal/health",
-            headers={"Authorization": f"Bearer {_ATTACH}"},
+            headers={"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"},
         ).status_code
         == 401
     )
@@ -106,13 +103,13 @@ def _assert_credential_planes(
     # --- Lifecycle plane: admin shutdown needs the ownership capability ---
     attach_only = client.post(
         "/admin/shutdown",
-        headers={"Authorization": f"Bearer {_ATTACH}"},
+        headers={"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"},
     )
     assert attach_only.status_code == 403
     wrong_cap = client.post(
         "/admin/shutdown",
         headers={
-            "Authorization": f"Bearer {_ATTACH}",
+            "Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}",
             _LIFECYCLE_HEADER: "not-the-capability",
         },
     )
@@ -122,38 +119,27 @@ def _assert_credential_planes(
 def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
     """The three planes are non-interchangeable and no secret ever leaks."""
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    credentials_dir = seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
+    credentials_dir = seat_app_home(app_home).credentials_dir
     log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
     # A real armed desktop gateway booting the *production* lifespan: create_app
     # runs the armed credential loading, and the lifespan validates the seated
     # schema, seats the application state, and publishes the discovery record.
     # The quiet variant keeps the log free of routine INFO chatter, so the
-    # secret-absence scan below reads a log carrying only real warnings.
-    script = gateway_script(log_level="warning")
-
-    def _spawn(port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        return spawn_gateway(
-            script=script,
-            gateway_port=port,
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=port,
-                worker_port=worker_port,
-                # The credential planes are the subject; keep the worker cold so
-                # no worker process is started behind this test.
-                auto_spawn_worker=False,
-            ),
-            log_handle=log_handle,
-        )
-
-    proc, _port, _worker_port, base = spawn_until_ready(_spawn, log_path=log_path)
-    try:
+    # secret-absence scan below reads a log carrying only real warnings. The
+    # credential planes are the subject; the worker is kept cold so no worker
+    # process is started behind this test.
+    with booted_gateway(
+        armed_gateway_env(app_home, auto_spawn_worker=False),
+        log_path=log_path,
+        script=gateway_script(log_level="warning"),
+    ) as gateway:
+        base = gateway.base_url
         # The gateway minted the worker IPC secret; read it to scan for its leak.
         worker_ipc = (credentials_dir / "worker-ipc.cred").read_text(encoding="utf-8")
-        assert worker_ipc and worker_ipc not in (_ATTACH, _OWNERSHIP)
+        assert worker_ipc and worker_ipc not in (
+            DEFAULT_ATTACH_CREDENTIAL,
+            DEFAULT_OWNERSHIP_CAPABILITY,
+        )
 
         # Budgeted for a REPLY, not for promptness: every assertion below is
         # about which credential a plane accepts, and none is about latency.
@@ -164,14 +150,10 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
             _assert_credential_planes(client, app_home, worker_ipc)
 
         # --- The process logs never printed a secret ---
-        log_handle.flush()
         log_bytes = log_path.read_bytes()
-        for secret in (_ATTACH, _OWNERSHIP, worker_ipc):
+        for secret in (
+            DEFAULT_ATTACH_CREDENTIAL,
+            DEFAULT_OWNERSHIP_CAPABILITY,
+            worker_ipc,
+        ):
             assert secret.encode("utf-8") not in log_bytes
-    finally:
-        # The TREE, not the handle: on Windows the virtual-environment
-        # interpreter is a launcher stub, so a terminate() aimed at this handle
-        # leaves the real uvicorn gateway alive holding its port and its SQLite
-        # handles for the rest of the session.
-        reap_gateway(proc)
-        log_handle.close()

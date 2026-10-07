@@ -68,6 +68,7 @@ from ...database import (
 from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import loopback_callback_bridge
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
@@ -80,7 +81,6 @@ from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from .clarification_harness import (
     clarification_graph,
-    loopback_callback_bridge,
     park_clarification,
 )
 from .conftest import async_catalog_run_fields, make_app

@@ -197,7 +197,7 @@ def test_real_worker_run_reaches_terminal_state_with_scripted_content(
             "VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
         },
     ) as gateway:
-        started = gateway.start(run_id, message="Complete the task and stop.")
+        started = gateway.runs.start(run_id, message="Complete the task and stop.")
         assert started.status_code == 201, started.text
 
         snapshot = _await_terminal(gateway, run_id, budget=180.0)

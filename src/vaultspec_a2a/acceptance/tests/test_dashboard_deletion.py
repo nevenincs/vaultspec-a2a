@@ -77,7 +77,7 @@ def test_deletion_removes_the_run_from_control_and_checkpoint_stores(
     that skipped the checkpoint store would leave a non-zero after-count and fail.
     """
     run_id = "run-deletion-cross-store"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
     wait_for_terminal(gateway, run_id)
 
@@ -112,7 +112,7 @@ def test_replayed_delete_converges_without_a_second_teardown(
     an error masquerading as success.
     """
     run_id = "run-deletion-replay"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
     wait_for_terminal(gateway, run_id)
 

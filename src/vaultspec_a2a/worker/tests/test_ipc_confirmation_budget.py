@@ -16,18 +16,17 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import socket
 import subprocess
 import sys
 import textwrap
 from typing import Any
 
 import pytest
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
 from ...domain_config import domain_config
+from ...testing import serve_on_loopback
 from ..ipc import WorkerBridge, event_client_timeout
 
 # The worst case the gateway is allowed: a checkpoint read that spends its whole
@@ -127,43 +126,28 @@ async def test_a_terminal_held_for_the_whole_confirmation_is_posted_once() -> No
 
     _ = _batch
 
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen()
-    listener.setblocking(False)
-    port = listener.getsockname()[1]
+    async with serve_on_loopback(app, log_level="error") as base:
+        bridge = WorkerBridge(api_url=base, worker_id="confirming")
+        try:
+            await bridge.send_event(
+                "held-terminal-run", {"type": "thread_terminal", "status": "completed"}
+            )
+            # Drive exactly one flush, so the cadence flush and this one cannot
+            # both take a slice of the same buffer and confuse the count below.
+            deferred = bridge._flush_task
+            assert deferred is not None
+            deferred.cancel()
+            await asyncio.gather(deferred, return_exceptions=True)
 
-    config = uvicorn.Config(app, log_level="error", lifespan="on")
-    server = uvicorn.Server(config)
-    serving = asyncio.create_task(server.serve(sockets=[listener]))
-    bridge = WorkerBridge(api_url=f"http://127.0.0.1:{port}", worker_id="confirming")
-    try:
-        while not server.started:
-            await asyncio.sleep(0.01)
+            delivered = await asyncio.wait_for(
+                bridge.flush_events(), timeout=_FLUSH_WAIT_SECONDS
+            )
 
-        await bridge.send_event(
-            "held-terminal-run", {"type": "thread_terminal", "status": "completed"}
-        )
-        # Drive exactly one flush, so the cadence flush and this one cannot
-        # both take a slice of the same buffer and confuse the count below.
-        deferred = bridge._flush_task
-        assert deferred is not None
-        deferred.cancel()
-        await asyncio.gather(deferred, return_exceptions=True)
-
-        delivered = await asyncio.wait_for(
-            bridge.flush_events(), timeout=_FLUSH_WAIT_SECONDS
-        )
-
-        assert delivered, (
-            "the worker gave up on a terminal the gateway was still confirming"
-        )
-        assert posts == ["/internal/events/batch"], (
-            f"the terminal was posted {len(posts)} times: {posts}"
-        )
-    finally:
-        await bridge.close()
-        server.should_exit = True
-        await asyncio.wait_for(serving, timeout=10.0)
-        listener.close()
+            assert delivered, (
+                "the worker gave up on a terminal the gateway was still confirming"
+            )
+            assert posts == ["/internal/events/batch"], (
+                f"the terminal was posted {len(posts)} times: {posts}"
+            )
+        finally:
+            await bridge.close()

@@ -38,6 +38,7 @@ from ...graph.nodes.action_completion import (
     record_graph_completion,
 )
 from ...providers import ProviderCondition
+from ...testing import serve_on_loopback
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus
@@ -49,7 +50,6 @@ from .conftest import (
     async_catalog_run_fields,
     make_app,
 )
-from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -182,7 +182,7 @@ async def test_cancelling_a_settled_run_is_a_conflict_not_a_bad_gateway(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client)
@@ -212,7 +212,7 @@ async def test_cancelling_an_already_cancelled_run_succeeds_idempotently(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client)
@@ -243,7 +243,7 @@ async def test_accepted_cancel_rejects_late_completion_and_settles_exact_receipt
 ) -> None:
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client)
@@ -278,7 +278,7 @@ async def test_cancelling_an_absent_run_is_still_a_not_found(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         absent = await client.post("/v1/runs/no-such-run-at-all/cancel")

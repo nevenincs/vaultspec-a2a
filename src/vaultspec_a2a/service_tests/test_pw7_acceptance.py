@@ -92,7 +92,7 @@ from ..authoring.discovery import resolve_engine
 from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
 from ..team.team_config import load_team_config
-from ..testing import resolve_gateway_url, settings_override
+from ..testing import health_listener, resolve_gateway_url, settings_override
 from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
@@ -1026,36 +1026,20 @@ async def test_engine_client_reresolves_bearer_once_on_401(
     engine), pinning that the ``before_retry`` hook actually rotates the
     credential and retries immediately.
     """
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-    class _Health(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"{}")
-
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    service_json = tmp_path / "service.json"
-    service_json.write_text(
-        json.dumps(
-            {
-                "port": server.server_address[1],
-                "service_token": "rotated-tok",
-                "pid": os.getpid(),
-                "last_heartbeat": int(time.time() * 1000),
-            }
-        ),
-        encoding="utf-8",
-    )
-    calls = 0
-    try:
+    with health_listener() as port:
+        service_json = tmp_path / "service.json"
+        service_json.write_text(
+            json.dumps(
+                {
+                    "port": port,
+                    "service_token": "rotated-tok",
+                    "pid": os.getpid(),
+                    "last_heartbeat": int(time.time() * 1000),
+                }
+            ),
+            encoding="utf-8",
+        )
+        calls = 0
 
         async def denied_once(_self: AuthoringClient) -> str:
             nonlocal calls
@@ -1077,10 +1061,6 @@ async def test_engine_client_reresolves_bearer_once_on_401(
         assert result == "ok"
         assert calls == 2  # 401 consumed one attempt, immediate retry
         assert client._bearer_token == "rotated-tok"  # rotation really ran
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
 
 
 # The gateway status poll rides the same shared retry loop; these pin its

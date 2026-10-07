@@ -23,10 +23,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
-import time
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -42,17 +39,11 @@ from ..lifecycle.singleton import (
     acquire_singleton,
     classify_app_home,
 )
+from ..testing import SignalledChild, spawn_signalled
+from ..testing.ports import free_port
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-class _ResidentHandle(TypedDict):
-    """Signal files and process handle for a spawned resident child."""
-
-    proc: subprocess.Popen[bytes]
-    ready: Path
-    stop: Path
 
 
 # A real resident: take the singleton, write an owner-restricted attach
@@ -90,55 +81,27 @@ finally:
 def _spawn_resident(
     app_home: Path,
     owner: str,
-    port: int,
-    tag: str,
     *,
     protocol: tuple[int, int] = (1, 1),
-) -> _ResidentHandle:
-    ready = app_home.parent / f"{tag}.ready"
-    stop = app_home.parent / f"{tag}.stop"
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            _RESIDENT,
-            str(app_home),
-            owner,
-            str(port),
-            str(protocol[0]),
-            str(protocol[1]),
-            str(ready),
-            str(stop),
-        ],
-        env=os.environ.copy(),
+) -> SignalledChild:
+    return spawn_signalled(
+        _RESIDENT,
+        str(app_home),
+        owner,
+        str(free_port()),
+        str(protocol[0]),
+        str(protocol[1]),
+        signal_dir=app_home.parent,
+        tag="res",
     )
-    return {"proc": proc, "ready": ready, "stop": stop}
-
-
-def _await(path: Path, *, timeout: float = 25.0) -> str:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.exists() and path.read_text():
-            return path.read_text()
-        time.sleep(0.05)
-    raise AssertionError(f"timed out waiting for {path}")
-
-
-def _stop(handle: _ResidentHandle, *, timeout: float = 25.0) -> None:
-    handle["stop"].touch()
-    try:
-        handle["proc"].wait(timeout=timeout)
-    except subprocess.TimeoutExpired:  # pragma: no cover - defensive teardown
-        handle["proc"].kill()
-        handle["proc"].wait(timeout=timeout)
 
 
 def test_foreign_contender_validates_but_never_owns(tmp_path: Path) -> None:
     """A contender validates a live compatible resident yet cannot take ownership."""
     app_home = tmp_path / "app"
-    resident = _spawn_resident(app_home, "owner-a", 8400, "res")
+    resident = _spawn_resident(app_home, "owner-a")
     try:
-        _await(resident["ready"])
+        resident.payload()
         state, record = classify_desktop_discovery(service_json_path(app_home))
         assert state is DesktopDiscoveryState.FRESH
         assert record is not None
@@ -154,15 +117,15 @@ def test_foreign_contender_validates_but_never_owns(tmp_path: Path) -> None:
             acquire_singleton(app_home, owner="owner-b")
         assert conflict.value.state is SingletonState.FOREIGN
     finally:
-        _stop(resident)
+        resident.request_stop()
 
 
 def test_live_incompatible_resident_is_immutable_conflict(tmp_path: Path) -> None:
     """An incompatible protocol resident is refused for attach and for ownership."""
     app_home = tmp_path / "app"
-    resident = _spawn_resident(app_home, "owner-a", 8401, "res", protocol=(2, 2))
+    resident = _spawn_resident(app_home, "owner-a", protocol=(2, 2))
     try:
-        _await(resident["ready"])
+        resident.payload()
         record = classify_desktop_discovery(service_json_path(app_home))[1]
         assert record is not None
         # A protocol-1 contender is incompatible: it must not attach.
@@ -172,15 +135,15 @@ def test_live_incompatible_resident_is_immutable_conflict(tmp_path: Path) -> Non
             acquire_singleton(app_home, owner="owner-b")
         assert conflict.value.state is SingletonState.FOREIGN
     finally:
-        _stop(resident)
+        resident.request_stop()
 
 
 def test_live_malformed_discovery_is_immutable_conflict(tmp_path: Path) -> None:
     """A live resident with a corrupted discovery record is an immutable conflict."""
     app_home = tmp_path / "app"
-    resident = _spawn_resident(app_home, "owner-a", 8402, "res")
+    resident = _spawn_resident(app_home, "owner-a")
     try:
-        _await(resident["ready"])
+        resident.payload()
         # Corrupt the published record while the resident is still live.
         service_json_path(app_home).write_text("{ not json", encoding="utf-8")
         assert (
@@ -192,19 +155,19 @@ def test_live_malformed_discovery_is_immutable_conflict(tmp_path: Path) -> None:
             acquire_singleton(app_home, owner="owner-b")
         assert conflict.value.state is SingletonState.FOREIGN
     finally:
-        _stop(resident)
+        resident.request_stop()
 
 
 def test_stale_discovery_quarantined_only_by_owner(tmp_path: Path) -> None:
     """After the resident dies, only the matching owner may reclaim the home."""
     app_home = tmp_path / "app"
-    resident = _spawn_resident(app_home, "owner-a", 8403, "res")
+    resident = _spawn_resident(app_home, "owner-a")
     dead_pid = 0
     try:
-        dead_pid = cast("dict[str, int]", json.loads(_await(resident["ready"])))["pid"]
+        dead_pid = cast("dict[str, int]", json.loads(resident.payload()))["pid"]
     finally:
-        resident["proc"].terminate()
-        resident["proc"].wait(timeout=25)
+        resident.process.terminate()
+        resident.process.wait(timeout=25)
 
     # The heartbeat is still recent, so the filesystem-only classifier reads
     # FRESH — but the recorded process is provably dead, which the ownership

@@ -6,7 +6,6 @@ import asyncio
 import json
 import sqlite3
 import time
-from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -28,7 +27,6 @@ from ...database import (
     init_db,
 )
 from ...database.thread_repository import create_thread
-from ...desktop.profile import derive_state_paths
 from ...ipc.schemas import DispatchRequest
 from ...providers.in_process_catalog import discover_in_process_catalog
 from ...providers.provider_catalog import (
@@ -54,24 +52,23 @@ from ...providers.team_selection import (
     model_assignment_digest,
 )
 from ...team.team_config import load_team_config
-from ...testing.tests._support.catalog_selection import in_process_selection
-from ...tests._write_authority import make_test_write_authority
-from ...tests.gateway_boot import (
+from ...testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    RunVerbs,
+    booted_gateway,
     broker_gateway_env,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    log_tail,
+    seat_app_home,
 )
+from ...testing.tests._support.catalog_selection import in_process_selection
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..schemas.gateway import FrozenTeamAssignmentSummary
 from .conftest import _InProcessWorker
 
 if TYPE_CHECKING:
-    import subprocess
     from pathlib import Path
 
 
@@ -220,16 +217,9 @@ class _RestartCase:
 def _prepare_restart_case(tmp_path: Path) -> _RestartCase:
     app_home = tmp_path / "app-home"
     workspace = app_home / "workspaces" / "project"
-    app_home.mkdir()
     workspace.mkdir(parents=True)
-    attach = "attach-restart-proof-0123456789abcdef"
-    seed_credentials(
-        app_home,
-        attach=attach,
-        ownership="ownership-restart-proof-fedcba9876543210",
-    )
-    seat_valid_database(app_home)
-    database_path = derive_state_paths(app_home).database_path
+    attach = DEFAULT_ATTACH_CREDENTIAL
+    database_path = seat_app_home(app_home, attach=attach).database_path
     frozen_revision = "frozen-revision-no-longer-served"
     metadata, frozen_selection = _current_metadata(
         workspace, catalog_revision=frozen_revision
@@ -363,24 +353,19 @@ def _assert_restart_runs(
     # A real start is the production dispatch-demand edge. It starts the
     # worker and releases the gateway's deferred startup recovery only
     # after the worker has answered its readiness probe.
-    trigger = client.post(
-        "/v1/runs",
-        json={
-            "stage": "start",
-            "run_id": "restart-demand",
-            "team_preset": "mock-success-single",
-            "message": "release startup recovery",
-            "autonomous": True,
-            "selection": live_selection,
-            "metadata": {"workspace_root": str(case.workspace)},
-        },
-    )
+    trigger = RunVerbs(
+        base_url=str(client.base_url),
+        authorization=client.headers["Authorization"],
+        team_preset="mock-success-single",
+        workspace_root=str(case.workspace),
+        selection=lambda _workspace: live_selection,
+    ).start("restart-demand", message="release startup recovery")
     assert trigger.status_code == 201, trigger.text
 
     snapshot = _await_terminal(client, "current-schema-restart")
     assert snapshot["status"] == "completed", (
         snapshot,
-        log_path.read_text(encoding="utf-8", errors="replace")[-8000:],
+        log_tail(log_path, limit=8000),
     )
     # Semantic object equality covers every nested identity and value;
     # JSON object key order is deliberately not part of the contract.
@@ -469,39 +454,20 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
     case = _prepare_restart_case(tmp_path)
     asyncio.run(_seed_restart_case(case))
     log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
-    script = gateway_script(log_level="info")
-
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        environment = broker_gateway_env(
-            case.app_home,
-            gateway_port=gateway_port,
-            worker_port=worker_port,
-            gateway_token=case.attach,
-        )
-        environment["VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"] = "true"
-        return spawn_gateway(
-            script=script,
-            gateway_port=gateway_port,
-            env=environment,
-            log_handle=log_handle,
-            new_session=True,
-        )
-
-    process = None
-    try:
-        process, _gateway_port, _worker_port, base_url = spawn_until_ready(
-            _spawn, log_path=log_path
-        )
-        headers = {"Authorization": f"Bearer {case.attach}"}
-        with httpx.Client(base_url=base_url, headers=headers, timeout=240.0) as client:
-            _assert_restart_runs(client, case, log_path)
-            _assert_stored_restart_metadata(case)
-    finally:
-        if process is not None:
-            reap_gateway(process)
-        with suppress(Exception):
-            log_handle.close()
+    headers = {"Authorization": f"Bearer {case.attach}"}
+    with (
+        booted_gateway(
+            broker_gateway_env(case.app_home, gateway_token=case.attach),
+            log_path=log_path,
+            script=gateway_script(log_level="info"),
+            detached=True,
+        ) as gateway,
+        httpx.Client(
+            base_url=gateway.base_url, headers=headers, timeout=240.0
+        ) as client,
+    ):
+        _assert_restart_runs(client, case, log_path)
+        _assert_stored_restart_metadata(case)
 
 
 @pytest.mark.asyncio

@@ -21,9 +21,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import create_engine, inspect, text
 
+from ...testing import JsonReplyHandler, serve_handler
 from ...testing.ports import free_port
-from ...testing.tests._support.http_handlers import JsonReplyHandler
-from ...testing.tests._support.listeners import serve_handler
 from ...tests._write_authority import make_test_thread_authority_columns
 from ..admin import _CHECKPOINT_TABLES, _CLEAR_ORDER, _administrative_engine
 from ..models import (

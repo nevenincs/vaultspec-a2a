@@ -56,7 +56,7 @@ def test_authenticated_prepare_reserves_without_run_or_token(
     a real gate rather than a disabled one.
     """
     run_id = "run-contract-prepare"
-    response = gateway.prepare(run_id)
+    response = gateway.runs.prepare(run_id)
     assert response.status_code == 201, response.text
     body = response.json()
 
@@ -87,7 +87,7 @@ def test_authenticated_prepare_reserves_without_run_or_token(
     assert unauth.status_code == 401, unauth.text
 
     # Keep the shared gateway's bounded capacity clean for later scenarios.
-    released = gateway.release(run_id, body["reservation_id"])
+    released = gateway.runs.release(run_id, body["reservation_id"])
     assert released.status_code == 201, released.text
     assert released.json()["released"] is True
 
@@ -102,7 +102,7 @@ def test_authenticated_start_creates_a_dispatched_run(
     created nothing addressable. An unauthenticated start is refused 401.
     """
     run_id = "run-contract-start"
-    response = gateway.start(run_id)
+    response = gateway.runs.start(run_id)
     assert response.status_code == 201, response.text
     body = response.json()
 
@@ -158,7 +158,7 @@ def test_authenticated_status_snapshot_is_coherent_or_a_real_not_found(
     literal.
     """
     run_id = "run-contract-status"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
 
     snapshot = wait_for_terminal(gateway, run_id)
@@ -223,7 +223,7 @@ async def test_authenticated_progress_stream_relays_bounded_lifecycle_frame(
     empty frame cannot pass.
     """
     run_id = "run-contract-progress"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
     wait_for_terminal(gateway, run_id)
 

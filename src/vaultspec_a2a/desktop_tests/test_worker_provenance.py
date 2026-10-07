@@ -21,10 +21,8 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import subprocess
 import sys
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -32,87 +30,33 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ..lifecycle.discovery import is_pid_alive
-from ..testing.ports import free_port
-from ..tests.gateway_boot import (
+from ..testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    FOREIGN_WORKER_PROGRAM,
+    RunVerbs,
     armed_gateway_env,
     await_gateway_ready,
+    booted_gateway,
     desktop_workspace,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
+    foreign_worker,
+    reap_process,
+    reap_tree,
+    seat_app_home,
     spawn_gateway,
-    spawn_until_ready,
+    status_and_json,
     worker_lifecycle_gateway_script,
 )
+from ..testing.ports import free_port
 from ._catalog import catalog_selection
-from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+_AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 _GATEWAY = worker_lifecycle_gateway_script()
-
-_SQUATTER = """
-import json
-import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-port = int(sys.argv[1])
-body = json.loads(sys.argv[2])
-log_path = sys.argv[3]
-
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        with open(log_path, "a", encoding="utf-8") as log:
-            log.write("GET " + self.path + "\\n")
-        payload = json.dumps(body).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def do_POST(self):
-        with open(log_path, "a", encoding="utf-8") as log:
-            log.write("POST " + self.path + "\\n")
-        self.send_response(503)
-        self.end_headers()
-
-    def log_message(self, *args):
-        pass
-
-
-HTTPServer(("127.0.0.1", port), Handler).serve_forever()
-"""
-
-
-@contextmanager
-def _squatter(
-    tmp_path: Path, port: int, body: dict[str, Any]
-) -> Generator[tuple[subprocess.Popen[bytes], Path]]:
-    """Run a real stranger process serving *body* on the worker port."""
-    log_path = tmp_path / f"squatter-{port}.log"
-    log_path.write_text("", encoding="utf-8")
-    proc = subprocess.Popen(
-        [sys.executable, "-c", _SQUATTER, str(port), json.dumps(body), str(log_path)],
-    )
-    try:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            try:
-                with httpx.Client(timeout=1.0) as client:
-                    if client.get(f"http://127.0.0.1:{port}/health").status_code == 200:
-                        break
-            except httpx.HTTPError:
-                time.sleep(0.05)
-        else:
-            raise AssertionError("squatter never came up")
-        yield proc, log_path
-    finally:
-        with contextlib.suppress(Exception):
-            proc.kill()
-            proc.wait(timeout=10)
+# This module admits runs against the in-process mock lane (see ``_catalog.py``);
+# the gateway must serve one to select.
+_SERVE_LANES = {"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"}
 
 
 @contextmanager
@@ -126,33 +70,14 @@ def _armed_gateway_on_worker_port(
     allocated with bind-race retry. Yields ``(base, bearer, gateway_log)``.
     """
     app_home = tmp_path / home_name
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-    log_path = tmp_path / f"{home_name}-gateway.log"
-    log_handle = log_path.open("wb")
-
-    def _spawn(gateway_port: int, _ignored: int) -> subprocess.Popen[bytes]:
-        return spawn_gateway(
-            script=_GATEWAY,
-            gateway_port=gateway_port,
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-                # This module admits runs against the in-process mock lane
-                # (see ``_catalog.py``); the gateway must serve one to select.
-                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"},
-            ),
-            log_handle=log_handle,
-        )
-
-    proc, _gateway_port, _ignored, base = spawn_until_ready(_spawn, log_path=log_path)
-    try:
-        yield base, f"Bearer {_ATTACH}", log_path
-    finally:
-        reap_gateway(proc)
-        log_handle.close()
+    seat_app_home(app_home)
+    env = armed_gateway_env(app_home, extra=_SERVE_LANES)
+    with booted_gateway(
+        lambda gateway_port, _ignored: env(gateway_port, worker_port),
+        log_path=tmp_path / f"{home_name}-gateway.log",
+        script=_GATEWAY,
+    ) as gateway:
+        yield gateway.base_url, _AUTH, gateway.log_path
 
 
 def _worker_ready(base: str, auth: str) -> bool:
@@ -165,27 +90,14 @@ def _worker_ready(base: str, auth: str) -> bool:
 
 
 def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
-    workspace = desktop_workspace(base)
-    with httpx.Client(base_url=base, timeout=60.0) as client:
-        resp = client.post(
-            "/v1/runs",
-            headers={"Authorization": auth},
-            json={
-                "team_preset": "mock-success-single",
-                "stage": "prepare",
-                "autonomous": True,
-                "run_id": run_id,
-                # The workspace anchors the selection, which run start
-                # revalidates against the catalog served for it.
-                "metadata": {"workspace_root": workspace},
-                "selection": catalog_selection(base, auth, workspace),
-            },
-        )
-    try:
-        body = resp.json()
-    except ValueError:
-        body = {"raw": resp.text}
-    return resp.status_code, body
+    verbs = RunVerbs(
+        base_url=base,
+        authorization=auth,
+        team_preset="mock-success-single",
+        workspace_root=desktop_workspace(base),
+        selection=lambda workspace: catalog_selection(base, auth, workspace),
+    )
+    return status_and_json(verbs.prepare(run_id))
 
 
 def _assert_refused_without_adoption_or_eviction(
@@ -193,8 +105,9 @@ def _assert_refused_without_adoption_or_eviction(
 ) -> None:
     """One squatter scenario: armed demand must refuse, not adopt, not evict."""
     worker_port = free_port()
+    request_log = tmp_path / f"squatter-{worker_port}.log"
     with (
-        _squatter(tmp_path, worker_port, body) as (squatter, request_log),
+        foreign_worker(worker_port, body, request_log=request_log) as squatter,
         _armed_gateway_on_worker_port(tmp_path, worker_port) as (base, auth, gw_log),
     ):
         status, prepared = _prepare(base, auth, run_id)
@@ -258,31 +171,22 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
         "gateway_url": f"http://127.0.0.1:{gateway_port}",
     }
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
+    seat_app_home(app_home)
     log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
-    with _squatter(tmp_path, worker_port, body) as (squatter, request_log):
+    request_log = tmp_path / f"squatter-{worker_port}.log"
+    with foreign_worker(worker_port, body, request_log=request_log) as squatter:
         proc = spawn_gateway(
             script=_GATEWAY,
             gateway_port=gateway_port,
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-                # This module admits runs against the in-process mock lane
-                # (see ``_catalog.py``); the gateway must serve one to select.
-                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"},
+            env=armed_gateway_env(app_home, extra=_SERVE_LANES)(
+                gateway_port, worker_port
             ),
-            log_handle=log_handle,
+            log_path=log_path,
         )
         try:
             base = f"http://127.0.0.1:{gateway_port}"
             await_gateway_ready(base, proc, log_path=log_path)
-            status, prepared = _prepare(
-                base, f"Bearer {_ATTACH}", "run-provenance-url-echo"
-            )
+            status, prepared = _prepare(base, _AUTH, "run-provenance-url-echo")
             assert status == 503, prepared
             assert "OS isolation backend" in prepared["detail"]
             assert "lifecycle worker spawned: False" in log_path.read_text(
@@ -292,8 +196,7 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
             requests = request_log.read_text(encoding="utf-8").splitlines()
             assert all(line.startswith("GET /health") for line in requests), requests
         finally:
-            reap_gateway(proc)
-            log_handle.close()
+            reap_process(proc)
 
 
 def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
@@ -468,18 +371,14 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
     app_home = tmp_path / "app-home"
     app_home.mkdir()
     squatter_file = tmp_path / "squatter.py"
-    squatter_file.write_text(_SQUATTER, encoding="utf-8")
+    squatter_file.write_text(FOREIGN_WORKER_PROGRAM, encoding="utf-8")
     driver_file = tmp_path / "prior_generation_conflict_driver.py"
     driver_file.write_text(_PRIOR_GENERATION_CONFLICT_DRIVER, encoding="utf-8")
     squatter_log = tmp_path / "squatter-requests.log"
     squatter_log.write_text("", encoding="utf-8")
     result_file = tmp_path / "result.json"
 
-    env = os.environ.copy()
-    env["VAULTSPEC_A2A_DESKTOP_APP_HOME"] = str(app_home)
-    env["VAULTSPEC_A2A_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_A2A_PORT"] = str(free_port())
-    env["VAULTSPEC_A2A_WORKER_PORT"] = str(worker_port)
+    env = armed_gateway_env(app_home)(free_port(), worker_port)
 
     driver = subprocess.run(
         [
@@ -525,11 +424,5 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
             "the wedged prior-generation worker must survive a failed eviction"
         )
     finally:
-        import asyncio
-
-        from ..utils import kill_pid_tree_async
-
         with contextlib.suppress(Exception):
-            asyncio.run(
-                kill_pid_tree_async(squatter_pid, term_timeout=5.0, kill_timeout=5.0)
-            )
+            reap_tree(squatter_pid, term_timeout=5.0, kill_timeout=5.0)

@@ -17,10 +17,10 @@ from sqlalchemy import text
 
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
-from ...testing import settings_override
+from ...testing import serve_on_loopback, settings_override
 from ...thread.enums import ThreadStatus
 from ._sse_reader import SseReader
-from .conftest import _live_server, make_app, seed_run_with_status
+from .conftest import make_app, seed_run_with_status
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -76,7 +76,7 @@ async def test_a_served_frame_carries_its_run_and_sequence_as_the_sse_id(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream("GET", f"/v1/runs/{_RUN}/stream") as response,
     ):
@@ -117,7 +117,7 @@ async def test_no_frame_carries_an_id_while_replay_is_switched_off(
 
     with settings_override(stream_replay_enabled=False):
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
             client.stream("GET", f"/v1/runs/{_RUN}/stream") as response,
         ):
@@ -160,7 +160,7 @@ async def test_an_unnumbered_run_carries_no_id_although_replay_is_switched_on(
 
     assert settings.stream_replay_enabled, "this proof is about the switch being ON"
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream("GET", f"/v1/runs/{_RUN}/stream") as response,
     ):

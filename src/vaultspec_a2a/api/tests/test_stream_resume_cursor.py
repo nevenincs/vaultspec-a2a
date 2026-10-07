@@ -14,9 +14,10 @@ import httpx
 import pytest
 
 from ...streaming.aggregator import EventAggregator
+from ...testing import serve_on_loopback
 from ...thread.enums import ThreadStatus
 from ._sse_reader import SseReader
-from .conftest import _live_server, make_app, seed_run_with_status
+from .conftest import make_app, seed_run_with_status
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -71,7 +72,7 @@ async def test_a_cursor_this_run_cannot_honour_closes_the_stream(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         frame = await _first_frame(client, header=cursor)
@@ -93,7 +94,7 @@ async def test_the_query_fallback_is_honoured_for_a_client_that_cannot_set_heade
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         refused = await _first_frame(client, query=f"{_OTHER_RUN}:4")
@@ -118,7 +119,7 @@ async def test_the_header_wins_over_the_query_when_both_are_supplied(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         header_refuses = await _first_frame(
@@ -142,7 +143,7 @@ async def test_the_dash_sentinel_asks_for_the_retained_window(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         header = await _first_frame(client, header="-")
@@ -161,7 +162,7 @@ async def test_a_cursor_longer_than_the_route_admits_is_refused_at_the_edge(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         response = await client.get(

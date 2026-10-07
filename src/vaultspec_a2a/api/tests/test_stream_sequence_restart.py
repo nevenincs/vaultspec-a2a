@@ -33,26 +33,21 @@ from ...database.permission_repository import create_control_action
 from ...database.thread_repository import create_thread
 from ...desktop.credentials import WORKER_IPC_CREDENTIAL_NAME
 from ...desktop.profile import derive_state_paths
-from ...tests._write_authority import make_test_write_authority
-from ...tests.gateway_boot import (
+from ...testing import (
     LOOPBACK_TIMEOUT,
     armed_gateway_env,
+    booted_gateway,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    log_tail,
+    seat_app_home,
 )
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
-    import subprocess
     from pathlib import Path
 
 _RUN = "sequence-survives-restart"
-_ATTACH = "attach-sequence-restart-0123456789abcdef"
-_OWNERSHIP = "ownership-sequence-restart-fedcba9876543210"
 
 
 def _relay_body(worker_sequences: list[int]) -> dict[str, Any]:
@@ -148,60 +143,33 @@ def _post_worker_batch(base_url: str, secret: str, sequences: list[int]) -> None
 def test_a_restarted_gateway_continues_the_run_sequence(tmp_path: Path) -> None:
     """Two gateway lifetimes, one run, one unbroken and unduplicated sequence."""
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-    database_path = derive_state_paths(app_home).database_path
+    database_path = seat_app_home(app_home).database_path
     asyncio.run(_seed_running_thread(database_path))
 
     log_path = tmp_path / "gateway.log"
+    # No worker is spawned: the frames below arrive on the same route a worker
+    # would use, and a real agent run would only add nondeterminism to a proof
+    # about numbering. Both lifetimes append to one log.
+    env = armed_gateway_env(app_home, auto_spawn_worker=False)
     script = gateway_script(log_level="warning")
 
-    def _boot() -> tuple[subprocess.Popen[bytes], str]:
-        with log_path.open("ab") as handle:
-
-            def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-                return spawn_gateway(
-                    script=script,
-                    gateway_port=gateway_port,
-                    env=armed_gateway_env(
-                        app_home,
-                        gateway_port=gateway_port,
-                        worker_port=worker_port,
-                        # No worker is spawned: the frames below arrive on the
-                        # same route a worker would use, and a real agent run
-                        # would only add nondeterminism to a proof about
-                        # numbering.
-                        auto_spawn_worker=False,
-                    ),
-                    log_handle=handle,
-                    new_session=True,
-                )
-
-            process, _gateway_port, _worker_port, base = spawn_until_ready(
-                _spawn, log_path=log_path
-            )
-            return process, base
-
-    first, base = _boot()
-    try:
-        _post_worker_batch(base, _worker_secret(app_home), [1, 2, 3])
+    with booted_gateway(env, log_path=log_path, script=script, detached=True) as first:
+        _post_worker_batch(first.base_url, _worker_secret(app_home), [1, 2, 3])
         after_first = _retained(database_path)
-    finally:
-        reap_gateway(first)
 
     assert [sequence for sequence, _ in after_first] == [1, 2, 3], (
         after_first,
-        log_path.read_text(encoding="utf-8", errors="replace")[-4000:],
+        log_tail(log_path),
     )
 
-    second, base = _boot()
     try:
-        # A respawned worker numbers from one again; the gateway must not.
-        _post_worker_batch(base, _worker_secret(app_home), [1, 2])
-        after_second = _retained(database_path)
+        with booted_gateway(
+            env, log_path=log_path, script=script, detached=True
+        ) as second:
+            # A respawned worker numbers from one again; the gateway must not.
+            _post_worker_batch(second.base_url, _worker_secret(app_home), [1, 2])
+            after_second = _retained(database_path)
     finally:
-        reap_gateway(second)
         with suppress(OSError):
             log_path.unlink()
 
@@ -221,37 +189,18 @@ def test_a_gateway_serving_no_replay_retains_nothing(tmp_path: Path) -> None:
     value claimed both and proved neither.
     """
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-    database_path = derive_state_paths(app_home).database_path
+    database_path = seat_app_home(app_home).database_path
     asyncio.run(_seed_running_thread(database_path))
 
-    log_path = tmp_path / "gateway.log"
-    script = gateway_script(log_level="warning")
-
-    with log_path.open("ab") as handle:
-
-        def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-            return spawn_gateway(
-                script=script,
-                gateway_port=gateway_port,
-                env=armed_gateway_env(
-                    app_home,
-                    gateway_port=gateway_port,
-                    worker_port=worker_port,
-                    auto_spawn_worker=False,
-                    extra={"VAULTSPEC_A2A_STREAM_REPLAY_ENABLED": "false"},
-                ),
-                log_handle=handle,
-                new_session=True,
-            )
-
-        process, _gateway_port, _worker_port, base = spawn_until_ready(
-            _spawn, log_path=log_path
-        )
-    try:
-        _post_worker_batch(base, _worker_secret(app_home), [1, 2, 3])
+    with booted_gateway(
+        armed_gateway_env(
+            app_home,
+            auto_spawn_worker=False,
+            extra={"VAULTSPEC_A2A_STREAM_REPLAY_ENABLED": "false"},
+        ),
+        log_path=tmp_path / "gateway.log",
+        script=gateway_script(log_level="warning"),
+        detached=True,
+    ) as gateway:
+        _post_worker_batch(gateway.base_url, _worker_secret(app_home), [1, 2, 3])
         assert _retained(database_path) == []
-    finally:
-        reap_gateway(process)

@@ -29,6 +29,7 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...streaming.transformer import emit_interrupt_events
+from ...testing import serve_on_loopback
 from ...testing.tests._support.sse import read_frame
 from ...thread.clarification import (
     ClarificationKind,
@@ -36,7 +37,7 @@ from ...thread.clarification import (
     ClarificationRequest,
 )
 from .clarification_harness import new_state_graph
-from .conftest import SessionFactory, _live_server, async_catalog_run_fields, make_app
+from .conftest import SessionFactory, async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -137,7 +138,7 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
     """
     app, aggregator, _worker, cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=15.0) as client,
     ):
         start = await client.post(
@@ -189,7 +190,7 @@ async def test_the_questions_live_on_run_status_not_on_the_relay(
     """
     app, aggregator, _worker, cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=15.0) as client,
     ):
         start = await client.post(

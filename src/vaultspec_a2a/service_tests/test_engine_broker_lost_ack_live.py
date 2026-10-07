@@ -37,10 +37,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..desktop.profile import derive_state_paths
 from ..lifecycle.discovery import write_service_json
-from ..service_tests._live_desktop_gateway import (
-    ATTACH_CREDENTIAL,
-    armed_gateway,
-)
+from ..service_tests._live_desktop_gateway import armed_gateway
+from ..testing import DEFAULT_ATTACH_CREDENTIAL
 from ..testing.ports import free_port
 from ..utils.process import ProcessContainment
 from ._provider_catalog_live import (
@@ -589,7 +587,7 @@ def _run_lost_ack_engine(
         discovery_home / "service.json",
         port=int(options["relay"].server_address[1]),
         pid=os.getpid(),
-        service_token=ATTACH_CREDENTIAL,
+        service_token=DEFAULT_ATTACH_CREDENTIAL,
     )
     environment = {
         **{

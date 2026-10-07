@@ -12,7 +12,8 @@ authenticated liveness surface and the service-state verb.
 
 The valid database is seated by the real ``migrate`` entrypoint in a
 separate process; the gateway is a second real process. No mock, monkeypatch,
-stub, skip, or expected failure is used; children are torn down in a ``finally``.
+stub, skip, or expected failure is used; children are torn down when the test
+ends.
 """
 
 from __future__ import annotations
@@ -23,24 +24,23 @@ from typing import TYPE_CHECKING
 import httpx
 
 from ..control.health import SERVICE_WORKER_PROBE_TIMEOUT_SECONDS
-from ..tests.gateway_boot import (
+from ..testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    RunVerbs,
     armed_gateway_env,
+    booted_gateway,
     desktop_workspace,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    log_tail,
+    seat_app_home,
 )
 
 if TYPE_CHECKING:
-    import subprocess
     from pathlib import Path
 
-_ATTACH = "attach-credential-readiness-1234567890abcdef"
-_OWNERSHIP = "ownership-capability-readiness-fedcba0987654321"
-_GATEWAY_LOG_TAIL_BYTES = 4096
+    from ..testing import BootedGateway
+
+_AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 # A read budget for a RESPONSE, not a latency assertion: the bounded-probe
 # property is proven from the gateway's own probe measurement, and this only
 # keeps a wedged gateway from hanging the session. The per-item pytest-timeout
@@ -48,19 +48,14 @@ _GATEWAY_LOG_TAIL_BYTES = 4096
 _SERVICE_READ_BUDGET_SECONDS = 60.0
 
 
-def _gateway_failure_diagnostics(proc: subprocess.Popen[bytes], log_path: Path) -> str:
+def _gateway_failure_diagnostics(gateway: BootedGateway) -> str:
     """Preserve child exit and lifespan evidence when the real HTTP trace fails."""
-    exit_code = proc.poll()
+    exit_code = gateway.process.poll()
     process_state = "still running" if exit_code is None else f"exited {exit_code}"
-    try:
-        log_tail = log_path.read_bytes()[-_GATEWAY_LOG_TAIL_BYTES:].decode(
-            "utf-8", errors="replace"
-        )
-    except OSError as exc:
-        log_tail = f"<could not read gateway log: {exc}>"
+    tail = log_tail(gateway.log_path)
     return (
-        f"gateway child {process_state}; log={log_path}; "
-        f"lifespan/stderr tail:\n{log_tail or '<empty>'}"
+        f"gateway child {process_state}; log={gateway.log_path}; "
+        f"lifespan/stderr tail:\n{tail or '<empty>'}"
     )
 
 
@@ -99,7 +94,7 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     assert client.get("/v1/service").status_code == 401
 
     # --- Authenticated readiness carries identity and the cold ladder. ---
-    auth = {"Authorization": f"Bearer {_ATTACH}"}
+    auth = {"Authorization": _AUTH}
     ready = client.get("/health", headers=auth)
     assert ready.status_code == 200
     body = ready.json()
@@ -164,21 +159,23 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
         "catalog_revision": "unvalidated",
         "entry_id": "unvalidated",
     }
-    for stage in ("start", "prepare", "commit"):
-        payload: dict[str, object] = {
-            "stage": stage,
-            "run_id": f"native-isolation-{stage}",
-            "team_preset": "mock-success-single",
-            "message": "synthetic read",
-            "metadata": {"workspace_root": workspace},
-            "selection": selection,
-        }
-        if stage == "commit":
-            payload["reservation_id"] = "unissued-reservation"
-            payload["actor_tokens"] = {
-                "tokens": {"mock-coder-success": "synthetic-actor-token"}
-            }
-        refusal = client.post("/v1/runs", headers=auth, json=payload)
+    verbs = RunVerbs(
+        base_url=str(client.base_url),
+        authorization=_AUTH,
+        team_preset="mock-success-single",
+        workspace_root=workspace,
+        selection=lambda _workspace: selection,
+        message="synthetic read",
+    )
+    for refusal in (
+        verbs.start("native-isolation-start"),
+        verbs.prepare("native-isolation-prepare"),
+        verbs.commit(
+            "native-isolation-commit",
+            "unissued-reservation",
+            tokens={"mock-coder-success": "synthetic-actor-token"},
+        ),
+    ):
         assert refusal.status_code == 503, refusal.text
         assert "OS isolation backend" in refusal.json()["detail"]
         assert "synthetic-actor-token" not in refusal.text
@@ -195,54 +192,31 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
 ) -> None:
     """Minimal liveness is public; readiness with the cold ladder is authenticated."""
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-
-    log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
+    seat_app_home(app_home)
     # A real armed desktop gateway booting the *production* lifespan: create_app
     # runs the armed credential loading, and the production lifespan validates
     # the seated schema, seats the database engine, and creates the lazy worker
     # spawner. With auto-spawn disabled the worker stays cold, which is exactly
-    # the fact under test.
+    # the fact under test: ordinary boot must not start it, so the gateway-ready
+    # yet not-execution-ready fact is observable.
     # This gateway's INFO lifecycle messages are diagnostic evidence only: a
     # request failure must retain the real startup/shutdown trail and child exit
     # state instead of leaving a bare client timeout after a Popen exit.
-    script = gateway_script(log_level="info")
-
-    def _spawn(port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        return spawn_gateway(
-            script=script,
-            gateway_port=port,
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=port,
-                worker_port=worker_port,
-                # Keep the worker cold: ordinary boot must not start it, so the
-                # gateway-ready yet not-execution-ready fact is observable.
-                auto_spawn_worker=False,
-            ),
-            log_handle=log_handle,
-        )
-
-    proc, _port, _worker_port, base = spawn_until_ready(_spawn, log_path=log_path)
-    try:
-        with httpx.Client(
-            base_url=base, timeout=_SERVICE_READ_BUDGET_SECONDS
-        ) as client:
-            try:
-                _assert_readiness_surfaces(client)
-            except (httpx.HTTPError, AssertionError) as exc:
-                raise AssertionError(
-                    "desktop readiness HTTP trace failed "
-                    f"({type(exc).__name__}: {exc}); "
-                    f"{_gateway_failure_diagnostics(proc, log_path)}"
-                ) from exc
-    finally:
-        # The TREE, not the handle: on Windows the virtual-environment
-        # interpreter is a launcher stub, so a terminate() aimed at this handle
-        # leaves the real uvicorn gateway alive holding its port and its SQLite
-        # handles for the rest of the session.
-        reap_gateway(proc)
-        log_handle.close()
+    with (
+        booted_gateway(
+            armed_gateway_env(app_home, auto_spawn_worker=False),
+            log_path=tmp_path / "gateway.log",
+            script=gateway_script(log_level="info"),
+        ) as gateway,
+        httpx.Client(
+            base_url=gateway.base_url, timeout=_SERVICE_READ_BUDGET_SECONDS
+        ) as client,
+    ):
+        try:
+            _assert_readiness_surfaces(client)
+        except (httpx.HTTPError, AssertionError) as exc:
+            raise AssertionError(
+                "desktop readiness HTTP trace failed "
+                f"({type(exc).__name__}: {exc}); "
+                f"{_gateway_failure_diagnostics(gateway)}"
+            ) from exc

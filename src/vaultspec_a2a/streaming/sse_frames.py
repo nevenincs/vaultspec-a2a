@@ -325,7 +325,7 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     ServerEventType.MESSAGE_CHUNK: {
         "content": _Text(MAX_PROGRESS_CONTENT_CHARS),
-        "finish_reason": _Text(64),
+        "finish_reason": _ENUM,
     },
     ServerEventType.THOUGHT_CHUNK: {"content": _Text(MAX_PROGRESS_CONTENT_CHARS)},
     ServerEventType.TOOL_CALL_START: _TOOL_CALL_FIELDS,
@@ -350,16 +350,16 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
                 "agent_id": _Text(MAX_ROLE_ID_CHARS),
                 "state": _ENUM,
                 "node_name": _NODE_NAME,
-                "provider": _Text(64),
+                "provider": _ENUM,
                 "model_name": _Text(128),
-                "role": _Text(64),
+                "role": _ENUM,
                 "display_name": _Text(128),
                 "description": _Text(256),
             },
         ),
     },
     ServerEventType.ERROR: {
-        "code": _Text(64),
+        "code": _ENUM,
         "message": _Text(512),
         "recoverable": _Flag(),
     },
@@ -376,10 +376,10 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "error_detail": _Text(512),
     },
     ServerEventType.HEARTBEAT: {"server_uptime_seconds": _Number()},
-    StreamFrameKind.STREAM_REJECTED: {"reason": _Text(64)},
+    StreamFrameKind.STREAM_REJECTED: {"reason": _ENUM},
     StreamFrameKind.PROGRESS_DROPPED: {
-        "reason": _Text(64),
-        "dropped_type": _Text(64),
+        "reason": _ENUM,
+        "dropped_type": _ENUM,
         "dropped_count": _Integer(),
         # The first sequence a short replay CAN serve. Carried here because a
         # resynchronization notice that cannot say where the stream picks up

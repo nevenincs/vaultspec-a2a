@@ -488,10 +488,16 @@ async def enrich_snapshot_from_execution_state(
     *,
     thread: ThreadModel,
     snapshot: ThreadStateData,
-    checkpoint_present: bool,
+    checkpoint_present: bool | None,
     checkpoint_id: str | None,
 ) -> ThreadStateData:
-    """Merge durable execution-state truth and classify freshness."""
+    """Merge durable execution-state truth and classify freshness.
+
+    ``checkpoint_present`` is ``None`` when the caller read no checkpoint at
+    all. The row is still decoded, because an unreadable row says nothing about
+    the checkpoint, but with nothing to compare it against its lineage is not
+    judged.
+    """
     row = await get_thread_execution_state(session, thread.id)
     if row is None:
         if checkpoint_present:
@@ -514,7 +520,7 @@ async def enrich_snapshot_from_execution_state(
     if is_terminal:
         return snapshot
 
-    if execution_state_is_stale(
+    if checkpoint_present is not None and execution_state_is_stale(
         row,
         checkpoint_present=checkpoint_present,
         checkpoint_id=checkpoint_id,

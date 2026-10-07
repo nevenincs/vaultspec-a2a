@@ -1,30 +1,36 @@
 """Run listing: the thread summaries served by the run-list read route.
 
 Each summary joins the durable thread row with its latest checkpoint and any
-pending approval, reading every checkpoint in one bounded pass.
+pending approval, reading every checkpoint in one bounded pass. The posture and
+approval it serves are judged by the read-model steps run-status applies, so a
+run lists as it reads.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..database import (
     actionable_pending_permissions,
-    get_thread_execution_state,
     list_threads,
     read_latest_checkpoint,
 )
 from ..domain_config import domain_config
-from ..thread.enums import TERMINAL_STATUS_VALUES, RepairStatus, ThreadStatus
-from ..thread.snapshots import project_checkpoint_tuple
+from ..thread.enums import DegradedReason, RepairStatus, ThreadStatus
+from ..thread.snapshots import (
+    ThreadStateData,
+    finalize_snapshot_replay_status,
+    project_checkpoint_tuple,
+    record_repair_posture,
+)
 from .projection import (
+    clear_permissions_without_checkpoint_truth,
     durable_approval,
-    escalate_repair_posture,
-    execution_state_is_stale,
+    enrich_snapshot_from_execution_state,
+    mark_degraded,
 )
 
 if TYPE_CHECKING:
@@ -32,14 +38,11 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.models import ThreadExecutionStateModel, ThreadModel
+    from ..database.models import ThreadModel
 
 __all__ = [
     "list_threads_service",
 ]
-
-# The listing moved out of the thread service; its records keep that name.
-logger = logging.getLogger("vaultspec_a2a.control.thread_service")
 
 
 def _parse_thread_summary_metadata(
@@ -171,74 +174,84 @@ async def _bulk_read_checkpoints(
     return dict(pairs)
 
 
-def _summary_checkpoint_state(
+async def _judge_run_posture(
+    db: AsyncSession,
     thread: ThreadModel,
-    execution_state: ThreadExecutionStateModel | None,
-    probe: _CheckpointProbe,
-    *,
-    checkpointer_active: bool,
-) -> tuple[str | None, bool]:
-    repair_status = thread.repair_status
-    checkpoint_unverified = checkpointer_active and probe.unverified
+    probe: _CheckpointProbe | None,
+) -> ThreadStateData:
+    """Judge one thread's repair posture and approval as run-status judges them.
+
+    The summary serves only the posture fields of the snapshot, so this applies
+    the read-model steps run-status applies, in its order, and nothing else:
+    the durable approval, what the checkpoint read says about it, the
+    execution-state row, then the replay verdict. ``probe`` is ``None`` when no
+    checkpointer was given, and then no claim is made about the checkpoint
+    either way.
+    """
+    snapshot = ThreadStateData(
+        thread_id=thread.id, status=thread.status, last_sequence=0
+    )
+    record_repair_posture(snapshot, thread.repair_status)
+    snapshot.approval_status, snapshot.approval_request_id = durable_approval(
+        await actionable_pending_permissions(db, thread_id=thread.id)
+    )
+    if probe is None:
+        return await enrich_snapshot_from_execution_state(
+            db,
+            thread=thread,
+            snapshot=snapshot,
+            checkpoint_present=None,
+            checkpoint_id=None,
+        )
+
+    checkpoint_present = probe.tuple is not None
     checkpoint_id: str | None = None
-    if checkpointer_active and probe.tuple is not None:
+    if probe.unverified:
+        mark_degraded(
+            snapshot,
+            DegradedReason.CHECKPOINT_UNAVAILABLE,
+            repair=RepairStatus.CHECKPOINT_UNAVAILABLE,
+        )
+    if probe.tuple is None:
+        clear_permissions_without_checkpoint_truth(snapshot)
+    else:
         checkpoint_id = project_checkpoint_tuple(
             probe.tuple, thread_id=thread.id
         ).checkpoint_id
-    if checkpoint_unverified:
-        repair_status = escalate_repair_posture(
-            repair_status, RepairStatus.CHECKPOINT_UNAVAILABLE
-        )
-    # Judged as run-status judges it, so the two surfaces report the same
-    # posture for one run: a settled run keeps its row unjudged, and only a
-    # listing that read checkpoints can say whether the row still matches one.
-    if (
-        checkpointer_active
-        and execution_state is not None
-        and thread.status not in TERMINAL_STATUS_VALUES
-        and execution_state_is_stale(
-            execution_state,
-            checkpoint_present=probe.tuple is not None,
-            checkpoint_id=checkpoint_id,
-        )
-    ):
-        repair_status = escalate_repair_posture(
-            repair_status, RepairStatus.NEEDS_RECONCILIATION
-        )
-    return repair_status, checkpoint_unverified
+    snapshot = await enrich_snapshot_from_execution_state(
+        db,
+        thread=thread,
+        snapshot=snapshot,
+        checkpoint_present=checkpoint_present,
+        checkpoint_id=checkpoint_id,
+    )
+    finalize_snapshot_replay_status(
+        snapshot,
+        checkpoint_loaded=checkpoint_present,
+        checkpoint_present=checkpoint_present,
+        checkpoint_error=probe.unverified,
+        thread_status=thread.status,
+    )
+    return snapshot
 
 
 async def _thread_summary(
     db: AsyncSession,
     thread: ThreadModel,
-    probe: _CheckpointProbe,
-    *,
-    checkpointer_active: bool,
+    probe: _CheckpointProbe | None,
 ) -> ThreadSummaryData:
     feature_tag, source_branch, callee = _parse_thread_summary_metadata(
         thread.thread_metadata
     )
-    execution_state = await get_thread_execution_state(db, thread.id)
-    repair_status, checkpoint_unverified = _summary_checkpoint_state(
-        thread, execution_state, probe, checkpointer_active=checkpointer_active
-    )
-    approval_status: str | None = None
-    approval_request_id: str | None = None
-    # A settled run has no live request to read, so it needs no status check here.
-    if not checkpoint_unverified:
-        approval_status, approval_request_id = durable_approval(
-            await actionable_pending_permissions(db, thread_id=thread.id)
-        )
+    judged = await _judge_run_posture(db, thread, probe)
     return ThreadSummaryData(
         thread_id=thread.id,
         title=thread.title,
         status=thread.status,
-        repair_status=repair_status,
-        # Readiness is never judged apart from the repair posture: a run is as
-        # fit to resume as the posture this listing settled on says.
-        execution_readiness=repair_status,
-        approval_status=approval_status,
-        approval_request_id=approval_request_id,
+        repair_status=judged.repair_status,
+        execution_readiness=judged.execution_readiness,
+        approval_status=judged.approval_status,
+        approval_request_id=judged.approval_request_id,
         team_preset=thread.team_preset,
         created_at=thread.created_at,
         updated_at=thread.updated_at,
@@ -282,10 +295,9 @@ async def list_threads_service(
         await _thread_summary(
             db,
             thread,
-            checkpoint_probes.get(
-                thread.id, _CheckpointProbe(unverified=checkpointer is not None)
-            ),
-            checkpointer_active=checkpointer is not None,
+            None
+            if checkpointer is None
+            else checkpoint_probes.get(thread.id, _CheckpointProbe(unverified=True)),
         )
         for thread in threads
     ]

@@ -11,6 +11,7 @@ from langgraph.runtime import RunControl
 
 from ..streaming.aggregator import EventAggregator
 from ._dispatch_receipts import DispatchReceiptReporter
+from ._run_registry import RunScopedRegistry
 from .catalog_store import RunCatalogStore
 from .token_store import RunTokenStore
 
@@ -18,6 +19,13 @@ if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
     from ._dispatch_contract import DispatchCapacityReservation
     from ._dispatch_settlement import TerminalArbitration
+
+__all__ = [
+    "CheckpointAccess",
+    "DispatchCapacityState",
+    "RunControlRegistry",
+    "RunResources",
+]
 
 
 @dataclass(slots=True)
@@ -39,6 +47,13 @@ class DispatchCapacityState:
     The per-thread terminal arbitrations belong here with the admission slots
     they bracket: both are keyed by thread, and a thread's arbitration is what
     serializes the settlement that releases its slot.
+
+    The three maps stay plain dicts instead of run-scoped registries because
+    none of them is a value held for one run's active window. Reservations are
+    counted, compared by identity and snapshotted under ``lock``; a pending
+    cancellation is written by a cancel that may find no run at all and is
+    consumed by whichever terminal settles next; an arbitration entry lives
+    while it has waiters, not while a run does.
     """
 
     active_ingests: dict[str, DispatchCapacityReservation] = field(default_factory=dict)
@@ -67,17 +82,21 @@ class RunResources:
     receipts: DispatchReceiptReporter = field(default_factory=DispatchReceiptReporter)
 
 
-class RunControlRegistry:
+class RunControlRegistry(RunScopedRegistry[RunControl]):
     """The drain handles of every run executing on one worker.
 
     A drain is one-way, so the reason is held for the whole remaining life of
     the registry rather than only for the runs that happened to hold a control
     when it was asked for: a run whose control opens afterwards starts drained
     and stops before its first node, and the owner refuses further dispatch.
+
+    Callers use ``open`` and ``close`` rather than the inherited ``register``
+    and ``drop``, because each of those also moves the idle signal ``drain``
+    waits on.
     """
 
     def __init__(self) -> None:
-        self._controls: dict[str, RunControl] = {}
+        super().__init__()
         self._idle = asyncio.Event()
         self._idle.set()
         self._drain_reason: str | None = None
@@ -92,14 +111,14 @@ class RunControlRegistry:
         control = RunControl()
         if self._drain_reason is not None:
             control.request_drain(self._drain_reason)
-        self._controls[thread_id] = control
+        self.register(thread_id, control)
         self._idle.clear()
         return control
 
     def close(self, thread_id: str) -> None:
         """Drop one run's control and signal idle once none is left."""
-        self._controls.pop(thread_id, None)
-        if not self._controls:
+        self.drop(thread_id)
+        if not self._entries:
             self._idle.set()
 
     async def drain(self, reason: str) -> None:
@@ -111,6 +130,6 @@ class RunControlRegistry:
         delivered again after restart.
         """
         self._drain_reason = reason
-        for control in list(self._controls.values()):
+        for control in tuple(self._entries.values()):
             control.request_drain(reason)
         await self._idle.wait()

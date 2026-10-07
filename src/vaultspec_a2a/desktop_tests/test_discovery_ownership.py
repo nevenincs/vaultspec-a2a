@@ -30,7 +30,6 @@ import pytest
 from ..lifecycle.discovery import (
     DiscoveryState,
     classify_desktop_discovery,
-    desktop_record_process_is_live,
     service_json_path,
 )
 from ..lifecycle.singleton import (
@@ -38,6 +37,7 @@ from ..lifecycle.singleton import (
     SingletonState,
     acquire_singleton,
     classify_app_home,
+    recorded_process_is_live,
 )
 from ..testing import SignalledChild, free_port, spawn_signalled
 
@@ -105,7 +105,7 @@ def test_foreign_contender_validates_but_never_owns(tmp_path: Path) -> None:
         assert state is DiscoveryState.FRESH
         assert record is not None
         # Validate: process live, protocol compatible, attach reference named.
-        assert desktop_record_process_is_live(record) is True
+        assert recorded_process_is_live(record) is True
         assert record.supports_protocol(1) is True
         assert record.credential_reference is not None
         assert os.path.isfile(record.credential_reference)
@@ -173,7 +173,7 @@ def test_stale_discovery_quarantined_only_by_owner(tmp_path: Path) -> None:
     # layer detects.
     record = classify_desktop_discovery(service_json_path(app_home))[1]
     assert record is not None and record.pid == dead_pid
-    assert desktop_record_process_is_live(record) is False
+    assert recorded_process_is_live(record) is False
     assert classify_app_home(app_home, owner="owner-a")[0] is SingletonState.STALE
 
     # A foreign owner may not quarantine another owner's stale home.

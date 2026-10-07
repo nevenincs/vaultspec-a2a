@@ -36,7 +36,7 @@ import os
 import time
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, NoReturn, TypeGuard, cast
+from typing import TYPE_CHECKING, NoReturn, Protocol, TypeGuard, cast
 
 from ..control.state_layout import seal_state_home, state_layout
 from ..utils._process_tree import pid_is_live, process_start_identity
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SINGLETON_RECORD_VERSION",
+    "RecordedProcess",
     "RuntimeSingleton",
     "SingletonConflictError",
     "SingletonHeldError",
@@ -60,7 +61,6 @@ __all__ = [
     "clear_active_singleton",
     "current_process_fingerprint",
     "default_owner",
-    "process_start_fingerprint",
     "recorded_process_is_live",
     "set_active_singleton",
     "singleton_record_path",
@@ -159,22 +159,26 @@ def default_owner() -> str:
     return "desktop"
 
 
-def process_start_fingerprint(pid: int) -> str | None:
-    """Return a stable start-time fingerprint for *pid*, or ``None`` if unavailable.
+def current_process_fingerprint() -> str | None:
+    """Return this process's own start fingerprint (``None`` when unavailable).
 
     The fingerprint guards pid reuse: a recorded pid that is live again but was
     started later carries a different fingerprint, so a dead recorded process is not
-    mistaken for a live one. It is the kernel's clock-independent start stamp
-    (:func:`~vaultspec_a2a.utils._process_tree.process_start_identity`), so a
+    mistaken for a live one. It is the kernel's clock-independent start stamp, so a
     recorded value stays comparable across clock adjustments. Platforms without one
-    (notably macOS) return ``None``, and callers degrade to pid-liveness alone.
+    (notably macOS) return ``None``, and readers degrade to pid-liveness alone.
     """
-    return process_start_identity(pid)
+    return process_start_identity(os.getpid())
 
 
-def current_process_fingerprint() -> str | None:
-    """Return this process's own start fingerprint (``None`` when unavailable)."""
-    return process_start_fingerprint(os.getpid())
+class RecordedProcess(Protocol):
+    """A durable record naming the process that wrote it."""
+
+    @property
+    def pid(self) -> int: ...
+
+    @property
+    def start_fingerprint(self) -> str | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +264,7 @@ def _parse_record(record: dict[str, object]) -> SingletonRecord | None:
     )
 
 
-def recorded_process_is_live(record: SingletonRecord) -> bool:
+def recorded_process_is_live(record: RecordedProcess) -> bool:
     """Return ``True`` when the record's recorded process is provably still alive.
 
     Pid-liveness is the primary signal; the start fingerprint is a pid-reuse guard.
@@ -272,7 +276,7 @@ def recorded_process_is_live(record: SingletonRecord) -> bool:
         return False
     if record.start_fingerprint is None:
         return True
-    current = process_start_fingerprint(record.pid)
+    current = process_start_identity(record.pid)
     if current is None:
         return True
     return current == record.start_fingerprint

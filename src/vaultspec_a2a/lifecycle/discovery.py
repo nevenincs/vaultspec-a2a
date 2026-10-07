@@ -782,9 +782,10 @@ def classify_desktop_discovery(
 
     ``ABSENT`` when the file is missing, ``MALFORMED`` when it is unreadable or is
     not a valid versioned desktop record, ``STALE`` when its heartbeat is beyond
-    the freshness window, and ``FRESH`` otherwise. As with the Compose classifier,
-    a ``FRESH`` result still warrants a process-liveness probe via
-    :func:`desktop_record_process_is_live` before it is trusted as a live resident.
+    the freshness window, and ``FRESH`` otherwise. A ``FRESH`` result still
+    warrants a process-liveness probe via
+    :func:`~vaultspec_a2a.lifecycle.singleton.recorded_process_is_live` before it is
+    trusted as a live resident.
     """
     if not path.exists():
         return DiscoveryState.ABSENT, None
@@ -798,25 +799,6 @@ def classify_desktop_discovery(
     if not heartbeat_is_fresh(info, now):
         return DiscoveryState.STALE, record
     return DiscoveryState.FRESH, record
-
-
-def desktop_record_process_is_live(record: DesktopDiscoveryRecord) -> bool:
-    """Return ``True`` when the record's recorded gateway process is still alive.
-
-    Pid-liveness is the primary signal; the singleton's start fingerprint is the
-    pid-reuse guard. Delegates to the runtime singleton's process-liveness
-    authority so "prove this recorded process dead" has exactly one definition.
-    """
-    from .singleton import process_start_fingerprint
-
-    if not pid_is_live(record.pid):
-        return False
-    if record.start_fingerprint is None:
-        return True
-    current = process_start_fingerprint(record.pid)
-    if current is None:
-        return True
-    return current == record.start_fingerprint
 
 
 class _DesktopWriteOptional(TypedDict, total=False):

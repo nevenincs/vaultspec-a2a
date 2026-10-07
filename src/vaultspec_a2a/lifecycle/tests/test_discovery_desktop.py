@@ -22,9 +22,9 @@ from ...lifecycle.discovery import (
     DESKTOP_DISCOVERY_VERSION,
     DiscoveryState,
     classify_desktop_discovery,
-    desktop_record_process_is_live,
     write_desktop_discovery,
 )
+from ...lifecycle.singleton import recorded_process_is_live
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -163,12 +163,12 @@ def test_process_liveness_uses_recorded_identity(tmp_path: Path) -> None:
     """A live recording reads live; a dead pid reads dead."""
     path = tmp_path / "service.json"
     live = write_desktop_discovery(path, generation="g", port=8126, owner="alice")
-    assert desktop_record_process_is_live(live) is True
+    assert recorded_process_is_live(live) is True
 
     dead = write_desktop_discovery(
         path, generation="g", port=8126, owner="alice", pid=2**31 - 1
     )
-    assert desktop_record_process_is_live(dead) is False
+    assert recorded_process_is_live(dead) is False
 
 
 def test_publication_is_atomic_under_a_racing_reader(tmp_path: Path) -> None:

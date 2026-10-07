@@ -58,16 +58,16 @@ def _validated_desktop_attach_credential(parsed: SplitResult) -> str | None:
         DESKTOP_PROTOCOL_MAX,
         DiscoveryState,
         classify_desktop_discovery,
-        desktop_record_process_is_live,
         service_json_path,
     )
+    from .lifecycle.singleton import recorded_process_is_live
 
     state, record = classify_desktop_discovery(service_json_path(settings.a2a_home))
     if state is not DiscoveryState.FRESH or record is None:
         return None
     if not record.supports_protocol(
         DESKTOP_PROTOCOL_MAX
-    ) or not desktop_record_process_is_live(record):
+    ) or not recorded_process_is_live(record):
         return None
     if not _matches_desktop_discovery_origin(parsed, record) or not (
         _matches_desktop_credential_reference(record.credential_reference, references)

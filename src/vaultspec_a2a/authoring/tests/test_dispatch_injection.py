@@ -426,7 +426,10 @@ async def test_claude_native_turn_supplies_logical_call_identity(
     from ...control.config import settings
     from ...graph.enums import Provider
     from ...providers._acp_authoring import AuthoringToolBinding, attach_authoring_tools
-    from ...providers._factory_commands import _classify_acp_command
+    from ...providers._factory_commands import (
+        _classify_acp_command,
+        acp_launch_options,
+    )
     from ...providers.acp_chat_model import AcpChatModel
     from ...providers.acp_exceptions import AcpError
     from ...providers.conditions import ProviderCondition
@@ -440,12 +443,13 @@ async def test_claude_native_turn_supplies_logical_call_identity(
         external_prerequisite.absent("provider-catalog-live-selection", reason)
     command = _classify_acp_command(settings.acp_backend)
     environment, auth_mode = claude_auth_env()
+    use_exec, launch_env = acp_launch_options(command.acp_backend)
     model = AcpChatModel(
         command=list(command.argv),
-        env_vars=environment,
+        env_vars={**environment, **launch_env},
         desired_model=served,
         workspace_root=str(tmp_path),
-        use_exec=command.acp_backend == "binary",
+        use_exec=use_exec,
         provider=Provider.CLAUDE.value,
         auth_mode=auth_mode,
     )

@@ -14,6 +14,7 @@ from pathlib import Path
 from langchain_core.messages import UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 
+from ..control.infra_config import AcpBackend
 from ..control.workspace import (
     canonical_workspace_root,
     configured_workspace_boundary,
@@ -91,7 +92,7 @@ class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
     use_exec: bool
     provider: str | None
     runtime_authority: str | None
-    acp_backend: str | None
+    acp_backend: AcpBackend | None
     command_origin: str | None
     command_kind: str | None
     command_executable: str | None

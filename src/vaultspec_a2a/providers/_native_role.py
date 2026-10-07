@@ -21,6 +21,11 @@ from ..desktop.profile import derive_state_paths
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainmentError
 from ._acp_types import require_workspace_root
+from ._factory_commands import (
+    ANTHROPIC_AUTH_TOKEN_ENV,
+    CLAUDE_CONFIG_DIR_ENV,
+    CLAUDE_OAUTH_TOKEN,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator, Mapping
@@ -92,7 +97,7 @@ def role_environment(authority: NativeLaunchAuthority) -> dict[str, str]:
     """Provider configuration resolves only within this prepared home."""
     environment = authority.home_environment()
     home = environment["HOME"]
-    return {**environment, "USERPROFILE": home, "CLAUDE_CONFIG_DIR": home}
+    return {**environment, "USERPROFILE": home, CLAUDE_CONFIG_DIR_ENV: home}
 
 
 def _new_home(authority: NativeWorkspaceAuthority) -> DirectoryAuthority:
@@ -153,9 +158,9 @@ async def prepare_acp_role(
     else:
         raise ProcessContainmentError("native Claude managed policy is not qualified")
     if provider == "claude":
-        selected = environment.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+        selected = environment.get(CLAUDE_OAUTH_TOKEN.env_name, "")
     elif provider == "zai":
-        selected = environment.get("ANTHROPIC_AUTH_TOKEN", "")
+        selected = environment.get(ANTHROPIC_AUTH_TOKEN_ENV, "")
     else:
         raise ProcessContainmentError(
             "native provider role preparation is not qualified"

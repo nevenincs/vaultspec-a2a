@@ -18,6 +18,7 @@ import pytest
 from ...testing import request_permission_params
 from .._acp_rpc_handlers import on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
+from ..execution_modes import NODE_BACKEND
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,7 +46,7 @@ def _config(
         use_exec=False,
         provider="claude",
         runtime_authority=None,
-        acp_backend="claude_code",
+        acp_backend=NODE_BACKEND,
         command_origin=None,
         command_kind=None,
         command_executable=None,

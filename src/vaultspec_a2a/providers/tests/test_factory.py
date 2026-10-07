@@ -30,6 +30,7 @@ from ..cli_resolution import (
     resolve_service_executable,
 )
 from ..codex_chat_model import CodexChatModel
+from ..execution_modes import BINARY_BACKEND, NODE_BACKEND
 from ..factory import ProviderFactory, _zai_auth_env
 from ..provider_catalog import (
     SELECTION_SCHEMA_VERSION,
@@ -144,7 +145,7 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     assert model.runtime_authority == "package_bin"
     assert model.command_origin == "package_bin"
     assert model.command_kind == "bun_binary"
-    assert model.acp_backend == "binary"
+    assert model.acp_backend == BINARY_BACKEND
 
 
 def test_provider_factory_claude_default_never_injects_a_setting_token() -> None:
@@ -370,7 +371,7 @@ def test_classify_provider_command_zai_returns_acp_meta() -> None:
         return
     command = classify_provider_command(Provider.ZAI)
     assert command.command_kind == "node_entry"
-    assert command.acp_backend == "node"
+    assert command.acp_backend == NODE_BACKEND
     node = str(resolve_service_executable("node"))
     assert command.command_executable == Path(node).name
 

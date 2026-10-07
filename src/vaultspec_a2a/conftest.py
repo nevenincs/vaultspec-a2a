@@ -214,6 +214,7 @@ def _cli_reports_logged_in(
 
 def _claude_credentialed() -> bool:
     """Whether the production Claude auth channel has a usable credential."""
+    from .providers._factory_commands import CLAUDE_CONFIG_DIR_ENV
     from .providers.cli_resolution import ProviderRuntimeUnavailableError
     from .providers.factory import claude_auth_env
 
@@ -221,21 +222,22 @@ def _claude_credentialed() -> bool:
         injected, channel = claude_auth_env()
     except ProviderRuntimeUnavailableError:
         return False
-    if channel == "oauth_token":
-        return bool(injected.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
-    # An operator export reaches the child through the allowed ambient
-    # environment. A token only in project .env is not an ambient export.
-    if (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip():
+    # The factory injects a token for the oauth_token channel and, for the
+    # subscription login, only an operator export - a token that sits only in
+    # project .env is not one.
+    if any(token.strip() for token in injected.values()):
         return True
+    if channel == "oauth_token":
+        return False
     # `claude auth status` emits JSON carrying "loggedIn", which answers the
     # expiry question a file on disk cannot. Only its silence falls back.
     reported = _cli_reports_logged_in(["claude", "auth", "status"], '"loggedin": true')
     if reported is not None:
         return reported
-    # CLAUDE_CONFIG_DIR is the CLI's own knob (see providers/acp_chat_model.py);
-    # it is not a settings field, so it is read where the CLI reads it.
+    # CLAUDE_CONFIG_DIR is the CLI's own knob; it is not a settings field, so it
+    # is read where the CLI reads it.
     return _credential_store(
-        os.environ.get("CLAUDE_CONFIG_DIR"), ".claude", ".credentials.json"
+        os.environ.get(CLAUDE_CONFIG_DIR_ENV), ".claude", ".credentials.json"
     )
 
 
@@ -326,8 +328,9 @@ def _claude_acp_adapter_present() -> bool:
     """The Node ACP adapter is installed, or the binary backend replaces it."""
     from .control.config import settings
     from .providers._factory_commands import claude_acp_entry
+    from .providers.execution_modes import BINARY_BACKEND
 
-    return settings.acp_backend == "binary" or claude_acp_entry().exists()
+    return settings.acp_backend == BINARY_BACKEND or claude_acp_entry().exists()
 
 
 EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (

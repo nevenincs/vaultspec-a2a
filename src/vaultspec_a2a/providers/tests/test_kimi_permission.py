@@ -51,7 +51,7 @@ def _config(
         use_exec=False,
         provider="kimi",
         runtime_authority=None,
-        acp_backend="kimi_cli",
+        acp_backend=None,
         command_origin=None,
         command_kind=None,
         command_executable=None,

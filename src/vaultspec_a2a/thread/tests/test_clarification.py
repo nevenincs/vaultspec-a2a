@@ -512,4 +512,4 @@ def test_an_unreadable_payload_reads_as_no_pending_question(payload: object) -> 
 
 
 def test_no_checkpoint_means_no_pending_question() -> None:
-    assert pending_clarification(None, thread_id="run-1") is None
+    assert pending_clarification(None) is None

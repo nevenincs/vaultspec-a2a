@@ -267,8 +267,10 @@ async def run_status_endpoint(
         raise HTTPException(status_code=404, detail="Run not found")
 
     snapshot = capture.snapshot
-    proposal_ids, changeset_ids = derive_run_authoring_ids(capture.checkpoint_tuple)
-    semantic = derive_run_semantic_context(capture.checkpoint_tuple)
+    proposal_ids, changeset_ids = derive_run_authoring_ids(
+        capture.checkpoint_projection
+    )
+    semantic = derive_run_semantic_context(capture.checkpoint_projection)
     semantic_phase = project_semantic_phase(
         status=snapshot.status,
         next_nodes=snapshot.next_nodes,
@@ -343,13 +345,11 @@ async def run_status_endpoint(
             is not None
             else None
         ),
-        # Read from the SAME capture tuple as every other field above, so
+        # Read from the SAME capture projection as every other field above, so
         # a questionnaire cannot be reported against a position the run has since
         # left. This is the authoritative disclosure a reloaded client recovers
         # from; the progress relay only ever nudges it to look here.
-        pending_clarification=pending_clarification(
-            capture.checkpoint_tuple, thread_id=run_id
-        ),
+        pending_clarification=pending_clarification(capture.checkpoint_projection),
     )
 
 

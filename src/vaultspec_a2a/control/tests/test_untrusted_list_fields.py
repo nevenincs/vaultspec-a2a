@@ -7,6 +7,7 @@ import json
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
 
+from ...thread import CheckpointProjection, project_checkpoint_tuple
 from ..execution_authority import (
     ExecutionAuthorityError,
     ExecutionAuthorityFailure,
@@ -35,9 +36,9 @@ def _legacy_metadata(fallback: object) -> dict[str, object]:
     }
 
 
-def _snapshot(values: dict[str, object]) -> CheckpointTuple:
-    """Build the concrete LangGraph tuple production code receives."""
-    return CheckpointTuple(
+def _snapshot(values: dict[str, object]) -> CheckpointProjection:
+    """Project the concrete LangGraph tuple production code receives."""
+    checkpoint_tuple = CheckpointTuple(
         config={"configurable": {"thread_id": "thread-1"}},
         checkpoint={
             "v": 1,
@@ -51,6 +52,7 @@ def _snapshot(values: dict[str, object]) -> CheckpointTuple:
         metadata={"source": "loop", "step": 0, "parents": {}},
         pending_writes=[],
     )
+    return project_checkpoint_tuple(checkpoint_tuple, thread_id="thread-1")
 
 
 class TestRetiredRoleFallbackChain:

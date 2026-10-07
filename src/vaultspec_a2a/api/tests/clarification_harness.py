@@ -17,6 +17,7 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...thread import project_checkpoint_tuple
 from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,
@@ -137,8 +138,10 @@ async def park_clarification(
     if graph_definition_digest is not None:
         state["graph_definition_digest"] = graph_definition_digest
     await graph.ainvoke(state, config=config)
+    stored = await checkpointer.aget_tuple(config)
+    assert stored is not None, "clarification graph wrote no checkpoint"
     request = pending_clarification(
-        await checkpointer.aget_tuple(config), thread_id=thread_id
+        project_checkpoint_tuple(stored, thread_id=thread_id)
     )
     assert request is not None, "clarification graph did not park"
     return ParkedClarification(graph=graph, request=request)

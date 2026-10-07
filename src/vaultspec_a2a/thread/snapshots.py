@@ -320,6 +320,10 @@ class CheckpointProjection:  # pylint: disable=too-many-instance-attributes
     history_depth: int | None = None
     pause_cause: str | None = None
     pending_interrupts: list[ProjectedInterrupt] = field(default_factory=list)
+    # The types of the held interrupts that name no request. None is disclosed,
+    # because no answer can be addressed to one, but a run stopped on such a
+    # question is still stopped, so a reader can tell what kind holds it.
+    unnamed_interrupt_types: list[str] = field(default_factory=list)
     # Every observation, once per occurrence; merging onto a snapshot dedupes.
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
 
@@ -794,6 +798,7 @@ def _project_pending_interrupt(
         # Every producer names its question; one that does not cannot be
         # answered, so it is not disclosed as a pause anyone could resolve.
         projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNREADABLE)
+        projection.unnamed_interrupt_types.append(interrupt_type)
         return
     projection.pending_interrupts.append(
         ProjectedInterrupt(

@@ -15,6 +15,7 @@ from ...control.projection import (
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
     project_execution_state_model,
+    reconcile_checkpoint_permissions_with_durable_state,
 )
 from ...database import (
     create_thread,
@@ -23,7 +24,7 @@ from ...database import (
 )
 from ...database.models import ThreadExecutionStateModel
 from ...tests._write_authority import make_test_write_authority
-from ...thread.enums import DegradedReason
+from ...thread.enums import DegradedReason, RepairStatus
 from ...thread.snapshots import (
     CheckpointProjection,
     ExecutionStateProjection,
@@ -74,6 +75,7 @@ def test_project_checkpoint_tuple_extracts_plan_approval_interrupt() -> None:
                             "feature": "auth",
                             "plan_paths": ["plan.md"],
                             "exec_worker": "vaultspec-coder",
+                            "request_id": "plan-approval-1",
                         },
                         id="interrupt-plan-1",
                     )
@@ -105,7 +107,8 @@ def test_project_checkpoint_tuple_extracts_plan_approval_interrupt() -> None:
         tzinfo=UTC,
     )
     assert len(projection.pending_interrupts) == 1
-    assert projection.pending_interrupts[0].interrupt_id == "interrupt-plan-1"
+    # The id the producer named the request by, not LangGraph's interrupt id.
+    assert projection.pending_interrupts[0].interrupt_id == "plan-approval-1"
     assert projection.pending_write_channels == ["__interrupt__"]
     assert projection.pending_write_count == 1
 
@@ -148,8 +151,14 @@ def test_project_checkpoint_tuple_surfaces_metadata_parent_and_pending_writes() 
     assert "checkpoint_history_unknown" in projection.degraded_reasons
 
 
-def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
-    """Projected interrupts should surface as pending permissions in snapshots."""
+def test_a_checkpoint_only_permission_is_flagged_rather_than_merged() -> None:
+    """A parked permission is never built from the checkpoint alone.
+
+    The durable row is the only source of a pending permission's content, so a
+    permission the checkpoint is parked on with no row behind it contributes
+    nothing to the snapshot's pending permissions: it is flagged as an orphan
+    the respond route cannot act on, and the run is held for reconciliation.
+    """
     snapshot = ThreadStateData(
         thread_id="thread-1",
         status="input_required",
@@ -174,6 +183,7 @@ def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
                 interrupt_type="permission_request",
                 payload={
                     "type": "permission_request",
+                    "request_id": "interrupt-tool-1",
                     "tool_name": "bash",
                     "options": [
                         {"optionId": "allow_once", "name": "Allow Once"},
@@ -196,14 +206,22 @@ def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
     assert projected.pending_write_count == 1
     assert projected.history_depth == 2
     assert projected.pause_cause == "permission_request"
-    assert len(projected.pending_permissions) == 1
-    permission = projected.pending_permissions[0]
-    assert permission.request_id == "interrupt-tool-1"
-    assert permission.tool_call == "bash"
-    assert [option.option_id for option in permission.options] == [
-        "allow_once",
-        "reject_once",
-    ]
+    assert projected.pending_permissions == []
+
+    reconciled = reconcile_checkpoint_permissions_with_durable_state(
+        projected, projection
+    )
+
+    assert reconciled.pending_permissions == []
+    assert (
+        DegradedReason.CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW
+        in reconciled.degraded_reasons
+    )
+    assert reconciled.snapshot_complete is False
+    assert reconciled.repair_status == RepairStatus.NEEDS_RECONCILIATION
+    assert reconciled.execution_readiness == RepairStatus.NEEDS_RECONCILIATION
+    # No actionable permission remains, so the pause it named is withdrawn.
+    assert reconciled.pause_cause is None
 
 
 @pytest.mark.parametrize(

@@ -13,13 +13,12 @@ from ..database import read_latest_checkpoint
 from ..domain_config import domain_config
 from ..graph.acp_options import option_display_name, option_id_of, option_kind
 from ..graph.enums import AgentLifecycleState, PermissionOptionKind, PermissionType
-from ..thread import InterruptType
-from ..thread.snapshots import live_interrupts
+from ..thread import InterruptType, live_interrupts
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ..thread.snapshots import LiveInterrupt
+    from ..thread import LiveInterrupt
     from .emitters import EventEmitters
     from .types import StreamableGraph
 

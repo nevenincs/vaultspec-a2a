@@ -277,6 +277,18 @@ def apply_checkpoint_projection(
 
     for reason in projection.degraded_reasons:
         mark_degraded(snapshot, reason)
+    if any(
+        interrupt_type in PERMISSION_REQUEST_EVENT_TYPES
+        for interrupt_type in projection.unnamed_interrupt_types
+    ):
+        # A permission naming no request still holds the run, and no answer can
+        # be addressed to it, so the run needs reconciling exactly as when a
+        # parked permission has no durable row.
+        mark_degraded(
+            snapshot,
+            DegradedReason.INTERRUPT_PAYLOAD_UNREADABLE,
+            repair=RepairStatus.NEEDS_RECONCILIATION,
+        )
 
     return snapshot
 

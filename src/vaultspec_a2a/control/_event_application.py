@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from ..ipc.schemas import DispatchApplicationReceiptPayload
+from ..thread import named_request_id
 from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.enums import ThreadStatus
 from ..thread.permission_fsm import compute_permission_resolution_effects
@@ -56,8 +57,9 @@ async def apply_permission_resolution(
         permission_response_applied_action_key,
     )
 
-    request_value = payload.get("request_id")
-    request_id = request_value if isinstance(request_value, str) else ""
+    request_id = named_request_id(payload)
+    if request_id is None:
+        return
     permission = await get_permission_request(db, request_id)
     if permission is None or permission.request_status != "answered_pending_apply":
         return

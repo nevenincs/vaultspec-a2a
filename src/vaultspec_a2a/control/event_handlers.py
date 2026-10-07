@@ -24,6 +24,7 @@ from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
 )
 from ..providers import ProviderCondition
+from ..thread import named_request_id
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ..thread.enums import TERMINAL_STATUS_VALUES, InterruptType, ThreadStatus
@@ -750,8 +751,8 @@ def _permission_request_fields(
     payload: dict[str, object], event_type: str
 ) -> tuple[str, str | None, str, str] | None:
     """Validate and normalize the fields stored with a permission request."""
-    request_value = payload.get("request_id")
-    if not isinstance(request_value, str) or not request_value:
+    request_id = named_request_id(payload)
+    if request_id is None:
         return None
     tool_value = payload.get("tool_call")
     tool_call = tool_value if isinstance(tool_value, str) else None
@@ -768,7 +769,7 @@ def _permission_request_fields(
         else ""
     )
     return (
-        request_value,
+        request_id,
         tool_call,
         pause_reason_type,
         description,

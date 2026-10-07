@@ -31,6 +31,7 @@ from ..database import (
     settle_control_action_lease,
     thread_write_expectation,
 )
+from ..thread import project_checkpoint_tuple
 from ..thread.clarification import (
     ClarificationAnswers,
     ClarificationRequest,
@@ -271,6 +272,32 @@ def _checkpoint_receipt(checkpoint: CheckpointRead, request_id: str) -> str | No
     return fingerprint if isinstance(fingerprint, str) else None
 
 
+def _parked_clarification(
+    checkpoint: CheckpointRead, thread_id: str
+) -> ClarificationRequest | None:
+    """Return the clarification the read checkpoint shows the run parked on.
+
+    A checkpoint the projection cannot read reads as no pending clarification,
+    as an absent one does, so the answer path refuses rather than failing. The
+    failure is logged because, unlike absence, it hides a checkpoint that exists.
+    """
+    if checkpoint.checkpoint_tuple is None:
+        return None
+    try:
+        projection = project_checkpoint_tuple(
+            checkpoint.checkpoint_tuple, thread_id=thread_id
+        )
+    except (AttributeError, TypeError, ValueError):
+        logger.warning(
+            "Could not project the checkpoint of thread %s; reading no pending "
+            "clarification",
+            thread_id,
+            exc_info=True,
+        )
+        return None
+    return pending_clarification(projection)
+
+
 def _stored_resolution(
     action: ControlActionModel,
 ) -> ClarificationResolution | None:
@@ -432,7 +459,7 @@ async def respond_to_clarification(
     # transaction opens: holding the write lock across it would block every
     # other writer for the length of a checkpoint round trip.
     checkpoint = await read_latest_checkpoint(checkpointer, thread_id)
-    parked = pending_clarification(checkpoint.checkpoint_tuple, thread_id=thread_id)
+    parked = _parked_clarification(checkpoint, thread_id)
     attempt = _ClarificationAttempt(
         thread_id=thread_id,
         request_id=request_id,
@@ -721,10 +748,7 @@ async def reconcile_clarification_pause(
     if checkpoint.checkpoint_tuple is None:
         # A missing or unreadable checkpoint proves neither a pause nor its end.
         return
-    parked = (
-        pending_clarification(checkpoint.checkpoint_tuple, thread_id=thread_id)
-        is not None
-    )
+    parked = _parked_clarification(checkpoint, thread_id) is not None
     if parked == recorded_as_parked:
         return
     await begin_write_transaction(db)

@@ -1802,6 +1802,7 @@ class TestEmitInterruptEvents:
 
         interrupt_payload = {
             "type": "permission_request",
+            "request_id": "perm-write-text-file",
             "tool_name": "fs/write_text_file",
             "tool_input": {"path": "/tmp/test.py"},
             "options": [
@@ -1915,6 +1916,7 @@ class TestEmitInterruptEvents:
 
         interrupt_payload: dict[str, object] = {
             "type": "permission_request",
+            "request_id": "perm-shell-exec",
             "tool_name": "shell_exec",
             "tool_input": {},
             "options": [],  # Empty options — should use defaults

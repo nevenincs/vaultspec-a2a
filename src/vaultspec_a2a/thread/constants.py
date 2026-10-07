@@ -22,6 +22,7 @@ compiles the shared text rather than restating it.
 __all__ = [
     "DEFAULT_SUPERVISOR_ID",
     "MAX_AGENT_ID_CHARS",
+    "MAX_APPROVAL_REQUEST_ID_CHARS",
     "MAX_DISCOVERY_RESULTS",
     "MAX_FEATURE_TAG_LENGTH",
     "MAX_FEEDBACK_BATCH_ID_CHARS",
@@ -118,6 +119,14 @@ MAX_REQUEST_ID_CHARS: int = 128
 Clarification and permission requests are answered by the handle the run
 minted, so every frame and model carrying one must admit the full minted
 length: a truncated handle names a request that does not exist.
+"""
+
+MAX_APPROVAL_REQUEST_ID_CHARS: int = 256
+"""Longest approval request handle the run history record reports.
+
+Wider than :data:`MAX_REQUEST_ID_CHARS`, which bounds the handles a run mints:
+the history record keeps the width its consumers were first served, so
+narrowing it changes the published contract rather than tidying a constant.
 """
 
 MAX_TOOL_CALL_CHARS: int = 128

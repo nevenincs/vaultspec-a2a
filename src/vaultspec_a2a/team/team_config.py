@@ -42,13 +42,6 @@ from ..thread.errors import (
     TeamConfigNotFoundError,
 )
 
-# Agent and team ids name a TOML file, so they are confined to the role-id
-# grammar before any path is built from one (e.g. "../../etc" is refused). Applied
-# with ``fullmatch``: the grammar's ``$`` alone also matches before a trailing
-# newline.
-_SAFE_AGENT_ID_RE = re.compile(ROLE_ID_PATTERN)
-
-
 __all__ = [
     "DEFAULT_AUTHORING_SURFACES",
     "AgentCapabilitiesConfig",
@@ -320,8 +313,8 @@ class AgentConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_id_is_identifier(self) -> "AgentConfig":
-        """Ensure agent.id matches _SAFE_AGENT_ID_RE."""
-        if not _SAFE_AGENT_ID_RE.fullmatch(self.id):
+        """Ensure agent.id matches the role-id grammar."""
+        if not re.fullmatch(ROLE_ID_PATTERN, self.id):
             raise ValueError(
                 f"Invalid agent.id {self.id!r}: must match pattern "
                 f"{ROLE_ID_PATTERN!r} (alphanumeric, underscores, hyphens)."
@@ -757,7 +750,7 @@ def load_agent_config(
     """
     # Validate agent_id before using it in path construction to prevent
     # path traversal attacks (e.g. agent_id="../../etc/passwd").
-    if not _SAFE_AGENT_ID_RE.fullmatch(agent_id):
+    if not re.fullmatch(ROLE_ID_PATTERN, agent_id):
         raise ConfigError(
             f"Invalid agent_id {agent_id!r}: must match pattern "
             f"{ROLE_ID_PATTERN!r} (alphanumeric, underscores, hyphens)."
@@ -791,7 +784,7 @@ def load_team_config(
                                   bundled preset exists.
         pydantic.ValidationError: If the TOML data fails schema validation.
     """
-    if not _SAFE_AGENT_ID_RE.fullmatch(team_id):
+    if not re.fullmatch(ROLE_ID_PATTERN, team_id):
         raise ConfigError(
             f"Invalid team_id {team_id!r}: must match pattern {ROLE_ID_PATTERN!r}."
         )

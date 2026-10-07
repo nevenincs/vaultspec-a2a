@@ -22,7 +22,12 @@ from ..authoring._relay_client import RELAY_CALL_PATH, RELAY_PROOF_DOMAIN
 from ..authoring._tool_calls import private_tool_call_journal_path
 from ..authoring.catalog import make_tool_dispatch
 from ..authoring.discovery import resolve_engine
-from ..thread.constants import MAX_ROLE_ID_CHARS, ROLE_ID_PATTERN
+from ..thread.constants import (
+    MAX_ROLE_ID_CHARS,
+    MAX_RUN_ID_CHARS,
+    ROLE_ID_PATTERN,
+    RUN_ID_PATTERN,
+)
 
 if TYPE_CHECKING:
     from .catalog_store import RunCatalogStore
@@ -36,7 +41,9 @@ logger = logging.getLogger(__name__)
 class RelayCall(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
-    run_id: str = Field(min_length=1, max_length=160)
+    run_id: str = Field(
+        min_length=1, max_length=MAX_RUN_ID_CHARS, pattern=RUN_ID_PATTERN
+    )
     role: str = Field(
         min_length=1, max_length=MAX_ROLE_ID_CHARS, pattern=ROLE_ID_PATTERN
     )

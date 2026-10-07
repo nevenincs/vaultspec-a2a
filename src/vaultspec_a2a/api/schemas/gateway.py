@@ -50,6 +50,7 @@ from ...thread.clarification import (
 )
 from ...thread.constants import (
     MAX_AGENT_ID_CHARS,
+    MAX_APPROVAL_REQUEST_ID_CHARS,
     MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
     MAX_FEEDBACK_BATCH_ID_CHARS,
@@ -441,7 +442,9 @@ class RunSummaryRecord(BaseModel):
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     approval_status: ApprovalStatus | None = None
-    approval_request_id: str | None = Field(default=None, max_length=256)
+    approval_request_id: str | None = Field(
+        default=None, max_length=MAX_APPROVAL_REQUEST_ID_CHARS
+    )
     created_at: datetime
     updated_at: datetime
     source_branch: str | None = Field(default=None, max_length=256)

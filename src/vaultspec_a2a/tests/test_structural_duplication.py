@@ -14,6 +14,15 @@ so every identifier becomes the same placeholder, and hashed. Functions whose
 bodies survive that erasure identically are structural duplicates regardless of
 their names, their arguments, or the types they mention.
 
+The scan covers the shipped package (``src/vaultspec_a2a``) AND the
+repository's own tooling - ``dev/``, ``packaging/``, ``scripts/`` and the root
+``conftest.py`` - because a copy-pasted fixture or guard is exactly as much
+debt as one in the shipped package, and the tooling trees are large enough
+(dev/ alone carries dozens of modules) to have grown their own clones unseen.
+Tier classification for every discovered module, wherever it sits, comes from
+:mod:`dev.paths` (``TEST_TIERS`` plus the ``testing`` support package), so one
+module answers "is this test code" for every check in the repository.
+
 Two limits are deliberate and worth knowing before reading a failure:
 
 - It cannot see a clone that DIVERGED. A copy that gained one argument hashes
@@ -40,10 +49,34 @@ from __future__ import annotations
 import ast
 import hashlib
 from collections import defaultdict
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Final, override
 
+from dev.paths import REPO_ROOT, SKIPPED_DIRS, is_test_code
+
 _SOURCE_ROOT = Path(__file__).resolve().parents[1]
+
+#: Repository tooling scanned alongside the shipped package. Each is rglob'd
+#: in full - their own test tiers (``dev/tests``, ``packaging/tests``) fall
+#: out of :func:`dev.paths.is_test_code` exactly like ``src``'s do.
+_EXTRA_ROOTS: Final[tuple[Path, ...]] = (
+    REPO_ROOT / "dev",
+    REPO_ROOT / "packaging",
+    REPO_ROOT / "scripts",
+)
+
+#: Standalone files outside every rglob'd root.
+_EXTRA_FILES: Final[tuple[Path, ...]] = (REPO_ROOT / "conftest.py",)
+
+#: Below this many files visited, the scan is treated as mis-rooted rather
+#: than as a tree that genuinely holds few duplicates - a floor that fails
+#: LOUDLY beats a scan that silently walked the wrong directory and reported
+#: a clean result for having compared nothing. Set comfortably below the
+#: ~1100 modules the configured roots hold today, so routine deletions do not
+#: flap it, but far above what any single misrooted root could still supply.
+_VISITED_FLOOR: Final = 900
 
 # Below this many AST nodes a shared body is more likely a coincidence of shape
 # - a two-line delegating accessor, a guard-and-return - than a copied idea, and
@@ -111,6 +144,57 @@ _ACCEPTED_TESTS: Final[tuple[frozenset[str], ...]] = (
             "api/tests/test_v1_attach_whitelist.py::test_whitelist_rejects_unauthenticated",
         }
     ),
+    # The zombie-state poll (read the stored /proc/<pid>/stat line, compare
+    # the retained inode to catch pid reuse) duplicated verbatim across the
+    # in-process desktop isolation test and the frozen-binary packaging
+    # artifact test. `pid_is_live`/psutil cannot stand in: neither tells
+    # "pid reused" apart from "still running" inside this race window, which
+    # is the one thing this poll exists to catch. The two tests deliberately
+    # invoke the isolation boundary through different paths (an imported
+    # module vs the packaged binary's own entry point) and the packaging
+    # artifact tier does not import the unit tree whose output it verifies,
+    # so sharing a helper would cross a boundary this repository keeps apart
+    # on purpose. Consolidating it into a shared process-identity helper is
+    # residue for that area's owner, not this guard's fix.
+    frozenset(
+        {
+            "desktop/tests/test_native_isolation.py::_descendant_gone",
+            "packaging/tests/native_isolation_artifact.py::_descendant_gone",
+        }
+    ),
+)
+
+# Reviewed groups that cross the production/test boundary - a shape neither of
+# the two tier-scoped passes above can see, because each buckets by tier
+# before it compares. Held separately a third time for the same reason: a
+# group here says something different ("this test fixture and this production
+# helper happen to share a shape") than a same-tier entry does.
+_ACCEPTED_CROSS_TIER: Final[tuple[frozenset[str], ...]] = (
+    # The PEP 562 lazy-import shim (see _ACCEPTED above), now also carried by
+    # the test-support fixture-lane package. Same reason: the lookup-and-import
+    # dance is shared, the attribute-to-module map is not.
+    frozenset(
+        {
+            "graph/__init__.py::__getattr__",
+            "providers/__init__.py::__getattr__",
+            "testing/lanes/__init__.py::__getattr__",
+            "thread/__init__.py::__getattr__",
+        }
+    ),
+    # `testing/leases.py::_marker_is_live` mirrors `lifecycle/registry.py::
+    # _reservation_is_live` by design - its own docstring says so - and the
+    # bodies are now identical once names are erased: a freshness window,
+    # then a missing pid treated as live, else `pid_is_live`. It stayed
+    # unconsolidated because one judges production port-reservation state and
+    # the other judges the pytest resource-lease marker the harness alone
+    # uses; folding them into one liveness helper is residue for that area's
+    # owner, not this guard's fix.
+    frozenset(
+        {
+            "lifecycle/registry.py::_reservation_is_live",
+            "testing/leases.py::_marker_is_live",
+        }
+    ),
 )
 
 
@@ -141,10 +225,26 @@ class _EraseIdentifiers(ast.NodeTransformer):
         )
 
 
+@dataclass(frozen=True)
+class _Function:
+    """One hashed function body, wherever it was found."""
+
+    qualified_name: str
+    shape: str
+    node_count: int
+    is_test: bool
+
+
 def _structure_hash(
-    function: ast.FunctionDef | ast.AsyncFunctionDef, floor: int
-) -> str | None:
-    """Hash *function*'s body shape, or None when it is below *floor*."""
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[str, int] | None:
+    """Hash *function*'s body shape, or None when it has no body to hash.
+
+    The node count is returned rather than compared here: the floor a function
+    must clear differs by tier and by pass, while the hash itself does not, so
+    computing it once and filtering per-pass avoids hashing the same body twice
+    under two different floors.
+    """
     body = [
         statement
         for statement in function.body
@@ -157,36 +257,125 @@ def _structure_hash(
     if not body:
         return None
     module = ast.Module(body=body, type_ignores=[])
-    if sum(1 for _ in ast.walk(module)) < floor:
-        return None
+    node_count = sum(1 for _ in ast.walk(module))
     erased = _EraseIdentifiers().visit(module)
     ast.fix_missing_locations(erased)
-    return hashlib.sha256(ast.dump(erased).encode()).hexdigest()
+    digest = hashlib.sha256(ast.dump(erased).encode()).hexdigest()
+    return digest, node_count
 
 
-def _is_test_module(path: Path) -> bool:
-    """Report whether *path* is test code rather than production code."""
-    parts = path.parts
-    return "tests" in parts or "testing" in parts or path.name.startswith("test_")
+def _relative(path: Path) -> Path:
+    """Render *path* relative to whichever configured root contains it.
 
-
-def _structural_groups(*, tests: bool, floor: int) -> list[set[str]]:
-    """Return every set of same-tier functions sharing one body shape."""
-    by_shape: dict[str, set[str]] = defaultdict(set)
-    for path in sorted(_SOURCE_ROOT.rglob("*.py")):
-        relative = path.relative_to(_SOURCE_ROOT)
-        if _is_test_module(relative) is not tests:
-            continue
+    The shipped package is tried first so its members keep the short,
+    already-reviewed key form (``"graph/__init__.py::__getattr__"``); every
+    other configured root falls back to the repository root, which cannot
+    collide with a package-relative key because none of ``dev/``,
+    ``packaging/``, ``scripts/`` or ``conftest.py`` names a top-level member
+    of ``src/vaultspec_a2a``.
+    """
+    for root in (_SOURCE_ROOT, REPO_ROOT):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-        except SyntaxError:
+            return path.relative_to(root)
+        except ValueError:
             continue
+    raise ValueError(f"{path} is outside every configured root")  # pragma: no cover
+
+
+def _discovered_files() -> list[Path]:
+    """Return every module the scan covers, across every configured root."""
+    found = [
+        path
+        for root in (_SOURCE_ROOT, *_EXTRA_ROOTS)
+        for path in root.rglob("*.py")
+        if not any(part in SKIPPED_DIRS for part in path.parts)
+    ]
+    found.extend(path for path in _EXTRA_FILES if path.is_file())
+    return sorted(found)
+
+
+@lru_cache(maxsize=1)
+def _catalog() -> tuple[_Function, ...]:
+    """Hash every function in every configured root, once.
+
+    Raises when a root is mis-configured rather than letting a scan that
+    covered nothing report a clean result: a module that fails to parse is a
+    repository defect, not a file to skip, and a root or standalone file that
+    contributed zero paths is this test pointing at the wrong tree.
+    """
+    for root in (_SOURCE_ROOT, *_EXTRA_ROOTS):
+        assert root.is_dir() and any(root.rglob("*.py")), (
+            f"{root} contributed no Python files - a mis-rooted scan, not an empty tree"
+        )
+    for path in _EXTRA_FILES:
+        assert path.is_file(), f"{path} is missing - a mis-rooted scan"
+
+    functions: list[_Function] = []
+    visited = 0
+    for path in _discovered_files():
+        relative = _relative(path)
+        text = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(text, filename=relative.as_posix())
+        except SyntaxError as exc:
+            raise AssertionError(f"{relative}: could not parse: {exc}") from exc
+        visited += 1
+        is_test = is_test_code(relative)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                shape = _structure_hash(node, floor)
-                if shape is not None:
-                    by_shape[shape].add(f"{relative.as_posix()}::{node.name}")
+                hashed = _structure_hash(node)
+                if hashed is not None:
+                    shape, node_count = hashed
+                    functions.append(
+                        _Function(
+                            f"{relative.as_posix()}::{node.name}",
+                            shape,
+                            node_count,
+                            is_test,
+                        )
+                    )
+
+    assert visited >= _VISITED_FLOOR, (
+        f"only {visited} files were scanned (floor {_VISITED_FLOOR}) - a "
+        "mis-rooted scan must not pass vacuously"
+    )
+    return tuple(functions)
+
+
+def _groups(
+    functions: tuple[_Function, ...], *, floor: int, tier: bool
+) -> list[set[str]]:
+    """Return every set of same-tier functions sharing one body shape."""
+    by_shape: dict[str, set[str]] = defaultdict(set)
+    for function in functions:
+        if function.is_test is tier and function.node_count >= floor:
+            by_shape[function.shape].add(function.qualified_name)
     return [members for members in by_shape.values() if len(members) > 1]
+
+
+def _cross_tier_groups(
+    functions: tuple[_Function, ...], *, floor: int
+) -> list[set[str]]:
+    """Return shape-identical groups whose members span BOTH tiers.
+
+    :func:`_groups` buckets by tier before it compares shapes, so neither
+    tier-scoped test sees a production function cloned into test scaffolding,
+    or a test fixture copied into production: they never land in the same
+    bucket. This pass drops the tier split and keeps only the groups that
+    actually straddle it.
+    """
+    by_shape: dict[str, set[str]] = defaultdict(set)
+    tiers_seen: dict[str, set[bool]] = defaultdict(set)
+    for function in functions:
+        if function.node_count < floor:
+            continue
+        by_shape[function.shape].add(function.qualified_name)
+        tiers_seen[function.shape].add(function.is_test)
+    return [
+        members
+        for shape, members in by_shape.items()
+        if len(members) > 1 and len(tiers_seen[shape]) > 1
+    ]
 
 
 def _assert_reviewed(
@@ -214,7 +403,7 @@ def _assert_reviewed(
 def test_no_unreviewed_structural_duplicate() -> None:
     """Every set of identically-shaped production functions must be reviewed."""
     _assert_reviewed(
-        _structural_groups(tests=False, floor=_NODE_FLOOR), _ACCEPTED, "_ACCEPTED"
+        _groups(_catalog(), floor=_NODE_FLOOR, tier=False), _ACCEPTED, "_ACCEPTED"
     )
 
 
@@ -226,7 +415,22 @@ def test_no_unreviewed_structural_duplicate_in_tests() -> None:
     ``testing/``, not in whichever test module happened to need it first.
     """
     _assert_reviewed(
-        _structural_groups(tests=True, floor=_TEST_NODE_FLOOR),
+        _groups(_catalog(), floor=_TEST_NODE_FLOOR, tier=True),
         _ACCEPTED_TESTS,
         "_ACCEPTED_TESTS",
+    )
+
+
+def test_no_unreviewed_structural_duplicate_across_tiers() -> None:
+    """Substantial clones that cross the production/test boundary.
+
+    A production helper hashed identically to a test fixture is invisible to
+    the two tests above by construction - see :func:`_cross_tier_groups`. The
+    production floor applies here because a group spanning both tiers is, by
+    definition, at least as substantial as the smaller side already requires.
+    """
+    _assert_reviewed(
+        _cross_tier_groups(_catalog(), floor=_NODE_FLOOR),
+        _ACCEPTED_CROSS_TIER,
+        "_ACCEPTED_CROSS_TIER",
     )

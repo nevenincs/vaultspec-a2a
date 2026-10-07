@@ -14,7 +14,7 @@ import pytest
 
 from ...utils import process as process_module
 from ...utils._process_tree import (
-    _win_parent_map,
+    descendant_pids,
     kill_pid_tree_async,
     pid_is_live,
     win_kernel32,
@@ -23,7 +23,6 @@ from ...utils.process import (
     ProcessContainment,
     ProcessContainmentError,
     _posix_group_is_live,
-    _ps_group_is_live,
 )
 
 if TYPE_CHECKING:
@@ -232,19 +231,16 @@ def test_repeated_liveness_probes_release_process_handles() -> None:
 if sys.platform == "win32":
 
     @pytest.mark.asyncio
-    async def test_parent_snapshots_track_descendants_without_handle_growth() -> None:
+    async def test_descendant_snapshots_track_the_tree_without_handle_growth() -> None:
         async with _owned_tree() as (_, parent, child_pid):
             assert parent.stdout is not None
-            # Windows venv launchers can add an interpreter beneath Popen's PID.
-            # Read the executing parent's identity from that real child process.
-            executing_parent_pid = int(await asyncio.to_thread(parent.stdout.readline))
-            assert _win_parent_map()[child_pid] == executing_parent_pid
+            # The child reports itself once it runs; wait for that before reading.
+            await asyncio.to_thread(parent.stdout.readline)
+            assert child_pid in descendant_pids(parent.pid)
             process = psutil.Process()
             before = process.num_handles()
             for _ in range(50):
-                parents = _win_parent_map()
-                assert parents[parent.pid] == process.pid
-                assert parents[child_pid] == executing_parent_pid
+                assert child_pid in descendant_pids(parent.pid)
             assert process.num_handles() <= before
 
     @pytest.mark.asyncio
@@ -299,9 +295,6 @@ else:
             parent.kill()
             parent.wait(timeout=10)
             assert _posix_group_is_live(pgid) is True
-            # Exercise the macOS probe against the real ps boundary on Linux too.
-            assert _ps_group_is_live(pgid) is True
             assert await containment.terminate(term_timeout=0.2, kill_timeout=5.0)
             assert _posix_group_is_live(pgid) is False
-            assert _ps_group_is_live(pgid) is False
             assert not pid_is_live(child_pid)

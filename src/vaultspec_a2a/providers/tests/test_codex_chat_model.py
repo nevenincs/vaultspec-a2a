@@ -88,15 +88,19 @@ for line in sys.stdin:
 """
 
 
-async def _echo_client() -> _CodexAppServerClient:
-    """Spawn the real echo subprocess and wrap it in the JSON-RPC client."""
-    process = await spawn_acp_process(
+async def _echo_process() -> asyncio.subprocess.Process:
+    """Spawn the real echo subprocess the JSON-RPC client is tested against."""
+    return await spawn_acp_process(
         [sys.executable, "-c", _ECHO_SERVER],
         env={},
         cwd=".",
         use_exec=True,
     )
-    return _CodexAppServerClient(process)
+
+
+async def _echo_client() -> _CodexAppServerClient:
+    """Spawn the real echo subprocess and wrap it in the JSON-RPC client."""
+    return _CodexAppServerClient(await _echo_process())
 
 
 # ---------------------------------------------------------------------------
@@ -717,8 +721,8 @@ async def test_cleanup_continues_and_reaps_the_process_after_a_prior_failure() -
 
     from .._cleanup import run_independent_cleanups
 
-    client = await _echo_client()
-    process = client._process  # the real spawned subprocess this client owns
+    process = await _echo_process()
+    client = _CodexAppServerClient(process)
 
     def _failing_step() -> None:
         raise OSError("a prior cleanup step failed")

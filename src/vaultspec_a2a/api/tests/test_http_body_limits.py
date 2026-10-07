@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from ...control._worker_health import worker_liveness
 from ...control.infra_config import InfraConfig
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import settings_override
 from ...worker.app import create_worker_app
 from ..app import create_app
@@ -41,7 +41,7 @@ def _app(path: str) -> FastAPI:
         return create_worker_app(lifespan=_no_lifespan)
     app = create_app(lifespan=_no_lifespan)
     app.state.internal_token = _TOKEN
-    app.state.aggregator = EventAggregator()
+    app.state.aggregator = RelayHub()
     app.state.db_session_factory = None
     return app
 

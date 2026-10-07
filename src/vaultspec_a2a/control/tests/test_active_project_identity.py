@@ -31,7 +31,7 @@ from ...control.config import settings
 from ...database.thread_repository import normalize_workspace_identity
 from ...ipc.schemas import DispatchRequest, canonical_project_root
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RunEventProducer
 from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_TEAM_PRESET,
@@ -443,7 +443,7 @@ class TestAuthoringSubmitterIsBoundToTheProject:
         manager = GraphLifecycleManager(
             checkpointer=InMemorySaver(),
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
@@ -475,7 +475,7 @@ class TestOneWorkspaceOneGraphEntry:
         return GraphLifecycleManager(
             checkpointer=InMemorySaver(),
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
@@ -723,7 +723,7 @@ class TestOneWorkspaceOneGraphEntry:
                     bridge=WorkerBridge(
                         api_url="http://127.0.0.1:1", worker_id="identity"
                     ),
-                    aggregator=EventAggregator(),
+                    producer=RunEventProducer(),
                     token_store=RunTokenStore(),
                     catalog_store=RunCatalogStore(),
                 )
@@ -778,7 +778,7 @@ class TestOneWorkspaceOneGraphEntry:
                     bridge=WorkerBridge(
                         api_url="http://127.0.0.1:1", worker_id="identity"
                     ),
-                    aggregator=EventAggregator(),
+                    producer=RunEventProducer(),
                     token_store=RunTokenStore(),
                     catalog_store=RunCatalogStore(),
                 )
@@ -824,7 +824,7 @@ class TestOneWorkspaceOneGraphEntry:
                     bridge=WorkerBridge(
                         api_url="http://127.0.0.1:1", worker_id="identity"
                     ),
-                    aggregator=EventAggregator(),
+                    producer=RunEventProducer(),
                     token_store=RunTokenStore(),
                     catalog_store=RunCatalogStore(),
                 )
@@ -879,7 +879,7 @@ class TestOneWorkspaceOneGraphEntry:
                     bridge=WorkerBridge(
                         api_url="http://127.0.0.1:1", worker_id="identity"
                     ),
-                    aggregator=EventAggregator(),
+                    producer=RunEventProducer(),
                     token_store=RunTokenStore(),
                     catalog_store=RunCatalogStore(),
                 )
@@ -932,7 +932,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager = GraphLifecycleManager(
             checkpointer=checkpointer,
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
             checkpoint_read_timeout_seconds=0.02,
@@ -974,7 +974,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager = GraphLifecycleManager(
             checkpointer=cast("Any", DigestCheckpointer()),
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
@@ -1017,7 +1017,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager = CompileTrap(
             checkpointer=cast("Any", DigestCheckpointer()),
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
@@ -1045,7 +1045,7 @@ class TestOneWorkspaceOneGraphEntry:
                     bridge=WorkerBridge(
                         api_url="http://127.0.0.1:1", worker_id="identity"
                     ),
-                    aggregator=EventAggregator(),
+                    producer=RunEventProducer(),
                     token_store=RunTokenStore(),
                     catalog_store=RunCatalogStore(),
                 )

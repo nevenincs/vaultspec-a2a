@@ -22,7 +22,7 @@ from ...control.repositories import create_deletion_saga
 from ...control.thread_listing import list_threads_service
 from ...control.thread_state_service import capture_thread_state
 from ...database import create_control_action, create_thread, get_thread
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 
@@ -105,7 +105,7 @@ async def test_run_lookup_reports_a_deleting_thread_as_absent(
         capture = await capture_thread_state(
             session,
             thread_id="gone",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=InMemorySaver(),
         )
 

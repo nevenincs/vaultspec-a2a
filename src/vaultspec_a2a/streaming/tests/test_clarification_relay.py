@@ -3,9 +3,9 @@
 Real objects end to end: the production clarification node pair drives a real
 ``StateGraph`` to a real ``interrupt()`` over a real ``InMemorySaver``, the real
 ``emit_interrupt_events`` inspects it through the real ``aget_state`` read, and a
-real ``EventAggregator`` subscriber receives whatever comes out. Nothing here
-stands in for production code, so an assertion about what a subscriber receives
-is an assertion about what a dashboard receives.
+real ``RunEventProducer``'s relay hook receives whatever comes out. Nothing here
+stands in for production code, so an assertion about what the relay receives is
+an assertion about what a dashboard receives.
 
 The point of the frame is what it does NOT carry. The interrupt payload sitting
 in the checkpoint holds every prompt and option; the frame is allowed to say only
@@ -39,7 +39,7 @@ from ...thread.clarification import (
 )
 from ...thread.constants import MAX_REQUEST_ID_CHARS
 from .._interrupt_projection import emit_interrupt_events
-from ..aggregator import EventAggregator
+from ..aggregator import RunEventProducer
 from ..sse_frames import enforce_progress_allowlist
 
 if TYPE_CHECKING:
@@ -123,28 +123,29 @@ async def _park_on_clarification(
     return cast("StreamableGraph", graph), cast("dict[str, Any]", config)
 
 
-def _drain(queue: Any) -> list[SequencedEvent]:
-    drained: list[SequencedEvent] = []
-    while not queue.empty():
-        drained.append(queue.get_nowait())
-    return drained
+def _relayed(producer: RunEventProducer) -> list[SequencedEvent]:
+    """Collect every event *producer* hands its relay, in order."""
+    received: list[SequencedEvent] = []
+
+    async def _capture(sequenced: SequencedEvent) -> None:
+        received.append(sequenced)
+
+    producer.add_broadcast_hook(_capture)
+    return received
 
 
 async def _relay(
     thread_id: str, request_id: str = _REQUEST_ID
-) -> tuple[EventAggregator, list[SequencedEvent]]:
-    """Park a real run, project it, and return everything a subscriber got."""
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber("client-1")
-    aggregator.subscribe("client-1", [thread_id])
+) -> tuple[RunEventProducer, list[SequencedEvent]]:
+    """Park a real run, project it, and return everything its relay received."""
+    producer = RunEventProducer()
+    received = _relayed(producer)
 
     graph, config = await _park_on_clarification(thread_id, request_id)
-    emitted = await emit_interrupt_events(
-        thread_id, "supervisor", graph, config, aggregator._emitters
-    )
+    emitted = await emit_interrupt_events(thread_id, graph, config, producer._emitters)
     assert emitted
 
-    return aggregator, _drain(queue)
+    return producer, received
 
 
 @pytest.mark.asyncio
@@ -154,7 +155,7 @@ async def test_a_parked_run_puts_a_clarification_nudge_on_the_relay() -> None:
     A frame kind nothing emits is a dead declaration, so this drives the actual
     interrupt-inspection seam rather than calling the emitter directly.
     """
-    _aggregator, received = await _relay("relay-emits")
+    _producer, received = await _relay("relay-emits")
 
     nudges = [s for s in received if isinstance(s.event, ClarificationPending)]
     assert len(nudges) == 1
@@ -174,7 +175,7 @@ async def test_no_question_text_reaches_the_relay() -> None:
     client could render the questionnaire from relay memory, which is exactly the
     reload bug the authoritative status disclosure exists to prevent.
     """
-    _aggregator, received = await _relay("relay-silent")
+    _producer, received = await _relay("relay-silent")
 
     everything = repr([s.event for s in received])
     assert _PROMPT not in everything
@@ -188,7 +189,7 @@ async def test_no_question_text_reaches_the_relay() -> None:
 @pytest.mark.asyncio
 async def test_the_run_is_reported_as_awaiting_input() -> None:
     """A parked run must not look like it is still working."""
-    _aggregator, received = await _relay("relay-status")
+    _producer, received = await _relay("relay-status")
 
     statuses = [s.event for s in received if isinstance(s.event, AgentStatus)]
     assert any(s.state is AgentLifecycleState.INPUT_REQUIRED for s in statuses)
@@ -203,9 +204,9 @@ async def test_a_clarification_is_not_filed_as_a_pending_permission() -> None:
     clarification has no option list and is answered through its own verb, so it
     has no entry there.
     """
-    aggregator, _received = await _relay("relay-not-permission")
+    producer, _received = await _relay("relay-not-permission")
 
-    assert not aggregator._emitters.has_pending_permission(_REQUEST_ID)
+    assert not producer._emitters.has_pending_permission(_REQUEST_ID)
 
 
 @pytest.mark.asyncio
@@ -236,9 +237,8 @@ async def test_a_run_parked_on_nothing_emits_no_nudge() -> None:
     builder.add_edge("proceed", END)
     graph = compile_test_graph(builder, checkpointer=InMemorySaver())
 
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber("client-2")
-    aggregator.subscribe("client-2", ["relay-unparked"])
+    producer = RunEventProducer()
+    received = _relayed(producer)
 
     config = RunnableConfig(configurable={"thread_id": "relay-unparked"})
     await graph.ainvoke(
@@ -256,14 +256,13 @@ async def test_a_run_parked_on_nothing_emits_no_nudge() -> None:
     )
     emitted = await emit_interrupt_events(
         "relay-unparked",
-        "supervisor",
         cast("StreamableGraph", graph),
         cast("dict[str, Any]", config),
-        aggregator._emitters,
+        producer._emitters,
     )
 
     assert not emitted
-    assert not [s for s in _drain(queue) if isinstance(s.event, ClarificationPending)]
+    assert not [s for s in received if isinstance(s.event, ClarificationPending)]
 
 
 def test_the_catalog_strips_question_material_from_the_frame() -> None:
@@ -317,7 +316,7 @@ async def test_a_handle_minted_at_the_ceiling_survives_the_relay_intact() -> Non
         "actually reaches the ceiling the outbound bound has to cover"
     )
 
-    _aggregator, received = await _relay("relay-ceiling", minted)
+    _producer, received = await _relay("relay-ceiling", minted)
 
     nudges = [s for s in received if isinstance(s.event, ClarificationPending)]
     assert len(nudges) == 1

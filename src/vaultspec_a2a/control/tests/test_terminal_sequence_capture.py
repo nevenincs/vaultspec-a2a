@@ -4,7 +4,7 @@ The gateway numbers a run's frames through ``RunSequenceAllocator``, and
 ``ThreadModel.last_sequence`` is that same mark, recorded when the run settles
 and served by ``capture_thread_state`` for a run that has not. These tests drive
 the real production seam (``_handle_terminal_event`` against a real SQLite-backed
-session, a real ``EventAggregator`` numbering through a real ``RunEventStore``,
+session, a real ``RelayHub`` numbering through a real ``RunEventStore``,
 and ``capture_thread_state`` for the read side) and prove the cursor agrees with
 the number the allocator handed out, not with any counter kept beside it.
 
@@ -29,7 +29,7 @@ from ...database import (
 from ...database.models import ThreadModel
 from ...graph.enums import AgentLifecycleState
 from ...ipc.schemas import DispatchRequest
-from ...streaming import EventAggregator, RunSequenceAllocator
+from ...streaming import RelayHub, RunSequenceAllocator
 from ...team.team_config import load_team_config
 from ...testing import DEFAULT_TEAM_PRESET
 from ...tests._checkpoint_seeding import real_checkpoint
@@ -122,18 +122,16 @@ async def _seed_completed_authority(
 
 def _numbered_aggregator(
     session_factory: async_sessionmaker[AsyncSession],
-) -> EventAggregator:
-    """An aggregator whose frames are numbered by the real allocator and store."""
-    aggregator = EventAggregator()
+) -> RelayHub:
+    """A relay hub whose frames are numbered by the real allocator and store."""
+    aggregator = RelayHub()
     aggregator.bind_sequence_allocator(
         RunSequenceAllocator(RunEventStore(session_factory))
     )
     return aggregator
 
 
-async def _relay_frames(
-    aggregator: EventAggregator, thread_id: str, count: int
-) -> None:
+async def _relay_frames(aggregator: RelayHub, thread_id: str, count: int) -> None:
     """Relay *count* worker frames, each carrying the worker's own ordering."""
     await aggregator.prepare_run(thread_id)
     for worker_sequence in range(1, count + 1):
@@ -311,7 +309,7 @@ async def test_a_run_no_allocator_numbers_settles_without_a_cursor(
             session, checkpointer, title="no allocator"
         )
 
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     assert aggregator.issued_sequence(thread_id) is None
 
     await _handle_terminal_event(

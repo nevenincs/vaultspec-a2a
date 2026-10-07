@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import DEFAULT_TEAM_PRESET, catalog_run_fields, session_scratch_dir
 from .conftest import SessionFactory
 from .conftest import make_app as _make_app_4
@@ -56,8 +56,8 @@ def _run_workspace():
 def _make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    aggregator: EventAggregator | None = None,
-) -> tuple[FastAPI, EventAggregator]:
+    aggregator: RelayHub | None = None,
+) -> tuple[FastAPI, RelayHub]:
     """Shim: forwards to shared make_app(), dropping extra returns."""
     app, agg, _worker, _cp = _make_app_4(
         session_factory, checkpointer, aggregator=aggregator

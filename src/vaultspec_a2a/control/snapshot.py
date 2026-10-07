@@ -34,7 +34,7 @@ from ..thread.snapshots import (
 from .projection import mark_degraded
 
 if TYPE_CHECKING:
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RunLiveStateMirror
 
 __all__ = [
     "MinimalState",
@@ -82,7 +82,7 @@ def _checkpoint_messages(values: dict[str, Any]) -> list[MessageData]:
 def _checkpoint_agents(
     snapshot: ThreadStateData,
     values: dict[str, Any],
-    aggregator: EventAggregator | None,
+    mirror: RunLiveStateMirror | None,
 ) -> list[AgentData]:
     raw_descriptors: object = values.get("agent_descriptors")
     node_summaries: list[dict[str, str]] = []
@@ -103,14 +103,12 @@ def _checkpoint_agents(
             ]
         else:
             mark_degraded(snapshot, DegradedReason.INVALID_AGENT_DESCRIPTORS)
-    elif aggregator is not None:
-        node_summaries = aggregator.get_node_summaries(snapshot.thread_id)
+    elif mirror is not None:
+        node_summaries = mirror.get_node_summaries(snapshot.thread_id)
     if not node_summaries:
         return []
     agent_states = (
-        aggregator.get_agent_states(snapshot.thread_id)
-        if aggregator is not None
-        else {}
+        mirror.get_agent_states(snapshot.thread_id) if mirror is not None else {}
     )
     return [
         build_agent_descriptor(
@@ -178,10 +176,10 @@ def _checkpoint_tool_calls(
 
 
 def _live_tool_calls(
-    aggregator: EventAggregator, thread_id: str, checkpoint_ids: set[str]
+    mirror: RunLiveStateMirror, thread_id: str, checkpoint_ids: set[str]
 ) -> list[ToolCallData]:
     tool_calls: list[ToolCallData] = []
-    for call_id, state in aggregator.get_tool_call_states(thread_id).items():
+    for call_id, state in mirror.get_tool_call_states(thread_id).items():
         if call_id in checkpoint_ids:
             continue
         try:
@@ -208,14 +206,14 @@ def _live_tool_calls(
 def enrich_snapshot_from_state(
     snapshot: ThreadStateData,
     state: Any,
-    aggregator: EventAggregator | None = None,
+    mirror: RunLiveStateMirror | None = None,
     expected_assignment_digest: str | None = None,
 ) -> ThreadStateData:
     """Populate snapshot fields from LangGraph checkpointer state.
 
     Maps LangChain ``BaseMessage`` objects to ``MessageData`` and
     extracts ``checkpoint_id``, plan, artifacts from the state config.
-    Populates agents from the aggregator.
+    Populates live agents and tool calls from the gateway's relay *mirror*.
     """
     msgs = _checkpoint_messages(state.values)
 
@@ -230,7 +228,7 @@ def enrich_snapshot_from_state(
 
     # Checkpoint-owned descriptors win; the thread-scoped live cache is used
     # only before the first descriptor checkpoint lands.
-    agent_data = _checkpoint_agents(snapshot, state.values, aggregator)
+    agent_data = _checkpoint_agents(snapshot, state.values, mirror)
 
     # Extract tool calls from AIMessage.tool_calls. Two shapes reach this
     # loop through the identical field:
@@ -255,9 +253,9 @@ def enrich_snapshot_from_state(
     # uses for the live stream, so a provider action classifies identically
     # whether read live or reconstructed from a settled run's checkpoint.
     tool_call_data, checkpoint_tc_ids = _checkpoint_tool_calls(state.values)
-    if aggregator is not None:
+    if mirror is not None:
         tool_call_data.extend(
-            _live_tool_calls(aggregator, snapshot.thread_id, checkpoint_tc_ids)
+            _live_tool_calls(mirror, snapshot.thread_id, checkpoint_tc_ids)
         )
 
     snapshot.messages = msgs

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import httpx
 import pytest
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import serve_on_loopback
 from ._relay_events import progress_event, relay_events
 from .conftest import make_app
@@ -37,7 +37,7 @@ class _CheckedOutPool(Protocol):
     def checkedout(self) -> int: ...
 
 
-async def _wait_for_subscribers(aggregator: EventAggregator, expected: int) -> None:
+async def _wait_for_subscribers(aggregator: RelayHub, expected: int) -> None:
     for _ in range(500):
         if aggregator.subscriber_count() >= expected:
             return
@@ -71,7 +71,7 @@ async def test_attached_viewers_hold_no_pooled_connection(
     streams are demonstrably open, proven by the subscriber registrations rather
     than by a sleep.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
     run_id, _receipt = await _seed_live_thread(session_factory, title="pool")
 
@@ -136,7 +136,7 @@ async def test_a_resuming_viewer_hands_its_replay_connection_back(
     above fixed. The count is read after the replayed frames have arrived, so
     the read is demonstrably finished rather than not yet started.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
     run_id, _receipt = await _seed_live_thread(session_factory, title="resume-pool")
 

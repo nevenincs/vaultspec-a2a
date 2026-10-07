@@ -35,7 +35,7 @@ from ...control.tests._continuation import (
 )
 from ...database import get_thread
 from ...database.run_event_repository import RunEventStore
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import SseFrame, SseReader, serve_on_loopback
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.enums import ThreadStatus
@@ -195,7 +195,7 @@ async def staged_run(
     relay seats on first use is closed afterwards, so neither case leaves a
     flush ticker running past its database.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     async with session_factory() as db:
         receipt = await seed_busy_run(db, tmp_path)
     await finish_turn(checkpointer, receipt)

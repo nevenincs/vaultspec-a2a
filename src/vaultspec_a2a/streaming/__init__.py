@@ -1,18 +1,23 @@
 """Provide ordered runtime event streaming.
 
-:class:`vaultspec_a2a.streaming.aggregator.EventAggregator` ingests, buffers,
-sequences, and emits execution events. :mod:`vaultspec_a2a.streaming.types`
-defines the streamable graph protocol and tool-kind classification.
+A run's event stream has two halves, one per process.
+:class:`vaultspec_a2a.streaming.aggregator.RunEventProducer` is the worker's:
+it ingests a graph run, buffers and emits its domain events, and hands each to
+the relay hooks. :class:`vaultspec_a2a.streaming.subscribers.RelayHub` is the
+gateway's: it projects and numbers every relayed payload, fans it out to the
+run's subscribers, and keeps the :class:`RunLiveStateMirror` the read surfaces
+serve live agent, tool-call and node state from. Both record that state through
+one set of mutations. :mod:`vaultspec_a2a.streaming.types` defines the
+streamable graph protocol and tool-kind classification.
 
 Events enter from :mod:`vaultspec_a2a.graph.events`. Workers publish through
-:mod:`vaultspec_a2a.worker`. Server-Sent Events and WebSocket consumers live in
+:mod:`vaultspec_a2a.worker`. Server-Sent Events consumers live in
 :mod:`vaultspec_a2a.api`.
-
-This package owns event aggregation. API and control modules consume its
-sequenced output.
 """
 
-from .aggregator import EventAggregator
+from ._interrupt_projection import emit_interrupt_events
+from ._run_state import RunLiveStateMirror
+from .aggregator import RunEventProducer
 from .node_metadata import (
     NODE_METADATA_FIELDS,
     node_metadata_fields,
@@ -21,6 +26,7 @@ from .node_metadata import (
 from .run_event_writer import FrameProjector, RunEventWriter
 from .subscribers import (
     AllocationSink,
+    RelayHub,
     RunSequenceAllocator,
     RunSequenceSeedSource,
     SequenceAllocation,
@@ -30,15 +36,18 @@ from .types import SequencedEvent, StreamableGraph, classify_tool_kind
 __all__ = [
     "NODE_METADATA_FIELDS",
     "AllocationSink",
-    "EventAggregator",
     "FrameProjector",
+    "RelayHub",
+    "RunEventProducer",
     "RunEventWriter",
+    "RunLiveStateMirror",
     "RunSequenceAllocator",
     "RunSequenceSeedSource",
     "SequenceAllocation",
     "SequencedEvent",
     "StreamableGraph",
     "classify_tool_kind",
+    "emit_interrupt_events",
     "node_metadata_fields",
     "node_metadata_from_graph",
 ]

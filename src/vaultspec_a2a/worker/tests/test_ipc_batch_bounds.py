@@ -23,7 +23,7 @@ from httpx import ASGITransport
 from ...api.internal import internal_router
 from ...control.config import settings
 from ...ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import settings_override
 from ..ipc import WorkerBridge
 
@@ -48,7 +48,7 @@ def _gateway_app() -> FastAPI:
     )
     app.include_router(internal_router)
     app.state.internal_token = None
-    app.state.aggregator = EventAggregator()
+    app.state.aggregator = RelayHub()
     app.state.db_session_factory = None
     app.state.checkpointer = None
     return app

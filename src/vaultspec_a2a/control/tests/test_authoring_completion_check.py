@@ -29,7 +29,7 @@ from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.thread_state_service import capture_thread_state
 from ...database import create_control_action, create_thread
 from ...ipc.schemas import DispatchRequest
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...team.team_config import load_team_config
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -49,7 +49,7 @@ async def _snapshot(
     session: AsyncSession,
     *,
     thread_id: str,
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
     checkpointer: AsyncSqliteSaver,
 ) -> ThreadStateData | None:
     """Project the live capture service to the snapshot these tests inspect."""
@@ -168,7 +168,7 @@ async def test_a_completed_doc_editor_run_with_no_artifact_is_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-empty",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -206,7 +206,7 @@ async def test_a_completed_doc_editor_run_that_did_propose_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-proposed",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -243,7 +243,7 @@ async def test_a_completed_coder_run_with_no_authoring_ids_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="coder-empty",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -273,7 +273,7 @@ async def test_a_still_running_doc_editor_thread_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-running",
-            aggregator=EventAggregator(),
+            aggregator=RelayHub(),
             checkpointer=checkpointer,
         )
 

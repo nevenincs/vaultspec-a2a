@@ -45,7 +45,7 @@ from ...domain_config import domain_config
 from ...providers.provider_catalog_service import (
     ProviderCatalogScopeCapacityError,
 )
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...team.preset_origin import PresetOrigin
 from ...telemetry import trace_headers
 from ...thread.clarification import (
@@ -803,9 +803,9 @@ def _service_check_ready(checks: dict[str, object], name: str) -> bool:
 @router.get("/service", response_model=ServiceStateResponse)
 async def service_state_endpoint(
     request: Request,
-    services: tuple[
-        AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient
-    ] = Depends(get_services),
+    services: tuple[AsyncSession, RelayHub, Checkpointer, httpx.AsyncClient] = Depends(
+        get_services
+    ),
     circuit_breaker: Any = Depends(get_circuit_breaker),
     worker_spawner: Any = Depends(get_worker_spawner),
 ) -> ServiceStateResponse:

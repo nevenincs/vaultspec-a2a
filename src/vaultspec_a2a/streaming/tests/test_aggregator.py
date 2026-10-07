@@ -1,9 +1,8 @@
-"""Tests for the EventAggregator central event bus."""
+"""Tests for the worker's RunEventProducer and the gateway's RelayHub."""
 
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable, Coroutine
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, TypedDict, Unpack, cast
 from uuid import uuid4
@@ -42,11 +41,14 @@ from ...testing import (
     simulator_command,
 )
 from ...thread.enums import ThreadStatus
-from ...thread.errors import EventAggregatorError
-from .. import EventAggregator as CoreAggregator
+from ...thread.errors import StreamSubscriptionError
+from .. import RelayHub as FacadeRelayHub
+from .. import RunEventProducer as FacadeProducer
 from .. import aggregator as agg_module
-from ..aggregator import EventAggregator
+from .. import subscribers as subscribers_module
+from ..aggregator import RunEventProducer
 from ..ingest import _next_event_or_cancel, summarize_ingest_exception
+from ..subscribers import RelayHub
 from ..transformer import StreamFrame
 from ..types import SequencedEvent, StreamableGraph, StreamOptions
 from ._error_injecting_graph import (
@@ -61,13 +63,47 @@ from ._error_injecting_graph import (
 
 
 @pytest.fixture
-def aggregator() -> EventAggregator:
-    """Return a fresh EventAggregator for each test."""
-    return EventAggregator()
+def producer() -> RunEventProducer:
+    """Return a fresh worker event producer for each test."""
+    return RunEventProducer()
+
+
+@pytest.fixture
+def hub() -> RelayHub:
+    """Return a fresh gateway relay hub for each test."""
+    return RelayHub()
+
+
+def _relayed(producer: RunEventProducer, *thread_ids: str) -> asyncio.Queue[Any]:
+    """Queue what *producer* hands its relay for *thread_ids*, in order.
+
+    The broadcast hook is the seam the worker relays every event through, so
+    the queue holds exactly what the gateway would receive for those runs.
+    """
+    queue: asyncio.Queue[Any] = asyncio.Queue()
+
+    async def _capture(sequenced: SequencedEvent) -> None:
+        if sequenced.event.thread_id in thread_ids:
+            queue.put_nowait(sequenced)
+
+    producer.add_broadcast_hook(_capture)
+    return queue
+
+
+def _relayed_chunk(thread_id: str, content: str) -> dict[str, object]:
+    """A message-chunk payload as the worker relays it to the gateway."""
+    return {
+        "type": "message_chunk",
+        "event_type": "message_chunk",
+        "thread_id": thread_id,
+        "agent_id": "agent-1",
+        "content": content,
+        "message_id": "msg-1",
+    }
 
 
 class _IngestOptions(TypedDict):
-    """Typed keyword arguments forwarded to ``EventAggregator.ingest``."""
+    """Typed keyword arguments forwarded to ``RunEventProducer.ingest``."""
 
     thread_id: str
     agent_id: str
@@ -77,18 +113,18 @@ class _IngestOptions(TypedDict):
 
 
 async def _ingest(
-    aggregator: EventAggregator,
+    producer: RunEventProducer,
     **options: Unpack[_IngestOptions],
 ) -> str:
-    """Call ``EventAggregator.ingest`` through a fully typed seam.
+    """Call ``RunEventProducer.ingest`` through a fully typed seam.
 
-    ``EventAggregator.ingest`` declares ``graph_input`` against a bare,
+    ``RunEventProducer.ingest`` declares ``graph_input`` against a bare,
     unparameterized ``Command`` generic, which strict type checking treats as
     partially unknown at every call site. This wrapper pins the type once so
     the many call sites below get a resolved return type instead of each
     repeating the same cast.
     """
-    typed_ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    typed_ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
     return await typed_ingest(**options)
 
 
@@ -121,7 +157,7 @@ async def test_cancellation_at_stream_eof_wins_and_closes_generator() -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_during_post_read_callback_drops_event(
-    aggregator: EventAggregator,
+    producer: RunEventProducer,
 ) -> None:
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.graph import END
@@ -137,13 +173,12 @@ async def test_cancel_during_post_read_callback_drops_event(
     builder.add_edge("finish", END)
     graph = compile_test_graph(builder, checkpointer=InMemorySaver())
     thread_id = "cancel-post-read-callback"
-    queue = aggregator.add_subscriber("post-read")
-    aggregator.subscribe("post-read", [thread_id])
+    queue = _relayed(producer, thread_id)
 
     async def cancel_after_read() -> None:
-        aggregator.cancel_thread(thread_id)
+        producer.cancel_thread(thread_id)
 
-    outcome = await aggregator.ingest(
+    outcome = await producer.ingest(
         thread_id,
         "supervisor",
         graph,
@@ -162,34 +197,45 @@ async def test_cancel_during_post_read_callback_drops_event(
     assert isinstance(frames[1], TeamStatus)
     assert len(frames[1].agents) == 1
     assert frames[1].agents[0]["state"] == AgentLifecycleState.CANCELLED
-    await aggregator.shutdown()
+    await producer.shutdown()
 
 
 class TestSequenceManagement:
-    """Tests for per-thread monotonic sequence counters."""
+    """The worker's per-run ordering counter, which numbers what it relays."""
 
-    def test_initial_sequence_is_zero(self, aggregator: EventAggregator) -> None:
-        """Fresh aggregator reports sequence 0 for any unseen thread."""
-        assert aggregator.get_sequence("thread-1") == 0
+    def test_an_unseen_run_starts_at_one(self, producer: RunEventProducer) -> None:
+        """The first event of a run the producer has not seen is numbered 1."""
+        assert producer._channel.next_sequence("thread-1") == 1
 
-    def test_sequence_increments(self, aggregator: EventAggregator) -> None:
+    def test_sequence_increments(self, producer: RunEventProducer) -> None:
         """next_sequence returns 1 then 2 on successive calls."""
-        seq1 = aggregator._emitters.next_sequence("thread-1")
-        seq2 = aggregator._emitters.next_sequence("thread-1")
+        seq1 = producer._channel.next_sequence("thread-1")
+        seq2 = producer._channel.next_sequence("thread-1")
         expected_first = 1
         expected_second = 2
         assert seq1 == expected_first
         assert seq2 == expected_second
 
-    def test_sequences_are_per_thread(self, aggregator: EventAggregator) -> None:
+    def test_sequences_are_per_thread(self, producer: RunEventProducer) -> None:
         """Sequence counters are independent across threads."""
-        aggregator._emitters.next_sequence("thread-a")
-        aggregator._emitters.next_sequence("thread-a")
-        aggregator._emitters.next_sequence("thread-b")
-        expected_a = 2
-        expected_b = 1
-        assert aggregator.get_sequence("thread-a") == expected_a
-        assert aggregator.get_sequence("thread-b") == expected_b
+        producer._channel.next_sequence("thread-a")
+        producer._channel.next_sequence("thread-a")
+        producer._channel.next_sequence("thread-b")
+        expected_a = 3
+        expected_b = 2
+        assert producer._channel.next_sequence("thread-a") == expected_a
+        assert producer._channel.next_sequence("thread-b") == expected_b
+
+    def test_a_purged_run_restarts_its_ordering(
+        self, producer: RunEventProducer
+    ) -> None:
+        """Purging a run's state forgets its counter; nothing resumes against it."""
+        producer._channel.next_sequence("thread-1")
+        producer._channel.next_sequence("thread-1")
+
+        producer.clear_thread_state("thread-1")
+
+        assert producer._channel.next_sequence("thread-1") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -200,49 +246,45 @@ class TestSequenceManagement:
 class TestSubscriberManagement:
     """Tests for subscriber registration and thread subscription management."""
 
-    def test_add_subscriber_returns_bounded_queue(
-        self, aggregator: EventAggregator
-    ) -> None:
+    def test_add_subscriber_returns_bounded_queue(self, hub: RelayHub) -> None:
         """add_subscriber returns a bounded Queue."""
-        queue = aggregator.add_subscriber("client-1")
+        queue = hub.add_subscriber("client-1")
         assert isinstance(queue, asyncio.Queue)
         assert queue.maxsize == domain_config.event_queue_maxsize
 
-    def test_remove_subscriber(self, aggregator: EventAggregator) -> None:
+    def test_remove_subscriber(self, hub: RelayHub) -> None:
         """remove_subscriber is idempotent — double-remove does not raise."""
-        aggregator.add_subscriber("client-1")
-        aggregator.remove_subscriber("client-1")
-        aggregator.remove_subscriber("client-1")
+        hub.add_subscriber("client-1")
+        hub.remove_subscriber("client-1")
+        hub.remove_subscriber("client-1")
 
-    def test_subscribe_unregistered_client_raises(
-        self, aggregator: EventAggregator
-    ) -> None:
-        """Subscribe raises EventAggregatorError for unknown client_id."""
-        with pytest.raises(EventAggregatorError, match="not registered"):
-            aggregator.subscribe("unknown", ["thread-1"])
+    def test_subscribe_unregistered_client_raises(self, hub: RelayHub) -> None:
+        """Subscribe raises StreamSubscriptionError for unknown client_id."""
+        with pytest.raises(StreamSubscriptionError, match="not registered"):
+            hub.subscribe("unknown", ["thread-1"])
 
-    def test_subscribe_to_threads(self, aggregator: EventAggregator) -> None:
+    def test_subscribe_to_threads(self, hub: RelayHub) -> None:
         """Subscribe records thread_ids for the given client."""
-        aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-a", "thread-b"])
-        assert aggregator.get_active_thread_ids() == ["thread-a", "thread-b"]
+        hub.add_subscriber("client-1")
+        hub.subscribe("client-1", ["thread-a", "thread-b"])
+        assert hub.get_active_thread_ids() == ["thread-a", "thread-b"]
 
     def test_clear_thread_state_drops_the_thread_from_subscriptions(
-        self, aggregator: EventAggregator
+        self, hub: RelayHub
     ) -> None:
         """Purging a thread removes it from every subscription set it was in."""
-        aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-a", "thread-b"])
-        aggregator.clear_thread_state("thread-a")
-        assert aggregator.get_active_thread_ids() == ["thread-b"]
+        hub.add_subscriber("client-1")
+        hub.subscribe("client-1", ["thread-a", "thread-b"])
+        hub.clear_thread_state("thread-a")
+        assert hub.get_active_thread_ids() == ["thread-b"]
 
-    def test_get_active_thread_ids(self, aggregator: EventAggregator) -> None:
+    def test_get_active_thread_ids(self, hub: RelayHub) -> None:
         """get_active_thread_ids returns a sorted union of all subscribed threads."""
-        aggregator.add_subscriber("c1")
-        aggregator.add_subscriber("c2")
-        aggregator.subscribe("c1", ["t1", "t2"])
-        aggregator.subscribe("c2", ["t2", "t3"])
-        active = aggregator.get_active_thread_ids()
+        hub.add_subscriber("c1")
+        hub.add_subscriber("c2")
+        hub.subscribe("c1", ["t1", "t2"])
+        hub.subscribe("c2", ["t2", "t3"])
+        active = hub.get_active_thread_ids()
         assert active == ["t1", "t2", "t3"]  # sorted
 
 
@@ -255,12 +297,11 @@ class TestEventEmission:
     """Tests for the high-level emit_* helpers."""
 
     @pytest.mark.asyncio
-    async def test_emit_agent_status(self, aggregator: EventAggregator) -> None:
+    async def test_emit_agent_status(self, producer: RunEventProducer) -> None:
         """emit_agent_status delivers an AgentStatusEvent with correct fields."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator.emit_agent_status(
+        await producer.emit_agent_status(
             thread_id="thread-1",
             agent_id="agent-1",
             node_name="worker",
@@ -282,71 +323,70 @@ class TestEventEmission:
 
     @pytest.mark.asyncio
     async def test_agent_state_does_not_leak_across_threads(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A role's state in one thread must not appear in another thread's
-        get_agent_states(thread_id) read - the EventAggregator is shared
+        get_agent_states(thread_id) read - the RunEventProducer is shared
         across every thread a worker process handles over its lifetime, so
         an agent_id-only key would let an unrelated, possibly already-
         terminal thread's role state bleed into a live thread's status
         (P10 finding: a doc-editor run's role appeared "working" inside an
         unrelated adr-research run's roles list)."""
-        await aggregator.emit_agent_status(
+        await producer.emit_agent_status(
             thread_id="thread-doc-editor",
             agent_id="vaultspec-doc-editor",
             node_name="vaultspec-doc-editor",
             state=AgentLifecycleState.WORKING,
         )
-        await aggregator.emit_agent_status(
+        await producer.emit_agent_status(
             thread_id="thread-adr-research",
             agent_id="vaultspec-researcher",
             node_name="vaultspec-researcher",
             state=AgentLifecycleState.WORKING,
         )
 
-        adr_states = aggregator.get_agent_states("thread-adr-research")
+        adr_states = producer._state.get_agent_states("thread-adr-research")
         assert "vaultspec-doc-editor" not in adr_states
         assert adr_states == {"vaultspec-researcher": AgentLifecycleState.WORKING}
 
-        doc_editor_states = aggregator.get_agent_states("thread-doc-editor")
+        doc_editor_states = producer._state.get_agent_states("thread-doc-editor")
         assert doc_editor_states == {
             "vaultspec-doc-editor": AgentLifecycleState.WORKING
         }
 
     @pytest.mark.asyncio
     async def test_clear_thread_state_drops_only_that_threads_agent_states(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """clear_thread_state purges a terminal thread's agent states so the
         shared map does not grow unbounded over a long-lived worker's
         lifetime, without disturbing a sibling thread's states."""
-        await aggregator.emit_agent_status(
+        await producer.emit_agent_status(
             thread_id="thread-a",
             agent_id="agent-a",
             node_name="agent-a",
             state=AgentLifecycleState.WORKING,
         )
-        await aggregator.emit_agent_status(
+        await producer.emit_agent_status(
             thread_id="thread-b",
             agent_id="agent-b",
             node_name="agent-b",
             state=AgentLifecycleState.WORKING,
         )
 
-        aggregator.clear_thread_state("thread-a")
+        producer.clear_thread_state("thread-a")
 
-        assert aggregator.get_agent_states("thread-a") == {}
-        assert aggregator.get_agent_states("thread-b") == {
+        assert producer._state.get_agent_states("thread-a") == {}
+        assert producer._state.get_agent_states("thread-b") == {
             "agent-b": AgentLifecycleState.WORKING
         }
 
     @pytest.mark.asyncio
-    async def test_emit_message_chunk(self, aggregator: EventAggregator) -> None:
+    async def test_emit_message_chunk(self, producer: RunEventProducer) -> None:
         """emit_message_chunk delivers a MessageChunkEvent with correct content."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._emitters.emit_message_chunk(
+        await producer._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="Hello",
@@ -360,12 +400,11 @@ class TestEventEmission:
         assert event.message_id == "msg-1"
 
     @pytest.mark.asyncio
-    async def test_emit_thought_chunk(self, aggregator: EventAggregator) -> None:
+    async def test_emit_thought_chunk(self, producer: RunEventProducer) -> None:
         """emit_thought_chunk delivers a ThoughtChunkEvent."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._emitters.emit_thought_chunk(
+        await producer._emitters.emit_thought_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="thinking...",
@@ -378,12 +417,11 @@ class TestEventEmission:
         assert event.content == "thinking..."
 
     @pytest.mark.asyncio
-    async def test_emit_tool_call_start(self, aggregator: EventAggregator) -> None:
+    async def test_emit_tool_call_start(self, producer: RunEventProducer) -> None:
         """emit_tool_call_start delivers a ToolCallStartEvent with PENDING status."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._emitters.emit_tool_call_start(
+        await producer._emitters.emit_tool_call_start(
             thread_id="thread-1",
             agent_id="agent-1",
             tool_call_id="tc-1",
@@ -400,12 +438,11 @@ class TestEventEmission:
         assert event.status == ToolCallStatus.PENDING
 
     @pytest.mark.asyncio
-    async def test_emit_permission_request(self, aggregator: EventAggregator) -> None:
+    async def test_emit_permission_request(self, producer: RunEventProducer) -> None:
         """emit_permission_request delivers a PermissionRequestEvent."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._emitters.emit_permission_request(
+        await producer._emitters.emit_permission_request(
             thread_id="thread-1",
             agent_id="agent-1",
             request_id="perm-1",
@@ -435,10 +472,10 @@ class TestEventEmission:
 
     @pytest.mark.asyncio
     async def test_emit_permission_request_replaces_stale_request_for_thread(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A new permission request should replace older pending ones."""
-        await aggregator._emitters.emit_permission_request(
+        await producer._emitters.emit_permission_request(
             thread_id="thread-1",
             agent_id="agent-1",
             request_id="perm-old",
@@ -446,7 +483,7 @@ class TestEventEmission:
             options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
         )
 
-        await aggregator._emitters.emit_permission_request(
+        await producer._emitters.emit_permission_request(
             thread_id="thread-1",
             agent_id="agent-1",
             request_id="perm-new",
@@ -454,26 +491,26 @@ class TestEventEmission:
             options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
         )
 
-        assert not aggregator._emitters.has_pending_permission("perm-old")
-        assert aggregator._emitters.has_pending_permission("perm-new")
+        assert not producer._emitters.has_pending_permission("perm-old")
+        assert producer._emitters.has_pending_permission("perm-new")
 
     @pytest.mark.asyncio
     async def test_expire_thread_permissions_drops_a_freshly_recorded_request(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Thread expiry is age-independent, unlike the stale-age janitor.
 
         A request recorded moments ago is not yet stale, but is already
         unanswerable once its thread reaches a terminal state.
         """
-        await aggregator._emitters.emit_permission_request(
+        await producer._emitters.emit_permission_request(
             thread_id="thread-1",
             agent_id="agent-1",
             request_id="perm-fresh",
             description="Fresh request",
             options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
         )
-        await aggregator._emitters.emit_permission_request(
+        await producer._emitters.emit_permission_request(
             thread_id="thread-2",
             agent_id="agent-1",
             request_id="perm-other-thread",
@@ -482,20 +519,19 @@ class TestEventEmission:
         )
 
         # The age-based janitor cannot touch a request this young.
-        assert aggregator.prune_stale_permissions() == 0
+        assert producer.prune_stale_permissions() == 0
 
-        assert aggregator._emitters.expire_thread_permissions("thread-1") == 1
-        assert not aggregator._emitters.has_pending_permission("perm-fresh")
+        assert producer._emitters.expire_thread_permissions("thread-1") == 1
+        assert not producer._emitters.has_pending_permission("perm-fresh")
         # A sibling thread's pending request is untouched.
-        assert aggregator._emitters.has_pending_permission("perm-other-thread")
+        assert producer._emitters.has_pending_permission("perm-other-thread")
 
     @pytest.mark.asyncio
-    async def test_emit_error(self, aggregator: EventAggregator) -> None:
+    async def test_emit_error(self, producer: RunEventProducer) -> None:
         """emit_error delivers an ErrorEvent with the supplied code."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator.emit_error(
+        await producer.emit_error(
             thread_id="thread-1",
             code="PROVIDER_TIMEOUT",
             message="Claude API timed out",
@@ -509,12 +545,11 @@ class TestEventEmission:
         assert event.recoverable is True
 
     @pytest.mark.asyncio
-    async def test_emit_team_status(self, aggregator: EventAggregator) -> None:
+    async def test_emit_team_status(self, producer: RunEventProducer) -> None:
         """emit_team_status delivers a TeamStatusEvent with agent summaries."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._emitters.emit_team_status(
+        await producer._emitters.emit_team_status(
             thread_id="thread-1",
             agents=[
                 {
@@ -538,11 +573,10 @@ class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emit_team_status_node_metadata(
         self,
-        aggregator: EventAggregator,
+        producer: RunEventProducer,
     ) -> None:
         """register_graph populates metadata; emit_team_status reads it."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
         # Policy exception: register_graph() uses duck typing via getattr(graph,
         # "nodes") and getattr(node, "metadata"). Constructing a real compiled
@@ -559,9 +593,9 @@ class TestEventEmission:
         class _MinimalGraph:
             nodes: ClassVar[dict[str, _MinimalNode]] = {"worker": _MinimalNode()}
 
-        aggregator.register_graph("thread-1", cast("StreamableGraph", _MinimalGraph()))
+        producer.register_graph("thread-1", cast("StreamableGraph", _MinimalGraph()))
 
-        await aggregator._emitters.emit_team_status(
+        await producer._emitters.emit_team_status(
             thread_id="thread-1",
             agents=[
                 {
@@ -589,44 +623,28 @@ class TestEventEmission:
 
 
 class TestThreadIsolation:
-    """Tests that events are only delivered to clients subscribed to the thread."""
+    """Tests that relayed frames reach only clients subscribed to their thread."""
 
-    @pytest.mark.asyncio
-    async def test_events_only_go_to_subscribed_clients(
-        self, aggregator: EventAggregator
-    ) -> None:
-        """An event on thread-a must not reach a client subscribed only to thread-b."""
-        q1 = aggregator.add_subscriber("client-1")
-        q2 = aggregator.add_subscriber("client-2")
-        aggregator.subscribe("client-1", ["thread-a"])
-        aggregator.subscribe("client-2", ["thread-b"])
+    def test_events_only_go_to_subscribed_clients(self, hub: RelayHub) -> None:
+        """A frame on thread-a must not reach a client subscribed only to thread-b."""
+        q1 = hub.add_subscriber("client-1")
+        q2 = hub.add_subscriber("client-2")
+        hub.subscribe("client-1", ["thread-a"])
+        hub.subscribe("client-2", ["thread-b"])
 
-        await aggregator._emitters.emit_message_chunk(
-            thread_id="thread-a",
-            agent_id="agent-1",
-            content="for client-1 only",
-            message_id="msg-1",
-        )
+        hub.relay_payload("thread-a", _relayed_chunk("thread-a", "for client-1 only"))
 
         assert q2.qsize() == 0
         assert q1.qsize() == 1
 
-    @pytest.mark.asyncio
-    async def test_multiple_subscribers_same_thread(
-        self, aggregator: EventAggregator
-    ) -> None:
-        """All clients subscribed to the same thread receive each event."""
-        q1 = aggregator.add_subscriber("client-1")
-        q2 = aggregator.add_subscriber("client-2")
-        aggregator.subscribe("client-1", ["thread-1"])
-        aggregator.subscribe("client-2", ["thread-1"])
+    def test_multiple_subscribers_same_thread(self, hub: RelayHub) -> None:
+        """All clients subscribed to the same thread receive each frame."""
+        q1 = hub.add_subscriber("client-1")
+        q2 = hub.add_subscriber("client-2")
+        hub.subscribe("client-1", ["thread-1"])
+        hub.subscribe("client-2", ["thread-1"])
 
-        await aggregator._emitters.emit_message_chunk(
-            thread_id="thread-1",
-            agent_id="agent-1",
-            content="shared event",
-            message_id="msg-1",
-        )
+        hub.relay_payload("thread-1", _relayed_chunk("thread-1", "shared event"))
 
         assert q1.qsize() == 1
         assert q2.qsize() == 1
@@ -642,19 +660,18 @@ class TestSequenceOnEvents:
 
     @pytest.mark.asyncio
     async def test_sequence_increments_across_events(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Consecutive events on the same thread get sequences 1, 2."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._emitters.emit_message_chunk(
+        await producer._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="first",
             message_id="msg-1",
         )
-        await aggregator._emitters.emit_message_chunk(
+        await producer._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="second",
@@ -670,25 +687,24 @@ class TestSequenceOnEvents:
 
     @pytest.mark.asyncio
     async def test_sequences_independent_per_thread(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Sequence counters restart from 1 for each distinct thread."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-a", "thread-b"])
+        queue = _relayed(producer, "thread-a", "thread-b")
 
-        await aggregator._emitters.emit_message_chunk(
+        await producer._emitters.emit_message_chunk(
             thread_id="thread-a",
             agent_id="agent-1",
             content="a-1",
             message_id="msg-1",
         )
-        await aggregator._emitters.emit_message_chunk(
+        await producer._emitters.emit_message_chunk(
             thread_id="thread-b",
             agent_id="agent-1",
             content="b-1",
             message_id="msg-2",
         )
-        await aggregator._emitters.emit_message_chunk(
+        await producer._emitters.emit_message_chunk(
             thread_id="thread-a",
             agent_id="agent-1",
             content="a-2",
@@ -753,13 +769,12 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_model_token_frame_is_batched(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Model tokens are batched and flushed after the buffer interval."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _messages_frame(AIMessageChunk(content="Hello world", id="msg-123")),
             thread_id="thread-1",
             agent_id="agent-1",
@@ -779,15 +794,14 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_model_token_frame_flushes_over_the_size_threshold(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Token chunks flush immediately when the buffer exceeds its cap."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
         large_content = "x" * (domain_config.chunk_buffer_max_bytes + 100)
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _messages_frame(AIMessageChunk(content=large_content, id="msg-big")),
             thread_id="thread-1",
             agent_id="agent-1",
@@ -800,12 +814,11 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_model_frame_is_attributed_to_the_node_that_ran_it(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _messages_frame(AIMessageChunk(content="from the coder"), node="coder"),
             thread_id="thread-1",
             agent_id="agent-1",
@@ -818,12 +831,11 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_tool_call_is_reported_under_the_id_the_model_gave_it(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A tool's lifecycle arrives on the callback surface, not the stream."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
+        queue = _relayed(producer, "thread-1")
+        callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_tool_start(
             {"name": "search_code"},
@@ -842,7 +854,7 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_one_tool_call_keeps_one_identity_from_start_to_end(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """The end resolves the call the start registered, not a second one.
 
@@ -850,9 +862,8 @@ class TestLangGraphStreamProcessing:
         registered and PENDING for the life of the run, beside a second,
         completed entry no client could join to it.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
+        queue = _relayed(producer, "thread-1")
+        callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
         await callbacks.on_tool_start(
@@ -882,7 +893,7 @@ class TestLangGraphStreamProcessing:
         assert identities == {"call_SEARCH"}
         updates = [event for event in events if isinstance(event, ToolCallUpdate)]
         assert updates[-1].status == ToolCallStatus.COMPLETED
-        assert aggregator.get_tool_call_states("thread-1") == {
+        assert producer._state.get_tool_call_states("thread-1") == {
             "call_SEARCH": {
                 "title": "search_code",
                 "kind": "search",
@@ -893,11 +904,10 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_failed_tool_call_is_reported_failed(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
+        queue = _relayed(producer, "thread-1")
+        callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
         await callbacks.on_tool_start(
@@ -924,12 +934,11 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_file_tool_reports_its_artifact_without_the_raw_path(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Artifact updates must not expose hostile absolute file paths."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
+        queue = _relayed(producer, "thread-1")
+        callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
         await callbacks.on_tool_start(
@@ -959,11 +968,10 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_model_turn_closes_on_its_finish_reason(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
+        queue = _relayed(producer, "thread-1")
+        callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_llm_end(
             LLMResult(
@@ -990,7 +998,7 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_nostream_model_turn_does_not_even_close_visibly(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """The stream layer hides a nostream run's tokens; so does its end.
 
@@ -999,9 +1007,8 @@ class TestLangGraphStreamProcessing:
         fires for it, so a final chunk sent from there would put the routing
         turn back on a client's screen with nothing before it.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
+        queue = _relayed(producer, "thread-1")
+        callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_llm_end(
             LLMResult(
@@ -1025,12 +1032,11 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_node_start_frame_emits_working(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _task_start("coder"), thread_id="thread-1", agent_id="agent-1"
         )
 
@@ -1041,12 +1047,11 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_node_result_frame_emits_idle(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _task_result("coder", result={}),
             thread_id="thread-1",
             agent_id="agent-1",
@@ -1059,12 +1064,11 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_failed_node_result_frame_emits_failed(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _task_result("coder", error=RuntimeError("node blew up")),
             thread_id="thread-1",
             agent_id="agent-1",
@@ -1077,7 +1081,7 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_subgraph_inner_node_is_not_reported_as_an_agent(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Only the run's own graph names agents a client knows.
 
@@ -1086,15 +1090,14 @@ class TestLangGraphStreamProcessing:
         state update published plan entries as though the parent had written
         them.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _task_start("inner", namespace=("team:abc",)),
             thread_id="thread-1",
             agent_id="agent-1",
         )
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _task_result(
                 "inner",
                 result={"current_plan": [{"content": "inner plan"}]},
@@ -1108,12 +1111,11 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_a_node_result_publishes_the_plan_that_node_wrote(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _task_result(
                 "planner",
                 result={"current_plan": [{"content": "ship it", "status": "pending"}]},
@@ -1133,13 +1135,12 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_an_unknown_stream_mode_does_not_emit(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A mode this projection does not consume is silently filtered."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             StreamFrame(namespace=(), mode="debug", payload={"anything": True}),
             thread_id="thread-1",
             agent_id="agent-1",
@@ -1149,13 +1150,12 @@ class TestLangGraphStreamProcessing:
 
     @pytest.mark.asyncio
     async def test_empty_content_chunk_not_buffered(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Empty-string content chunks are not buffered or emitted."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _messages_frame(AIMessageChunk(content="", id="msg-empty")),
             thread_id="thread-1",
             agent_id="agent-1",
@@ -1209,17 +1209,16 @@ class TestProviderActionToolCallChunks:
 
     @pytest.mark.asyncio
     async def test_a_completed_command_execution_reaches_a_terminal_status(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A completed commandExecution action advances past PENDING.
 
         Fails on unfixed code: chunk.tool_call_chunks was never read, so
         neither event below is emitted and the queue stays empty.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _action_chunk_frame(
                 run_id="run-cmd",
                 tool_call_id="call_1",
@@ -1256,7 +1255,7 @@ class TestProviderActionToolCallChunks:
 
     @pytest.mark.asyncio
     async def test_a_policy_rejected_command_reaches_failed_not_completed(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A rejected/failed action is distinguishable from success.
 
@@ -1266,10 +1265,9 @@ class TestProviderActionToolCallChunks:
         this repo does not recognise as a success is FAILED, never a silent
         COMPLETED.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _action_chunk_frame(
                 run_id="run-cmd-rejected",
                 tool_call_id="call_2",
@@ -1297,7 +1295,7 @@ class TestProviderActionToolCallChunks:
 
     @pytest.mark.asyncio
     async def test_an_unrecognised_status_spelling_still_fails_closed(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A status this repo has not catalogued is FAILED, never COMPLETED.
 
@@ -1305,10 +1303,9 @@ class TestProviderActionToolCallChunks:
         unfamiliar spelling (a future "declined", "aborted", ...) must not
         be misread as success just because it is unrecognised.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _action_chunk_frame(
                 run_id="run-cmd-unknown",
                 tool_call_id="call_3",
@@ -1330,7 +1327,7 @@ class TestProviderActionToolCallChunks:
 
     @pytest.mark.asyncio
     async def test_a_file_change_action_populates_locations(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A completed fileChange action reports the paths it touched.
 
@@ -1338,10 +1335,9 @@ class TestProviderActionToolCallChunks:
         tool calls as part of the defect - a frontend could never show what
         any call touched.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             _action_chunk_frame(
                 run_id="run-file",
                 tool_call_id="call_4",
@@ -1369,13 +1365,12 @@ class TestProviderActionToolCallChunks:
 
     @pytest.mark.asyncio
     async def test_a_plain_registration_chunk_is_not_re_registered_on_repeat(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """A tool call with no status (ACP's own registration shape) starts
         pending and is registered only once, even across repeated chunks for
         the same id (e.g. partial-arg-streaming deltas)."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
         raw_input_frame = _messages_frame(
             AIMessageChunk(
@@ -1391,10 +1386,10 @@ class TestProviderActionToolCallChunks:
                 ],
             )
         )
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             raw_input_frame, thread_id="thread-1", agent_id="agent-1"
         )
-        await aggregator._ingest.project_frame(
+        await producer._ingest.project_frame(
             raw_input_frame, thread_id="thread-1", agent_id="agent-1"
         )
 
@@ -1416,14 +1411,13 @@ class TestTokenChunkBatching:
 
     @pytest.mark.asyncio
     async def test_multiple_chunks_batched_into_one(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Multiple small token chunks are combined into one event."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
         for token in ["Hello", " ", "world"]:
-            await aggregator._ingest.project_frame(
+            await producer._ingest.project_frame(
                 _messages_frame(AIMessageChunk(content=token, id="run-batch")),
                 thread_id="thread-1",
                 agent_id="agent-1",
@@ -1441,13 +1435,12 @@ class TestTokenChunkBatching:
         assert event.content == "Hello world"
 
     @pytest.mark.asyncio
-    async def test_flush_on_shutdown(self, aggregator: EventAggregator) -> None:
+    async def test_flush_on_shutdown(self, producer: RunEventProducer) -> None:
         """Remaining chunk buffer is flushed via flush_chunk_buffer."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
         # Buffer a chunk through the buffering manager
-        await aggregator._buffering.buffer_message_chunk(
+        await producer._buffering.buffer_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="pending data",
@@ -1457,7 +1450,7 @@ class TestTokenChunkBatching:
         assert queue.empty()
 
         # Explicit flush, as the ingest loop and model-end callback issue it
-        await aggregator._buffering.flush_chunk_buffer("thread-1")
+        await producer._buffering.flush_chunk_buffer("thread-1")
 
         sequenced = queue.get_nowait()
         event = sequenced.event
@@ -1475,13 +1468,12 @@ class TestToolCallUpdateDebouncing:
 
     @pytest.mark.asyncio
     async def test_first_update_emits_immediately(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """The first tool call update for a given key is emitted without delay."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+        queue = _relayed(producer, "thread-1")
 
-        await aggregator._emitters.emit_tool_call_update(
+        await producer._emitters.emit_tool_call_update(
             thread_id="thread-1",
             agent_id="agent-1",
             tool_call_id="tc-1",
@@ -1501,99 +1493,59 @@ class TestToolCallUpdateDebouncing:
 
 
 class TestBackpressure:
-    """Tests for the drop-oldest broadcast strategy when a client queue is full."""
+    """Tests for the drop-oldest fan-out strategy when a client queue is full."""
 
-    @pytest.mark.asyncio
-    async def test_full_queue_drops_oldest_event(
-        self, aggregator: EventAggregator
-    ) -> None:
-        """When the subscriber queue is full, the oldest event is dropped and
-        the newest is inserted so _broadcast never blocks."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
+    def test_full_queue_drops_oldest_event(self, hub: RelayHub) -> None:
+        """When the subscriber queue is full, the oldest frame is dropped and
+        the newest is inserted so the relay never blocks."""
+        queue = hub.add_subscriber("client-1")
+        hub.subscribe("client-1", ["thread-1"])
 
         # Fill the queue to capacity with distinct content
         for i in range(domain_config.event_queue_maxsize):
-            await aggregator._emitters.emit_message_chunk(
-                thread_id="thread-1",
-                agent_id="agent-1",
-                content=f"msg-{i}",
-                message_id=f"id-{i}",
-            )
+            hub.relay_payload("thread-1", _relayed_chunk("thread-1", f"msg-{i}"))
 
         assert queue.full()
 
-        # One more event: should drop the oldest (msg-0) and enqueue this one
-        await aggregator._emitters.emit_message_chunk(
-            thread_id="thread-1",
-            agent_id="agent-1",
-            content="newest",
-            message_id="id-new",
-        )
+        # One more frame: should drop the oldest (msg-0) and enqueue this one
+        hub.relay_payload("thread-1", _relayed_chunk("thread-1", "newest"))
 
         # Queue remains at capacity (not exceeding maxsize)
         assert queue.qsize() == domain_config.event_queue_maxsize
 
-        # First event dequeued is msg-1 (msg-0 was dropped)
-        first = queue.get_nowait()
-        assert isinstance(first, SequencedEvent)
-        assert isinstance(first.event, MessageChunk)
-        assert first.event.content == "msg-1"
+        # First frame dequeued is msg-1 (msg-0 was dropped)
+        first = cast("dict[str, object]", queue.get_nowait())
+        assert first["content"] == "msg-1"
 
-        # Last event dequeued is the newly inserted one
-        items = [queue.get_nowait() for _ in range(queue.qsize())]
-        last = items[-1]
-        assert isinstance(last, SequencedEvent)
-        assert isinstance(last.event, MessageChunk)
-        assert last.event.content == "newest"
+        # Last frame dequeued is the newly inserted one
+        items = [
+            cast("dict[str, object]", queue.get_nowait()) for _ in range(queue.qsize())
+        ]
+        assert items[-1]["content"] == "newest"
 
-    @pytest.mark.asyncio
-    async def test_slow_client_does_not_block_fast_client(
-        self, aggregator: EventAggregator
-    ) -> None:
+    def test_slow_client_does_not_block_fast_client(self, hub: RelayHub) -> None:
         """A full slow-client queue must not stall delivery to a fast client."""
-        q_fast = aggregator.add_subscriber("fast")
-        q_slow = aggregator.add_subscriber("slow")
-        aggregator.subscribe("fast", ["thread-1"])
-        aggregator.subscribe("slow", ["thread-1"])
+        q_fast = hub.add_subscriber("fast")
+        q_slow = hub.add_subscriber("slow")
+        hub.subscribe("fast", ["thread-1"])
+        hub.subscribe("slow", ["thread-1"])
 
         # Pre-fill the slow queue to capacity
         for i in range(domain_config.event_queue_maxsize):
-            q_slow.put_nowait(_make_sequenced_event(aggregator, f"pre-{i}"))
+            q_slow.put_nowait(_relayed_chunk("thread-1", f"pre-{i}"))
 
         assert q_slow.full()
 
-        # Broadcast one more event — must not block
-        await aggregator._emitters.emit_message_chunk(
-            thread_id="thread-1",
-            agent_id="agent-1",
-            content="new-event",
-            message_id="id-new",
-        )
+        # Relay one more frame — must not block
+        hub.relay_payload("thread-1", _relayed_chunk("thread-1", "new-event"))
 
-        # Fast client received the event
+        # Fast client received the frame
         assert q_fast.qsize() == 1
-        fast_sequenced = q_fast.get_nowait()
-        assert isinstance(fast_sequenced, SequencedEvent)
-        assert isinstance(fast_sequenced.event, MessageChunk)
-        assert fast_sequenced.event.content == "new-event"
+        fast_frame = cast("dict[str, object]", q_fast.get_nowait())
+        assert fast_frame["content"] == "new-event"
 
         # Slow client still at capacity (oldest was dropped, newest inserted)
         assert q_slow.qsize() == domain_config.event_queue_maxsize
-
-
-def _make_sequenced_event(aggregator: EventAggregator, content: str) -> SequencedEvent:
-    """Helper: return a SequencedEvent without broadcasting it."""
-    return SequencedEvent(
-        event=MessageChunk(
-            thread_id="thread-1",
-            agent_id="agent-1",
-            timestamp=datetime.now(UTC).timestamp(),
-            content=content,
-            message_id="helper",
-        ),
-        sequence=aggregator._emitters.next_sequence("thread-1"),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1602,20 +1554,29 @@ def _make_sequenced_event(aggregator: EventAggregator, content: str) -> Sequence
 
 
 class TestShutdown:
-    """Tests for the aggregator shutdown / state-clear path."""
+    """Tests for the producer's and the hub's shutdown / state-clear paths."""
 
     @pytest.mark.asyncio
-    async def test_shutdown_clears_state(self, aggregator: EventAggregator) -> None:
-        """shutdown() drops every subscriber, subscription and sequence counter."""
-        aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-1"])
-        aggregator._emitters.next_sequence("thread-1")
+    async def test_hub_shutdown_clears_state(self, hub: RelayHub) -> None:
+        """shutdown() drops every subscriber and subscription."""
+        hub.add_subscriber("client-1")
+        hub.subscribe("client-1", ["thread-1"])
 
-        await aggregator.shutdown()
+        await hub.shutdown()
 
-        assert aggregator.subscriber_count() == 0
-        assert aggregator.get_active_thread_ids() == []
-        assert aggregator.get_sequence("thread-1") == 0
+        assert hub.subscriber_count() == 0
+        assert hub.get_active_thread_ids() == []
+
+    @pytest.mark.asyncio
+    async def test_producer_shutdown_clears_the_ordering_counters(
+        self, producer: RunEventProducer
+    ) -> None:
+        """shutdown() forgets every run's ordering counter."""
+        producer._channel.next_sequence("thread-1")
+
+        await producer.shutdown()
+
+        assert producer._channel.next_sequence("thread-1") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1624,16 +1585,17 @@ class TestShutdown:
 
 
 class TestExports:
-    """Tests that the aggregator module and core facade export expected names."""
+    """Tests that the streaming modules and facade export the split classes."""
 
     def test_all_defined(self) -> None:
-        """Aggregator module declares __all__ containing EventAggregator."""
-        assert hasattr(agg_module, "__all__")
-        assert "EventAggregator" in agg_module.__all__
+        """Each half of the stream is declared in its module's __all__."""
+        assert "RunEventProducer" in agg_module.__all__
+        assert "RelayHub" in subscribers_module.__all__
 
     def test_facade_reexports(self) -> None:
-        """streaming package re-exports EventAggregator and it is the same class."""
-        assert CoreAggregator is EventAggregator
+        """The streaming package re-exports both halves, as the same classes."""
+        assert FacadeProducer is RunEventProducer
+        assert FacadeRelayHub is RelayHub
 
 
 # ---------------------------------------------------------------------------
@@ -1653,13 +1615,12 @@ class TestEmitInterruptEvents:
 
     @pytest.mark.asyncio
     async def test_ingest_emits_permission_on_tool_interrupt(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """When graph suspends with a permission_request interrupt, events are
         emitted.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-interrupt"])
+        queue = _relayed(producer, "thread-interrupt")
 
         interrupt_payload = {
             "type": "permission_request",
@@ -1675,7 +1636,7 @@ class TestEmitInterruptEvents:
 
         config = {"configurable": {"thread_id": "thread-interrupt"}}
         await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-interrupt",
             agent_id="supervisor",
             graph=graph,
@@ -1711,18 +1672,17 @@ class TestEmitInterruptEvents:
 
     @pytest.mark.asyncio
     async def test_ingest_no_permission_on_normal_completion(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """When graph completes normally (empty tasks), no PermissionRequestEvent
         is emitted."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-normal"])
+        queue = _relayed(producer, "thread-normal")
 
         graph = build_error_injecting_graph()
 
         config = {"configurable": {"thread_id": "thread-normal"}}
         await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-normal",
             agent_id="supervisor",
             graph=graph,
@@ -1740,18 +1700,17 @@ class TestEmitInterruptEvents:
 
     @pytest.mark.asyncio
     async def test_ingest_no_permission_on_non_permission_interrupt(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Interrupts with type != 'permission_request' are silently skipped."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-other-interrupt"])
+        queue = _relayed(producer, "thread-other-interrupt")
 
         interrupt_payload = {"type": "some_other_type", "data": "irrelevant"}
         graph = build_error_injecting_graph()
 
         config = {"configurable": {"thread_id": "thread-other-interrupt"}}
         await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-other-interrupt",
             agent_id="supervisor",
             graph=graph,
@@ -1769,11 +1728,10 @@ class TestEmitInterruptEvents:
 
     @pytest.mark.asyncio
     async def test_ingest_uses_default_options_when_none_provided(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """When ACP provides no options, allow_once/deny_once defaults are used."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-default-opts"])
+        queue = _relayed(producer, "thread-default-opts")
 
         interrupt_payload: dict[str, object] = {
             "type": "permission_request",
@@ -1786,7 +1744,7 @@ class TestEmitInterruptEvents:
 
         config = {"configurable": {"thread_id": "thread-default-opts"}}
         await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-default-opts",
             agent_id="supervisor",
             graph=graph,
@@ -1808,7 +1766,7 @@ class TestEmitInterruptEvents:
 
     @pytest.mark.asyncio
     async def test_ingest_no_permission_on_empty_interrupt_tasks(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """When a task has an empty interrupts list, no PermissionRequestEvent
         is emitted.
@@ -1842,12 +1800,11 @@ class TestEmitInterruptEvents:
 
         assert issubclass(_DisagreeingGraph, StreamableGraph)  # protocol drift guard
 
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-empty-interrupts"])
+        queue = _relayed(producer, "thread-empty-interrupts")
 
         config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
         await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-empty-interrupts",
             agent_id="supervisor",
             graph=_DisagreeingGraph(),
@@ -1874,7 +1831,7 @@ class TestRecursionLimitDetection:
 
     @pytest.mark.asyncio
     async def test_ingest_emits_recursion_limit_error(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """GraphRecursionError produces ErrorEvent(code='RECURSION_LIMIT_EXCEEDED',
         recoverable=False).
@@ -1883,8 +1840,7 @@ class TestRecursionLimitDetection:
         ``recursion_limit``, so LangGraph's own Pregel loop raises the error
         rather than this fixture manufacturing it.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-recurse"])
+        queue = _relayed(producer, "thread-recurse")
 
         graph = build_error_injecting_graph()
         config = {
@@ -1892,7 +1848,7 @@ class TestRecursionLimitDetection:
             "recursion_limit": 3,
         }
         await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-recurse",
             agent_id="supervisor",
             graph=graph,
@@ -1917,7 +1873,7 @@ class TestGenericIngestExceptionDetection:
 
     @pytest.mark.asyncio
     async def test_ingest_reports_the_real_exception_not_a_generic_message(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """The emitted error names the actual failure, not a generic string.
 
@@ -1928,8 +1884,7 @@ class TestGenericIngestExceptionDetection:
         through a real node raising the real exception, not a stub simulating
         one.
         """
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-generic-fail"])
+        queue = _relayed(producer, "thread-generic-fail")
 
         failure_message = (
             "authoring transport error (401 authoring_actor_token_unknown): "
@@ -1938,7 +1893,7 @@ class TestGenericIngestExceptionDetection:
         graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-generic-fail"}}
         await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-generic-fail",
             agent_id="supervisor",
             graph=graph,
@@ -1964,13 +1919,12 @@ class TestGenericIngestExceptionDetection:
 
 @pytest.mark.asyncio
 async def test_provider_cancelled_prompt_settles_as_cancelled(
-    aggregator: EventAggregator,
+    producer: RunEventProducer,
 ) -> None:
     """A real node raising the real cancellation exception settles as CANCELLED."""
-    queue = aggregator.add_subscriber("provider-cancel-client")
-    aggregator.subscribe("provider-cancel-client", ["provider-cancel-thread"])
+    queue = _relayed(producer, "provider-cancel-thread")
     outcome = await _ingest(
-        aggregator,
+        producer,
         thread_id="provider-cancel-thread",
         agent_id="supervisor",
         graph=build_error_injecting_graph(),
@@ -1989,7 +1943,7 @@ async def test_provider_cancelled_prompt_settles_as_cancelled(
 
 @pytest.mark.asyncio
 async def test_a_signal_raised_by_a_node_is_reported_and_still_propagates(
-    aggregator: EventAggregator,
+    producer: RunEventProducer,
 ) -> None:
     """A ``BaseException`` outside ``Exception`` is not swallowed as a failure.
 
@@ -1997,11 +1951,10 @@ async def test_a_signal_raised_by_a_node_is_reported_and_still_propagates(
     but the signal reaches whoever is running the ingest: absorbing it into a
     settled outcome would let a request to stop look like a run that ended.
     """
-    queue = aggregator.add_subscriber("signal-client")
-    aggregator.subscribe("signal-client", ["signal-thread"])
+    queue = _relayed(producer, "signal-thread")
     with pytest.raises(InjectedSignal):
         await _ingest(
-            aggregator,
+            producer,
             thread_id="signal-thread",
             agent_id="supervisor",
             graph=build_error_injecting_graph(),
@@ -2156,15 +2109,14 @@ class TestProviderFailureReachesTheReason:
 
     @pytest.mark.asyncio
     async def test_a_provider_refusal_names_itself_in_the_failure_reason(
-        self, aggregator: EventAggregator, tmp_path: Path
+        self, producer: RunEventProducer, tmp_path: Path
     ) -> None:
         """The reason names the provider's type, code, message and lane."""
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-provider-fail"])
+        queue = _relayed(producer, "thread-provider-fail")
         config = {"configurable": {"thread_id": "thread-provider-fail"}}
 
         outcome = await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-provider-fail",
             agent_id="supervisor",
             graph=cast(
@@ -2206,19 +2158,18 @@ class TestProviderFailureReachesTheReason:
 
     @pytest.mark.asyncio
     async def test_the_same_reason_is_offered_for_the_durable_column(
-        self, aggregator: EventAggregator, tmp_path: Path
+        self, producer: RunEventProducer, tmp_path: Path
     ) -> None:
         """A reloading client gets the same answer the live stream got.
 
         The relay is droppable, so the reason the executor persists must be the
         one the frame carried - not a second, poorer summary derived elsewhere.
         """
-        queue = aggregator.add_subscriber("client-2")
-        aggregator.subscribe("client-2", ["thread-provider-durable"])
+        queue = _relayed(producer, "thread-provider-durable")
         config = {"configurable": {"thread_id": "thread-provider-durable"}}
 
         await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-provider-durable",
             agent_id="supervisor",
             graph=cast(
@@ -2237,7 +2188,7 @@ class TestProviderFailureReachesTheReason:
         ]
         assert len(error_events) >= 1
 
-        reason = aggregator.take_failure_reason("thread-provider-durable")
+        reason = producer.take_failure_reason("thread-provider-durable")
         assert reason == error_events[-1].message
         assert reason is not None
         assert _PROVIDER_REFUSAL in reason
@@ -2249,12 +2200,12 @@ class TestProviderFailureReachesTheReason:
         # is the SAME value the frame carried. A reloading client that recovers
         # a different condition than the live stream showed would be worse than
         # one that recovers none.
-        condition = aggregator.take_failure_condition("thread-provider-durable")
+        condition = producer.take_failure_condition("thread-provider-durable")
         assert condition is ProviderCondition.UNAUTHENTICATED
         assert condition.value == error_events[-1].code
         # Popped, never re-served: a later run on this thread must not inherit
         # the classification of the one before it.
-        assert aggregator.take_failure_condition("thread-provider-durable") is None
+        assert producer.take_failure_condition("thread-provider-durable") is None
 
 
 class TestRecoverabilityFollowsTheCondition:
@@ -2274,19 +2225,17 @@ class TestRecoverabilityFollowsTheCondition:
 
     @staticmethod
     async def _error_frame(
-        aggregator: EventAggregator,
+        producer: RunEventProducer,
         *,
         thread_id: str,
-        client_id: str,
         error_kind: str | None,
         workspace_root: str,
     ) -> ErrorOccurred:
         """Drive one real provider refusal and return the error frame it emitted."""
-        queue = aggregator.add_subscriber(client_id)
-        aggregator.subscribe(client_id, [thread_id])
+        queue = _relayed(producer, thread_id)
 
         await _ingest(
-            aggregator,
+            producer,
             thread_id=thread_id,
             agent_id="supervisor",
             graph=cast(
@@ -2310,7 +2259,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_a_transient_refusal_is_served_as_recoverable(
-        self, aggregator: EventAggregator, tmp_path: Path
+        self, producer: RunEventProducer, tmp_path: Path
     ) -> None:
         """A rate refusal reaches the client as recoverable, because it is.
 
@@ -2318,9 +2267,8 @@ class TestRecoverabilityFollowsTheCondition:
         so no provider failure of any kind could ever be reported recoverable.
         """
         err = await self._error_frame(
-            aggregator,
+            producer,
             thread_id="thread-recoverable-throttled",
-            client_id="client-throttled",
             error_kind="rate_limit",
             workspace_root=str(tmp_path),
         )
@@ -2330,7 +2278,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_a_credential_refusal_is_served_as_unrecoverable(
-        self, aggregator: EventAggregator, tmp_path: Path
+        self, producer: RunEventProducer, tmp_path: Path
     ) -> None:
         """A credential failure stays unrecoverable, and for a stated reason.
 
@@ -2338,9 +2286,8 @@ class TestRecoverabilityFollowsTheCondition:
         it the flag could have been flipped to a constant true and still passed.
         """
         err = await self._error_frame(
-            aggregator,
+            producer,
             thread_id="thread-recoverable-unauth",
-            client_id="client-unauth",
             error_kind="authentication_failed",
             workspace_root=str(tmp_path),
         )
@@ -2350,7 +2297,7 @@ class TestRecoverabilityFollowsTheCondition:
 
     @pytest.mark.asyncio
     async def test_the_graph_and_the_client_read_one_retryability_judgement(
-        self, aggregator: EventAggregator, tmp_path: Path
+        self, producer: RunEventProducer, tmp_path: Path
     ) -> None:
         """What the client is told matches what the retry policy would do.
 
@@ -2363,14 +2310,13 @@ class TestRecoverabilityFollowsTheCondition:
         from ...graph._compiler_retry import _worker_retry_on
         from ...thread.errors import WorkerExecutionError
 
-        for kind, thread_id, client_id in (
-            ("rate_limit", "thread-agree-throttled", "client-agree-throttled"),
-            ("billing_error", "thread-agree-billing", "client-agree-billing"),
+        for kind, thread_id in (
+            ("rate_limit", "thread-agree-throttled"),
+            ("billing_error", "thread-agree-billing"),
         ):
             err = await self._error_frame(
-                aggregator,
+                producer,
                 thread_id=thread_id,
-                client_id=client_id,
                 error_kind=kind,
                 workspace_root=str(tmp_path),
             )
@@ -2420,12 +2366,11 @@ class TestIngestStallWatchdog:
 
     @pytest.mark.asyncio
     async def test_stall_fails_loud_with_a_named_reason_not_a_silent_hang(
-        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+        self, producer: RunEventProducer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A graph that goes quiet past the stall budget fails fast, not forever."""
         monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.05)
-        queue = aggregator.add_subscriber("client-1")
-        aggregator.subscribe("client-1", ["thread-stall"])
+        queue = _relayed(producer, "thread-stall")
 
         graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-stall"}}
@@ -2434,7 +2379,7 @@ class TestIngestStallWatchdog:
         # suite for the graph's simulated hour-long stall.
         outcome = await asyncio.wait_for(
             _ingest(
-                aggregator,
+                producer,
                 thread_id="thread-stall",
                 agent_id="supervisor",
                 graph=graph,
@@ -2460,17 +2405,16 @@ class TestIngestStallWatchdog:
 
     @pytest.mark.asyncio
     async def test_cancel_interrupts_a_blocked_next_event_and_closes_the_stream(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """Cancellation wins before the watchdog and does not leak the generator."""
         thread_id = "thread-cancel-blocked"
-        queue = aggregator.add_subscriber("client-cancel-blocked")
-        aggregator.subscribe("client-cancel-blocked", [thread_id])
+        queue = _relayed(producer, thread_id)
         entered, closed = asyncio.Event(), asyncio.Event()
         graph = _cancellable_stalling_graph(entered, closed)
         task = asyncio.create_task(
             _ingest(
-                aggregator,
+                producer,
                 thread_id=thread_id,
                 agent_id="supervisor",
                 graph=graph,
@@ -2480,7 +2424,7 @@ class TestIngestStallWatchdog:
         )
 
         await asyncio.wait_for(entered.wait(), timeout=1.0)
-        aggregator.cancel_thread(thread_id)
+        producer.cancel_thread(thread_id)
         assert await asyncio.wait_for(task, timeout=1.0) == ThreadStatus.CANCELLED
         await asyncio.wait_for(closed.wait(), timeout=1.0)
 
@@ -2496,17 +2440,16 @@ class TestIngestStallWatchdog:
 
     @pytest.mark.asyncio
     async def test_cancel_before_ingest_starts_is_observed_by_the_new_ingest(
-        self, aggregator: EventAggregator
+        self, producer: RunEventProducer
     ) -> None:
         """An accepted cancel must survive the dispatch-to-ingest startup race."""
         thread_id = "thread-cancel-before-ingest"
-        queue = aggregator.add_subscriber("client-cancel-before-ingest")
-        aggregator.subscribe("client-cancel-before-ingest", [thread_id])
-        aggregator.cancel_thread(thread_id)
+        queue = _relayed(producer, thread_id)
+        producer.cancel_thread(thread_id)
 
         outcome = await asyncio.wait_for(
             _ingest(
-                aggregator,
+                producer,
                 thread_id=thread_id,
                 agent_id="supervisor",
                 graph=_cancellable_stalling_graph(asyncio.Event(), asyncio.Event()),
@@ -2529,7 +2472,7 @@ class TestIngestStallWatchdog:
 
     @pytest.mark.asyncio
     async def test_stall_reason_is_retrievable_via_take_failure_reason(
-        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+        self, producer: RunEventProducer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The stall reason is exposed for the durable failure_reason column.
 
@@ -2542,7 +2485,7 @@ class TestIngestStallWatchdog:
         config = {"configurable": {"thread_id": "thread-stall-reason"}}
         outcome = await asyncio.wait_for(
             _ingest(
-                aggregator,
+                producer,
                 thread_id="thread-stall-reason",
                 agent_id="supervisor",
                 graph=graph,
@@ -2553,15 +2496,15 @@ class TestIngestStallWatchdog:
         )
         assert outcome == "failed"
 
-        reason = aggregator.take_failure_reason("thread-stall-reason")
+        reason = producer.take_failure_reason("thread-stall-reason")
         assert reason is not None
         assert "stalled" in reason.lower()
         # A pop: the second read finds nothing left to report.
-        assert aggregator.take_failure_reason("thread-stall-reason") is None
+        assert producer.take_failure_reason("thread-stall-reason") is None
 
     @pytest.mark.asyncio
     async def test_a_normal_completing_graph_never_trips_the_watchdog(
-        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+        self, producer: RunEventProducer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A graph that exhausts normally is unaffected by the bounded rewrite.
 
@@ -2573,7 +2516,7 @@ class TestIngestStallWatchdog:
         graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-normal"}}
         outcome = await _ingest(
-            aggregator,
+            producer,
             thread_id="thread-normal",
             agent_id="supervisor",
             graph=graph,
@@ -2581,11 +2524,11 @@ class TestIngestStallWatchdog:
             config=config,
         )
         assert outcome == "completed"
-        assert aggregator.take_failure_reason("thread-normal") is None
+        assert producer.take_failure_reason("thread-normal") is None
 
     @pytest.mark.asyncio
     async def test_a_node_within_its_own_step_budget_is_not_killed_by_the_global_floor(
-        self, aggregator: EventAggregator, monkeypatch: pytest.MonkeyPatch
+        self, producer: RunEventProducer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A silent stretch under the run's OWN step_timeout must not trip the
         watchdog, even when it exceeds the flat global default.
@@ -2612,7 +2555,7 @@ class TestIngestStallWatchdog:
         config = {"configurable": {"thread_id": "thread-long-step"}}
         outcome = await asyncio.wait_for(
             _ingest(
-                aggregator,
+                producer,
                 thread_id="thread-long-step",
                 agent_id="supervisor",
                 graph=graph,
@@ -2622,4 +2565,4 @@ class TestIngestStallWatchdog:
             timeout=5.0,
         )
         assert outcome == "completed"
-        assert aggregator.take_failure_reason("thread-long-step") is None
+        assert producer.take_failure_reason("thread-long-step") is None

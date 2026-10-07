@@ -28,7 +28,7 @@ from ...control.config import settings
 from ...control.event_handlers import CheckpointPruneRegistry
 from ...database import create_thread
 from ...providers.in_process_catalog import in_process_catalog_key, in_process_lanes
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import LaneInventoryFactory, adopted_spawner
 from ...tests._write_authority import make_test_write_authority
 from ...worker._dispatch_contract import CAPACITY_FULL
@@ -168,7 +168,7 @@ class _InProcessWorker:
 # App factory
 # ---------------------------------------------------------------------------
 
-type AppFixture = tuple[FastAPI, EventAggregator, _InProcessWorker, AsyncSqliteSaver]
+type AppFixture = tuple[FastAPI, RelayHub, _InProcessWorker, AsyncSqliteSaver]
 
 # The credentials every ``make_app`` gateway holds. Known constants, so a test
 # that wants to present them, or to present something else, can name them.
@@ -268,7 +268,7 @@ def _session_catalog_service() -> ProviderCatalogService:
 def make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    aggregator: EventAggregator | None = None,
+    aggregator: RelayHub | None = None,
     *,
     stamp_credentials: bool = True,
 ) -> AppFixture:
@@ -299,7 +299,7 @@ def make_app(
         app.add_middleware(cast("Any", _SeatedCredentials), owner=app)
 
     if aggregator is None:
-        aggregator = EventAggregator()
+        aggregator = RelayHub()
 
     worker = _InProcessWorker(app.state.internal_token)
 

@@ -47,7 +47,7 @@ from ..graph.enums import ServerEventType, StreamFrameKind
 from ..providers.conditions import ProviderCondition
 from ..streaming.sse_frames import encode_sse_frame, transport_frame
 from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
-from ..thread.errors import EventAggregatorError
+from ..thread.errors import StreamSubscriptionError
 from ._stream_replay import (
     replay_is_served,
     replay_window,
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RelayHub
     from ..streaming.run_event_writer import RunEventWriter
     from ._stream_replay import ReplayFrame, ResumePosition
 
@@ -115,7 +115,7 @@ class ThreadStreamRequest:
     """
 
     thread_id: str
-    aggregator: EventAggregator
+    aggregator: RelayHub
     session_factory: async_sessionmaker[AsyncSession]
     resume_cursor: str | None = None
     replay_writer: RunEventWriter | None = None
@@ -291,7 +291,7 @@ class _ThreadStream:
         return self._request.thread_id
 
     @property
-    def _aggregator(self) -> EventAggregator:
+    def _aggregator(self) -> RelayHub:
         return self._request.aggregator
 
     async def frames(self) -> AsyncGenerator[bytes]:
@@ -349,7 +349,7 @@ class _ThreadStream:
         """
         try:
             queue = self._aggregator.add_subscriber(self._client_id)
-        except EventAggregatorError:
+        except StreamSubscriptionError:
             logger.warning(
                 "Refused SSE stream for thread %s: subscriber registry at capacity",
                 self._thread_id,

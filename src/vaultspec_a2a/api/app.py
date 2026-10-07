@@ -1,12 +1,12 @@
 """FastAPI application factory -- the gateway entry point.
 
 Creates the ASGI application with:
-- Lifespan management (init/close DB, EventAggregator, telemetry)
+- Lifespan management (init/close DB, the relay hub, telemetry)
 - REST router from per-resource route modules
 - Internal router from ``internal.py`` (worker relay)
 
 The gateway NO LONGER runs agent execution locally.  All graph
-compilation and ``aggregator.ingest()`` calls are dispatched to the
+compilation and ``RunEventProducer.ingest()`` calls are dispatched to the
 worker process via HTTP POST to ``/dispatch`` (service separation).
 """
 
@@ -84,7 +84,7 @@ from ..lifecycle.registration import (
 from ..lifecycle.registry import ProcRecord
 from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
 from ..providers.in_process_catalog import in_process_lanes
-from ..streaming.aggregator import EventAggregator
+from ..streaming import RelayHub
 from ..telemetry import TelemetryMiddleware, configure_telemetry, trace_headers
 from ..telemetry.aggregator_hook import OTelAggregatorHook
 from ..utils import (
@@ -457,7 +457,7 @@ async def _shutdown_observability(deadline: ShutdownDeadline) -> None:
         )
 
 
-_WorkerShutdownResources = tuple[httpx.AsyncClient, LazyWorkerSpawner, EventAggregator]
+_WorkerShutdownResources = tuple[httpx.AsyncClient, LazyWorkerSpawner, RelayHub]
 _GatewayShutdownTasks = tuple[
     asyncio.Task[None],
     asyncio.Task[None],
@@ -473,7 +473,7 @@ async def _shutdown_gateway(
     tasks: _GatewayShutdownTasks,
     discovery: _DiscoveryRuntime,
 ) -> None:
-    worker_client, worker_spawner, aggregator = workers
+    worker_client, worker_spawner, relay_hub = workers
     (
         watchdog_task,
         reconcile_task,
@@ -580,7 +580,7 @@ async def _shutdown_gateway(
         phase="owned worker tree",
     )
     await finish_before(worker_client.aclose(), deadline, phase="worker HTTP client")
-    await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
+    await finish_before(relay_hub.shutdown(), deadline, phase="relay hub")
     await _settle_checkpoint_prunes(app, deadline)
     await finish_before(close_db(), deadline, phase="database")
 
@@ -777,7 +777,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     process.  The lifespan sets up:
     1. Database (SQLAlchemy)
     2. Read-only checkpointer (for snapshot queries -- safe under WAL mode)
-    3. EventAggregator (lightweight -- for local event relay only)
+    3. RelayHub (the worker event relay, its subscribers and live-state mirror)
     4. Telemetry
     5. httpx.AsyncClient for worker dispatch
     """
@@ -803,8 +803,8 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         await _reconcile_gateway_startup(app, checkpointer)
 
-        aggregator = EventAggregator(telemetry=OTelAggregatorHook())
-        app.state.aggregator = aggregator
+        relay_hub = RelayHub(telemetry=OTelAggregatorHook())
+        app.state.aggregator = relay_hub
 
         app.state.db_engine = engine
 
@@ -839,7 +839,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         await _shutdown_gateway(
             app,
-            (worker_client, worker_spawner, aggregator),
+            (worker_client, worker_spawner, relay_hub),
             (
                 watchdog_task,
                 reconcile_task,

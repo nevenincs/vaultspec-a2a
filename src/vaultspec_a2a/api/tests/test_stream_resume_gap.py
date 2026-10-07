@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import text
 
 from ...database.run_event_repository import RunEventStore
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
 from ...testing import SseReader, serve_on_loopback, settings_override
@@ -57,12 +57,8 @@ async def test_a_cursor_behind_the_trimmed_window_is_told_where_the_replay_start
     retention has cut to its newest rows - the state any later process, or
     any restart, actually finds.
     """
-    producer, _agg, _worker, _cp = make_app(
-        session_factory, checkpointer, EventAggregator()
-    )
-    viewer, _vagg, _vworker, _vcp = make_app(
-        session_factory, checkpointer, EventAggregator()
-    )
+    producer, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
+    viewer, _vagg, _vworker, _vcp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     with settings_override(stream_replay_window_events=_RETAINED):
@@ -111,7 +107,7 @@ async def test_a_resume_with_the_feature_off_is_told_the_replay_is_unavailable(
     resumed, which is the failure the notice exists to prevent; refusing the
     stream outright would deny a viewer the live frames it can still have.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     with settings_override(stream_replay_enabled=False):
@@ -142,7 +138,7 @@ async def test_a_store_that_cannot_answer_is_reported_rather_than_assumed_empty(
     database the stream reads, which is what a store the gateway cannot serve
     from looks like from here.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
     async with session_factory() as session:
         await session.execute(text("DROP TABLE run_events"))
@@ -169,7 +165,7 @@ async def test_a_run_with_nothing_retained_cannot_serve_a_cursor(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A position in a window that no longer exists is answered, not ignored."""
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
@@ -208,7 +204,7 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
     actually produced, so the stream goes live immediately after the notice
     and closes on the terminal like any other.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     async with session_factory() as session:
         _, receipt = await _seed_accepted_thread(session, thread_id=_RUN)
         await session.commit()
@@ -253,7 +249,7 @@ async def test_a_caught_up_resume_is_given_no_notice_at_all(
     The counterweight to every case above: a notice on each routine
     reconnection would train a consumer to ignore the one that matters.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (

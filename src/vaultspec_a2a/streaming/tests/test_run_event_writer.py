@@ -27,9 +27,8 @@ from ...database.run_event_repository import RunEventStore
 from ...database.thread_repository import create_thread
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
-from ..aggregator import EventAggregator
 from ..run_event_writer import RunEventWriter
-from ..subscribers import RunSequenceAllocator, SequenceAllocation
+from ..subscribers import RelayHub, RunSequenceAllocator, SequenceAllocation
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -60,7 +59,7 @@ class _Harness:
         self.writer = RunEventWriter(
             self.store, window=window, flush_interval_seconds=interval
         )
-        self.aggregator = EventAggregator()
+        self.aggregator = RelayHub()
         self.aggregator.bind_sequence_allocator(
             RunSequenceAllocator(self.store), sink=self.writer
         )

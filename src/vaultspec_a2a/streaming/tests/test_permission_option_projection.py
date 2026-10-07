@@ -3,9 +3,9 @@
 Real objects throughout: a real ``StateGraph`` compiled with LangGraph's
 ``InMemorySaver``, suspended by a real ``interrupt()`` call, inspected through
 the real ``aget_state`` checkpointer read, and projected by the real
-``emit_interrupt_events`` into a real ``EventAggregator``. Nothing here stands in
-for production code, so the assertions describe what a dashboard client actually
-receives.
+``emit_interrupt_events`` into a real ``RunEventProducer``. Nothing here stands
+in for production code, so the assertions describe what a dashboard client
+actually receives.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from ...graph.enums import PermissionOptionKind
 from ...graph.events import PermissionRequest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from .._interrupt_projection import emit_interrupt_events
-from ..aggregator import EventAggregator
+from ..aggregator import RunEventProducer
 
 if TYPE_CHECKING:
     from ..types import SequencedEvent, StreamableGraph
@@ -70,7 +70,7 @@ async def _project(
     thread_id: str, acp_options: list[dict[str, Any]]
 ) -> list[dict[str, str]]:
     """Return the option list a client receives for the given ACP options."""
-    aggregator = EventAggregator()
+    producer = RunEventProducer()
     relayed: list[PermissionRequest] = []
 
     async def _capture(sequenced: SequencedEvent) -> None:
@@ -78,12 +78,10 @@ async def _project(
             relayed.append(sequenced.event)
 
     # The broadcast hook is the seam the worker relays every event through.
-    aggregator.add_broadcast_hook(_capture)
+    producer.add_broadcast_hook(_capture)
     graph, config = await _suspend_on_permission(thread_id, acp_options)
 
-    emitted = await emit_interrupt_events(
-        thread_id, "coder", graph, config, aggregator._emitters
-    )
+    emitted = await emit_interrupt_events(thread_id, graph, config, producer._emitters)
     assert emitted
 
     assert len(relayed) == 1

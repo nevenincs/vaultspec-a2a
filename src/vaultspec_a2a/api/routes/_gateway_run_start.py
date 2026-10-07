@@ -48,7 +48,7 @@ from ...ipc.schemas import SeedTranscriptMessage
 from ...providers.team_selection import (
     FrozenTeamSelection,
 )
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...team import TeamConfig
 from ...telemetry import trace_headers
 from ...thread.enums import (
@@ -183,9 +183,9 @@ def _log_readiness_refusal(
 async def run_start_endpoint(
     request: Request,
     body: RunStartRequest,
-    services: tuple[
-        AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient
-    ] = Depends(get_services),
+    services: tuple[AsyncSession, RelayHub, Checkpointer, httpx.AsyncClient] = Depends(
+        get_services
+    ),
     circuit_breaker: Any = Depends(get_circuit_breaker),
     worker_spawner: Any = Depends(get_worker_spawner),
 ) -> RunStartResponse | RunPrepareResponse | RunCommitResponse | RunReleaseResponse:

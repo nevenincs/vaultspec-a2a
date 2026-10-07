@@ -37,7 +37,7 @@ from ...database import (
 )
 from ...database.checkpoints import Checkpointer
 from ...providers import ProviderCondition
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...thread.constants import (
     MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
@@ -250,7 +250,7 @@ async def run_status_endpoint(
     run_id: PathSafeRunId,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    aggregator: RelayHub = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunStatusResponse:
     """Return the authoritative recovery snapshot for a run."""
@@ -365,7 +365,7 @@ async def run_stream_endpoint(
     # gives the connection back when this function returns, which is the last
     # moment the stream needs it.
     db: AsyncSession = Depends(get_db, scope="function"),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    aggregator: RelayHub = Depends(get_aggregator),
     last_event_id_header: Annotated[
         str | None,
         Header(
@@ -445,7 +445,7 @@ def snapshot_to_wire(data: Any) -> ThreadStateSnapshot:
 async def run_history_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    aggregator: RelayHub = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunHistoryResponse:
     """Read one run whole, including a terminal or archived one.
@@ -550,7 +550,7 @@ async def run_archive_endpoint(
 @router.get("/team/status", response_model=TeamStatusV1Response)
 async def team_status_endpoint(
     request: Request,
-    aggregator: EventAggregator = Depends(get_aggregator),
+    aggregator: RelayHub = Depends(get_aggregator),
     db: AsyncSession = Depends(get_db),
 ) -> TeamStatusV1Response:
     """Report the team's live operational projection.
@@ -616,7 +616,7 @@ async def team_status_endpoint(
 async def run_delete_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    aggregator: RelayHub = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> Response:
     """Delete a run through the durable cross-store deletion saga.

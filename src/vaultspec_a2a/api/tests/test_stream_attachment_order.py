@@ -11,7 +11,7 @@ absent or unobservable to a consumer:
 - a viewer whose queue overflowed is told so, once, instead of silently losing
   history.
 
-Driven against the real ``EventAggregator``, the real subscriber registry and a
+Driven against the real ``RelayHub``, the real subscriber registry and a
 real file-backed SQLite run row. The generator is driven directly rather than
 through a socket because these are properties of the body's own ordering, and a
 socket would add a second source of interleaving without making any of them more
@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...domain_config import domain_config
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import decode_frame, settings_override
 from ...thread.enums import ThreadStatus
 from ..thread_stream import ThreadStreamRequest, _stream_thread_events
@@ -80,7 +80,7 @@ async def test_a_viewer_is_subscribed_before_it_is_told_the_run_state(
     boundary - it carries the state that was read - so a subscription that is
     already live when it arrives proves the read happened after attachment.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     stream = _stream_thread_events(
@@ -124,7 +124,7 @@ async def test_no_frame_claims_an_sse_id_the_stream_cannot_resume_from(
     stream does not offer, and a consumer deduplicating by it would drop a
     restarted worker's events as ones it already held.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     stream = _stream_thread_events(
@@ -159,7 +159,7 @@ async def test_a_run_that_settles_unheard_still_closes_the_stream(
     behind - and the stream still reports the outcome and ends, bounded by one
     idle beat rather than never.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     async with session_factory() as session:
         await _seed_accepted_thread(session, thread_id=_RUN, status="running")
         await session.commit()
@@ -216,7 +216,7 @@ async def test_a_viewer_that_overflows_its_queue_is_told_to_resynchronize(
     generator is suspended at a yield, which is where a slow consumer actually
     sits.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
     overflow = domain_config.event_queue_maxsize + 8
 

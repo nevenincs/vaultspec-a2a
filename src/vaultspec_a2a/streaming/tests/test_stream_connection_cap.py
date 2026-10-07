@@ -7,7 +7,7 @@ subscribers that check never observes. The SSE route's own pre-check is weaker
 still, because it runs while building the response and the registration it
 authorises does not happen until the client starts reading the body.
 
-So the bound has to hold at the registry itself. These drive the real aggregator
+So the bound has to hold at the registry itself. These drive the real relay hub
 at its real shipped default rather than a tuned-down cap, so the limit under test
 is the value operators actually run.
 """
@@ -17,18 +17,18 @@ from __future__ import annotations
 import pytest
 
 from ...domain_config import domain_config
-from ...thread.errors import EventAggregatorError
-from ..aggregator import EventAggregator
+from ...thread.errors import StreamSubscriptionError
+from ..subscribers import RelayHub
 from ._metric_reader import counter_total, metered_hook
 
 
 @pytest.fixture
-def aggregator() -> EventAggregator:
-    """Return a fresh EventAggregator for each test."""
-    return EventAggregator()
+def aggregator() -> RelayHub:
+    """Return a fresh RelayHub for each test."""
+    return RelayHub()
 
 
-def _fill(aggregator: EventAggregator, count: int, *, prefix: str = "client") -> None:
+def _fill(aggregator: RelayHub, count: int, *, prefix: str = "client") -> None:
     for index in range(count):
         aggregator.add_subscriber(f"{prefix}-{index}")
 
@@ -39,7 +39,7 @@ def test_the_limit_has_a_bounded_positive_default() -> None:
 
 
 def test_the_registry_admits_subscribers_up_to_the_cap(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """The limit admits exactly its configured number, not one fewer."""
     limit = domain_config.max_stream_connections
@@ -49,17 +49,17 @@ def test_the_registry_admits_subscribers_up_to_the_cap(
     assert aggregator.subscriber_count() == limit
 
 
-def test_the_subscriber_past_the_cap_is_refused(aggregator: EventAggregator) -> None:
+def test_the_subscriber_past_the_cap_is_refused(aggregator: RelayHub) -> None:
     """One past the limit raises rather than silently extending the registry."""
     limit = domain_config.max_stream_connections
     _fill(aggregator, limit)
 
-    with pytest.raises(EventAggregatorError, match="global limit"):
+    with pytest.raises(StreamSubscriptionError, match="global limit"):
         aggregator.add_subscriber("one-client-too-many")
 
 
 def test_a_refused_subscriber_leaves_the_registry_unchanged(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """A refusal must not half-register the caller.
 
@@ -69,15 +69,15 @@ def test_a_refused_subscriber_leaves_the_registry_unchanged(
     limit = domain_config.max_stream_connections
     _fill(aggregator, limit)
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.add_subscriber("one-client-too-many")
 
     assert aggregator.subscriber_count() == limit
-    assert "one-client-too-many" not in aggregator._subscribers_mgr._subscribers
+    assert "one-client-too-many" not in aggregator._subscribers
 
 
 def test_the_cap_is_global_rather_than_per_client(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """Distinct client identities share one bound.
 
@@ -89,12 +89,12 @@ def test_the_cap_is_global_rather_than_per_client(
     _fill(aggregator, limit // 2, prefix="sse")
     _fill(aggregator, limit - limit // 2, prefix="ws")
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.add_subscriber("a-wholly-unrelated-client")
 
 
 def test_re_registering_a_held_client_at_capacity_is_not_refused(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """Replacing a held client's queue must stay possible at capacity.
 
@@ -111,7 +111,7 @@ def test_re_registering_a_held_client_at_capacity_is_not_refused(
     assert aggregator.subscriber_count() == limit
 
 
-def test_removing_a_subscriber_frees_capacity(aggregator: EventAggregator) -> None:
+def test_removing_a_subscriber_frees_capacity(aggregator: RelayHub) -> None:
     """The cap bounds concurrent subscribers, not lifetime total."""
     limit = domain_config.max_stream_connections
     _fill(aggregator, limit)
@@ -131,10 +131,10 @@ def test_a_refusal_emits_the_operational_counter() -> None:
     cannot pass on a counter some other code path recorded.
     """
     hook, reader = metered_hook()
-    aggregator = EventAggregator(telemetry=hook)
+    aggregator = RelayHub(telemetry=hook)
     _fill(aggregator, domain_config.max_stream_connections)
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.add_subscriber("one-client-too-many")
 
     assert counter_total(reader, "aggregator.subscribers_refused") == 1
@@ -143,7 +143,7 @@ def test_a_refusal_emits_the_operational_counter() -> None:
 def test_an_admitted_subscriber_emits_no_refusal_counter() -> None:
     """Control: the counter tracks refusals, not registrations."""
     hook, reader = metered_hook()
-    aggregator = EventAggregator(telemetry=hook)
+    aggregator = RelayHub(telemetry=hook)
 
     aggregator.add_subscriber("client-0")
 

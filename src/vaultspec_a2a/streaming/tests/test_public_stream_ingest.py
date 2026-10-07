@@ -11,8 +11,8 @@ arrangement are what a client depends on:
 - nothing in the streaming package reaches into LangGraph's private modules
   to make any of it work.
 
-Driven against real compiled graphs, a real checkpointer and the real
-aggregator; the model text comes from the deterministic lane, built through the
+Driven against real compiled graphs, a real checkpointer and the real event
+producer; the model text comes from the deterministic lane, built through the
 real provider factory.
 """
 
@@ -47,7 +47,7 @@ from ...graph.events import (
 from ...providers import ProviderFactory
 from ...team.team_config import load_agent_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ..aggregator import EventAggregator
+from ..aggregator import RunEventProducer
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
@@ -106,11 +106,15 @@ def _full_surface_graph(saver: AsyncSqliteSaver, replies: list[str]) -> Streamab
     return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
 
 
-async def _drain(queue: Any) -> list[SequencedEvent]:
-    events: list[SequencedEvent] = []
-    while not queue.empty():
-        events.append(queue.get_nowait())
-    return events
+def _relayed(producer: RunEventProducer) -> list[SequencedEvent]:
+    """Collect every event *producer* hands its relay, in order."""
+    received: list[SequencedEvent] = []
+
+    async def _capture(sequenced: SequencedEvent) -> None:
+        received.append(sequenced)
+
+    producer.add_broadcast_hook(_capture)
+    return received
 
 
 @pytest.mark.asyncio
@@ -119,10 +123,9 @@ async def test_a_run_still_reports_every_family_of_frame_it_used_to(
 ) -> None:
     """The public stream plus its callbacks carry the whole wire surface."""
     replies: list[str] = []
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber("client-surface")
-    aggregator.subscribe("client-surface", ["thread-surface"])
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    relayed = _relayed(producer)
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
         ingest(
@@ -136,7 +139,7 @@ async def test_a_run_still_reports_every_family_of_frame_it_used_to(
     )
 
     assert outcome == "completed"
-    events = [sequenced.event for sequenced in await _drain(queue)]
+    events = [sequenced.event for sequenced in relayed]
 
     text = "".join(e.content for e in events if isinstance(e, MessageChunk))
     assert len(replies) == 1
@@ -192,10 +195,9 @@ async def test_a_parked_run_is_reported_interrupted_and_asks_for_its_answer(
     checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The stream reports the park, and the projection publishes the request."""
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber("client-park")
-    aggregator.subscribe("client-park", ["thread-park"])
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    relayed = _relayed(producer)
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
         ingest(
@@ -209,7 +211,7 @@ async def test_a_parked_run_is_reported_interrupted_and_asks_for_its_answer(
     )
 
     assert outcome == "interrupted"
-    events = [sequenced.event for sequenced in await _drain(queue)]
+    events = [sequenced.event for sequenced in relayed]
     requests = [e for e in events if isinstance(e, PermissionRequest)]
     assert requests, events
     assert "fs/write_text_file" in requests[0].description
@@ -227,7 +229,7 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
     from langgraph.graph import END, START
     from langgraph.types import interrupt
 
-    from vaultspec_a2a.streaming.aggregator import EventAggregator
+    from vaultspec_a2a.streaming import RunEventProducer
     from vaultspec_a2a.testing import add_test_node, compile_test_graph, new_state_graph
 
 
@@ -250,16 +252,17 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
             builder.add_edge(START, "gate")
             builder.add_edge("gate", END)
             graph = compile_test_graph(builder, checkpointer=saver)
-            aggregator = EventAggregator()
-            queue = aggregator.add_subscriber("c")
-            aggregator.subscribe("c", ["t"])
-            outcome = await aggregator.ingest(
+            producer = RunEventProducer()
+            emitted = []
+
+            async def capture(sequenced):
+                emitted.append(type(sequenced.event).__name__)
+
+            producer.add_broadcast_hook(capture)
+            outcome = await producer.ingest(
                 "t", "supervisor", graph, {"note": ""},
                 {"configurable": {"thread_id": "t"}},
             )
-            emitted = []
-            while not queue.empty():
-                emitted.append(type(queue.get_nowait().event).__name__)
             return {"outcome": outcome, "emitted": emitted}
 
 

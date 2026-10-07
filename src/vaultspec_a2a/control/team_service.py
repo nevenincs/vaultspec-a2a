@@ -17,7 +17,7 @@ from ..thread.snapshots import AgentData, build_agent_descriptor
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RelayHub, RunLiveStateMirror
 
 __all__ = ["build_team_status"]
 
@@ -42,18 +42,18 @@ class TeamStatus:
 
 
 def _active_agent_descriptors(
-    aggregator: EventAggregator, active_threads: list[str]
+    mirror: RunLiveStateMirror, active_threads: list[str]
 ) -> list[AgentData]:
     agents: list[AgentData] = []
     for thread_id in active_threads:
-        agent_states = aggregator.get_agent_states(thread_id)
+        agent_states = mirror.get_agent_states(thread_id)
         agents.extend(
             build_agent_descriptor(
                 summary,
                 agent_states.get(summary["agent_id"], AgentLifecycleState.IDLE),
                 thread_id=thread_id,
             )
-            for summary in aggregator.get_node_summaries(thread_id)
+            for summary in mirror.get_node_summaries(thread_id)
         )
     return agents
 
@@ -61,10 +61,10 @@ def _active_agent_descriptors(
 async def build_team_status(
     *,
     db: AsyncSession,
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
     heartbeat_threads: list[str],
 ) -> TeamStatus:
-    """Assemble the full team status from DB and in-memory aggregator state."""
+    """Assemble the full team status from DB and the relay hub's live state."""
     live_pending = await actionable_pending_permissions(db)
     # A run holding any unanswered request is active even when none of them is
     # actionable; only the actionable ones are advertised as waiting.
@@ -84,10 +84,10 @@ async def build_team_status(
         | {p.request.thread_id for p in live_pending}
     )
 
-    # Public pending permissions must be durable-backed; aggregator state is
-    # still used for agents and active-thread liveness, not permission truth.
+    # Public pending permissions must be durable-backed; the relay hub is
+    # still read for agents and active-thread liveness, not permission truth.
     return TeamStatus(
-        agents=_active_agent_descriptors(aggregator, active_threads),
+        agents=_active_agent_descriptors(aggregator.mirror, active_threads),
         active_threads=active_threads,
         pending_permissions=public_pending,
     )

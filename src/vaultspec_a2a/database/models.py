@@ -341,20 +341,19 @@ class ThreadModel(Base):
     # at read time - so it only keeps step with the posture until it is dropped.
     execution_readiness: Mapped[str] = mapped_column(default=RepairStatus.HEALTHY)
     # The reconnect cursor a client compares against to discard already-seen
-    # WebSocket/SSE events (api/schemas/snapshots.py's ThreadStateSnapshot
-    # docstring). The live value lives only on the gateway's in-memory
-    # EventAggregator and is pruned the moment a run settles
-    # (EventEmitters.clear_thread_state), so a REST read after settle - the
-    # only moment the reconnect contract matters - had nothing durable to
-    # read and always answered 0 (F19). Captured and persisted here at the
-    # same terminal-status write as failure_reason/provider_condition/
-    # repair_status, before the prune runs.
+    # SSE events (api/schemas/snapshots.py's ThreadStateSnapshot docstring):
+    # the highest frame number the gateway's sequence allocator issued the
+    # run. The live counter is forgotten the moment a run settles
+    # (RelayHub.clear_thread_state), so a REST read after settle - the only
+    # moment the reconnect contract matters - needs a durable value to read.
+    # Captured and persisted here at the same terminal-status write as
+    # failure_reason/provider_condition/repair_status, before the purge runs.
     #
     # Nullable with no default, on the SAME reasoning as provider_condition
-    # above: a run that settled before this column existed, or through a
-    # code path with no aggregator available, genuinely has no captured
-    # cursor, and 0 is a legitimate value a thread with truly zero relayed
-    # events could carry. Defaulting to 0 would make "never captured"
+    # above: a run that settled before this column existed, or one no
+    # allocator numbered, genuinely has no captured cursor, and 0 is a
+    # legitimate value a thread with truly zero relayed events could
+    # carry. Defaulting to 0 would make "never captured"
     # indistinguishable from "captured as zero" - the same failure mode
     # this column exists to close, reintroduced at the schema level.
     last_sequence: Mapped[int | None] = mapped_column(default=None)

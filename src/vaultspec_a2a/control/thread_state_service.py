@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.checkpoints import Checkpointer
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RelayHub, RunLiveStateMirror
     from ..thread.snapshots import CheckpointProjection
 
 __all__ = [
@@ -296,7 +296,7 @@ class _CheckpointSnapshotRead:
 async def _read_projected_checkpoint(
     checkpointer: Checkpointer,
     snapshot: ThreadStateData,
-    aggregator: EventAggregator,
+    mirror: RunLiveStateMirror,
     expected_assignment_digest: str | None,
 ) -> _CheckpointSnapshotRead:
     thread_id = snapshot.thread_id
@@ -327,7 +327,7 @@ async def _read_projected_checkpoint(
             snapshot = enrich_snapshot_from_state(
                 snapshot,
                 minimal_state,
-                aggregator=aggregator,
+                mirror=mirror,
                 expected_assignment_digest=expected_assignment_digest,
             )
             snapshot = apply_checkpoint_projection(snapshot, projection)
@@ -370,7 +370,7 @@ async def _read_projected_checkpoint(
 
 
 async def _served_last_sequence(
-    db: AsyncSession, thread: ThreadModel, aggregator: EventAggregator
+    db: AsyncSession, thread: ThreadModel, aggregator: RelayHub
 ) -> int:
     """Return the run's frame cursor: the highest number its stream has issued.
 
@@ -393,7 +393,7 @@ async def capture_thread_state(
     db: AsyncSession,
     *,
     thread_id: str,
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
     checkpointer: Checkpointer,
 ) -> ThreadStateCapture | None:
     """Capture a coherent thread snapshot and its checkpoint projection.
@@ -446,7 +446,7 @@ async def capture_thread_state(
     checkpoint_read = await _read_projected_checkpoint(
         checkpointer,
         snapshot,
-        aggregator,
+        aggregator.mirror,
         expected_assignment_digest,
     )
     snapshot = checkpoint_read.snapshot

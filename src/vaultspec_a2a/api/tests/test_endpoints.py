@@ -1,7 +1,7 @@
 """Tests for the REST endpoints.
 
 Uses FastAPI TestClient with a real in-memory SQLite database and a real
-EventAggregator (no mocks).  Dispatch requests to the worker are captured
+RelayHub (no mocks).  Dispatch requests to the worker are captured
 by a real in-process FastAPI ASGI app (ASGITransport) — no MockTransport,
 no unittest.mock.
 
@@ -41,7 +41,7 @@ from ...database.models import (
     ThreadExecutionStateModel,
     ThreadModel,
 )
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import DEFAULT_TEAM_PRESET, catalog_run_fields, settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -1825,7 +1825,7 @@ class TestTeamStatus:
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Agents registered via aggregator node metadata appear in response."""
-        agg = EventAggregator()
+        agg = RelayHub()
         agg.sync_worker_event(
             "team-status-node-metadata",
             {

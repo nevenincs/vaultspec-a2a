@@ -1,8 +1,8 @@
 """Event handlers for worker → gateway relay.
 
 Business-logic handlers that persist worker events into the database,
-journal permission requests, re-project the run's pause, and perform
-aggregator GC on thread termination.  Extracted from ``api/internal.py``
+journal permission requests, re-project the run's pause, and release the
+relay hub's run state on thread termination.  Extracted from ``api/internal.py``
 to decouple protocol translation from domain logic.
 
 The :func:`relay_event` orchestrator consolidates the duplicated 4-handler
@@ -58,7 +58,7 @@ if TYPE_CHECKING:
 
     from ..database import ThreadStatusElectionOutcome
     from ..database.checkpoints import Checkpointer
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RelayHub
     from .drain import DrainGate
 
 __all__ = [
@@ -94,7 +94,7 @@ type _TerminalPublisher = Callable[[], None]
 
 
 class _TerminalEventOptions(TypedDict, total=False):
-    aggregator: EventAggregator | None
+    aggregator: RelayHub | None
     session_factory: async_sessionmaker[AsyncSession] | None
     checkpointer: Checkpointer | None
     drain_gate: DrainGate | None
@@ -678,7 +678,7 @@ async def _handle_terminal_event(
     payload: dict[str, object],
     **options: Unpack[_TerminalEventOptions],
 ) -> None:
-    """Settle a proven terminal event, then release drain and aggregator state.
+    """Settle a proven terminal event, then release drain and relay hub state.
 
     Also the gate on the client-visible terminal frame. The relay hands the
     frame over as *publish_terminal* rather than fanning it out itself,
@@ -688,7 +688,7 @@ async def _handle_terminal_event(
     cannot take back. A refused terminal also cannot be shown: a delayed
     first-turn event may arrive after recovery already promoted its successor.
     Only a settled run publishes, before the prune, drain release and
-    aggregator purge that would otherwise make the frame undeliverable.
+    relay hub purge that would otherwise make the frame undeliverable.
     """
     unknown = set(options).difference(_RELAY_OPTIONS)
     if unknown:
@@ -705,7 +705,7 @@ async def _handle_terminal_event(
     publish = options.get("publish_terminal")
     if not is_terminal_event(payload):
         return
-    # Capture before the durable write and before aggregator state is pruned.
+    # Capture before the durable write and before relay hub state is pruned.
     # ``None`` - nothing numbers this run - leaves the settled cursor unwritten.
     last_sequence = (
         aggregator.issued_sequence(thread_id) if aggregator is not None else None
@@ -992,12 +992,12 @@ async def relay_event(
     ``receive_worker_event_batch``.
 
     Callers are responsible for routing execution-state projections before this
-    general relay, broadcasting to WS clients via ConnectionManager, and syncing
-    non-projection events into the aggregator.
+    general relay, fanning the frame out through the relay hub, and mirroring
+    non-projection events into the hub's live run state.
 
     This function handles the DB-side event processing:
     permission journal, progress inference, execution state persistence,
-    the pause projection, and terminal status updates with aggregator GC.
+    the pause projection, and terminal status updates with relay hub GC.
 
     A terminal frame is the one exception to the caller owning the fan-out.
     Whether it may be shown at all is this plane's answer, so the caller hands
@@ -1032,7 +1032,7 @@ async def relay_event(
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
-    # Terminal status update + aggregator GC + drain-gate release.
+    # Terminal status update + relay hub GC + drain-gate release.
     await _handle_terminal_event(
         thread_id,
         payload,

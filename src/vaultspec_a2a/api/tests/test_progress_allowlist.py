@@ -23,7 +23,7 @@ import httpx
 import pytest
 
 from ...domain_config import domain_config
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
 from ...testing import read_frame, serve_on_loopback
 from ...tests._write_authority import make_test_write_authority
@@ -47,7 +47,7 @@ _PLAN_BODY = "SECRET-PLAN-PROSE-64c1af"
 def _secured(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> AppFixture:
     """Build the real gateway fixture; every caller presents its own bearer."""
     return make_app(session_factory, checkpointer, aggregator, stamp_credentials=False)
@@ -67,7 +67,7 @@ async def _seed_running_run(session_factory: SessionFactory) -> str:
         return thread.id
 
 
-async def _await_subscriber(agg: EventAggregator) -> None:
+async def _await_subscriber(agg: RelayHub) -> None:
     for _ in range(200):
         if agg.subscriber_count() > 0:
             return
@@ -94,7 +94,7 @@ async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S27/S99: an artifact body cannot cross the authenticated edge; identity does."""
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
@@ -141,7 +141,7 @@ async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S27/S99: an edit diff cannot cross; the tool-call metadata does."""
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
@@ -194,7 +194,7 @@ async def test_authenticated_stream_bounds_the_token_delta(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S159: a message frame's token content is bounded, not relayed whole."""
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
     oversized = "T" * (MAX_PROGRESS_CONTENT_CHARS + 5000)
 
@@ -245,7 +245,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
     the default-allow path. Each is relayed through the real aggregator and read
     back off a real socket.
     """
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
@@ -331,7 +331,7 @@ async def test_authenticated_stream_degrades_an_uncatalogued_frame(
     This inverts the pre-catalog edge behaviour. The type NAME survives, so a
     consumer classifying frames by name still routes it; its payload does not.
     """
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
@@ -376,7 +376,7 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Plan entries are rebuilt item by item; the model-authored text stays home."""
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
@@ -422,7 +422,7 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
     limit = domain_config.max_stream_connections
     assert limit > 0, "the global stream limit must be enabled for this proof"
 
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     for index in range(limit):
         aggregator.add_subscriber(f"prefill-{index}")
 
@@ -453,7 +453,7 @@ async def test_global_stream_quota_admits_the_authenticated_caller_below_capacit
     refusal above is the connection limit rather than an auth artefact.
     """
     limit = domain_config.max_stream_connections
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     for index in range(limit - 1):
         aggregator.add_subscriber(f"prefill-{index}")
 

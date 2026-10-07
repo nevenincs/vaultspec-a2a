@@ -69,7 +69,7 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RunEventProducer
     from ..streaming.types import SequencedEvent, StreamableGraph
     from ..thread.action_receipts import GraphActionReceipt
     from ._dispatch_receipts import DispatchReceiptReporter
@@ -250,7 +250,7 @@ class Executor(SettlementMixin):
         self._graph_lifecycle = GraphLifecycleManager(
             checkpointer=checkpointer,
             bridge=bridge,
-            aggregator=self._aggregator,
+            producer=self._producer,
             token_store=self._token_store,
             catalog_store=self._catalog_store,
             checkpoint_read_timeout_seconds=checkpoint_read_timeout_seconds,
@@ -270,7 +270,7 @@ class Executor(SettlementMixin):
             if thread_id:
                 await _bridge_ref.send_event(thread_id, sequenced_to_dict(sequenced))
 
-        self._aggregator.add_broadcast_hook(_relay_event)
+        self._producer.add_broadcast_hook(_relay_event)
 
         self._capacity = DispatchCapacityState()
 
@@ -284,8 +284,8 @@ class Executor(SettlementMixin):
 
     @property
     @override
-    def _aggregator(self) -> EventAggregator:
-        return self._resources.aggregator
+    def _producer(self) -> RunEventProducer:
+        return self._resources.producer
 
     @property
     def _token_store(self) -> RunTokenStore:
@@ -332,11 +332,6 @@ class Executor(SettlementMixin):
     @override
     def _dispatch_reservation(self) -> ContextVar[DispatchCapacityReservation | None]:
         return self._capacity.reservation
-
-    @property
-    def aggregator(self) -> EventAggregator:
-        """Return the event aggregator (for subscriber wiring, if needed)."""
-        return self._aggregator
 
     @property
     def token_store(self) -> RunTokenStore:
@@ -455,7 +450,7 @@ class Executor(SettlementMixin):
         outcome: str,
         reservation: DispatchCapacityReservation | None = None,
     ) -> None:
-        """Release the ingest slot, untrack thread, prune aggregator.
+        """Release the ingest slot, untrack thread, prune the producer's run state.
 
         Drops the run's actor tokens only on a TERMINAL *outcome*. An
         ``"interrupted"`` ingest means the run parked at a gate and will resume -
@@ -473,12 +468,10 @@ class Executor(SettlementMixin):
             self._release_terminal_thread(thread_id, closes_run_window=True)
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
-        self._aggregator.prune_sequences(active_snapshot)
+        self._producer.prune_sequences(active_snapshot)
         # Prune permissions older than 5 minutes regardless of thread state.
-        self._aggregator.prune_stale_permissions()
-        reservation = reservation or self._dispatch_reservation.get()
-        if reservation is not None:
-            await self.release_dispatch_capacity(reservation)
+        self._producer.prune_stale_permissions()
+        await self._release_held_capacity(reservation)
 
     @override
     def _release_terminal_thread(
@@ -496,8 +489,7 @@ class Executor(SettlementMixin):
             self._token_store.drop(thread_id)
             self._catalog_store.drop(thread_id)
         self._graph_lifecycle.release_thread(thread_id)
-        self._aggregator.remove_node_metadata(thread_id)
-        self._aggregator.clear_thread_state(thread_id)
+        self._producer.clear_thread_state(thread_id)
 
     @override
     async def _close_authoring_session_best_effort(
@@ -617,7 +609,7 @@ class Executor(SettlementMixin):
     async def _handle_cancel(self, req: DispatchRequest) -> None:
         """Apply one cancel while holding the run's terminal arbitration lock."""
         self._pending_cancellations[req.thread_id] = req.dispatch_id
-        self._aggregator.cancel_thread(req.thread_id)
+        self._producer.cancel_thread(req.thread_id)
         # Release the run's tokens and cached catalog on the
         # TERMINAL boundary only. When an ingest is still active
         # the cancel is not yet terminal: that ingest settles
@@ -793,7 +785,7 @@ class Executor(SettlementMixin):
         outcome: str = ThreadStatus.FAILED
         try:
             span.add_event(f"{action}_graph_execution_started")
-            outcome = await self._aggregator.ingest(
+            outcome = await self._producer.ingest(
                 req.thread_id,
                 req.agent_id or DEFAULT_SUPERVISOR_ID,
                 run.graph,
@@ -903,7 +895,7 @@ class Executor(SettlementMixin):
         )
         span.set_attribute("pre_flight", "refused")
         span.set_attribute("refusal", refusal.cause.value)
-        await self._aggregator.emit_error(
+        await self._producer.emit_error(
             req.thread_id,
             refusal.cause.value,
             refusal.detail,
@@ -934,7 +926,7 @@ class Executor(SettlementMixin):
         await self._run_controls.drain(reason)
 
     async def shutdown(self) -> None:
-        """Release held resources (aggregator debounce tasks, etc.)."""
-        await self._aggregator.shutdown()
+        """Release held resources (the producer's debounce tasks, etc.)."""
+        await self._producer.shutdown()
         self._pending_cancellations.clear()
         self._graph_lifecycle.clear()

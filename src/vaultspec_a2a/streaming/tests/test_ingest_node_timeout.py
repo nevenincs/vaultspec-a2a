@@ -1,6 +1,6 @@
 """A node that outruns its own run budget fails the run and names itself.
 
-Driven through a real compiled LangGraph graph and the real aggregator ingest:
+Driven through a real compiled LangGraph graph and the real producer ingest:
 the node's ``TimeoutPolicy`` is enforced by LangGraph, and the classification
 under test is what ingest reports once LangGraph raises.
 """
@@ -16,7 +16,7 @@ from langgraph.types import TimeoutPolicy
 
 from ...graph.events import ErrorOccurred
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ..aggregator import EventAggregator
+from ..aggregator import RunEventProducer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -49,10 +49,15 @@ def _graph_with_node_budget(run_timeout: float) -> StreamableGraph:
 
 @pytest.mark.asyncio
 async def test_a_node_timeout_fails_the_run_naming_the_node_and_limit() -> None:
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber("client-node-timeout")
-    aggregator.subscribe("client-node-timeout", ["thread-node-timeout"])
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    events: list[SequencedEvent] = []
+
+    async def _relay(sequenced: SequencedEvent) -> None:
+        events.append(sequenced)
+
+    # The broadcast hook is the seam the worker relays every event through.
+    producer.add_broadcast_hook(_relay)
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
         ingest(
@@ -66,9 +71,6 @@ async def test_a_node_timeout_fails_the_run_naming_the_node_and_limit() -> None:
     )
 
     assert outcome == "failed"
-    events: list[SequencedEvent] = []
-    while not queue.empty():
-        events.append(queue.get_nowait())
     errors = [s.event for s in events if isinstance(s.event, ErrorOccurred)]
     assert errors, "a timed-out node must surface an error event"
     error = errors[-1]
@@ -76,4 +78,4 @@ async def test_a_node_timeout_fails_the_run_naming_the_node_and_limit() -> None:
     assert error.recoverable is True
     assert "'slow_author'" in error.message
     assert "run timeout" in error.message
-    assert aggregator.take_failure_reason("thread-node-timeout") == error.message
+    assert producer.take_failure_reason("thread-node-timeout") == error.message

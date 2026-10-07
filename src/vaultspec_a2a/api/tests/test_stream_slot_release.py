@@ -8,7 +8,7 @@ registered but outside the cleanup guard can strand a slot for the life of the
 process, and the gateway would refuse honest callers on the strength of a client
 that is long gone.
 
-These drive the real response generator against a real ``EventAggregator`` at a
+These drive the real response generator against a real ``RelayHub`` at a
 genuinely occupied capacity, and assert release the only way that means anything:
 by having a subsequent client actually take the freed slot through the production
 registry API. A count that merely decrements would not prove the slot is usable.
@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...domain_config import domain_config
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...thread.enums import ThreadStatus
 from ..thread_stream import ThreadStreamRequest, _stream_thread_events
 from .conftest import seed_run_with_status
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from .conftest import SessionFactory
 
 
-def _occupy(aggregator: EventAggregator, count: int, *, prefix: str) -> None:
+def _occupy(aggregator: RelayHub, count: int, *, prefix: str) -> None:
     """Register *count* real subscribers through the production registry API."""
     for index in range(count):
         aggregator.add_subscriber(f"{prefix}-{index}")
@@ -71,7 +71,7 @@ async def test_a_finished_stream_hands_its_slot_to_the_next_caller(
     newcomer's admission is the release: had the finished stream kept its slot,
     ``add_subscriber`` would raise instead.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     limit = domain_config.max_stream_connections
     _occupy(aggregator, limit - 1, prefix="held")
     await seed_run_with_status(session_factory, "run-finished", ThreadStatus.COMPLETED)
@@ -111,7 +111,7 @@ async def test_a_refused_cursor_takes_no_slot_and_releases_nobody_elses(
     client would turn a bad cursor into an outage for the viewers that arrived
     first.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     limit = domain_config.max_stream_connections
     _occupy(aggregator, limit - 1, prefix="held")
     await seed_run_with_status(session_factory, "run-refused", ThreadStatus.RUNNING)
@@ -134,7 +134,7 @@ async def test_a_refused_cursor_takes_no_slot_and_releases_nobody_elses(
 
     assert aggregator.subscriber_count() == limit - 1
     assert aggregator.get_active_thread_ids() == []
-    registered = aggregator._subscribers_mgr._subscribers
+    registered = aggregator._subscribers
     for index in range(limit - 1):
         assert f"held-{index}" in registered
 
@@ -154,7 +154,7 @@ async def test_a_stream_abandoned_mid_flight_hands_its_slot_to_the_next_caller(
     ``add_subscriber`` and after ``subscribe``, which the subscription assertion
     below pins - so it is precisely the case the cleanup guard has to cover.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     limit = domain_config.max_stream_connections
     _occupy(aggregator, limit - 1, prefix="held")
     await seed_run_with_status(session_factory, "run-abandoned", ThreadStatus.RUNNING)

@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RunEventProducer
     from .authoring_binding import AuthoringBindingProvider
     from .ipc import WorkerBridge
 
@@ -160,15 +160,15 @@ class GraphLifecycleManager:
         Shared LangGraph checkpointer for graph compilation.
     bridge:
         ``WorkerBridge`` for forwarding graph_registered events.
-    aggregator:
-        ``EventAggregator`` for registering compiled graphs.
+    producer:
+        ``RunEventProducer`` for registering compiled graphs.
     """
 
     def __init__(
         self,
         checkpointer: Checkpointer,
         bridge: WorkerBridge,
-        aggregator: EventAggregator,
+        producer: RunEventProducer,
         *args: object,
         **options: Unpack[GraphLifecycleOptions],
     ) -> None:
@@ -185,7 +185,7 @@ class GraphLifecycleManager:
         self._ports = GraphLifecyclePorts(
             checkpointer=checkpointer,
             bridge=bridge,
-            aggregator=aggregator,
+            producer=producer,
             token_store=token_store,
             catalog_store=catalog_store,
             provider_factory=ProviderFactory(),
@@ -267,7 +267,7 @@ class GraphLifecycleManager:
 
         This is the only public graph-injection seam.  It maintains the same
         cache and thread mapping invariant as normal compilation, then makes
-        the graph available to event aggregation before dispatch can resume it.
+        the graph available to the event producer before dispatch can resume it.
         That invariant includes the project spelling: an injected key is minted
         here so a graph installed through this seam shares the entry a dispatch
         for the same workspace would find, rather than shadowing it.
@@ -287,7 +287,7 @@ class GraphLifecycleManager:
         self._state.graph_cache[cache_key] = graph
         self._state.graph_cache.move_to_end(cache_key)
         self._state.thread_to_cache_key[thread_id] = cache_key
-        self._ports.aggregator.register_graph(thread_id, graph)
+        self._ports.producer.register_graph(thread_id, graph)
 
     # ------------------------------------------------------------------
     # Graph cache lookup and compilation
@@ -303,7 +303,7 @@ class GraphLifecycleManager:
 
         If the thread already maps to a cached graph, return it (LRU touch).
         If the preset is known but no graph is cached (eviction or first use),
-        compile a new one, cache it, and register with the aggregator.
+        compile a new one, cache it, and register it with the event producer.
         Missing accepted graph authority is a compilation refusal.
         """
         lock = self._state.thread_compile_locks.setdefault(
@@ -429,9 +429,9 @@ class GraphLifecycleManager:
 
         graph = await self._get_or_compile_cache_key(req, new_key, team_preset)
         self._state.thread_to_cache_key[req.thread_id] = new_key
-        self._ports.aggregator.register_graph(req.thread_id, graph)
-        # Relay node metadata to the control-surface aggregator so
-        # REST /team-status and WS team_status events include role/display_name.
+        self._ports.producer.register_graph(req.thread_id, graph)
+        # Relay node metadata to the gateway's live-state mirror so its
+        # team-status read and the team_status frames include role/display_name.
         await self._send_graph_registered(req.thread_id, graph)
         return graph
 
@@ -542,9 +542,9 @@ class GraphLifecycleManager:
     ) -> None:
         """Send a ``graph_registered`` event with node metadata via the bridge.
 
-        The control-surface aggregator uses this to populate its
-        ``_node_metadata`` cache so that ``emit_team_status`` and the REST
-        ``/team-status`` endpoint include role/display_name/description.
+        The gateway's live-state mirror records the nodes it carries, so the
+        team-status read and the run snapshot include
+        role/display_name/description.
         """
         nodes = node_metadata_from_graph(graph)
         if nodes:
@@ -827,7 +827,7 @@ class GraphLifecycleManager:
 
         Returns:
             A ``dict`` suitable for passing directly to
-            ``EventAggregator.ingest()`` as *graph_input*.
+            ``RunEventProducer.ingest()`` as *graph_input*.
         """
         messages: list[BaseMessage] = []
         if req.context_preamble:

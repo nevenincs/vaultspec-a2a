@@ -3,7 +3,7 @@
 Net-new coverage: before the src/ui deletion the SSE endpoint had
 no automated exerciser at all — the React SPA was its only consumer. These tests
 drive the real endpoint through a real ASGI app + a real SQLite thread row + the
-real EventAggregator, asserting an actual ``text/event-stream`` frame. No mocks,
+real RelayHub, asserting an actual ``text/event-stream`` frame. No mocks,
 no test doubles. The /ws WebSocket tests do NOT cover this SSE surface.
 
 The terminal-replay path is asserted directly because it is deterministic and

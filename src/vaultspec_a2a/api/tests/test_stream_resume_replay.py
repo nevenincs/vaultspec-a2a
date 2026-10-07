@@ -19,7 +19,7 @@ import httpx
 import pytest
 
 from ...database.run_event_repository import RunEventRecord, RunEventStore
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
 from ...testing import SseFrame, SseReader, serve_on_loopback
@@ -58,7 +58,7 @@ async def test_a_reconnect_covers_every_sequence_to_the_terminal_exactly_once(
     the window. That overlap is the reason the stream tracks what it has
     emitted; without it the resume would deliver the same frames twice.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     async with session_factory() as session:
         _, receipt = await _seed_accepted_thread(session, thread_id=_RUN)
         await session.commit()
@@ -123,7 +123,7 @@ async def test_the_window_sentinel_replays_everything_still_retained_once(
     sources one after the other would answer with the window again instead of
     the live frame relayed below.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
@@ -150,7 +150,7 @@ async def test_a_resume_at_the_head_of_the_window_replays_nothing(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A caught-up client goes straight to live, with no frame repeated."""
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (

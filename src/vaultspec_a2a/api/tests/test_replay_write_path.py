@@ -26,7 +26,7 @@ import pytest
 from ...database import create_control_action
 from ...database.run_event_repository import RunEventStore
 from ...database.thread_repository import create_thread
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import RunSequenceAllocator
 from ...testing import serve_on_loopback
@@ -100,7 +100,7 @@ _UNREACHABLE_CADENCE = 3600.0
 
 
 def _seat_recorder_without_a_cadence(
-    app: Any, aggregator: EventAggregator, factory: SessionFactory
+    app: Any, aggregator: RelayHub, factory: SessionFactory
 ) -> RunEventWriter:
     """Seat the real recorder and numbering authority, with its timer parked.
 
@@ -135,7 +135,7 @@ async def test_a_batch_relayed_over_http_is_retained_by_the_ingests_own_flush(
     which is what makes the stored rows resumable positions rather than a
     second process's ordering.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
     await seed_run_with_status(session_factory, _RETAINED_RUN, ThreadStatus.RUNNING)
     writer = _seat_recorder_without_a_cadence(app, aggregator, session_factory)
@@ -177,7 +177,7 @@ async def test_deleting_a_run_releases_the_frames_its_recorder_still_holds(
     flush can ever place them, and until they are evicted they are still
     offered as that run's replay window.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await checkpointer.setup()
     await _seed_deletable_run(session_factory, _DELETED_RUN)
 

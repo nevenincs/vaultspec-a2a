@@ -68,7 +68,7 @@ from ...providers.team_selection import (
     normalize_replay_selection,
 )
 from ...thread.constants import RUN_ID_PATTERN
-from ...utils.coercion import coerce_object_mapping
+from ...utils.coercion import coerce_object_mapping, decode_json_object
 from ..auth import authenticate_request
 from ..run_admission import (
     replay_digest_matches,
@@ -101,6 +101,8 @@ __all__ = [
     "_bool_field",
     "_canonical_replay_body",
     "_catalog_records_within_budget",
+    "_decoded_lease_binding",
+    "_decoded_lease_id",
     "_int_field",
     "_load_preset_or_refuse",
     "_modern_frozen_disclosure",
@@ -109,7 +111,6 @@ __all__ = [
     "_persist_request_digest",
     "_persist_team_selection",
     "_persisted_lease_binding",
-    "_persisted_lease_id",
     "_prepare_workspace_root",
     "_probe_admission_readiness",
     "_probe_harness",
@@ -136,17 +137,6 @@ def provider_catalog_service(app: FastAPI) -> ProviderCatalogService:
         service = ProviderCatalogService()
         app.state.provider_catalog_service = service
     return service
-
-
-def _metadata_object(metadata_json: str | None) -> dict[str, object] | None:
-    """Decode durable metadata only when it is a JSON object."""
-    if not metadata_json:
-        return None
-    try:
-        decoded: object = json.loads(metadata_json)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return coerce_object_mapping(decoded)
 
 
 def _string_field(record: dict[str, object], field: str) -> str | None:
@@ -501,7 +491,7 @@ _REQUEST_DIGEST_METADATA_KEY = "run_request_digest"
 
 def _persist_request_digest(metadata_json: str | None, digest: str) -> str:
     """Embed the creating request's rule-stamped digest into run metadata."""
-    data = _metadata_object(metadata_json) or {}
+    data = decode_json_object(metadata_json) or {}
     data[_REQUEST_DIGEST_METADATA_KEY] = digest
     return json.dumps(data)
 
@@ -513,7 +503,7 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
     caller-supplied run id. ``None`` therefore means the metadata cannot be tied
     to any request, never that the request was empty.
     """
-    data = _metadata_object(metadata_json)
+    data = decode_json_object(metadata_json)
     digest = data.get(_REQUEST_DIGEST_METADATA_KEY) if data is not None else None
     return digest if isinstance(digest, str) and digest else None
 
@@ -565,7 +555,7 @@ def _replay_identity_or_conflict(
 
 def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
     """Embed the non-secret lease and exact replay binding into run metadata."""
-    data = _metadata_object(metadata_json) or {}
+    data = decode_json_object(metadata_json) or {}
     data[_RUN_LEASE_METADATA_KEY] = {
         "lease_id": binding.lease_id,
         "reservation_id": binding.reservation_id,
@@ -580,25 +570,27 @@ def _legacy_lease_id(value: object) -> str | None:
     return None
 
 
-def _persisted_lease_id(metadata_json: str | None) -> str | None:
-    """Read current or legacy non-secret lease metadata from a durable run."""
-    binding = _persisted_lease_binding(metadata_json)
-    if binding is not None:
-        return binding.lease_id
-    data = _metadata_object(metadata_json)
-    lease = data.get(_RUN_LEASE_METADATA_KEY) if data is not None else None
-    lease_object = coerce_object_mapping(lease)
-    if lease_object is None:
-        return None
-    return _legacy_lease_id(lease_object.get("lease_id"))
-
-
-def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | None:
-    """Read the exact staged-commit replay binding from durable metadata."""
-    data = _metadata_object(metadata_json)
+def _lease_entry(data: dict[str, object] | None) -> dict[str, object] | None:
+    """Return the lease entry of decoded run metadata, or ``None`` without one."""
     if data is None:
         return None
-    lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
+    return coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
+
+
+def _decoded_lease_id(data: dict[str, object] | None) -> str | None:
+    """Read current or legacy non-secret lease metadata from decoded run metadata."""
+    binding = _decoded_lease_binding(data)
+    if binding is not None:
+        return binding.lease_id
+    lease = _lease_entry(data)
+    if lease is None:
+        return None
+    return _legacy_lease_id(lease.get("lease_id"))
+
+
+def _decoded_lease_binding(data: dict[str, object] | None) -> _RunLeaseBinding | None:
+    """Read the exact staged-commit replay binding from decoded run metadata."""
+    lease = _lease_entry(data)
     if lease is None:
         return None
     lease_id = _string_field(lease, "lease_id")
@@ -611,6 +603,11 @@ def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | No
         reservation_id=reservation_id,
         commit_digest=commit_digest,
     )
+
+
+def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | None:
+    """Read the exact staged-commit replay binding from stored run metadata."""
+    return _decoded_lease_binding(decode_json_object(metadata_json))
 
 
 def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> TeamConfig:
@@ -670,7 +667,7 @@ def _persist_team_selection(
     metadata_json: str | None, frozen: FrozenTeamSelection
 ) -> str:
     """Persist the normalized schema-v1 catalog selection."""
-    data = _metadata_object(metadata_json) or {}
+    data = decode_json_object(metadata_json) or {}
     record_frozen_team_selection(data, frozen)
     return json.dumps(data)
 

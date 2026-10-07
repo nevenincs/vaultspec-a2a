@@ -451,12 +451,13 @@ def test_a_replay_of_a_run_with_no_recorded_digest_is_refused() -> None:
 def test_persisting_a_digest_preserves_the_lease_beside_it() -> None:
     """Two writers share this blob; neither may clobber the other."""
     from ...api.routes.gateway import (
+        _decoded_lease_id,
         _persist_request_digest,
-        _persisted_lease_id,
     )
+    from ...utils.coercion import decode_json_object
 
     with_lease = '{"run_lease": {"lease_id": "lease-1", "reservation_id": "r"}}'
 
     merged = _persist_request_digest(with_lease, "deadbeef")
 
-    assert _persisted_lease_id(merged) == "lease-1"
+    assert _decoded_lease_id(decode_json_object(merged)) == "lease-1"

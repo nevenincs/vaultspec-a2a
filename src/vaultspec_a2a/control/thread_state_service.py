@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from ..authoring.contract import is_document_authoring_role
+from ..context.metadata import ThreadMetadata
 from ..control.projection import (
     apply_authoring_completion_check,
     apply_checkpoint_projection,
@@ -36,7 +36,7 @@ from ..control.snapshot import (
 from ..database import ThreadModel, get_thread, read_latest_checkpoint
 from ..domain_config import domain_config
 from ..graph.enums import SemanticPhase, research_adr_semantic_phase
-from ..team.team_config import load_agent_config, load_team_config
+from ..team.team_config import AuthoringCapability, authoring_capability
 from ..thread.enums import (
     DegradedReason,
     RepairStatus,
@@ -44,15 +44,15 @@ from ..thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
-from ..thread.errors import ConfigError
 from ..thread.snapshots import (
     ThreadStateData,
     classify_transcript_availability,
     finalize_snapshot_replay_status,
     project_checkpoint_tuple,
 )
-from ..utils.coercion import coerce_string_list
+from ..utils.coercion import coerce_string_list, decode_json_object
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .graph_definition import read_accepted_graph_definition
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +66,7 @@ __all__ = [
     "AUTHORING_SESSION_FIELD",
     "CHANGESET_ID_FIELD",
     "PROPOSAL_ID_FIELD",
+    "MetadataView",
     "SemanticContext",
     "ThreadStateCapture",
     "capture_thread_state",
@@ -154,41 +155,32 @@ def derive_run_authoring_ids(
     )
 
 
-def _preset_requires_document_authoring(team_preset: str | None) -> bool:
-    """Return whether *team_preset* runs at least one document-authoring role.
+async def _document_authoring_required(db: AsyncSession, thread_id: str) -> bool:
+    """Return whether the run's accepted definition has a document-authoring role.
 
-    Deliberately role-based, not topology-based. The served
-    ``authoring_capability`` projection (``team_config.authoring_capability``)
-    keys on topology alone (``is_document_authoring_topology``, true only for
-    ``research_adr``), which misclassifies the solo doc-editor lane: its
-    topology is ``pipeline``, not ``research_adr``, so that predicate answers
-    "coding" for a preset that authors documents through the engine bridge.
-    Checking each worker's persona ``role`` against the authoring contract's
-    role set catches both the research_adr phase machine and the solo
-    doc-editor lane through one predicate, because ``DOCUMENT_AUTHORING_ROLES``
-    already unions both by construction.
+    Asked of the definition frozen when the run was accepted, never of the preset
+    files as they read now: the answer is the one the run executes under, and no
+    config file is loaded to give it. Role-based, through
+    ``team_config.authoring_capability``, so the research_adr phase machine and the
+    solo doc-editor lane are both caught by one predicate.
 
-    Fails closed toward *not flagging*: a preset that cannot be resolved or
-    whose worker configs cannot be loaded returns ``False`` rather than
-    raising, so a run-status read never breaks over a config problem. An
-    unloadable preset already fails run-start elsewhere (fail-closed there),
-    so this module declining to guess at an unproven predicate does not mask
-    that defect.
+    Fails closed toward *not flagging*: a run whose accepted definition cannot be
+    read answers ``False`` rather than raising, so a run-status read never breaks
+    over it. The same unreadable definition already refuses every later graph
+    action of the run, so declining to guess here does not mask that defect.
     """
-    if not team_preset:
-        return False
     try:
-        team_config = load_team_config(team_preset)
-    except (ConfigError, ValidationError):
+        definition = await read_accepted_graph_definition(db, thread_id)
+    except ValueError as exc:
+        logger.warning(
+            "Run %s has no readable accepted definition (%s); the authoring "
+            "completion check is skipped",
+            thread_id,
+            exc,
+        )
         return False
-    for worker in team_config.workers:
-        try:
-            agent_config = load_agent_config(worker.agent_id)
-        except (ConfigError, ValidationError):
-            continue
-        if is_document_authoring_role(agent_config.role):
-            return True
-    return False
+    team, agents, _ = definition.compiler_inputs()
+    return authoring_capability(team, agents) is AuthoringCapability.DOCUMENT_AUTHORING
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +189,21 @@ class SemanticContext:
 
     feature_tag: str | None
     authoring_session_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataView:
+    """A thread's stored metadata, decoded once for every reader of its capture.
+
+    ``text`` is the blob as stored, for the readers whose own verbs take stored
+    text. ``fields`` is the JSON object it holds, for the readers of one keyed
+    entry, and ``provenance`` is the metadata model those fields satisfy. Both are
+    ``None`` when the blob is absent or does not decode to what they name.
+    """
+
+    text: str | None
+    fields: dict[str, object] | None
+    provenance: ThreadMetadata | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +219,11 @@ class ThreadStateCapture:
     projected. A field read from the checkpoint - its channel values - reads it
     rather than projecting the tuple again; the pending clarification was read
     from it once, onto the snapshot, which every surface then serves.
+    ``proposal_ids`` and ``changeset_ids`` are the authoring ids that projection
+    holds, derived once and empty without one.
+
+    ``metadata`` is the thread's stored metadata, decoded once here so no reader
+    parses the blob again.
 
     ``transcript`` states whether the snapshot's messages are the run's record
     or an artefact of an unread checkpoint. It is carried here rather than
@@ -223,7 +235,9 @@ class ThreadStateCapture:
     snapshot: ThreadStateData
     checkpoint_projection: CheckpointProjection | None
     team_preset: str | None
-    thread_metadata: str | None
+    metadata: MetadataView
+    proposal_ids: list[str]
+    changeset_ids: list[str]
     transcript: TranscriptAvailability
 
 
@@ -243,6 +257,33 @@ def derive_run_semantic_context(
         feature_tag=_optional_str(values.get(ACTIVE_FEATURE_FIELD)),
         authoring_session_id=_optional_str(values.get(AUTHORING_SESSION_FIELD)),
     )
+
+
+def _view_metadata(thread_id: str, text: str | None) -> MetadataView:
+    """Decode *text* once into the view every reader of the capture shares.
+
+    Absent metadata is stored as null OR as an empty string depending on how the
+    run was created, and an empty string is not parseable JSON - so the guard is
+    truthiness, not "is not None".
+
+    Unreadable metadata is reported as absent rather than failing the read. Not
+    defensive padding: the stored blob and the metadata model genuinely disagree
+    today - a run started without a workspace root persists metadata the model
+    rejects as incomplete - and run-status and run-history report the record they
+    can read rather than lose a whole read over one unrelated field.
+    """
+    fields = decode_json_object(text)
+    provenance: ThreadMetadata | None = None
+    if text:
+        try:
+            provenance = ThreadMetadata.model_validate(fields)
+        except ValidationError:
+            logger.warning(
+                "Stored metadata for run %s does not satisfy the metadata model; "
+                "reporting it absent",
+                thread_id,
+            )
+    return MetadataView(text=text, fields=fields, provenance=provenance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,17 +487,17 @@ async def capture_thread_state(
         checkpoint_id=snapshot.checkpoint_id,
     )
 
+    proposal_ids, changeset_ids = derive_run_authoring_ids(captured_projection)
     # Gated on checkpoint_loaded, not merely captured_projection: an unread
     # checkpoint already carries its own "unavailable" degraded reason above,
     # and asserting emptiness on top of an unread snapshot would misreport
     # "unread" as "produced nothing" - see apply_authoring_completion_check.
     if checkpoint_loaded:
-        proposal_ids, changeset_ids = derive_run_authoring_ids(captured_projection)
         snapshot = apply_authoring_completion_check(
             snapshot,
             thread_status=thread.status,
-            requires_document_authoring=_preset_requires_document_authoring(
-                thread.team_preset
+            requires_document_authoring=await _document_authoring_required(
+                db, thread_id
             ),
             proposal_ids=proposal_ids,
             changeset_ids=changeset_ids,
@@ -473,7 +514,9 @@ async def capture_thread_state(
         snapshot=finalized_snapshot,
         checkpoint_projection=captured_projection,
         team_preset=thread.team_preset,
-        thread_metadata=thread.thread_metadata,
+        metadata=_view_metadata(thread_id, thread.thread_metadata),
+        proposal_ids=proposal_ids,
+        changeset_ids=changeset_ids,
         transcript=classify_transcript_availability(
             checkpoint_loaded=checkpoint_loaded,
             checkpoint_present=checkpoint_present,

@@ -25,7 +25,7 @@ from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..models import RunEventModel, ThreadModel
 from ..thread_repository import create_thread, delete_thread
-from ._backends import downgrade, empty_database_url, synchronous_url, upgrade
+from ._migration_target import downgrade, empty_database_url, synchronous_url, upgrade
 
 if TYPE_CHECKING:
     from pathlib import Path

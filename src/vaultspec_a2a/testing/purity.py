@@ -57,8 +57,6 @@ IMPURE_FIXTURES: Final = frozenset(
         "echo_context",
         # Reads a discovery record from disk and probes a live engine over HTTP.
         "live_engine",
-        # Opens a pool against the live PostgreSQL server.
-        "pooled_postgres_saver",
         # Copy a schema template onto a per-test SQLite file.
         "database_file",
         "migrated_database_file",

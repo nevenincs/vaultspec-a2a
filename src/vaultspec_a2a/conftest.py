@@ -35,9 +35,6 @@ if TYPE_CHECKING:
 
     from .authoring.discovery import EngineEndpoint
 
-#: Where a suite reads the live PostgreSQL server it was given.
-POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
-
 
 @pytest.fixture(scope="session", autouse=True)
 def _seated_fixture_lanes() -> Iterator[None]:
@@ -337,15 +334,6 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
             "re-run the service tier"
         ),
         probe=_docker_compose_present,
-    ),
-    ExternalPrerequisite(
-        "postgres",
-        what="a reachable PostgreSQL server for the checkpoint backend",
-        supply=(
-            "start PostgreSQL and export " + POSTGRES_URL_ENV + " as a "
-            "postgresql:// connection string to a database the tests may write"
-        ),
-        probe=_env_set(POSTGRES_URL_ENV),
     ),
     ExternalPrerequisite(
         "dashboard-engine",

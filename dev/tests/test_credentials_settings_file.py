@@ -129,7 +129,6 @@ def test_development_fixtures_need_no_application_credentials() -> None:
         scope,
         {},
         {
-            "POSTGRES_PASSWORD": "synthetic-password",
             "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-token",
             "JAEGER_UI_PORT": "18686",
         },

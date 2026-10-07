@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import httpx
-from sqlalchemy.engine import make_url
 
 from ..control.config import settings
 from ..testing import (
@@ -165,7 +164,6 @@ class ServiceStack:
 
     project_name: str
     ports: dict[str, int]
-    postgres_url: str | None = field(default=None, repr=False)
     started_at: float = field(default_factory=time.time)
     runtime_dir: Path = field(init=False)
     artifacts: dict[str, Any] = field(default_factory=dict)
@@ -287,23 +285,12 @@ class ServiceStack:
             auto_spawn_worker=auto_spawn_worker,
             serve_in_process_lanes=True,
         )
-        if self.postgres_url is None:
-            database_url = (
-                f"sqlite+aiosqlite:///{(self.runtime_dir / 'service.db').as_posix()}"
-            )
-            backend = "sqlite"
-        else:
-            database_url = (
-                make_url(self.postgres_url)
-                .set(drivername="postgresql+asyncpg", query={})
-                .render_as_string(hide_password=False)
-            )
-            backend = "postgres"
+        database_url = (
+            f"sqlite+aiosqlite:///{(self.runtime_dir / 'service.db').as_posix()}"
+        )
         env.update(
             {
                 "VAULTSPEC_A2A_DATABASE_URL": database_url,
-                "VAULTSPEC_A2A_DATABASE_BACKEND": backend,
-                "VAULTSPEC_A2A_CHECKPOINT_BACKEND": backend,
                 "VAULTSPEC_A2A_GATEWAY_URL": self.gateway_url,
                 "VAULTSPEC_A2A_WORKER_URL": self.worker_url,
                 "VAULTSPEC_A2A_WORKER_HOST": "127.0.0.1",
@@ -329,9 +316,6 @@ class ServiceStack:
         # every run here is unstartable. The worker is spawned with the same
         # arming, and with it the hold gate its held turns wait on.
         env.update(armed_lane_environment(hold_gate=self.hold_gate))
-        if self.postgres_url is not None:
-            env["VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL"] = self.postgres_url
-            env["VAULTSPEC_A2A_POSTGRES_REQUIRED"] = "true"
         return env
 
     def spawn_native(
@@ -757,7 +741,7 @@ class ServiceStack:
             return payload
 
 
-def build_service_stack(*, postgres_url: str | None = None) -> ServiceStack:
+def build_service_stack() -> ServiceStack:
     ports = {
         "gateway": free_port(),
         "worker": free_port(),
@@ -765,9 +749,7 @@ def build_service_stack(*, postgres_url: str | None = None) -> ServiceStack:
         "jaeger_otlp": free_port(),
     }
     project_name = f"vaultspec-service-tests-{uuid.uuid4().hex[:8]}"
-    return ServiceStack(
-        project_name=project_name, ports=ports, postgres_url=postgres_url
-    )
+    return ServiceStack(project_name=project_name, ports=ports)
 
 
 def unstarted_service_stack(project_name: str) -> ServiceStack:

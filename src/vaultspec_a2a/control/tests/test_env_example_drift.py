@@ -53,10 +53,8 @@ if TYPE_CHECKING:
 #: why. Every other line must show the default, so a changed default and a
 #: stale example cannot pass each other silently.
 _DOCUMENTED_OVERRIDES = {
-    "VAULTSPEC_A2A_DATABASE_URL": "a relocated SQLite store, and the Postgres profile",
-    "VAULTSPEC_A2A_DATABASE_BACKEND": "the Postgres profile",
-    "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "the Postgres profile",
-    "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": "the Postgres profile",
+    "VAULTSPEC_A2A_DATABASE_URL": "a relocated SQLite store",
+    "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": "a relocated SQLite checkpoint store",
     "VAULTSPEC_A2A_ENGINE_SERVE_CMD": "unset, the launcher runs this same template",
     "OTEL_SERVICE_VERSION": "a sample service identity",
     "OTEL_SDK_DISABLED": "an opt-in switch shown switched on",
@@ -163,8 +161,8 @@ def _profiles() -> list[list[Assignment]]:
 
     The uncommented lines are what a copied file sets. Each run of adjacent
     commented lines is a block an operator uncomments together, loaded on top
-    of the uncommented lines it would sit beside - the way the Postgres block
-    replaces the SQLite backends.
+    of the uncommented lines it would sit beside - the way a relocated store
+    replaces the default one.
     """
     settings_names = setting_field_by_name()
     lines = [

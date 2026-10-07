@@ -33,7 +33,7 @@ from ...thread.enums import (
 from ..control_action_repository import create_control_action
 from ..models import ControlActionModel, ThreadModel
 from ..thread_repository import create_thread
-from ._backends import downgrade, empty_database_url, synchronous_url, upgrade
+from ._migration_target import downgrade, empty_database_url, synchronous_url, upgrade
 
 if TYPE_CHECKING:
     from pathlib import Path

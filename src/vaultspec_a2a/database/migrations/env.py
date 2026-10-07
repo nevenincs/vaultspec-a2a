@@ -173,21 +173,14 @@ def _has_current_write_authority_structure(
         for column in inspector.get_columns("threads")
     }
     has_structure = all(actual.get(name) == shape for name, shape in expected.items())
-    if connection.dialect.name == "sqlite":
-        create_table_sql = connection.exec_driver_sql(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'"
-        ).scalar_one_or_none()
-        checks = (
-            extract_named_check_predicates(str(create_table_sql))
-            if create_table_sql is not None
-            else {}
-        )
-    else:
-        checks = {
-            str(check["name"]): str(check["sqltext"])
-            for check in inspector.get_check_constraints("threads")
-            if check.get("name") is not None
-        }
+    create_table_sql = connection.exec_driver_sql(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'"
+    ).scalar_one_or_none()
+    checks = (
+        extract_named_check_predicates(str(create_table_sql))
+        if create_table_sql is not None
+        else {}
+    )
     return (
         has_structure
         and write_authority_receipt_index_matches(inspector.get_indexes("threads"))
@@ -240,7 +233,7 @@ def do_run_migrations(connection: Connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         include_name=include_name,
-        render_as_batch=connection.dialect.name == "sqlite",
+        render_as_batch=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -252,9 +245,7 @@ async def run_async_migrations() -> None:
     settings["sqlalchemy.url"] = resolve_database_url()
     engine_options: dict[str, object] = {}
     busy_timeout_ms = config.attributes.get("sqlite_busy_timeout_ms")
-    if settings["sqlalchemy.url"].startswith("sqlite") and isinstance(
-        busy_timeout_ms, int
-    ):
+    if isinstance(busy_timeout_ms, int):
         engine_options["connect_args"] = {"timeout": busy_timeout_ms / 1000}
     connectable = async_engine_from_config(
         settings,

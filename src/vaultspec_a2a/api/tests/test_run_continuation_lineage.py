@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from ...control.thread_service import successor_seed_transcript
-from ...database.checkpoints import open_checkpointer
 from ...ipc.schemas import DispatchRequest
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     async_catalog_run_fields,
     serve_on_loopback,
-    settings_override,
 )
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...worker.graph_lifecycle import GraphLifecycleManager
@@ -138,38 +133,3 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
             },
         )
         assert wrong_workspace.status_code == 409, wrong_workspace.text
-
-
-@pytest.mark.asyncio(loop_scope="function")
-@pytest.mark.requires_prerequisites("postgres")
-async def test_postgres_final_checkpoint_seeds_successor_transcript() -> None:
-    with settings_override(
-        checkpoint_backend="postgres",
-        checkpoint_database_url=os.environ["VAULTSPEC_A2A_TEST_POSTGRES_URL"],
-    ):
-        async with open_checkpointer() as checkpointer:
-            predecessor_id = f"lineage-postgres-{uuid4().hex}"
-            checkpoint = await real_checkpoint()
-            checkpoint["id"] = f"cp-{uuid4().hex}"
-            checkpoint["channel_values"] = {
-                "messages": [
-                    HumanMessage(content="question"),
-                    AIMessage(content="answer"),
-                ]
-            }
-            checkpoint["channel_versions"] = {
-                "messages": checkpointer.get_next_version(None, None)
-            }
-            await checkpointer.aput(
-                {"configurable": {"thread_id": predecessor_id, "checkpoint_ns": ""}},
-                checkpoint,
-                {"source": "loop", "step": 1, "parents": {}},
-                checkpoint["channel_versions"],
-            )
-            transcript = await successor_seed_transcript(
-                checkpointer, predecessor_id, 1
-            )
-            assert transcript is not None
-            assert [(turn.role, turn.content) for turn in transcript] == [
-                ("assistant", "answer")
-            ]

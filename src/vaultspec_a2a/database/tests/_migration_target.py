@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from alembic import command
+from sqlalchemy.engine import make_url
 
-from ...control.infra_config import _synchronous_url
 from ..migrate import build_migration_config
 
 if TYPE_CHECKING:
@@ -36,12 +36,12 @@ def empty_database_url(directory: Path) -> str:
 
 
 def synchronous_url(url: str) -> str:
-    """Return the synchronous equivalent of an async database URL.
+    """Return the synchronous equivalent of an async SQLite URL.
 
-    Reflection is a synchronous API, and driving it through the production
-    derivation keeps the test lane on the same driver the service ships.
+    Reflection is a synchronous API, so it reads the same file through the
+    stdlib driver.
     """
-    return _synchronous_url(url, setting="the test database URL")
+    return make_url(url).set(drivername="sqlite").render_as_string(hide_password=False)
 
 
 def upgrade(url: str, revision: str = "head") -> None:

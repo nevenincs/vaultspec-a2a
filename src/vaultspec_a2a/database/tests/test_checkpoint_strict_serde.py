@@ -258,10 +258,7 @@ async def test_the_desktop_store_admits_the_preset_and_refuses_what_it_never_wro
     """The SQLite saver the desktop profile opens, held to both halves."""
     database = tmp_path / "checkpoints.sqlite"
     thread_id = f"strict-desktop-{uuid4().hex}"
-    with _settings_override(
-        checkpoint_backend="sqlite",
-        checkpoint_database_url=f"sqlite+aiosqlite:///{database}",
-    ):
+    with _settings_override(checkpoint_database_url=f"sqlite+aiosqlite:///{database}"):
         async with open_checkpointer() as saver, open_checkpointer() as reader:
             await _prove_the_store_hands_a_parked_preset_back_whole(
                 saver, reader, thread_id

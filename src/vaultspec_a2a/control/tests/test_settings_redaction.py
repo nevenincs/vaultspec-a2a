@@ -25,14 +25,14 @@ def test_a_rejected_database_url_never_carries_its_password(tmp_path: Path) -> N
         pytest.raises(ConfigurationError) as refusal,
     ):
         read_configuration(
-            Settings, database_url=["postgresql+asyncpg://dbuser:hunter2@dbhost/app"]
+            Settings, database_url=["mysql+aiomysql://dbuser:hunter2@dbhost/app"]
         )
 
     reported = str(refusal.value)
     assert "hunter2" not in reported
     assert "dbuser" not in reported
     # The scheme and the host survive, which is what names the store.
-    assert "postgresql+asyncpg://<redacted>@dbhost/app" in reported
+    assert "mysql+aiomysql://<redacted>@dbhost/app" in reported
 
 
 def test_a_rejected_backend_never_carries_the_urls_password(tmp_path: Path) -> None:

@@ -24,7 +24,6 @@ __all__ = [
     "WORKER_URL_ENV",
     "AcpBackend",
     "InfraConfig",
-    "_synchronous_url",
     "_warn_seating_discard",
 ]
 
@@ -49,55 +48,6 @@ AcpBackend = Literal["node", "binary"]
 # Derived from the Literal so a frozen lane's backend suffix is checked against
 # the one declaration the ``acp_backend`` setting is validated by.
 ACP_BACKENDS: frozenset[str] = frozenset(get_args(AcpBackend))
-
-# The synchronous SQLAlchemy driver this project ships for each supported backend.
-# Keyed on the SQLAlchemy *backend* name rather than on the full drivername, so the
-# mapping resolves identically for a bare scheme (``postgresql://``), an async
-# driver (``postgresql+asyncpg://``), and an already-synchronous one
-# (``postgresql+psycopg://``). Only psycopg v3 and the stdlib sqlite driver are
-# declared dependencies; psycopg2 - which SQLAlchemy would otherwise select for a
-# bare ``postgresql://`` scheme - is not installed.
-_SYNC_DRIVERNAMES: dict[str, str] = {
-    "postgresql": "postgresql+psycopg",
-    "sqlite": "sqlite",
-}
-
-
-def _synchronous_url(url: str, *, setting: str) -> str:
-    """Return the synchronous SQLAlchemy URL equivalent of ``url``.
-
-    The driver is replaced through the parsed URL structure rather than by
-    substring substitution: a substring replace is a silent no-op on a URL that
-    declares no driver, and it corrupts any URL whose password or query value
-    happens to contain the replaced text.
-
-    Raises ``ValueError`` when the URL cannot be parsed or names a backend with no
-    synchronous driver shipped here, so a broken URL is refused at its source
-    rather than reaching ``create_engine`` inside a destructive admin command.
-    """
-    # Imported lazily: SQLAlchemy costs roughly a quarter-second to import, and the
-    # settings module sits on the CLI startup path. Every consumer of the derived
-    # URL has already paid that cost.
-    from sqlalchemy.engine.url import make_url
-    from sqlalchemy.exc import ArgumentError
-
-    try:
-        parsed = make_url(url)
-    except ArgumentError as exc:
-        # The URL itself is never echoed: it routinely carries a password.
-        msg = f"{setting} is not a parseable SQLAlchemy URL."
-        raise ValueError(msg) from exc
-
-    backend = parsed.get_backend_name()
-    drivername = _SYNC_DRIVERNAMES.get(backend)
-    if drivername is None:
-        msg = (
-            f"{setting} names the {backend!r} backend, which has no synchronous "
-            f"driver in this project; expected one of {sorted(_SYNC_DRIVERNAMES)}."
-        )
-        raise ValueError(msg)
-
-    return parsed.set(drivername=drivername).render_as_string(hide_password=False)
 
 
 def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> None:
@@ -163,32 +113,32 @@ class InfraConfig(ProjectSettings):
             "OTEL spans carry request tracing; opt in here for a raw access trail."
         ),
     )
-    database_backend: Literal["sqlite", "postgres"] = Field(
+    database_backend: str = Field(
         default="sqlite",
         description=(
-            "Primary application database backend.  SQLite is the local/dev "
-            "default.  Production deployments set 'postgres' via env."
+            "Retired selector, kept so a stale value is refused rather than "
+            "ignored. SQLite is the only store: any other value refuses startup."
         ),
     )
-    checkpoint_backend: Literal["sqlite", "postgres"] = Field(
+    checkpoint_backend: str = Field(
         default="sqlite",
         description=(
-            "LangGraph checkpointer persistence backend.  Follows the same "
-            "convention as database_backend: sqlite for dev, postgres for prod."
+            "Retired selector for the LangGraph checkpoint store, held to the "
+            "same rule as database_backend: sqlite is the only accepted value."
         ),
     )
     database_url: str = Field(
         default="sqlite+aiosqlite:///vaultspec.db",
         description=(
-            "SQLAlchemy async database URL.  Must match the selected "
-            "database_backend scheme (sqlite+aiosqlite or postgresql+asyncpg).  "
-            "Left unset, the store is state/vaultspec.db in the state home. A "
-            "relative SQLite path resolves against the project root."
+            "SQLAlchemy async database URL. It must name SQLite "
+            "(sqlite+aiosqlite). Left unset, the store is state/vaultspec.db in "
+            "the state home. A relative SQLite path resolves against the project "
+            "root."
         ),
     )
     checkpoint_database_url: str | None = Field(
         default=None,
-        description="Optional dedicated checkpoint database URL/DSN.",
+        description="Optional dedicated checkpoint database URL; it must name SQLite.",
     )
     sqlite_busy_timeout_ms: int = Field(
         default=5000,
@@ -197,16 +147,9 @@ class InfraConfig(ProjectSettings):
     postgres_required: bool = Field(
         default=False,
         description=(
-            "Fail startup loudly when Postgres-backed dependencies are required."
+            "Retired with the Postgres backend, kept so a stale value is refused "
+            "rather than ignored. True refuses startup."
         ),
-    )
-    db_pool_size: int = Field(
-        default=5,
-        description="SQLAlchemy QueuePool pool_size for Postgres engine.",
-    )
-    db_pool_max_overflow: int = Field(
-        default=10,
-        description="SQLAlchemy QueuePool max_overflow for Postgres engine.",
     )
     workspace_root: Path | None = Field(
         default=None,

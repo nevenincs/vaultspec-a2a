@@ -140,10 +140,8 @@ async def release_deletion_saga_claim(
 async def read_cleanup_ledger(session: AsyncSession, thread_id: str) -> str | None:
     """Return one saga's serialized result ledger, or ``None`` when it has none.
 
-    The select takes the row lock where the backend honours it, so on Postgres
-    contention serialises. SQLAlchemy's SQLite dialect silently discards ``FOR
-    UPDATE``, so correctness rests on :func:`swap_cleanup_ledger`, which holds on
-    both.
+    The select asks for the row lock, which SQLAlchemy's SQLite dialect silently
+    discards, so correctness rests on :func:`swap_cleanup_ledger`.
     """
     return (
         await session.execute(

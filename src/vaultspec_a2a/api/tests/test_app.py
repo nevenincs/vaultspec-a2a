@@ -195,7 +195,7 @@ async def test_health_ready_for_adopted_worker_without_heartbeat(
 
 
 def test_build_sqlite_fallback_diagnostics_reports_wal_state(tmp_path: Path) -> None:
-    """SQLite fallback diagnostics should inspect real file-backed journal mode."""
+    """SQLite store diagnostics should inspect real file-backed journal mode."""
     case_dir = tmp_path / "api-test-sqlite-health"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_path = case_dir / "health.db"
@@ -208,16 +208,14 @@ def test_build_sqlite_fallback_diagnostics_reports_wal_state(tmp_path: Path) -> 
             conn.close()
 
     diagnostics = build_sqlite_fallback_diagnostics(
-        database_backend="sqlite",
-        checkpoint_backend="sqlite",
         database_path=db_path,
         checkpoint_path=checkpoint_path,
         busy_timeout_ms=5000,
     )
 
-    assert diagnostics is not None
     assert diagnostics["active"] is True
-    assert diagnostics["production_certifying"] is False
+    assert "production_certifying" not in diagnostics
+    assert "limitations" not in diagnostics
     assert diagnostics["busy_timeout_ms"] == 5000
     db_diag = cast("dict[str, object]", diagnostics["database"])
     assert db_diag["wal_enabled"] is True
@@ -230,14 +228,12 @@ async def test_health_reports_sqlite_fallback_diagnostics(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """GET /health should expose explicit SQLite fallback diagnostics."""
+    """GET /health should expose the SQLite store diagnostics and no Postgres claims."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
     app.state.worker_status = "up"
     app.state.sqlite_fallback_diagnostics = {
         "active": True,
         "busy_timeout_ms": 5000,
-        "production_certifying": False,
-        "limitations": ["sqlite_fallback_not_production_certifying"],
         "database": {"path": "test.db", "wal_enabled": True, "journal_mode": "wal"},
     }
 
@@ -250,8 +246,10 @@ async def test_health_reports_sqlite_fallback_diagnostics(
     assert resp.status_code == 200
     body = resp.json()
     assert body["sqlite_fallback"]["active"] is True
-    assert body["sqlite_fallback"]["production_certifying"] is False
     assert body["sqlite_fallback"]["database"]["journal_mode"] == "wal"
+    assert "production_certifying" not in body
+    assert "postgres_required" not in body
+    assert all("postgres_required" not in check for check in body["checks"].values())
 
 
 @pytest.mark.asyncio

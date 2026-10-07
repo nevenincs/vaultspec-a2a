@@ -9,14 +9,12 @@ of continued.
 
 The checkpoint under test is one a real compiled graph wrote, replayed into
 the scenario's own store through the saver's own API, and the readings are
-taken through real savers: SQLite here, and the live PostgreSQL server where
-one is declared.
+taken through a real SQLite saver.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
-from uuid import uuid4
 
 import pytest
 
@@ -118,26 +116,4 @@ async def test_an_action_the_staged_input_does_not_name_is_still_a_new_turn(
     )
 
     assert evidence.kind is CheckpointEvidenceKind.PRIOR_ACTION
-    assert evidence.incorporated is False
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_prerequisites("postgres")
-async def test_the_staged_input_reads_the_same_on_postgres(
-    pooled_postgres_saver: Any,
-) -> None:
-    """The backend must not change what the crash window proves."""
-    thread_id = f"input-window-{uuid4().hex}"
-    receipt = _receipt("ingest", generation=1, thread_id=thread_id)
-    checkpoint_id = await _seed_crashed_input(pooled_postgres_saver, receipt)
-
-    evidence = classify_checkpoint_evidence(
-        await read_latest_checkpoint(
-            pooled_postgres_saver, thread_id, timeout=_READ_TIMEOUT_SECONDS
-        ),
-        receipt,
-    )
-
-    assert evidence.kind is CheckpointEvidenceKind.PENDING
-    assert evidence.checkpoint_id == checkpoint_id
     assert evidence.incorporated is False

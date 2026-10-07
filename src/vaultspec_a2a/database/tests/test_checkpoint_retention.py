@@ -72,8 +72,11 @@ def _failing_graph(saver: Checkpointer) -> Any:
     return compile_test_graph(builder, checkpointer=saver)
 
 
-async def _prove_a_settled_thread_keeps_only_its_latest(saver: Checkpointer) -> None:
-    graph = _settling_graph(saver)
+@pytest.mark.asyncio
+async def test_sqlite_keeps_only_the_latest_checkpoint_of_a_settled_thread(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    graph = _settling_graph(checkpointer)
     # The control thread takes the same turns and is never pruned: it is both
     # the neighbour pruning must not touch and the reference the pruned thread
     # must keep matching.
@@ -84,22 +87,22 @@ async def _prove_a_settled_thread_keeps_only_its_latest(saver: Checkpointer) -> 
                 await graph.ainvoke(
                     cast("Any", {"log": [turn]}), cast("Any", config_for(target))
                 )
-        before = await stored_history(saver, thread_id)
-        control_before = await stored_history(saver, control_id)
+        before = await stored_history(checkpointer, thread_id)
+        control_before = await stored_history(checkpointer, control_id)
         settled = (await graph.aget_state(cast("Any", config_for(thread_id)))).values
         # The root namespace plus one subgraph namespace per turn, each with a
         # history - otherwise there is nothing for retention to prove.
         assert len(before) == 3
         assert all(len(ids) > 1 for ids in before.values())
 
-        assert await prune_settled_checkpoints(saver, thread_id) is True
+        assert await prune_settled_checkpoints(checkpointer, thread_id) is True
 
-        assert await stored_history(saver, thread_id) == {
+        assert await stored_history(checkpointer, thread_id) == {
             namespace: [max(ids)] for namespace, ids in before.items()
         }
         pruned = await graph.aget_state(cast("Any", config_for(thread_id)))
         assert pruned.values == settled
-        assert await stored_history(saver, control_id) == control_before
+        assert await stored_history(checkpointer, control_id) == control_before
 
         for target in (thread_id, control_id):
             await graph.ainvoke(
@@ -110,50 +113,41 @@ async def _prove_a_settled_thread_keeps_only_its_latest(saver: Checkpointer) -> 
         assert resumed.values == control.values
         assert len(resumed.values["log"]) > len(settled["log"])
     finally:
-        await saver.adelete_thread(thread_id)
-        await saver.adelete_thread(control_id)
-
-
-async def _prove_a_failed_thread_keeps_its_error_writes(saver: Checkpointer) -> None:
-    graph = _failing_graph(saver)
-    thread_id = f"failed-{uuid4()}"
-    try:
-        with pytest.raises(RuntimeError, match="the step failed"):
-            await graph.ainvoke(
-                cast("Any", {"log": ["go"]}), cast("Any", config_for(thread_id))
-            )
-        latest = await saver.aget_tuple(cast("Any", config_for(thread_id)))
-        assert latest is not None
-        assert latest.pending_writes
-        channels = {write[1] for write in latest.pending_writes}
-        # The failure and the sibling's finished work are both pending on the
-        # latest checkpoint: recovery reads the one, a retry reuses the other.
-        assert {"__error__", "log"} <= channels
-        assert len((await stored_history(saver, thread_id))[""]) > 1
-
-        assert await prune_settled_checkpoints(saver, thread_id) is True
-
-        kept = await saver.aget_tuple(cast("Any", config_for(thread_id)))
-        assert kept is not None
-        assert kept.checkpoint["id"] == latest.checkpoint["id"]
-        assert sorted(kept.pending_writes or []) == sorted(latest.pending_writes)
-        assert await stored_history(saver, thread_id) == {"": [latest.checkpoint["id"]]}
-    finally:
-        await saver.adelete_thread(thread_id)
-
-
-@pytest.mark.asyncio
-async def test_sqlite_keeps_only_the_latest_checkpoint_of_a_settled_thread(
-    checkpointer: AsyncSqliteSaver,
-) -> None:
-    await _prove_a_settled_thread_keeps_only_its_latest(checkpointer)
+        await checkpointer.adelete_thread(thread_id)
+        await checkpointer.adelete_thread(control_id)
 
 
 @pytest.mark.asyncio
 async def test_sqlite_keeps_the_error_writes_of_a_failed_thread(
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    await _prove_a_failed_thread_keeps_its_error_writes(checkpointer)
+    graph = _failing_graph(checkpointer)
+    thread_id = f"failed-{uuid4()}"
+    try:
+        with pytest.raises(RuntimeError, match="the step failed"):
+            await graph.ainvoke(
+                cast("Any", {"log": ["go"]}), cast("Any", config_for(thread_id))
+            )
+        latest = await checkpointer.aget_tuple(cast("Any", config_for(thread_id)))
+        assert latest is not None
+        assert latest.pending_writes
+        channels = {write[1] for write in latest.pending_writes}
+        # The failure and the sibling's finished work are both pending on the
+        # latest checkpoint: recovery reads the one, a retry reuses the other.
+        assert {"__error__", "log"} <= channels
+        assert len((await stored_history(checkpointer, thread_id))[""]) > 1
+
+        assert await prune_settled_checkpoints(checkpointer, thread_id) is True
+
+        kept = await checkpointer.aget_tuple(cast("Any", config_for(thread_id)))
+        assert kept is not None
+        assert kept.checkpoint["id"] == latest.checkpoint["id"]
+        assert sorted(kept.pending_writes or []) == sorted(latest.pending_writes)
+        assert await stored_history(checkpointer, thread_id) == {
+            "": [latest.checkpoint["id"]]
+        }
+    finally:
+        await checkpointer.adelete_thread(thread_id)
 
 
 async def _write_count(saver: AsyncSqliteSaver, thread_id: str) -> int:

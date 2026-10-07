@@ -1,5 +1,8 @@
 """Tests for the deterministic in-process research_adr acceptance provider."""
 
+from __future__ import annotations
+
+import asyncio
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -16,6 +19,7 @@ from .. import UNATTENDED_REPLY, DeterministicResearchAdrChatModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from pathlib import Path
 
     from langchain_core.messages import AIMessageChunk
 
@@ -219,3 +223,43 @@ async def test_looping_turn_keeps_generating_until_it_is_closed() -> None:
 
     assert len(set(chunks)) == 20
     assert all(chunks)
+
+
+@pytest.mark.asyncio
+async def test_held_turn_completes_only_after_its_gate_is_released(
+    tmp_path: Path,
+) -> None:
+    """The hold-then-complete scenario blocks in-process on its own gate file.
+
+    No worker, gateway or subprocess is involved: the turn is driven directly
+    through the model's real async generation path, and the gate is a plain
+    file this test creates and removes from its own process.
+    """
+    gate = tmp_path / "hold.gate"
+    gate.touch()
+    model = _authored("deterministic-hold-then-complete", hold_gate=gate)
+
+    turn = asyncio.ensure_future(model.ainvoke([HumanMessage(content="x")]))
+    try:
+        # Several real gate-poll cycles, not a single scheduler tick: proves the
+        # turn is actually blocked on the gate rather than merely not yet
+        # scheduled.
+        done, _pending = await asyncio.wait({turn}, timeout=0.3)
+        assert not done, "the turn must stay in flight while the gate exists"
+
+        gate.unlink()
+        result = await asyncio.wait_for(turn, timeout=5.0)
+    finally:
+        if not turn.done():
+            turn.cancel()
+
+    assert isinstance(result, AIMessage)
+    assert result.content == "Deterministic held turn completed after its release."
+
+
+@pytest.mark.asyncio
+async def test_a_held_turn_with_no_gate_configured_refuses_loudly() -> None:
+    """A stack that forgot to configure the gate fails fast, not silently."""
+    model = _authored("deterministic-hold-then-complete")
+    with pytest.raises(RuntimeError, match="served without a hold gate"):
+        await model.ainvoke([HumanMessage(content="x")])

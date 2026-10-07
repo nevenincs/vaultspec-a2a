@@ -264,3 +264,79 @@ async def test_the_desktop_store_admits_the_preset_and_refuses_what_it_never_wro
                 saver, reader, thread_id
             )
             await _prove_the_store_will_not_rebuild_an_unsafe_type(saver)
+
+
+# ---------------------------------------------------------------------------
+# A checkpoint an older build left behind, carrying a channel this build
+# no longer declares (the retired write-only `clarification_answers`).
+# ---------------------------------------------------------------------------
+
+
+def _one_turn_graph(saver: Checkpointer) -> Any:
+    """A minimal real graph over the current ``TeamState`` schema."""
+
+    async def _turn(state: Any) -> dict[str, Any]:
+        del state
+        return {}
+
+    builder = new_state_graph()
+    add_test_node(builder, "turn", _turn)
+    builder.add_edge(START, "turn")
+    builder.add_edge("turn", END)
+    return compile_test_graph(builder, checkpointer=saver)
+
+
+@pytest.mark.asyncio
+async def test_a_retired_channel_left_in_an_old_checkpoint_does_not_block_resumption(
+    tmp_path: Path,
+) -> None:
+    """A stale ``clarification_answers`` entry from before C12 still loads and resumes.
+
+    The channel was deleted from ``TeamState`` once the node that wrote it was
+    deleted, but an old run's checkpoint can still carry the key an earlier
+    build wrote: the strict-serde store must hand that checkpoint back whole
+    and let the current graph resume past it, not refuse the row outright.
+    """
+    database = tmp_path / "checkpoints.sqlite"
+    thread_id = f"strict-stale-channel-{uuid4().hex}"
+    with _settings_override(checkpoint_database_url=f"sqlite+aiosqlite:///{database}"):
+        async with open_checkpointer() as saver:
+            config = _config(thread_id)
+            graph = _one_turn_graph(saver)
+            await graph.ainvoke(
+                cast(
+                    "Any",
+                    {"thread_id": thread_id, "messages": [HumanMessage(content="hi")]},
+                ),
+                cast("Any", config),
+            )
+
+            # Patch the real, just-written checkpoint to carry the retired
+            # channel too, exactly as an older build's row would still read.
+            written = await saver.aget_tuple(cast("Any", config))
+            assert written is not None
+            stale_checkpoint = cast("Any", written.checkpoint)
+            stale_values = dict(stale_checkpoint["channel_values"])
+            stale_values["clarification_answers"] = {"old-request": {"scope": "legacy"}}
+            stale_checkpoint["channel_values"] = stale_values
+            stale_versions = dict(stale_checkpoint["channel_versions"])
+            stale_versions["clarification_answers"] = saver.get_next_version(
+                None, cast("Any", None)
+            )
+            stale_checkpoint["channel_versions"] = stale_versions
+            await saver.aput(
+                written.config,
+                stale_checkpoint,
+                written.metadata,
+                stale_versions,
+            )
+
+            with _recorded_serde_events() as events:
+                hydrated = await graph.aget_state(cast("Any", config))
+                assert hydrated.values["thread_id"] == thread_id
+                resumed = await graph.ainvoke(
+                    cast("Any", {"messages": [HumanMessage(content="continue")]}),
+                    cast("Any", config),
+                )
+            assert len(resumed["messages"]) == 2
+            assert not events, f"the stale channel forced a blocked type: {events}"

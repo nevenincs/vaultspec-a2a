@@ -1,0 +1,50 @@
+[team]
+id           = "deterministic-research-branches"
+display_name = "Deterministic Research Branches"
+description  = """
+Scripted research_adr scenario over two research branches, codebase and
+prior-art. On a supervised run each branch's researcher asks its human for
+permission to run every tool its persona lists before it reports, and parks on
+each request in turn; an autonomous run asks nobody. Every finding names the
+branch that produced it, and every other role answers with the in-process
+deterministic provider's role content.
+
+Runs on the in-process deterministic provider, so it needs no credential, no
+network, and no tape server.
+"""
+
+[team.topology]
+type  = "research_adr"
+order = []
+
+[[team.topology.research_threads]]
+thread_id = "codebase"
+
+[[team.topology.research_threads]]
+thread_id = "prior-art"
+
+[team.permissions]
+auto_approve = false
+
+[team.persona]
+directive = "Run the in-process deterministic research branches, each asking before it reports."
+
+[team.graph]
+step_timeout_seconds = 600
+run_timeout_seconds  = 30000
+recursion_limit      = 50
+
+[[team.workers]]
+agent_id = "deterministic-branch-researcher"
+
+[[team.workers]]
+agent_id = "vaultspec-synthesist"
+
+[[team.workers]]
+agent_id = "vaultspec-adr-author"
+
+[[team.workers]]
+agent_id = "vaultspec-plan-author"
+
+[[team.workers]]
+agent_id = "vaultspec-doc-reviewer"

@@ -45,7 +45,12 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    new_state_graph,
+)
 from ...thread.errors import (
     ConfigError,
     DocumentConformanceError,
@@ -71,7 +76,6 @@ from ..compiler import (
     compile_team_graph,
 )
 from ..nodes.phase_gate import revision_granted
-from .conftest import deterministic_model_assignment
 
 # ---------------------------------------------------------------------------
 # Parametrized compilation (C7 rewrite)

@@ -1,8 +1,8 @@
 """Review loops end: by their budget in a document phase, by verdict in a loop.
 
-Real graphs are compiled from shipped presets through ``compile_team_graph``.
-A run whose reviewer may pass is driven on the deterministic lane through the
-real provider factory; a reviewer that never passes is a scripted reply. A
+Real graphs are compiled from bundled presets through ``compile_team_graph`` and
+driven on the deterministic lane through the real provider factory; a reviewer
+that never passes is the lane's revising reviewer, seated by a fixture preset. A
 document reviewer that never passes must hand the phase to its human gate once
 the preset's revision budget is spent, and a human revision at that gate must
 earn the phase a fresh budget. A ``pipeline_loop`` must stop as soon as its loop
@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -25,6 +24,7 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing import deterministic_model_assignment
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -32,35 +32,17 @@ from ...thread.action_receipts import (
 from ...thread.enums import ControlActionType
 from ...thread.errors import DocumentConformanceError
 from ..compiler import compile_team_graph
-from ..nodes.phase_gate import REVIEW_REVISION_SENTINEL, ProposalRevisionRequiredError
-from .conftest import deterministic_model_assignment
+from ..nodes.phase_gate import ProposalRevisionRequiredError
 
 if TYPE_CHECKING:
     from ..nodes.phase_gate import DocumentProposalSubmitter
-    from ..protocols import ProviderFactoryProtocol
 
-_REVISION = f"{REVIEW_REVISION_SENTINEL}\n1. The claims need re-fetchable locators."
-
-
-class _RoleScriptedFactory:
-    """Hands each agent a fixed reply, and chosen agents a scripted one."""
-
-    def __init__(self, replies: dict[str, str]) -> None:
-        self._replies = replies
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeListChatModel:
-        del provider, model, workspace_root, kwargs
-        agent_id = getattr(agent_config, "id", "")
-        reply = self._replies.get(agent_id, f"{agent_id} did its part")
-        return FakeListChatModel(responses=[reply])
+_RESEARCH = "vaultspec-adr-research"
+# The research team with its document reviewer replaced by one that never passes.
+_REVISING_RESEARCH = "deterministic-research-revising-review"
+# A review loop whose loop node never passes.
+_REVISING_LOOP = "deterministic-revising-loop"
+_REVISING_REVIEWER = "deterministic-revising-reviewer"
 
 
 class _Submitter:
@@ -105,10 +87,10 @@ async def _updates(graph: Any, graph_input: Any, thread_id: str) -> list[str]:
 def _research_graph(
     max_review_revisions: int,
     *,
-    provider_factory: ProviderFactoryProtocol,
+    team_id: str = _RESEARCH,
     submitter: DocumentProposalSubmitter | None = None,
 ) -> Any:
-    team = load_team_config("vaultspec-adr-research")
+    team = load_team_config(team_id)
     topology = team.topology.model_copy(
         update={
             "research_threads": [ResearchThreadSpec(thread_id="primary")],
@@ -120,17 +102,14 @@ def _research_graph(
         team_config=team,
         agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
         checkpointer=InMemorySaver(),
-        provider_factory=provider_factory,
+        provider_factory=ProviderFactory(),
         proposal_submitter=submitter or _Submitter(),
         model_assignment=deterministic_model_assignment(team),
     )
 
 
 def _never_passing_research_graph(max_review_revisions: int) -> Any:
-    return _research_graph(
-        max_review_revisions,
-        provider_factory=_RoleScriptedFactory({"vaultspec-doc-reviewer": _REVISION}),
-    )
+    return _research_graph(max_review_revisions, team_id=_REVISING_RESEARCH)
 
 
 @pytest.mark.asyncio
@@ -182,7 +161,7 @@ async def test_an_approved_phase_stops_showing_its_revision_notes() -> None:
     clears the channel. Nothing made that write, so an ADR author was still
     being told to fix a research document the human had since approved.
     """
-    graph = _research_graph(1, provider_factory=ProviderFactory())
+    graph = _research_graph(1)
     thread: Any = {"configurable": {"thread_id": "clears"}}
     await _updates(graph, _receipt_input("clears"), "clears")
 
@@ -258,7 +237,7 @@ async def test_a_submitter_that_never_accepts_a_body_ends_the_run_typed() -> Non
     name no proposal and nothing out of run could resume it.
     """
     submitter = _RefusingSubmitter()
-    graph = _research_graph(2, provider_factory=ProviderFactory(), submitter=submitter)
+    graph = _research_graph(2, submitter=submitter)
 
     with pytest.raises(DocumentConformanceError) as raised:
         await _updates(graph, _receipt_input("refusing"), "refusing")
@@ -299,7 +278,7 @@ async def test_a_transport_blip_on_submit_does_not_fail_a_gated_run() -> None:
     attempt returns the same proposal id rather than a duplicate.
     """
     submitter = _FlakyTransportSubmitter(drops=1)
-    graph = _research_graph(1, provider_factory=ProviderFactory(), submitter=submitter)
+    graph = _research_graph(1, submitter=submitter)
 
     await _updates(graph, _receipt_input("flaky"), "flaky")
 
@@ -319,7 +298,7 @@ async def test_a_zero_budget_refusal_ends_on_its_first_retry() -> None:
     and a second refusal ends the run.
     """
     submitter = _RefusingSubmitter()
-    graph = _research_graph(0, provider_factory=ProviderFactory(), submitter=submitter)
+    graph = _research_graph(0, submitter=submitter)
 
     with pytest.raises(DocumentConformanceError):
         await _updates(graph, _receipt_input("refusing-zero"), "refusing-zero")
@@ -327,20 +306,20 @@ async def test_a_zero_budget_refusal_ends_on_its_first_retry() -> None:
     assert submitter.attempts == 2
 
 
-def _loop_graph(provider_factory: ProviderFactoryProtocol) -> Any:
-    team = load_team_config("mock-autonomous")
+def _loop_graph(team_id: str) -> Any:
+    team = load_team_config(team_id)
     return compile_team_graph(
         team_config=team,
         agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
         checkpointer=InMemorySaver(),
-        provider_factory=provider_factory,
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
     )
 
 
 @pytest.mark.asyncio
 async def test_a_loop_ends_when_its_loop_node_asks_for_nothing_more() -> None:
-    graph = _loop_graph(ProviderFactory())
+    graph = _loop_graph("mock-autonomous")
 
     visited = await _updates(graph, _receipt_input("loop-pass"), "loop-pass")
 
@@ -350,9 +329,9 @@ async def test_a_loop_ends_when_its_loop_node_asks_for_nothing_more() -> None:
 
 @pytest.mark.asyncio
 async def test_a_loop_that_keeps_asking_for_revision_stops_at_its_ceiling() -> None:
-    graph = _loop_graph(_RoleScriptedFactory({"mock-reviewer": _REVISION}))
-    max_loops = load_team_config("mock-autonomous").topology.max_loops
+    graph = _loop_graph(_REVISING_LOOP)
+    max_loops = load_team_config(_REVISING_LOOP).topology.max_loops
 
     visited = await _updates(graph, _receipt_input("loop-revise"), "loop-revise")
 
-    assert visited.count("mock-reviewer") == max_loops
+    assert visited.count(_REVISING_REVIEWER) == max_loops

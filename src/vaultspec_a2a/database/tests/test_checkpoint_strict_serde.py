@@ -28,14 +28,18 @@ from langgraph.graph import END, START
 from langgraph.types import Command
 
 from ...graph.compiler import compile_team_graph
-from ...graph.tests.conftest import deterministic_model_assignment
 from ...providers import ProviderFactory
 from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
     load_team_config,
 )
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    new_state_graph,
+)
 from ...testing import settings_override as _settings_override
 from ...thread.action_receipts import (
     GraphActionReceipt,

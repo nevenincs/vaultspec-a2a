@@ -45,14 +45,13 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from ...testing import simulator_command
+from ...testing import deterministic_model_assignment, simulator_command
 from .._compiler_prompts import (
     WEB_GROUNDING_MARKER,
     compose_persona_prompt,
     web_grounding_text,
 )
 from ..compiler import compile_team_graph
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from pathlib import Path

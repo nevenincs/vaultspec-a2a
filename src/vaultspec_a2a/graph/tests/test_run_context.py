@@ -16,10 +16,14 @@ from langgraph.runtime import Runtime
 
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_agent_config, load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    new_state_graph,
+)
 from ..compiler import compile_team_graph
 from ..run_context import RunContext, run_thread_id
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine

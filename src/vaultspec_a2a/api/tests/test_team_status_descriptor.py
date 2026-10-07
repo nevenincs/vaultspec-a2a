@@ -27,7 +27,6 @@ from ...database import create_thread
 from ...graph.compiler import compile_team_graph
 from ...graph.enums import AgentLifecycleState, Provider
 from ...providers.factory import ProviderFactory
-from ...providers.team_selection import FrozenLaneAssignment
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import (
     TeamConfig,
@@ -36,7 +35,7 @@ from ...team.team_config import (
     WorkerRef,
     load_agent_config,
 )
-from ...testing import SseReader, serve_on_loopback
+from ...testing import SseReader, deterministic_model_assignment, serve_on_loopback
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
@@ -62,23 +61,6 @@ def _deterministic_team() -> TeamConfig:
     )
 
 
-def _exact_assignment() -> dict[str, FrozenLaneAssignment]:
-    lane = FrozenLaneAssignment.model_validate(
-        {
-            "schema_version": 1,
-            "provider_id": "deterministic",
-            "execution_mode": "in-process-deterministic",
-            "catalog_revision": "test-revision",
-            "entry_id": "test-entry",
-            "model_name": "deterministic",
-            "controls": [],
-            "defaulted_control_ids": [],
-            "provenance": {"selection_source": "team_selection"},
-        }
-    )
-    return {_WORKER_ID: lane}
-
-
 @pytest.mark.asyncio
 async def test_team_status_reports_the_resolved_provider_and_model(
     session_factory: SessionFactory,
@@ -96,7 +78,7 @@ async def test_team_status_reports_the_resolved_provider_and_model(
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
         checkpointer=checkpointer,
         provider_factory=ProviderFactory(),
-        model_assignment=_exact_assignment(),
+        model_assignment=deterministic_model_assignment(team),
         step_timeout=60.0,
     )
 
@@ -133,7 +115,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
         checkpointer=checkpointer,
         provider_factory=ProviderFactory(),
-        model_assignment=_exact_assignment(),
+        model_assignment=deterministic_model_assignment(team),
         step_timeout=60.0,
     )
     aggregator = EventAggregator()
@@ -196,7 +178,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
         checkpointer=checkpointer,
         provider_factory=ProviderFactory(),
-        model_assignment=_exact_assignment(),
+        model_assignment=deterministic_model_assignment(team),
         step_timeout=60.0,
     )
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())

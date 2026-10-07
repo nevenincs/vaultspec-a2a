@@ -3,12 +3,16 @@ tags:
   - '#adr'
   - '#infra-config'
 date: '2026-03-28'
-modified: '2026-07-15'
-body_hash: 'sha256:0980019172e87a963737fb5fe91de0388ece9cde2a30efcbfe6f06553f4a184b'
+modified: '2026-10-07'
+body_hash: 'sha256:c13b8ab016d5071690a6726556bad41a04745336d8d323ba6e3aa0c74681890f'
 related:
   - '[[2026-03-28-infra-config-research]]'
   - '[[2026-03-28-post-layer2d-boundary-audit]]'
   - '[[2026-03-28-layer2d-rolling-audit]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-03-23-core-layer-boundary-adr]]'
+  - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
+  - '[[2026-10-04-container-release-native-production-adr]]'
 ---
 
 # `infra-config` adr: layer 3 infrastructure config cleanup | (**status:** `accepted`)
@@ -163,3 +167,33 @@ Each file touches the import line and one or more field access sites.
 - **Deferred items** (service topology extraction, `max_concurrent_threads`
   relocation, Justfile structural cleanup, `docker-compose.prod.postgres.yml`
   hardcoded credentials) remain tracked for the service layer PR.
+
+## Amendment (2026-10-07): settings single source
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+**Change.** `Settings` derives from `InfraConfig` only. Domain fields are read only through `domain_config`. No setting is reachable through both singletons, and a guard asserts that the field sets of `DomainConfig` and `Settings` are disjoint. Test overrides route each field to the singleton that owns it. Environment variable names, the prefix and the `.env` sources do not change.
+
+**Why.** The dual source is now a live defect, not an accepted risk. Code paths are under `src/vaultspec_a2a/`.
+
+- `class Settings(DomainSettingsConfig, InfraConfig)` (`control/config.py:53`) re-exposes all 32 domain fields that the separate `domain_config` singleton also parses (`domain_config.py:313-334`).
+- `max_stream_connections` (`domain_config.py:83`) is read through `settings` at the edge (`api/thread_stream.py:646`) and through `domain_config` in the subscriber registry (`streaming/subscribers.py:386`).
+- `settings_override` mutates only `settings` (`testing/environment.py:65-81`). One override therefore changes the edge limit and leaves the registry limit unchanged.
+- Step 1a's shared `.env` loading equalizes values read from the environment. It cannot equalize in-process mutation.
+- `api/thread_stream.py:646` is the only production read of a domain field through `settings`, so the migration is one call site plus tests.
+
+Evidence: R7-F23 in `2026-10-06-codebase-remediation-audit`.
+
+**Replaces.** The Consequences bullet "Dual-source risk": its accepted risk is retired. This also ends the transitional composed facade that `2026-03-23-core-layer-boundary-adr` D-05 allowed "during migration". The `control/config.py:1-9,55-58` docstrings that call `Settings` a drop-in replacement for the former `core.config.Settings` describe that retired contract. `2026-03-29-infra-config-phase2-adr` D-10, which moved `max_concurrent_threads` into `DomainConfig`, is consistent with this amendment and unchanged.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+The Compose Postgres files this record names are historical:
+
+- Considerations: "postgres overlay" in "The 5 remaining compose files serve distinct purposes (dev, prod, postgres overlay, provider overlay, integration)."
+- Consequences: "Anyone who had custom scripts referencing this file must switch to `docker-compose.prod.postgres.yml`."
+- Consequences, Deferred items: "`docker-compose.prod.postgres.yml` hardcoded credentials".
+
+`docker-compose.prod.postgres.yml` and the other application Compose files were retired under `2026-10-04-container-release-native-production-adr`; only `service/docker-compose.integration.yml` remains. No Postgres overlay returns: `2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr` and makes SQLite the only store. Grounding: R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`. The 2026-10-07 settings amendment above is unchanged.

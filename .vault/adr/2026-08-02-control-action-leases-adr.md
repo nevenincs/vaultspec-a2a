@@ -3,15 +3,17 @@ tags:
   - '#adr'
   - '#control-action-leases'
 date: '2026-08-02'
-modified: '2026-10-01'
+modified: '2026-10-07'
 body_schema: 'body-v1'
-body_hash: 'sha256:d384385e841c0f8d787fbd091194d877898b142fa4ae96a917a93f5fbf052a3d'
+body_hash: 'sha256:a2059955cb378b3359212463b2261e61b30652268a2b063d22e54a88f45e07c5'
 related:
   - "[[2026-08-02-control-action-leases-research]]"
   - "[[2026-08-02-control-action-leases-reference]]"
   - '[[2026-09-05-embedded-runtime-remediation-research]]'
   - '[[2026-09-06-embedded-runtime-remediation-w02-p03-s11-abandoned-election-research]]'
   - '[[2026-10-01-run-continuation-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-03-28-database-layer-adr]]'
 ---
 # `control-action-leases` adr: `durable leased dispatch claims` | (**status:** `accepted`)
 
@@ -139,3 +141,59 @@ refusal is likewise a semantic conflict about one run, not transport failure; it
 open the shared breaker, and it retains the action lease because the worker is executing
 that run. This settles the open finding `run-busy-not-in-the-recovery-lease-release-set`.
 Grounding: `2026-10-01-run-continuation-adr`, `2026-09-24-architecture-review-audit`.
+
+## Amendment (2026-10-07): journal semantics
+
+Code paths are under `src/vaultspec_a2a/`. Grounding: R3-F4, R3-F17 and R3-F18 in `2026-10-06-codebase-remediation-audit`.
+
+### Recovery deadlines on dispatchable rows only
+
+The recovery-deadline invariant applies only to a journal row that can still be dispatched. That is a row of a recovery action type with `result_status IN ('accepted_not_applied','queued')`. The rules:
+
+- A dispatchable row carries a deadline.
+- A row of a non-recovery type carries none.
+- A row written already non-dispatchable carries none. This covers the `permission-rejection:*` and `permission-duplicate:*` rows.
+- A row that settles keeps the deadline it was accepted with.
+- Recovery selects only dispatchable rows.
+
+A new Alembic revision installs the narrowed CHECK, and revision 0021 stays as history. The rejection and duplicate writers stop inventing `now + 5 min` (`control/permission_service.py:136-145,500-509`).
+
+**Why.** Revision 0021 keys the deadline on action type alone (`database/control_action_schema.py:41-51`). Rows that will never be dispatched therefore need a fabricated deadline, and 0021 itself says deadlines "cannot be inferred" (`database/migrations/versions/0021_control_action_deadline_invariant.py:45-49`).
+
+**Replaces.** The action-type-only deadline rule introduced with 0021 under the 2026-09-06 amendment. The run-derived deadline of a dispatchable action is unchanged.
+
+### One permission decision record
+
+`permission_logs` is the single durable record of a permission decision. `permission_requests` holds lifecycle only: status, offered options and timestamps. The `permission-*` journal rows stay the idempotency and replay record of the response action; they are not a decision store.
+
+The apply path stops reading the answered option from `permission_requests.response_option_id` (`control/_event_application.py:52-56`). It takes the option from the response action's accepted dispatch envelope, which "Closed accepted dispatch input" already requires; the exact read is left to implementation. `2026-10-01-tool-permission-model-plan` widens `permission_logs` and carries this move.
+
+**Why.** A decision is recorded today in three places: the `permission_requests` resolution columns (`database/permission_repository.py:220-235`), `permission_logs` (`control/permission_service.py:845-856`) and the journal rows.
+
+**Replaces.** Nothing earlier in this record. This applies the Considerations line "Existing journal and checkpoint owners remain single homes for their facts" to permission decisions.
+
+### Immutable graph receipt kept, one matcher
+
+`control_actions.graph_receipt_json` keeps the full immutable `GraphActionReceipt`, as "Transaction ownership at action acceptance" requires. The proposal to store only an acceptance snapshot and rebuild the receipt from row columns (R3-F17) is declined. That proposal is optional, needs a migration and a change to this record, and removes no behaviour.
+
+The duplication R3-F17 found is in the validators, not the blob. The three consistency checks fold into one `GraphActionReceipt.matches()` in `thread/action_receipts.py`:
+
+- `control/dispatch_receipts.py:74-94`
+- `database/graph_receipt_repository.py:19-36`
+- `control/graph_definition.py:22-35`
+
+The difference between an exact revision and a revision bound becomes an explicit argument.
+
+**Replaces.** Nothing. The receipt clause stands unchanged.
+
+### Repair journal rows retired
+
+`repair_started` and `repair_finished` (`thread/enums.py:202-203`) stop being journal action types. They are vestigial:
+
+- Nothing has written them since commit 99dbf79d.
+- Revision 0021 refuses any populated store, so no historical pair reaches head.
+- The pruner runs only when `retain_repair_boots > 0`, and the single production caller passes the default of 0 (`database/reconciliation.py:68-78`, `api/app.py:634`).
+
+The prune machinery is removed. The enum members leave `ControlActionType` in the revision that narrows the action-type CHECK predicates. That revision must keep the index direction on `threads` when it rebuilds the table.
+
+**Replaces.** Nothing in this record names the repair pair. The journal's action vocabulary narrows to the actions that are still written.

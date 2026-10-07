@@ -3,16 +3,17 @@ tags:
   - '#adr'
   - '#domain-logic'
 date: '2026-03-27'
-modified: '2026-07-15'
-body_hash: 'sha256:ac8e0ef3f2c019042f5dafaf36148eb55e6605c18e26abea146f714f877345de'
+modified: '2026-10-07'
+body_hash: 'sha256:f447fbddc5f3de7fb9236133f475ffbb684f2f8ef33bfa3518e03a7329e75908'
 related:
   - '[[2026-03-27-domain-logic-extraction-research]]'
   - '[[2026-03-24-entry-point-decomposition-adr]]'
   - '[[2026-03-23-core-layer-boundary-adr]]'
   - '[[2026-03-24-core-layer-boundary-audit]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
 ---
 
-# `domain-logic` adr: `layer-2b-domain-logic-extraction` | (**status:** `proposed`)
+# `domain-logic` adr: `layer-2b-domain-logic-extraction` | (**status:** `rejected`)
 
 ## Problem Statement
 
@@ -394,3 +395,9 @@ After all phases:
 - `pytest -m core` >= 425 passed
 - `pytest -m middleware` >= 616 passed
 - Full suite >= 1,041 passed
+
+## Rejection (2026-10-07)
+
+Rejected 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+This proposal is closed without acceptance, and no part of it remains to accept. Its enum, transition, `PlanEntry`, data-access split and dead-code decisions landed as routine refactors, and the code is their record (`src/vaultspec_a2a/thread/enums.py`, `src/vaultspec_a2a/thread/transitions.py`, `src/vaultspec_a2a/thread/models.py:20`; `database/crud.py`, `utils/vowel_counter.py` and `lifecycle/reconciliation.py` no longer exist). Its D-12 wire adapter, `ThreadStateSnapshot.model_validate(asdict(data))`, is the lossy seam (`src/vaultspec_a2a/api/routes/_gateway_read_endpoints.py:573-581`) that the 2026-10-07 amendment of `2026-03-23-core-layer-boundary-adr` replaces by serving the Layer-1 dataclasses directly (R1-F11 and R2-F14 in `2026-10-06-codebase-remediation-audit`). Two of its layering goals remain unmet and are not kept alive by this proposal: `utils/` still imports `control` (`src/vaultspec_a2a/utils/logging.py:39,420`), and `control/` still imports `api.schemas.gateway_readiness` (`src/vaultspec_a2a/control/admission.py:43`, `src/vaultspec_a2a/control/health.py:52`). Supersession does not apply, because a proposed record holds no authority to retire. Its test-count baselines and merge-commit constraint are obsolete.

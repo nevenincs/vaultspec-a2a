@@ -12,12 +12,16 @@ related:
   - '[[2026-10-01-run-continuation-adr]]'
   - '[[2026-10-01-tool-permission-model-adr]]'
   - '[[2026-10-01-stream-resumption-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
+  - '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
+  - '[[2026-10-07-codebase-remediation-task-queue-retirement-adr]]'
 supersedes:
   - '2026-02-28-react-tailwind-figma-migration-adr'
   - '2026-02-26-frontend-backend-contract-adr'
   - '2026-04-05-contract-validation-adr'
-modified: '2026-10-02'
-body_hash: 'sha256:0b19ed637e0b2140392df704c6fa61058e8398831ec8ca34c86254284a66d491'
+modified: '2026-10-07'
+body_hash: 'sha256:ce6086301567211608d1a737e666c96fe5410dd18f226dfabac8039868aca864'
 ---
 
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
@@ -430,3 +434,29 @@ the retained window after the snapshot. An `id:` is served only where its replay
 Introducing the cursor, the id, and the `stream_resumable` field on `run-status` is a
 contract event on the frozen edge and is announced to the dashboard before release.
 Grounding: `2026-10-01-stream-resumption-adr`.
+
+## Amendment (2026-10-07): stream frame contract and cross-repo bounds verification
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+The Constraints require this repo to fence event-shape drift with versioned schemas on its SSE frames, and R6 keeps endpoint shapes versioned. The stream had no single frame contract: two domain-to-wire paths produced different shapes, the heartbeat carried a second timestamp encoding, and the cross-repo bounds check never ran in CI. This amendment gives the R6 stream clause, that Constraints clause, and the Consequences sentence "drift between them is itself a defect" their concrete form. Grounding: R1-F1, R1-F2, R1-F10 and R1-F16 in `2026-10-06-codebase-remediation-audit`; decision D15 in `2026-10-06-codebase-remediation-plan`.
+
+- **One serializer.** `ipc/serializers.sequenced_to_dict` (`src/vaultspec_a2a/ipc/serializers.py:63-70`) is the only domain-to-wire serializer. The in-process `api/event_adapter.py` path is dead. It runs only when a `SequencedEvent` sits in a gateway subscriber queue (`src/vaultspec_a2a/api/thread_stream.py:177-183`, `src/vaultspec_a2a/api/_replay_writer_seat.py:55-56`), and no gateway code produces one; the only domain-event ingest is the worker's (`src/vaultspec_a2a/worker/executor.py:803`). The module, its `SequencedEvent` branches and the Pydantic progress models in `api/schemas/events.py` are removed.
+- **One frame schema source.** `streaming/sse_frames.PROGRESS_CATALOG` (`src/vaultspec_a2a/streaming/sse_frames.py:299`) is the single source of the served frame schema. The encoder already projects every outgoing frame onto it (`src/vaultspec_a2a/streaming/sse_frames.py:579-585`). Any published frame schema, including a `text/event-stream` schema in `openapi.json`, is generated from the catalog. No hand-written or parallel model set is a schema source; the orphaned `schemas/ws-client-messages.json` and `schemas/ws-server-events.json` are not one.
+- **Timestamp.** The production `timestamp` is float epoch seconds. Domain events declare it (`src/vaultspec_a2a/graph/events.py:43`), and the catalog passes it through as an always-safe key (`src/vaultspec_a2a/streaming/sse_frames.py:97-109`).
+- **Heartbeat correction.** The remediation draft's premise that the ISO path is dead holds only for progress frames. The heartbeat is live and ISO-8601: it is built from the Pydantic `HeartbeatEvent`, whose `timestamp` is a `datetime` (`src/vaultspec_a2a/api/schemas/events.py:294-300`), and dumped in JSON mode (`src/vaultspec_a2a/api/thread_stream.py:532-542`). It also carries `type` without `event_type`. Ruling: the heartbeat becomes a catalog dict built like the other transport frames (`src/vaultspec_a2a/api/thread_stream.py:186-286`). It carries a float epoch `timestamp`, `server_uptime_seconds` (its catalog entry, `src/vaultspec_a2a/streaming/sse_frames.py:352`) and both kind keys. `HeartbeatEvent` is then deleted, and one stream carries one timestamp encoding.
+- **Kind keys.** Every frame keeps both `type` and `event_type`, with the same value. The dashboard reads both (dashboard checkout 60fce959: `frontend/src/stores/server/liveAdapters/a2aRelay.ts:77-79`, `engine/crates/vaultspec-api/src/routes/ops/a2a_stream.rs:978-984`). Collapsing them is a separate future contract event.
+- **Cross-repo bounds verification.** Each repo checks its own side against the published contract, never against the other repo's source. a2a asserts its own published constants structurally, in process, over `create_app().openapi()` (`src/vaultspec_a2a/api/app.py:887`), and that test never skips. The dashboard owns the engine-side check; it already arbitrates against the served `openapi.json` (dashboard `engine/crates/vaultspec-product/src/a2a_contract.rs:101-110,286-293`). `src/vaultspec_a2a/api/tests/test_engine_edge_bounds_agreement.py` is retired. It reads the sibling repo's Rust source from fixed workstation paths (`:56-61`) and skips when they are absent (`:73-77`). It therefore skips on the Linux CI runners (`.github/workflows/test.yml:70`), where no workflow sets `VAULTSPEC_A2A_ENGINE_SOURCE`.
+
+The heartbeat encoding change (the timestamp type and the added `event_type` key) and the published frame schema are a contract event under R6, announced to the dashboard before release. Removing the dead serializer, its models and the source-reading test changes no served frame. Reconsideration: if the dashboard cannot accept a float heartbeat timestamp, the heartbeat ruling is reopened by amendment; it does not fall back silently to ISO.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+Four clauses are reconciled with decisions accepted on 2026-10-07. Code paths are under `src/vaultspec_a2a/`.
+
+- **Considerations, Postgres requirement, historical.** "Startup enforces `settings.validate_postgres_requirement()` - headless boot must remain possible with the SQLite default." `2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr`. SQLite is the only store, and `validate_postgres_requirement` (`control/config.py:513`, called at `api/app.py:785` and `worker/app.py:179`) is removed. Settings load instead refuses a `postgres` backend value, a `postgresql` URL or `VAULTSPEC_A2A_POSTGRES_REQUIRED=true` with a typed configuration error. Headless SQLite boot is unaffected (R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`).
+- **R1, parenthetical historical.** "(mock-tape presets are acceptable evidence)". `2026-10-07-codebase-remediation-fixture-lanes-adr` removes VidaiMock, `MockChatModel`, the tapes and the mock presets. The only scripted fixture lane is the deterministic lane, registered through `VAULTSPEC_A2A_LANE_PLUGINS` under that record's double arm. The rest of R1 is unchanged (R6-F3 in `2026-10-06-codebase-remediation-audit`; decision D2 in `2026-10-06-codebase-remediation-plan`).
+- **R5, superseded.** `2026-10-07-codebase-remediation-task-queue-retirement-adr` retires the agent task queue. Historical: R5's "The capability is preserved; only its home changes." and its 2026-07-14 Refinement in full, meaning the planner-emitted population source, the migration 0006 schema, the preserved context injection and the interim population. The Refinement's premise is false. No planner emission path was built, and the only writer, `seed_task_queue`, has no production caller (`database/task_queue_repository.py:11-13,73`, `database/__init__.py:146`). The queue is not a product capability. A new revision drops `task_queue_entries`, `current_task_id` leaves `TeamState`, and `vault_reader` renders no queue view. A future task-sequencing capability needs a new decision that names a producer. The "queue investment" named in Considered options and Rationale describes the inventory when this record was written (R3-F3 in `2026-10-06-codebase-remediation-audit`; decision D10 in `2026-10-06-codebase-remediation-plan`).
+- **R12, corrected.** "`adr-17` amended per R5" now reads: `adr-17` (`2026-03-03-persistent-task-queue-schema-adr`) is superseded by `2026-10-07-codebase-remediation-task-queue-retirement-adr`.

@@ -1,18 +1,18 @@
 ---
 tags:
-- '#adr'
-- '#persistent-task-queue-schema'
-date: 2026-03-03
-modified: '2026-09-30'
-body_hash: 'sha256:135785b6838fcf77055ed25baaf781d0036c2b2328be68b80d42f2f23af19057'
+  - "#adr"
+  - "#persistent-task-queue-schema"
+date: '2026-03-03'
 related:
-- '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
-- '[[2026-03-03-blackboard-content-mounting-adr]]'
-- '[[2026-03-03-contextual-anchoring-graph-lifecycle-adr]]'
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - "[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]"
+  - "[[2026-03-03-blackboard-content-mounting-adr]]"
+  - "[[2026-03-03-contextual-anchoring-graph-lifecycle-adr]]"
+  - "[[2026-03-31-docs-vault-migration-research]]"
+superseded_by: '2026-10-07-codebase-remediation-task-queue-retirement-adr'
+modified: '2026-10-07'
+body_hash: 'sha256:6809d77dc5035055a12830b136531a4e5d6d8801e8600b949a97ad103cf33d6f'
 ---
-
-# `persistent-task-queue-schema` adr: `adr-17` | (**status:** `accepted`)
+# `persistent-task-queue-schema` adr: `adr-17` | (**status:** `superseded`)
 
 ## Migration Note
 

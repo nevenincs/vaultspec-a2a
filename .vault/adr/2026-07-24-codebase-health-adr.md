@@ -3,12 +3,14 @@ tags:
   - '#adr'
   - '#codebase-health'
 date: '2026-07-24'
-modified: '2026-07-24'
-body_hash: 'sha256:c5dff1a2d548b32263b535db4943b0c56976112bf23096618cb4deb1d11390b2'
+modified: '2026-10-07'
+body_hash: 'sha256:48df6d20b5d277a425a1210045be8b099d3c0dabc15db14b0aa378c72197015a'
 related:
   - '[[2026-07-19-codebase-health-audit]]'
   - '[[2026-07-19-codebase-health-plan]]'
   - '[[2026-07-19-codebase-health-adr]]'
+  - '[[2026-10-07-codebase-remediation-process-introspection-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
 ---
 
 # `codebase-health` adr: `the authenticated pairing verdict governs worker adoption under the armed profile` | (**status:** `accepted`)
@@ -113,3 +115,13 @@ dead-code status.
   policy as their subjects land.
 - The plan's real-process pairing proofs become honestly closable and are
   delivered with the wiring.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-07-codebase-remediation-process-introspection-adr` rules that no credential reaches a listener before its ownership is confirmed. On a gateway that auto-spawns its worker, the worker-port listener is confirmed only when it is the gateway itself or one of its descendants. Grounding: R7-F1 in `2026-10-06-codebase-remediation-audit`; decision D13 in `2026-10-06-codebase-remediation-plan`.
+
+Superseded Constraint: "The unarmed paths must remain byte-for-byte behavior-compatible." Replacement: the unarmed paths keep their behaviour, except on the unarmed auto-spawn path. There, a worker-port occupant that is not a descendant, or whose ownership cannot be resolved, is a conflict. It gets no credentialed probe, it is not adopted on the gateway-URL signal, and it is not evicted. A credentialed readiness probe runs only after a confirmed verdict. This ends the unarmed foreign-orphan eviction (`src/vaultspec_a2a/control/_worker_health.py:626-680`); the dev-process registry `reap` verb clears a stale dev orphan.
+
+The same narrowing applies to three more clauses: "unarmed it keeps the declared gateway-URL comparison" in Implementation, "dev/Compose keep working unchanged" in Considered options, and "Dev and Compose behavior is unchanged, so the lenient signal survives there" in Consequences. The gateway-URL comparison now runs only for a descendant occupant. A worker attached with `auto_spawn_worker=False` keeps its trust model, and the armed verdict logic is unchanged.

@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#stream-resumption'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:0a9d27e6a99c064dad8cda44866f820e244f98cb9ce4cfc117b47a3886635adc'
+body_hash: 'sha256:5217212021a424b97d4e82cfb46dc117cf0efef2a7bcfe8f78493a69ea0ceaea'
 related:
   - "[[2026-10-01-stream-resumption-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -15,6 +15,8 @@ related:
   - "[[2026-07-19-observability-lanes-adr]]"
   - "[[2026-03-04-worker-process-architecture-adr]]"
   - "[[2026-03-10-postgres-dual-backend-adr]]"
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
 ---
 
 # `stream-resumption` adr: `durable event sequence and bounded replay for resumable progress streams` | (**status:** `accepted`)
@@ -121,3 +123,29 @@ Proposed addition to the 2026-07-15 amendment, so its scope cannot be read as co
 **`2026-08-05-served-capability-contract-state-truthfulness-adr`.** No edit proposed. T4 forbids a structured field contradicting a run's outcome; a replayed frame is ordered before the durable terminal the same stream then emits, so the replay path satisfies T4 rather than straining it.
 
 Accepted 2026-10-01 under the user's blanket approval of that date.
+
+## Amendment (2026-10-07): one sequence authority for frame ids and `threads.last_sequence`
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+S1 and S7 contradicted each other. S1 seeds the allocator from `threads.last_sequence`, and S7 left that column to a different counter. Settle captures the gateway emitter counter (`src/vaultspec_a2a/control/event_handlers.py:811-813`), and the live fallback serves it (`src/vaultspec_a2a/control/thread_state_service.py:427-431`). That counter skips `graph_registered` (`src/vaultspec_a2a/streaming/emitters.py:856-871`), counts a held terminal that is never numbered (`src/vaultspec_a2a/streaming/emitters.py:785-786`), and restarts at zero with the gateway. Frame ids come from `RunSequenceAllocator` (`src/vaultspec_a2a/streaming/subscribers.py:108-229`). A settled run's cursor can therefore sit below its own terminal frame id, and a later reseed reads that low value. Grounding: R2-F1 and R2-F18 in `2026-10-06-codebase-remediation-audit`; decision D4 in `2026-10-06-codebase-remediation-plan`.
+
+S1 and S7 are amended:
+
+- `threads.last_sequence` is the highest sequence `RunSequenceAllocator` has issued for the run: its live counter, or the floor it keeps for a forgotten run. Settle writes it from the allocator. No other counter writes the column.
+- Live run-status for an unsettled run serves the same mark: the allocator's issued mark, else the run's durable high-water mark in S1's seed order, else 0.
+- Where no allocator numbers the run, settle writes nothing and the column keeps its prior value. This covers replay disabled, where no allocator is seated (`src/vaultspec_a2a/api/_replay_writer_seat.py:73-74`), and a run left unnumbered because its seed could not be read. Such a run serves no id, and S8's `stream_resumable` already reports it.
+- The gateway emitter counter is retired. The gateway's use of `EventEmitters._sequences` and `get_sequence`, `EventAggregator.get_sequence`, and the `next_sequence()` calls inside the `_sync_*` handlers are removed.
+- The worker's per-run counter (`src/vaultspec_a2a/streaming/emitters.py:148-157`) is a worker-local ordering aid only. Nothing resumes, deduplicates, persists or serves against it. It survives only as the body `sequence` of a frame on an unnumbered run, which carries no id.
+- The gateway produces no in-process domain events. Every numbered frame is a relayed worker payload, numbered in `SubscriberManager.enqueue_payload` (`src/vaultspec_a2a/streaming/subscribers.py:532-562`). S1's mention of the gateway's own in-process domain events describes the path that the 2026-10-07 amendment of `2026-07-14-a2a-edge-conformance-adr` removes.
+
+Superseded sentence in S7: "`threads.last_sequence` keeps its current meaning and writer." Replacement: `threads.last_sequence` is the allocator's issued high-water mark, written at settle by the allocator and by nothing else. S1's seed order is unchanged and now reads one authority.
+
+S5 is amended in two places:
+
+- `trace_id` and `span_id` are stamped at allocation from the ambient OpenTelemetry span context, in the same act that stamps `created_at` (`src/vaultspec_a2a/streaming/subscribers.py:324-333`). On the relay path that context is the gateway request span. The worker propagates its trace on every batch (`src/vaultspec_a2a/worker/ipc.py:394-401`), and the gateway middleware extracts it (`src/vaultspec_a2a/telemetry/middleware.py:125-137`). An invalid span context leaves both columns NULL. The columns stay. Today the writer never sets them (`src/vaultspec_a2a/streaming/run_event_writer.py:132-140`).
+- Superseded phrase: "identical on both backends". Replacement: the table lives in the SQLite application store, the only backend under `2026-10-07-codebase-remediation-sqlite-only-adr`. The note on `2026-03-10-postgres-dual-backend-adr` under "Proposed reconciliation of existing decisions" is historical.
+
+S9 gains one real-behaviour test: served `last_sequence`, live and settled, equals the last SSE id the run emitted and `MAX(run_events.sequence)`, and a gateway restart mid-run does not rewind it.
+
+This is a contract event under `2026-07-14-a2a-edge-conformance-adr` R6, announced to the dashboard before release. The `last_sequence` field and its type are unchanged. Its value becomes the sequence of the run's last numbered frame, so it agrees with the SSE ids. With replay disabled a new run reports 0, because no frame is numbered. The trace columns are internal and change nothing on the wire.

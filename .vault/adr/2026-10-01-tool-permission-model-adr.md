@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#tool-permission-model'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:5806cc7b298f4e3a3875f8563c0ec96de4e63f23dec9a2c0d7694ca046c41e59'
+body_hash: 'sha256:c51e99cbe9c449308eb9ded7149ba4965741171bc0f863ed4374c428f4ed3e7d'
 related:
   - "[[2026-10-01-tool-permission-model-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -19,6 +19,8 @@ related:
   - "[[2026-07-17-kimi-provider-adr]]"
   - "[[2026-08-02-llm-context-provider-abstraction-acp-v1-client-wire-adr]]"
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-08-02-clarification-continuation-adr]]'
 ---
 
 # `tool-permission-model` adr: `one compiled policy, one durable grant store, one attributed decision log` | (**status:** `accepted`)
@@ -350,3 +352,22 @@ Accepted 2026-10-01 under the user's blanket approval of that date.
 The vendored adapter release this lane moves to no longer offers `dontAsk`: its advertised modes are `default` (shown as "Manual"), `acceptEdits`, `plan`, a new `auto`, and `bypassPermissions` only where bypass is allowed, and it still parses a `dontAsk` setting it never advertises (`2026-10-01-provider-binary-policy-acp-adapter-upgrade-research`). The reconsideration condition above, "move to `dontAsk` when the hook carries the policy", is therefore withdrawn as a target: the unattended posture stays `default`, verified on the session, with refusal supplied by this record's single decision function.
 
 The new `auto` mode hands permission decisions to the provider's own classifier. That is outside this record's commitment that every decision is made by the one compiled policy and logged as one attributed decision, so an unattended session never runs in `auto`; a session reporting it is refused exactly as a session reporting any mode other than the pinned one. A future adapter mode that denies an uncovered call through the client's permission request, rather than deciding it, would reopen the question under this record.
+
+## Amendment (2026-10-07): grants and options build on the checkpoint pause authority
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+**Change.** This record's grant table and its option handling build on the pause authority ruled in the 2026-10-07 amendment of `2026-08-02-clarification-continuation-adr`. The checkpoint decides whether a run is parked; `permission_requests` is journal, audit and disclosure cache.
+
+- **Grants.** A `permission_rules` row is written only when the worker consumes an answer on resume against the live interrupt, through `PermissionPolicyPort`. It is never written on the respond verb's admission or from a journal row's status. Its nullable `request_id` is an audit link to the journal row and gives that row no authority. A grant that answers inside `decide` raises no interrupt, so it creates no journal row, no pause and no status election; its record is the decision-log row with its `rule_id`.
+- **One option home.** Option identity and kind live in `src/vaultspec_a2a/graph/acp_options.py`, which gains `option_kind`, `is_approval`, `is_rejection` and `is_remembering` beside `option_id_of` and `valid_option_ids`. The a2a-owned scoped options are declared there too. The re-derivations migrate to it and are deleted:
+  - `REJECT_OPTION_IDS` and `is_rejection_response` (`src/vaultspec_a2a/graph/enums.py:150-212`);
+  - `_is_approval_option`, `_offered_refusal_option_id`, `_refusal_option_id`, `_approval_option_id` and `_is_always_option` (`src/vaultspec_a2a/providers/_acp_rpc_handlers.py:296-395`);
+  - the "always" test in `_offered_options` (`src/vaultspec_a2a/graph/nodes/_worker_permissions.py:58-74`);
+  - `resolve_acp_option_kind` (`src/vaultspec_a2a/streaming/types.py:326`).
+- **The worker-offered set is the only option authority.** For a tool permission it is `_PermissionRequest.offered`, carried in the interrupt payload (`graph/nodes/_worker_permissions.py:132-149`), scoped options included. Every later layer forwards it verbatim. The respond verb validates against it as the checkpoint holds it, and the journal's `allowed_options` is a disclosure copy. No layer adds an option, invents an id or defaults a kind; a layer that needs a kind asks `option_kind`.
+- **Fabricated defaults are forbidden and removed.** This covers `_default_permission_options` and the `"allow_once"` id fallback (`src/vaultspec_a2a/streaming/_interrupt_projection.py:278-284,307,313-326`), and the emitter's `uuid4()` id and `ALLOW_ONCE` kind defaults (`src/vaultspec_a2a/streaming/emitters.py:577-588`). A request with no usable option is refused at the worker and never parks.
+
+**Why.** The fabricated set is persisted, and the human's pick is validated against it. The worker then rejects the pick against the real offer and re-parks under a request id the relay will not reopen, so the run stalls (R4-F5). That breaks this record's Constraint "no path substitutes a neighbouring option". Option kind is re-derived at five sites that disagree on what "always" means (R4-F7). A grant keyed to a journal row's status would make the mirror an authority again (R4-F2). Evidence: `2026-10-06-codebase-remediation-audit`.
+
+**Replaces.** In Durable grants, "`request_id` (nullable, to `permission_requests`)" now reads as an audit link. The Implementation locators for `_offered_options` and `_narrowed_to_one_use` now resolve to `graph/nodes/_worker_permissions.py:58` and `providers/_acp_rpc_handlers.py:397`; their roles are unchanged. Nothing else changes. What the provider hears when a run parks, and the turn-replay contract, are out of scope for this amendment.

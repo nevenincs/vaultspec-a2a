@@ -3,13 +3,16 @@ tags:
 - '#adr'
 - '#process-and-workspace-management'
 date: 2026-02-26
-modified: '2026-07-15'
-body_hash: 'sha256:f495805cc3513f8ce027794c9ed863e45d38510332ab9cfb3716bf965bc7295f'
+modified: '2026-10-07'
+body_hash: 'sha256:e1bbd2edc3d2c25c488d126d6542382a7d2190aa06ad7e6590ee10ff29c46006'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
+- '[[2026-10-07-codebase-remediation-process-introspection-adr]]'
 ---
 
-# `process-and-workspace-management` adr: `adr-1` | (**status:** `proposed`)
+# `process-and-workspace-management` adr: `adr-1` | (**status:** `rejected`)
+
+Rejected 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
 
 ## Migration Note
 
@@ -181,3 +184,7 @@ worktree` (e.g., `agent/coder/123`). Because worktrees are sparse
 
 - LangGraph Gap Audit Research
 - Architecture Domain - Distilled
+
+## Rejection (2026-10-07)
+
+This proposal was never accepted, and its process-management stance contradicts the shipped code. It prefers `taskkill /T /F` with builtins and rejects Windows Job Objects (Rejected Alternatives, "Windows Job Objects (pywin32)"). Owned processes run inside Job Object or process-group containment (`src/vaultspec_a2a/utils/process.py:244-267`), and psutil is a locked base dependency (`pyproject.toml:39`). `2026-10-07-codebase-remediation-process-introspection-adr` now governs process introspection, contained spawn and owned-tree termination. The workspace clauses are not carried forward as authority: workspace roots are governed by the workspace-root-authority ADRs, and the global Git mutex is retired by routine choice D24, Step `W05.P16.S95` of `2026-10-06-codebase-remediation-plan`, because its Git co-owner no longer exists (`src/vaultspec_a2a/workspace/concurrency.py:1-9`). The dual-mode virtual-environment resolution it describes survives as routine implementation in `src/vaultspec_a2a/workspace/environment.py:1-7`; this rejection does not remove it.

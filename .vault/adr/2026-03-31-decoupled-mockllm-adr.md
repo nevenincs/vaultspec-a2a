@@ -3,13 +3,18 @@ tags:
 - '#adr'
 - '#decoupled-mockllm'
 date: 2026-03-31
-modified: '2026-07-15'
-body_hash: 'sha256:b95399ca87d82af5a82e1863a04201186fbf4bd14933ac6af93d6d5c0c5bb621'
+modified: '2026-10-07'
+body_hash: 'sha256:d2ad89880791139f4f3d888a2cf4be06d06043195b47a0db1cfb90ee13bd5d50'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
+- '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
 ---
 
-# `decoupled-mockllm` adr: `adr-032` | (**status:** `proposed`)
+# `decoupled-mockllm` adr: `adr-032` | (**status:** `rejected`)
+
+## Rejection (2026-10-07): superseded by the fixture-lanes decision
+
+Rejected 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments). This proposal was never accepted, and it is now superseded by `2026-10-07-codebase-remediation-fixture-lanes-adr`. That decision keeps one scripted in-process fixture lane, the deterministic lane, under `src/vaultspec_a2a/testing/`. It removes VidaiMock, `MockChatModel`, the tapes and the mock presets. The mock wrapper duplicated the deterministic lane, and it needed a production graph branch keyed on its own type string (`src/vaultspec_a2a/graph/nodes/_worker_tool_calls.py:95-170`). The tape path cited below (`src/vaultspec_a2a/core/presets/mock/tapes/`) was stale before this rejection. The findings are R6-F3, R6-F4 and R6-F26 in `2026-10-06-codebase-remediation-audit`. The text below is kept as the historical proposal only.
 
 ## Migration Note
 

@@ -6,11 +6,13 @@ date: '2026-10-04'
 related:
   - "[[2026-10-04-container-release-audit]]"
   - "[[2026-08-01-dashboard-bundled-runtime-subordination-adr]]"
+  - '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
 supersedes:
   - '2026-10-04-container-release-adr'
-modified: '2026-10-04'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:8410af6de9f480c4c539b095817af802fb1200dd87ced7e683ba869de290118b'
+body_hash: 'sha256:d61de355f190c78bf179ae1bf82a4bdb6d2f3cde0e3c54c1d8b16aaf17887cc7'
 ---
 # `container-release` adr: `native production binaries with Docker only for development fixtures` | (**status:** `accepted`)
 
@@ -41,3 +43,17 @@ The owner's explicit correction and approval authorize this reversal. Existing t
 ## Consequences
 
 Development retains Jaeger trace debugging and deterministic provider fixtures. Linux setuid/container proofs are retired with their unsupported image, while native launch protections and refusal tests remain. Dashboard adoption drift remains a separate integration concern. Earlier container-release implementation and its mistaken acceptance remain recorded as history.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-07-codebase-remediation-fixture-lanes-adr` removes VidaiMock: `service/docker/vidaimock.Dockerfile`, the `vidaimock` service in `service/docker-compose.integration.yml`, `MockChatModel` and the tapes. Compose carries Jaeger only. Grounding: R6-F3 in `2026-10-06-codebase-remediation-audit`; decision D2 in `2026-10-06-codebase-remediation-plan`.
+
+Corrected clauses:
+
+- Problem Statement, "Jaeger and VidaiMock may remain Docker development dependencies only": Jaeger alone remains a Docker development dependency.
+- Considerations, "using Compose only for Jaeger and VidaiMock": the native harness uses Compose only for Jaeger.
+- Constraints, "Jaeger and VidaiMock are development/test fixtures only": Jaeger is the only container fixture, for development and test only.
+
+The fixture-only integration Compose definition of Implementation keeps Jaeger alone. The "deterministic provider fixtures" of Consequences are the in-process deterministic lane, registered through `VAULTSPEC_A2A_LANE_PLUGINS`, not a container. The native-production ruling is otherwise unchanged.

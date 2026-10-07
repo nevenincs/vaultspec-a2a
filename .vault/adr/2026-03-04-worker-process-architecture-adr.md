@@ -3,8 +3,8 @@ tags:
 - '#adr'
 - '#worker-process-architecture'
 date: 2026-03-04
-modified: '2026-10-01'
-body_hash: 'sha256:4cfecf8f0c7d09182368ee7cb164bcaa8105972de54e6d2266f97741e5f022b0'
+modified: '2026-10-07'
+body_hash: 'sha256:09710d33d5ef2ff6d747d57af4202c8fed1839e87c86c3400692f512b92c5628'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-observability-telemetry-integration-adr]]'
@@ -12,6 +12,10 @@ related:
 - '[[2026-03-03-persistent-task-queue-schema-adr]]'
 - '[[2026-03-31-docs-vault-migration-research]]'
 - '[[2026-10-01-stream-resumption-adr]]'
+- '[[2026-10-06-codebase-remediation-audit]]'
+- '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
+- '[[2026-10-07-codebase-remediation-process-introspection-adr]]'
+- '[[2026-10-07-codebase-remediation-task-queue-retirement-adr]]'
 ---
 
 # `worker-process-architecture` adr: `adr-25` | (**status:** `accepted`)
@@ -280,3 +284,24 @@ Addition to section 2.2. The worker→gateway event relay carries no sequence au
 worker's per-thread counter orders a run's events within one worker lifetime; the stream's
 identity is allocated by the gateway at fan-out and is durable across a restart of either
 process (`2026-10-01-stream-resumption-adr`).
+
+## Amendment (2026-10-07): worker ingress is HTTP batch plus heartbeat
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+Sections 2.2 and 2.7 are corrected to the implemented protocol, and the unused ingress routes are removed. Grounding: R1-F6, R2-F8 (a duplicate of R1-F6) and R2-F22 in `2026-10-06-codebase-remediation-audit`; decision D17 in `2026-10-06-codebase-remediation-plan`.
+
+- **Section 2.2, corrected.** Superseded: the events line `POST /api/internal/events` (`ServerEvent` JSON body), and the heartbeat line's `POST /api/internal/heartbeat` with an empty body. Replacement: the worker posts batched events to `POST /internal/events/batch` (`src/vaultspec_a2a/worker/ipc.py:394-401`); each entry carries `thread_id`, `payload` and `ts` (`src/vaultspec_a2a/worker/ipc.py:314-320`). The heartbeat goes to `POST /internal/heartbeat` and carries a body (`src/vaultspec_a2a/worker/ipc.py:611-620`).
+- **Section 2.7, corrected.** Superseded figure: "every 30 seconds". Replacement: every 10 seconds (`src/vaultspec_a2a/worker/app.py:258`). The 90 second disconnect threshold stands (`src/vaultspec_a2a/control/infra_config.py:741-746`). `active_threads` carries the ids of the executing runs, not a count (`src/vaultspec_a2a/ipc/schemas.py:315-317`).
+- **Removed ingress.** Worker-to-gateway traffic is the batch route plus the heartbeat route, and nothing else. The internal WebSocket `/internal/ws` (`src/vaultspec_a2a/api/internal.py:283-390`) and the single-event `POST /internal/events` (`src/vaultspec_a2a/api/internal.py:404-444`) have no production client and are removed. The worker opens no WebSocket and posts only to the two kept routes (`src/vaultspec_a2a/worker/ipc.py:398,612`). The `GET /internal/health` readiness probe is unaffected.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+Four clauses are reconciled with decisions accepted on 2026-10-07. Code paths are under `src/vaultspec_a2a/`.
+
+- **Section 3, Negative, historical.** "PostgreSQL migration (future) would remove this constraint." `2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr`: SQLite is the only application database and checkpoint store, and multi-host or replicated deployment is unsupported. The single-host bound of section 2.3 is the product bound. Lifting it needs a new decision and a CI lane that provisions a server store (R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`).
+- **2026-09-30 amendment, schema setup, corrected.** Superseded sentence: "Concurrent schema setup across the two processes is serialized by the owner named in `2026-03-10-postgres-dual-backend-adr`." Replacement: checkpoint schema setup is LangGraph's idempotent `CREATE TABLE IF NOT EXISTS` (`langgraph/checkpoint/sqlite/aio.py:305-344`, locked `langgraph-checkpoint-sqlite` 3.1.1), and the SQLite write lock serializes it across the two processes; a second setup creates nothing. Outside the desktop profile the opening process runs it at boot. The armed desktop profile skips it at boot and runs it only from the staged-generation migration entrypoint (`database/checkpoints.py:654-666`). This follows the "Checkpoint schema setup" clause of `2026-10-07-codebase-remediation-sqlite-only-adr`, which replaces the Postgres advisory lock as the owner of concurrent setup.
+- **Section 2.4, Auto-spawn, corrected.** Superseded: "Gateway spawns the worker as a child process via `subprocess.Popen`". Replacement: the gateway starts the worker through `utils/process.spawn_contained()`, the only way to start an owned process under `2026-10-07-codebase-remediation-process-introspection-adr`. The worker's root is created inside its containment before its first instruction runs, and a failed admission kills that exact root and raises. The current spawn-running-then-assign path (`control/worker_management.py:160-168`, `control/_worker_readiness.py:82-87`) is what that record replaces (R7-F2 in `2026-10-06-codebase-remediation-audit`; decision D13 in `2026-10-06-codebase-remediation-plan`). The narrowing to first execution demand by `2026-07-18-desktop-product-profile-adr` is unchanged.
+- **Section 7, reference historical.** "ADR-021 — task queue integration with Executor". ADR-021 is `2026-03-03-persistent-task-queue-schema-adr`, superseded by `2026-10-07-codebase-remediation-task-queue-retirement-adr`. The executor has no task-queue integration: the queue port (`worker/task_queue_port.py`, wired at `worker/graph_lifecycle.py:279,746`) is removed (R3-F3 in `2026-10-06-codebase-remediation-audit`; decision D10 in `2026-10-06-codebase-remediation-plan`).

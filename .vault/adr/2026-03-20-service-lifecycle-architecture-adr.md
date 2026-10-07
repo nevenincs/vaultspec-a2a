@@ -10,8 +10,11 @@ related:
   - "[[2026-03-31-docs-vault-migration-research]]"
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
-modified: '2026-10-04'
-body_hash: 'sha256:538bd593479ac83a7aee13c42453746f839d6617b8525f274b896c6cd3fa6b96'
+  - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
+  - '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+modified: '2026-10-07'
+body_hash: 'sha256:315ebb7819481d6aa026226d454874ddd2bd8cb3aa6d166bafb74805423645bf'
 ---
 # `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)
 
@@ -402,3 +405,12 @@ starts cleanly and Jaeger confirms distributed traces from a real team operation
 ### Production scope correction, 2026-10-04
 
 The owner's native-production directive in 2026-10-04-container-release-native-production-adr supersedes this record's application Docker/Compose production deployment clauses and production-stack certification work. Gateway and worker ship and run as native binaries. Compose ownership now applies only to development/test Jaeger and VidaiMock fixtures. Native process registry and lifecycle ownership remain in force. Earlier production topology and compliance rows above are historical, not deployment instructions.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+Two passages are reconciled with decisions accepted on 2026-10-07.
+
+- **Section 1, optional infrastructure, historical.** "plus optional infrastructure (Jaeger, Postgres, VidaiMock)" and "Optional infrastructure: Jaeger (:4317/:16686), Postgres (:5432), VidaiMock (:8100)." Postgres is removed: `2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr` and makes SQLite the only store (R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`). VidaiMock is removed by `2026-10-07-codebase-remediation-fixture-lanes-adr` (R6-F3; decision D2). Jaeger is the only optional infrastructure.
+- **Production scope correction, 2026-10-04, corrected.** Superseded sentence: "Compose ownership now applies only to development/test Jaeger and VidaiMock fixtures." Replacement: Compose ownership applies only to the development and test Jaeger fixture. The `vidaimock` service in `service/docker-compose.integration.yml` (`:6`) and `service/docker/vidaimock.Dockerfile` are what `2026-10-07-codebase-remediation-fixture-lanes-adr` removes. The deterministic in-process lane replaces that fixture and needs no container. The rest of the correction is unchanged.

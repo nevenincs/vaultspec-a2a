@@ -3,11 +3,13 @@ tags:
 - '#adr'
 - '#event-aggregation-server-side-replay'
 date: 2026-02-26
-modified: '2026-10-01'
-body_hash: 'sha256:fd113ce8e69827a623574019e0b7c0e4688c88043186babe3c8f8970df7fd6c6'
+modified: '2026-10-07'
+body_hash: 'sha256:db73023e0641bbb312f502e6932851c2c14e3987f3bd51c6ac1a000809abbeb8'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 - '[[2026-10-01-stream-resumption-adr]]'
+- '[[2026-10-06-codebase-remediation-audit]]'
+- '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
 ---
 
 # `event-aggregation-server-side-replay` adr: `adr-4` | (**status:** `accepted`)
@@ -172,3 +174,23 @@ Addition to the 2026-07-15 amendment above, so its scope cannot be read as cover
 server-side replay for DOCUMENT lifecycle remains the engine's `/authoring/v1/events`
 outbox. Replay of this service's own orchestration PROGRESS stream is a different subject
 and is decided by `2026-10-01-stream-resumption-adr`.
+
+## Amendment (2026-10-07): the `custom` stream mode is retired
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+The 2026-09-30 amendment opens ingest over a `custom` mode and binds a rule for a node's own custom stream write. Neither has a producer. No shipped node calls `get_stream_writer`, and `emit_custom_node_write` (`src/vaultspec_a2a/streaming/custom_writes.py:54-70`) has only test callers; its module states that no shipped node calls it (`src/vaultspec_a2a/streaming/custom_writes.py:12-13`). The consumer, `_project_custom` and `_custom_text` (`src/vaultspec_a2a/streaming/transformer.py:351-394`), and the `custom` entry in `STREAM_MODES` (`src/vaultspec_a2a/streaming/transformer.py:52`) serve only tests. Grounding: R2-F16 in `2026-10-06-codebase-remediation-audit`; decision D17 in `2026-10-06-codebase-remediation-plan`.
+
+Superseded clause: "Ingest opens one stream over `messages`, `updates`, `tasks`, `custom` and `checkpoints` with `subgraphs=True`". Replacement: ingest opens one stream over `messages`, `updates`, `tasks` and `checkpoints` with `subgraphs=True`.
+
+Superseded sentence: "A node's own custom stream write carries the writing node's identity in its payload, because LangGraph drops that node's segment from a custom write's namespace (`src/vaultspec_a2a/streaming/custom_writes.py`)." Replacement: none. The mode, `streaming/custom_writes.py`, its consumer and its streaming facade export are removed.
+
+The other commitments of the 2026-09-30 amendment are unchanged. Reconsideration: a node that must stream its own writes re-adds the mode together with that producer, by amendment, and restores the identity-in-payload rule with it.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr` and makes SQLite the only checkpoint store in every profile. Grounding: R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`.
+
+Superseded sentence in the 2026-09-30 amendment: "Checkpoint sourcing is no longer SQLite-only; `2026-03-10-postgres-dual-backend-adr` chooses the backend." Replacement: checkpoint sourcing is SQLite-only, through `langgraph-checkpoint-sqlite` (`pyproject.toml:32`), and `2026-10-07-codebase-remediation-sqlite-only-adr` owns the store. Section 2's "SQLite Checkpoint Sourcing" bullet again describes the backend. The other 2026-09-30 commitments, as amended above, are unchanged.

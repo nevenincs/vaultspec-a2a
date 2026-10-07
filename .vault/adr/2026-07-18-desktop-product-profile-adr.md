@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-10-04'
-body_hash: 'sha256:1de654b1a79764c562643fed397897e1cec2ffc798061b00dfce46edca6a14e6'
+modified: '2026-10-07'
+body_hash: 'sha256:c1f2bfaf9d441b7451cbcdd0deee351f6131fb66ba6f66633edc37e62e485d47'
 related:
   - "[[2026-07-18-desktop-product-profile-research]]"
   - "[[2026-07-18-desktop-product-profile-reference]]"
@@ -16,6 +16,10 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-10-01-provider-binary-policy-adr]]'
+  - '[[2026-10-07-codebase-remediation-process-introspection-adr]]'
+  - '[[2026-10-04-engine-discovery-security-adr]]'
+  - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
 ---
 
 # `desktop-product-profile` adr: `a dashboard-managed companion profile alongside Compose` | (**status:** `accepted`)
@@ -332,3 +336,32 @@ providers resolve capsule-owned assets, including the provider CLI the ACP adapt
 drives. Capsule validation requires that asset, and a host CLI or an inherited executable
 override never substitutes for it. Without this clause the constraint reads as satisfied
 while the CLI escapes it. Grounding: `2026-10-01-provider-binary-policy-adr`.
+
+## Amendment (2026-10-07): ownership before credential
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+**Change.** This adds one rule to "Security, singleton, and discovery": no A2A process presents a credential to a loopback listener before it has confirmed who owns that listener. Credential means the worker IPC credential, the attach credential, or the ownership capability.
+
+- A listener that A2A spawned is confirmed by process ancestry: it is the expected root or one of that root's descendants, as `2026-10-07-codebase-remediation-process-introspection-adr` rules. The gateway applies this to its worker port before a pre-spawn occupant probe, before each readiness probe, and before an eviction request.
+- A resident gateway reached through a discovery record is confirmed when the recorded process, with a matching start fingerprint, owns the listener on the recorded endpoint. Only then does an A2A lifecycle client send the attach credential or the ownership capability.
+- An independently owned producer is confirmed by its proof of possession, as `2026-10-04-engine-discovery-security-adr` requires for the engine.
+
+An occupant that is foreign, or whose ownership cannot be resolved, receives no credentialed request. It is a conflict: it is never adopted and never evicted. The dashboard's own contender path is not changed by this amendment.
+
+**Why.** The gateway sends its worker IPC credential to any process holding the worker port: pre-spawn probes (`src/vaultspec_a2a/control/_worker_health.py:428,585,629`), readiness after a bare TCP connect (`src/vaultspec_a2a/control/_worker_readiness.py:130-132`) and eviction (`src/vaultspec_a2a/control/_worker_health.py:553-559`). This section already keeps that credential out of discovery; the rule keeps it away from a squatter too. Evidence: R7-F1 in `2026-10-06-codebase-remediation-audit`. The rule applies the proof-before-bearer principle of `2026-10-04-engine-discovery-security-adr` (Rationale) to the processes A2A owns, where ancestry is the proof and no challenge is added.
+
+**Replaces.** No clause is removed. The rule orders two existing clauses: the worker IPC credential clause ("Worker dispatch and administration use a separate worker IPC credential") and the contender clause ("A contender validates discovery, process identity, compatibility, authentication, and readiness"). For an A2A client, the identity of the listener is confirmed before any authentication is attempted.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr`. SQLite is the only application database and the only checkpoint store in every profile. Grounding: R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`.
+
+Two Postgres clauses are historical:
+
+- "Product profiles and artifact boundary": the "PostgreSQL option" in "Compose retains its gateway, independently managed worker, PostgreSQL option, Jaeger integration, and operator lifecycle."
+- "Verification": "PostgreSQL" in "Compose receives regression certification for server topology, standalone workers, PostgreSQL, and observability."
+
+No profile offers a Postgres option and no certification covers one. The rest of both sentences is not ruled by this amendment.

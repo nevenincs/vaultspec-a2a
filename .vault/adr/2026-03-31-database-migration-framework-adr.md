@@ -3,13 +3,18 @@ tags:
 - '#adr'
 - '#database-migration-framework'
 date: 2026-03-31
-modified: '2026-07-15'
-body_hash: 'sha256:319185eb9b41948783e634a704a488abe5f275e29f3064ff25bf4963742657b0'
+modified: '2026-10-07'
+body_hash: 'sha256:92ae003cbac440a128ebc01926818fc93064e886678bfc3b147cf22d5538fd53'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
+- '[[2026-10-06-codebase-remediation-audit]]'
+- '[[2026-10-07-codebase-remediation-task-queue-retirement-adr]]'
+- '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
 ---
 
-# `database-migration-framework` adr: `adr-029` | (**status:** `proposed`)
+# `database-migration-framework` adr: `adr-029` | (**status:** `accepted`)
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
 
 ## Migration Note
 
@@ -63,3 +68,39 @@ We will integrate **Alembic** as the strict dependency for asynchronous SQLite d
 - Codebase gap finding: `legacy-research/2026-03-04-database-migration-research.md`.
 - Original workaround file: `y:/code/vaultspec-a2a-worktrees/main/src/vaultspec_a2a/database/session.py`.
 - ADR-021 - Note: The task queue relies on `.vault/` file persistence, separating its schema cleanly from the SQLite databases governed by this ADR.
+
+## Amendment (2026-10-07): status reconciled and one migrate entry point
+
+Code paths are under `src/vaultspec_a2a/`.
+
+**Status.** The heading said `proposed`, but the original body says "Status: Accepted", and the decision is implemented:
+
+- Alembic owns schema evolution (`database/migrate.py`, `database/migrations/versions/`).
+- CI runs a SQLite round trip (`.github/workflows/migrations.yml:66-72`).
+
+The heading now records `accepted`. The migration note's legacy status stays as history.
+
+**One migrate entry point.** Two paths apply revisions:
+
+- `vaultspec-a2a migrate` (`cli/service.py:520-546`, through `desktop/migration.migrate_stores`);
+- gateway-boot migration (`database/session.py:404-407`).
+
+Both go through `database/migrate.run_migrations`, which holds `_MIGRATION_LOCK` (`database/migrate.py:93-96`).
+
+`database/admin.py` is removed (D19 and R3-F21 in `2026-10-06-codebase-remediation-audit`):
+
+- Its `_migrate_to_head` called `command.upgrade` without that lock (`database/admin.py:70-74`), a duplicate of the locked path.
+- Its snapshot and restore verbs duplicated the snapshot and rollback that the dashboard owns (`cli/service.py:20-23`).
+- Its `clear` verb had no consumer.
+
+Its one unique capability, WAL truncate plus `VACUUM` (`migrate --fix`), becomes `vaultspec-a2a migrate --compact`:
+
+- It runs after the revisions, on stores that `migrate_stores` has already proved quiesced with a zero-timeout `BEGIN IMMEDIATE` (`desktop/migration.py:191-213`).
+- A blocked compaction is a failed stage.
+- The option is additive on the dashboard-spawnable verb.
+
+The restore guard fixed at e19c501d (R7-F30) goes with the verbs it guarded. A real-subprocess test re-proves the same refusal on `migrate --compact` against a live gateway.
+
+Bare `alembic` stays a developer tool that takes an explicit URL. Its missing-URL hint (`database/migrations/env.py:72-82`) names `vaultspec-a2a migrate`.
+
+**Replaces.** Decision item 4 is narrowed: "programmatically triggered" means `run_migrations` under its lock, and no other programmatic path exists. The ADR-021 reference is historical, because `2026-10-07-codebase-remediation-task-queue-retirement-adr` retires that task queue.

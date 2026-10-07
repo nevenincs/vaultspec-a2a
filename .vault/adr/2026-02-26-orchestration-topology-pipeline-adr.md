@@ -3,10 +3,12 @@ tags:
 - '#adr'
 - '#orchestration-topology-pipeline'
 date: 2026-02-26
-modified: '2026-09-30'
-body_hash: 'sha256:8fc36b175847a05c8a6c75abe260eddd15421f797d14a37a8d3bb71e56752266'
+modified: '2026-10-07'
+body_hash: 'sha256:1fd45d1efceae97d2ca7b4e967461c426216ffe1178f04fbb4dac45a514f4d96'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
+- '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
+- '[[2026-10-06-codebase-remediation-audit]]'
 ---
 
 # `orchestration-topology-pipeline` adr: `adr-008` | (**status:** `accepted`)
@@ -127,3 +129,11 @@ Later accepted decisions have overtaken four descriptions in this record. The de
 - **Second interface:** it is not an in-repo WebSocket UI. The dashboard is a separate repository fronting this service across a loopback edge.
 
 The structured-callback rationale stands and has grown load-bearing. Tool lifecycle reaches the event layer only through LangChain callbacks, because it is not a graph superstep and appears in no stream mode (`src/vaultspec_a2a/streaming/_run_callbacks.py`). Grounding: `2026-09-30-langgraph-conformance-audit`.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr` and makes SQLite the only checkpoint store in every profile. Grounding: R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`.
+
+Superseded bullet in the 2026-09-30 amendment: "**Checkpoint backend:** checkpointing is not SQLite-only; `2026-03-10-postgres-dual-backend-adr` owns the backend choice." Replacement: checkpointing is SQLite-only, and `2026-10-07-codebase-remediation-sqlite-only-adr` owns the store. Section 2, item 3 ("SQLite Checkpointing") again names the backend. The other three bullets of that amendment are unchanged.

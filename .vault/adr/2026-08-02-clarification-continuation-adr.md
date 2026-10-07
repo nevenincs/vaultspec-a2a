@@ -3,13 +3,16 @@ tags:
   - '#adr'
   - '#clarification-continuation'
 date: '2026-08-02'
-modified: '2026-10-01'
+modified: '2026-10-07'
 body_schema: 'body-v1'
-body_hash: 'sha256:151c01290ebd4256faa976aebc85b26ac329d6b35277041bc5a81fa04010a4a1'
+body_hash: 'sha256:23c560691143339f9755a73d4587ef64e2354ad8c19dcd61a55c97f556998055'
 related:
   - "[[2026-08-02-clarification-continuation-research]]"
   - "[[2026-08-02-clarification-continuation-reference]]"
   - '[[2026-10-01-run-continuation-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-08-05-served-capability-contract-state-truthfulness-adr]]'
+  - '[[2026-08-02-control-action-leases-adr]]'
 ---
 
 # `clarification-continuation` adr: `typed new-prompt resolution for parked questions` | (**status:** `accepted`)
@@ -82,3 +85,31 @@ because a message admitted here would wait behind a pause only an answer can cle
 ruling is unchanged - a parked run still refuses an ordinary message and the typed respond
 verb remains the only continuation for it - and `2026-10-01-run-continuation-adr` extends it
 to the busy and settled states. Grounding: `2026-10-01-run-continuation-research`.
+
+## Amendment (2026-10-07): the checkpoint is the pause authority for every interrupt kind
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+**Change.** The run's checkpoint is the only authority for whether a run is parked, on which interrupt and under which request id, for every interrupt kind: clarification, tool permission, plan approval and document approval. The control plane runs one pause mechanism over the graph's one `interrupt()` and one `RESUME`.
+
+- **Durable rows are journal, audit and disclosure cache.** A `permission_requests` row and its creation action are the request's journal: they hold its lifecycle and cache the description and offered options for disclosure. The decision record is `permission_logs`, per the 2026-10-07 amendment of `2026-08-02-control-action-leases-adr`. No row opens, closes or answers a pause, and no row's status is read as proof of one.
+- **One pause recorder.** The shipped `reconcile_clarification_pause` (`src/vaultspec_a2a/control/clarification_service.py:764-819`, commit 8a6fbe62) generalizes into one recorder for every `InterruptType`. It owns both edges of `INPUT_REQUIRED` and is that state's obligated writer under T2 of `2026-08-05-served-capability-contract-state-truthfulness-adr`. It keeps the shipped properties:
+  - the checkpoint read decides, and a relayed frame only prompts the read;
+  - the write witness is read before the checkpoint, so an election that loses to a newer writer changes nothing;
+  - the status is elected under the current writer's identity, whichever graph-run dispatch raised the pause, with no new control-action type and no migration;
+  - it runs on the progress nudge, on the resume application receipt and at startup.
+- **The permission election moves into it.** `_persist_permission_request` (`src/vaultspec_a2a/control/event_handlers.py:889-1002`) keeps only the journal and audit rows. Removed: its election under a `PERMISSION_REQUEST_CREATED` writer receipt (`:958-968`), the receipt check `_permission_receipt_is_current` (`:874-886`), and the settlement's unfenced `RUNNING` write (`src/vaultspec_a2a/control/_event_application.py:258`).
+- **Ruling on the permission park receipt.** A permission park elects under the current writer, as a clarification does. The receipt checks are reworked:
+  - recovery recognizes a park by `INPUT_REQUIRED` plus a pending interrupt on the checkpoint, never by the writer's action type (replaces `src/vaultspec_a2a/control/recovery_authority.py:390-398`);
+  - the respond verb still leases `PERMISSION_RESPONSE_SUBMITTED` against the current writer expectation (`src/vaultspec_a2a/control/permission_service.py:779-806`), and reads from the live checkpoint whether the request is pending and which options it offers;
+  - the journal row's replay idempotency rests on its `permission-request:{request_id}` reservation alone (`event_handlers.py:931-941`).
+- **Supersession and reopening follow the checkpoint.** A new request supersedes only requests the checkpoint no longer holds, and a re-park under an existing request id is a park (replaces `event_handlers.py:952-957,972-976`).
+- **One vocabulary and one id.** One `InterruptType` StrEnum in `src/vaultspec_a2a/thread/enums.py` names the four kinds with today's wire strings. One `interrupt_request_id` in `src/vaultspec_a2a/thread/snapshots.py` resolves the request id for the stream, run-status and the worker. The divergent fallbacks (`thread/snapshots.py:703-707`, `src/vaultspec_a2a/streaming/_interrupt_projection.py:144-156`) and the duplicate clarification type constants (`thread/snapshots.py:78`, `thread/clarification.py:87`) fold into them.
+- **One leased re-entry builder.** A new `src/vaultspec_a2a/control/leased_dispatch.py` builds every follow-on dispatch of an accepted run: follow-up, permission response, clarification response, verdict resume and cancel. It resolves the workspace root, accepted definition and execution authority, builds the `DispatchRequest`, runs the lease tail, and returns a typed `FailureType` failure, never an HTTP status. It computes the recursion budget once as `min(operator ceiling, preset)` and freezes it into the accepted envelope; the worker consumes it as supplied. The copied preambles (`control/clarification_service.py:577-614`, `control/permission_service.py:726-777`, `control/message_service.py:225-285`, `control/verdict_subscriber.py:602-642`) and the divergent budget source (`control/message_service.py:283`) are removed.
+- **One settlement owner and one recovery owner.** `commit_proven_application` (`src/vaultspec_a2a/control/_event_application.py:193`) settles every graph-mutating action from its proven receipt. That includes a clarification `RESUME`, matched by its `clarification_resolution_receipts` entry through a typed intent rather than an idempotency-key prefix. `control/direct_control_recovery` is the only recovery owner. Removed: `redrive_clarification_actions` (`control/clarification_service.py:822-879`, called once at `src/vaultspec_a2a/api/app.py:743-760`) and the service's own receipt settlement (`control/clarification_service.py:323,388,753`). The startup trigger the redrive carried moves to the recorder.
+
+**Why.** The graph has one pause mechanism (`src/vaultspec_a2a/graph/nodes/_worker_permissions.py:267`, `src/vaultspec_a2a/graph/nodes/clarification.py:369`, `src/vaultspec_a2a/worker/executor.py:202-229`). The control plane ran two: a permission mirror that elects status and validates answers, and a checkpoint-only clarification that elected nothing until 8a6fbe62. The mirror diverges from the checkpoint and strands requests. It supersedes a parallel branch the worker can still answer (`event_handlers.py:972-976`), persists fabricated options (`streaming/_interrupt_projection.py:278-326`), and refuses to reopen a request the worker re-parked (`event_handlers.py:952-957`). The clarification rule already makes the checkpoint authoritative for disclosure. Follow-ups escaped the operator ceiling because each verb chose its own budget source. Evidence: R4-F1, R4-F2, R4-F3, R4-F8, R4-F9 and R2-F2 in `2026-10-06-codebase-remediation-audit`.
+
+**Constraints.** Wire strings, the edge verbs and the typed respond verbs are unchanged. The builder and the two owners implement `2026-08-02-control-action-leases-adr` ("The accepted request explicitly supplies the recursion budget"; "Startup and ordinary operation drain the same durable recovery owner") and add no lease policy. What a provider hears when a run parks is not ruled here.
+
+**Replaces.** No ruling of this record is reversed. The Considerations line "Checkpoint request identity remains authoritative for every resolution" now also covers the pause itself, for every interrupt kind.

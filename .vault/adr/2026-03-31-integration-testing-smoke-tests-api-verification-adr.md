@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#integration-testing-smoke-tests-api-verification'
 date: '2026-03-31'
-modified: '2026-09-05'
-body_hash: 'sha256:11b51d42c764965e12fcd0e2ab14cbb070fcac3746fe3c8c0bb09e032c33130c'
+modified: '2026-10-07'
+body_hash: 'sha256:bd64525f706ebda8619855d9d2621d582f6100765ec86e2e524e5db30689ae8f'
 related:
   - '[[2026-03-31-integration-testing-smoke-tests-api-verification-research]]'
   - '[[2026-03-31-integration-testing-service-certification-research]]'
@@ -12,6 +12,9 @@ related:
   - '[[2026-03-30-service-layer-rolling-audit]]'
   - '[[2026-03-20-service-lifecycle-architecture-adr]]'
   - '[[2026-03-31-decoupled-mockllm-adr]]'
+  - '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
 ---
 
 # `integration-testing-smoke-tests-api-verification` adr: `real-stack service certification for issue #17` | (**status:** `accepted`)
@@ -72,3 +75,23 @@ A current catalog member may receive explicit opt-in compatibility coverage
 when its own active contract requires it. Such coverage remains separate from
 the deterministic service certification gate and cannot be used to justify
 support for a lane absent from the current catalog.
+
+## Amendment (2026-10-07): the deterministic lane is the certification replay
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+VidaiMock is no longer the certification gate's deterministic replay. The deterministic in-process lane is, as `2026-10-07-codebase-remediation-fixture-lanes-adr` rules. The certification stack brings up the real gateway and worker processes, the deterministic lane registered through `VAULTSPEC_A2A_LANE_PLUGINS`, and Jaeger. VidaiMock, `MockChatModel`, the tapes and the mock presets are removed.
+
+Why: three model stand-ins did one job, and only the deterministic lane drives the real factory and the real `permission_callback` seam (`src/vaultspec_a2a/providers/deterministic_chat_model.py:46-66,243-301`). The mock lane needed a production special case (`src/vaultspec_a2a/graph/nodes/_worker_tool_calls.py:95-170`). The findings are R6-F3, R6-F4 and R6-F26 in `2026-10-06-codebase-remediation-audit`.
+
+The Constraints ban on fake chat models stands. The deterministic lane is not such a fake: it is a provider lane selected through the real `ProviderFactory` inside the real worker process. The ban still covers langchain fake chat models and any bypass of the factory.
+
+This replaces "deterministic mock provider path" in Implementation and "VidaiMock gives deterministic replay for the certification gate" in Rationale. "Deterministic mock provider tapes" in Considerations describes the inventory when this record was written. The certification scenarios, the separate opt-in provider smoke, and the 2026-09-06 amendment are unchanged.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr` and makes SQLite the only store in every profile. Grounding: R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`.
+
+Superseded sentence in Constraints: "SQLite is the first persistence target; Postgres can be added later as an extension, not as a blocker." Replacement: SQLite is the only persistence target. A Postgres extension needs a new decision and a CI lane that provisions the server. The rest of Constraints and the earlier amendments are unchanged.

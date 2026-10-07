@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#multi-provider-execution'
 date: '2026-07-15'
-modified: '2026-09-05'
-body_hash: 'sha256:00ae7a336fed5928e04901a822253c03a3ef70a0ea8ac24ad637b11cbeb84357'
+modified: '2026-10-07'
+body_hash: 'sha256:b0d3a0e3ed737beb6d982c184cb993cc56f914ef3cc187dd074c4e104c039bd1'
 related:
   - '[[2026-07-15-multi-provider-execution-research]]'
   - '[[2026-07-15-multi-provider-execution-reference]]'
@@ -12,6 +12,8 @@ related:
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-08-02-provider-model-catalog-adr]]'
+  - '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
 ---
 # `multi-provider-execution` adr: `provider matrix, per-role assignment, and cross-repo initialization for Codex, Claude, and Z.ai` | (**status:** `accepted`)
 
@@ -79,3 +81,11 @@ Retired profile or model-map input and stored state are refused as typed
 unsupported/incompatible before construction or dispatch; no alias,
 translation, migration, fallback, restart, or redispatch path is retained for
 that state.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+The `providers/mock_chat_model.py` precedent is historical. It is cited in Considerations ("precedented by `providers/mock_chat_model.py`"), in the chosen option ("following the `mock_chat_model.py` precedent of a non-ACP `BaseChatModel`") and in Rationale ("Codex is `mock_chat_model.py`'s non-ACP `BaseChatModel` pattern applied to a real subprocess instead of a stub"). `2026-10-07-codebase-remediation-fixture-lanes-adr` removes `MockChatModel` and its lane. Grounding: R6-F3 and R6-F4 in `2026-10-06-codebase-remediation-audit`; decision D2 in `2026-10-06-codebase-remediation-plan`.
+
+The Codex decision does not rest on that precedent: `CodexChatModel` is a non-ACP chat model on the shared process base (`src/vaultspec_a2a/providers/codex_chat_model.py:123`). The provider-lane decisions and the 2026-09-05 amendment are unchanged.

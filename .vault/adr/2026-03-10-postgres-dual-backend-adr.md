@@ -1,17 +1,17 @@
 ---
 tags:
-- '#adr'
-- '#postgres-dual-backend'
-date: 2026-03-10
-modified: '2026-09-30'
-body_hash: 'sha256:28e0e98120ed65c7ff8117644a8b801ef72846ce96e1bf40ecd15ced3d96703f'
+  - "#adr"
+  - "#postgres-dual-backend"
+date: '2026-03-10'
 related:
-- '[[2026-03-31-database-migration-framework-adr]]'
-- '[[2026-03-04-worker-process-architecture-adr]]'
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - "[[2026-03-31-database-migration-framework-adr]]"
+  - "[[2026-03-04-worker-process-architecture-adr]]"
+  - "[[2026-03-31-docs-vault-migration-research]]"
+superseded_by: '2026-10-07-codebase-remediation-sqlite-only-adr'
+modified: '2026-10-07'
+body_hash: 'sha256:b1fe094681eff50cfe8c67738b71abb0137c6deafd845ed5511b90ada2cb08d0'
 ---
-
-# `postgres-dual-backend` adr: `adr-29` | (**status:** `accepted`)
+# `postgres-dual-backend` adr: `adr-29` | (**status:** `superseded`)
 
 ## Migration Note
 

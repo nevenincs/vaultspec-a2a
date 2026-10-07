@@ -3,16 +3,20 @@ tags:
   - '#adr'
   - '#database-layer'
 date: '2026-03-28'
-modified: '2026-07-15'
-body_hash: 'sha256:056d39b58bb28c7abf72c196bac96d39fff3966f4dedf79c06f11f05e766c46d'
+modified: '2026-10-07'
+body_hash: 'sha256:6cb23d87c2fb3bf80213140241b0449611d27af1c1e7b555c589a979e826f0d4'
 related:
   - '[[2026-03-28-database-layer-research]]'
   - '[[2026-03-28-post-layer2b-boundary-audit]]'
   - '[[2026-03-27-domain-logic-extraction-adr]]'
   - '[[2026-03-24-entry-point-decomposition-adr]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-08-02-control-action-leases-adr]]'
 ---
 
-# `database-layer` adr: `layer-2c-database-rework-handler-extraction` | (**status:** `proposed`)
+# `database-layer` adr: `layer-2c-database-rework-handler-extraction` | (**status:** `accepted`)
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
 
 **Prerequisite:** PR #9 (Layer 2b domain logic extraction) merged to `main`.
 
@@ -314,3 +318,47 @@ After all phases:
 - `pytest -m core` >= 520 passed
 - `pytest -m middleware` >= 574 passed
 - Full suite >= 1,094 passed
+
+## Amendment (2026-10-07): one repository per aggregate
+
+Code paths are under `src/vaultspec_a2a/`.
+
+**Change.** All SQL and ORM access to a table lives in `database/`, in the one module that owns its aggregate:
+
+- `thread_repository.py`: `threads`, `thread_execution_state`, status elections and the run row lock.
+- `control_action_repository.py`: the `control_actions` journal, its leases, graph-receipt persistence and the continuation-queue SQL. It takes over the journal half of `permission_repository.py` and absorbs `graph_receipt_repository.py`.
+- `permission_repository.py`: `permission_requests` and `permission_logs`.
+- `recovery_attempt_repository.py`: `recovery_attempts`, holding the SQL now in `control/recovery.py`.
+- `deletion_saga_repository.py`: `thread_deletion_saga`, holding the SQL now in `control/repositories/deletion_saga.py`.
+- `run_event_repository.py`: `run_events`. It reads `threads` only through `thread_repository`.
+- `cost_repository.py`: `cost_tracking`, moved out of `artifact_repository.py`. Its read surface follows the accounting decision.
+
+`authoring_cursor_repository.py` and `runtime_identity_repository.py` keep their aggregates. `artifact_repository.py` dissolves: the artifacts half is removed (R3-F13), and permission logs and cost move as listed above.
+
+The rules that go with this layout:
+
+- **No sub-package.** `control/repositories/` is removed. D-01 already rejected a `repositories/` sub-package. Its rule-free SQL moves into `database/`.
+- **Policy stays in `control/` and `thread/`.** Lease policy, recovery classification and transitions stay there. Repositories hold queries, conditional writes and row mapping only.
+- **Dependency direction.** `database/` imports none of `control/`, `api/`, `worker/` or `graph/`. `database/reconciliation.py` moves to `control/`: it is startup orchestration, and it imports `control.recovery_authority` (`database/reconciliation.py:8-13`).
+- **Facade-only imports.** Code outside `database/` imports from the `database` facade (`database/__init__.py`). This includes type-only and function-local imports. The facade exports every public repository symbol. Modules inside `database/` use relative sibling imports.
+- **One lease helper.** `database/_leases.py` builds the acquire, renew, release and settle predicates for a token-and-expiry column pair, and declares the lease durations together. `control_actions`, `recovery_attempts` and `thread_deletion_saga` use it (R3-F10). This amendment does not decide whether the saga moves from its timestamp-only claim to token plus expiry, because that is a schema change.
+- **CHECK predicates from one source.** The models build their `CheckConstraint`s from `WRITE_AUTHORITY_CHECKS` (`database/write_authority_schema.py`) and `RECOVERY_DEADLINE_CHECKS` (`database/control_action_schema.py`) instead of retyping them (R3-F20). Alembic revisions keep their frozen literals.
+
+**Why.** Ownership is split today (R3-F9, R3-F10, R3-F20 and R3-F23 in `2026-10-06-codebase-remediation-audit`):
+
+- SQL for the same tables sits in four `database/` modules and nine `control/` modules, led by 76 ORM references in `control/recovery.py`.
+- `control/repositories/` contradicts D-01.
+- Module names hide what the modules hold. `database/permission_repository.py:1` holds the journal, and `database/artifact_repository.py:1` holds permission logs and cost.
+- `graph_receipt_repository.py` is deep-imported (`control/dispatch_receipts.py:20`).
+- The facade is bypassed (`api/app.py:61-63`, `api/routes/_gateway_read_endpoints.py:48`).
+
+**Replaces.**
+
+- D-01's three-module list and the "3 modules" premise in the sub-package consideration. The naming convention and the rejection of a sub-package stand.
+- D-02's allowance to import "from specific repository modules", and the matching Validation Criteria line. Consumers outside `database/` import from the facade only.
+
+**What binds at acceptance.**
+
+- Track A as amended here.
+- Tracks B and C (D-03 to D-07), which describe the implemented control service layer. D-04's direction rule binds: `control/` does not import `api/`. One violation is known: `control/health.py:516` imports `api.schemas.gateway_readiness` at runtime.
+- The PR-scoped clauses are historical: the PR #9 prerequisite, the test-count baselines, the merge-commit rule, the phase order and the Layer 2d deferral. The 1,000-line module limit is owned by the pylint gate (`pyproject.toml:552`).

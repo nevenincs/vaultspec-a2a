@@ -10,10 +10,12 @@ related:
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-research]]'
   - '[[2026-08-01-repository-tooling-hardening-strict-quality-gates-reference]]'
+  - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-08-04-canonical-homes-adr]]'
 supersedes:
   - '2026-03-19-control-layer-cli-justfile-separation-adr'
-modified: '2026-08-01'
-body_hash: 'sha256:23fc4f2b6cf05ded5325776f4d410799c4a38277a33a368b2c92daaa9994bbb3'
+modified: '2026-10-07'
+body_hash: 'sha256:26770fb2d2719bd74048bb5e149f68a5ceb8aae593558c2dfd8a2c05b376c6fd'
 ---
 # `repository-tooling-hardening` adr: `one modular, locked, and reproducible repository control surface` | (**status:** `accepted`)
 
@@ -206,3 +208,48 @@ A real-code anti-drift guard is mandatory. It imports the declarative registry a
 ## Amendment (2026-08-01, canonical anti-drift enforcement)
 
 The anti-drift guard is a required canonical CI check, not a workflow-only diagnostic. `CI.all` runs `test harness` after Vault validation and before `test unit`. The `TEST.harness` target retains exclusive ownership of `pytest dev`; the hosted workflow adds no separate harness step and product `testpaths` remain unchanged. Root `just ci` and the hosted workflow's existing `just ci` invocation therefore enforce the same guard through the sole declarative CI owner.
+
+## Amendment (2026-10-07): blocking duplication enforcement, one owner per quality dimension, and no R0902
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+This amendment is the separate decision that the staged strict-quality amendment requires before any blocking clone policy. It refines that amendment and does not supersede this record. Grounding: findings R6-F18, R6-F32, R7-F13, R3-F19 and R4-F24 in `2026-10-06-codebase-remediation-audit`.
+
+**Duplication enforcement is blocking.** Two detectors own two distinct clone dimensions, and both block.
+
+- *Structural clones* are function bodies that are identical once every identifier is erased. The AST guard `src/vaultspec_a2a/tests/test_structural_duplication.py` owns them. It runs in `test unit`, which canonical CI runs. Its roots widen from the package alone (`:46`) to `src`, `dev`, `packaging`, `scripts` and the repository-root `conftest.py`. Tiers come from the canonical tier list in `dev/paths.py` plus `testing`, replacing the path heuristic at `:213-216`. A cross-tier pass compares test functions against production functions; today groups are compared within one tier only (`:219-235`). Each root asserts a visited-files floor. An unparseable file fails the guard instead of being skipped (`:228`). An accepted group needs a written reason. A group that exists only to satisfy a lint threshold is not accepted.
+- *Copy-paste spans* are owned by JSCPD through `audit duplication` (`dev/audit/duplication.py`). JSCPD is pinned as a development dependency in `package.json` and locked in `package-lock.json`. The floating `npx` spec `jscpd@4` (`dev/audit/duplication.py:60`) is retired. The scan widens from production only (`:63`, `:72`) to every test tier, `testing`, `dev`, `packaging` and `scripts`. The 20-line, 70-token threshold is unchanged. The scan blocks against an adjudicated baseline: the target joins `lint all`, and its hosted step loses `continue-on-error` (`.github/workflows/test.yml:137-140`).
+
+The baseline may not grow. A new clone is removed, never baselined. An entry leaves when its clone is removed, and a stale entry fails the gate, so the baseline only shrinks. Adjudication follows these rules:
+
+- *Legitimate-copy categories.* `distinct-semantics` covers one shape applied to a different table, column, event kind or schema. `oracle` covers a test's independent derivation of an external contract, kept so the test does not import the logic it checks. Each entry carries exactly one category and a written reason.
+- *Debt.* An entry in neither category is debt. It names the Step that removes it, and no debt entry survives the close of `2026-10-06-codebase-remediation-plan`.
+- *Generated and migration files.* Generated output and Alembic revision scripts are excluded by path, not baselined. Migration history is immutable, and generated text has one source.
+- *Exclusion ownership.* `dev/audit/duplication.py` owns the duplication scan scope, thresholds and path exclusions. The baseline file owns the adjudicated entries. `dev/toolchain.py` keeps the target name, composition and failure behaviour. Nothing else restates them.
+- *False positives.* A reported span that is not a copy is adjudicated as `distinct-semantics` with its reason. Thresholds and scope never change to hide a report.
+
+The duplication baseline is the only baseline gate. The promotion invariant for the deterministic sentinels still forbids baselines. The gate complements the rehoming rule of `2026-08-04-canonical-homes-adr` and does not replace it. That record rejected a lint that freezes existing copies; here debt entries are removed, not kept.
+
+**One owner per quality dimension.** Each dimension has exactly one gate:
+
+- cyclomatic complexity: ruff `C901` in `limits` (`dev/toolchain.py:118`, ceiling in `[tool.ruff.lint.mccabe]`);
+- function returns, branches, arguments and statements: ruff `PLR0911`, `PLR0912`, `PLR0913` and `PLR0915` in `limits`;
+- nesting depth: ruff `PLR1702` in `nesting`;
+- module length, public methods and boolean expressions: pylint `C0302`, `R0904` and `R0916` in `size`;
+- cognitive complexity: complexipy in `complexity`;
+- structural clones and copy-paste spans: the two duplication detectors above.
+
+`dev.health` gates no dimension. It stays a ranking report that always exits 0. The `cyclomatic` target (`dev/toolchain.py:405-409`, `health --gate cyclomatic`) is retired. It duplicates ruff `C901`, as `dev/health/report.py:384-395` itself records. The `shape` target (`dev/toolchain.py:410-414`, `health --gate`) is retired by the same rule. It re-measures module lines, statements, arguments and nesting at the thresholds that pylint `C0302` and ruff `PLR0915`, `PLR0913` and `PLR1702` already gate (`dev/health/report.py:79-82` against `pyproject.toml:373,376,552` and `dev/toolchain.py:422`). The false-pass exit of `health --gate` (`dev/health/__main__.py:67-72`) goes with the gate.
+
+**R0902 is disabled for the project.** pylint `too-many-instance-attributes` leaves the enabled set, and `max-attributes` is dropped (`pyproject.toml:545,555`). Record size is not a complexity signal. The rule produced four field-binder machineries and eleven inline suppressions across six modules (R7-F13, R3-F19, R4-F24). Those binders and suppressions are removed, not relocated. Records are plain keyword-only frozen dataclasses grouped by meaning. Complexity stays owned by the gates above.
+
+**Replaced clauses.** In the staged strict-quality amendment:
+
+- The deterministic sentinel list loses `cyclomatic` and `shape`. It is now `type-strict`, `type-platforms`, `complexity`, `limits`, `nesting` and `size`.
+- This amendment replaces the paragraph that begins "Duplication remains a reviewed investigation lead" and ends "false-positive disposition".
+- In the anti-drift guard, "duplication remains advisory and outside `lint all`" becomes: the duplication target is a blocking member of `lint all`, with one visible hosted step and no `continue-on-error`.
+- "`dev/toolchain.py` remains the sole owner of target names, commands, scan scope, composition, and failure behavior" now excepts the duplication scan scope, which `dev/audit/duplication.py` owns.
+
+The 2026-08-01 rule against version constraints on independently released capabilities does not apply to JSCPD. JSCPD is this repository's own development tool, and its lock binds only this repository's builds.
+
+Reconsider the baseline rule if a legitimate copy fits neither category. Reconsider the R0902 ruling if record width is shown to cause defects that the remaining gates miss.

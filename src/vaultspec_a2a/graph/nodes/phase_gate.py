@@ -66,6 +66,8 @@ __all__ = [
     "create_phase_gate_node",
     "create_phase_submit_node",
     "review_requests_revision",
+    "review_revisions_spent",
+    "revision_granted",
 ]
 
 #: The standalone verdict line a reviewer persona emits to send work back.
@@ -85,6 +87,23 @@ def review_requests_revision(messages: Sequence[object]) -> bool:
     return REVIEW_REVISION_SENTINEL in {
         line.strip().upper() for line in content.splitlines()
     }
+
+
+def revision_granted(*, revision_requested: bool, spent: int, budget: int) -> bool:
+    """Whether a review loop sends its work back to the writer once more.
+
+    The one budget rule every review loop applies: a revision is granted only
+    when one is asked for and the revisions ``spent`` - counting the one being
+    asked for - stay within ``budget``. A reviewer that never passes would
+    otherwise loop until the recursion limit killed the run, so a spent budget
+    ends the loop whatever the verdict says.
+    """
+    return revision_requested and spent <= budget
+
+
+def review_revisions_spent(state: TeamState, phase: str) -> int:
+    """The revisions ``phase`` has spent since it last reached its gate."""
+    return (state.get("review_revisions") or {}).get(phase, 0)
 
 
 _REVISION_VERDICTS = frozenset({VERDICT_REJECTED, VERDICT_REQUEST_CHANGES})
@@ -189,8 +208,12 @@ def create_phase_submit_node(
         try:
             proposal_id = await submitter(state, phase)
         except ProposalRevisionRequiredError as exc:
-            spent = (state.get("review_revisions") or {}).get(phase, 0)
-            if spent > max_revisions:
+            spent = review_revisions_spent(state, phase)
+            # The refusal is weighed before it is counted, so even a zero
+            # budget grants the writer one corrective pass.
+            if not revision_granted(
+                revision_requested=True, spent=spent, budget=max_revisions
+            ):
                 raise DocumentConformanceError(
                     phase, exc.revision_notes, attempts=spent
                 ) from exc

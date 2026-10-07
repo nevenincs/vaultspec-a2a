@@ -42,7 +42,6 @@ __all__ = [
     "SseFrame",
     "StreamError",
     "approval_decision_verdict",
-    "changeset_status_verdict",
     "parse_sse_frame",
     "verdict_from_event",
 ]
@@ -54,15 +53,6 @@ _DECISION_TO_VERDICT: dict[str, str] = {
     "approve": VERDICT_APPROVED,
     "reject": VERDICT_REJECTED,
     "request_changes": VERDICT_REQUEST_CHANGES,
-}
-
-# Terminal changeset statuses (snake_case `ChangesetStatus`) that map to a
-# reviewer verdict for the recovery-snapshot catch-up path. `request_changes`
-# has no distinct changeset status (it returns the proposal to draft), so it is
-# not recoverable from a status snapshot - only from the live decision event.
-_STATUS_TO_VERDICT: dict[str, str] = {
-    "approved": VERDICT_APPROVED,
-    "rejected": VERDICT_REJECTED,
 }
 
 # Lifecycle event_kinds that resolve a review without an explicit `decision`
@@ -93,8 +83,8 @@ class LifecycleEvent:
 
         The aggregate id addresses the event's own aggregate (changeset, proposal
         or approval); the payload data may additionally name the proposal and
-        changeset ids. A parked run is matched when any of these intersect its
-        recorded ``authoring_proposal_ids`` / ``authoring_changeset_ids``.
+        changeset ids. A parked run is matched when one of these is the proposal
+        its document gate is pending on.
         """
         ids: set[str] = set()
         if self.aggregate_id:
@@ -211,21 +201,12 @@ def verdict_from_event(event: LifecycleEvent) -> tuple[str, str | None] | None:
     return None
 
 
-def changeset_status_verdict(status: str) -> str | None:
-    """Map a terminal changeset status to a verdict for recovery catch-up.
-
-    Returns ``None`` for non-terminal or non-verdict statuses (draft, generating,
-    needs_review, applied, ...), which carry no reviewer decision to resume on.
-    """
-    return _STATUS_TO_VERDICT.get(status)
-
-
 def approval_decision_verdict(decision: str) -> str | None:
     """Map an engine approval ``decision`` string onto a verdict.
 
     The recovery-snapshot catch-up for a MISSED ``request_changes`` reads this: a
     ``request_changes`` (or an edit-proposal reject) returns its changeset to
-    ``draft``, so `changeset_status_verdict` surfaces nothing, but the resolved
+    ``draft``, so the changeset status carries no verdict, but the resolved
     approval record still carries ``decision``. Returns ``None`` for an unknown
     decision so a malformed snapshot never resumes a run on a phantom verdict.
     """

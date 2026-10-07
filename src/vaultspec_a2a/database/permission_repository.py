@@ -22,6 +22,7 @@ from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
     PermissionRequestStatus,
+    ThreadStatus,
 )
 from ._helpers import (
     _coerce_control_action_type,
@@ -29,7 +30,7 @@ from ._helpers import (
     _coerce_permission_request_status,
     save_model,
 )
-from .models import ControlActionModel, PermissionRequestModel, utcnow
+from .models import ControlActionModel, PermissionRequestModel, ThreadModel, utcnow
 
 __all__ = [
     "ControlActionReservation",
@@ -48,6 +49,7 @@ __all__ = [
     "mark_control_action_superseded",
     "mark_permission_request_applied",
     "outstanding_permission_pause",
+    "pending_document_approval_thread",
     "prune_repair_journal",
     "record_permission_request",
     "record_permission_response_submission",
@@ -89,6 +91,9 @@ always mean both members; the other two toggle ``ANSWERED_PENDING_APPLY`` in
 or out via ``include_answered_pending_apply``, so the toggle stays an explicit
 argument at those call sites rather than being folded into this constant.
 """
+
+_DOCUMENT_APPROVAL_PAUSE = "document_approval_request"
+"""The pause a document gate records, under the proposal id it parked on."""
 
 
 def _encode_payload(payload: dict[str, object] | None) -> str | None:
@@ -215,6 +220,38 @@ async def outstanding_permission_pause(
         )
     ).first()
     return None if row is None else (row[0], row[1])
+
+
+async def pending_document_approval_thread(
+    session: AsyncSession,
+    *,
+    request_ids: Collection[str],
+) -> str | None:
+    """Return the parked run whose pending document approval is in ``request_ids``.
+
+    A document gate records its pause with the proposal it parked on as the
+    request id, so an engine verdict naming that proposal reaches its run through
+    this row alone, by primary key, however many runs are parked. Only a run
+    still ``INPUT_REQUIRED`` qualifies: an applied verdict resume settles the row
+    and moves the run on, so a replayed verdict finds nothing and is a no-op.
+    """
+    candidates = [request_id for request_id in dict.fromkeys(request_ids) if request_id]
+    if not candidates:
+        return None
+    stmt = (
+        select(PermissionRequestModel.thread_id)
+        .join(ThreadModel, ThreadModel.id == PermissionRequestModel.thread_id)
+        .where(
+            PermissionRequestModel.request_id.in_(candidates),
+            PermissionRequestModel.pause_reason_type == _DOCUMENT_APPROVAL_PAUSE,
+            PermissionRequestModel.request_status
+            == PermissionRequestStatus.PENDING.value,
+            ThreadModel.status == ThreadStatus.INPUT_REQUIRED.value,
+        )
+        .order_by(PermissionRequestModel.created_at.asc())
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def record_permission_response_submission(

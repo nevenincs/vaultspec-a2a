@@ -57,6 +57,8 @@ from .nodes.phase_gate import (
     create_phase_gate_node,
     create_phase_submit_node,
     review_requests_revision,
+    review_revisions_spent,
+    revision_granted,
 )
 from .nodes.worker import (
     create_worker_node,
@@ -376,16 +378,17 @@ def _doc_review_router(
     A reviewer verdict asking for revision routes back to the phase writer while
     the phase still has revisions left in its budget; anything else (the
     ``PASS`` verdict, or no verdict) advances to the phase gate. Every revision
-    costs a writer turn and a review turn, and a reviewer that never passes
-    would otherwise loop until the recursion limit killed the run, so a spent
-    budget advances to the gate too: the human is the backstop, not the loop.
+    costs a writer turn and a review turn, so a spent budget advances to the
+    gate too: the human is the backstop, not the loop.
     """
 
     def router(state: TeamState) -> str:
-        if not review_requests_revision(state.get("messages") or []):
-            return gate_target
-        spent = (state.get("review_revisions") or {}).get(phase, 0)
-        return writer_target if spent <= max_revisions else gate_target
+        granted = revision_granted(
+            revision_requested=review_requests_revision(state.get("messages") or []),
+            spent=review_revisions_spent(state, phase),
+            budget=max_revisions,
+        )
+        return writer_target if granted else gate_target
 
     return router
 
@@ -409,7 +412,7 @@ def _count_review_revisions(review_node: WorkerNode, phase: str) -> WorkerNode:
             result.get("messages") or []
         ):
             return result
-        spent = (state.get("review_revisions") or {}).get(phase, 0)
+        spent = review_revisions_spent(state, phase)
         return {**result, "review_revisions": {phase: spent + 1}}
 
     return accepting_runnable_config(_review_node_with_count)
@@ -661,7 +664,7 @@ def _compile_research_adr(
     # Each gate is split into a submit node (commits the proposal id to the
     # checkpoint) and a pure gate node (interrupt + verdict routing), so the
     # out-of-run verdict subscriber can correlate a verdict to the parked run via
-    # the committed ``authoring_proposal_ids``. The inner review loop
+    # the committed proposal id the gate parks under. The inner review loop
     # routes into the SUBMIT node; the submit node routes on into its gate.
     #
     # The submit nodes take the SAME per-phase budget as the review router below:

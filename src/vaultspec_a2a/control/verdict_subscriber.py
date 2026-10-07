@@ -5,18 +5,18 @@ stream. It resolves a live engine, reads its persisted cursor, opens
 ``GET /authoring/v1/events`` from that cursor, and for each reviewer verdict it
 correlates the event to a parked run and resumes that run with the verdict.
 
-Correlation flows through run state, not a side table: a parked thread's
-checkpointed ``TeamState`` carries the ``authoring_proposal_ids`` /
-``authoring_changeset_ids`` the run produced; an inbound event names the same
-ids (as its aggregate id or in its payload data). The matched run is resumed via
-the existing worker dispatch path with ``Command(resume={"verdict", "notes"})``
+Correlation flows through the durable pause record: a document gate parks with
+the proposal it awaits as the request id of a pending
+``document_approval_request`` permission row, and an inbound event names the
+same id (as its aggregate id or in its payload data). The matched run is resumed
+via the existing worker dispatch path with ``Command(resume={"verdict", "notes"})``
 - the identical seam the permission-response service uses, differing only in the
 resume value shape.
 
 The engine serves a bounded replay page and closes the stream, so the loop
 polls: consume a page, advance the durable cursor per event, re-open from the
-new cursor. A ``gap`` frame (replay window exceeded) falls back to the recovery
-snapshot to reconcile terminal verdicts, then jumps the cursor to the engine's
+new cursor. A ``gap`` frame (replay window exceeded) runs the parked-run
+reconcile over the recovery snapshot, then jumps the cursor to the engine's
 high-water mark. The loop is cancellation-safe: an ``asyncio.CancelledError``
 propagates cleanly and closes the active stream.
 """
@@ -36,7 +36,6 @@ from ..authoring import (
     SseFrame,
     StreamError,
     approval_decision_verdict,
-    changeset_status_verdict,
     verdict_from_event,
 )
 from ..database import (
@@ -47,6 +46,7 @@ from ..database import (
     list_threads,
     mark_control_action_applied,
     mark_permission_request_applied,
+    pending_document_approval_thread,
     read_latest_checkpoint,
     set_authoring_cursor,
     thread_write_expectation,
@@ -95,9 +95,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-# TeamState reference fields that carry the engine ids a run produced.
-_STATE_ID_FIELDS = ("authoring_proposal_ids", "authoring_changeset_ids")
 
 # The TeamState field carrying the proposal id of the gate a run is CURRENTLY
 # parked at (committed by the submit node before the gate interrupt).
@@ -174,9 +171,7 @@ def _gate_resume_verdict(status: str) -> str | None:
     unresolved; an AUTO gate resolves-and-applies in one synchronous step, so a
     still-parked run's proposal is observed terminal as ``applied``), ``rejected``
     resumes as rejected. A non-terminal status (``needs_review``/``draft``/...)
-    carries no decision yet. This is the parked-run reconcile's LOCAL mapping - it
-    admits ``applied`` where the shared `changeset_status_verdict` (gap path) does
-    not, so the gap path's narrower semantics are unchanged.
+    carries no decision yet.
     """
     if status in ("applied", "approved"):
         return VERDICT_APPROVED
@@ -225,15 +220,6 @@ def _decided_verdicts(data: object) -> dict[str, str]:
         for proposal_id in proposal["ids"]:
             verdict_by_id.setdefault(proposal_id, verdict)
     return verdict_by_id
-
-
-def _checkpoint_authoring_ids(values: Mapping[str, object]) -> set[str]:
-    out: set[str] = set()
-    for field in _STATE_ID_FIELDS:
-        items = coerce_object_list(values.get(field))
-        if items is not None:
-            out.update(item for item in items if isinstance(item, str) and item)
-    return out
 
 
 class VerdictSubscriber:
@@ -304,16 +290,15 @@ class VerdictSubscriber:
         the terminal verdict of the gate it is CURRENTLY parked at.
 
         GATE-PRECISE by construction: a run accumulates its authoring ids across
-        gates, so correlating by ANY id (as the per-event/gap path does) would let a
-        LATER gate be resumed by an EARLIER gate's already-terminal verdict - e.g.
-        the ADR gate spuriously resumed by the applied research verdict, completing
-        the run with the ADR unreviewed. So this path keys on the run's
-        ``gate_pending_proposal_id`` (the ONE proposal it is awaiting a verdict for)
-        and resumes only when THAT proposal is decided. ``applied`` counts as
-        approved HERE (a changeset cannot apply unresolved; an AUTO gate resolves-
-        and-applies in one step, so a still-parked run's proposal reads ``applied``,
-        not the transient ``approved``) - handled locally so the shared
-        `changeset_status_verdict`/gap path keeps its narrower semantics.
+        gates, so correlating by ANY of them would let a LATER gate be resumed by
+        an EARLIER gate's already-terminal verdict - e.g. the ADR gate spuriously
+        resumed by the applied research verdict, completing the run with the ADR
+        unreviewed. So this path keys on the run's ``gate_pending_proposal_id``
+        (the ONE proposal it is awaiting a verdict for) and resumes only when THAT
+        proposal is decided. ``applied`` counts as approved (a changeset cannot
+        apply unresolved; an AUTO gate resolves-and-applies in one step, so a
+        still-parked run's proposal reads ``applied``, not the transient
+        ``approved``).
 
         Reject recovery: a HUMAN ``request_changes`` (or edit-proposal
         reject) returns its changeset to ``draft``, so the changeset status carries
@@ -349,11 +334,19 @@ class VerdictSubscriber:
         except Exception:
             logger.debug("Parked-run reconcile snapshot fetch failed", exc_info=True)
             return
-        # Map every decided proposal id (proposal + changeset) to its gate verdict,
-        # so a run can be matched by its CURRENT gate proposal alone. The verdict is
-        # drawn from the changeset status OR - for a missed request_changes, which
-        # leaves the changeset in draft - the resolved approval decision.
-        verdict_by_id = _decided_verdicts(snapshot.data)
+        await self._resume_decided_gates(snapshot.data, candidates)
+
+    async def _resume_decided_gates(
+        self, snapshot_data: object, candidates: list[str]
+    ) -> None:
+        """Resume each candidate parked at a gate the recovery snapshot shows decided.
+
+        Every decided proposal id (proposal + changeset) maps to its gate verdict,
+        so a run is matched by its CURRENT gate proposal alone. The verdict is
+        drawn from the changeset status OR - for a missed request_changes, which
+        leaves the changeset in draft - the resolved approval decision.
+        """
+        verdict_by_id = _decided_verdicts(snapshot_data)
         if not verdict_by_id:
             return
         for thread_id in candidates:
@@ -447,7 +440,10 @@ class VerdictSubscriber:
             return
         verdict_kind, notes = verdict
         correlated_ids = event.correlation_ids()
-        thread_id = await self._find_parked_thread(correlated_ids)
+        async with self._dependencies.session_factory() as db:
+            thread_id = await pending_document_approval_thread(
+                db, request_ids=correlated_ids
+            )
         if thread_id is None:
             logger.debug(
                 "No parked thread correlates to authoring ids %s (seq=%d)",
@@ -462,13 +458,13 @@ class VerdictSubscriber:
     # ------------------------------------------------------------------
 
     async def _handle_gap(self, client: AuthoringClient, gap: GapSignal) -> None:
-        """Reconcile terminal verdicts from the recovery snapshot after a gap.
+        """Run the parked-run reconcile over the recovery snapshot after a gap.
 
         The replay window was exceeded, so per-event resume is impossible for the
-        skipped range. The recovery snapshot lists current proposal statuses;
-        every proposal now in a terminal verdict state whose id correlates to a
-        still-parked run is resumed. The cursor then jumps to the engine's
-        high-water mark so live streaming continues from there.
+        skipped range. The recovery snapshot lists current proposal statuses, so
+        every run parked at a gate whose own proposal is now decided is resumed
+        with that verdict. The cursor then jumps to the engine's high-water mark
+        so live streaming continues from there.
         """
         logger.warning(
             "Authoring lifecycle gap: %s (latest_outbox_seq=%s)",
@@ -483,64 +479,15 @@ class VerdictSubscriber:
             logger.warning("Recovery snapshot fetch failed", exc_info=True)
             return
 
-        await self._reconcile_recovery(snapshot.data)
+        await self._resume_decided_gates(
+            snapshot.data, await self._parked_candidate_ids()
+        )
 
         high_water = gap.latest_outbox_seq
         if high_water is None:
             high_water = _recovery_high_water(snapshot.data)
         if high_water is not None:
             await self._advance_cursor(high_water)
-
-    async def _reconcile_recovery(self, snapshot_data: object) -> None:
-        """Resume parked runs for terminal-verdict proposals in a recovery snapshot.
-
-        Pure over the decoded snapshot payload: every proposal now in a terminal
-        verdict status whose id correlates to a still-parked run is resumed with
-        that verdict. Non-verdict statuses and uncorrelated proposals are skipped.
-        """
-        for proposal in _iter_recovery_proposals(snapshot_data):
-            verdict = changeset_status_verdict(proposal["status"])
-            if verdict is None:
-                continue
-            correlated_ids = set(proposal["ids"])
-            thread_id = await self._find_parked_thread(correlated_ids)
-            if thread_id is None:
-                continue
-            await self._resume_with_verdict(thread_id, verdict, None, correlated_ids)
-
-    # ------------------------------------------------------------------
-    # Correlation
-    # ------------------------------------------------------------------
-
-    async def _find_parked_thread(self, ids: set[str]) -> str | None:
-        """Return the parked thread whose recorded authoring ids intersect ``ids``.
-
-        Only ``INPUT_REQUIRED`` threads are candidates - a run parked at a gate
-        interrupt. Once resumed a run leaves that status, so a replayed verdict
-        finds no match and is a safe no-op.
-        """
-        if not ids:
-            return None
-        async with self._dependencies.session_factory() as db:
-            threads, _ = await list_threads(
-                db,
-                status=ThreadStatus.INPUT_REQUIRED,
-                limit=self._timing.parked_thread_limit,
-            )
-        for thread in threads:
-            state_ids = await self._thread_authoring_ids(thread.id)
-            if state_ids & ids:
-                return thread.id
-        return None
-
-    async def _thread_authoring_ids(self, thread_id: str) -> set[str]:
-        """Read a thread's authoring reference ids from its latest checkpoint."""
-        checkpoint = await read_latest_checkpoint(
-            self._dependencies.checkpointer,
-            thread_id,
-            timeout=self._timing.checkpoint_timeout_seconds,
-        )
-        return _checkpoint_authoring_ids(checkpoint.channel_values)
 
     # ------------------------------------------------------------------
     # Resume dispatch
@@ -577,8 +524,8 @@ class VerdictSubscriber:
                 )
                 return
 
-        # Gate-precision: the verdict must answer the gate the run is CURRENTLY
-        # parked at, not a superseded earlier gate matched by accumulated ids.
+        # Gate-precision: the verdict must answer the gate the run's checkpoint is
+        # CURRENTLY parked at, not a superseded earlier gate.
         current_gate = await self._thread_pending_gate_proposal(thread_id)
         if current_gate is None or current_gate not in correlated_ids:
             logger.debug(
@@ -624,11 +571,11 @@ class VerdictSubscriber:
         - **Gate-precision.** Resume only when the run's current
           ``gate_pending_proposal_id`` is among ``correlated_ids`` - the ids the
           caller matched the verdict on. A verdict for a SUPERSEDED gate (a late r1
-          request_changes arriving after the run already re-parked at r2, matched by
-          the run's ACCUMULATED authoring ids) has a current gate that is not in its
-          id set, so it is skipped rather than applied to the wrong gate's interrupt
-          - a stale resume that corrupts the checkpoint's interrupt lineage and
-          wedges the run at ``next_nodes=[]``.
+          request_changes arriving after the run's checkpoint already re-parked at
+          r2, before r2's pause row superseded r1's) has a current gate that is not
+          in its id set, so it is skipped rather than applied to the wrong gate's
+          interrupt - a stale resume that corrupts the checkpoint's interrupt
+          lineage and wedges the run at ``next_nodes=[]``.
         - **Durable lease before dispatch.** The shared control-action journal
           reserves the current gate's typed verdict and atomically elects one lease
           owner before dispatch. Identical fresh replays skip, competing verdict

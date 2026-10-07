@@ -30,7 +30,6 @@ a checksum, which would refuse for a reason having nothing to do with any number
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -38,6 +37,7 @@ import pytest
 
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN
 from .._catalog_fields import CatalogFieldReader, optional_description
+from .._team_selection_record import frozen_team_selection_from_record
 from ..provider_catalog import (
     MAX_CONTROLS,
     MAX_DISPLAY_LENGTH,
@@ -59,12 +59,11 @@ from ..provider_catalog import (
     StructuredProviderHealth,
 )
 from ..team_selection import (
+    FrozenLaneAssignment,
     FrozenNativeControl,
-    FrozenSelectedLane,
     TeamSelectionError,
-    _digest_record,
+    digest_record,
     freeze_team_selection,
-    frozen_team_selection_from_record,
 )
 
 _CHECKED = datetime(2099, 1, 1, tzinfo=UTC)
@@ -174,7 +173,7 @@ def test_a_full_complement_of_controls_survives_the_round_trip() -> None:
     _round_trip(_provider_record(control_count=MAX_CONTROLS))
 
 
-def _record_carrying(lane: FrozenSelectedLane) -> dict[str, Any]:
+def _record_carrying(lane: FrozenLaneAssignment) -> dict[str, Any]:
     """Return a persisted record for *lane* whose digest MATCHES its contents.
 
     Recomputing the digest with the production helper is what makes the refusal
@@ -187,7 +186,7 @@ def _record_carrying(lane: FrozenSelectedLane) -> dict[str, Any]:
     roles = ("coder",)
     return {
         "schema_version": 1,
-        "digest": _digest_record(
+        "digest": digest_record(
             selection=lane, overrides={}, fallbacks=(), roles=roles
         ),
         "selection": lane.to_record(),
@@ -197,7 +196,7 @@ def _record_carrying(lane: FrozenSelectedLane) -> dict[str, Any]:
     }
 
 
-def _legal_lane() -> FrozenSelectedLane:
+def _legal_lane() -> FrozenLaneAssignment:
     """Freeze one real selection and hand back its lane."""
     return freeze_team_selection(
         selection=_reference(),
@@ -210,7 +209,9 @@ def _legal_lane() -> FrozenSelectedLane:
 
 def test_a_display_name_one_character_past_the_bound_is_refused() -> None:
     """One character too many must be refused in this module's own dialect."""
-    lane = replace(_legal_lane(), model_display_name="m" * (MAX_DISPLAY_LENGTH + 1))
+    lane = _legal_lane().model_copy(
+        update={"model_display_name": "m" * (MAX_DISPLAY_LENGTH + 1)}
+    )
 
     with pytest.raises(TeamSelectionError):
         frozen_team_selection_from_record(_record_carrying(lane))
@@ -218,7 +219,7 @@ def test_a_display_name_one_character_past_the_bound_is_refused() -> None:
 
 def test_an_identity_value_one_character_past_the_bound_is_refused() -> None:
     """One character too many must be refused in this module's own dialect."""
-    lane = replace(_legal_lane(), provider_value="m" * (MAX_TEXT_LENGTH + 1))
+    lane = _legal_lane().model_copy(update={"model_name": "m" * (MAX_TEXT_LENGTH + 1)})
 
     with pytest.raises(TeamSelectionError):
         frozen_team_selection_from_record(_record_carrying(lane))
@@ -233,16 +234,17 @@ def test_one_control_past_the_bound_is_refused_before_the_contract_sees_it() -> 
     error the caller cannot act on, in place of a safe persisted-selection
     refusal - which is exactly the harm this agreement exists to prevent.
     """
-    lane = replace(
-        _legal_lane(),
-        controls=tuple(
-            FrozenNativeControl(
-                control_id=f"control-{index}",
-                option_id="low",
-                provider_value="low",
+    lane = _legal_lane().model_copy(
+        update={
+            "controls": tuple(
+                FrozenNativeControl(
+                    control_id=f"control-{index}",
+                    option_id="low",
+                    provider_value="low",
+                )
+                for index in range(MAX_CONTROLS + 1)
             )
-            for index in range(MAX_CONTROLS + 1)
-        ),
+        }
     )
 
     with pytest.raises(TeamSelectionError):

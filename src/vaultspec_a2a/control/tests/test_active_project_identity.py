@@ -32,7 +32,7 @@ from ...control._thread_metadata import dispatchable_workspace_root
 from ...control.config import settings
 from ...database.thread_repository import normalize_workspace_identity
 from ...ipc.schemas import DispatchRequest, canonical_project_root
-from ...providers.team_selection import model_assignment_digest
+from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...thread.errors import ConfigError
@@ -63,19 +63,21 @@ def _uncanonical_spelling(workspace: Path) -> str:
     return str(workspace.parent / "sibling" / ".." / workspace.name).replace("\\", "/")
 
 
-def _assignment(model_name: str) -> dict[str, dict[str, object]]:
+def _assignment(model_name: str) -> dict[str, FrozenLaneAssignment]:
     return {
-        "coder": {
-            "provider": "deterministic",
-            "execution_mode": "in-process-deterministic",
-            "catalog_revision": "revision",
-            "entry_id": "entry",
-            "model_name": model_name,
-            "controls": [],
-            "fallbacks": [],
-            "provenance": {"selection_source": "team_selection"},
-            "schema_version": 1,
-        }
+        "coder": FrozenLaneAssignment.model_validate(
+            {
+                "provider_id": "deterministic",
+                "execution_mode": "in-process-deterministic",
+                "catalog_revision": "revision",
+                "entry_id": "entry",
+                "model_name": model_name,
+                "controls": [],
+                "defaulted_control_ids": [],
+                "provenance": {"selection_source": "team_selection"},
+                "schema_version": 1,
+            }
+        )
     }
 
 
@@ -513,9 +515,9 @@ class TestOneWorkspaceOneGraphEntry:
         ) == ("preset", None, True, digest, definition_digest, "r")
 
     def test_model_assignment_identity_partitions_the_graph_cache(self) -> None:
-        first = model_assignment_digest({"coder": {"model_name": "first"}})
-        same = model_assignment_digest({"coder": {"model_name": "first"}})
-        other = model_assignment_digest({"coder": {"model_name": "second"}})
+        first = model_assignment_digest(_assignment("first"))
+        same = model_assignment_digest(_assignment("first"))
+        other = model_assignment_digest(_assignment("second"))
         definition_digest = _test_graph_definition_digest("preset")
 
         assert graph_cache_key(
@@ -741,7 +743,7 @@ class TestOneWorkspaceOneGraphEntry:
 
         manager = ControlledManager()
 
-        def request(assignment: dict[str, dict[str, object]]) -> DispatchRequest:
+        def request(assignment: dict[str, FrozenLaneAssignment]) -> DispatchRequest:
             return DispatchRequest(
                 action="ingest",
                 thread_id="run-race",

@@ -36,7 +36,7 @@ from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
-from ...providers.team_selection import model_assignment_digest
+from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_team_config
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import (
@@ -76,7 +76,7 @@ class _MultiroleFixture:
     thread_id: str
     checkpoint_path: str
     definition: FrozenGraphDefinition
-    model_assignment: dict[str, dict[str, Any]]
+    model_assignment: dict[str, FrozenLaneAssignment]
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ def _install_multirole_graph(
     executor: Executor,
     thread_id: str,
     definition: FrozenGraphDefinition,
-    model_assignment: dict[str, dict[str, Any]],
+    model_assignment: dict[str, FrozenLaneAssignment],
 ) -> None:
     """A real two-role graph: a coder then a reviewer, each attributing a message."""
 

@@ -26,9 +26,7 @@ def test_current_freeze_resolves_to_its_complete_canonical_compiler_map(
     assert authority.model_assignment_digest == model_assignment_digest(
         authority.model_assignment
     )
-    assert all(
-        lane["schema_version"] == 1 for lane in authority.model_assignment.values()
-    )
+    assert all(lane.schema_version == 1 for lane in authority.model_assignment.values())
 
 
 @pytest.mark.parametrize(

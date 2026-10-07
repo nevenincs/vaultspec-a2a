@@ -59,6 +59,8 @@ from ._catalog_authority import current_execution_metadata
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
+    from ...providers.team_selection import FrozenLaneAssignment
+
 _TEST_INTERNAL_TOKEN = "direct-control-recovery-test-token"
 
 
@@ -86,7 +88,7 @@ class _AcceptedCase:
 
 def _graph_authority(
     workspace: Path,
-) -> tuple[FrozenGraphDefinition, dict[str, dict[str, object]]]:
+) -> tuple[FrozenGraphDefinition, dict[str, FrozenLaneAssignment]]:
     definition = freeze_graph_definition(
         load_team_config("mock-success-single", workspace_root=workspace),
         workspace_root=workspace,

@@ -27,6 +27,7 @@ from ...database import create_thread
 from ...graph.compiler import compile_team_graph
 from ...graph.enums import AgentLifecycleState, Provider
 from ...providers.factory import ProviderFactory
+from ...providers.team_selection import FrozenLaneAssignment
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import enforce_progress_allowlist
 from ...team.team_config import (
@@ -69,18 +70,20 @@ def _deterministic_team() -> TeamConfig:
     )
 
 
-def _exact_assignment() -> dict[str, dict[str, object]]:
-    lane: dict[str, object] = {
-        "schema_version": 1,
-        "provider": "deterministic",
-        "execution_mode": "in-process-deterministic",
-        "catalog_revision": "test-revision",
-        "entry_id": "test-entry",
-        "model_name": "deterministic",
-        "controls": [],
-        "fallbacks": [],
-        "provenance": {"selection_source": "team_selection"},
-    }
+def _exact_assignment() -> dict[str, FrozenLaneAssignment]:
+    lane = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": "deterministic",
+            "execution_mode": "in-process-deterministic",
+            "catalog_revision": "test-revision",
+            "entry_id": "test-entry",
+            "model_name": "deterministic",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+        }
+    )
     return {_WORKER_ID: lane}
 
 

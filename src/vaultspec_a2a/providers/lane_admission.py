@@ -88,6 +88,7 @@ from typing import TYPE_CHECKING
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .binary_version import next_minor_version, parse_binary_version
+from .execution_modes import EXTERNAL_EXECUTION_MODES
 from .in_process_catalog import IN_PROCESS_EXECUTION_MODES
 from .provider_catalog import ProviderCatalogKey
 
@@ -218,12 +219,13 @@ PROVEN_TURN_LANES: Mapping[Provider, LaneProof] = MappingProxyType(
 
 # Catalog serving is execution-mode specific. A future transport for an
 # already-proven provider must not inherit another transport's evidence. Keep
-# this declaration literal and deny-by-default.
+# the admitted lanes literal and deny-by-default; only the mode's spelling comes
+# from the execution-mode vocabulary.
 PROVEN_CATALOG_TURN_LANES: Mapping[ProviderCatalogKey, LaneProof] = MappingProxyType(
     {
-        ProviderCatalogKey("codex", "codex-app-server"): PROVEN_TURN_LANES[
-            Provider.CODEX
-        ],
+        ProviderCatalogKey(
+            Provider.CODEX.value, EXTERNAL_EXECUTION_MODES[Provider.CODEX]
+        ): PROVEN_TURN_LANES[Provider.CODEX],
     }
 )
 

@@ -105,6 +105,7 @@ from .test_verdict_subscriber_live import (
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
+    from ...providers.team_selection import FrozenLaneAssignment
     from ...thread.state import TeamState
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
@@ -121,7 +122,7 @@ class _LiveVerdictResources:
     executor: Executor
     graph: RegisteredCompiledGraph
     definition: FrozenGraphDefinition
-    model_assignment: dict[str, dict[str, object]]
+    model_assignment: dict[str, FrozenLaneAssignment]
     metadata: str
 
 

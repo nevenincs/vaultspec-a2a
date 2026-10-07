@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.runtime import Runtime
 
+    from ..providers.team_selection import FrozenLaneAssignment
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.worker import WorkerNode
     from .protocols import (
@@ -145,7 +146,7 @@ class _TopologyOptional(TypedDict, total=False):
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
     authoring_binding_provider: AuthoringBindingProvider | None
-    frozen_assignment: dict[str, dict[str, Any]] | None
+    frozen_assignment: dict[str, FrozenLaneAssignment] | None
 
 
 class _TopologyOptions(_TopologyOptional):

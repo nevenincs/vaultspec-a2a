@@ -33,6 +33,7 @@ from ...providers.cli_resolution import (
 )
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
 from ...providers.factory import ProviderFactory
+from ...providers.team_selection import FrozenLaneAssignment, FrozenNativeControl
 from ...team.team_config import (
     TeamConfig,
     TeamGraphConfig,
@@ -51,7 +52,6 @@ from ...thread.errors import (
 from ...thread.state import TeamState
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
 from .._compiler_models import (
-    parse_catalog_preferences,
     resolve_model_for_worker,
     resolve_supervisor_model,
 )
@@ -207,28 +207,31 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
             return FakeListChatModel(responses=["ok"])
 
     factory = RuntimeFailingFactory()
-    lane: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": "codex",
-        "execution_mode": "codex-app-server",
-        "catalog_revision": "rev",
-        "entry_id": "primary",
-        "model_name": "primary",
-        "controls": [],
-        "provenance": {"selection_source": "team_selection"},
-        "fallbacks": [
-            {
-                "schema_version": 1,
-                "provider_id": "codex",
-                "execution_mode": "codex-app-server",
-                "catalog_revision": "rev",
-                "entry_id": "fallback",
-                "model_name": "fallback",
-                "controls": [],
-                "defaulted_control_ids": [],
-            }
-        ],
-    }
+    lane = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": "codex",
+            "execution_mode": "codex-app-server",
+            "catalog_revision": "rev",
+            "entry_id": "primary",
+            "model_name": "primary",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+            "fallbacks": [
+                {
+                    "schema_version": 1,
+                    "provider_id": "codex",
+                    "execution_mode": "codex-app-server",
+                    "catalog_revision": "rev",
+                    "entry_id": "fallback",
+                    "model_name": "fallback",
+                    "controls": [],
+                    "defaulted_control_ids": [],
+                }
+            ],
+        }
+    )
     _model, provider, model_name = resolve_model_for_worker(
         worker,
         agent,
@@ -260,17 +263,19 @@ def test_frozen_external_assignment_refuses_without_current_proof(
     team = load_team_config("vaultspec-solo-coder")
     worker = team.workers[0]
     agent = load_agent_config(worker.agent_id)
-    frozen: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": provider.value,
-        "execution_mode": execution_mode,
-        "catalog_revision": "frozen-revision",
-        "entry_id": "frozen-entry",
-        "model_name": "frozen-model",
-        "controls": [],
-        "provenance": {"selection_source": "team_selection"},
-        "fallbacks": [],
-    }
+    frozen = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": provider.value,
+            "execution_mode": execution_mode,
+            "catalog_revision": "frozen-revision",
+            "entry_id": "frozen-entry",
+            "model_name": "frozen-model",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+        }
+    )
 
     with pytest.raises(ValueError, match="All frozen provider lanes exhausted") as exc:
         resolve_model_for_worker(
@@ -289,17 +294,19 @@ def test_frozen_external_assignment_refuses_without_current_proof(
 
 
 def test_frozen_supervisor_refuses_without_current_proof() -> None:
-    frozen: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": Provider.CLAUDE.value,
-        "execution_mode": f"claude-agent-acp:{settings.acp_backend}",
-        "catalog_revision": "frozen-revision",
-        "entry_id": "frozen-entry",
-        "model_name": "frozen-model",
-        "controls": [],
-        "provenance": {"selection_source": "team_selection"},
-        "fallbacks": [],
-    }
+    frozen = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": Provider.CLAUDE.value,
+            "execution_mode": f"claude-agent-acp:{settings.acp_backend}",
+            "catalog_revision": "frozen-revision",
+            "entry_id": "frozen-entry",
+            "model_name": "frozen-model",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+        }
+    )
 
     with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
         resolve_supervisor_model(
@@ -325,28 +332,31 @@ def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() ->
             return FakeListChatModel(responses=["must not run"])
 
     factory = RecordingFactory()
-    lane: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": "codex",
-        "execution_mode": "codex-app-server",
-        "catalog_revision": "rev",
-        "entry_id": "primary",
-        "model_name": "primary",
-        "controls": [],
-        "provenance": {"selection_source": "team_selection"},
-        "fallbacks": [
-            {
-                "schema_version": 1,
-                "provider_id": "claude",
-                "execution_mode": "codex-app-server",
-                "catalog_revision": "rev",
-                "entry_id": "bad",
-                "model_name": "bad",
-                "controls": [],
-                "defaulted_control_ids": [],
-            }
-        ],
-    }
+    lane = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": "codex",
+            "execution_mode": "codex-app-server",
+            "catalog_revision": "rev",
+            "entry_id": "primary",
+            "model_name": "primary",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+            "fallbacks": [
+                {
+                    "schema_version": 1,
+                    "provider_id": "claude",
+                    "execution_mode": "codex-app-server",
+                    "catalog_revision": "rev",
+                    "entry_id": "bad",
+                    "model_name": "bad",
+                    "controls": [],
+                    "defaulted_control_ids": [],
+                }
+            ],
+        }
+    )
     with pytest.raises(ValueError, match="cannot execute mode"):
         resolve_model_for_worker(
             worker,
@@ -411,7 +421,10 @@ async def test_compile_prevalidates_all_roles_before_any_provider_contact(
     team = _pipeline_team()
     agents = {ref.agent_id: load_agent_config(ref.agent_id) for ref in team.workers}
     assignment = deterministic_model_assignment(team)
-    assignment[team.workers[-1].agent_id]["execution_mode"] = "codex-app-server"
+    last = team.workers[-1].agent_id
+    assignment[last] = assignment[last].model_copy(
+        update={"execution_mode": "codex-app-server"}
+    )
 
     class RecordingFactory:
         def __init__(self) -> None:
@@ -443,17 +456,21 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
     team = _pipeline_team()
     agents = {ref.agent_id: load_agent_config(ref.agent_id) for ref in team.workers}
     assignment = deterministic_model_assignment(team)
-    first = assignment[team.workers[0].agent_id]
+    first = team.workers[0].agent_id
+    unsupported = (
+        FrozenNativeControl(
+            control_id="unsupported", option_id="x", provider_value="x"
+        ),
+    )
     if location == "primary":
-        first["controls"] = [
-            {"control_id": "unsupported", "option_id": "x", "provider_value": "x"}
-        ]
+        assignment[first] = assignment[first].model_copy(
+            update={"controls": unsupported}
+        )
     elif location == "later_role":
-        assignment[team.workers[-1].agent_id]["controls"] = [
-            {"control_id": "unsupported", "option_id": "x", "provider_value": "x"}
-        ]
+        last = team.workers[-1].agent_id
+        assignment[last] = assignment[last].model_copy(update={"controls": unsupported})
     else:
-        first["fallbacks"] = [
+        duplicate_effort = FrozenLaneAssignment.model_validate(
             {
                 "schema_version": 1,
                 "provider_id": "codex",
@@ -475,7 +492,10 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
                 ],
                 "defaulted_control_ids": [],
             }
-        ]
+        )
+        assignment[first] = assignment[first].model_copy(
+            update={"fallbacks": (duplicate_effort,)}
+        )
 
     class RecordingFactory:
         def __init__(self) -> None:
@@ -1061,12 +1081,10 @@ async def test_compile_team_graph_does_not_set_recursion_limit(
 
 
 def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
-    from ...graph.enums import Provider
-
-    provider, model_name, execution_mode, controls = parse_catalog_preferences(
+    lane = FrozenLaneAssignment.model_validate(
         {
             "schema_version": 1,
-            "provider": "codex",
+            "provider_id": "codex",
             "execution_mode": "codex-app-server",
             "catalog_revision": "rev",
             "entry_id": "entry",
@@ -1078,14 +1096,14 @@ def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
                     "provider_value": "brief",
                 }
             ],
-            "fallbacks": [],
+            "defaulted_control_ids": [],
             "provenance": {"selection_source": "team_selection"},
         }
     )
-    assert provider == Provider.CODEX
-    assert model_name == "provider-model"
-    assert execution_mode == "codex-app-server"
-    assert controls == {"reasoning_effort:entry": "brief"}
+    assert lane.provider_id is Provider.CODEX
+    assert lane.model_name == "provider-model"
+    assert lane.execution_mode == "codex-app-server"
+    assert lane.native_controls() == {"reasoning_effort:entry": "brief"}
 
 
 # ---------------------------------------------------------------------------

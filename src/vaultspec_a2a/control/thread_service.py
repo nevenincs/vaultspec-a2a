@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.checkpoints import Checkpointer
+    from ..providers.team_selection import FrozenLaneAssignment
     from ..thread.actor_tokens import ActorTokenBundle
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
@@ -118,7 +119,7 @@ class ThreadCreationRequest:  # pylint: disable=too-many-instance-attributes
     workspace_root: Path
     actor_tokens: ActorTokenBundle | None = None
     # The exact served selection frozen at admission and threaded to the worker.
-    model_assignment: dict[str, dict[str, Any]] = field(default_factory=dict)
+    model_assignment: dict[str, FrozenLaneAssignment] = field(default_factory=dict)
     seed_transcript: list[SeedTranscriptMessage] = field(default_factory=list)
 
 

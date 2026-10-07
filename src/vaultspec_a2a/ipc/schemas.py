@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from pydantic import (
@@ -16,10 +16,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    field_validator,
     model_validator,
 )
 
+from ..providers.team_selection import ModelAssignment
 from ..thread.action_receipts import GraphActionReceipt
 from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
@@ -102,50 +102,6 @@ def canonical_project_root(value: str | os.PathLike[str]) -> str:
 # put an unminted spelling on a dispatch.
 ActiveProjectRoot = Annotated[str, AfterValidator(canonical_project_root)]
 
-_FALLBACK_FIELDS = frozenset(
-    {
-        "provider_id",
-        "execution_mode",
-        "catalog_revision",
-        "entry_id",
-        "model_name",
-        "controls",
-        "defaulted_control_ids",
-        "schema_version",
-    }
-)
-_FALLBACK_OPTIONAL_FIELDS = frozenset({"provider_display_name", "model_display_name"})
-_CONTROL_FIELDS = frozenset({"control_id", "option_id", "provider_value"})
-_CONTROL_OPTIONAL_FIELDS = frozenset({"display_name", "option_display_name"})
-
-
-def _validate_model_assignment_control(raw_selected: object) -> None:
-    if not isinstance(raw_selected, dict):
-        raise ValueError("model_assignment control has invalid fields")
-    selected = cast("dict[str, object]", raw_selected)
-    if not _CONTROL_FIELDS.issubset(selected) or (
-        set(selected) - _CONTROL_FIELDS - _CONTROL_OPTIONAL_FIELDS
-    ):
-        raise ValueError("model_assignment control has invalid fields")
-
-
-def _validate_model_assignment_candidate(
-    raw_candidate: object, *, fallback: bool
-) -> None:
-    if not isinstance(raw_candidate, dict):
-        raise ValueError("model_assignment fallback is invalid")
-    candidate = cast("dict[str, object]", raw_candidate)
-    if fallback and (
-        not _FALLBACK_FIELDS.issubset(candidate)
-        or set(candidate) - _FALLBACK_FIELDS - _FALLBACK_OPTIONAL_FIELDS
-    ):
-        raise ValueError("model_assignment fallback has invalid fields")
-    controls: object = candidate.get("controls")
-    if not isinstance(controls, list):
-        raise ValueError("model_assignment controls are invalid")
-    for raw_selected in cast("list[object]", controls):
-        _validate_model_assignment_control(raw_selected)
-
 
 class SeedTranscriptMessage(BaseModel):
     """A bounded conversation turn copied into a successor's first graph input."""
@@ -200,7 +156,7 @@ class DispatchRequest(BaseModel):
     validation_errors: list[str] = Field(default_factory=list)
     # The exact catalog selection frozen at admission. Compilation consumes this
     # verbatim and never re-resolves provider or model policy from presets.
-    model_assignment: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    model_assignment: ModelAssignment = Field(default_factory=dict)
     # Engine-provisioned per-role actor tokens forwarded from run-start.
     # The bundle's redacting repr keeps raw tokens out of any dispatch log line;
     # model_dump still emits them for the gateway->worker loopback transport. The
@@ -253,38 +209,6 @@ class DispatchRequest(BaseModel):
         if definition.team["id"] != self.team_preset:
             raise ValueError("accepted graph definition does not match the run preset")
         return definition
-
-    @field_validator("model_assignment")
-    @classmethod
-    def _closed_model_assignment(
-        cls, value: dict[str, dict[str, Any]]
-    ) -> dict[str, dict[str, Any]]:
-        primary = {
-            "provider",
-            "execution_mode",
-            "catalog_revision",
-            "entry_id",
-            "model_name",
-            "controls",
-            "fallbacks",
-            "provenance",
-            "schema_version",
-        }
-        for lane in value.values():
-            if set(lane) != primary:
-                raise ValueError("model_assignment lane has invalid fields")
-            provenance: object = lane.get("provenance")
-            if not isinstance(provenance, dict):
-                raise ValueError("model_assignment provenance has invalid fields")
-            if set(cast("dict[str, object]", provenance)) != {"selection_source"}:
-                raise ValueError("model_assignment provenance has invalid fields")
-            raw_fallbacks: object = lane.get("fallbacks") or []
-            if not isinstance(raw_fallbacks, list):
-                raise ValueError("model_assignment fallback is invalid")
-            candidates: list[object] = [lane, *cast("list[object]", raw_fallbacks)]
-            for index, raw_candidate in enumerate(candidates):
-                _validate_model_assignment_candidate(raw_candidate, fallback=index > 0)
-        return value
 
     @model_validator(mode="after")
     def _ingest_names_its_project(self) -> DispatchRequest:

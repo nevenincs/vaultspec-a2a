@@ -288,14 +288,14 @@ async def test_an_in_process_lane_is_selectable_freezable_and_constructible(
     )
 
     compiled = frozen.compiler_map()["mock-coder-success"]
-    assert compiled["provider"] == key.provider_id
-    assert compiled["execution_mode"] == key.execution_mode
-    assert compiled["model_name"] == entry.provider_value
+    assert compiled.provider_id.value == key.provider_id
+    assert compiled.execution_mode == key.execution_mode
+    assert compiled.model_name == entry.provider_value
 
     model = ProviderFactory().create(
-        Provider(compiled["provider"]),
-        model=compiled["model_name"],
-        execution_mode=compiled["execution_mode"],
+        compiled.provider_id,
+        model=compiled.model_name,
+        execution_mode=compiled.execution_mode,
     )
     assert isinstance(model, expected_model)
 

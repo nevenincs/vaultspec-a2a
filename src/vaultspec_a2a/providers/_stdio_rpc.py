@@ -24,7 +24,6 @@ tests; this module is where it would land.
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict, Unpack
 
@@ -35,6 +34,15 @@ from ._subprocess import kill_process_tree
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+__all__ = [
+    "MAX_OUTPUT_BYTES",
+    "OutputBudget",
+    "OutputBudgetLike",
+    "ProtocolErrorFactory",
+    "drain_stderr",
+    "read_response",
+]
 
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
@@ -88,20 +96,6 @@ class OutputBudget:
         self.consumed += size
         if self.consumed > self.limit:
             raise self.protocol_error("discovery output exceeds one MiB")
-
-
-async def cancel_task[T](task: asyncio.Task[T]) -> None:
-    """Cancel *task* and absorb the resulting cancellation.
-
-    Generic in the task's result because the drain tasks it reaps differ in what
-    they return - one accumulates the child's stderr, another discards it - and
-    that difference is irrelevant to cancelling: the result is never read on this
-    path. Pinning it to one concrete type is what pushed a third caller into
-    writing its own copy.
-    """
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
 
 
 async def drain_stderr(

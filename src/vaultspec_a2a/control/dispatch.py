@@ -192,7 +192,7 @@ async def dispatch_to_worker(
     # worker the circuit has shut out, and it still reports honestly on whether
     # the transport worked when it got there.
     admission: DispatchAdmission | None = None
-    if dispatch.action != "cancel":
+    if dispatch.requires_graph_receipt:
         admission = circuit_breaker.pre_dispatch()
         if admission is None:
             raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)

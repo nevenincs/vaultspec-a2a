@@ -167,6 +167,7 @@ from .session import get_session_factory as get_session_factory
 from .session import init_db as init_db
 from .session import inspect_sqlite_database as inspect_sqlite_database
 from .session import resolve_session_factory as resolve_session_factory
+from .session import retry_write_contention as retry_write_contention
 from .session import seat_sqlite_posture as seat_sqlite_posture
 from .session import verify_wal_mode as verify_wal_mode
 from .thread_repository import ActiveThreadProjection as ActiveThreadProjection
@@ -293,6 +294,7 @@ __all__ = [
     "reserve_control_action",
     "reset_permission_response_submission",
     "resolve_session_factory",
+    "retry_write_contention",
     "run_migrations",
     "save_model",
     "schedule_recovery_attempt",

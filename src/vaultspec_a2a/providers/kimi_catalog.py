@@ -33,8 +33,9 @@ from ._catalog_fields import (
     display_text,
     local_id,
 )
+from ._cleanup import cancel_owned_tasks
 from ._json_contract import JsonObject, JsonValue
-from ._stdio_rpc import OutputBudget, cancel_task
+from ._stdio_rpc import OutputBudget
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
     MAX_CAPABILITIES,
@@ -351,8 +352,14 @@ async def discover_kimi_catalog(
     cleanup_steps.extend(
         [
             ("kimi-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("kimi-catalog-stdout", lambda: cancel_task(stdout_task)),
-            ("kimi-catalog-stderr", lambda: cancel_task(stderr_task)),
+            (
+                "kimi-catalog-stdout",
+                lambda: cancel_owned_tasks((stdout_task,), reraise=True),
+            ),
+            (
+                "kimi-catalog-stderr",
+                lambda: cancel_owned_tasks((stderr_task,), reraise=True),
+            ),
         ]
     )
     return await finish_discovery(

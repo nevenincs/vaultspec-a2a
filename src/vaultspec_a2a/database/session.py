@@ -5,9 +5,10 @@ Provides backend-selectable ``create_async_engine`` wiring,
 initialisation through Alembic.
 """
 
+import asyncio
 import logging
 import sqlite3
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -15,6 +16,7 @@ from typing import Literal, cast
 from fastapi import Request
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -42,6 +44,7 @@ __all__ = [
     "init_db",
     "inspect_sqlite_database",
     "resolve_session_factory",
+    "retry_write_contention",
     "seat_sqlite_posture",
     "verify_wal_mode",
 ]
@@ -135,6 +138,55 @@ async def begin_write_transaction(session: AsyncSession) -> None:
         msg = "a write transaction must begin on a session with none open"
         raise RuntimeError(msg)
     await session.connection(execution_options={_SQLITE_BEGIN_MODE: "IMMEDIATE"})
+
+
+# One write's attempts under contention, and the base of the linear backoff
+# between them. ``busy_timeout`` already waits inside each attempt; these cover a
+# lock still held when that wait runs out.
+_WRITE_CONTENTION_ATTEMPTS = 4
+_WRITE_CONTENTION_BACKOFF_SECONDS = 0.05
+
+
+def _is_write_contention(exc: OperationalError) -> bool:
+    """Whether SQLite refused the statement because another writer holds a lock."""
+    return (
+        isinstance(exc.orig, sqlite3.OperationalError)
+        and "locked" in str(exc.orig).lower()
+    )
+
+
+async def retry_write_contention[T](
+    session: AsyncSession,
+    attempt: Callable[[], Awaitable[T]],
+    *,
+    after_rollback: Callable[[], Awaitable[T | None]] | None = None,
+) -> T:
+    """Run one write *attempt*, re-running it while SQLite refuses it as contended.
+
+    Each refusal rolls *session* back, so the next attempt opens a transaction of
+    its own and re-reads whatever it decides on. *after_rollback* runs after each
+    rollback and may settle the call with a result of its own instead of another
+    attempt: the durable winner of a race the refused attempt lost. An error that
+    is not write contention propagates at once, and the last refusal propagates
+    once the attempts are spent. Other dialects never match, so they never retry.
+    """
+    retries = 0
+    while True:
+        try:
+            return await attempt()
+        except OperationalError as exc:
+            if (
+                not _is_write_contention(exc)
+                or retries + 1 >= _WRITE_CONTENTION_ATTEMPTS
+            ):
+                raise
+        await session.rollback()
+        if after_rollback is not None:
+            settled = await after_rollback()
+            if settled is not None:
+                return settled
+        retries += 1
+        await asyncio.sleep(_WRITE_CONTENTION_BACKOFF_SECONDS * retries)
 
 
 def configure_sqlite_transactions(engine: AsyncEngine) -> None:

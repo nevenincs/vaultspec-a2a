@@ -1,6 +1,5 @@
 """Run start, preparation, lease commit, and release endpoints."""
 
-import asyncio
 import hmac
 import logging
 from dataclasses import dataclass
@@ -14,7 +13,7 @@ from fastapi import (
     Request,
 )
 from pydantic import ValidationError
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
@@ -42,6 +41,7 @@ from ...control.workspace import (
 )
 from ...database import (
     get_thread,
+    retry_write_contention,
 )
 from ...database.checkpoints import Checkpointer
 from ...database.models import ThreadModel
@@ -326,37 +326,33 @@ async def _attempt_thread_creation(
     request: ThreadCreationRequest,
     runtime: _RunRuntime,
 ) -> ThreadCreationResult | _RunWinner:
-    for attempt in range(4):
-        try:
-            return await create_and_dispatch_thread(
-                db,
-                request,
-                transport=DispatchTransport(
-                    worker_client=runtime.worker_client,
-                    circuit_breaker=runtime.circuit_breaker,
-                    worker_spawner=runtime.worker_spawner,
-                    trace_headers=trace_headers(),
-                ),
-            )
-        except OperationalError as exc:
-            if (
-                db.get_bind().dialect.name != "sqlite"
-                or "database is locked" not in str(exc).lower()
-                or attempt == 3
-            ):
-                raise
+    async def create() -> ThreadCreationResult | _RunWinner:
+        return await create_and_dispatch_thread(
+            db,
+            request,
+            transport=DispatchTransport(
+                worker_client=runtime.worker_client,
+                circuit_breaker=runtime.circuit_breaker,
+                worker_spawner=runtime.worker_spawner,
+                trace_headers=trace_headers(),
+            ),
+        )
+
+    async def durable_winner() -> _RunWinner | None:
+        # A contended start may have lost to a sibling that committed this run
+        # id; that run is the answer, and starting another would duplicate it.
+        winner = await get_thread(db, body.run_id)
+        if winner is None:
             await db.rollback()
-            winner = await get_thread(db, body.run_id)
-            if winner is not None:
-                return _RunWinner(
-                    winner.id,
-                    winner.status,
-                    winner.nickname,
-                    winner.thread_metadata,
-                )
-            await db.rollback()
-            await asyncio.sleep(0.05 * (attempt + 1))
-    raise RuntimeError("run admission retry exhausted without a result")
+            return None
+        return _RunWinner(
+            winner.id,
+            winner.status,
+            winner.nickname,
+            winner.thread_metadata,
+        )
+
+    return await retry_write_contention(db, create, after_rollback=durable_winner)
 
 
 async def _create_thread_with_retry(

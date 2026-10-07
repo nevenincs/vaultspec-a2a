@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 
 from ..team.team_config import AgentConfig, TeamConfig, load_agent_config
+from .action_receipts import canonical_json, sha256_hex
 from .constants import DEFAULT_SUPERVISOR_ID
 
 if TYPE_CHECKING:
@@ -86,10 +85,7 @@ class FrozenGraphDefinition(BaseModel):
         return supervisor
 
     def digest(self) -> str:
-        encoded = json.dumps(
-            self.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-        )
-        return hashlib.sha256(encoded.encode()).hexdigest()
+        return sha256_hex(canonical_json(self.model_dump(mode="json")).encode())
 
     @property
     def team_id(self) -> str:

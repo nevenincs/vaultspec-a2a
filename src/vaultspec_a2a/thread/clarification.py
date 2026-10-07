@@ -33,8 +33,6 @@ Two rules shape the design beyond the bounds:
 
 from __future__ import annotations
 
-import hashlib
-import json
 import unicodedata
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, cast
@@ -48,6 +46,7 @@ from pydantic import (
     model_validator,
 )
 
+from .action_receipts import canonical_json, sha256_fingerprint
 from .constants import MAX_REQUEST_ID_CHARS, MAX_RUN_MESSAGE_CHARS
 from .enums import InterruptType
 
@@ -430,13 +429,8 @@ def clarification_resolution_fingerprint(
     JSON form preserves the existing discriminator and request identity.  Prompt
     text is consumed here transiently and is not stored in the receipt.
     """
-    canonical = json.dumps(
-        resolution.as_resume_value(),
-        ensure_ascii=True,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+    canonical = canonical_json(resolution.as_resume_value()).encode("utf-8")
+    return sha256_fingerprint(canonical)
 
 
 def _normalized_clarification_answers(

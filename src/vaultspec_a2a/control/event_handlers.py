@@ -28,7 +28,7 @@ from ..thread import named_request_id
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ..thread.enums import TERMINAL_STATUS_VALUES, InterruptType, ThreadStatus
-from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ..thread.failure_evidence import GraphFailureEvidence
 from ..thread.idempotency import permission_request_action_key
 from ..thread.snapshots import (
     PERMISSION_REQUEST_EVENT_TYPES,
@@ -469,9 +469,10 @@ def _parse_failure_terminal(
         condition = ProviderCondition(raw_condition)
     except (TypeError, ValueError):
         return None
-    if (
-        evidence.detail_fingerprint != failure_detail_fingerprint(error_detail)
-        or evidence.provider_condition != condition.value
+    if not evidence.matches(
+        thread_id=thread_id,
+        error_detail=error_detail,
+        provider_condition=condition.value,
     ):
         logger.warning(
             "Refusing mismatched failure evidence for thread %s",

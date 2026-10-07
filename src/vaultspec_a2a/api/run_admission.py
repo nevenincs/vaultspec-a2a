@@ -30,13 +30,13 @@ different layer, so none can stand in for another:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import hmac
-import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
+
+from ..thread.action_receipts import canonical_json, sha256_hex
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -167,8 +167,7 @@ def _digest(body: RunStartRequest, excluded: frozenset[str]) -> str:
     if body.continues_run_id is None:
         omitted.add("continues_run_id")
     payload = body.model_dump(mode="json", exclude=omitted)
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return sha256_hex(canonical_json(payload).encode("utf-8"))
 
 
 def request_digest(body: RunStartRequest, *, prepared: bool) -> str:

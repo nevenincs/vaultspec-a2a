@@ -30,7 +30,7 @@ from ..thread.checkpoint_evidence import (
     read_checkpoint_evidence,
 )
 from ..thread.enums import TERMINAL_STATUSES, DegradedReason, ThreadStatus
-from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ..thread.failure_evidence import GraphFailureEvidence
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
@@ -344,20 +344,6 @@ def _validate_terminal_evidence_kind(
         raise ValueError("failed terminal requires failure evidence")
 
 
-def _failure_evidence_matches(
-    thread_id: str,
-    error_detail: str | None,
-    condition: ProviderCondition,
-    evidence: GraphFailureEvidence,
-) -> bool:
-    return bool(
-        error_detail
-        and evidence.action.thread_id == thread_id
-        and evidence.detail_fingerprint == failure_detail_fingerprint(error_detail)
-        and evidence.provider_condition == condition.value
-    )
-
-
 def _validated_terminal_evidence(
     thread_id: str,
     outcome: str,
@@ -371,8 +357,10 @@ def _validated_terminal_evidence(
     failure_evidence = evidence if isinstance(evidence, GraphFailureEvidence) else None
     _validate_terminal_evidence_kind(outcome, cancellation_evidence, failure_evidence)
     resolved_condition = provider_condition or ProviderCondition.UNKNOWN
-    if failure_evidence is not None and not _failure_evidence_matches(
-        thread_id, error_detail, resolved_condition, failure_evidence
+    if failure_evidence is not None and not failure_evidence.matches(
+        thread_id=thread_id,
+        error_detail=error_detail,
+        provider_condition=resolved_condition.value,
     ):
         raise ValueError("failure evidence does not match terminal payload")
     return cancellation_evidence, failure_evidence, resolved_condition

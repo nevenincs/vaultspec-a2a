@@ -25,7 +25,7 @@ nothing, and nothing would raise.
 
 from __future__ import annotations
 
-import hashlib
+from .action_receipts import sha256_hex
 
 __all__ = [
     "AUTHORING_VERDICT_KEY_PREFIX",
@@ -60,7 +60,7 @@ AUTHORING_VERDICT_KEY_PREFIX = "authoring-verdict:"
 
 def default_cancel_key(thread_id: str) -> str:
     """Derive a deterministic idempotency key for a cancel operation."""
-    return hashlib.sha256(f"{thread_id}:cancel".encode()).hexdigest()
+    return sha256_hex(f"{thread_id}:cancel".encode())
 
 
 def default_permission_response_key(request_id: str, option_id: str) -> str:
@@ -70,7 +70,7 @@ def default_permission_response_key(request_id: str, option_id: str) -> str:
     with the SAME option deduplicates while a genuine change of answer does not
     collide with the first.
     """
-    return hashlib.sha256(f"{request_id}:{option_id}".encode()).hexdigest()
+    return sha256_hex(f"{request_id}:{option_id}".encode())
 
 
 def thread_create_action_key(thread_id: str) -> str:

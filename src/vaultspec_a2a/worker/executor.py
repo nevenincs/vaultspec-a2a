@@ -27,6 +27,7 @@ from ..streaming.ingest import INGEST_DRAINED
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import operation_span
 from ..thread import PermissionAnswer
+from ..thread.action_receipts import receipt_channels
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from ..utils.logging import log_context
@@ -180,10 +181,7 @@ def _ingest_graph_input(
         req, is_first_ingest=preflight.is_first_ingest
     )
     graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
-    graph_input["graph_action_receipts"] = {
-        req.dispatch_id: receipt.model_dump(mode="json")
-    }
-    graph_input["active_graph_action_receipt"] = receipt.model_dump(mode="json")
+    graph_input.update(receipt_channels(receipt))
     return graph_input
 
 
@@ -207,8 +205,7 @@ def _resume_command(
     return Command(
         resume=_addressed_resume(req.option_id, admission),
         update={
-            "graph_action_receipts": {req.dispatch_id: receipt.model_dump(mode="json")},
-            "active_graph_action_receipt": receipt.model_dump(mode="json"),
+            **receipt_channels(receipt),
             "agent_descriptors": node_metadata_from_graph(graph),
             "graph_definition_digest": req.require_graph_definition().digest(),
             "model_assignment_digest": model_assignment_digest(req.model_assignment),

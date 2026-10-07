@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .action_receipts import GraphActionReceipt
+from .action_receipts import Fingerprint, GraphActionReceipt, sha256_fingerprint
 
-_Fingerprint = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+__all__ = ["GraphFailureEvidence", "failure_detail_fingerprint"]
+
 _Condition = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^\S+$")]
 
 
 def failure_detail_fingerprint(detail: str) -> str:
     """Bind terminal classification to the exact bounded failure detail."""
-    return f"sha256:{hashlib.sha256(detail.encode('utf-8')).hexdigest()}"
+    return sha256_fingerprint(detail.encode("utf-8"))
 
 
 class GraphFailureEvidence(BaseModel):
@@ -26,5 +26,16 @@ class GraphFailureEvidence(BaseModel):
     schema_version: Literal["graph-failure-v1"]
     action: GraphActionReceipt
     outcome: Literal["failed"]
-    detail_fingerprint: _Fingerprint
+    detail_fingerprint: Fingerprint
     provider_condition: _Condition
+
+    def matches(
+        self, *, thread_id: str, error_detail: str | None, provider_condition: str
+    ) -> bool:
+        """Return whether this evidence proves the failure a terminal reports."""
+        return bool(
+            error_detail
+            and self.action.thread_id == thread_id
+            and self.detail_fingerprint == failure_detail_fingerprint(error_detail)
+            and self.provider_condition == provider_condition
+        )

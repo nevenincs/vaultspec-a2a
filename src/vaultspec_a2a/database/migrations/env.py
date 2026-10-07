@@ -191,7 +191,7 @@ def _has_current_write_authority_structure(
     return (
         has_structure
         and write_authority_receipt_index_matches(inspector.get_indexes("threads"))
-        and write_authority_checks_match(checks, dialect=connection.dialect.name)
+        and write_authority_checks_match(checks)
     )
 
 

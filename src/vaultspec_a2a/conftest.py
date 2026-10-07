@@ -669,32 +669,6 @@ def live_engine(external_prerequisite: ExternalPrerequisiteRule) -> EngineEndpoi
     return endpoint
 
 
-@pytest_asyncio.fixture
-async def pooled_postgres_saver(
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> AsyncIterator[Any]:
-    """The production pooled PostgreSQL saver against the live server.
-
-    One home for the whole repository: every suite that proves something about
-    the PostgreSQL checkpoint backend opens it the way production does, over
-    the pool production builds, rather than each keeping its own copy of the
-    same eight lines.
-    """
-    external_prerequisite("postgres")
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-    from .database.checkpoints import postgres_checkpoint_pool
-
-    pool = postgres_checkpoint_pool(os.environ[POSTGRES_URL_ENV])
-    await pool.open(wait=True)
-    try:
-        saver = AsyncPostgresSaver(conn=pool)
-        await saver.setup()
-        yield saver
-    finally:
-        await pool.close()
-
-
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register the one channel a caller uses to guarantee a prerequisite."""
     parser.addoption(

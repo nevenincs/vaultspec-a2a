@@ -181,7 +181,7 @@ def select_orphaned_writer_thread() -> Select[tuple[str]]:
 
 
 def path_safe_run_id_clause() -> ColumnElement[bool]:
-    """Return the cross-dialect persisted run-id grammar predicate.
+    """Return the persisted run-id grammar predicate.
 
     The one canonical predicate for "is this durable id the shape the gateway's
     ``PathSafeRunId`` type admits" - public so a query outside this module can
@@ -473,10 +473,10 @@ def _active_thread_page_statement(
         .where(
             ThreadModel.is_active.is_(True),
             ThreadModel.status.in_(sorted(status.value for status in ACTIVE_STATUSES)),
-            # SQLAlchemy renders this portable operator as ``REGEXP`` on
-            # SQLite (whose dialect installs a Python regexp function) and
-            # ``~`` on PostgreSQL. Keep legacy invalid identifiers out of the
-            # bounded page in the database, before LIMIT is applied.
+            # SQLAlchemy renders this operator as ``REGEXP``, which the SQLite
+            # dialect backs with a Python regexp function. Keep legacy invalid
+            # identifiers out of the bounded page in the database, before LIMIT
+            # is applied.
             path_safe_run_id_clause(),
         )
         .order_by(ThreadModel.created_at.desc(), ThreadModel.id.desc())

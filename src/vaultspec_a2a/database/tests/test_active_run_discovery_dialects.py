@@ -1,12 +1,12 @@
-"""Cross-dialect SQL proof for bounded active-run discovery."""
+"""SQL proof for bounded active-run discovery."""
 
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.dialects import sqlite
 
 from ...database.thread_repository import _active_thread_page_statement
 
 
-def test_run_id_filter_compiles_for_sqlite_and_postgresql() -> None:
-    """The production predicate must use each supported dialect's regexp verb."""
+def test_run_id_filter_compiles_to_the_sqlite_regexp_verb() -> None:
+    """The production predicate must use SQLite's regexp verb."""
     statement = _active_thread_page_statement(
         limit=6,
         workspace_root="C:/workspace",
@@ -16,9 +16,6 @@ def test_run_id_filter_compiles_for_sqlite_and_postgresql() -> None:
     )
 
     sqlite_sql = str(statement.compile(dialect=sqlite.dialect()))
-    postgres_sql = str(statement.compile(dialect=postgresql.dialect()))
 
     assert "REGEXP" in sqlite_sql
     assert "GLOB" not in sqlite_sql
-    assert " ~ " in postgres_sql
-    assert "GLOB" not in postgres_sql

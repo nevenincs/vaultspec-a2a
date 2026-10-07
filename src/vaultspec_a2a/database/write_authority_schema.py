@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, cast
 
 from ..thread import RECEIPT_ID_MAX_LENGTH
@@ -75,7 +74,7 @@ WRITE_AUTHORITY_RECEIPT_INDEX = "ux_threads_writer_action_receipt_id"
 WRITE_AUTHORITY_RECEIPT_INDEX_COLUMNS = ("writer_action_receipt_id",)
 
 
-def normalize_schema_expression(expression: str, *, dialect: str = "sqlite") -> str:
+def normalize_schema_expression(expression: str) -> str:
     """Return a stable SQL predicate fingerprint without changing literals."""
     normalized: list[str] = []
     quoted = False
@@ -94,51 +93,24 @@ def normalize_schema_expression(expression: str, *, dialect: str = "sqlite") -> 
         elif character not in ' \t\r\n`"[]':
             normalized.append(character.lower())
         index += 1
-    result = "".join(normalized)
-    if dialect == "postgresql":
-        result = re.sub(
-            r"::(?:charactervarying|text)(?:\[\])?",
-            "",
-            result,
-        ).replace("btrim(", "trim(")
-        # PostgreSQL renders a reflected ``trim(x)`` as ``TRIM(BOTH FROM x)``,
-        # which the whitespace strip above leaves as ``trim(bothfrom``. Without
-        # this fold the receipt-id predicate never matches its own definition,
-        # and the migration guard then refuses every revision after the one
-        # that introduced write authority - on PostgreSQL only, and only for a
-        # store that already carries it, so a fresh database still reaches head
-        # and an existing one can never leave it. ``LEADING`` and ``TRAILING``
-        # are different predicates and are deliberately not folded in.
-        result = result.replace("trim(bothfrom", "trim(")
-        result = result.replace("=any", "in")
-        result = result.replace("[", "").replace("]", "")
-        result = result.replace("(", "").replace(")", "")
-        result = result.replace("inarray", "in")
-    return result
+    return "".join(normalized)
 
 
-def named_checks_match(
-    checks: Mapping[str, str],
-    required: Mapping[str, str],
-    *,
-    dialect: str = "sqlite",
-) -> bool:
+def named_checks_match(checks: Mapping[str, str], required: Mapping[str, str]) -> bool:
     """Return whether every required named CHECK has its exact current predicate."""
     normalized = {
-        name.lower(): normalize_schema_expression(predicate, dialect=dialect)
+        name.lower(): normalize_schema_expression(predicate)
         for name, predicate in checks.items()
     }
     return all(
-        normalized.get(name) == normalize_schema_expression(predicate, dialect=dialect)
+        normalized.get(name) == normalize_schema_expression(predicate)
         for name, predicate in required.items()
     )
 
 
-def write_authority_checks_match(
-    checks: Mapping[str, str], *, dialect: str = "sqlite"
-) -> bool:
+def write_authority_checks_match(checks: Mapping[str, str]) -> bool:
     """Return whether every write-authority CHECK has its exact current predicate."""
-    return named_checks_match(checks, WRITE_AUTHORITY_CHECKS, dialect=dialect)
+    return named_checks_match(checks, WRITE_AUTHORITY_CHECKS)
 
 
 def write_authority_receipt_index_matches(

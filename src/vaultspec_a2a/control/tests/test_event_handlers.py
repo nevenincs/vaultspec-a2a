@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
 from ...control._permission_response_contract import permission_response_action_key
 from ...control.accepted_input import freeze_accepted_input
@@ -53,6 +52,7 @@ from ...database.session import configure_sqlite_transactions
 from ...database.tests._backends import BACKENDS, migrated_session_factory
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
+from ...streaming.sse_frames import enforce_progress_allowlist
 from ...team.team_config import load_team_config
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -1491,14 +1491,16 @@ async def test_persisted_description_matches_what_the_stream_showed(
     """The durable row holds exactly what the operator was streamed.
 
     Two readers truncate the same worker-supplied text at different times: this
-    handler before writing the row, and the wire model when the frame is built.
-    A reload re-reads the row, so a stream permitted to carry more than the row
-    stores would show text live that vanishes on refresh - which is the bug the
-    shared bound exists to prevent, and the one a second declaration reopens.
+    handler before writing the row, and the stream catalog when the frame is
+    served. A reload re-reads the row, so a stream permitted to carry more than
+    the row stores would show text live that vanishes on refresh - which is the
+    bug the shared bound exists to prevent, and the one a second declaration
+    reopens.
 
-    Driven end to end against a real migrated SQLite database and the real wire
-    model, from a single pathological description, so the two truncations are
-    compared rather than each compared to a number written down twice.
+    Driven end to end against a real migrated SQLite database and the real
+    stream catalog, from a single pathological description, so the two
+    truncations are compared rather than each compared to a number written down
+    twice.
     """
     async with session_factory() as session:
         thread = await create_thread(
@@ -1528,17 +1530,19 @@ async def test_persisted_description_matches_what_the_stream_showed(
     async with session_factory() as session:
         stored = await get_permission_request(session, "bounded-description")
 
-    streamed = PermissionRequestEvent(
-        type=ServerEventType.PERMISSION_REQUEST,
-        thread_id=thread.id,
-        agent_id="agent-1",
-        timestamp=datetime.now(UTC),
-        sequence=1,
-        request_id="bounded-description",
-        description=oversize,
-        options=[],
+    streamed = enforce_progress_allowlist(
+        {
+            "type": ServerEventType.PERMISSION_REQUEST,
+            "thread_id": thread.id,
+            "agent_id": "agent-1",
+            "timestamp": datetime.now(UTC).timestamp(),
+            "sequence": 1,
+            "request_id": "bounded-description",
+            "description": oversize,
+            "options": [],
+        }
     )
 
     assert stored is not None
     assert len(stored.description) < len(oversize)
-    assert stored.description == streamed.description
+    assert stored.description == streamed["description"]

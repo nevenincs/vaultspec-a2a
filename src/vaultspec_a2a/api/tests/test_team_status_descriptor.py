@@ -17,18 +17,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+import httpx
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from ...control.config import settings
 from ...control.team_service import build_team_status
 from ...database import create_thread
 from ...graph.compiler import compile_team_graph
 from ...graph.enums import AgentLifecycleState, Provider
 from ...providers.factory import ProviderFactory
 from ...streaming.aggregator import EventAggregator
-from ...streaming.sse_frames import enforce_progress_allowlist
 from ...team.team_config import (
     TeamConfig,
     TopologyConfig,
@@ -38,9 +39,11 @@ from ...team.team_config import (
 )
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
-from ..event_adapter import domain_to_wire
-from ..schemas.events import TeamStatusEvent
-from .conftest import SessionFactory, make_app
+from ...thread.enums import ThreadStatus
+from ...worker.executor import Executor
+from ...worker.ipc import WorkerBridge
+from ._sse_reader import SseReader
+from .conftest import SessionFactory, _live_server, make_app, seed_run_with_status
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -183,16 +186,22 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
     assert agents[_WORKER_ID]["model_name"] == "deterministic"
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="function")
 async def test_team_status_broadcast_carries_the_resolved_assignment(
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
     graph_checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """The ``team_status`` broadcast carries the assignment through to the wire.
+    """The ``team_status`` frame a client reads carries the resolved assignment.
 
-    Drives the real emitter and the real ``domain_to_wire`` adapter, because the
-    event path builds ``AgentSummary`` from plain dicts rather than from the
-    descriptor and so could silently drop the fields the REST route now carries.
+    Drives the worker's own executor, its real bridge and the gateway's real
+    relay route over a socket, then reads the frame off the served stream. The
+    event path builds each agent entry from plain dicts rather than from the
+    descriptor, so it could silently drop the fields the REST route carries, and
+    the stream's closed field catalog drops anything it does not name - only the
+    frame as delivered shows that the fields survived both.
     """
+    thread_id = "thread-descriptor-broadcast"
     team = _deterministic_team()
     graph = compile_team_graph(
         team_config=team,
@@ -202,42 +211,52 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         model_assignment=_exact_assignment(),
         step_timeout=60.0,
     )
-    aggregator = EventAggregator()
-    thread_id = "thread-descriptor-broadcast"
-    aggregator.register_graph(thread_id, cast("StreamableGraph", graph))
-    queue = aggregator.add_subscriber("descriptor-client")
-    aggregator.subscribe("descriptor-client", [thread_id])
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    await seed_run_with_status(session_factory, thread_id, ThreadStatus.RUNNING)
 
-    # Only agent_id/node_name/state, exactly as the lifecycle emitter supplies
-    # them; the assignment must be merged in from the registered node metadata.
-    await aggregator.emit_team_status(
-        thread_id,
-        [
-            {
-                "agent_id": _WORKER_ID,
-                "node_name": _WORKER_ID,
-                "state": AgentLifecycleState.WORKING.value,
-            }
-        ],
-    )
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        bridge = WorkerBridge(
+            api_url=base,
+            worker_id="descriptor-worker",
+            internal_token=settings.internal_token,
+        )
+        executor = Executor(checkpointer=graph_checkpointer, bridge=bridge)
+        try:
+            executor.aggregator.register_graph(
+                thread_id, cast("StreamableGraph", graph)
+            )
+            async with client.stream("GET", f"/v1/runs/{thread_id}/stream") as response:
+                assert response.status_code == 200
+                reader = SseReader(response.aiter_bytes())
+                assert (await reader.next_frame()).type == "stream_snapshot"
 
-    sequenced = queue.get_nowait()
-    wire = domain_to_wire(sequenced.event, sequenced.sequence)
-    assert isinstance(wire, TeamStatusEvent)
-    summary = next(a for a in wire.agents if a.agent_id == _WORKER_ID)
-    assert summary.thread_id == thread_id
-    assert summary.provider is Provider.DETERMINISTIC
-    assert summary.model_name == "deterministic"
+                # Only agent_id/node_name/state, exactly as the lifecycle
+                # emitter supplies them; the assignment must be merged in from
+                # the registered node metadata.
+                await executor.aggregator.emit_team_status(
+                    thread_id,
+                    [
+                        {
+                            "agent_id": _WORKER_ID,
+                            "node_name": _WORKER_ID,
+                            "state": AgentLifecycleState.WORKING.value,
+                        }
+                    ],
+                )
+                assert await bridge.flush_events()
+                frame = (await reader.until("team_status"))[-1]
+        finally:
+            await executor.shutdown()
+            await bridge.close()
 
-    # The SSE catalog is a closed allowlist that drops anything it does not
-    # name, so the fields must survive that projection to reach a client.
-    payload = enforce_progress_allowlist(
-        {"type": "team_status", **wire.model_dump(mode="json")}
-    )
-    projected = cast("list[dict[str, str]]", payload["agents"])
-    assert projected[0]["thread_id"] == thread_id
-    assert projected[0]["provider"] == Provider.DETERMINISTIC.value
-    assert projected[0]["model_name"] == "deterministic"
+    assert frame.data["thread_id"] == thread_id
+    agents = cast("list[dict[str, str]]", frame.data["agents"])
+    summary = next(a for a in agents if a["agent_id"] == _WORKER_ID)
+    assert summary["provider"] == Provider.DETERMINISTIC.value
+    assert summary["model_name"] == "deterministic"
 
 
 @pytest.mark.asyncio

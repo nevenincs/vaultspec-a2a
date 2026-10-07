@@ -27,25 +27,23 @@ def test_sequenced_to_dict_includes_permission_event_type_fields() -> None:
     assert payload["sequence"] == 7
 
 
-def test_every_domain_event_subclass_is_mapped_by_both_catalogs() -> None:
-    """No worker event may fall through either wire catalog.
+def test_every_domain_event_subclass_is_mapped_by_the_relay_catalog() -> None:
+    """No worker event may fall through the relay's wire-type catalog.
 
-    The two catalogs enumerate the same eleven event classes in independent
-    ``match`` statements - `ipc/serializers.py` tags a wire-type string for the
-    IPC relay, `api/event_adapter.py` builds the streamed wire model - and
-    nothing statically ties them together. There is no closed union to exhaust:
-    ``DomainEvent`` is a base class, so a type checker cannot prove either match
-    complete. This test is the guarantee instead, and it is deliberately driven
-    off the SUBCLASS SET rather than a hand-written list, so a twelfth event
-    class cannot be added without appearing here.
+    ``ipc/serializers.py`` tags each of the eleven event classes with a wire-type
+    string for the IPC relay in one enumeration, and nothing statically ties it
+    to the event classes. There is no closed union to exhaust: ``DomainEvent`` is
+    a base class, so a type checker cannot prove the enumeration complete. This
+    test is the guarantee instead, and it is deliberately driven off the SUBCLASS
+    SET rather than a hand-written list, so a twelfth event class cannot be added
+    without appearing here.
 
-    The two catalogs also fail differently on a miss, and only one is safe. The
-    adapter raises. The relay returns ``None``, which its own docstring explains
+    A miss is silent. The relay returns ``None``, which its own docstring explains
     reaches subscribers "stripped of everything that made it meaningful, while
     the worker-side emission looks perfectly healthy" - and names the event this
     already shipped undeliverable once. A silent miss is exactly what an
     in-process test of the emitter cannot see, which is why the assertion lives
-    here, against the enumeration, rather than in either catalog's own suite.
+    here, against the enumeration, rather than in the emitter's own suite.
     """
     from ...graph import events as events_module
     from ...graph.events import DomainEvent

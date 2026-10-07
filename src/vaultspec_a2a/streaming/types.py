@@ -32,8 +32,8 @@ class SequencedEvent:
 
     The sequence is a wire-protocol concern and does not belong
     on the domain event itself.  This lightweight wrapper carries both values
-    through the subscriber queue so the API boundary can translate to wire
-    format via ``api.event_adapter.domain_to_wire()``.
+    through the subscriber queues and broadcast hooks so the worker's relay can
+    serialize the pair with ``ipc.serializers.sequenced_to_dict()``.
     """
 
     event: DomainEvent

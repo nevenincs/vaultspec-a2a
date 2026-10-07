@@ -30,7 +30,7 @@ from ..thread.constants import (
     MAX_RUN_MESSAGE_CHARS,
     MAX_SEED_TRANSCRIPT_MESSAGES,
 )
-from ..thread.enums import ControlActionType
+from ..thread.enums import ControlActionType, DegradedReason
 from ..thread.executable_graph import FrozenGraphDefinition
 
 __all__ = [
@@ -308,7 +308,7 @@ class ExecutionStateProjectionPayload(BaseModel):
     interrupt_count: int = 0
     task_count: int = 0
     tasks: list[ExecutionTaskProjectionPayload] = Field(default_factory=list)
-    degraded_reasons: list[str] = Field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

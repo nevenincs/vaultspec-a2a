@@ -24,7 +24,6 @@ from ..domain_config import domain_config
 from ..thread.enums import DegradedReason, RepairStatus, ThreadStatus
 from ..thread.snapshots import (
     ThreadStateData,
-    finalize_snapshot_replay_status,
     project_checkpoint_tuple,
     record_repair_posture,
 )
@@ -32,6 +31,7 @@ from .projection import (
     clear_permissions_without_checkpoint_truth,
     durable_approval,
     enrich_snapshot_from_execution_state,
+    finalize_snapshot_replay_status,
     mark_degraded,
 )
 

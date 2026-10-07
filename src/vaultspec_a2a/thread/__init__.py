@@ -78,9 +78,6 @@ if TYPE_CHECKING:
     from .snapshots import classify_message_role as classify_message_role
     from .snapshots import derive_message_id as derive_message_id
     from .snapshots import extract_message_timestamp as extract_message_timestamp
-    from .snapshots import (
-        finalize_snapshot_replay_status as finalize_snapshot_replay_status,
-    )
     from .snapshots import live_interrupts as live_interrupts
     from .snapshots import named_request_id as named_request_id
     from .snapshots import normalize_artifacts as normalize_artifacts
@@ -145,7 +142,6 @@ _LAZY_IMPORTS = {
     "classify_message_role": ".snapshots",
     "derive_message_id": ".snapshots",
     "extract_message_timestamp": ".snapshots",
-    "finalize_snapshot_replay_status": ".snapshots",
     "live_interrupts": ".snapshots",
     "named_request_id": ".snapshots",
     "normalize_artifacts": ".snapshots",
@@ -220,7 +216,6 @@ __all__ = [
     "classify_message_role",
     "derive_message_id",
     "extract_message_timestamp",
-    "finalize_snapshot_replay_status",
     "live_interrupts",
     "named_request_id",
     "normalize_artifacts",

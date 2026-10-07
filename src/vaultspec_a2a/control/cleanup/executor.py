@@ -3,18 +3,12 @@
 The deletion saga captures a durable manifest of cleanup work; this module
 turns that manifest into real store effects. It builds the manifest from a
 thread, and executes each item against the store it targets - the LangGraph
-checkpoint store, workspace files, or authoring replay journals.
+checkpoint store or the authoring replay journals.
 
-Two properties matter here and are enforced by construction:
-
-- **Containment.** An artifact file item is unlinked only when it resolves
-  inside the workspace root it was recorded against. Escaping paths (absolute
-  paths, parent traversals, symlinks pointing outside) are refused before any
-  unlink, so a delete can never remove a file the thread does not own.
-- **Independence.** Every item is executed and recorded on its own. One item's
-  failure is captured as that item's failure and never aborts, skips, or masks
-  the items after it, so a stuck checkpoint delete cannot leave artifact files
-  behind and a locked artifact cannot leave checkpoint state behind.
+Every item is executed and recorded on its own. One item's failure is captured
+as that item's failure and never aborts, skips, or masks the items after it, so
+a stuck checkpoint delete cannot leave replay state behind and a replay store
+that cannot be retired cannot leave checkpoint state behind.
 """
 
 from __future__ import annotations
@@ -30,7 +24,6 @@ from ...authoring._tool_calls import (
     tool_call_journal_directories,
 )
 from ...thread.enums import CleanupKind
-from .._thread_metadata import dispatchable_workspace_root
 from ..repositories import (
     CleanupItem,
     CleanupItemResult,
@@ -45,12 +38,13 @@ __all__ = [
     "build_cleanup_manifest",
     "execute_cleanup_item",
     "execute_cleanup_manifest",
-    "resolve_contained_artifact_path",
 ]
 
 logger = logging.getLogger(__name__)
 
 _MAX_DETAIL_LENGTH = 200
+
+_AUTHORING_REPLAY_KEY_PREFIX = "authoring-replay:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,54 +65,6 @@ def _short_detail(exc: BaseException) -> str:
     if len(detail) > _MAX_DETAIL_LENGTH:
         return detail[: _MAX_DETAIL_LENGTH - 1] + "…"
     return detail
-
-
-def _workspace_root_from_thread(thread: Any) -> pathlib.Path | None:
-    """Return the resolved, existing workspace root recorded on a thread.
-
-    The root is read from the thread's own metadata so containment is judged
-    against the checkout the thread declared, and only an existing directory is
-    returned so a stale or missing root refuses every artifact.
-
-    A RELATIVE stored root is refused rather than resolved: resolving one anchors
-    containment to whatever directory this process happens to be serving from, so
-    a stale root that happens to name an existing path there would go on to
-    decide which artifacts count as contained. That rule is not restated here,
-    nor is the reading of the column - the shared reader owns both, and asking it
-    is what keeps this pass agreeing with every other reader of the same bytes.
-
-    What this adds is its own, and stays: containment is judged against a
-    directory, and a root that no longer exists must refuse every artifact rather
-    than admit paths under a vanished tree.
-    """
-    workspace_root = dispatchable_workspace_root(
-        getattr(thread, "thread_metadata", None)
-    )
-    if workspace_root is None:
-        return None
-    resolved = pathlib.Path(workspace_root)
-    if not resolved.is_dir():
-        return None
-    return resolved
-
-
-def resolve_contained_artifact_path(
-    workspace_root: pathlib.Path,
-    path: str,
-) -> pathlib.Path | None:
-    """Resolve an artifact path against the root, or ``None`` if it escapes.
-
-    Resolution happens before the containment check, so a symlink is judged by
-    its target. An absolute path, a parent traversal, or a link pointing
-    outside the root each resolve outside it and are refused.
-    """
-    try:
-        target = (workspace_root / path).resolve()
-    except (OSError, ValueError):
-        return None
-    if not target.is_relative_to(workspace_root):
-        return None
-    return target
 
 
 def build_cleanup_manifest(
@@ -142,12 +88,12 @@ def build_cleanup_manifest(
         )
     for index, directory in enumerate(tool_call_journal_directories()):
         if os.path.lexists(directory):
-            # File-backed replay state uses the existing artifact cleanup kind;
-            # its key selects compaction rather than a workspace-file unlink.
+            # Replay journals are recorded under the artifact-file kind; the key
+            # prefix is what routes them to retirement at execution.
             items.append(
                 CleanupItem(
                     kind=CleanupKind.ARTIFACT_FILE,
-                    key=f"authoring-replay:{index}",
+                    key=f"{_AUTHORING_REPLAY_KEY_PREFIX}{index}",
                     target=thread.id,
                     root=str(directory),
                 )
@@ -179,28 +125,17 @@ async def _execute_checkpoint_item(
     return CleanupItemResult(item.key, CleanupItemState.DONE)
 
 
-def _execute_artifact_item(item: CleanupItem) -> CleanupItemResult:
-    if item.root is None:
-        return CleanupItemResult(
-            item.key,
-            CleanupItemState.FAILED,
-            detail="artifact cleanup item carries no workspace root",
-        )
+async def _execute_authoring_replay_item(item: CleanupItem) -> CleanupItemResult:
     try:
-        root = pathlib.Path(item.root).resolve()
-        target = pathlib.Path(item.target).resolve()
-        if not target.is_relative_to(root):
-            return CleanupItemResult(
-                item.key,
-                CleanupItemState.FAILED,
-                detail="artifact path escapes its workspace root",
-            )
-        # An already-removed file is a completed cleanup, not a failure: the
-        # unlink is idempotent so a resumed pass converges rather than stalls.
-        if target.is_file():
-            target.unlink()
-    except (OSError, ValueError) as exc:
-        logger.warning("Artifact cleanup failed for %s", item.target, exc_info=True)
+        if item.root is None:
+            raise ValueError("authoring replay cleanup has no store root")
+        await retire_run_tool_calls(item.target, directory=pathlib.Path(item.root))
+    except Exception as exc:
+        logger.warning(
+            "Authoring replay cleanup failed for thread %s",
+            item.target,
+            exc_info=True,
+        )
         return CleanupItemResult(
             item.key, CleanupItemState.FAILED, detail=_short_detail(exc)
         )
@@ -220,22 +155,16 @@ async def execute_cleanup_item(
     """
     if item.kind is CleanupKind.CHECKPOINT:
         return await _execute_checkpoint_item(item, checkpointer)
-    if item.key.startswith("authoring-replay:"):
-        try:
-            if item.root is None:
-                raise ValueError("authoring replay cleanup has no store root")
-            await retire_run_tool_calls(item.target, directory=pathlib.Path(item.root))
-        except Exception as exc:
-            logger.warning(
-                "Authoring replay cleanup failed for thread %s",
-                item.target,
-                exc_info=True,
-            )
-            return CleanupItemResult(
-                item.key, CleanupItemState.FAILED, detail=_short_detail(exc)
-            )
-        return CleanupItemResult(item.key, CleanupItemState.DONE)
-    return _execute_artifact_item(item)
+    if item.key.startswith(_AUTHORING_REPLAY_KEY_PREFIX):
+        return await _execute_authoring_replay_item(item)
+    # A durable manifest can outlive the builder that wrote it. An item with no
+    # store here fails on its own, so the saga's attempt ceiling retires it
+    # instead of the pass raising or acting on a target it cannot vouch for.
+    return CleanupItemResult(
+        item.key,
+        CleanupItemState.FAILED,
+        detail=f"no executor for cleanup kind {item.kind.value}",
+    )
 
 
 async def execute_cleanup_manifest(

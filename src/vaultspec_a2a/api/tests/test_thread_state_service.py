@@ -20,7 +20,6 @@ from ...database import (
 from ...database.models import (
     PermissionRequestModel,
     ThreadExecutionStateModel,
-    ThreadModel,
 )
 from ...graph.events import PermissionRequest
 from ...streaming.aggregator import EventAggregator
@@ -322,7 +321,6 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
                     thread_id="thread-corrupt-state",
                     checkpoint_id="cp-corrupt-state",
                     parent_checkpoint_id=None,
-                    recovery_epoch=0,
                     task_count=0,
                     interrupt_count=0,
                     next_nodes_json="{",
@@ -394,15 +392,11 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
                 repair_status="healthy",
                 execution_readiness="healthy",
             )
-            thread = await session.get(ThreadModel, "thread-stale-state")
-            assert thread is not None
-            thread.recovery_epoch = 3
             session.add(
                 ThreadExecutionStateModel(
                     thread_id="thread-stale-state",
-                    checkpoint_id="cp-fresh-state",
+                    checkpoint_id="cp-superseded-state",
                     parent_checkpoint_id=None,
-                    recovery_epoch=1,
                     task_count=1,
                     interrupt_count=0,
                     next_nodes_json='["worker"]',

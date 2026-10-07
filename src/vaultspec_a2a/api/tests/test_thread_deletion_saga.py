@@ -37,6 +37,7 @@ from ...database import (
     get_thread,
 )
 from ...database.models import ThreadDeletionSagaModel
+from ...testing import settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import CleanupKind
@@ -405,13 +406,16 @@ class TestDeletionSagaEndpoint:
     ) -> None:
         """Both stranded kinds are named, in the cleanup manifest's own order.
 
-        The artifact item here can never be cleaned: it was captured against a
-        workspace root its target does not sit under, so every pass refuses it
-        as an escaping path rather than removing a file the thread does not own.
-        Paired with a detached checkpoint store, the delete finalizes over two
-        different kinds of stranded state and has to name both.
+        The replay item here can never be cleaned: the production manifest
+        captures it against a store root that is a regular file rather than a
+        directory, so every pass refuses to retire it. Paired with a detached
+        checkpoint store, the delete finalizes over two different kinds of
+        stranded state and has to name both.
         """
         store = _detached_checkpoint_store(tmp_path / "detached_checkpoints.db")
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".vaultspec-authoring-calls").write_text("file", encoding="utf-8")
         app, _agg, _worker, _cp = make_app(session_factory, store)
 
         async def _seed() -> None:
@@ -421,28 +425,14 @@ class TestDeletionSagaEndpoint:
                     thread_id="t-both",
                     status="completed",
                 )
-                await create_deletion_saga(
-                    session,
-                    thread_id="t-both",
-                    manifest=[
-                        CleanupItem(
-                            kind=CleanupKind.CHECKPOINT,
-                            key="checkpoint",
-                            target="t-both",
-                        ),
-                        CleanupItem(
-                            kind=CleanupKind.ARTIFACT_FILE,
-                            key="artifact:gone",
-                            target="/elsewhere/out/report.md",
-                            root="/workspace",
-                        ),
-                    ],
-                )
                 await session.commit()
 
         asyncio.run(_seed())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
+        with (
+            settings_override(a2a_home=tmp_path / "state", workspace_root=workspace),
+            TestClient(app, raise_server_exceptions=True) as client,
+        ):
             responses = [client.delete("/v1/runs/t-both") for _ in range(3)]
 
         assert [resp.status_code for resp in responses] == [503, 503, 200]
@@ -452,5 +442,5 @@ class TestDeletionSagaEndpoint:
         ]
         # No filesystem path, ledger key, or failure detail reaches the caller.
         serialized = responses[-1].text
-        assert "elsewhere" not in serialized
-        assert "artifact:gone" not in serialized
+        assert workspace.as_posix() not in serialized
+        assert "authoring-replay" not in serialized

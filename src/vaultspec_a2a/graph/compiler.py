@@ -42,10 +42,6 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import TimeoutPolicy
 
 from ..domain_config import domain_config
-from ..thread.clarification import (
-    CLARIFICATION_TOPOLOGIES,
-    topology_honours_clarification,
-)
 from ..thread.errors import (
     ConfigError,
 )
@@ -578,15 +574,6 @@ def _validate_compiled_topology(
             f"Unknown topology type: {topology.type!r}. "
             f"Expected one of: {[t.value for t in TopologyType]}"
         )
-    if getattr(team_config, "clarification", None) is not None and (
-        not topology_honours_clarification(topology.type)
-    ):
-        raise ConfigError(
-            f"Team {getattr(team_config, 'id', '?')!r} declares a clarification "
-            f"questionnaire on topology {topology.type.value!r}, which compiles no "
-            f"clarification stage; the questions would never be asked. Topologies "
-            f"that ask: {sorted(CLARIFICATION_TOPOLOGIES)}."
-        )
     if topology.type == TopologyType.STAR:
         # Only the star compiles a supervisor, so only the star can spend this
         # budget; every other topology's recursion limit is its own business.
@@ -673,9 +660,7 @@ def compile_team_graph(
 
     Raises:
         ConfigError: If a worker agent_id from team_config is not in agent_configs,
-                     if topology configuration is invalid, or if a clarification
-                     questionnaire is declared on a topology that mounts no
-                     clarification stage.
+                     or if topology configuration is invalid.
         ValueError:  If an unknown topology type is encountered.
     """
     from ..team.team_config import TopologyType

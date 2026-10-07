@@ -17,11 +17,11 @@ from sqlalchemy.engine import make_url
 
 from ..control.accepted_input import AcceptedActionInput, restore_accepted_dispatch
 from ..testing import wait_for_run_status
-from ..testing.tests._support.payloads import json_object, json_object_list
+from ..testing.payloads import json_object, json_object_list
+from ..testing.sse import read_frames_until
 from ..thread.action_receipts import GraphActionReceipt
 from ._state import thread_state
 from .harness import build_service_stack
-from .test_stream_followup import _read_sse_frames
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -226,8 +226,10 @@ def _assert_queued_turn_runs_after_a_live_turn_with_one_terminal(
         stack.gateway_client(timeout=None) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as stream,
     ):
-        frames = _read_sse_frames(
-            stream, stop_when=lambda event: event.get("type") == "thread_terminal"
+        frames = read_frames_until(
+            stream.iter_lines(),
+            lambda event: event.get("type") == "thread_terminal",
+            timeout=120.0,
         )
     terminal_frames = [
         frame for frame in frames if frame.get("type") == "thread_terminal"

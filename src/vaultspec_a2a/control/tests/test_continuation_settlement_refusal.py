@@ -39,6 +39,7 @@ from ...database import (
 from ...database.session import close_db, get_session_factory, init_db
 from ...database.tests._backends import BACKENDS
 from ...ipc.schemas import DispatchRequest
+from ...testing.catalog_authority import current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.failure_evidence import (
@@ -53,7 +54,6 @@ from ..dispatch_receipts import prepare_graph_action_receipt
 from ..event_handlers import _handle_terminal_event
 from ..repositories import count_queued_continuations
 from ..worker_management import LazyWorkerSpawner
-from ._catalog_authority import current_execution_metadata
 from ._continuation import (
     FIRST_RECEIPT,
     PRESET,

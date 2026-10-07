@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 
 from ...providers.team_selection import model_assignment_digest
+from ...testing.catalog_authority import current_execution_metadata
 from ..execution_authority import (
     ExecutionAuthorityError,
     ExecutionAuthorityFailure,
     resolve_execution_authority,
 )
-from ._catalog_authority import current_execution_metadata
 
 
 def test_current_freeze_resolves_to_its_complete_canonical_compiler_map(

@@ -27,6 +27,7 @@ import pytest
 
 from ...database import get_thread
 from ...database.models import ControlActionModel
+from ...testing.catalog_authority import current_execution_metadata
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition
@@ -39,7 +40,6 @@ from ..recovery_authority import (
     reconcile_run_checkpoint,
 )
 from ..repositories import count_queued_continuations
-from ._catalog_authority import current_execution_metadata
 from ._continuation import RUN, BusyRun, busy_run_state, finish_turn, journal_action
 
 if TYPE_CHECKING:

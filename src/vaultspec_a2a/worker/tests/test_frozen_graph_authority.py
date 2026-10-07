@@ -9,9 +9,9 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
 from ...control.execution_authority import resolve_execution_authority
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing.catalog_authority import current_execution_metadata
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ..executor import Executor
 from ..graph_lifecycle import GraphCompilationError

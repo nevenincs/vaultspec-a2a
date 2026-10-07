@@ -70,11 +70,9 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
-from ..streaming.sse_frames import decode_sse_lines
 from ..team.team_config import load_team_config
 from ..testing import (
     NoSelectableLaneError,
@@ -85,12 +83,14 @@ from ..testing import (
     selection_from_served_catalog,
     wait_for_run_status,
 )
-from ..testing.tests._support.payloads import (
+from ..testing.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
+    text_list,
 )
+from ..testing.sse import read_frames_until
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -125,7 +125,6 @@ _WORKER_READY_BUDGET_SECONDS = "120"
 
 _PARK_BUDGET = 180.0
 _RESUME_BUDGET = 300.0
-_TEXT_LIST = TypeAdapter(list[str])
 type ContinuationOutcome = tuple[str, str, httpx.Response]
 
 
@@ -145,12 +144,7 @@ def _required_object(body: JsonObject, field: str, *, at: str) -> JsonObject:
 def _optional_text_list(body: JsonObject, field: str, *, at: str) -> list[str]:
     """Read an optional list of text values without accepting malformed options."""
     value = body.get(field)
-    if value is None:
-        return []
-    try:
-        return _TEXT_LIST.validate_python(value, strict=True)
-    except ValidationError as exc:
-        raise AssertionError(f"{at}.{field} was not a text list: {value!r}") from exc
+    return [] if value is None else text_list(value, at=f"{at}.{field}")
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +345,8 @@ def _await_resumed_past_fan_out(
     return json_object(advanced, at="run-status while awaiting resume")
 
 
-def _read_frame(lines: Iterable[str], *, wanted: str, deadline: float) -> JsonObject:
-    """Return the first SSE frame whose ``type`` matches, or raise at *deadline*.
+def _read_frame(lines: Iterable[str], *, wanted: str, timeout: float) -> JsonObject:
+    """Return the first SSE frame whose ``type`` matches, or raise after *timeout*.
 
     The failure message is deliberately specific about what has ALREADY been
     established by the time this runs: the park is asserted from ``run-status``
@@ -361,23 +355,18 @@ def _read_frame(lines: Iterable[str], *, wanted: str, deadline: float) -> JsonOb
     the park - an emission or relay gap, which is a product defect rather than a
     timing artefact of this test.
     """
-    seen: list[str] = []
-    for event in decode_sse_lines(lines):
-        decoded: object = json.loads(event.data)
-        payload = json_object(decoded, at="clarification SSE frame")
-        kind = str(payload.get("type") or payload.get("event_type") or "<untyped>")
-        if kind not in seen:
-            seen.append(kind)
-        if payload.get("type") == wanted:
-            return payload
-        if time.monotonic() > deadline:
-            break
-    raise AssertionError(
-        f"no {wanted!r} frame reached a subscriber attached BEFORE the park, "
-        f"though run-status has already confirmed the run parked. This is an "
-        f"emission or relay gap, not a missed park and not a subscribe race. "
-        f"Frame types actually seen on the stream: {seen or ['<none>']}"
-    )
+    try:
+        frames = read_frames_until(
+            lines, lambda frame: frame.get("type") == wanted, timeout=timeout
+        )
+    except AssertionError as exc:
+        raise AssertionError(
+            f"no {wanted!r} frame reached a subscriber attached BEFORE the park, "
+            "though run-status has already confirmed the run parked. This is an "
+            "emission or relay gap, not a missed park and not a subscribe race. "
+            f"{exc}"
+        ) from exc
+    return frames[-1]
 
 
 def _served_catalog(gateway: CertifiedGateway) -> JsonObject:
@@ -659,7 +648,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
             frame = _read_frame(
                 response.iter_lines(),
                 wanted="clarification_pending",
-                deadline=time.monotonic() + 90.0,
+                timeout=90.0,
             )
 
         assert frame["thread_id"] == run_id

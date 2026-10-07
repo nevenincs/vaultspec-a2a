@@ -22,11 +22,11 @@ from ...database import (
     record_permission_request,
 )
 from ...database.models import Base
+from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 from ...thread.idempotency import permission_response_action_key
-from ._catalog_authority import current_execution_metadata
 from .test_dispatch_failure_transitions import _seed_accepted_initial_action
 
 if TYPE_CHECKING:

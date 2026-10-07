@@ -57,8 +57,8 @@ import pytest
 from ..api.schemas.gateway import ProviderCatalogSelection
 from ..providers.conditions import ProviderCondition
 from ..testing import wait_for_run_status_async
+from ..testing.acceptance import GATEWAY_AUTH_HEADERS
 from ..testing.endpoints import resolve_gateway_url
-from .test_pw7_acceptance import _GATEWAY_AUTH_HEADERS
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
@@ -238,7 +238,7 @@ async def test_a_real_provider_refusal_reaches_run_status_as_a_typed_condition(
 
     run_id = f"provider-condition-{uuid.uuid4().hex[:12]}"
 
-    async with httpx.AsyncClient(headers=_GATEWAY_AUTH_HEADERS) as hc:
+    async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
         catalog_resp = await hc.get(
             f"{gateway_url}/v1/provider-catalog",
             params={"workspace_root": workspace_root},

@@ -67,13 +67,13 @@ from ...database import (
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing.catalog_authority import current_execution_metadata
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import authoring_verdict_action_key, thread_create_action_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
-from ._catalog_authority import current_execution_metadata
 
 _TEST_INTERNAL_TOKEN = "verdict-subscriber-test-token"
 

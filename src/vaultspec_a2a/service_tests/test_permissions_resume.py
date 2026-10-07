@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..testing import wait_for_run_status
-from ..testing.tests._support.payloads import (
+from ..testing.payloads import (
     json_object,
     json_object_list,
     required_bool,

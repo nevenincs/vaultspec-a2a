@@ -32,6 +32,7 @@ from ...database.session import configure_sqlite_transactions
 from ...database.thread_repository import ThreadStatusElectionOutcome
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing.catalog_authority import current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import (
     ControlActionResultStatus,
@@ -55,7 +56,6 @@ from ..dispatch_receipts import prepare_graph_action_receipt
 from ..execution_authority import resolve_execution_authority
 from ..recovery import seed_recovery_attempts
 from ..worker_management import LazyWorkerSpawner
-from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator

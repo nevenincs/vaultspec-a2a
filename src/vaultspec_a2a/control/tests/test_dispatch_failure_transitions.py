@@ -49,6 +49,7 @@ from ...ipc.schemas import DispatchRequest
 from ...providers.conditions import ProviderCondition
 from ...team.team_config import load_team_config
 from ...testing import session_scratch_dir
+from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
@@ -58,7 +59,6 @@ from ...thread.idempotency import thread_create_action_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
-from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator

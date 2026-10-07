@@ -15,7 +15,6 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...conftest import materialize_schema
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...control.tests.test_dispatch_failure_transitions import (
     _seed_accepted_initial_action,
 )
@@ -30,6 +29,7 @@ from ...database.permission_repository import (
     get_or_create_control_action,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
+from ...testing.catalog_authority import current_execution_metadata
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType

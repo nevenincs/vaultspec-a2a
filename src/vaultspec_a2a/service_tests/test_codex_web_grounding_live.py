@@ -95,7 +95,7 @@ from ..providers._subprocess import spawn_acp_process
 from ..providers.codex_chat_model import CodexChatModel
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import is_web_lane_proven
-from ..testing.tests._support.json_contract import json_list, json_text
+from ..testing.payloads import json_list, json_text
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 

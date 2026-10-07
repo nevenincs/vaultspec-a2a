@@ -8,8 +8,8 @@ document's body as a disclosed source. A surfaced tool name, an allowlist entry,
 parsed config, or a model saying it searched are none of them retrievals, and this
 module is deliberately unable to pass on any of them.
 
-Not a second driver. It reuses the standing pw7 acceptance harness exactly as the
-floor and semantic proofs do (``test_tool_cores_floor_live``): ``_reachable_stack``
+Not a second driver. It reuses the shared acceptance harness exactly as the floor
+and semantic proofs do (``vaultspec_a2a.testing.acceptance``): ``reachable_stack``
 for the infra gate, ``AcceptanceHarness`` for token minting and run-start against
 the live ``vaultspec-adr-research`` preset. What it adds is the retrieval evidence
 and a NON-materializing observation - the run is watched only until that evidence
@@ -80,16 +80,18 @@ from ..graph.nodes.diverge import WEB_LOCATOR_KIND
 from ..providers._json_contract import JsonObject
 from ..providers.conditions import ProviderCondition, condition_from_acp_error
 from ..team.team_config import load_team_config
-from ..testing.tests._support.payloads import json_object, json_object_list
-from .test_pw7_acceptance import (
-    _GATEWAY_AUTH_HEADERS,
-    _MODE_MANUAL,
-    _PRESET_LIVE,
+from ..testing.acceptance import (
+    GATEWAY_AUTH_HEADERS,
+    MODE_MANUAL,
+    PRESET_LIVE,
     AcceptanceCase,
     AcceptanceHarness,
-    _reachable_stack,
+    ResilientAuthoringClient,
+    reachable_stack,
+    snapshot_vault,
+    vault_write_delta,
 )
-from .test_tool_cores_floor_live import _snapshot_vault, _vault_write_delta
+from ..testing.payloads import json_object, json_object_list
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -219,7 +221,7 @@ def _web_grounding_case(feature: str) -> AcceptanceCase:
     """
     return AcceptanceCase(
         label="tool-cores-web-grounding-live",
-        preset=_PRESET_LIVE,
+        preset=PRESET_LIVE,
         feature=feature,
         prompt=(
             "Research the current release activity of the LangGraph project, and "
@@ -235,7 +237,7 @@ def _web_grounding_case(feature: str) -> AcceptanceCase:
             "URL retrieved as a bare URL with its retrieval date. A claim you did "
             "not retrieve must be presented as recall, never as a retrieved fact."
         ),
-        roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
+        roles=tuple(required_role_ids(load_team_config(PRESET_LIVE))),
         expected_doc_kinds=(),
         autonomous=True,
     )
@@ -396,26 +398,24 @@ async def _observe_web_grounding_run(
     failure_reason = ""
     failure_condition = ""
 
-    from .test_pw7_acceptance import _ResilientAuthoringClient
-
-    async with _ResilientAuthoringClient(
+    async with ResilientAuthoringClient(
         harness.engine_base_url, harness.engine_bearer
     ) as ec:
         run_tokens = {
-            role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
+            role: await harness.mint(ec, f"agent:{harness.run_id}:{role}", "agent")
             for role in case.roles
         }
-        reviewer_human = await harness._mint(ec, f"rev-human:{harness.run_id}", "human")
+        reviewer_human = await harness.mint(ec, f"rev-human:{harness.run_id}", "human")
         # Manual mode is the zero-writes guarantee at its source: a queued proposal
         # waits for a human verdict this test never gives, so nothing can apply even
         # if the observation loop were to overrun its deadline.
-        await harness._set_mode(ec, _MODE_MANUAL, setter_token=reviewer_human)
+        await harness.set_mode(ec, MODE_MANUAL, setter_token=reviewer_human)
 
         # The gateway fails closed on every /v1/ route unless the caller presents
         # the service-discovery bearer the booting shell configured it with; an
         # unauthenticated client degrades to a truthful 401 rather than a run.
-        async with httpx.AsyncClient(headers=_GATEWAY_AUTH_HEADERS) as hc:
-            await harness._run_start(
+        async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
+            await harness.run_start(
                 hc,
                 run_id=harness.run_id,
                 tokens=run_tokens,
@@ -434,7 +434,7 @@ async def _observe_web_grounding_run(
                     evidence = await _read_evidence(harness.run_id)
                     if evidence.complete:
                         break
-                    status = await harness._run_status(hc)
+                    status = await harness.run_status(hc)
                     if status.get("status") in {"failed", "cancelled"}:
                         # Both are read from run-status rather than from the relay:
                         # the frame carrying the condition is droppable, and this
@@ -475,7 +475,7 @@ def _assert_web_grounding_evidence(
         if _is_provider_rate_refusal(observation.failure_condition):
             external_prerequisite.absent(
                 "provider-capacity",
-                f"the {_PRESET_LIVE!r} lane's provider refused the run for rate "
+                f"the {PRESET_LIVE!r} lane's provider refused the run for rate "
                 "before the evidence landed (condition "
                 f"{observation.failure_condition!r}): "
                 f"{observation.failure_reason}. This lane cannot say whether a "
@@ -493,8 +493,8 @@ def _assert_web_grounding_evidence(
     shas_after = _fetch_live_commit_shas()
     live_shas = observation.shas_before | shas_after
 
-    after = _snapshot_vault(harness.vault_root)
-    delta = _vault_write_delta(observation.before, after)
+    after = snapshot_vault(harness.vault_root)
+    delta = vault_write_delta(observation.before, after)
 
     locator_urls = observation.evidence.locator_urls
     body = observation.evidence.body
@@ -574,7 +574,7 @@ async def test_claude_lane_completes_a_real_web_retrieval(
     nothing ever applied, and a before / after snapshot of the engine workspace
     asserts no document changed.
     """
-    stack = _reachable_stack()
+    stack = reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
@@ -598,7 +598,7 @@ async def test_claude_lane_completes_a_real_web_retrieval(
         gateway_url=gateway_url,
     )
 
-    before = _snapshot_vault(vault_root)
+    before = snapshot_vault(vault_root)
     evidence, failure_reason, failure_condition = await _observe_web_grounding_run(
         harness, case, feature
     )
@@ -627,7 +627,7 @@ def test_proof_case_pins_the_url_the_token_and_the_sources_obligation() -> None:
     case = _web_grounding_case("tool-cores-web-guard")
     assert PROOF_URL in case.prompt
     assert "Sources" in case.prompt
-    assert case.preset == _PRESET_LIVE
+    assert case.preset == PRESET_LIVE
     assert case.autonomous is True
     assert case.gate_policy == {}
     assert case.expected_doc_kinds == ()

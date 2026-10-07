@@ -24,7 +24,6 @@ from ...control._worker_health import WorkerLiveness
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...database import (
     create_control_action,
     create_thread,
@@ -37,6 +36,7 @@ from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...testing.catalog_authority import current_execution_metadata
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphCompletionReceipt

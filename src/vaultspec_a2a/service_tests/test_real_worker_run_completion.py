@@ -62,7 +62,7 @@ from ..acceptance.tests._harness import (
     certified_gateway,
 )
 from ..testing import ok_body, wait_for_run_status
-from ..testing.tests._support.payloads import json_object, json_object_list
+from ..testing.payloads import json_object, json_object_list
 from ._net import TAPE_SERVER_ENV, tape_server_base
 
 if TYPE_CHECKING:

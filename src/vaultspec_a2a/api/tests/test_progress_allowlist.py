@@ -28,12 +28,17 @@ from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
 from ...testing import read_frame
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
-from .conftest import AppFixture, SessionFactory, _live_server, make_app
+from .conftest import (
+    SEATED_ATTACH_TOKEN,
+    AppFixture,
+    SessionFactory,
+    _live_server,
+    make_app,
+)
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-_SERVICE_TOKEN = "discovery-service-token"
 _ARTIFACT_BODY = "SECRET-ARTIFACT-BODY-8f21c9"
 _DIFF_BODY = "SECRET-EDIT-DIFF-3a7be1"
 _METADATA_BODY = "SECRET-METADATA-VALUE-19dd73"
@@ -45,11 +50,8 @@ def _secured(
     checkpointer: AsyncSqliteSaver,
     aggregator: EventAggregator,
 ) -> AppFixture:
-    """Build the real gateway fixture with its production bearer armed."""
-    app, agg, worker, cp = make_app(session_factory, checkpointer, aggregator)
-    app.state.v1_service_token = _SERVICE_TOKEN
-    app.state.allow_unauthenticated_v1_for_testing = False
-    return app, agg, worker, cp
+    """Build the real gateway fixture; every caller presents its own bearer."""
+    return make_app(session_factory, checkpointer, aggregator, stamp_credentials=False)
 
 
 async def _seed_running_run(session_factory: SessionFactory) -> str:
@@ -101,7 +103,7 @@ async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -148,7 +150,7 @@ async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -202,7 +204,7 @@ async def test_authenticated_stream_bounds_the_token_delta(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -252,7 +254,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -338,7 +340,7 @@ async def test_authenticated_stream_degrades_an_uncatalogued_frame(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -383,7 +385,7 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -433,7 +435,7 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client,
     ):
         refused = await client.get(f"/v1/runs/{run_id}/stream")
@@ -464,7 +466,7 @@ async def test_global_stream_quota_admits_the_authenticated_caller_below_capacit
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):

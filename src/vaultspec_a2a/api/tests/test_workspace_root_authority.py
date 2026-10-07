@@ -17,12 +17,10 @@ from ...testing import async_catalog_run_fields, settings_override
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..routes._gateway_run_start import _require_settled_predecessor
-from .conftest import make_app
+from .conftest import SEATED_ATTACH_TOKEN, make_app
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_TOKEN = "workspace-authority-token-0123456789abcdef"
 
 
 @pytest.mark.asyncio
@@ -62,9 +60,9 @@ async def test_saved_project_aliases_remain_valid_for_successors(
 
 
 def _secured_app(session_factory: Any, checkpointer: Any) -> Any:
-    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
-    app.state.v1_service_token = _TOKEN
-    app.state.allow_unauthenticated_v1_for_testing = False
+    app, _aggregator, _worker, _checkpointer = make_app(
+        session_factory, checkpointer, stamp_credentials=False
+    )
     return app
 
 
@@ -134,7 +132,7 @@ async def test_workspace_query_routes_refuse_invalid_roots(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {_TOKEN}"},
+        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
     ) as client:
         response = await client.get(route, params={"workspace_root": invalid})
 
@@ -153,7 +151,7 @@ async def test_authenticated_caller_can_select_an_arbitrary_existing_root(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {_TOKEN}"},
+        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
     ) as client:
         catalog = await client.get(
             "/v1/provider-catalog", params={"workspace_root": str(workspace)}
@@ -199,7 +197,7 @@ async def test_configured_unarmed_profile_confines_every_workspace_route(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {_TOKEN}"},
+        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
     ) as client:
         for route in ("/v1/provider-catalog", "/v1/presets", "/v1/runs"):
             admitted = await client.get(
@@ -277,7 +275,7 @@ async def test_armed_desktop_confines_queries_and_run_admission(
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://gateway.test",
-            headers={"Authorization": f"Bearer {_TOKEN}"},
+            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client:
             for route in ("/v1/provider-catalog", "/v1/presets", "/v1/runs"):
                 allowed = await client.get(
@@ -342,7 +340,7 @@ async def test_configured_profile_refuses_symlink_escape(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {_TOKEN}"},
+        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
     ) as client:
         fields = await async_catalog_run_fields(client, workspace_root=str(managed))
         response = await client.get(

@@ -35,7 +35,6 @@ def _make_app():
     app = create_app(lifespan=_noop_lifespan)
     app.state.v1_service_token = _ATTACH
     app.state.lifecycle_capability = _CAPABILITY
-    app.state.allow_unauthenticated_v1_for_testing = False
     return app
 
 

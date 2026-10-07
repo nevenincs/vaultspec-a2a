@@ -57,7 +57,6 @@ def _gated_app() -> FastAPI:
 
     app = create_app(lifespan=_noop_lifespan)
     app.state.v1_service_token = _TOKEN
-    app.state.allow_unauthenticated_v1_for_testing = False
     return app
 
 

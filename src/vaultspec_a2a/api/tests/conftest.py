@@ -47,9 +47,13 @@ from ...providers.in_process_catalog import served_in_process_lanes
 from ...streaming.aggregator import EventAggregator
 from ...tests._write_authority import make_test_write_authority
 from ..app import create_app
+from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
+from ..internal import internal_router
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
+
+    from starlette.types import ASGIApp, Receive, Scope, Send
 
     from ...providers.provider_catalog_service import ProviderCatalogService
     from ...thread.enums import ThreadStatus
@@ -264,6 +268,55 @@ class _InProcessWorker:
 
 type AppFixture = tuple[FastAPI, EventAggregator, _InProcessWorker, AsyncSqliteSaver]
 
+# The credentials every ``make_app`` gateway holds. Known constants, so a test
+# that wants to present them, or to present something else, can name them.
+SEATED_ATTACH_TOKEN = "seated-attach-token-0123456789abcdef"
+SEATED_LIFECYCLE_CAPABILITY = "seated-lifecycle-capability-0123456789abcdef"
+
+_AUTHORIZATION = b"authorization"
+_CAPABILITY = LIFECYCLE_CAPABILITY_HEADER.lower().encode("latin-1")
+
+
+class _SeatedCredentials:
+    """Present the app's own credentials on every request that carries none.
+
+    Route-behaviour suites reach the gateway through clients of their own - a
+    ``TestClient``, an ASGI transport, a socket - that do not authenticate. This
+    layer is the credentialed client they share: it adds the attach bearer and the
+    lifecycle capability the app currently holds, so every request still crosses
+    the production gates and is verified by the production comparison. A header a
+    request already carries is never replaced, so presenting a wrong credential is
+    still refused. The relay plane is skipped because it verifies a different
+    credential on the same ``Authorization`` header.
+
+    Credentials are read from app state per request rather than captured, since
+    suites reseat them after the factory returns.
+    """
+
+    def __init__(self, app: ASGIApp, *, owner: FastAPI) -> None:
+        self._app = app
+        self._owner = owner
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and not scope["path"].startswith(
+            internal_router.prefix
+        ):
+            scope = {**scope, "headers": self._credentialed(scope["headers"])}
+        await self._app(scope, receive, send)
+
+    def _credentialed(
+        self, headers: list[tuple[bytes, bytes]]
+    ) -> list[tuple[bytes, bytes]]:
+        presented = {name for name, _ in headers}
+        credentialed = list(headers)
+        token = getattr(self._owner.state, "v1_service_token", None)
+        if isinstance(token, str) and token and _AUTHORIZATION not in presented:
+            credentialed.append((_AUTHORIZATION, f"Bearer {token}".encode()))
+        capability = getattr(self._owner.state, "lifecycle_capability", None)
+        if isinstance(capability, str) and capability and _CAPABILITY not in presented:
+            credentialed.append((_CAPABILITY, capability.encode()))
+        return credentialed
+
 
 _session_catalog_service_cache: ProviderCatalogService | None = None
 
@@ -327,12 +380,20 @@ def make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
     aggregator: EventAggregator | None = None,
+    *,
+    stamp_credentials: bool = True,
 ) -> AppFixture:
     """Create a test FastAPI app with explicit app-state injection.
 
     Wires a real in-process dispatch receiver (ASGITransport over a
     minimal FastAPI app) for the worker client, and injects the real
     AsyncSqliteSaver checkpointer from the calling fixture.
+
+    The gateway holds ``SEATED_ATTACH_TOKEN`` and ``SEATED_LIFECYCLE_CAPABILITY``
+    and enforces them through the production gates. By default every request
+    that presents no credential of its own is sent with them; pass
+    ``stamp_credentials=False`` for a test that exercises the gates themselves
+    and so must present exactly what it chooses, or nothing.
 
     Returns:
         Tuple of (app, aggregator, worker, checkpointer).
@@ -342,10 +403,11 @@ def make_app(
     async def _test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         yield
 
-    app = create_app(
-        lifespan=_test_lifespan,
-        allow_unauthenticated_v1_for_testing=True,
-    )
+    app = create_app(lifespan=_test_lifespan)
+    app.state.v1_service_token = SEATED_ATTACH_TOKEN
+    app.state.lifecycle_capability = SEATED_LIFECYCLE_CAPABILITY
+    if stamp_credentials:
+        app.add_middleware(cast("Any", _SeatedCredentials), owner=app)
 
     if aggregator is None:
         aggregator = EventAggregator()

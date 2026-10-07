@@ -58,9 +58,10 @@ _PRESENTATIONS: tuple[tuple[str, str | None, bool], ...] = (
 
 def _armed_app(session_factory: Any, checkpointer: Any) -> Any:
     """Build the real gateway app with its production attach boundary armed."""
-    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
+    app, _aggregator, _worker, _checkpointer = make_app(
+        session_factory, checkpointer, stamp_credentials=False
+    )
     app.state.v1_service_token = _SERVICE_TOKEN
-    app.state.allow_unauthenticated_v1_for_testing = False
     return app
 
 
@@ -141,9 +142,10 @@ async def test_an_unconfigured_credential_reaches_each_surfaces_own_failure(
     faith would leave a gate that fails OPEN on missing state indistinguishable
     from one that fails closed.
     """
-    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
+    app, _aggregator, _worker, _checkpointer = make_app(
+        session_factory, checkpointer, stamp_credentials=False
+    )
     app.state.v1_service_token = configured
-    app.state.allow_unauthenticated_v1_for_testing = False
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),

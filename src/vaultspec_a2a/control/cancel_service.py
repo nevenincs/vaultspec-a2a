@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from ..database import (
     ThreadModel,
     ThreadStatusElectionOutcome,
+    WriteContentionError,
     begin_write_transaction,
     elect_thread_status,
     get_control_action_by_dispatch_id,
@@ -180,9 +181,23 @@ async def cancel_thread(
     # it must not create a second dispatchable intention.
     resolved_idempotency_key = default_cancel_key(thread_id)
     response_idempotency_key = idempotency_key or resolved_idempotency_key
-    claimed = await retry_write_contention(
-        db, lambda: _claim_cancel(db, thread_id, resolved_idempotency_key)
-    )
+    try:
+        claimed = await retry_write_contention(
+            db, lambda: _claim_cancel(db, thread_id, resolved_idempotency_key)
+        )
+    except WriteContentionError as exc:
+        # The acceptance never got the write lock, so no cancellation was
+        # reserved and the run is exactly as the caller found it. That is a
+        # refusal to retry, not a fault: the shared mapping serves it as one.
+        logger.warning(
+            "Cancellation of %s found the store contended: %s", thread_id, exc
+        )
+        return ControlActionOutcome(
+            thread_id=thread_id,
+            idempotency_key=response_idempotency_key,
+            error_detail=str(exc),
+            failure_type=FailureType.STORE_BUSY,
+        )
     if isinstance(claimed, ControlActionOutcome):
         return claimed
     thread = claimed.preflight.thread

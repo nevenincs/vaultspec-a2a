@@ -228,6 +228,7 @@ from .runtime_identity_repository import (
 from .runtime_identity_repository import (
     record_provider_runtime_identity as record_provider_runtime_identity,
 )
+from .session import WriteContentionError as WriteContentionError
 from .session import application_session_factory as application_session_factory
 from .session import begin_write_transaction as begin_write_transaction
 from .session import checkpoint_wal as checkpoint_wal
@@ -320,6 +321,7 @@ __all__ = [
     "ThreadModel",
     "ThreadStatusElectionOutcome",
     "ThreadStatusElectionResult",
+    "WriteContentionError",
     "acquire_control_action_lease",
     "actionable_pending_permissions",
     "append_cost_record",

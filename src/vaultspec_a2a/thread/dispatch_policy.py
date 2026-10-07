@@ -48,6 +48,11 @@ class FailureType(StrEnum):
     INCOMPATIBLE_STATE = "incompatible_state"
     CREDENTIALS_REQUIRED = "credentials_required"
     DEADLINE_EXCEEDED = "deadline_exceeded"
+    # Every attempt at the verb's durable write was refused because another
+    # writer held the store's write lock throughout. Distinct from AT_CAPACITY,
+    # which is the worker's own refusal: no worker was involved and nothing was
+    # applied, so the caller simply retries.
+    STORE_BUSY = "store_busy"
 
 
 # Whether a dispatch failure of each type moves the run to FAILED. A type absent
@@ -66,6 +71,8 @@ _MARKS_RUN_FAILED: dict[FailureType, bool] = {
     # of work that IS being done. Failing the run here would kill the very turn
     # the refusal is reporting as alive.
     FailureType.RUN_BUSY: False,
+    # A contended store wrote nothing and says nothing about the run.
+    FailureType.STORE_BUSY: False,
 }
 
 

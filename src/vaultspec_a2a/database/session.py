@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "WalCheckpointResult",
+    "WriteContentionError",
     "application_session_factory",
     "begin_write_transaction",
     "checkpoint_wal",
@@ -154,6 +155,23 @@ def _is_write_contention(exc: OperationalError) -> bool:
     )
 
 
+class WriteContentionError(RuntimeError):
+    """Every attempt at one durable write was refused by a competing writer.
+
+    Typed, and distinct from the driver error it is raised from, because the
+    outcome is not a fault in the request or in the store: the write would have
+    succeeded had the lock been free, so the caller's verb has to refuse as
+    retryable rather than report an internal failure. Nothing was applied.
+    """
+
+    def __init__(self, attempts: int) -> None:
+        self.attempts = attempts
+        super().__init__(
+            f"the application store held its write lock against this write for "
+            f"all {attempts} attempts; nothing was applied"
+        )
+
+
 async def retry_write_contention[T](
     session: AsyncSession,
     attempt: Callable[[], Awaitable[T]],
@@ -166,19 +184,26 @@ async def retry_write_contention[T](
     its own and re-reads whatever it decides on. *after_rollback* runs after each
     rollback and may settle the call with a result of its own instead of another
     attempt: the durable winner of a race the refused attempt lost. An error that
-    is not write contention propagates at once, and the last refusal propagates
-    once the attempts are spent.
+    is not write contention propagates at once as itself.
+
+    Raises:
+        WriteContentionError: When every attempt was refused as contended. The
+            typed error is what lets the verb above serve a retryable refusal;
+            letting the driver error through made a busy store read as an
+            internal gateway fault.
     """
     retries = 0
     while True:
         try:
             return await attempt()
         except OperationalError as exc:
-            if (
-                not _is_write_contention(exc)
-                or retries + 1 >= _WRITE_CONTENTION_ATTEMPTS
-            ):
+            if not _is_write_contention(exc):
                 raise
+            if retries + 1 >= _WRITE_CONTENTION_ATTEMPTS:
+                # The refusal leaves nothing open: the verb that serves it reads
+                # the run again to describe it.
+                await session.rollback()
+                raise WriteContentionError(_WRITE_CONTENTION_ATTEMPTS) from exc
         await session.rollback()
         if after_rollback is not None:
             settled = await after_rollback()

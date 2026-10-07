@@ -1,4 +1,31 @@
-"""Bounded run-start request identity and per-run single-flight ordering."""
+"""Bounded run-start request identity and per-run single-flight ordering.
+
+Run start has three replay mechanisms. Each answers a different question at a
+different layer, so none can stand in for another:
+
+- **The plain-start replay fingerprint.** Every run persists its creating
+  request's :func:`stamped_replay_digest` in its durable metadata. A later
+  request that meets a run already owning its id is compared against it by
+  :func:`replay_digest_matches`, under the rule the fingerprint was written
+  with. It asks whether that request is the same intention as the durable run.
+  Credential values are excluded, so a retry carrying rotated short-lived
+  tokens still recovers the original run.
+- **The staged admission binding.** A prepare binds its reservation in the
+  gateway's in-memory :class:`~vaultspec_a2a.control.admission.AdmissionBroker`
+  to ``request_digest(prepared=True)``, beside the raw client body's digest that
+  a release must present. A commit binds ``request_digest(prepared=False)``,
+  which folds credential values in, and persists it with the run's lease so a
+  lost commit acknowledgement replays only the exact accepted commit. It asks
+  whether a commit or release belongs to that reservation, and outlives the
+  reservation only as that persisted commit digest.
+- **The initial-dispatch journal.** A run's first ingest is claimed under the
+  ``thread-create:<run id>`` control-action idempotency key, with the accepted
+  graph input as its payload, and a replayed claim is compared against the
+  stored payload. It asks whether this run's first dispatch was already
+  accepted with exactly that input; it keeps that dispatch exactly-once below
+  the HTTP edge, and later run actions read the run's accepted program back
+  from it.
+"""
 
 from __future__ import annotations
 

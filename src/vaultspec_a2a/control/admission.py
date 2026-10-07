@@ -89,12 +89,15 @@ class ReservationState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class AdmissionReadiness:
-    """Execution-readiness facts probed once during a prepare.
+    """Execution-readiness facts probed once during a prepare or a commit.
 
     Reports the worker's rung on the cold-to-execution ladder, whether any
     subprocess provider resolves on this host, and the composed run-admission
-    verdict. Prepare is fail-closed: any verdict other than execution-ready
-    refuses the reservation before capacity is assigned.
+    verdict. Only the verdict gates: it already folds in the worker rung,
+    provider eligibility, gateway database readiness, the recovery owner and the
+    native-execution profile, so the other facts are disclosure. Both stages are
+    fail-closed: any verdict other than execution-ready refuses before capacity
+    is assigned or actor tokens are accepted.
     """
 
     worker_state: WorkerLifecycleState
@@ -102,6 +105,15 @@ class AdmissionReadiness:
     eligible_providers: tuple[str, ...]
     run_admission: RunAdmission
     reasons: tuple[str, ...] = ()
+
+    @property
+    def not_ready_reason(self) -> str | None:
+        """Return the safe refusal reason, or ``None`` when execution-ready."""
+        from ..api.schemas.gateway_readiness import RunAdmission
+
+        if self.run_admission is RunAdmission.READY:
+            return None
+        return _REASON_NOT_READY
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,11 +234,8 @@ class AdmissionBroker:
         # flight, so exactly one worker is created no matter how many prepare.
         await ensure_worker()
         readiness = await probe_readiness()
-        if (
-            readiness.worker_state.value != "ready"
-            or readiness.provider_eligibility.value != "eligible"
-            or readiness.run_admission.value != "ready"
-        ):
+        not_ready = readiness.not_ready_reason
+        if not_ready is not None:
             return PrepareOutcome(
                 admitted=False,
                 reservation_id=None,
@@ -234,7 +243,7 @@ class AdmissionBroker:
                 required_roles=roles,
                 expires_at=None,
                 readiness=readiness,
-                reason=_REASON_NOT_READY,
+                reason=not_ready,
             )
 
         loop = asyncio.get_running_loop()

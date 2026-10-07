@@ -2,7 +2,7 @@
 
 import hmac
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -18,13 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
 from ...control._worker_health import worker_liveness
-from ...control.admission import AdmissionBroker
-from ...control.config import settings
+from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.execution_authority import read_frozen_team_selection
 from ...control.leased_dispatch import DispatchTransport
 from ...control.provider_execution import native_execution_refusal_reason
 from ...control.run_start_policy import (
-    evaluate_execution_eligibility,
     evaluate_run_start_eligibility,
     required_role_ids,
 )
@@ -51,6 +49,7 @@ from ...providers.team_selection import (
     FrozenTeamSelection,
 )
 from ...streaming.aggregator import EventAggregator
+from ...team import TeamConfig
 from ...telemetry import trace_headers
 from ...thread.enums import (
     ThreadStatus,
@@ -79,9 +78,7 @@ from ..schemas.gateway import (
     RunStartRequest,
     RunStartResponse,
 )
-from ..schemas.gateway_readiness import WorkerLifecycleState
 from .gateway import (
-    _admission_readiness,
     _body_with_frozen_selection,
     _canonical_replay_body,
     _load_preset_or_refuse,
@@ -107,11 +104,41 @@ __all__ = ["_RunLeaseBinding"]
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
 
 
-def _require_profile_execution() -> None:
-    """Refuse unavailable execution before worker startup or run admission."""
+def _load_admitted_preset(body: RunStartRequest) -> tuple[Path | None, TeamConfig]:
+    """Load the request's preset once, after its workspace and profile admit it.
+
+    The workspace is resolved first, so an out-of-authority root is refused as
+    the client error it is. Unavailable native execution then refuses before any
+    preset is read, worker started, reservation assigned or token accepted.
+    """
+    logger.info("commit step: workspace_root")
+    ws_root = _prepare_workspace_root(body)
     reason = native_execution_refusal_reason()
     if reason is not None:
         raise HTTPException(status_code=503, detail=reason)
+    logger.info("commit step: load_preset")
+    return ws_root, _load_preset_or_refuse(body.team_preset, ws_root)
+
+
+def _log_readiness_refusal(
+    stage: str, reason: str | None, readiness: AdmissionReadiness
+) -> None:
+    # The refusal reason is deliberately one safe sentence, so it cannot say
+    # WHICH readiness leg failed. Those facts are already probed and carried on
+    # the readiness view, and already served on the service-state surface, so
+    # logging them here discloses nothing new - and without them a refusal is
+    # only diagnosable by re-deriving the probe by hand.
+    logger.warning(
+        "%s refused: reason=%s worker_state=%s provider_eligibility=%s "
+        "run_admission=%s eligible_providers=%s readiness_reasons=%s",
+        stage,
+        reason,
+        readiness.worker_state.value,
+        readiness.provider_eligibility.value,
+        readiness.run_admission.value,
+        ",".join(readiness.eligible_providers) or "none",
+        "; ".join(readiness.reasons) or "none",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -209,11 +236,21 @@ class _RunRuntime:
 
 @dataclass(frozen=True, slots=True)
 class _RunAdmission:
+    """One request's admission of a new run, computed once and consumed whole.
+
+    The persisted selection, the canonical body every staged digest binds, and
+    the preset the initial dispatch freezes all come from this one value, so a
+    catalog refresh can never leave a commit's bound digest and its persisted
+    selection describing two different freezes.
+    """
+
     workspace_root: Path
     nickname: str
     metadata: ThreadMetadata | None
     metadata_json: str
+    team_config: TeamConfig
     frozen: FrozenTeamSelection
+    canonical_body: RunStartRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,24 +306,52 @@ async def _require_settled_predecessor(
         )
 
 
+async def _existing_run_replay(
+    db: AsyncSession, body: RunStartRequest
+) -> _RunDispatchResult | None:
+    """Answer a request whose run id already owns a durable run, else ``None``.
+
+    Client idempotency: a retry with the same stable run id returns the existing
+    run rather than starting a second one (dispatch-exactly-once), and a
+    different request wearing that id is refused. On ``None`` the read is ended:
+    a snapshot held across admission goes stale under concurrent starts, and
+    creation must open its own write transaction.
+    """
+    existing = await get_thread(db, body.run_id)
+    if existing is None:
+        await db.rollback()
+        return None
+    _replay_identity_or_conflict(existing.id, existing.thread_metadata, body)
+    return _RunDispatchResult(
+        thread_id=existing.id,
+        status=existing.status,
+        nickname=existing.nickname,
+        frozen=read_frozen_team_selection(existing.thread_metadata),
+        replayed=True,
+    )
+
+
 async def _prepare_run_admission(
-    request: Request, body: RunStartRequest, commit_binding: _RunLeaseBinding | None
+    request: Request, body: RunStartRequest
 ) -> _RunAdmission:
+    """Admit a new run once, refusing before any durable state is created.
+
+    An unloadable preset, a document-authoring preset with no target feature, an
+    actor-token bundle that does not cover the preset's roles, or a selection the
+    current catalog no longer serves all raise a 4xx here.
+    """
     run_id = body.run_id
     # Thread the target feature onto the metadata so it reaches dispatch and the
     # vault index; the top-level field is authoritative when both are present.
     metadata = _run_metadata_with_request_fields(body)
+    _, team_config = _load_admitted_preset(body)
     try:
         ws_root, nickname, metadata_json = process_metadata(
-            metadata, run_id, body.team_preset
+            metadata, run_id, team_config
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    _require_profile_execution()
-
-    logger.info("commit step: load_preset")
-    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     effective_feature = body.feature_tag or (
         metadata.feature_tag if metadata is not None else None
     )
@@ -313,11 +378,15 @@ async def _prepare_run_admission(
     metadata_json = _persist_request_digest(
         metadata_json, stamped_replay_digest(canonical_body)
     )
-    # Bind the committed reservation's non-secret lease identity to the run,
-    # durably, so terminal settlement and post-restart reconciliation recover it.
-    if commit_binding is not None:
-        metadata_json = _persist_lease(metadata_json, commit_binding)
-    return _RunAdmission(ws_root, nickname, metadata, metadata_json, frozen)
+    return _RunAdmission(
+        workspace_root=ws_root,
+        nickname=nickname,
+        metadata=metadata,
+        metadata_json=metadata_json,
+        team_config=team_config,
+        frozen=frozen,
+        canonical_body=canonical_body,
+    )
 
 
 async def _attempt_thread_creation(
@@ -372,6 +441,7 @@ async def _create_thread_with_retry(
         metadata=prepared.metadata,
         metadata_json=prepared.metadata_json,
         workspace_root=prepared.workspace_root,
+        team_config=prepared.team_config,
         actor_tokens=body.actor_tokens,
         model_assignment=prepared.frozen.compiler_map(),
         seed_transcript=seed_transcript,
@@ -411,38 +481,19 @@ async def _create_run_core(
     body: RunStartRequest,
     db: AsyncSession,
     runtime: _RunRuntime,
-    *,
-    commit_binding: _RunLeaseBinding | None,
+    prepared: _RunAdmission,
 ) -> _RunDispatchResult:
-    """Create and dispatch one durable run - the shared start/commit core.
+    """Create and dispatch one admitted durable run - the shared start/commit core.
 
-    Refuses before any durable state is created: an unloadable preset, a
-    document-authoring preset with no target feature, or an actor-token bundle
-    that does not cover the preset's roles all raise a 4xx. A client-supplied
-    ``run_id`` makes creation dispatch-exactly-once under retry. When
-    *commit_binding* is supplied, the commit path persists it into the run's
-    metadata so terminal settlement and restart reconciliation can recover the
-    run's non-secret lease and replay identity durably.
+    *prepared* is the request's single admission, used as it is and never
+    recomputed: its metadata (carrying the lease binding on the commit path, so
+    terminal settlement and restart reconciliation recover the run's non-secret
+    lease and replay identity durably), its frozen selection and its preset. The
+    caller has already answered a same-id replay through
+    :func:`_existing_run_replay`, so a client-supplied ``run_id`` keeps creation
+    dispatch-exactly-once under retry.
     """
-    # Client idempotency: a retry with the same stable run id returns the
-    # existing run rather than starting a second one (dispatch-exactly-once).
-    existing = await get_thread(db, body.run_id)
-    if existing is not None:
-        _replay_identity_or_conflict(existing.id, existing.thread_metadata, body)
-        return _RunDispatchResult(
-            thread_id=existing.id,
-            status=existing.status,
-            nickname=existing.nickname,
-            frozen=read_frozen_team_selection(existing.thread_metadata),
-            replayed=True,
-        )
-    # End the read before the awaits below: a snapshot held across admission
-    # goes stale under concurrent starts, and creation must open its own write
-    # transaction.
-    await db.rollback()
     run_id = body.run_id
-
-    prepared = await _prepare_run_admission(request, body, commit_binding)
     seed_transcript: list[SeedTranscriptMessage] = []
     if body.continues_run_id is not None:
         await _require_settled_predecessor(
@@ -549,13 +600,10 @@ async def _run_direct_start(
     runtime: _RunRuntime,
 ) -> RunStartResponse:
     """One-shot start: create and dispatch a run in a single call (unchanged path)."""
-    result = await _create_run_core(
-        request,
-        body,
-        db,
-        runtime,
-        commit_binding=None,
-    )
+    result = await _existing_run_replay(db, body)
+    if result is None:
+        prepared = await _prepare_run_admission(request, body)
+        result = await _create_run_core(request, body, db, runtime, prepared)
     return RunStartResponse(
         run_id=result.thread_id,
         status=result.status,
@@ -580,10 +628,7 @@ async def _run_prepare(
     is created. A capacity-exhausted or role-invalid prepare is refused with a
     503 carrying the safe reason.
     """
-    logger.info("commit step: workspace_root")
-    ws_root = _prepare_workspace_root(body)
-    _require_profile_execution()
-    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
+    ws_root, team_config = _load_admitted_preset(body)
     frozen = await _validate_and_freeze_selection_or_refuse(
         request.app, body, team_config, ws_root
     )
@@ -603,24 +648,7 @@ async def _run_prepare(
         or outcome.reservation_id is None
         or outcome.lease_id is None
     ):
-        # The refusal reason is deliberately one safe sentence, so it cannot say
-        # WHICH of the three readiness legs failed. Those facts are already
-        # probed and carried on the outcome, and already served on the
-        # service-state surface, so logging them here discloses nothing new -
-        # and without them a refusal is only diagnosable by re-deriving the
-        # probe by hand, which is how three admission failures stayed open.
-        refused = outcome.readiness
-        logger.warning(
-            "run admission refused: reason=%s worker_state=%s "
-            "provider_eligibility=%s run_admission=%s eligible_providers=%s "
-            "readiness_reasons=%s",
-            outcome.reason,
-            refused.worker_state.value,
-            refused.provider_eligibility.value,
-            refused.run_admission.value,
-            ",".join(refused.eligible_providers) or "none",
-            "; ".join(refused.reasons) or "none",
-        )
+        _log_readiness_refusal("run admission", outcome.reason, outcome.readiness)
         raise HTTPException(status_code=503, detail=outcome.reason)
     readiness = outcome.readiness
     return RunPrepareResponse(
@@ -643,12 +671,14 @@ async def _run_commit(
 ) -> RunCommitResponse:
     """Bind actor tokens to a stable run under a prepared reservation.
 
-    Re-evaluates execution eligibility and handles an exact durable replay before
-    moving the reservation into its recoverable ``committing`` state. A new
-    commit must match the prepared request and role set before the shared creation
-    core receives its tokens. The reservation is consumed only after the exact
-    run binding is durable; a proven pre-durability failure restores it. The
-    non-secret lease identity is returned and persisted for terminal settlement.
+    Handles an exact durable replay, then admits the run once and re-evaluates
+    execution readiness before moving the reservation into its recoverable
+    ``committing`` state. A new commit must match the prepared request and role
+    set before the shared creation core receives its tokens; the digest that
+    match binds and the selection the run persists come from that one admission.
+    The reservation is consumed only after the exact run binding is durable; a
+    proven pre-durability failure restores it. The non-secret lease identity is
+    returned and persisted for terminal settlement.
     """
     if body.reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
@@ -695,60 +725,35 @@ async def _commit_replay(
     )
 
 
-async def _prepare_commit_eligibility(
+async def _require_commit_execution_ready(
     request: Request,
-    body: RunStartRequest,
     runtime: _RunRuntime,
     reservation_id: str,
-) -> tuple[RunStartRequest, str]:
-    broker = admission_broker(request.app)
-    ws_root = _prepare_workspace_root(body)
-    _require_profile_execution()
-    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
-    frozen = await _validate_and_freeze_selection_or_refuse(
-        request.app, body, team_config, ws_root
-    )
-    canonical_body = _body_with_frozen_selection(body, frozen)
-    commit_digest = request_digest(canonical_body, prepared=False)
-    # Evaluate worker and provider eligibility BEFORE consuming the reservation,
-    # accepting the actor tokens, or creating a run: run credentials are minted
-    # only after the runtime and provider are eligible. The worker reachability is
-    # probed live so the verdict never lags behind the watchdog's status ladder; a
-    # refusal releases the reservation so a failed commit leaks nothing.
-    from ...control._worker_health import probe_worker_health
+    canonical_body: RunStartRequest,
+) -> None:
+    """Refuse a commit unless run admission is execution-ready right now.
 
+    Evaluated BEFORE consuming the reservation, accepting the actor tokens, or
+    creating a run: run credentials are minted only after execution is ready.
+    The worker is probed live, through the same tri-state probe prepare uses, so
+    the verdict never lags behind the watchdog's status ladder and a worker busy
+    with an in-flight run stays execution-ready. A refusal releases the
+    reservation so a failed commit leaks nothing.
+    """
     logger.info("commit step: probe_worker")
-    probe = await probe_worker_health(settings.worker_url, client=runtime.worker_client)
-    # Same tri-state as prepare: only a probe that OBSERVED absence may report it.
-    # An indeterminate one defers to the watchdog's seated state, so a worker busy
-    # with an in-flight run stays execution-ready for the next commit.
-    readiness = _admission_readiness(
-        request.app.state,
-        worker_probe_ready=None if probe.indeterminate else probe.healthy,
+    readiness = await _probe_admission_readiness(
+        request.app.state, runtime.worker_client
     )
-    worker_reachable = readiness.worker_state is WorkerLifecycleState.READY
-    execution = evaluate_execution_eligibility(
-        worker_reachable=worker_reachable,
-        provider_eligibility=readiness.provider_eligibility,
+    reason = readiness.not_ready_reason
+    if reason is None:
+        return
+    # Same disclosure the prepare refusal carries: a commit 503 otherwise cannot
+    # be told apart from a refusal about the reservation itself.
+    _log_readiness_refusal("run commit", reason, readiness)
+    await _release_ineligible_reservation(
+        admission_broker(request.app), reservation_id, canonical_body
     )
-    if not execution.eligible:
-        # Same disclosure the prepare refusal carries: a commit 503 otherwise
-        # says only that something was ineligible, which cannot be told apart
-        # from a refusal about the reservation itself.
-        logger.warning(
-            "run commit refused as ineligible: reason=%s worker_state=%s "
-            "worker_probe=%s provider_eligibility=%s reservation=%s",
-            execution.reason,
-            readiness.worker_state.value,
-            "indeterminate"
-            if probe.indeterminate
-            else ("healthy" if probe.healthy else "absent"),
-            readiness.provider_eligibility.value,
-            reservation_id,
-        )
-        await _release_ineligible_reservation(broker, reservation_id, canonical_body)
-        raise HTTPException(status_code=503, detail=execution.reason)
-    return canonical_body, commit_digest
+    raise HTTPException(status_code=503, detail=reason)
 
 
 async def _classify_failed_commit(
@@ -816,10 +821,11 @@ async def _run_commit_locked(
     existing = await get_thread(db, run_id)
     if existing is not None:
         return await _commit_replay(existing, body, broker, reservation_id)
-    # Not held across the live worker probe below.
+    # Not held across the catalog freeze and live worker probe below.
     await db.rollback()
-    canonical_body, commit_digest = await _prepare_commit_eligibility(
-        request, body, runtime, reservation_id
+    prepared = await _prepare_run_admission(request, body)
+    await _require_commit_execution_ready(
+        request, runtime, reservation_id, prepared.canonical_body
     )
 
     presented_roles: set[str] = (
@@ -827,7 +833,7 @@ async def _run_commit_locked(
     )
     outcome = await broker.commit(
         reservation_id,
-        binding_digest=request_digest(canonical_body, prepared=True),
+        binding_digest=request_digest(prepared.canonical_body, prepared=True),
         presented_roles=presented_roles,
     )
     logger.info(
@@ -841,16 +847,21 @@ async def _run_commit_locked(
     binding = _RunLeaseBinding(
         lease_id=outcome.lease_id,
         reservation_id=reservation_id,
-        commit_digest=commit_digest,
+        commit_digest=request_digest(prepared.canonical_body, prepared=False),
     )
     try:
-        result = await _create_run_core(
-            request,
-            body,
-            db,
-            runtime,
-            commit_binding=binding,
-        )
+        # A plain start may have claimed this run id while the commit was
+        # admitted; that run is the answer, exactly as for a start retry.
+        result = await _existing_run_replay(db, body)
+        if result is None:
+            # Bind the committed reservation's non-secret lease identity to the
+            # run, durably, so terminal settlement and post-restart
+            # reconciliation recover it.
+            leased = replace(
+                prepared,
+                metadata_json=_persist_lease(prepared.metadata_json, binding),
+            )
+            result = await _create_run_core(request, body, db, runtime, leased)
     except BaseException:
         await _classify_failed_commit(db, run_id, binding, broker)
         raise

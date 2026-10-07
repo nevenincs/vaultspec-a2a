@@ -34,13 +34,12 @@ from ...database import (
     create_thread,
     elect_thread_status,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
-from ...database.models import RunWriteAuthority
 from ...database.session import close_db, get_session_factory, init_db
 from ...database.tests._backends import BACKENDS
 from ...ipc.schemas import DispatchRequest
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.failure_evidence import (
     GraphFailureEvidence,
@@ -145,11 +144,8 @@ async def _take_cancel_authority(run: BusyRun) -> None:
             RUN,
             expectation=expectation,
             status=ThreadStatus.CANCELLING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.CANCEL,
-                action_receipt_id=_CANCEL_RECEIPT,
-            ),
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id=_CANCEL_RECEIPT,
         )
         assert election.outcome is ThreadStatusElectionOutcome.WON
         await db.commit()

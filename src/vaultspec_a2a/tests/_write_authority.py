@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from ..database.models import RunWriteAuthority
+from ..thread import RunWriteAuthority
 from ..thread.enums import ControlActionType
 
 

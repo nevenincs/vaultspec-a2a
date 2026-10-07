@@ -14,7 +14,8 @@ from ._permission_response_contract import (
 )
 
 if TYPE_CHECKING:
-    from ..database import PermissionRequestModel, ThreadModel, ThreadWriteExpectation
+    from ..database import PermissionRequestModel, ThreadModel
+    from ..thread import ThreadWriteExpectation
 
 
 @dataclass(frozen=True, slots=True)

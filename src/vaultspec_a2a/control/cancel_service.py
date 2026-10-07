@@ -37,7 +37,6 @@ from ..database import (
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ..database.models import ThreadModel
@@ -57,7 +56,7 @@ if TYPE_CHECKING:
 
     from ..control.circuit_breaker import WorkerCircuitBreaker
     from ..control.worker_management import LazyWorkerSpawner
-    from ..database import ThreadWriteExpectation
+    from ..thread import ThreadWriteExpectation
     from ..thread.cancel_policy import CancelEligibility
 
 __all__ = ["CancelResult", "CancelRuntime", "cancel_thread"]
@@ -468,12 +467,9 @@ async def _existing_cancel_claim(
                 idempotency_key=response_idempotency_key,
                 failure_type=FailureType.NOT_FOUND,
             )
-        claim_owns_thread = (
-            current_thread.status == ThreadStatus.CANCELLING.value
-            and current_thread.writer_action_type == ControlActionType.CANCEL.value
-            and current_thread.writer_action_receipt_id == claim.dispatch_id
-        )
-        if not claim_owns_thread:
+        if not _cancel_authority_already_owned(
+            thread_write_expectation(current_thread), claim.dispatch_id
+        ):
             return CancelResult(
                 action_id=claim.action_id,
                 thread_id=thread_id,
@@ -507,8 +503,7 @@ def _cancel_authority_already_owned(
     """Return whether the expected writer already owns this cancel receipt."""
     return (
         expectation.status is ThreadStatus.CANCELLING
-        and expectation.authority.action_type is ControlActionType.CANCEL
-        and expectation.authority.action_receipt_id == dispatch_id
+        and expectation.authority.owned_by(ControlActionType.CANCEL, dispatch_id)
     )
 
 
@@ -545,11 +540,8 @@ async def _elect_cancel_authority(
             thread_id,
             expectation=expectation,
             status=ThreadStatus.CANCELLING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.CANCEL,
-                action_receipt_id=claim.dispatch_id,
-            ),
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id=claim.dispatch_id,
         )
     )
     if election is not None and election.outcome is not ThreadStatusElectionOutcome.WON:

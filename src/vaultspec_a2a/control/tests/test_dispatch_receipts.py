@@ -15,13 +15,13 @@ from ...database import (
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
-from ...database.models import Base, RunWriteAuthority
+from ...database.models import Base
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..accepted_input import freeze_accepted_input
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
-    from ...database.thread_repository import ThreadWriteExpectation
+    from ...thread import ThreadWriteExpectation
 
 
 @pytest_asyncio.fixture
@@ -183,11 +183,8 @@ async def test_retry_preserves_original_receipt_after_state_revision(
             "run",
             expectation=expectation,
             status=ThreadStatus.RUNNING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.RESUME,
-                action_receipt_id=claim.dispatch_id,
-            ),
+            action_type=ControlActionType.RESUME,
+            action_receipt_id=claim.dispatch_id,
         )
         await db.commit()
     async with sessions() as db:
@@ -278,11 +275,8 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
             "run",
             expectation=witness,
             status=ThreadStatus.CANCELLED,
-            successor=successor_thread_write_authority(
-                witness,
-                action_type=ControlActionType.INGEST,
-                action_receipt_id="initial",
-            ),
+            action_type=ControlActionType.INGEST,
+            action_receipt_id="initial",
         )
         await db.commit()
     async with sessions() as db:

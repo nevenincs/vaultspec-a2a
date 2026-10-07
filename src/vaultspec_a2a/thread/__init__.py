@@ -1,7 +1,7 @@
 """Expose thread-domain state and projection helpers.
 
 The package defines thread enums, errors, models, state, snapshots, actor
-tokens, and projection helpers. Snapshots also use
+tokens, run write authority, and projection helpers. Snapshots also use
 :mod:`vaultspec_a2a.graph.enums`.
 
 :mod:`vaultspec_a2a.context` reads thread state.
@@ -80,6 +80,9 @@ if TYPE_CHECKING:
     from .snapshots import project_checkpoint_tuple as project_checkpoint_tuple
     from .snapshots import stamp_message_created_at as stamp_message_created_at
     from .state import TeamState as TeamState
+    from .write_authority import RECEIPT_ID_MAX_LENGTH as RECEIPT_ID_MAX_LENGTH
+    from .write_authority import RunWriteAuthority as RunWriteAuthority
+    from .write_authority import ThreadWriteExpectation as ThreadWriteExpectation
 
 _LAZY_IMPORTS = {
     "ActorTokenBundle": ".actor_tokens",
@@ -131,6 +134,9 @@ _LAZY_IMPORTS = {
     "project_checkpoint_tuple": ".snapshots",
     "stamp_message_created_at": ".snapshots",
     "TeamState": ".state",
+    "RECEIPT_ID_MAX_LENGTH": ".write_authority",
+    "RunWriteAuthority": ".write_authority",
+    "ThreadWriteExpectation": ".write_authority",
 }
 
 
@@ -148,6 +154,7 @@ __all__ = [
     "DEFAULT_SUPERVISOR_ID",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
+    "RECEIPT_ID_MAX_LENGTH",
     "ActorTokenBundle",
     "AgentConfigNotFoundError",
     "AgentProcessError",
@@ -176,10 +183,12 @@ __all__ = [
     "ProtocolError",
     "ProviderSessionError",
     "RepairStatus",
+    "RunWriteAuthority",
     "SupervisorRoutingError",
     "TeamConfigNotFoundError",
     "TeamState",
     "ThreadStatus",
+    "ThreadWriteExpectation",
     "TokenBudgetExceededError",
     "TokenUsageEntry",
     "VaultspecError",

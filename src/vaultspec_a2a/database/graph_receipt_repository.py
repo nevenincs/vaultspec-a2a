@@ -9,11 +9,12 @@ from sqlalchemy import exists, select, update
 
 from ..thread.action_receipts import GraphActionReceipt
 from .models import ControlActionModel, ThreadModel
+from .thread_repository import thread_owned_by
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from .thread_repository import ThreadWriteExpectation
+    from ..thread import ThreadWriteExpectation
 
 
 def _matches_original_receipt(
@@ -21,19 +22,20 @@ def _matches_original_receipt(
     receipt: GraphActionReceipt,
     expectation: ThreadWriteExpectation,
 ) -> bool:
-    authority = expectation.authority
-    identity_matches = (
+    return (
         stored.thread_id == receipt.thread_id
         and stored.action_id == receipt.action_id
         and stored.action_type == receipt.action_type
         and stored.dispatch_id == receipt.dispatch_id
+        and stored.payload_fingerprint == receipt.payload_fingerprint
+        and expectation.authority.owned_by(
+            stored.action_type,
+            stored.dispatch_id,
+            writer_generation=stored.writer_generation,
+            run_revision=stored.run_revision,
+            exact_revision=False,
+        )
     )
-    evidence_matches = (
-        stored.payload_fingerprint == receipt.payload_fingerprint
-        and stored.writer_generation == authority.writer_generation
-        and stored.run_revision <= authority.run_revision
-    )
-    return identity_matches and evidence_matches
 
 
 async def persist_graph_action_receipt(
@@ -44,21 +46,23 @@ async def persist_graph_action_receipt(
 ) -> GraphActionReceipt | None:
     """Persist once under exact ownership; every retry returns the same receipt."""
     authority = expectation.authority
-    if (
-        receipt.dispatch_id != authority.action_receipt_id
-        or receipt.action_type != authority.action_type
-        or receipt.run_revision != authority.run_revision
-        or receipt.writer_generation != authority.writer_generation
+    if not authority.owned_by(
+        receipt.action_type,
+        receipt.dispatch_id,
+        writer_generation=receipt.writer_generation,
+        run_revision=receipt.run_revision,
     ):
         return None
     owns_thread = exists(
         select(ThreadModel.id).where(
             ThreadModel.id == receipt.thread_id,
             ThreadModel.status == expectation.status.value,
-            ThreadModel.run_revision == authority.run_revision,
-            ThreadModel.writer_generation == authority.writer_generation,
-            ThreadModel.writer_action_type == authority.action_type.value,
-            ThreadModel.writer_action_receipt_id == authority.action_receipt_id,
+            thread_owned_by(
+                authority.action_type,
+                authority.action_receipt_id,
+                writer_generation=authority.writer_generation,
+                run_revision=authority.run_revision,
+            ),
         )
     )
     identity = (

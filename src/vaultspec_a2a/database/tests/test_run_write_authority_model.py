@@ -9,9 +9,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType
 from .. import create_thread
-from ..models import Base, RunWriteAuthority, ThreadModel
+from ..models import Base, ThreadModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

@@ -42,7 +42,6 @@ from ...database import (
     delete_thread,
     elect_thread_status,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ...database.models import ControlActionModel, ThreadModel
@@ -176,11 +175,8 @@ def _early_terminal_worker(
                 thread.id,
                 expectation=expectation,
                 status=ThreadStatus.COMPLETED,
-                successor=successor_thread_write_authority(
-                    expectation,
-                    action_type=expectation.authority.action_type,
-                    action_receipt_id=body["dispatch_id"],
-                ),
+                action_type=expectation.authority.action_type,
+                action_receipt_id=body["dispatch_id"],
             )
             assert result.outcome is ThreadStatusElectionOutcome.WON
             await session.commit()
@@ -236,11 +232,8 @@ def _cancelling_capacity_worker(
                 thread.id,
                 expectation=expectation,
                 status=ThreadStatus.CANCELLING,
-                successor=successor_thread_write_authority(
-                    expectation,
-                    action_type=ControlActionType.CANCEL,
-                    action_receipt_id=cancel.dispatch_id,
-                ),
+                action_type=ControlActionType.CANCEL,
+                action_receipt_id=cancel.dispatch_id,
             )
             assert result.outcome is ThreadStatusElectionOutcome.WON
             await session.commit()

@@ -145,7 +145,6 @@ from .thread_repository import (
 from .thread_repository import (
     ThreadStatusElectionResult as ThreadStatusElectionResult,
 )
-from .thread_repository import ThreadWriteExpectation as ThreadWriteExpectation
 from .thread_repository import create_thread as create_thread
 from .thread_repository import delete_thread as delete_thread
 from .thread_repository import elect_thread_deleting as elect_thread_deleting
@@ -175,9 +174,7 @@ from .thread_repository import (
     set_thread_approval_state as set_thread_approval_state,
 )
 from .thread_repository import set_thread_repair_state as set_thread_repair_state
-from .thread_repository import (
-    successor_thread_write_authority as successor_thread_write_authority,
-)
+from .thread_repository import thread_owned_by as thread_owned_by
 from .thread_repository import (
     thread_write_expectation as thread_write_expectation,
 )
@@ -204,7 +201,6 @@ __all__ = [
     "ThreadModel",
     "ThreadStatusElectionOutcome",
     "ThreadStatusElectionResult",
-    "ThreadWriteExpectation",
     "acquire_control_action_lease",
     "append_cost_record",
     "append_permission_log",
@@ -266,11 +262,11 @@ __all__ = [
     "set_thread_approval_state",
     "set_thread_repair_state",
     "settle_control_action_lease",
-    "successor_thread_write_authority",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
     "supersede_permission_requests",
     "supported_migration_head",
+    "thread_owned_by",
     "thread_write_expectation",
     "update_thread_status",
     "validate_desktop_schema",

@@ -5,10 +5,9 @@ and cost tracking. Uses ``DeclarativeBase`` with ``Mapped`` / ``mapped_column``
 for full type-safety.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
-from typing import Any, cast, override
+from typing import Any, override
 
 from sqlalchemy import (
     BigInteger,
@@ -28,10 +27,10 @@ from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeEngine
 
+from ..thread import RECEIPT_ID_MAX_LENGTH
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
     ControlActionResultStatus,
-    ControlActionType,
     PermissionRequestStatus,
     RecoveryCondition,
     RepairStatus,
@@ -60,7 +59,6 @@ __all__ = [
     "ProviderRuntimeIdentityModel",
     "RecoveryAttemptModel",
     "RunEventModel",
-    "RunWriteAuthority",
     "ThreadDeletionSagaModel",
     "ThreadExecutionStateModel",
     "ThreadModel",
@@ -252,53 +250,6 @@ class Base(DeclarativeBase):
     """
 
 
-_MAX_ACTION_RECEIPT_ID_LENGTH = 64
-
-
-def _is_integer_at_least(value: object, minimum: int) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
-
-
-@dataclass(frozen=True, slots=True)
-class RunWriteAuthority:
-    """Complete identity required to elect one durable run-state writer.
-
-    This value is deliberately separate from :class:`ThreadModel` until the
-    current-only migration installs all four columns atomically. Mapping the
-    fields ahead of that migration would make the current schema unreadable;
-    making them nullable or defaulted would instead manufacture authority for
-    rows that never carried it. The value contains only concurrency and receipt
-    identity. Checkpoint state and transcript content remain in their existing
-    stores, and credentials have no field here.
-    """
-
-    run_revision: int
-    writer_generation: int
-    action_type: ControlActionType
-    action_receipt_id: str
-
-    def __post_init__(self) -> None:
-        """Reject incomplete or structurally invalid current authority."""
-        # Runtime checks also defend against deserialized values that bypass
-        # the static types; bool is not a valid revision or generation.
-        if not _is_integer_at_least(self.run_revision, 0):
-            raise ValueError("run_revision must be a non-negative integer")
-        if not _is_integer_at_least(self.writer_generation, 1):
-            raise ValueError("writer_generation must be a positive integer")
-        if not isinstance(cast("object", self.action_type), ControlActionType):
-            raise TypeError("action_type must be a ControlActionType")
-        if not isinstance(cast("object", self.action_receipt_id), str):
-            raise TypeError("action_receipt_id must be a string")
-        if (
-            not self.action_receipt_id.strip()
-            or len(self.action_receipt_id) > _MAX_ACTION_RECEIPT_ID_LENGTH
-        ):
-            raise ValueError(
-                "action_receipt_id cannot be blank and must contain at most "
-                f"{_MAX_ACTION_RECEIPT_ID_LENGTH} characters"
-            )
-
-
 class ThreadModel(Base):
     """Orchestration thread — the top-level unit of work."""
 
@@ -318,7 +269,7 @@ class ThreadModel(Base):
         ),
         CheckConstraint(
             "length(trim(writer_action_receipt_id)) >= 1 "
-            "AND length(writer_action_receipt_id) <= 64",
+            f"AND length(writer_action_receipt_id) <= {RECEIPT_ID_MAX_LENGTH}",
             name="ck_threads_writer_action_receipt_id_bounded",
         ),
         Index(
@@ -365,7 +316,7 @@ class ThreadModel(Base):
     run_revision: Mapped[int] = mapped_column()
     writer_generation: Mapped[int] = mapped_column()
     writer_action_type: Mapped[str] = mapped_column(String(32))
-    writer_action_receipt_id: Mapped[str] = mapped_column(String(64))
+    writer_action_receipt_id: Mapped[str] = mapped_column(String(RECEIPT_ID_MAX_LENGTH))
     title: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -705,7 +656,8 @@ class RecoveryAttemptModel(Base):
             name="ck_recovery_attempts_action_type_current",
         ),
         CheckConstraint(
-            "length(trim(action_receipt_id)) >= 1 AND length(action_receipt_id) <= 64",
+            "length(trim(action_receipt_id)) >= 1 "
+            f"AND length(action_receipt_id) <= {RECEIPT_ID_MAX_LENGTH}",
             name="ck_recovery_attempts_action_receipt_id_bounded",
         ),
         UniqueConstraint(
@@ -729,7 +681,7 @@ class RecoveryAttemptModel(Base):
     run_revision: Mapped[int] = mapped_column()
     writer_generation: Mapped[int] = mapped_column()
     action_type: Mapped[str] = mapped_column(String(32))
-    action_receipt_id: Mapped[str] = mapped_column(String(64))
+    action_receipt_id: Mapped[str] = mapped_column(String(RECEIPT_ID_MAX_LENGTH))
     condition: Mapped[str] = mapped_column(String(32))
     attempt_count: Mapped[int] = mapped_column()
     next_eligible_at: Mapped[datetime] = mapped_column(UTCDateTime())

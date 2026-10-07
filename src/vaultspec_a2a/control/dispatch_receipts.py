@@ -14,7 +14,6 @@ from ..database import (
     ThreadStatusElectionOutcome,
     elect_thread_status,
     get_control_action_by_dispatch_id,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ..database.graph_receipt_repository import persist_graph_action_receipt
@@ -28,8 +27,8 @@ from .accepted_input import AcceptedActionInput, dispatch_matches_accepted_input
 
 if TYPE_CHECKING:
     from ..database.models import ControlActionModel
-    from ..database.thread_repository import ThreadWriteExpectation
     from ..ipc.schemas import DispatchRequest
+    from ..thread import ThreadWriteExpectation
 
 logger = logging.getLogger(__name__)
 _PAYLOAD = TypeAdapter(dict[str, object])
@@ -80,12 +79,12 @@ def _receipt_matches_current_writer(
         or action.action_type != receipt.action_type
     ):
         return False
-    authority = expectation.authority
-    return (
-        receipt.action_type == authority.action_type
-        and receipt.dispatch_id == authority.action_receipt_id
-        and receipt.writer_generation == authority.writer_generation
-        and receipt.run_revision <= authority.run_revision
+    return expectation.authority.owned_by(
+        receipt.action_type,
+        receipt.dispatch_id,
+        writer_generation=receipt.writer_generation,
+        run_revision=receipt.run_revision,
+        exact_revision=False,
     )
 
 
@@ -138,11 +137,7 @@ async def prepare_graph_action_receipt(
         return None
     action_type, payload = accepted_graph_action
     expectation = thread_write_expectation(thread)
-    matches = (
-        expectation.authority.action_type == action_type
-        and expectation.authority.action_receipt_id == dispatch_id
-    )
-    if not matches:
+    if not expectation.authority.owned_by(action_type, dispatch_id):
         if install_from is None:
             return None
         election = await elect_thread_status(
@@ -150,11 +145,8 @@ async def prepare_graph_action_receipt(
             thread_id,
             expectation=install_from,
             status=install_from.status,
-            successor=successor_thread_write_authority(
-                install_from,
-                action_type=action_type,
-                action_receipt_id=dispatch_id,
-            ),
+            action_type=action_type,
+            action_receipt_id=dispatch_id,
         )
         if election.outcome is not ThreadStatusElectionOutcome.WON:
             return None

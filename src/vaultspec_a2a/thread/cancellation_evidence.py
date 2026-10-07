@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .write_authority import RECEIPT_ID_MAX_LENGTH
+
 __all__ = ["CancellationEvidence"]
 
 
@@ -15,5 +17,7 @@ class CancellationEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["cancellation-evidence-v1"]
-    dispatch_id: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^\S+$")]
+    dispatch_id: Annotated[
+        str, Field(min_length=1, max_length=RECEIPT_ID_MAX_LENGTH, pattern=r"^\S+$")
+    ]
     outcome: Literal["ceased", "no_active_work"]

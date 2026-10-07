@@ -23,7 +23,7 @@ from ..database import (
     mark_control_action_applied,
     release_control_action_lease,
     set_thread_repair_state,
-    successor_thread_write_authority,
+    thread_owned_by,
     thread_write_expectation,
 )
 from ..thread.action_receipts import GRAPH_ACTION_VERB
@@ -67,8 +67,8 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..database.models import RunWriteAuthority
     from ..ipc.schemas import DispatchRequest
+    from ..thread import RunWriteAuthority
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
@@ -124,8 +124,9 @@ async def _expire_overdue_actions(
                 ControlActionModel.recovery_deadline_at.is_not(None),
                 ControlActionModel.recovery_deadline_at <= observed_at,
                 ThreadModel.is_active.is_(True),
-                ThreadModel.writer_action_type == ControlActionModel.action_type,
-                ThreadModel.writer_action_receipt_id == ControlActionModel.dispatch_id,
+                thread_owned_by(
+                    ControlActionModel.action_type, ControlActionModel.dispatch_id
+                ),
             )
             .order_by(ControlActionModel.recovery_deadline_at)
             .limit(_RECOVERY_PAGE_SIZE)
@@ -288,10 +289,8 @@ async def _restore_requested_state(
         )
     else:
         target = expectation.status
-    return (
-        target is expectation.status
-        and action_type is expectation.authority.action_type
-        and action_receipt_id == expectation.authority.action_receipt_id
+    return target is expectation.status and expectation.authority.owned_by(
+        action_type, action_receipt_id
     )
 
 
@@ -327,10 +326,7 @@ async def _settle_permanent_refusal(
         return False
     expectation = thread_write_expectation(thread)
     action_type = ControlActionType(action.action_type)
-    if (
-        expectation.authority.action_type is not action_type
-        or expectation.authority.action_receipt_id != action.identity.dispatch_id
-    ):
+    if not expectation.authority.owned_by(action_type, action.identity.dispatch_id):
         return False
     if deadline_observed_at is not None:
         await record_recovery_deadline(
@@ -346,11 +342,8 @@ async def _settle_permanent_refusal(
             action.thread_id,
             expectation=expectation,
             status=ThreadStatus.RECONCILING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=action_type,
-                action_receipt_id=action.identity.dispatch_id,
-            ),
+            action_type=action_type,
+            action_receipt_id=action.identity.dispatch_id,
         )
         if election.outcome is not ThreadStatusElectionOutcome.WON:
             return False
@@ -394,11 +387,8 @@ async def _settle_orphaned_refusal(
             thread_id,
             expectation=expectation,
             status=ThreadStatus.RECONCILING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=authority.action_type,
-                action_receipt_id=authority.action_receipt_id,
-            ),
+            action_type=authority.action_type,
+            action_receipt_id=authority.action_receipt_id,
         )
         if election.outcome not in {
             ThreadStatusElectionOutcome.WON,
@@ -446,9 +436,8 @@ async def _settle_missing_action(
         FailureType.INCOMPATIBLE_STATE,
         "accepted recovery input is absent or inconsistent",
     )
-    if (
-        row is not None
-        and row.action_type == recovery_claim.authority.action_type.value
+    if row is not None and recovery_claim.authority.owned_by(
+        row.action_type, row.dispatch_id
     ):
         quarantined = await _settle_permanent_refusal(
             db,

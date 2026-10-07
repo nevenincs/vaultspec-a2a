@@ -41,11 +41,10 @@ from ..database import (
     elect_thread_status,
     get_artifacts_by_thread,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ..database.checkpoints import surviving_transcript
-from ..database.models import RunWriteAuthority, ThreadModel
+from ..database.models import ThreadModel
 from ..graph.nodes.vault_reader import build_initial_vault_index
 from ..ipc.schemas import (
     DispatchRequest,
@@ -53,6 +52,7 @@ from ..ipc.schemas import (
     to_dispatch_action,
 )
 from ..team.team_config import load_team_config
+from ..thread import RunWriteAuthority
 from ..thread.creation import resolve_autonomous
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
@@ -301,12 +301,13 @@ async def _failed_initial_dispatch(
             error_detail="Thread disappeared while initial dispatch settled",
             failure_type=FailureType.NOT_FOUND,
         )
-    if (
-        current_thread.writer_action_type == ControlActionType.INGEST.value
-        and current_thread.writer_action_receipt_id == action_receipt_id
-        and current_thread.status
-        in {ThreadStatus.COMPLETED.value, ThreadStatus.FAILED.value}
-    ):
+    ingest_owns_run = thread_write_expectation(current_thread).authority.owned_by(
+        ControlActionType.INGEST, action_receipt_id
+    )
+    if ingest_owns_run and current_thread.status in {
+        ThreadStatus.COMPLETED.value,
+        ThreadStatus.FAILED.value,
+    }:
         return ThreadCreationResult(
             thread_id=thread.id,
             status=current_thread.status,
@@ -448,11 +449,8 @@ async def create_and_dispatch_thread(
         thread.id,
         expectation=expectation,
         status=ThreadStatus.RUNNING,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=ControlActionType.INGEST,
-            action_receipt_id=action_receipt_id,
-        ),
+        action_type=ControlActionType.INGEST,
+        action_receipt_id=action_receipt_id,
     )
     await db.commit()
     current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
@@ -677,11 +675,8 @@ async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
         thread_id,
         expectation=expectation,
         status=ThreadStatus.ARCHIVED,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=expectation.authority.action_type,
-            action_receipt_id=expectation.authority.action_receipt_id,
-        ),
+        action_type=expectation.authority.action_type,
+        action_receipt_id=expectation.authority.action_receipt_id,
     )
     if election.outcome is not ThreadStatusElectionOutcome.WON:
         return await _archive_election_failure(db, thread_id)

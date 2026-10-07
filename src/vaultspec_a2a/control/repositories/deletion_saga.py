@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from sqlalchemy import CursorResult, Result
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ...database.thread_repository import ThreadWriteExpectation
+    from ...thread import ThreadWriteExpectation
 
 
 __all__ = [

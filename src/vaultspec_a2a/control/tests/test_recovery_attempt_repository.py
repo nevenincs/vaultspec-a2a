@@ -15,11 +15,11 @@ from ...database.models import (
     Base,
     ControlActionModel,
     RecoveryAttemptModel,
-    RunWriteAuthority,
 )
 from ...database.permission_repository import create_control_action
 from ...database.session import configure_sqlite_transactions
 from ...database.thread_repository import create_thread
+from ...thread import RunWriteAuthority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, RecoveryCondition
 from ..action_lease import (

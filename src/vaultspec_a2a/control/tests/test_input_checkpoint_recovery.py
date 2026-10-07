@@ -23,11 +23,12 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import create_control_action, create_thread, get_thread
-from ...database.models import Base, RunWriteAuthority
+from ...database.models import Base
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...tests._checkpoint_seeding import real_input_checkpoint
+from ...thread import RunWriteAuthority
 from ...thread.checkpoint_evidence import CheckpointEvidenceKind
 from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition

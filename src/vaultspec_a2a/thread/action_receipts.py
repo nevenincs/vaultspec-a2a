@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
 
 from .enums import ControlActionType
+from .write_authority import RECEIPT_ID_MAX_LENGTH
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -40,7 +41,9 @@ Its keys are exactly the actions a receipt can identify; every other action,
 cancel included, carries no graph input and needs no receipt.
 """
 
-_Identity = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^\S+$")]
+_Identity = Annotated[
+    str, Field(min_length=1, max_length=RECEIPT_ID_MAX_LENGTH, pattern=r"^\S+$")
+]
 _Fingerprint = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 
 

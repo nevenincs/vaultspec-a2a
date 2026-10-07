@@ -28,8 +28,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.models import RunWriteAuthority
-    from ..database.thread_repository import ThreadWriteExpectation
+    from ..thread import RunWriteAuthority, ThreadWriteExpectation
 
 __all__ = [
     "CONTROL_ACTION_LEASE_TTL",
@@ -568,10 +567,7 @@ async def _failure_thread_authority(
     if thread is None or not thread.is_active:
         return DispatchFailureDisposition.AUTHORITY_LOST
     authority = thread_write_expectation(thread).authority
-    if (
-        authority.action_type.value != action.action_type
-        or authority.action_receipt_id != action.dispatch_id
-    ):
+    if not authority.owned_by(action.action_type, action.dispatch_id):
         return DispatchFailureDisposition.AUTHORITY_LOST
     return authority
 

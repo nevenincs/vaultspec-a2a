@@ -15,9 +15,9 @@ from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType
 from ..migrate import build_migration_config, run_migrations
-from ..models import RunWriteAuthority
 from ..permission_repository import create_control_action
 from ..thread_repository import create_thread
 from ._write_authority_schema_cases import (

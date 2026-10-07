@@ -12,10 +12,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...database import create_control_action, create_thread
-from ...database.models import Base, RunWriteAuthority
+from ...database.models import Base
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..accepted_input import freeze_accepted_input

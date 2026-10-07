@@ -18,12 +18,12 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
+from ...thread import RunWriteAuthority, ThreadWriteExpectation
 from ...thread.enums import ControlActionType, InvalidTransitionError, ThreadStatus
-from ..models import Base, RunWriteAuthority
+from ..models import Base
 from ..permission_repository import create_control_action
 from ..thread_repository import (
     ThreadStatusElectionOutcome,
-    ThreadWriteExpectation,
     create_thread,
     elect_thread_status,
     get_thread,
@@ -74,22 +74,6 @@ async def _seed(
     return expectation
 
 
-def _successor(
-    expectation: ThreadWriteExpectation,
-    *,
-    action_type: ControlActionType | None = None,
-    receipt: str | None = None,
-    generation: int | None = None,
-) -> RunWriteAuthority:
-    current = expectation.authority
-    return RunWriteAuthority(
-        current.run_revision + 1,
-        current.writer_generation if generation is None else generation,
-        action_type or current.action_type,
-        receipt or current.action_receipt_id,
-    )
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("winner_status", "loser_status"),
@@ -107,7 +91,7 @@ async def test_stale_terminal_sessions_elect_exactly_one_winner(
     expected = await _seed(
         sessions, thread_id, ThreadStatus.RUNNING, f"receipt-{winner_status.value}"
     )
-    successor = _successor(expected)
+    writer = expected.authority
 
     async with sessions() as winner:
         first = await elect_thread_status(
@@ -115,7 +99,8 @@ async def test_stale_terminal_sessions_elect_exactly_one_winner(
             thread_id,
             expectation=expected,
             status=winner_status,
-            successor=successor,
+            action_type=writer.action_type,
+            action_receipt_id=writer.action_receipt_id,
         )
         await winner.commit()
     async with sessions() as stale:
@@ -124,7 +109,8 @@ async def test_stale_terminal_sessions_elect_exactly_one_winner(
             thread_id,
             expectation=expected,
             status=loser_status,
-            successor=successor,
+            action_type=writer.action_type,
+            action_receipt_id=writer.action_receipt_id,
         )
         await stale.commit()
     async with sessions() as reader:
@@ -146,14 +132,15 @@ async def test_completion_before_running_wins_and_late_running_loses(
     expected = await _seed(
         sessions, thread_id, ThreadStatus.SUBMITTED, "early-completion-receipt"
     )
-    successor = _successor(expected)
+    writer = expected.authority
     async with sessions() as completion:
         completed = await elect_thread_status(
             completion,
             thread_id,
             expectation=expected,
             status=ThreadStatus.COMPLETED,
-            successor=successor,
+            action_type=writer.action_type,
+            action_receipt_id=writer.action_receipt_id,
         )
         await completion.commit()
     async with sessions() as late_running:
@@ -162,7 +149,8 @@ async def test_completion_before_running_wins_and_late_running_loses(
             thread_id,
             expectation=expected,
             status=ThreadStatus.RUNNING,
-            successor=successor,
+            action_type=writer.action_type,
+            action_receipt_id=writer.action_receipt_id,
         )
         await late_running.commit()
 
@@ -188,18 +176,13 @@ async def test_winner_refreshes_same_session_identity_map(
             dispatch_id="same-session-cancel-receipt",
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
-        successor = _successor(
-            expected,
-            action_type=ControlActionType.CANCEL,
-            receipt="same-session-cancel-receipt",
-            generation=2,
-        )
         result = await elect_thread_status(
             session,
             thread_id,
             expectation=expected,
             status=ThreadStatus.CANCELLED,
-            successor=successor,
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id="same-session-cancel-receipt",
         )
         same_object = await get_thread(session, thread_id)
         assert same_object is loaded
@@ -271,7 +254,8 @@ async def test_each_stale_authority_dimension_loses(
                 thread_id,
                 expectation=expectation,
                 status=ThreadStatus.COMPLETED,
-                successor=_successor(expectation),
+                action_type=expectation.authority.action_type,
+                action_receipt_id=expectation.authority.action_receipt_id,
             )
             await session.rollback()
         assert result.outcome is expected_outcome
@@ -303,19 +287,14 @@ async def test_successor_requires_same_thread_action_receipt(
         "foreign-cancel-receipt",
         "wrong-action-receipt",
     ):
-        successor = _successor(
-            expected,
-            action_type=ControlActionType.CANCEL,
-            receipt=receipt,
-            generation=2,
-        )
         async with sessions() as session:
             result = await elect_thread_status(
                 session,
                 "receipt-owner",
                 expectation=expected,
                 status=ThreadStatus.CANCELLED,
-                successor=successor,
+                action_type=ControlActionType.CANCEL,
+                action_receipt_id=receipt,
             )
             await session.rollback()
         assert result.outcome is ThreadStatusElectionOutcome.RECEIPT_MISMATCH
@@ -339,19 +318,14 @@ async def test_changed_action_advances_generation_and_exact_receipt_wins(
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await session.commit()
-    successor = _successor(
-        expected,
-        action_type=ControlActionType.CANCEL,
-        receipt="changed-action-cancel-receipt",
-        generation=2,
-    )
     async with sessions() as session:
         result = await elect_thread_status(
             session,
             thread_id,
             expectation=expected,
             status=ThreadStatus.CANCELLED,
-            successor=successor,
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id="changed-action-cancel-receipt",
         )
         await session.commit()
     async with sessions() as reader:
@@ -366,7 +340,7 @@ async def test_changed_action_advances_generation_and_exact_receipt_wins(
 
 
 @pytest.mark.asyncio
-async def test_invalid_successor_and_terminal_reopen_refuse_before_sql(
+async def test_terminal_reopen_refuses_before_sql(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "terminal-refusal"
@@ -380,22 +354,13 @@ async def test_invalid_successor_and_terminal_reopen_refuse_before_sql(
                 thread_id,
                 expectation=expected,
                 status=ThreadStatus.RUNNING,
-                successor=_successor(expected),
-            )
-        with pytest.raises(ValueError, match="run_revision"):
-            await elect_thread_status(
-                session,
-                thread_id,
-                expectation=expected,
-                status=ThreadStatus.ARCHIVED,
-                successor=RunWriteAuthority(
-                    2, 1, ControlActionType.INGEST, "terminal-refusal-receipt"
-                ),
+                action_type=expected.authority.action_type,
+                action_receipt_id=expected.authority.action_receipt_id,
             )
 
 
 @pytest.mark.asyncio
-async def test_noop_and_wrong_generation_successors_are_refused(
+async def test_noop_election_is_refused(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "successor-refusal"
@@ -409,19 +374,8 @@ async def test_noop_and_wrong_generation_successors_are_refused(
                 thread_id,
                 expectation=expected,
                 status=ThreadStatus.RUNNING,
-                successor=_successor(expected),
-            )
-        with pytest.raises(ValueError, match="writer_generation"):
-            await elect_thread_status(
-                session,
-                thread_id,
-                expectation=expected,
-                status=ThreadStatus.CANCELLED,
-                successor=_successor(
-                    expected,
-                    action_type=ControlActionType.CANCEL,
-                    receipt="new-cancel-receipt",
-                ),
+                action_type=expected.authority.action_type,
+                action_receipt_id=expected.authority.action_receipt_id,
             )
 
 
@@ -439,7 +393,8 @@ async def test_missing_thread_and_failure_reason_bound(
             "missing-thread",
             expectation=missing,
             status=ThreadStatus.FAILED,
-            successor=_successor(missing),
+            action_type=missing.authority.action_type,
+            action_receipt_id=missing.authority.action_receipt_id,
         )
     assert absent.outcome is ThreadStatusElectionOutcome.NOT_FOUND
 
@@ -453,7 +408,8 @@ async def test_missing_thread_and_failure_reason_bound(
             thread_id,
             expectation=expected,
             status=ThreadStatus.FAILED,
-            successor=_successor(expected),
+            action_type=expected.authority.action_type,
+            action_receipt_id=expected.authority.action_receipt_id,
             failure_reason="字" * 1000,
         )
         await session.commit()

@@ -17,11 +17,12 @@ from ...database import (
     list_active_thread_page,
     normalize_workspace_identity,
 )
-from ...database.models import Base, RunWriteAuthority
+from ...database.models import Base
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import settings_override
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from .._thread_metadata import dispatchable_workspace_root

@@ -14,13 +14,13 @@ from ...database import (
     create_thread,
     elect_thread_status,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
-from ...database.models import Base, RunWriteAuthority
+from ...database.models import Base
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..accepted_input import freeze_accepted_input
@@ -95,11 +95,8 @@ async def test_discovery_discards_projection_captured_before_terminal_winner(
                 thread_id,
                 expectation=expectation,
                 status=ThreadStatus.COMPLETED,
-                successor=successor_thread_write_authority(
-                    expectation,
-                    action_type=expectation.authority.action_type,
-                    action_receipt_id=expectation.authority.action_receipt_id,
-                ),
+                action_type=expectation.authority.action_type,
+                action_receipt_id=expectation.authority.action_receipt_id,
             )
             assert election.outcome is ThreadStatusElectionOutcome.WON
             await db.commit()

@@ -58,8 +58,8 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..database.checkpoints import Checkpointer
-    from ..database.thread_repository import ThreadWriteExpectation
     from ..streaming.aggregator import EventAggregator
+    from ..thread import ThreadWriteExpectation
     from .drain import DrainGate
 
 __all__ = [
@@ -154,7 +154,6 @@ async def _persist_proven_cancellation(
         mark_control_action_applied,
         set_thread_approval_state,
         set_thread_repair_state,
-        successor_thread_write_authority,
         thread_write_expectation,
     )
     from ..thread.enums import ControlActionResultStatus, ControlActionType
@@ -175,26 +174,24 @@ async def _persist_proven_cancellation(
         if thread is None or action is None:
             await db.rollback()
             return False
+        expectation = thread_write_expectation(thread)
         if (
             action.action_type != ControlActionType.CANCEL.value
             or thread.status
             not in {ThreadStatus.CANCELLING.value, ThreadStatus.RECONCILING.value}
-            or thread.writer_action_type != ControlActionType.CANCEL.value
-            or thread.writer_action_receipt_id != evidence.dispatch_id
+            or not expectation.authority.owned_by(
+                ControlActionType.CANCEL, evidence.dispatch_id
+            )
         ):
             await db.rollback()
             return False
-        expectation = thread_write_expectation(thread)
         election = await elect_thread_status(
             db,
             thread_id,
             expectation=expectation,
             status=ThreadStatus.CANCELLED,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.CANCEL,
-                action_receipt_id=evidence.dispatch_id,
-            ),
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id=evidence.dispatch_id,
         )
         if election.outcome is not ThreadStatusElectionOutcome.WON:
             await db.rollback()
@@ -259,7 +256,6 @@ async def _persist_proven_failure(
         mark_control_action_applied,
         set_thread_approval_state,
         set_thread_repair_state,
-        successor_thread_write_authority,
         thread_write_expectation,
     )
     from ..thread.enums import NON_ACTIVE_STATUSES
@@ -292,11 +288,8 @@ async def _persist_proven_failure(
             thread_id,
             expectation=expectation,
             status=ThreadStatus.FAILED,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=evidence.action.action_type,
-                action_receipt_id=evidence.action.dispatch_id,
-            ),
+            action_type=evidence.action.action_type,
+            action_receipt_id=evidence.action.dispatch_id,
             failure_reason=failure_reason,
             provider_condition=evidence.provider_condition,
         )
@@ -873,11 +866,8 @@ def _permission_receipt_is_current(
 ) -> bool:
     from ..thread.enums import ControlActionType
 
-    return (
-        expectation.status is status
-        and expectation.authority.action_type
-        is ControlActionType.PERMISSION_REQUEST_CREATED
-        and expectation.authority.action_receipt_id == dispatch_id
+    return expectation.status is status and expectation.authority.owned_by(
+        ControlActionType.PERMISSION_REQUEST_CREATED, dispatch_id
     )
 
 
@@ -903,7 +893,6 @@ async def _persist_permission_request(
         reserve_control_action,
         set_thread_approval_state,
         set_thread_repair_state,
-        successor_thread_write_authority,
         supersede_permission_requests,
         thread_write_expectation,
     )
@@ -955,11 +944,8 @@ async def _persist_permission_request(
         thread_id,
         expectation=expectation,
         status=fx.thread_status,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
-            action_receipt_id=action.dispatch_id,
-        ),
+        action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
+        action_receipt_id=action.dispatch_id,
     )
     if election.outcome is not ThreadStatusElectionOutcome.WON:
         await db.rollback()

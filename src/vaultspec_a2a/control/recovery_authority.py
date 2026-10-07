@@ -20,7 +20,6 @@ from ..database import (
     mark_control_action_applied,
     set_thread_approval_state,
     set_thread_repair_state,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ..thread.checkpoint_evidence import (
@@ -54,7 +53,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.checkpoints import Checkpointer
-    from ..database.thread_repository import ThreadWriteExpectation
+    from ..thread import ThreadWriteExpectation
     from ..thread.action_receipts import GraphActionReceipt
     from ..thread.checkpoint_evidence import CheckpointEvidence
 
@@ -163,11 +162,8 @@ async def _reconcile_incomplete_checkpoint(
             decision.thread_id,
             expectation=decision.expectation,
             status=ThreadStatus.RECONCILING,
-            successor=successor_thread_write_authority(
-                decision.expectation,
-                action_type=decision.receipt.action_type,
-                action_receipt_id=decision.receipt.dispatch_id,
-            ),
+            action_type=decision.receipt.action_type,
+            action_receipt_id=decision.receipt.dispatch_id,
         )
         if election.outcome is ThreadStatusElectionOutcome.WON:
             await set_thread_repair_state(
@@ -241,11 +237,8 @@ async def _promote_queued_continuation(
         decision.thread_id,
         expectation=decision.expectation,
         status=ThreadStatus.RUNNING,
-        successor=successor_thread_write_authority(
-            decision.expectation,
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            action_receipt_id=dispatch_id,
-        ),
+        action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+        action_receipt_id=dispatch_id,
     )
     if election.outcome is not ThreadStatusElectionOutcome.WON:
         return await _refuse_promotion(db, decision, election.outcome.value)
@@ -321,11 +314,8 @@ async def _reconcile_completed_checkpoint(
         decision.thread_id,
         expectation=decision.expectation,
         status=ThreadStatus.COMPLETED,
-        successor=successor_thread_write_authority(
-            decision.expectation,
-            action_type=decision.receipt.action_type,
-            action_receipt_id=decision.receipt.dispatch_id,
-        ),
+        action_type=decision.receipt.action_type,
+        action_receipt_id=decision.receipt.dispatch_id,
     )
     if election.outcome is ThreadStatusElectionOutcome.WON:
         if decision.last_sequence is not None:

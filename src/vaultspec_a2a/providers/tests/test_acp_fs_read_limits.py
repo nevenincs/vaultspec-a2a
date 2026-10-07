@@ -15,9 +15,9 @@ from pydantic import ValidationError
 from ...control.config import settings
 from ...control.infra_config import InfraConfig
 from ...team.team_config import AgentConfig
-from ...testing import read_acp_frame, settings_override
+from ...testing import acp_request, read_acp_frame, settings_override
 from .._acp_protocol import _dispatch_stdout_line, process_stdout_loop
-from .._acp_request import issue_request
+from .._acp_request import issue_request, jsonrpc_result
 from .._acp_rpc_handlers import (
     _read_workspace_text,
     on_fs_read_text_file,
@@ -116,11 +116,9 @@ async def test_line_selection_and_optional_ranges(
     expected: str,
 ) -> None:
     (tmp_path / "data.txt").write_text("one\ntwo\nthree", encoding="utf-8")
-    assert await _read(tmp_path, acp_session_context, ranges) == {
-        "jsonrpc": "2.0",
-        "id": 7,
-        "result": {"content": expected},
-    }
+    assert await _read(tmp_path, acp_session_context, ranges) == jsonrpc_result(
+        7, {"content": expected}
+    )
 
 
 @pytest.mark.asyncio
@@ -281,12 +279,11 @@ async def test_json_dispatch_returns_exact_responses_through_real_pipes(
             "capabilities": {"filesystem_read": True},
         }
     )
-    request = {
-        "jsonrpc": "2.0",
-        "id": 11,
-        "method": "fs/read_text_file",
-        "params": {"path": "data.txt", "sessionId": "wire-session", **ranges},
-    }
+    request = acp_request(
+        11,
+        "fs/read_text_file",
+        {"path": "data.txt", "sessionId": "wire-session", **ranges},
+    )
     await _dispatch_stdout_line(
         json.dumps(request).encode("utf-8"),
         echo_context,
@@ -297,7 +294,7 @@ async def test_json_dispatch_returns_exact_responses_through_real_pipes(
     if expected is None:
         assert "error" in response and "result" not in response
     else:
-        assert response == {"jsonrpc": "2.0", "id": 11, "result": {"content": expected}}
+        assert response == jsonrpc_result(11, {"content": expected})
 
 
 @pytest.mark.service
@@ -429,10 +426,9 @@ agent({ name: 'read-contract-peer' })
                         "prompt": [{"type": "text", "text": "Read the selected line"}],
                     },
                 )
-                assert await response == {
-                    "jsonrpc": "2.0",
-                    "id": 42,
-                    "result": {
+                assert await response == jsonrpc_result(
+                    42,
+                    {
                         "stopReason": "end_turn",
                         "_meta": {
                             "first": {"content": "🙂"},
@@ -443,7 +439,7 @@ agent({ name: 'read-contract-peer' })
                             "terminalRefused": True,
                         },
                     },
-                }
+                )
                 assert (tmp_path / "sdk-written.txt").read_text() == "owner write"
                 assert not (tmp_path / "foreign.txt").exists()
                 assert not context.terminals

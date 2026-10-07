@@ -5,13 +5,13 @@ session lifecycle RPCs and data carriers.
 """
 
 import asyncio
-import json
 import logging
 from contextlib import suppress
 from typing import Never, TypedDict, Unpack
 
 from ..control.config import settings
 from ..utils.enums import AcpRequestId
+from ._acp_request import issue_request
 from ._acp_types import (
     AcpModelConfig,
     AcpResponseFuture,
@@ -242,24 +242,21 @@ async def authenticate_rpc(
     if ctx is not None:
         ctx.last_auth_url = auth_url
     method_id = select_auth_method_id(auth_methods)
-    rpc_id = AcpRequestId.AUTHENTICATE
-    response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-    req: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "method": "authenticate",
-        "params": {"methodId": method_id},
-    }
     logger.info(
         "Attempting ACP authenticate handshake",
         extra=runtime_log_extra(config, handshake_step="authenticate"),
     )
-    async with stdin_lock:
-        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await stdin.drain()
+    response_future = await issue_request(
+        response_futures,
+        stdin=stdin,
+        stdin_lock=stdin_lock,
+        rpc_id=AcpRequestId.AUTHENTICATE,
+        method="authenticate",
+        params={"methodId": method_id},
+    )
     try:
         resp = await wait_for_authenticate_response(
-            response_future=response_futures[rpc_id],
+            response_future=response_future,
             process=process,
             timeout_seconds=settings.acp_interactive_auth_timeout_seconds,
         )

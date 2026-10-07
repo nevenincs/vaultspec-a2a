@@ -22,6 +22,7 @@ from ..desktop._filesystem_authority import confined_file_descriptor
 from ..graph.acp_options import narrowest_option_id, valid_option_ids
 from ._acp_client_requests import AcpSessionRequest
 from ._acp_fs_read import AcpFileReadRange, AcpFileReadRequest, read_text_lines
+from ._acp_request import jsonrpc_error, jsonrpc_result
 from ._acp_rpc_terminal_handlers import on_terminal_create as on_terminal_create
 from ._acp_rpc_terminal_handlers import on_terminal_kill as on_terminal_kill
 from ._acp_rpc_terminal_handlers import on_terminal_output as on_terminal_output
@@ -43,6 +44,7 @@ from ._json_contract import (
 from ._native_read_tools import NATIVE_READ_TOOL_NAMES
 from ._project_scope import path_arguments_in_project
 from ._tool_policy import ToolPermissionRequest, decide
+from .acp_exceptions import AcpErrorCode
 
 __all__: list[str] = []
 
@@ -191,10 +193,9 @@ def _vault_write_denial(rpc_id: AcpRpcId, path: str) -> JsonObject:
     the authoring tools as the correct path — never a bare JSON-RPC error, so
     the agent is steered rather than left retrying a failed write.
     """
-    return {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {
+    return jsonrpc_result(
+        rpc_id,
+        {
             "status": "denied",
             "denial_kind": "forbidden_actor",
             "eligibility": {
@@ -209,7 +210,7 @@ def _vault_write_denial(rpc_id: AcpRpcId, path: str) -> JsonObject:
             },
             "path": path,
         },
-    }
+    )
 
 
 # Kimi's native READ tools that mirror the read floor (Claude's Read/Grep/Glob),
@@ -280,11 +281,9 @@ def _strip_mcp_prefix(tool_name: str) -> str:
 
 def _selected_outcome(rpc_id: AcpRpcId, option_id: str) -> JsonObject:
     """Build the response frame selecting one offered option."""
-    return {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {"outcome": {"optionId": option_id, "outcome": "selected"}},
-    }
+    return jsonrpc_result(
+        rpc_id, {"outcome": {"optionId": option_id, "outcome": "selected"}}
+    )
 
 
 def _refused_outcome(rpc_id: AcpRpcId, options: list[JsonObject]) -> JsonObject:
@@ -301,11 +300,7 @@ def _refused_outcome(rpc_id: AcpRpcId, options: list[JsonObject]) -> JsonObject:
     refusal = narrowest_option_id(options, approving=False)
     if refusal is not None:
         return _selected_outcome(rpc_id, refusal)
-    return {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {"outcome": {"outcome": "cancelled"}},
-    }
+    return jsonrpc_result(rpc_id, {"outcome": {"outcome": "cancelled"}})
 
 
 def _floor_call_is_confined(
@@ -472,13 +467,9 @@ async def on_fs_read_text_file(
             line=request.line,
             limit=request.limit,
         )
-        return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": text}}
+        return jsonrpc_result(rpc_id, {"content": text})
     except Exception as exc:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": -32603, "message": str(exc)},
-        }
+        return jsonrpc_error(rpc_id, AcpErrorCode.INTERNAL_ERROR, str(exc))
 
 
 async def on_fs_write_text_file(
@@ -516,12 +507,8 @@ async def on_fs_write_text_file(
         async with git_workspace_mutex:
             request.require_active_session(ctx)
             await asyncio.to_thread(_write_workspace_text, path, content, config)
-        return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
+        return jsonrpc_result(rpc_id, {})
     except _VaultWriteDeniedError:
         return _vault_write_denial(rpc_id, _required_string(params, "path"))
     except Exception as exc:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": -32603, "message": str(exc)},
-        }
+        return jsonrpc_error(rpc_id, AcpErrorCode.INTERNAL_ERROR, str(exc))

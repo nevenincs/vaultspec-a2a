@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing import request_permission_params
 from ...workspace.concurrency import git_workspace_mutex
+from .._acp_request import jsonrpc_result
 from .._acp_rpc_handlers import (
     on_fs_write_text_file,
     on_request_permission,
@@ -27,11 +29,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .._json_contract import JsonObject, JsonValue
-
-_PERMISSION_OPTIONS: list[JsonValue] = [
-    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-    {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
-]
 
 
 def _config(root: Path) -> AcpModelConfig:
@@ -283,7 +280,7 @@ async def test_owner_write_remains_permitted(
         acp_session_context,
         _config(tmp_path),
     )
-    assert response == {"jsonrpc": "2.0", "id": 1, "result": {}}
+    assert response == jsonrpc_result(1, {})
     assert (tmp_path / "nested/created.txt").read_text(
         encoding="utf-8"
     ) == "owner content"
@@ -318,14 +315,6 @@ async def test_write_rechecks_session_after_waiting_for_workspace_mutex(
     assert not (tmp_path / "created.txt").exists()
 
 
-def _permission_params(session: JsonValue) -> JsonObject:
-    return {
-        "sessionId": session,
-        "toolCall": {"title": "Edit", "rawInput": {}},
-        "options": list(_PERMISSION_OPTIONS),
-    }
-
-
 def _recording_config(root: Path, asked: list[str]) -> AcpModelConfig:
     """A supervised config whose human rung records each question it is asked."""
 
@@ -348,7 +337,7 @@ async def test_permission_outside_the_session_is_refused_before_any_rung(
     asked: list[str] = []
     response = await on_request_permission(
         1,
-        _permission_params(session),
+        request_permission_params(session),
         acp_session_context,
         _recording_config(tmp_path, asked),
     )
@@ -362,7 +351,7 @@ async def test_permission_requires_an_open_negotiated_session(
     tmp_path: Path, acp_session_context: AcpSessionContext, mode: str
 ) -> None:
     asked: list[str] = []
-    params = _permission_params(acp_session_context.session_id)
+    params = request_permission_params(acp_session_context.session_id)
     if mode == "missing":
         params.pop("sessionId")
     elif mode == "unbound":
@@ -383,7 +372,7 @@ async def test_owner_permission_request_reaches_the_human_rung(
     asked: list[str] = []
     response = await on_request_permission(
         1,
-        _permission_params(acp_session_context.session_id),
+        request_permission_params(acp_session_context.session_id),
         acp_session_context,
         _recording_config(tmp_path, asked),
     )

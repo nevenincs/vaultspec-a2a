@@ -1,4 +1,10 @@
-"""One fixed-id ACP client request: register a future, write its frame.
+"""The ACP client's JSON-RPC frames, and one fixed-id client request.
+
+Every frame this client puts on an agent's stdin is built here: a request for a
+call the client initiates, a result or an error for a server-initiated call the
+client answers. ``encode_frame`` is the one serialization of a frame to its
+newline-delimited line, and ``write_frame`` the one write of it under the lock
+that keeps concurrent writers from interleaving lines.
 
 Every ACP RPC the client itself initiates - as opposed to a server-initiated
 request the client answers - reserves ONE integer id per operation KIND
@@ -12,12 +18,11 @@ current call site does either.
 
 Split into two steps rather than one because they do not always travel
 together. ``setup_prompt`` issues the request and hands the future to a
-DIFFERENT reader whose resolution IS the turn's completion signal - it never
-awaits here at all, so it uses :func:`issue_request` alone. ``authenticate_
-rpc`` races the response future against the subprocess's own exit via
-``asyncio.wait`` and a three-way exception taxonomy neither step below
-models - and its frame carries a conditional ``_meta`` field the other eight
-never do - so it does not build on this module at all.
+DIFFERENT reader whose resolution IS the turn's completion signal, and
+``authenticate_rpc`` races the response future against the subprocess's own
+exit via ``asyncio.wait`` and a three-way exception taxonomy
+:func:`await_response` does not model. Neither awaits here, so both use
+:func:`issue_request` alone.
 
 ``on_timeout`` stays a caller-side argument to :func:`await_response` rather
 than a shared log call: two call sites log a structured event naming the
@@ -31,10 +36,52 @@ import json
 from collections.abc import Callable
 from typing import TypedDict, Unpack
 
-from ._acp_types import AcpResponseFuture, AcpResponseFutures
+from ._acp_types import AcpResponseFuture, AcpResponseFutures, AcpRpcId
 from ._json_contract import JsonObject
+from .acp_exceptions import AcpErrorCode
 
-__all__: list[str] = []
+__all__ = [
+    "await_response",
+    "encode_frame",
+    "issue_request",
+    "jsonrpc_error",
+    "jsonrpc_request",
+    "jsonrpc_result",
+    "write_frame",
+]
+
+
+def jsonrpc_request(rpc_id: AcpRpcId, method: str, params: JsonObject) -> JsonObject:
+    """Build the frame for a call this client makes of the agent."""
+    return {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
+
+
+def jsonrpc_result(rpc_id: AcpRpcId, result: JsonObject) -> JsonObject:
+    """Build the frame that answers the agent's call *rpc_id* with *result*."""
+    return {"jsonrpc": "2.0", "id": rpc_id, "result": result}
+
+
+def jsonrpc_error(rpc_id: AcpRpcId, code: AcpErrorCode, message: str) -> JsonObject:
+    """Build the frame that refuses the agent's call *rpc_id*."""
+    return {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "error": {"code": code, "message": message},
+    }
+
+
+def encode_frame(frame: JsonObject) -> bytes:
+    """Serialize *frame* as the one newline-terminated line the agent reads."""
+    return json.dumps(frame).encode("utf-8") + b"\n"
+
+
+async def write_frame(
+    stdin: asyncio.StreamWriter, stdin_lock: asyncio.Lock, frame: JsonObject
+) -> None:
+    """Write *frame* to the agent's stdin while holding *stdin_lock*."""
+    async with stdin_lock:
+        stdin.write(encode_frame(frame))
+        await stdin.drain()
 
 
 class _IssueRequestArgs(TypedDict):
@@ -56,15 +103,11 @@ async def issue_request(
     """
     future: AcpResponseFuture = asyncio.get_running_loop().create_future()
     futures[kwargs["rpc_id"]] = future
-    request: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": kwargs["rpc_id"],
-        "method": kwargs["method"],
-        "params": kwargs["params"],
-    }
-    async with kwargs["stdin_lock"]:
-        kwargs["stdin"].write(json.dumps(request).encode("utf-8") + b"\n")
-        await kwargs["stdin"].drain()
+    await write_frame(
+        kwargs["stdin"],
+        kwargs["stdin_lock"],
+        jsonrpc_request(kwargs["rpc_id"], kwargs["method"], kwargs["params"]),
+    )
     return future
 
 

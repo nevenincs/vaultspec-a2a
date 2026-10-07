@@ -33,7 +33,7 @@ from langgraph.errors import GraphBubbleUp
 from ._acp_types import PermissionCallback
 from ._harness_mcp_registry import harness_tool_is_withheld
 from ._json_contract import JsonObject, lenient_json_object
-from ._project_scope import ProjectScope, foreign_project_argument
+from ._project_scope import RunProjectScope, foreign_project_argument
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ class CodexPermissionRung:
         *,
         allowed_tools: frozenset[tuple[str, str]],
         permission_callback: PermissionCallback | None = None,
-        project_scope: ProjectScope | None = None,
+        project_scope: RunProjectScope | None = None,
     ) -> None:
         self._allowed_tools = allowed_tools
         self._permission_callback = permission_callback

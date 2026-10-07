@@ -22,7 +22,14 @@ class WorkspaceUnavailableError(ValueError):
 
 
 def canonical_workspace_root(value: str | Path) -> Path:
-    """Normalize aliases for authority comparisons, preserving absolute shares."""
+    """Normalize aliases for authority comparisons, preserving absolute shares.
+
+    The minted spelling keeps any extended-length prefix ``realpath`` leaves on
+    it, because durable selectors are derived from that spelling; authority is
+    compared without it. The comparison form must still be absolute: a prefixed
+    namespace that is neither a drive nor a share would otherwise reduce to a
+    path relative to this process's working directory.
+    """
     canonical = canonical_project_root(value)
     if os.name == "nt" and canonical.startswith("\\\\?\\"):
         # Extended UNC paths must retain their absolute share authority.
@@ -31,7 +38,12 @@ def canonical_workspace_root(value: str | Path) -> Path:
             if canonical[4:8].upper() == "UNC\\"
             else canonical[4:]
         )
-    return Path(canonical)
+    root = Path(canonical)
+    if not root.is_absolute():
+        raise ValueError(
+            f"workspace_root does not reduce to an absolute path: {value!r}"
+        )
+    return root
 
 
 def configured_workspace_boundary() -> Path | None:

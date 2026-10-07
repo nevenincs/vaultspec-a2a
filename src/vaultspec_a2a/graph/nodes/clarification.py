@@ -21,10 +21,11 @@ nor guaranteed stable. The split gives:
   that has nothing to ask routes the run straight on, so an autonomous run never
   parks for a question nobody asked.
 - The gate node (:func:`create_clarification_gate_node`) is pure: it re-reads the
-  committed question set, raises the ``interrupt()``, and on resume records the
-  answers or appends the submitted continuation prompt. Because the resume
-  restarts here, the producer is NOT consulted twice and the question a human
-  sees after a reload is byte-identical to the one they saw before it.
+  committed question set, raises the ``interrupt()``, and on resume appends the
+  rendered answers, the submitted continuation prompt, or the decline marker as
+  one human turn. Because the resume restarts here, the producer is NOT
+  consulted twice and the question a human sees after a reload is byte-identical
+  to the one they saw before it.
 
 Committing before parking is also what makes the question READABLE while the run
 is parked: the interrupt payload sits in the checkpoint, which is exactly where
@@ -66,10 +67,18 @@ if TYPE_CHECKING:
     from .worker import RoutingNode
 
 __all__ = [
+    "CLARIFICATION_GATE_NODE",
+    "CLARIFICATION_REQUEST_NODE",
     "ClarificationQuestionProducer",
     "create_clarification_gate_node",
     "create_clarification_request_node",
 ]
+
+# The graph node names the pair registers under. Declared beside the nodes so a
+# compiler wiring them and the nodes' own ``__name__`` cannot spell them apart;
+# the state key ``clarification_request`` is a different identifier.
+CLARIFICATION_REQUEST_NODE = "clarification_request"
+CLARIFICATION_GATE_NODE = "clarification_gate"
 
 
 class ClarificationQuestionProducer(Protocol):
@@ -167,7 +176,7 @@ def create_clarification_request_node(
             },
         )
 
-    clarification_request_node.__name__ = "clarification_request"
+    clarification_request_node.__name__ = CLARIFICATION_REQUEST_NODE
     return clarification_request_node
 
 
@@ -194,8 +203,8 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
 
     Returns:
         An async node that interrupts and then routes via ``Command.goto`` with
-        either an answer reducer delta or one appended human prompt, while the
-        pending question is cleared.
+        the resolution's appended human turn, if it has one, while the pending
+        question is cleared.
     """
 
     async def clarification_gate_node(state: TeamState) -> Command[Any]:
@@ -229,13 +238,13 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
             },
         }
         if isinstance(resolution, ClarificationAnswers):
-            declared = _declared_answers(resolution, request)
-            update["clarification_answers"] = {request.request_id: declared}
             # The transcript is the only state downstream turns read, so the
-            # answered questionnaire is ALSO rendered as one human turn - the
-            # recorded state alone reaches no model. Skipped when nothing was
-            # effectively answered (all-optional questionnaire, empty map).
-            rendered = render_clarification_answers(request, declared)
+            # answered questionnaire is carried as one human turn. Skipped when
+            # nothing was effectively answered (all-optional questionnaire,
+            # empty map); the receipt still records the resolution.
+            rendered = render_clarification_answers(
+                request, _declared_answers(resolution, request)
+            )
             if rendered is not None:
                 update["messages"] = [
                     stamp_message_created_at(HumanMessage(content=rendered))
@@ -244,7 +253,6 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
             # A decline's whole downstream trace is this one fixed marker: the
             # transcript is the only state model turns read, and without it a
             # declined questionnaire is indistinguishable from one never asked.
-            # No answer entry is recorded - refusal is not an answer.
             update["messages"] = [
                 stamp_message_created_at(
                     HumanMessage(content=CLARIFICATION_DECLINE_MARKER)
@@ -256,5 +264,5 @@ def create_clarification_gate_node(*, proceed_target: str) -> RoutingNode:
             ]
         return Command(goto=proceed_target, update=update)
 
-    clarification_gate_node.__name__ = "clarification_gate"
+    clarification_gate_node.__name__ = CLARIFICATION_GATE_NODE
     return clarification_gate_node

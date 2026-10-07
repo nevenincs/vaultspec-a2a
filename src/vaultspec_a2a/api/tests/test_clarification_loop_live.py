@@ -18,8 +18,8 @@ into a real ``Executor``/``worker.app.create_worker_app()``, and the
 gateway's ``app.state.worker_client`` is pointed at that real worker instead
 of the stub, so ``/respond`` drives a genuine ``Command(resume=answers)``
 through the real dispatch/executor path. The assertion is on the graph's OWN
-state (``clarification_answers`` actually written by the real node), not a
-recorded stub call.
+state (the transcript turn the real node actually appended), not a recorded
+stub call.
 """
 
 from __future__ import annotations
@@ -140,23 +140,6 @@ async def _worker_test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     yield
 
 
-async def _wait_for_answered_clarification(
-    graph: RegisteredCompiledGraph, config: RunnableConfig
-) -> GraphStateSnapshot:
-    """Wait until the real graph records answers AND runs on to its end.
-
-    The answers commit a superstep before the run finishes, so waiting on
-    them alone returns a snapshot still positioned at the node that follows,
-    and every assertion about where the run ended up races it.
-    """
-    with anyio.fail_after(15.0):
-        while True:
-            snap = await graph.aget_state(config)
-            if snap.values.get("clarification_answers") and snap.next == ():
-                return snap
-            await anyio.sleep(0.05)
-
-
 async def _wait_for_terminal_graph(
     graph: RegisteredCompiledGraph,
     config: RunnableConfig,
@@ -200,7 +183,6 @@ class _ParkedRun:
 class _ExpiredClaim:
     """An accepted clarification resume whose lease has already expired."""
 
-    request_id: str
     idempotency_key: str
     claim: ControlActionClaim
 
@@ -320,6 +302,7 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
     ) as gateway_client:
         run = await _create_parked_run(gateway_client, session_factory, checkpointer)
         request_id = run.parked.request.request_id
+        initial_messages = await _initial_messages(run)
 
         # Disclosure still works normally (unaffected by the worker swap below).
         status_resp = await gateway_client.get(f"/v1/runs/{run.thread_id}")
@@ -363,18 +346,18 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
 
             # The dispatch is fire-and-forget inside the worker; poll the
             # REAL graph's own state (not a recorded receiver call) until
-            # the real clarification node observes the resume.
-            snap = await _wait_for_answered_clarification(run.parked.graph, run.config)
+            # the real clarification node observes the resume and the run
+            # reaches its end.
+            _, messages = await _wait_for_terminal_graph(
+                run.parked.graph, run.config, initial_messages
+            )
 
-            assert snap.values["clarification_answers"] == {
-                request_id: {"provider": "codex"}
-            }
-            assert snap.next == (), "the graph did not reach its terminal state"
-            # The answered questionnaire also reaches the transcript - the
-            # one state downstream model turns actually read.
-            transcript = cast("list[BaseMessage]", snap.values["messages"])
-            assert transcript[-1].type == "human"
-            assert transcript[-1].content == (
+            # The answered questionnaire reaches the transcript - the one
+            # state downstream model turns actually read.
+            appended = messages[len(initial_messages) :]
+            assert len(appended) == 1
+            assert appended[0].type == "human"
+            assert appended[0].content == (
                 "Answers to the clarification questionnaire:\n"
                 "- Which provider should author the plan?: codex"
             )
@@ -420,11 +403,6 @@ async def test_new_prompt_resumes_the_parked_graph_as_a_real_human_turn(
             assert appended[0].content == prompt
             assert settled.values.get("clarification_request") is None
             assert settled.values.get("clarification_request_id") is None
-            recorded_answers = cast(
-                "dict[str, dict[str, str]]",
-                settled.values.get("clarification_answers", {}),
-            )
-            assert request_id not in recorded_answers
 
 
 @pytest.mark.asyncio
@@ -435,9 +413,9 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
 
     The refusal crosses the real gateway, worker app, Executor,
     ``Command(resume=...)``, and clarification gate. The durable graph state
-    proves the outcome: the run reached its terminal state, exactly one fixed
-    marker turn was appended, and no answer was fabricated for the declined
-    request.
+    proves the outcome: the run reached its terminal state and exactly one
+    fixed marker turn was appended, with no answer turn fabricated for the
+    declined request.
     """
     app, _agg, _recording_worker, _cp = make_app(session_factory, checkpointer)
 
@@ -467,11 +445,6 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
             assert appended[0].content == CLARIFICATION_DECLINE_MARKER
             assert settled.values.get("clarification_request") is None
             assert settled.values.get("clarification_request_id") is None
-            recorded_answers = cast(
-                "dict[str, dict[str, str]]",
-                settled.values.get("clarification_answers", {}),
-            )
-            assert request_id not in recorded_answers
 
 
 async def _seed_clarification_run(
@@ -567,7 +540,6 @@ async def _prepare_expired_claim(
         await db.commit()
     assert claim.acquired is True
     return _ExpiredClaim(
-        request_id=request_id,
         idempotency_key=idempotency_key,
         claim=claim,
     )
@@ -644,9 +616,12 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
     )
     assert outcome.first.examined == 1
     assert outcome.first.dispatched == 1
-    assert outcome.settled.values["clarification_answers"] == {
-        claim.request_id: {"provider": "codex"}
-    }
+    transcript = cast("list[BaseMessage]", outcome.settled.values["messages"])
+    assert transcript[-1].type == "human"
+    assert transcript[-1].content == (
+        "Answers to the clarification questionnaire:\n"
+        "- Which provider should author the plan?: codex"
+    )
     assert outcome.settled.values["model_assignment_digest"] == run.cache_key[3]
     assert outcome.second.examined == 1
     assert outcome.second.applied == 1

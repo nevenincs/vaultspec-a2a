@@ -156,23 +156,6 @@ def merge_permission_answers(
     return {**existing, **new}
 
 
-def _merge_clarification_answers(
-    existing: dict[str, dict[str, str]],
-    new: dict[str, dict[str, str]],
-) -> dict[str, dict[str, str]]:
-    """Merge answered clarifications, keyed by the request they answered.
-
-    Keyed rather than last-write-wins because a run may ask more than once, and
-    the answers to an earlier question stay relevant to every later stage. A
-    repeat of the same request id overwrites, which is the correct reading of a
-    re-answered questionnaire.
-    """
-    merged = {k: dict(v) for k, v in existing.items()}
-    for request_id, answers in new.items():
-        merged[request_id] = dict(answers)
-    return merged
-
-
 def _merge_clarification_resolution_receipts(
     existing: dict[str, str],
     new: dict[str, str],
@@ -349,11 +332,6 @@ class TeamState(TypedDict):
     # the gate node clears it once answered. Last-write-wins.
     clarification_request: NotRequired[dict[str, Any] | None]
     clarification_request_id: NotRequired[str | None]
-    # clarification_answers: every answered questionnaire, keyed by the request id
-    # it answered, so a later stage can read what the human said at an earlier one.
-    clarification_answers: NotRequired[
-        Annotated[dict[str, dict[str, str]], _merge_clarification_answers]
-    ]
     # Application proof for the durable control journal. The fingerprint is
     # computed from the typed resolution and keyed by the request it resolved;
     # prompt text remains solely in messages rather than being persisted twice.
@@ -372,12 +350,9 @@ class TeamState(TypedDict):
     # by the request node as clarification_request; nothing infers them from the
     # run's own prompt. A clarification_questions field existed for a node that
     # did infer them, and it was removed with that node: state a stage writes and
-    # nothing reads is indistinguishable from a wiring fault.
-    # clarification_answers is declared ONCE, above, keyed by request id and
-    # carrying its merge reducer. A second declaration lived here describing a
-    # flat {question_id: answer} map with last-write-wins, and being later it
-    # won: the resolved annotation lost the reducer entirely, and its type
-    # contradicted what the gate node actually writes.
+    # nothing reads is indistinguishable from a wiring fault. An answered
+    # questionnaire likewise reaches downstream turns only as the human turn the
+    # gate appends to messages; no separate answers field is kept.
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str | None]

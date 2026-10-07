@@ -26,6 +26,7 @@ from ..graph.enums import (
     PermissionOptionKind,
     PermissionType,
     Provider,
+    ProviderCondition,
     StreamFrameKind,
     ToolCallStatus,
     ToolKind,
@@ -531,7 +532,7 @@ class ThreadStateSnapshot:
     # of parsing prose that changes whenever a vendor rewords a message. Read
     # from the same durable row and on the same terms - None for a run that
     # never failed, or whose record predates the column.
-    provider_condition: str | None = None
+    provider_condition: ProviderCondition | None = None
     # Why an operation did not take on a run that is STILL ALIVE - an
     # undelivered follow-up or resume - as distinct from why a run FAILED. Its
     # writers decline to set the two fields above precisely because the run

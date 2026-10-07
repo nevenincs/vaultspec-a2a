@@ -30,10 +30,9 @@ if TYPE_CHECKING:
 _READ_MODEL_COMPONENT = "ThreadStateSnapshot"
 _RUN_STATUS_COMPONENT = "RunStatusResponse"
 
-#: ``provider_condition`` is excluded while the read model still serves it as a
-#: bare string. Typing the Layer-1 field needs its enum in Layer 1, which is a
-#: separate contract event; this exclusion goes with it.
-_NOT_YET_DERIVED = frozenset({"provider_condition"})
+#: No shared field is exempt. ``provider_condition`` was, while the read model
+#: served it as a bare string because its enum sat outside Layer 1.
+_NOT_YET_DERIVED: frozenset[str] = frozenset()
 
 
 def _components() -> Mapping[str, Any]:
@@ -72,6 +71,7 @@ def test_the_two_surfaces_actually_share_fields() -> None:
         "failure_reason",
         "last_sequence",
         "pending_clarification",
+        "provider_condition",
         "queued_messages",
         "repair_reason",
         "repair_status",

@@ -8,7 +8,7 @@ from typing import TypedDict, Unpack
 
 from langchain_core.messages import UsageMetadata
 
-from .conditions import ProviderCondition
+from ..graph.enums import ProviderCondition
 
 __all__ = [
     "AcpAuthError",

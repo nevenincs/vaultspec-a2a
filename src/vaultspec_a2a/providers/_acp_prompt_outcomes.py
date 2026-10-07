@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Never
 
+from ..graph.enums import ProviderCondition
 from ._json_contract import JsonObject, lenient_json_object
 from .acp_exceptions import (
     AcpError,
@@ -11,7 +12,7 @@ from .acp_exceptions import (
     AcpPromptCancelledError,
     AcpPromptError,
 )
-from .conditions import ProviderCondition, condition_from_acp_error
+from .conditions import condition_from_acp_error
 
 if TYPE_CHECKING:
     from langchain_core.messages import UsageMetadata

@@ -41,7 +41,7 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
-from ..graph.enums import Provider
+from ..graph.enums import Provider, ProviderCondition
 from ..team.team_config import AgentConfig
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
@@ -93,7 +93,6 @@ from ._runtime_identity import (
 from ._stream_lifetime import ProcessChatModel
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .binary_version import probe_binary_version
-from .conditions import ProviderCondition
 from .execution_modes import EXTERNAL_EXECUTION_MODES
 from .lane_admission import is_web_lane_proven
 

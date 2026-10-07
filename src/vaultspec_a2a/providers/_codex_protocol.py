@@ -11,9 +11,10 @@ from langchain_core.messages.ai import (
 )
 from langchain_core.outputs import ChatGenerationChunk
 
+from ..graph.enums import ProviderCondition
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from ._prompt_render import render_prompt_text
-from .conditions import ProviderCondition, condition_from_codex_turn_error
+from .conditions import condition_from_codex_turn_error
 
 __all__ = [
     "_ACTION_ITEM_TYPES",

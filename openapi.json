@@ -5138,13 +5138,12 @@
           "provider_condition": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ProviderCondition"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Provider Condition"
+            ]
           },
           "repair_reason": {
             "anyOf": [

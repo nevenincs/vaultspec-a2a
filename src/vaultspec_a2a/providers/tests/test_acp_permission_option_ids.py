@@ -15,12 +15,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing import request_permission_params
 from .._acp_rpc_handlers import _autonomous_option_id, on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
-from .._json_contract import JsonObject, JsonValue
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from .._json_contract import JsonObject
 
 # An option dict with no identity field at all — exactly what the unfiltered set
 # comprehension turned into a ``None`` member of the "valid" ids.
@@ -58,11 +60,7 @@ async def _outcome(
     options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
 ) -> JsonObject:
     """Drive the production handler and return the outcome object it answered with."""
-    params: JsonObject = {
-        "sessionId": ctx.session_id,
-        "toolCall": {"title": "Edit", "rawInput": {}},
-        "options": list[JsonValue](options),
-    }
+    params = request_permission_params(ctx.session_id, options=options)
     response = await on_request_permission(1, params, ctx, config)
     result = response.get("result")
     assert isinstance(result, dict)
@@ -74,16 +72,7 @@ async def _outcome(
 async def _decide(
     options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
 ) -> str:
-    params: JsonObject = {
-        "sessionId": ctx.session_id,
-        "toolCall": {"title": "Edit", "rawInput": {}},
-        "options": list[JsonValue](options),
-    }
-    response = await on_request_permission(1, params, ctx, config)
-    result = response.get("result")
-    assert isinstance(result, dict)
-    outcome = result.get("outcome")
-    assert isinstance(outcome, dict)
+    outcome = await _outcome(options, config, ctx)
     option_id = outcome.get("optionId")
     assert isinstance(option_id, str)
     return option_id

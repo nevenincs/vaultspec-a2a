@@ -7,14 +7,13 @@ with the pinned adapter to prove which binary actually ran.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
 
 import pytest
 
-from ...testing import read_acp_frame
+from ...testing import ACP_PROTOCOL_VERSION, exchange_acp_request, initialize_request
 from ...workspace.environment import resolve_env_vars
 from .._factory_commands import _classify_acp_command, claude_acp_entry
 from .._subprocess import kill_process_tree, spawn_acp_process
@@ -58,31 +57,23 @@ async def test_workspace_planted_node_never_launches_the_adapter(
     command, _metadata = _classify_acp_command("node")
     process = await spawn_acp_process(command, env, str(workspace), metadata=None)
     try:
-        assert process.stdin is not None
-        assert process.stdout is not None
-        request = {
-            "jsonrpc": "2.0",
-            "id": _INITIALIZE_ID,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": 1,
-                "clientCapabilities": {
+        # A planted launcher answers no handshake, so the reader's failure names
+        # what the child wrote instead, which is where its marker would show.
+        frame = await exchange_acp_request(
+            process,
+            initialize_request(
+                _INITIALIZE_ID,
+                "vaultspec",
+                {
                     "fs": {"readTextFile": False, "writeTextFile": False},
                     "terminal": False,
                 },
-                "clientInfo": {"name": "vaultspec", "version": "1.0.0"},
-            },
-        }
-        process.stdin.write(json.dumps(request).encode("utf-8") + b"\n")
-        await process.stdin.drain()
-        # A planted launcher answers no handshake, so the reader's failure names
-        # what the child wrote instead, which is where its marker would show.
-        frame = await read_acp_frame(
-            process.stdout, _INITIALIZE_ID, _HANDSHAKE_TIMEOUT_SECONDS
+            ),
+            _HANDSHAKE_TIMEOUT_SECONDS,
         )
         result = frame.get("result")
         assert isinstance(result, dict), frame
-        assert result["protocolVersion"] == 1
+        assert result["protocolVersion"] == ACP_PROTOCOL_VERSION
     finally:
         await kill_process_tree(process)
 

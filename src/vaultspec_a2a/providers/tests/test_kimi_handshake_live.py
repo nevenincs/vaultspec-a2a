@@ -13,21 +13,16 @@ Service-marked; skips with a pointer when `kimi` is unavailable (an infra gate).
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
 from ...graph.enums import Provider
-from ...testing import read_acp_frame
+from ...testing import ACP_PROTOCOL_VERSION, exchange_acp_request, initialize_request
 from ...workspace.environment import resolve_env_vars
 from .._factory_commands import _classify_kimi_command
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
-
-if TYPE_CHECKING:
-    from .._json_contract import JsonObject
 
 
 @pytest.mark.service
@@ -46,31 +41,25 @@ async def test_kimi_acp_keyless_handshake_surface() -> None:
     proc = await spawn_acp_process(
         command, env, workspace, use_exec=False, metadata=meta
     )
-    assert proc.stdin is not None and proc.stdout is not None
     try:
-        init: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": 1,
-                "clientCapabilities": {
-                    "fs": {"readTextFile": True},
-                    "_meta": {"terminal-auth": True},
-                },
-                "clientInfo": {"name": "p02-s09-kimi", "version": "1.0.0"},
-            },
-        }
-        proc.stdin.write(json.dumps(init).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        frame = await read_acp_frame(proc.stdout, 0, 30.0)
+        frame = await exchange_acp_request(
+            proc,
+            initialize_request(
+                0,
+                "p02-s09-kimi",
+                {"fs": {"readTextFile": True}, "_meta": {"terminal-auth": True}},
+            ),
+            30.0,
+        )
         assert "result" in frame, frame.get("error")
         result = frame["result"]
         assert isinstance(result, dict)
 
         # The (b1) shape's load-bearing facts: v1 protocol + the shared _meta
         # family our client's terminal-auth handshake speaks.
-        assert result.get("protocolVersion") == 1, result.get("protocolVersion")
+        assert result.get("protocolVersion") == ACP_PROTOCOL_VERSION, result.get(
+            "protocolVersion"
+        )
         auth_methods = result.get("authMethods")
         assert isinstance(auth_methods, list) and auth_methods
         first_auth_method = auth_methods[0]

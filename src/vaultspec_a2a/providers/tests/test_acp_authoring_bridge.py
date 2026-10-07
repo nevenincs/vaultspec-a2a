@@ -17,7 +17,6 @@ Skips with a pointer when the Claude CLI is unavailable (an infra gate).
 """
 
 import asyncio
-import json
 import threading
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -36,7 +35,7 @@ from ...authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ...control.config import settings
 from ...graph.enums import Provider
 from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
-from ...testing import read_acp_frame
+from ...testing import acp_request, exchange_acp_request, initialize_request
 from ...testing.ports import free_port
 from ...workspace.environment import resolve_env_vars
 from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
@@ -158,21 +157,12 @@ async def test_real_agent_connects_to_authoring_bridge(
     proc = await spawn_acp_process(
         command, env, workspace, use_exec=False, metadata=meta
     )
-    assert proc.stdin is not None and proc.stdout is not None
     try:
-        init: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": 1,
-                "clientCapabilities": {"fs": {"readTextFile": True}},
-                "clientInfo": {"name": "s19-bridge-test", "version": "1.0.0"},
-            },
-        }
-        proc.stdin.write(json.dumps(init).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        init_frame = await read_acp_frame(proc.stdout, 0, 20.0)
+        init_frame = await exchange_acp_request(
+            proc,
+            initialize_request(0, "s19-bridge-test", {"fs": {"readTextFile": True}}),
+            20.0,
+        )
         assert "result" in init_frame
 
         binding = AuthoringToolBinding(
@@ -181,22 +171,22 @@ async def test_real_agent_connects_to_authoring_bridge(
             bearer_token="test-bearer",
             actor_token="test-actor",
         )
-        new: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {
-                "cwd": workspace,
-                "mcpServers": list[JsonValue](build_authoring_mcp_servers(binding)),
-                # The posture a served session opens under. The bridge is
-                # reached from a real run, so the session that reaches it is
-                # created the way a real run creates one.
-                "_meta": claude_bypass_declined_meta(),
-            },
-        }
-        proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        new_frame = await read_acp_frame(proc.stdout, 1, 30.0)
+        new_frame = await exchange_acp_request(
+            proc,
+            acp_request(
+                1,
+                "session/new",
+                {
+                    "cwd": workspace,
+                    "mcpServers": list[JsonValue](build_authoring_mcp_servers(binding)),
+                    # The posture a served session opens under. The bridge is
+                    # reached from a real run, so the session that reaches it is
+                    # created the way a real run creates one.
+                    "_meta": claude_bypass_declined_meta(),
+                },
+            ),
+            30.0,
+        )
         # The real agent accepted the authoring mcpServers config.
         assert "result" in new_frame, new_frame.get("error")
 

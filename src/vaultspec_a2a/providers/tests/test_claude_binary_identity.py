@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...graph.enums import Provider
-from ...testing import armed_environment, settings_override
+from ...testing import armed_environment, initialize_result, settings_override
 from ...thread.errors import ConfigError
 from ...utils.enums import AcpRequestId
 from .._acp_session import initialize_session
@@ -370,16 +370,13 @@ async def test_the_handshake_identity_is_carried_off_the_wire(
         await asyncio.sleep(0)
     acp_session_context.response_futures[AcpRequestId.INITIALIZE].set_result(
         {
-            "result": {
-                "protocolVersion": 1,
-                "agentCapabilities": {},
-                "authMethods": [],
-                "agentInfo": {
+            "result": initialize_result(
+                agent_info={
                     "name": "@agentclientprotocol/claude-agent-acp",
                     "title": "Claude Agent",
                     "version": "0.59.0",
-                },
-            }
+                }
+            )
         }
     )
 

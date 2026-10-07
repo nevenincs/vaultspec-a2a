@@ -4,8 +4,8 @@ Run as a script this is a minimal ACP v1 agent: a real subprocess that answers
 ``initialize``, ``session/new`` and ``session/prompt`` as JSON-RPC lines on stdin
 and stdout, so a test drives the full protocol lifecycle without a live model.
 Imported, it supplies the launch command for that subprocess, the frame builders
-the agent writes with, and the reader a client-side test uses to pull one
-response off an agent's stdout.
+either side of the protocol writes with, and the exchange a client-side test uses
+to send one request and pull its response off an agent's stdout.
 
 Only the standard library is imported at runtime. The agent is launched by path
 and has to start without the package's settings stack, so the typing-only
@@ -24,14 +24,29 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..providers._json_contract import JsonObject, JsonValue
 
 __all__ = [
+    "ACP_PROTOCOL_VERSION",
     "ACP_SIMULATOR_PATH",
+    "REQUEST_PERMISSION_METHOD",
+    "acp_request",
+    "exchange_acp_request",
+    "initialize_request",
+    "initialize_result",
     "read_acp_frame",
+    "request_permission_params",
     "request_permission_request",
     "simulator_command",
 ]
+
+#: The one protocol version both sides of every test exchange speak.
+ACP_PROTOCOL_VERSION = 1
+
+#: The method an agent calls to ask its client for a permission decision.
+REQUEST_PERMISSION_METHOD = "session/request_permission"
 
 #: The file a test launches as the agent. Absolute, because a runtime identity
 #: record names the adapter entry it was started from and refuses anything else.
@@ -50,7 +65,12 @@ def simulator_command(*args: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _request(rpc_id: JsonValue, method: str, params: JsonObject) -> JsonObject:
+def acp_request(rpc_id: int | str, method: str, params: JsonObject) -> JsonObject:
+    """Build one JSON-RPC request frame.
+
+    The frame is symmetric: a client writes it to an agent's stdin, and an agent
+    writes it to its stdout to call back into the client.
+    """
     return {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
 
 
@@ -75,36 +95,105 @@ def _session_update(session_id: str, update: JsonObject) -> JsonObject:
     return _notification("session/update", {"sessionId": session_id, "update": update})
 
 
-def request_permission_request(
-    rpc_id: int | str, session_id: str, *, title: str = "Edit"
+def initialize_request(
+    rpc_id: int | str, client_name: str, client_capabilities: JsonObject
 ) -> JsonObject:
-    """Build the agent's ``session/request_permission`` request for *session_id*.
-
-    The request names the session it is asked for, and a client refuses one that
-    does not name its active session, so the id is required rather than defaulted.
-    """
-    return _request(
+    """Build a client's ``initialize`` request pinning :data:`ACP_PROTOCOL_VERSION`."""
+    return acp_request(
         rpc_id,
-        "session/request_permission",
+        "initialize",
         {
-            "sessionId": session_id,
-            "toolCall": {
-                "toolCallId": "tool-call-1",
-                "title": title,
-                "kind": "edit",
-                "status": "pending",
-                "rawInput": {},
-            },
-            "options": [
-                {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
-            ],
+            "protocolVersion": ACP_PROTOCOL_VERSION,
+            "clientCapabilities": client_capabilities,
+            "clientInfo": {"name": client_name, "version": "1.0.0"},
         },
     )
 
 
+def initialize_result(
+    *,
+    protocol_version: JsonValue = ACP_PROTOCOL_VERSION,
+    agent_capabilities: JsonValue | None = None,
+    auth_methods: JsonValue | None = None,
+    agent_info: JsonObject | None = None,
+) -> JsonObject:
+    """Build an agent's ``initialize`` result.
+
+    Every field takes any JSON value so a test can negotiate a version the client
+    does not speak or send a surface it must refuse as malformed; omitted
+    capabilities and auth methods are the empty object and list.
+    """
+    result: JsonObject = {
+        "protocolVersion": protocol_version,
+        "agentCapabilities": {} if agent_capabilities is None else agent_capabilities,
+        "authMethods": [] if auth_methods is None else auth_methods,
+    }
+    if agent_info is not None:
+        result["agentInfo"] = agent_info
+    return result
+
+
+def request_permission_params(
+    session_id: JsonValue,
+    *,
+    tool_call: JsonObject | None = None,
+    options: Sequence[JsonObject] | None = None,
+) -> JsonObject:
+    """Build the params of a ``session/request_permission`` request.
+
+    The params name the session they are asked for, and a client refuses a request
+    that does not name its active session, so the id is required rather than
+    defaulted. *tool_call* and *options* replace the default pending edit and its
+    allow/reject pair.
+    """
+    if tool_call is None:
+        tool_call = {
+            "toolCallId": "tool-call-1",
+            "title": "Edit",
+            "kind": "edit",
+            "status": "pending",
+            "rawInput": {},
+        }
+    if options is None:
+        options = [
+            {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+            {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
+        ]
+    return {
+        "sessionId": session_id,
+        "toolCall": tool_call,
+        "options": [dict(option) for option in options],
+    }
+
+
+def request_permission_request(rpc_id: int | str, session_id: str) -> JsonObject:
+    """Build the agent's ``session/request_permission`` request for *session_id*."""
+    return acp_request(
+        rpc_id, REQUEST_PERMISSION_METHOD, request_permission_params(session_id)
+    )
+
+
+async def exchange_acp_request(
+    process: asyncio.subprocess.Process, request: JsonObject, timeout: float
+) -> JsonObject:
+    """Write *request* to *process*'s stdin and return the frame answering it.
+
+    The reply is matched by the request's own id, so interleaved notifications are
+    skipped exactly as :func:`read_acp_frame` skips them.
+    """
+    if process.stdin is None or process.stdout is None:
+        raise AssertionError("the agent process has no piped stdin and stdout")
+    process.stdin.write(json.dumps(request).encode("utf-8") + b"\n")
+    await process.stdin.drain()
+    return await read_acp_frame(process.stdout, request["id"], timeout)
+
+
 async def read_acp_frame(
-    stdout: asyncio.StreamReader, want_id: int, timeout: float, *, max_frames: int = 60
+    stdout: asyncio.StreamReader,
+    want_id: JsonValue,
+    timeout: float,
+    *,
+    max_frames: int = 60,
 ) -> JsonObject:
     """Return the first JSON-RPC frame from *stdout* whose ``id`` is *want_id*.
 
@@ -330,12 +419,10 @@ def _initialize_frames(
     return [
         _result(
             msg_id,
-            {
-                "protocolVersion": 1,
-                "agentInfo": {"name": "acp-simulator", "version": "1.0.0"},
-                "agentCapabilities": {"loadSession": False},
-                "authMethods": [],
-            },
+            initialize_result(
+                agent_capabilities={"loadSession": False},
+                agent_info={"name": "acp-simulator", "version": "1.0.0"},
+            ),
         )
     ]
 

@@ -10,7 +10,6 @@ from pydantic import ValidationError
 from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..thread import named_request_id
 from ..thread.action_receipts import GRAPH_ACTION_VERB
-from ..thread.enums import ThreadStatus
 from ..thread.permission_fsm import compute_permission_resolution_effects
 from ..thread.repair_policy import RepairPhase, repair_state_for_action
 from .permission_options import response_is_rejection
@@ -210,9 +209,8 @@ async def commit_proven_application(
         ThreadModel,
         begin_write_transaction,
         mark_control_action_applied,
-        update_thread_status,
     )
-    from ..thread.enums import TERMINAL_STATUS_VALUES, ControlActionType
+    from ..thread.enums import ControlActionType
     from .dispatch_receipts import validate_current_graph_receipt
     from .repair_transitions import apply_repair_transition
 
@@ -268,11 +266,9 @@ async def commit_proven_application(
         await apply_permission_resolution(
             db, thread_id, {"request_id": action.request_id}
         )
-        # A turn that consumed the answer and then failed reports the answer
-        # as applied too, and the report can arrive after the run's terminal.
-        # The decision was consumed, so it settles; the run stays finished.
-        if thread.status not in TERMINAL_STATUS_VALUES:
-            await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
+        # The settlement moves no status: the run leaves its pause through the
+        # pause recorder, which this receipt prompts once the settlement is
+        # committed and which leaves a run whose turn already ended alone.
         await db.commit()
         return
     from .verdict_subscriber import settle_verdict_dispatch_receipt

@@ -7,60 +7,43 @@ registers the bundle when a run's ingest/resume begins and drops it when that
 window ends. Tokens therefore never outlive an active worker turn, are never
 checkpointed, and — via the bundle's redacting repr — never reach a log line.
 
-Every read is scoped to a single role (:meth:`actor_token`), so the authoring
-bridge for one worker can only ever obtain that worker's own token; a bug in one
+The reads the authoring bridge uses are scoped to a single role
+(:meth:`actor_token`), so a worker asks only for its own token and a bug in one
 role's binding cannot hand another role's principal across. The store is the
 single injection seam the per-run authoring binding
 consumes when it assembles a worker's tool surface.
-
-The worker process runs a single asyncio event loop, so the plain-dict backing
-needs no lock: register/drop happen at executor await boundaries and each dict
-operation is atomic between them.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, override
+from typing import override
 
-if TYPE_CHECKING:
-    from ..thread.actor_tokens import ActorTokenBundle
+from ..thread import ActorTokenBundle
+from ._run_registry import RunScopedRegistry
 
 __all__ = ["RunTokenStore"]
 
 
-class RunTokenStore:
+class RunTokenStore(RunScopedRegistry[ActorTokenBundle]):
     """In-memory, per-thread holder of actor token bundles for active runs."""
 
-    def __init__(self) -> None:
-        self._bundles: dict[str, ActorTokenBundle] = {}
-
-    def register(self, thread_id: str, bundle: ActorTokenBundle | None) -> None:
-        """Hold *bundle* for *thread_id*'s active window.
+    @override
+    def register(self, thread_id: str, value: ActorTokenBundle | None) -> None:
+        """Hold *value* for *thread_id*'s active window.
 
         A ``None`` or empty bundle registers nothing, so a run started without
         engine tokens leaves the store untouched rather than holding a shell.
         """
-        if bundle is None or bundle.is_empty():
+        if value is None or value.is_empty():
             return
-        self._bundles[thread_id] = bundle
+        super().register(thread_id, value)
 
     def actor_token(self, thread_id: str, role: str) -> str | None:
         """Return *role*'s actor token for *thread_id*, or ``None`` if unheld."""
-        bundle = self._bundles.get(thread_id)
+        bundle = self.get(thread_id)
         return bundle.actor_token(role) if bundle is not None else None
 
     def engine_bearer(self, thread_id: str) -> str | None:
         """Return the machine bearer for *thread_id*, or ``None`` if unheld."""
-        bundle = self._bundles.get(thread_id)
+        bundle = self.get(thread_id)
         return bundle.engine_bearer if bundle is not None else None
-
-    def drop(self, thread_id: str) -> None:
-        """Drop *thread_id*'s bundle at run end. Idempotent."""
-        self._bundles.pop(thread_id, None)
-
-    @override
-    def __repr__(self) -> str:
-        """Redacted representation — reports only the active-run count (R7)."""
-        return f"RunTokenStore(active_runs={len(self._bundles)})"
-
-    __str__ = __repr__

@@ -26,7 +26,12 @@ if TYPE_CHECKING:
         ThreadModel,
     )
 
-from ..graph.acp_options import option_id_of, option_kind, valid_option_ids
+from ..graph.acp_options import (
+    option_display_name,
+    option_id_of,
+    option_kind,
+    valid_option_ids,
+)
 from ..graph.enums import PermissionOptionKind, PermissionType
 from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
@@ -262,11 +267,7 @@ def _permission_data_from_interrupt(
                 options.append(
                     PermissionOptionData(
                         option_id=option_id,
-                        name=str(
-                            typed_option.get(
-                                "name", typed_option.get("label", option_id)
-                            )
-                        ),
+                        name=option_display_name(typed_option),
                         kind=str(option_kind(typed_option)),
                     )
                 )

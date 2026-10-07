@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
 
 from ..domain_config import domain_config
-from ..graph.acp_options import option_id_of, option_kind
+from ..graph.acp_options import option_display_name, option_id_of, option_kind
 from ..graph.enums import AgentLifecycleState, PermissionOptionKind, PermissionType
 from ..thread import InterruptType
 
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
     from .emitters import EventEmitters
     from .types import StreamableGraph
+
+__all__ = ["emit_interrupt_events"]
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +297,7 @@ def _permission_option(option: object) -> dict[str, Any]:
         )
     return {
         "option_id": option_id or "allow_once",
-        "name": fields.get("label", fields.get("name", option_id or "Allow")),
+        "name": option_display_name(option),
         "kind": kind,
     }
 

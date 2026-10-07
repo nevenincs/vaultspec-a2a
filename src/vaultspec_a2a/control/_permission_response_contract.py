@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, TypeIs
 from ..graph.enums import PermissionType
 from ..thread.enums import ApprovalStatus, PermissionRequestStatus
 from .accepted_input import AcceptedActionInput
-from .permission_options import extract_allowed_option_ids, response_is_rejection
+from .permission_options import response_is_rejection
 
 if TYPE_CHECKING:
     import httpx
@@ -20,6 +20,22 @@ if TYPE_CHECKING:
     from .action_lease import ControlActionClaim
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
+
+__all__ = [
+    "AuthorizedPermission",
+    "PermissionInput",
+    "PermissionResult",
+    "PermissionRuntime",
+    "PermissionTransition",
+    "RejectedResponse",
+    "action_payload_matches",
+    "audited_tool_name",
+    "existing_rejection_error",
+    "rejected_payload",
+    "rejected_permission_error",
+    "response_payload",
+    "response_verdict",
+]
 
 
 def response_payload(option_id: str, notes: str | None) -> dict[str, object]:
@@ -43,12 +59,6 @@ def _is_json_object(value: object) -> TypeIs[dict[str, object]]:
     # ``json.loads`` only constructs string-keyed object values; this helper is
     # called only on its decoded result after it has been erased to ``object``.
     return isinstance(value, dict)
-
-
-def allowed_option_ids(permission: object) -> set[str]:
-    """Extract valid option ids from a durable permission request row."""
-    raw_options = getattr(permission, "allowed_options_json", "[]")
-    return extract_allowed_option_ids(raw_options)
 
 
 def response_verdict(permission: object, option_id: str) -> str:

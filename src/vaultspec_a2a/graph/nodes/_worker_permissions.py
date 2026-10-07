@@ -22,7 +22,7 @@ from langgraph.types import Interrupt, interrupt
 
 from ...thread import InterruptType, PermissionAnswer
 from ...thread.state import read_untrusted_state_value
-from ..acp_options import option_id_of, valid_option_ids
+from ..acp_options import is_remembering, valid_option_ids
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -65,12 +65,7 @@ def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     the system deliberately never performs. A request offering nothing else
     keeps its options, so the run is never left without an answer to give.
     """
-    once = [
-        option
-        for option in options
-        if not str(option.get("kind", "")).endswith("_always")
-        and "always" not in (option_id_of(option) or "").lower()
-    ]
+    once = [option for option in options if not is_remembering(option)]
     return once or options
 
 

@@ -39,6 +39,7 @@ __all__ = [
     "is_remembering",
     "narrowest_option_id",
     "offered_option",
+    "option_display_name",
     "option_id_of",
     "option_id_of_kind",
     "option_kind",
@@ -77,6 +78,21 @@ def option_id_of(option: object) -> str | None:
         if isinstance(value, str) and value:
             return value
     return None
+
+
+def option_display_name(option: object) -> str:
+    """Return the name a human is shown for one ACP permission option.
+
+    The stream frame and the run-status projection render the same checkpoint
+    payload, so the label one surface shows must not depend on which surface
+    chose it. A ``label`` wins over a ``name``; an option carrying neither is
+    shown under its id, or as ``Allow`` when it has no id either.
+    """
+    fallback = option_id_of(option) or "Allow"
+    if not isinstance(option, dict):
+        return fallback
+    fields = cast("dict[str, object]", option)
+    return str(fields.get("label", fields.get("name", fallback)))
 
 
 def valid_option_ids(options: object) -> set[str]:

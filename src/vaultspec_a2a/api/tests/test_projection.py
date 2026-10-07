@@ -366,11 +366,7 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
 
     projection = project_execution_state_model(model)
 
-    assert projection.checkpoint_id == "cp-1"
-    assert projection.parent_checkpoint_id == "cp-0"
-    assert projection.recovery_epoch == 2
     assert projection.next_nodes == ["supervisor"]
-    assert projection.interrupt_types == ["permission_request"]
     assert projection.task_count == 1
     assert projection.interrupt_count == 1
     assert projection.degraded_reasons == [
@@ -479,13 +475,9 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
         last_sequence=0,
     )
     projection = ExecutionStateProjection(
-        checkpoint_id="cp-1",
-        parent_checkpoint_id="cp-0",
-        recovery_epoch=1,
         task_count=1,
         interrupt_count=1,
         next_nodes=["supervisor"],
-        interrupt_types=["permission_request"],
         execution_tasks=[
             ExecutionTaskData(
                 task_id="task-1",

@@ -294,13 +294,9 @@ class CheckpointProjection:  # pylint: disable=too-many-instance-attributes
 class ExecutionStateProjection:  # pylint: disable=too-many-instance-attributes
     """Normalized durable execution-state read model."""
 
-    checkpoint_id: str | None
-    parent_checkpoint_id: str | None
-    recovery_epoch: int
     task_count: int
     interrupt_count: int
     next_nodes: list[str] = field(default_factory=list)
-    interrupt_types: list[str] = field(default_factory=list)
     execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
 

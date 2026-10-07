@@ -868,11 +868,12 @@ async def _persist_permission_request(
     """
     from ..database import (
         get_thread,
+        mark_control_action_applied,
         record_permission_request,
         reserve_control_action,
         supersede_permission_requests,
     )
-    from ..thread.enums import ControlActionResultStatus, ControlActionType
+    from ..thread.enums import ControlActionType
 
     request_id = held.interrupt_id
     tool_call, pause_reason_type, description = _permission_request_fields(
@@ -891,7 +892,13 @@ async def _persist_permission_request(
     if not reservation.payload_matches or not reservation.created:
         await db.rollback()
         return
-    reservation.action.result_status = ControlActionResultStatus.APPLIED.value
+    # Nothing dispatches a request-creation action: writing it IS applying it.
+    # It is settled through the journal's one settler, which stamps the instant
+    # beside the status. Assigning the status alone left every such row applied
+    # with no ``applied_at``, so a settled action was indistinguishable from one
+    # still owed a delivery - and the recovery reads that tell them apart match
+    # on the timestamp, not on the status.
+    await mark_control_action_applied(db, reservation.action.id)
     await supersede_permission_requests(
         db,
         thread_id=thread_id,

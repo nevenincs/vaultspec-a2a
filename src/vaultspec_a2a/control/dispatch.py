@@ -20,6 +20,7 @@ import httpx
 
 from ..database import (
     ThreadStatusElectionOutcome,
+    begin_write_transaction,
     get_control_action_by_dispatch_id,
     get_session_factory,
     list_threads,
@@ -31,24 +32,26 @@ from ..ipc.schemas import (
     DispatchResponse,
 )
 from ..thread.dispatch_policy import FailureType, resolve_failure_type
-from ..thread.enums import ThreadStatus
+from ..thread.enums import ControlActionType, ThreadStatus
 from ..utils.coercion import coerce_object_mapping, decode_json_object
 from ._thread_metadata import workspace_root_from_metadata
 from .accepted_input import read_accepted_input, restore_accepted_dispatch
 from .config import settings
-from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
 from .workspace import canonical_workspace_root, require_admitted_workspace_root
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import ThreadModel
     from ..providers.team_selection import FrozenLaneAssignment
+    from ..thread import ThreadWriteExpectation
     from .circuit_breaker import DispatchAdmission, WorkerCircuitBreaker
+    from .leased_dispatch import SettledDispatchFailure
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
@@ -504,23 +507,49 @@ async def _refuse_missing_project(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _ReconcilingWork:
+    """One listed run's accepted action and the dispatch rebuilt from it.
+
+    The action travels with the dispatch because the delivery below is leased:
+    the lease it takes is this action's own, under this action's own stable
+    identity, so the sweep cannot deliver work a live dispatcher is holding.
+    """
+
+    action_id: str
+    action_type: ControlActionType
+    idempotency_key: str
+    request_id: str | None
+    payload: dict[str, object]
+    dispatch_id: str
+    recovery_deadline_at: datetime | None
+    dispatch: DispatchRequest
+
+
 async def _restore_reconciling_dispatch(
     db: AsyncSession,
     thread: ThreadModel,
     frozen_map: dict[str, FrozenLaneAssignment],
     workspace_root: str,
-) -> DispatchRequest | None:
-    """Load the accepted action only when it matches stored execution authority."""
+) -> _ReconcilingWork | None:
+    """Load the accepted action only when it matches stored execution authority.
+
+    Every field the claim below needs is copied off the row here, because losing
+    a claim rolls the session back and a rollback expires every loaded row.
+    """
     authority = thread_write_expectation(thread).authority
     action = await get_control_action_by_dispatch_id(
         db,
         thread_id=thread.id,
         dispatch_id=authority.action_receipt_id,
     )
-    if action is None or action.payload_json is None:
+    if action is None or action.payload_json is None or action.dispatch_id is None:
         logger.warning("No accepted action for reconciling thread %s", thread.id)
         return None
     try:
+        payload = decode_json_object(action.payload_json)
+        if payload is None:
+            raise ValueError("accepted action payload is not an object")
         accepted = read_accepted_input(action)
         dispatch = restore_accepted_dispatch(
             accepted, dispatch_id=authority.action_receipt_id
@@ -536,10 +565,94 @@ async def _restore_reconciling_dispatch(
             raise ValueError(
                 "accepted execution authority differs from thread metadata"
             )
-        return await bind_graph_action_receipt(db, dispatch)
+        return _ReconcilingWork(
+            action_id=action.id,
+            action_type=ControlActionType(action.action_type),
+            idempotency_key=action.idempotency_key,
+            request_id=action.request_id,
+            payload=payload,
+            dispatch_id=action.dispatch_id,
+            recovery_deadline_at=action.recovery_deadline_at,
+            dispatch=dispatch,
+        )
     except ValueError as exc:
         logger.warning("Invalid accepted action for thread %s: %s", thread.id, exc)
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class _RedispatchTransport:
+    """The worker connection and trace context one re-dispatch travels over."""
+
+    worker_client: httpx.AsyncClient
+    circuit_breaker: WorkerCircuitBreaker
+    spawner: LazyWorkerSpawner
+    trace_headers: dict[str, str] | None
+
+
+#: Why the sweep passed over a run without attempting a delivery at all.
+_LEASE_HELD = "accepted_action_leased"
+
+
+async def _deliver_reconciling_work(
+    db: AsyncSession,
+    thread_id: str,
+    work: _ReconcilingWork,
+    expectation: ThreadWriteExpectation,
+    transport: _RedispatchTransport,
+) -> SettledDispatchFailure | str | None:
+    """Deliver one listed run through its accepted action's own lease.
+
+    The sweep is one dispatcher among several - the direct recovery pass, a
+    client's own retry, another gateway - and the lease is how they agree on who
+    is delivering a run's accepted work. Delivering outside it meant the sweep
+    could hand the worker a dispatch a live dispatcher was already holding, which
+    the worker then refuses as a duplicate of work it is doing, or worse admits
+    as a second turn. Taking the claim first makes the sweep lose that race
+    instead of winning it wrongly.
+
+    Returns ``None`` on delivery, the reason this run was passed over when no
+    delivery was attempted, or the settled failure of one that was.
+    """
+    from .action_lease import ControlActionClaimRequest, prepare_control_action_claim
+    from .leased_dispatch import DispatchTransport, dispatch_leased
+
+    await begin_write_transaction(db)
+    claim = await prepare_control_action_claim(
+        db,
+        request=ControlActionClaimRequest(
+            thread_id=thread_id,
+            action_type=work.action_type,
+            idempotency_key=work.idempotency_key,
+            request_id=work.request_id,
+            payload=work.payload,
+            dispatch_id=work.dispatch_id,
+            recovery_deadline_at=work.recovery_deadline_at,
+            write_expectation=expectation,
+        ),
+    )
+    if not (claim.acquired and claim.payload_matches and claim.authority_matches):
+        # ``prepare_control_action_claim`` rolls an unacquired claim back itself;
+        # a claim acquired against content or authority that no longer matches
+        # has to release what it wrote here.
+        if db.in_transaction():
+            await db.rollback()
+        return _LEASE_HELD
+    failure = await dispatch_leased(
+        db,
+        claim,
+        work.dispatch,
+        DispatchTransport(
+            worker_client=transport.worker_client,
+            circuit_breaker=transport.circuit_breaker,
+            worker_spawner=transport.spawner,
+            trace_headers=transport.trace_headers,
+        ),
+    )
+    if failure is not None:
+        # The settlement was written into a transaction left open for this caller.
+        await db.commit()
+    return failure
 
 
 def _log_redispatch_batch_summary(
@@ -619,29 +732,11 @@ async def redispatch_reconciling_threads(
                         db, thread, failure_counts, failure_thread_ids
                     )
                     continue
-                dispatch = await _restore_reconciling_dispatch(
-                    db, thread, frozen_map, workspace_root
-                )
-                # The restore above read the accepted action; release that read
-                # before the worker call rather than holding it across delivery.
-                await db.commit()
-                if dispatch is None:
-                    continue
-                headers = trace_headers_fn() if trace_headers_fn else {}
-                try:
-                    await dispatch_to_worker(
-                        worker_client,
-                        dispatch,
-                        circuit_breaker,
-                        spawner,
-                        trace_headers=headers,
-                    )
-                    record_worker_contact(time.monotonic())
-                    logger.info(
-                        "Re-dispatched reconciling thread %s",
-                        thread.id,
-                    )
-                except WorkerCircuitOpenError:
+                if circuit_breaker.shut_out:
+                    # Nothing will be admitted, and a claim taken for a delivery
+                    # that cannot happen only holds the accepted action away from
+                    # the dispatcher that could make it. Read rather than
+                    # reserved, so a half-open circuit still gets its one probe.
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
@@ -650,20 +745,49 @@ async def redispatch_reconciling_threads(
                         thread.id,
                     )
                     continue
-                except (
-                    IncompatibleDispatchAuthorityError,
-                    WorkerAtCapacityError,
-                    WorkerDispatchRejectedError,
-                    WorkerUnreachableError,
-                ) as exc:
+                expectation = thread_write_expectation(thread)
+                work = await _restore_reconciling_dispatch(
+                    db, thread, frozen_map, workspace_root
+                )
+                # The restore above read the accepted action; release that read
+                # before the claim opens a write transaction of its own.
+                await db.commit()
+                if work is None:
+                    continue
+                failure = await _deliver_reconciling_work(
+                    db,
+                    thread.id,
+                    work,
+                    expectation,
+                    _RedispatchTransport(
+                        worker_client,
+                        circuit_breaker,
+                        spawner,
+                        trace_headers_fn() if trace_headers_fn else None,
+                    ),
+                )
+                if failure is None:
+                    record_worker_contact(time.monotonic())
+                    logger.info("Re-dispatched reconciling thread %s", thread.id)
+                    continue
+                if isinstance(failure, str):
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
-                        ("redispatch_error", thread.id),
-                        "Re-dispatch error for thread %s: %s",
+                        (failure, thread.id),
+                        "Skipping re-dispatch for thread %s: %s",
                         thread.id,
-                        exc,
+                        failure,
                     )
+                    continue
+                _log_redispatch_failure_ladder(
+                    failure_counts,
+                    failure_thread_ids,
+                    (failure.failure_type.value, thread.id),
+                    "Re-dispatch error for thread %s: %s",
+                    thread.id,
+                    failure.detail,
+                )
             _log_redispatch_batch_summary(failure_counts, failure_thread_ids)
     except Exception as exc:
         logger.error("Reconciling re-dispatch task failed: %s", exc)

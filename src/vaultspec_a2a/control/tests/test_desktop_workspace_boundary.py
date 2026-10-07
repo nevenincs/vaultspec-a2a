@@ -30,7 +30,10 @@ from ..accepted_input import (
     restore_accepted_dispatch,
 )
 from ..dispatch import _restore_reconciling_dispatch
-from ..dispatch_receipts import prepare_graph_action_receipt
+from ..dispatch_receipts import (
+    bind_graph_action_receipt,
+    prepare_graph_action_receipt,
+)
 from ..state_layout import state_layout
 from ..thread_service import process_metadata
 from ..workspace import require_admitted_workspace_root
@@ -232,9 +235,11 @@ async def test_saved_project_aliases_remain_valid_for_restart_reconciliation(
                 )
                 assert restored is not None
                 assert require_admitted_workspace_root(
-                    restored.workspace_root or ""
+                    restored.dispatch.workspace_root or ""
                 ).samefile(project)
-                assert restored.graph_action_receipt is not None
+                # The receipt the leased delivery binds is this action's own.
+                bound = await bind_graph_action_receipt(db, restored.dispatch)
+                assert bound.graph_action_receipt is not None
                 discovered = await list_active_thread_page(
                     db,
                     limit=100,

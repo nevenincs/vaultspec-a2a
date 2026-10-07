@@ -22,6 +22,7 @@ from ..database import (
 )
 from ..domain_config import domain_config
 from ..graph.enums import SemanticPhase, research_adr_semantic_phase
+from ..providers.team_selection import TeamSelectionError
 from ..team.team_config import AuthoringCapability, authoring_capability
 from ..thread.enums import (
     DegradedReason,
@@ -38,6 +39,7 @@ from ..utils.coercion import (
 )
 from .execution_authority import (
     ExecutionAuthorityError,
+    read_frozen_team_selection_from_fields,
     resolve_execution_authority_from_fields,
 )
 from .graph_definition import read_accepted_graph_definition
@@ -68,6 +70,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import Checkpointer
+    from ..providers.team_selection import FrozenTeamSelection
     from ..streaming import RelayHub, RunLiveStateMirror
     from ..thread.snapshots import CheckpointProjection
 
@@ -228,7 +231,13 @@ class _ThreadStateCapture:
     holds, derived once and empty without one.
 
     ``metadata`` is the thread's stored metadata, decoded once here so no reader
-    parses the blob again.
+    parses the blob again. ``frozen_selection`` is the execution authority that
+    metadata holds, validated once beside the digest the snapshot is reconciled
+    against, and ``None`` whenever there is none to disclose - including a stored
+    record that fails validation, which the snapshot reports as a degraded
+    reason. Carried here rather than re-read at the edge because the stored bytes
+    are digest-protected: a second reading of them raises, and a surface that
+    raises over a field the capture already degraded over refuses the whole run.
 
     ``transcript`` states whether the snapshot's messages are the run's record
     or an artefact of an unread checkpoint. It is carried here rather than
@@ -241,6 +250,7 @@ class _ThreadStateCapture:
     checkpoint_projection: CheckpointProjection | None
     team_preset: str | None
     metadata: _MetadataView
+    frozen_selection: FrozenTeamSelection | None
     proposal_ids: list[str]
     changeset_ids: list[str]
     transcript: TranscriptAvailability
@@ -441,8 +451,13 @@ async def capture_thread_state(
         expected_assignment_digest = resolve_execution_authority_from_fields(
             metadata.fields
         ).model_assignment_digest
-    except ExecutionAuthorityError:
+        # Read in the SAME attempt as the digest above: both are the one stored
+        # record, so one reason covers every way it fails and no later surface
+        # has to re-validate bytes this read already judged.
+        frozen_selection = read_frozen_team_selection_from_fields(metadata.fields)
+    except (ExecutionAuthorityError, TeamSelectionError):
         expected_assignment_digest = None
+        frozen_selection = None
         mark_degraded(snapshot, DegradedReason.INCOMPATIBLE_EXECUTION_AUTHORITY)
     checkpoint_read = await _read_projected_checkpoint(
         checkpointer,
@@ -502,6 +517,7 @@ async def capture_thread_state(
         checkpoint_projection=captured_projection,
         team_preset=thread.team_preset,
         metadata=metadata,
+        frozen_selection=frozen_selection,
         proposal_ids=proposal_ids,
         changeset_ids=changeset_ids,
         transcript=classify_transcript_availability(

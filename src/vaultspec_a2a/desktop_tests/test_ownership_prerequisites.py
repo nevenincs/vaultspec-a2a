@@ -36,7 +36,6 @@ expected failure is used; every child is reaped in a ``finally``.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 import time
 from contextlib import contextmanager
@@ -70,6 +69,7 @@ from ..testing import (
     desktop_workspace,
     fetch_in_process_selection_at,
     reap_process,
+    run_cli,
     seat_app_home,
     spawn_logged,
     status_and_json,
@@ -77,10 +77,10 @@ from ..testing import (
 from ..testing.ports import free_port
 
 if TYPE_CHECKING:
+    import subprocess
     from collections.abc import Generator
     from pathlib import Path
 
-_CLI_MODULE = "vaultspec_a2a.cli.main"
 _PRESET = "mock-success-single"
 _AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 # Raised by the runtime singleton when a second gateway contends one home.
@@ -222,14 +222,11 @@ def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
         record_before = singleton_record_path(app_home).read_bytes()
 
         # A second gateway, same home, DIFFERENT port: refused at acquisition.
-        second = subprocess.run(
-            [sys.executable, "-m", _CLI_MODULE, "serve"],
+        second = run_cli(
+            "serve",
             env=armed_gateway_env(app_home, auto_spawn_worker=False)(
                 free_port(), free_port()
             ),
-            capture_output=True,
-            text=True,
-            timeout=120,
         )
         assert second.returncode != 0, second.stdout
         assert _CONFLICT_REFUSAL in second.stderr, second.stderr

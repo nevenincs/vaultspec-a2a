@@ -67,7 +67,9 @@ from ..desktop.credentials import (
 )
 from ..desktop.profile import derive_state_paths
 from ..utils._process_tree import detached_spawn_kwargs
-from .children import reap_tree, run_child
+from ..utils.runtime_exec import self_command
+from .children import reap_tree
+from .cli import run_cli
 from .http import serve_on_loopback
 from .ports import (
     allocate_free_ports,
@@ -166,8 +168,6 @@ _LOG_TAIL_BYTES = 4096
 # test that scans for a leaked secret can scan for these as well as any other.
 DEFAULT_ATTACH_CREDENTIAL = "attach-credential-harness-1234567890abcdef"
 DEFAULT_OWNERSHIP_CAPABILITY = "ownership-capability-harness-fedcba0987654321"
-
-_CLI_MODULE = "vaultspec_a2a.cli.main"
 
 GatewayLogLevel = Literal["info", "warning"]
 
@@ -494,7 +494,7 @@ def spawn_gateway(
     listener binds. *detached* is as :func:`spawn_logged` describes.
     """
     command = (
-        [sys.executable, "-m", _CLI_MODULE, "serve"]
+        self_command("serve")
         if script is None
         else [sys.executable, "-c", script, str(gateway_port)]
     )
@@ -756,10 +756,7 @@ def seat_app_home(
         path = state.credentials_dir / name
         path.write_text(secret, encoding="utf-8")
         harden_credential_path(path)
-    result = run_child(
-        [sys.executable, "-m", _CLI_MODULE, "migrate", "--app-home", str(app_home)],
-        what="the desktop database migration",
-    )
+    result = run_cli("migrate", "--app-home", str(app_home))
     if result.returncode != 0:
         raise GatewayBootError(
             f"migrate failed (exit {result.returncode}): "

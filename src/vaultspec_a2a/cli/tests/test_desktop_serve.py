@@ -10,8 +10,6 @@ a gateway. No mocks, monkeypatches, or settings mutation.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -23,10 +21,8 @@ from ...providers._factory_commands import (
     capsule_claude_executable,
     capsule_node_executable,
 )
-from ...testing import armed_environment
+from ...testing import armed_environment, run_cli
 from ..main import _DesktopServePlan, _prepare_desktop_serve
-
-_MODULE = "vaultspec_a2a.cli.main"
 
 
 def _build_capsule(root: Path) -> Path:
@@ -39,17 +35,6 @@ def _build_capsule(root: Path) -> Path:
         asset.parent.mkdir(parents=True, exist_ok=True)
         asset.write_text(content, encoding="utf-8")
     return root
-
-
-def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
-    """Invoke the operator CLI as a real child process."""
-    return subprocess.run(
-        [sys.executable, "-m", _MODULE, *args],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
 
 
 def test_prepare_desktop_serve_arms_a_real_settings(tmp_path: Path) -> None:
@@ -105,7 +90,7 @@ def test_prepare_desktop_serve_rejects_incomplete_capsule(tmp_path: Path) -> Non
 def test_cli_desktop_serve_rejects_relative_app_home(tmp_path: Path) -> None:
     """The real CLI command exits non-zero on a relative app home before boot."""
     capsule = _build_capsule(tmp_path / "capsule")
-    result = _run_cli(
+    result = run_cli(
         "desktop-serve",
         "--app-home",
         "relative/app-home",
@@ -120,7 +105,7 @@ def test_cli_desktop_serve_rejects_incomplete_capsule(tmp_path: Path) -> None:
     """The real CLI command exits non-zero when the capsule lacks its assets."""
     empty_capsule = tmp_path / "capsule"
     empty_capsule.mkdir()
-    result = _run_cli(
+    result = run_cli(
         "desktop-serve",
         "--app-home",
         str(tmp_path / "app"),

@@ -28,11 +28,10 @@ per transport.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from ..thread import canonical_json, sha256_hex
 from .provider_catalog import MAX_DISPLAY_LENGTH, MAX_TEXT_LENGTH
 
 if TYPE_CHECKING:
@@ -105,8 +104,7 @@ def local_id(namespace: str, provider_value: str) -> str:
     either part - concatenating them directly would let one namespace forge an
     identifier belonging to another.
     """
-    encoded = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(encoded).hexdigest()[:32]
+    return sha256_hex(f"{namespace}\0{provider_value}".encode())[:32]
 
 
 def model_list_revision(
@@ -127,8 +125,7 @@ def model_list_revision(
         "execution_mode": key.execution_mode,
         "models": [model.provider_value for model in models],
     }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return sha256_hex(canonical_json(payload).encode())
 
 
 @dataclass(frozen=True, slots=True)

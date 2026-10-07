@@ -6,13 +6,13 @@ documents and generating human-friendly thread nicknames.
 """
 
 import glob
-import hashlib
 import re
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
 from ..domain_config import domain_config
+from ..thread import sha256_hex
 from .stage import VAULT_STAGE_PATTERNS
 
 __all__ = [
@@ -157,9 +157,7 @@ def generate_nickname(
     # convention, present or future - and, as a side effect, always produces
     # a full 4-hex-char slug (H2's short/empty guard collapses into the one
     # "no thread_id at all" case below).
-    short_hash = (
-        hashlib.sha256(thread_id.encode()).hexdigest()[:4] if thread_id else "0000"
-    )
+    short_hash = sha256_hex(thread_id.encode())[:4] if thread_id else "0000"
     # M1: sanitize feature_tag — lowercase and strip all non-alphanumeric-hyphen
     # characters so the generated nickname always satisfies _NICKNAME_PATTERN.
     # Uppercase feature_tags would fail ThreadMetadata validation without this.

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Annotated, Final, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
 
@@ -14,7 +14,7 @@ from .enums import ControlActionType
 from .write_authority import RECEIPT_ID_MAX_LENGTH
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from .write_authority import RunWriteAuthority
 
@@ -80,14 +80,20 @@ def sha256_fingerprint(data: bytes) -> str:
 
 
 def canonical_json(
-    value: object, *, ensure_ascii: bool = True, allow_nan: bool = True
+    value: object,
+    *,
+    ensure_ascii: bool = True,
+    allow_nan: bool = True,
+    default: Callable[[Any], Any] | None = None,
 ) -> str:
     """Encode ``value`` with sorted keys and compact separators.
 
     Stored digests and stored payload strings are made of these exact bytes, so
     the encoding flags are the caller's to state: the same value encodes
     differently when non-ASCII text is escaped or not, and a strict caller
-    refuses ``NaN`` where a lenient one writes it.
+    refuses ``NaN`` where a lenient one writes it. ``default`` renders a value
+    JSON cannot encode; the caller that passes one owns the stability of what
+    it renders.
     """
     return json.dumps(
         value,
@@ -95,6 +101,7 @@ def canonical_json(
         separators=(",", ":"),
         ensure_ascii=ensure_ascii,
         allow_nan=allow_nan,
+        default=default,
     )
 
 

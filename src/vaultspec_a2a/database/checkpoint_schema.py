@@ -13,10 +13,10 @@ the store read-only and validates through the already-open database authority.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import sqlite3
 from typing import TYPE_CHECKING, Final
+
+from ..thread import canonical_json, sha256_hex
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -148,7 +148,7 @@ _EXPECTED_OBJECTS: Final[dict[tuple[str, str], ObjectSignature]] = {
 
 
 def _schema_digest() -> str:
-    canonical = json.dumps(
+    canonical = canonical_json(
         {
             "objects": [
                 [object_type, name, *signature]
@@ -158,11 +158,9 @@ def _schema_digest() -> str:
                 name: list(columns)
                 for name, columns in sorted(_EXPECTED_TABLES.items())
             },
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+        }
     ).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
+    return sha256_hex(canonical)
 
 
 CHECKPOINT_SCHEMA_DIGEST: Final = _schema_digest()
@@ -199,8 +197,8 @@ def _resolve_busy_timeout_ms(busy_timeout_ms: int | None) -> int:
     """Resolve the configured busy timeout, allowing an explicit override."""
     if busy_timeout_ms is not None:
         return busy_timeout_ms
-    # Imported lazily: this module is the stdlib-only structural authority the
-    # desktop updater loads, and settings drags in pydantic-settings.
+    # Imported lazily: an explicit override never needs settings, and settings
+    # drags in pydantic-settings.
     from ..control.config import settings
 
     return settings.sqlite_busy_timeout_ms

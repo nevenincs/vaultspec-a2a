@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -11,6 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from ..graph.enums import Provider
+from ..thread import canonical_json, sha256_hex
 from ..thread.actor_tokens import MAX_ROLES_PER_RUN
 from .provider_catalog import (
     MAX_CONTROLS,
@@ -194,12 +193,10 @@ def model_assignment_digest(assignment: dict[str, FrozenLaneAssignment]) -> str:
     Sorting every object key makes it insensitive to JSON object ordering while
     preserving every nested value and list position.
     """
-    canonical = json.dumps(
-        {role: _checkpoint_form(lane) for role, lane in assignment.items()},
-        sort_keys=True,
-        separators=(",", ":"),
+    canonical = canonical_json(
+        {role: _checkpoint_form(lane) for role, lane in assignment.items()}
     )
-    return hashlib.sha256(canonical.encode()).hexdigest()
+    return sha256_hex(canonical.encode())
 
 
 def digest_record(
@@ -230,8 +227,7 @@ def digest_record(
         "fallbacks": [digest_lane(lane) for lane in fallbacks],
         "roles": list(roles),
     }
-    canonical = json.dumps(record, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode()).hexdigest()
+    return sha256_hex(canonical_json(record).encode())
 
 
 @dataclass(frozen=True, slots=True)

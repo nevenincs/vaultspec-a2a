@@ -9,13 +9,13 @@ catalogs lives beside them.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from time import monotonic
 from typing import Final, Protocol
+
+from ..thread import canonical_json, sha256_hex
 
 
 class CacheFreshness(StrEnum):
@@ -495,8 +495,7 @@ class SelectionReference:
             "provider_id": self.provider_id,
             "schema_version": self.schema_version,
         }
-        encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-        return hashlib.sha256(encoded).hexdigest()
+        return sha256_hex(canonical_json(payload).encode())
 
 
 @dataclass(frozen=True, slots=True)

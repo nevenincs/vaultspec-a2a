@@ -9,8 +9,6 @@ thinking efforts. Raw provider records and diagnostic output never escape.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 
 from pydantic import TypeAdapter, ValidationError
@@ -21,6 +19,7 @@ if TYPE_CHECKING:
 
     from ._cleanup import CleanupStep
 
+from ..thread import canonical_json, sha256_hex
 from ._catalog_discovery import (
     ProviderCatalogDiscovery,
     available_catalog,
@@ -163,8 +162,7 @@ def _revision(
             for control in controls
         ],
     }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return sha256_hex(canonical_json(payload).encode())
 
 
 def _validated_model_reference(

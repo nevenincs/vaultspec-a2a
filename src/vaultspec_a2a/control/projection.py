@@ -448,13 +448,6 @@ def project_execution_state_model(
             field_name="next_nodes_json",
         )
     ]
-    interrupt_types = [
-        str(item)
-        for item in _decode_json_list(
-            model.interrupt_types_json,
-            field_name="interrupt_types_json",
-        )
-    ]
     raw_tasks = _decode_json_list(model.tasks_json, field_name="tasks_json")
     execution_tasks: list[ExecutionTaskData] = []
     for raw_task in raw_tasks:
@@ -490,13 +483,9 @@ def project_execution_state_model(
         )
     ]
     return ExecutionStateProjection(
-        checkpoint_id=model.checkpoint_id,
-        parent_checkpoint_id=model.parent_checkpoint_id,
-        recovery_epoch=model.recovery_epoch,
         task_count=model.task_count,
         interrupt_count=model.interrupt_count,
         next_nodes=next_nodes,
-        interrupt_types=interrupt_types,
         execution_tasks=execution_tasks,
         degraded_reasons=degraded_reasons,
     )

@@ -45,19 +45,11 @@ from __future__ import annotations
 import tomllib
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..acceptance.tests._harness import certified_gateway
-from ..testing import (
-    NoSelectableLaneError,
-    fetch_in_process_selection,
-    ok_body,
-    wait_for_run_status,
-)
-
-if TYPE_CHECKING:
-    from ..acceptance.tests._harness import CertifiedGateway
-    from ..conftest import ExternalPrerequisiteRule
+from ..graph.enums import Provider
+from ..testing import ok_body, wait_for_run_status
 
 # A star preset, so the run crosses the supervisor's routing turns as well as its
 # worker's; agreement is asserted for every role the freeze discloses.
@@ -69,6 +61,11 @@ _PRESET_PATH = (
     / "teams"
     / f"{_PRESET}.toml"
 )
+
+# The in-process lane the preset runs on. The shared selection never returns a
+# lane that bills, so a host holding a live provider session cannot turn this
+# deterministic certification into spend.
+_PRESET_LANE = Provider.DETERMINISTIC.value
 
 _WORKER_READY_BUDGET_SECONDS = "120"
 
@@ -82,34 +79,8 @@ def _preset_roles() -> list[str]:
     return roles
 
 
-def _served_in_process_selection(
-    gateway: CertifiedGateway,
-    workspace_root: str,
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> dict[str, Any]:
-    """Resolve the served in-process lane's selection, or report the missing lane.
-
-    A deterministic certification run must freeze the in-process lane: the
-    freeze wins outright at compilation, so a selection naming any other served
-    lane would hand every role to a real external provider. Keeping a billable
-    lane out is the shared mechanism's own guarantee - it will not hand one back
-    even when it is the only selectable thing this stack serves - so what remains
-    local is the shape of the refusal: a loud report naming the missing serving,
-    never a run that quietly spends on whichever external lane the host happens
-    to have installed.
-    """
-    try:
-        with gateway.client(timeout=120.0) as client:
-            return fetch_in_process_selection(
-                client, workspace_root, prefer_provider_id="deterministic"
-            )
-    except NoSelectableLaneError as exc:
-        external_prerequisite.absent("in-process-lanes", str(exc))
-
-
 def test_advertised_assignment_is_the_assignment_the_worker_executes(
     tmp_path: Path,
-    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """Every role executes on the provider and capability admission advertised."""
     roles = _preset_roles()
@@ -120,8 +91,8 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
         VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         workspace_root = str(tmp_path)
-        selection = _served_in_process_selection(
-            gateway, workspace_root, external_prerequisite
+        selection = gateway.served_in_process_selection(
+            workspace_root, prefer_provider_id=_PRESET_LANE
         )
         with gateway.client(timeout=90.0) as client:
             started = client.post(

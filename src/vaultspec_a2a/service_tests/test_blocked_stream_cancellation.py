@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
+from ..graph.enums import Provider
 from ..testing import fetch_in_process_selection, wait_for_run_status
 from ..testing.payloads import json_object, required_bool, required_text
 from ._state import thread_state
@@ -20,6 +21,11 @@ if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
     from ..providers._json_contract import JsonObject
     from .harness import ServiceStack
+
+# The in-process lane the cancel-window preset is pinned to. The shared selection
+# refuses every lane that bills, so a host holding a live provider session cannot
+# turn these cancellation proofs into spend.
+_PRESET_LANE = Provider.DETERMINISTIC.value
 
 
 def _start_lazy_gateway(stack: ServiceStack) -> None:
@@ -87,7 +93,9 @@ def test_cancellation_survives_fresh_worker(
                     "run_id": run_id,
                     "message": "Wait for cancellation.",
                     "team_preset": "deterministic-cancel-window",
-                    "selection": _deterministic_selection(stack, str(workspace)),
+                    "selection": fetch_in_process_selection(
+                        client, str(workspace), prefer_provider_id=_PRESET_LANE
+                    ),
                     "metadata": {"workspace_root": str(workspace)},
                     "autonomous": True,
                 },
@@ -144,16 +152,6 @@ def _is_cancelled(state: JsonObject) -> bool:
     return state.get("status") == "cancelled"
 
 
-def _deterministic_selection(
-    service_stack: ServiceStack, workspace_root: str
-) -> dict[str, object]:
-    """Read the served catalog and choose only the real deterministic lane."""
-    with service_stack.gateway_client(timeout=240.0) as client:
-        return fetch_in_process_selection(
-            client, workspace_root, prefer_provider_id="deterministic"
-        )
-
-
 def test_blocked_deterministic_stream_cancellation_settles_terminally(
     service_stack: ServiceStack,
 ) -> None:
@@ -169,7 +167,9 @@ def test_blocked_deterministic_stream_cancellation_settles_terminally(
                 "run_id": run_id,
                 "message": "Block in the deterministic cancellation window.",
                 "team_preset": "deterministic-cancel-window",
-                "selection": _deterministic_selection(service_stack, workspace_root),
+                "selection": fetch_in_process_selection(
+                    client, workspace_root, prefer_provider_id=_PRESET_LANE
+                ),
                 "metadata": {"workspace_root": workspace_root},
                 "autonomous": True,
             },
@@ -219,7 +219,9 @@ def test_pre_ingest_deterministic_cancellation_settles_terminally(
                 "run_id": run_id,
                 "message": "Cancel before the deterministic ingest begins.",
                 "team_preset": "deterministic-cancel-window",
-                "selection": _deterministic_selection(service_stack, workspace_root),
+                "selection": fetch_in_process_selection(
+                    client, workspace_root, prefer_provider_id=_PRESET_LANE
+                ),
                 "metadata": {"workspace_root": workspace_root},
                 "autonomous": True,
             },

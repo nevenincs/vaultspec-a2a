@@ -49,21 +49,24 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 
-from ..api.schemas.gateway import ProviderCatalogSelection
+from ..providers._json_contract import lenient_json_object, lenient_json_object_list
 from ..providers.conditions import ProviderCondition
-from ..testing import wait_for_run_status_async
+from ..testing import (
+    async_fetch_provider_catalog,
+    named_lane_selection,
+    wait_for_run_status_async,
+)
 from ..testing.acceptance import GATEWAY_AUTH_HEADERS
 from ..testing.endpoints import resolve_gateway_url
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
-
-JsonObject = dict[str, object]
+    from ..providers._json_contract import JsonObject
 
 #: Names the condition the operator has armed the stack to produce. Its presence
 #: is also the consent to spend a real credential: without it this module never
@@ -143,71 +146,37 @@ def _declared_expectation() -> ProviderCondition | None:
         )
 
 
-def _selection_from_provider_record(
-    record: dict[str, object],
-) -> ProviderCatalogSelection | None:
-    """Build a selection when one served provider record is usable."""
-    raw_health: object = record.get("health")
-    raw_lane: object = record.get("catalog")
-    if not isinstance(raw_health, dict) or not isinstance(raw_lane, dict):
-        return None
-    health = cast("dict[str, object]", raw_health)
-    lane = cast("dict[str, object]", raw_lane)
-    if health.get("selectable") is not True:
-        return None
-    raw_state: object = lane.get("state")
-    raw_models: object = lane.get("models")
-    if (
-        not isinstance(raw_state, dict)
-        or not isinstance(raw_models, list)
-        or not raw_models
-    ):
-        return None
-    state = cast("dict[str, object]", raw_state)
-    models = cast("list[object]", raw_models)
-    revision = state.get("revision")
-    raw_entry = models[0]
-    if not isinstance(revision, str) or not isinstance(raw_entry, dict):
-        return None
-    entry = cast("dict[str, object]", raw_entry)
-    entry_id = entry.get("entry_id")
-    provider_id = record.get("provider_id")
-    execution_mode = record.get("execution_mode")
-    if not (
-        isinstance(entry_id, str)
-        and isinstance(provider_id, str)
-        and isinstance(execution_mode, str)
-    ):
-        return None
-    return ProviderCatalogSelection(
-        schema_version=1,
-        provider_id=provider_id,
-        execution_mode=execution_mode,
-        catalog_revision=revision,
-        entry_id=entry_id,
-    )
+def _selection_from_catalog(catalog: JsonObject) -> dict[str, Any] | None:
+    """Select the first served lane that is selectable, on its first entry.
 
-
-def _selection_from_catalog(catalog: JsonObject) -> ProviderCatalogSelection | None:
-    """Build a schema-valid selection from the first selectable served lane.
-
-    Read from the catalog the gateway actually served rather than assembled from
-    constants: a selection names a ``catalog_revision`` and an ``entry_id`` that
-    have to revalidate against the live workspace catalog at admission, so a
-    hand-written one would be refused the moment the catalog turned over.
+    This is the one decision made here, and it is the deliberate opposite of the
+    in-process rule: the proof needs a REAL provider to refuse real work, so it
+    takes whichever real lane is served rather than one that bills nothing. The
+    operator's consent to spend is ``_EXPECT_ENV``, never this function. Whether
+    that lane is uniquely served, still selectable, really advertises the entry,
+    and at which revision is read from the catalog the gateway actually served by
+    the shared named-lane selection, because a hand-written reference would be
+    refused the moment the catalog turned over.
     """
-    raw_providers: object = catalog.get("providers")
-    if not isinstance(raw_providers, list):
-        return None
-    providers = cast("list[object]", raw_providers)
-    for raw_record in providers:
-        if not isinstance(raw_record, dict):
-            continue
-        selection = _selection_from_provider_record(
-            cast("dict[str, object]", raw_record)
+    for record in lenient_json_object_list(catalog.get("providers")):
+        models = lenient_json_object_list(
+            lenient_json_object(record.get("catalog")).get("models")
         )
-        if selection is not None:
-            return selection
+        provider_id = record.get("provider_id")
+        execution_mode = record.get("execution_mode")
+        entry_id = models[0].get("entry_id") if models else None
+        if (
+            lenient_json_object(record.get("health")).get("selectable") is True
+            and isinstance(provider_id, str)
+            and isinstance(execution_mode, str)
+            and isinstance(entry_id, str)
+        ):
+            return named_lane_selection(
+                catalog,
+                provider_id=provider_id,
+                execution_mode=execution_mode,
+                entry_id=entry_id,
+            )
     return None
 
 
@@ -238,17 +207,11 @@ async def test_a_real_provider_refusal_reaches_run_status_as_a_typed_condition(
 
     run_id = f"provider-condition-{uuid.uuid4().hex[:12]}"
 
-    async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
-        catalog_resp = await hc.get(
-            f"{gateway_url}/v1/provider-catalog",
-            params={"workspace_root": workspace_root},
-            timeout=120.0,
-        )
-        assert catalog_resp.status_code == 200, (
-            f"the served provider catalog is unavailable ({catalog_resp.status_code}): "
-            f"{catalog_resp.text}. Without it no run can name a selection"
-        )
-        selection = _selection_from_catalog(catalog_resp.json())
+    async with httpx.AsyncClient(
+        base_url=gateway_url, headers=GATEWAY_AUTH_HEADERS
+    ) as hc:
+        catalog = await async_fetch_provider_catalog(hc, workspace_root, timeout=120.0)
+        selection = _selection_from_catalog(catalog)
         assert selection is not None, (
             "no served lane is selectable with at least one catalog entry, so no "
             "run can be started at all. Note that a lane armed by BREAKING its "
@@ -259,12 +222,12 @@ async def test_a_real_provider_refusal_reaches_run_status_as_a_typed_condition(
         )
 
         start = await hc.post(
-            f"{gateway_url}/v1/runs",
+            "/v1/runs",
             json={
                 "team_preset": _PROBE_PRESET,
                 "message": "Reply with the single word: pong",
                 "run_id": run_id,
-                "selection": selection.model_dump(mode="json"),
+                "selection": selection,
                 "metadata": {"workspace_root": workspace_root, "nickname": run_id},
             },
             timeout=120.0,
@@ -274,7 +237,7 @@ async def test_a_real_provider_refusal_reaches_run_status_as_a_typed_condition(
         )
 
         async def _read_status() -> JsonObject:
-            resp = await hc.get(f"{gateway_url}/v1/runs/{run_id}", timeout=30.0)
+            resp = await hc.get(f"/v1/runs/{run_id}", timeout=30.0)
             resp.raise_for_status()
             return resp.json()
 
@@ -369,13 +332,13 @@ def test_an_unarmed_environment_reports_unproven_rather_than_expecting_anything(
 
 
 def test_a_selection_is_built_only_from_a_selectable_lane_with_entries() -> None:
-    """Stack-free guard: the request body is valid against the CURRENT run schema.
+    """Stack-free guard: only a selectable lane with an entry is ever named.
 
     Two things are pinned. A lane that is not selectable, or that serves no
     catalog entry, yields no selection - which is what stops this module posting
     a run that admission would refuse for a stale or absent reference. And the
-    selection it does build validates as the production model, so a run-start
-    body assembled here cannot drift from the schema the gateway enforces.
+    selection it does build carries the revision and entry the catalog served,
+    never a value this module supplied.
     """
     unusable: JsonObject = {
         "providers": [
@@ -413,6 +376,6 @@ def test_a_selection_is_built_only_from_a_selectable_lane_with_entries() -> None
     }
     selection = _selection_from_catalog(usable)
     assert selection is not None
-    assert selection.catalog_revision == "r3"
-    assert selection.entry_id == "e3"
-    assert ProviderCatalogSelection.model_validate(selection.model_dump()) == selection
+    assert selection["provider_id"] == "p3"
+    assert selection["catalog_revision"] == "r3"
+    assert selection["entry_id"] == "e3"

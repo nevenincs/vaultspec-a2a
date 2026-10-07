@@ -73,11 +73,10 @@ import pytest
 
 from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
+from ..graph.enums import Provider
 from ..team.team_config import load_team_config
 from ..testing import (
-    NoSelectableLaneError,
     fetch_provider_catalog,
-    in_process_selection,
     is_terminal,
     ok_body,
     selection_from_served_catalog,
@@ -120,6 +119,12 @@ _FEATURE_TAG = "clarification-loop"
 # compiles. Nothing here writes to it: the run parks before any authoring, and
 # documents move through the engine's proposal path rather than the filesystem.
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+
+# The loop's ONE substitution is the model, expressed as a selection naming the
+# served in-process lane. The freeze wins outright at compilation, so any other
+# served lane would hand every document role to a real external provider; the
+# shared selection refuses every lane that bills.
+_DOCUMENT_LANE = Provider.DETERMINISTIC.value
 
 _WORKER_READY_BUDGET_SECONDS = "120"
 
@@ -378,32 +383,6 @@ def _served_catalog(gateway: CertifiedGateway) -> JsonObject:
         )
 
 
-def _served_in_process_selection(
-    gateway: CertifiedGateway, rule: ExternalPrerequisiteRule
-) -> JsonObject:
-    """Resolve the served in-process lane's selection, or report the missing lane.
-
-    The loop's ONE substitution is the model, and under the explicit-selection
-    contract the substitution is expressed as a selection naming the served
-    in-process lane - the freeze wins outright at compilation, so a selection
-    naming any other served lane would hand every document role to a real
-    external provider. Refusing a billable lane is the shared mechanism's own
-    guarantee; what is local here is the report, because a loop that cannot express
-    its substitution has nothing honest left to assert.
-    """
-    try:
-        return in_process_selection(
-            _served_catalog(gateway),
-            prefer_provider_id="deterministic",
-        )
-    except NoSelectableLaneError as exc:
-        rule.absent(
-            "in-process-lanes",
-            f"the loop's deterministic model substitution cannot be selected "
-            f"without freezing a real external provider: {exc}",
-        )
-
-
 def _start_document_run(
     gateway: CertifiedGateway,
     run_id: str,
@@ -615,7 +594,9 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         started = _start_document_run(
             gateway,
             run_id,
-            selection=_served_in_process_selection(gateway, external_prerequisite),
+            selection=gateway.served_in_process_selection(
+                str(_WORKSPACE_ROOT), prefer_provider_id=_DOCUMENT_LANE
+            ),
         )
         assert started.status_code == 201, started.text
 
@@ -714,7 +695,9 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         started = _start_document_run(
             gateway,
             run_id,
-            selection=_served_in_process_selection(gateway, external_prerequisite),
+            selection=gateway.served_in_process_selection(
+                str(_WORKSPACE_ROOT), prefer_provider_id=_DOCUMENT_LANE
+            ),
         )
         assert started.status_code == 201, started.text
 

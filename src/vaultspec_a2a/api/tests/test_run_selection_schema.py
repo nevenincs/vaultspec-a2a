@@ -15,11 +15,12 @@ from ...api.run_admission import request_digest
 from ...api.schemas.gateway import RunStartRequest
 from ...context.metadata import ThreadMetadata
 from ...control.admission import AdmissionBroker, _Reservation
+from ...providers.provider_catalog import SELECTION_SCHEMA_VERSION
 
 
 def _selection() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": SELECTION_SCHEMA_VERSION,
         "provider_id": "codex",
         "execution_mode": "app-server",
         "catalog_revision": "rev-1",

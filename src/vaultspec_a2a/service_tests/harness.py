@@ -18,6 +18,7 @@ import httpx
 from sqlalchemy.engine import make_url
 
 from ..control.config import settings
+from ..graph.enums import Provider
 from ..lifecycle.manager import tree_kill
 from ..testing import NoSelectableLaneError, fetch_in_process_selection
 from ..testing.ports import free_port
@@ -807,9 +808,12 @@ class ServiceStack:
         # stack serves. The choice is cached because the first catalog read on a
         # gateway builds it cold across every registered lane.
         try:
-            with self._client(timeout=240.0) as client:
+            with self._client() as client:
                 return fetch_in_process_selection(
-                    client, workspace_root, prefer_provider_id="mock", cache=True
+                    client,
+                    workspace_root,
+                    prefer_provider_id=Provider.MOCK.value,
+                    cache=True,
                 )
         except NoSelectableLaneError as exc:
             raise GatewayBootError(

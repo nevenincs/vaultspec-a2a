@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import httpx
 from fastapi import (
@@ -226,7 +226,7 @@ def _get_clarification_endpoint_context(
     )
 
 
-__all__ = ["_summarize_preset", "route_signature"]
+__all__ = ["PROVIDER_CATALOG_PATH", "_summarize_preset", "route_signature"]
 
 # ---------------------------------------------------------------------------
 # run-message
@@ -620,8 +620,14 @@ async def run_cancel_endpoint(
 # provider-catalog
 # ---------------------------------------------------------------------------
 
+_PROVIDER_CATALOG_ROUTE: Final = "/provider-catalog"
 
-@router.get("/provider-catalog", response_model=ProviderCatalogResponse)
+# The path a client requests. Derived from the router's own prefix so no client
+# restates the version segment or the verb's name.
+PROVIDER_CATALOG_PATH: Final = f"{router.prefix}{_PROVIDER_CATALOG_ROUTE}"
+
+
+@router.get(_PROVIDER_CATALOG_ROUTE, response_model=ProviderCatalogResponse)
 async def provider_catalog_endpoint(
     request: Request,
     workspace_root: str = Query(min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH),

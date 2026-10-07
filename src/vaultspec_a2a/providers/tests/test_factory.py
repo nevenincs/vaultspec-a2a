@@ -31,7 +31,12 @@ from ..cli_resolution import (
 )
 from ..codex_chat_model import CodexChatModel
 from ..factory import ProviderFactory
-from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
+from ..provider_catalog import (
+    SELECTION_SCHEMA_VERSION,
+    AuthenticationState,
+    CatalogStatus,
+    ProviderCatalogKey,
+)
 from ..team_selection import FrozenLaneAssignment
 
 # The exact model values a run freezes into its role assignment for each external
@@ -466,7 +471,7 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
     assignment = {
         worker_ref.agent_id: FrozenLaneAssignment.model_validate(
             {
-                "schema_version": 1,
+                "schema_version": SELECTION_SCHEMA_VERSION,
                 "provider_id": "codex",
                 "execution_mode": "unavailable-mode",
                 "catalog_revision": "rev",
@@ -477,7 +482,7 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
                 "provenance": {"selection_source": "team_selection"},
                 "fallbacks": [
                     {
-                        "schema_version": 1,
+                        "schema_version": SELECTION_SCHEMA_VERSION,
                         "provider_id": "codex",
                         "execution_mode": "codex-app-server",
                         "catalog_revision": "rev",

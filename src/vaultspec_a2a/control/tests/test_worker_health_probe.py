@@ -1,12 +1,15 @@
 """The single worker-health probe classifies identically via own and pooled client.
 
 Real loopback HTTP servers and real sockets, no mocks. Pins the equivalence the
-dedup exists to guarantee: an exact 200 is healthy and a 204 is NOT, for both the
-self-contained client path (watchdog/boot) and the injected pooled-client path
-(/health), so the two can never silently disagree on a worker's health. It also
-pins the one verdict that is not about the status code at all - a connect that
-never completes leaves health UNKNOWN rather than absent - against a real
-unanswering port.
+dedup exists to guarantee: the verdict is identical for both the self-contained
+client path (watchdog/boot) and the injected pooled-client path (/health), so
+the two can never silently disagree on a worker's health.
+
+The verdict itself is the shared role-aware readiness rule, not a bare status
+code: a 200 proves only that SOMETHING answered, and the gateway and the worker
+both serve ``/health`` on loopback. It also pins the one verdict that is not
+about the answer at all - a connect that never completes leaves health UNKNOWN
+rather than absent - against a real unanswering port.
 """
 
 from __future__ import annotations
@@ -35,25 +38,38 @@ _PROBE_TIMEOUT_SECONDS = 0.5
 _MAX_PENDING_CONNECTS = 256
 
 
-def _make_handler(status: int) -> type[http.server.BaseHTTPRequestHandler]:
+# What a real ready worker answers (the fields the verdict reads).
+_READY_WORKER_BODY: dict[str, object] = {"status": "ok", "service": "worker"}
+
+
+def _make_handler(
+    status: int, body: object
+) -> type[http.server.BaseHTTPRequestHandler]:
     class _Handler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            self.send_response(status if self.path == "/health" else 404)
-            payload = b"[]" if status == 200 and self.path == "/health" else b""
-            if payload:
-                self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            if payload:
-                self.wfile.write(payload)
+            if self.path != "/health":
+                self._reply_empty(404)
+                return
+            if status == 200:
+                self._reply(status, body)
+                return
+            self._reply_empty(status)
 
     return _Handler
 
 
 @contextmanager
-def _health_server(status: int) -> Generator[str]:
-    with serve_handler(_make_handler(status)) as port:
+def _health_server(status: int, body: object = _READY_WORKER_BODY) -> Generator[str]:
+    with serve_handler(_make_handler(status, body)) as port:
         yield f"http://{_LOOPBACK}:{port}"
+
+
+async def _both_client_paths(url: str) -> tuple[WorkerHealthProbe, WorkerHealthProbe]:
+    """The same probe through the owned one-shot client and an injected pool."""
+    own = await probe_worker_health(url, internal_token=None)
+    async with httpx.AsyncClient() as pooled:
+        injected = await probe_worker_health(url, client=pooled, internal_token=None)
+    return own, injected
 
 
 @contextmanager
@@ -94,31 +110,48 @@ def _unanswering_listener() -> Generator[str]:
 
 
 @pytest.mark.asyncio
-async def test_worker_health_200_is_healthy_via_both_client_paths() -> None:
+async def test_a_ready_worker_body_is_healthy_via_both_client_paths() -> None:
+    """The answer a real ready worker gives is healthy, and its body is carried."""
     with _health_server(200) as url:
-        own = await probe_worker_health(url, internal_token=None)
-        async with httpx.AsyncClient() as pooled:
-            injected = await probe_worker_health(
-                url, client=pooled, internal_token=None
-            )
-    # ``[]`` is valid JSON but not a health-object payload. The public contract
-    # keeps the exact-200 liveness verdict while withholding unusable evidence.
-    assert own == WorkerHealthProbe(healthy=True, body=None)
-    assert injected == WorkerHealthProbe(healthy=True, body=None)
+        own, injected = await _both_client_paths(url)
+    expected = WorkerHealthProbe(healthy=True, body=_READY_WORKER_BODY)
+    assert own == expected
+    assert injected == expected
 
 
 @pytest.mark.asyncio
 async def test_worker_health_204_is_unhealthy_identically_via_both_paths() -> None:
-    # 204 passed the old readiness raise_for_status but fails the watchdog's exact
-    # 200 - the silent disagreement this unification removes. Both must now say False.
+    # 204 passed the old readiness raise_for_status but fails the exact-200 half
+    # of the shared rule - the silent disagreement this unification removes.
     with _health_server(204) as url:
-        own = await probe_worker_health(url, internal_token=None)
-        async with httpx.AsyncClient() as pooled:
-            injected = await probe_worker_health(
-                url, client=pooled, internal_token=None
-            )
-        assert own == WorkerHealthProbe(healthy=False, body=None)
-        assert injected == WorkerHealthProbe(healthy=False, body=None)
+        own, injected = await _both_client_paths(url)
+    assert own == WorkerHealthProbe(healthy=False, body=None)
+    assert injected == WorkerHealthProbe(healthy=False, body=None)
+
+
+@pytest.mark.asyncio
+async def test_a_200_that_is_not_a_worker_readiness_answer_is_unhealthy() -> None:
+    """A 200 only proves something answered; the body must prove it is a ready worker.
+
+    Each case is a real server on loopback giving a real 200. The gateway body is
+    the one that matters most: the gateway serves ``/health`` too, and its own
+    readiness fact is a different key, so reading the status code alone let one
+    service's answer stand in for the other's readiness. ``[]`` decodes but is
+    not a health object at all, and a worker reporting a non-ok status is the
+    worker itself saying it is not ready.
+    """
+    for body in (
+        [],
+        {"service": "gateway", "ready": True},
+        {"status": "degraded", "service": "worker"},
+        {"status": "ok"},
+    ):
+        with _health_server(200, body) as url:
+            own, injected = await _both_client_paths(url)
+        assert own.healthy is False, body
+        assert injected.healthy is False, body
+        assert own.indeterminate is False, body
+        assert injected.indeterminate is False, body
 
 
 @pytest.mark.asyncio

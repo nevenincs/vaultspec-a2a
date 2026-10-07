@@ -21,7 +21,12 @@ from ...control._worker_health import WorkerHealthProbe, probe_worker_health
 from ...control.config import settings
 from ...control.infra_config import INTERNAL_TOKEN_ENV
 from ...control.worker_management import LazyWorkerSpawner
-from ...testing import JsonReplyHandler, inherited_environment, serve_handler
+from ...testing import (
+    JsonReplyHandler,
+    inherited_environment,
+    serve_handler,
+    settings_override,
+)
 from ...utils import bearer_header
 from ...utils._process_tree import port_has_listener
 
@@ -183,6 +188,46 @@ async def test_auto_spawn_does_not_evict_a_worker_without_target_evidence() -> N
     assert spawner.spawned is False
     assert spawner.process is None
     assert shutdown["called"] is False
+
+
+@pytest.mark.asyncio
+async def test_auto_spawn_refuses_a_held_port_whose_occupant_is_not_a_ready_worker(
+    tmp_path: Path,
+) -> None:
+    """A held port is refused WITHOUT a spawn attempt when its occupant is not ours.
+
+    The occupant answers 200 on ``/health`` with a body that is not a worker
+    readiness answer - a gateway's own health, say, or anything else serving that
+    path. It is therefore not adoptable; but it still HOLDS the port, so spawning
+    is not an option either: a replacement could not bind, and the readiness poll
+    would then meet the survivor on the port and wait out its whole budget for a
+    worker that was never going to appear.
+
+    "No spawn was attempted" is read from the worker stderr log, which
+    ``_spawn_worker`` opens before it starts the process: a refusal that still
+    spawned leaves that file behind, so its absence is the evidence. A bare
+    ``spawned is False`` cannot tell the two apart - a doomed spawn also reports
+    failure, just a minute later.
+    """
+    body: dict[str, object] = {"service": "gateway", "ready": True}
+    with _observed_worker_like(body) as (url, port, shutdown, received):
+        with settings_override(a2a_home=tmp_path):
+            spawner = LazyWorkerSpawner(
+                worker_url=url,
+                worker_port=port,
+                auto_spawn=True,
+                internal_token=_EVICTION_TOKEN,
+            )
+            await spawner.ensure_worker()
+            stderr_log = spawner.stderr_log_path
+        sent_by_the_gateway = list(received)
+
+    assert spawner.spawned is False
+    assert spawner.process is None
+    assert shutdown["called"] is False
+    assert {request["path"] for request in sent_by_the_gateway} == {"/health"}
+    assert stderr_log is not None
+    assert stderr_log.exists() is False
 
 
 @pytest.mark.asyncio

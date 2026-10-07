@@ -440,14 +440,21 @@ async def probe_worker_health(
     unauthenticated request, and the second is a defect that reads as a worker
     refusing its owner. Naming ``None`` is how a caller says it has none.
 
-    The health verdict is an exact ``200`` and nothing else, so every caller
-    agrees and ``/health`` can never silently diverge from the watchdog's
-    restart decision (a ``204`` fails both, not one). The decoded body is a
-    strictly additive by-product for callers that also want what the worker
-    *reported*: a body that will not decode leaves the verdict untouched and
-    yields ``None``, so reporting can never turn a healthy worker unhealthy.
+    The health verdict is an exact ``200`` whose body passes the shared
+    role-aware readiness rule
+    (:func:`~vaultspec_a2a.lifecycle.discovery.health_payload_ready`), so every
+    caller agrees and ``/health`` can never silently diverge from the watchdog's
+    restart decision (a ``204`` fails both, not one). Reading the status code
+    alone is not enough on loopback: the gateway serves ``/health`` as well, and
+    its readiness is a different fact under a different key, so a status-only
+    verdict let one service's answer stand in for the other's readiness - and a
+    200 carrying no health object at all read as a ready worker. ``healthy``
+    therefore implies a readable worker body, which is also the pairing evidence
+    every adoption decision goes on to read.
     """
     import httpx
+
+    from ..lifecycle.discovery import health_payload_ready
 
     async def _probe(active: httpx.AsyncClient) -> WorkerHealthProbe:
         resp = await active.get(f"{url}/health", timeout=timeout)
@@ -456,8 +463,11 @@ async def probe_worker_health(
         try:
             decoded: object = resp.json()
         except ValueError:
-            return WorkerHealthProbe(healthy=True, body=None)
-        return WorkerHealthProbe(healthy=True, body=coerce_object_mapping(decoded))
+            return WorkerHealthProbe(healthy=False, body=None)
+        body = coerce_object_mapping(decoded)
+        if not health_payload_ready(body, "worker"):
+            return WorkerHealthProbe(healthy=False, body=body)
+        return WorkerHealthProbe(healthy=True, body=body)
 
     try:
         if client is not None:
@@ -686,6 +696,28 @@ async def _occupant_is_addressable(worker_port: int, *, owner_pid: int) -> bool 
     return False
 
 
+async def _ready_occupant_body(
+    worker_url: str, worker_port: int, *, internal_token: str | None
+) -> Mapping[str, object] | None:
+    """The held port's occupant body, or ``None`` when it is not a ready worker.
+
+    Reached only once the listener is confirmed to be ours, so a ``None`` here is
+    never "the port is free": something our tree owns holds it and did not answer
+    as a ready worker. That is unadoptable AND unspawnable - a replacement could
+    not bind the held port, and the readiness poll would then wait out its whole
+    budget against the survivor - so the caller refuses rather than tries.
+    """
+    occupant = await probe_worker_health(worker_url, internal_token=internal_token)
+    if occupant.healthy and occupant.body is not None:
+        return occupant.body
+    logger.error(
+        "Worker port %d is held by an occupant that does not answer as a ready"
+        " worker — refusing to spawn onto the held port, adopt it, or evict it",
+        worker_port,
+    )
+    return None
+
+
 async def desktop_worker_port_clear(
     worker_url: str,
     worker_port: int,
@@ -700,50 +732,50 @@ async def desktop_worker_port_clear(
         return True
     if not addressable:
         return False
-    occupant = await probe_worker_health(worker_url, internal_token=internal_token)
-    if occupant.healthy:
-        verdict = _classify_worker_body(
-            occupant.body or {}, current_generation=generation
+    body = await _ready_occupant_body(
+        worker_url, worker_port, internal_token=internal_token
+    )
+    if body is None:
+        return False
+    verdict = _classify_worker_body(body, current_generation=generation)
+    if verdict is WorkerPairingVerdict.OWNED:
+        logger.info(
+            "Worker already running at %s with an owned pairing "
+            "verdict — adopting instead of spawning",
+            worker_url,
         )
-        if verdict is WorkerPairingVerdict.OWNED:
-            logger.info(
-                "Worker already running at %s with an owned pairing "
-                "verdict — adopting instead of spawning",
-                worker_url,
-            )
-            return False
-        if eviction_is_authorized(
-            verdict, desktop_profile_armed=settings.desktop_profile_armed
-        ):
-            logger.warning(
-                "Worker at %s is this gateway's prior generation "
-                "(verdict: %s) — evicting before spawning the replacement",
-                worker_url,
-                verdict.value,
-            )
-            if not await evict_stale_worker(
-                worker_url,
-                worker_port,
-                internal_token=internal_token,
-                owner_pid=owner_pid,
-            ):
-                logger.error(
-                    "Prior-generation worker at %s did not release port %d "
-                    "after an authorized eviction — refusing to spawn onto "
-                    "a held port (conflict, no adoption)",
-                    worker_url,
-                    worker_port,
-                )
-                return False
-        else:
-            logger.error(
-                "Worker port %d is held by a process this gateway cannot "
-                "adopt or evict (pairing verdict: %s) — refusing to spawn "
-                "(conflict, no adoption, no eviction)",
-                worker_port,
-                verdict.value,
-            )
-            return False
+        return False
+    if not eviction_is_authorized(
+        verdict, desktop_profile_armed=settings.desktop_profile_armed
+    ):
+        logger.error(
+            "Worker port %d is held by a process this gateway cannot "
+            "adopt or evict (pairing verdict: %s) — refusing to spawn "
+            "(conflict, no adoption, no eviction)",
+            worker_port,
+            verdict.value,
+        )
+        return False
+    logger.warning(
+        "Worker at %s is this gateway's prior generation "
+        "(verdict: %s) — evicting before spawning the replacement",
+        worker_url,
+        verdict.value,
+    )
+    if not await evict_stale_worker(
+        worker_url,
+        worker_port,
+        internal_token=internal_token,
+        owner_pid=owner_pid,
+    ):
+        logger.error(
+            "Prior-generation worker at %s did not release port %d "
+            "after an authorized eviction — refusing to spawn onto "
+            "a held port (conflict, no adoption)",
+            worker_url,
+            worker_port,
+        )
+        return False
     return True
 
 
@@ -764,47 +796,38 @@ async def shared_worker_port_clear(
         return True
     if not addressable:
         return False
-    existing = await probe_worker_health(worker_url, internal_token=internal_token)
-    if existing.healthy:
-        if existing.body is None:
-            logger.error(
-                "Worker port %d is held by a healthy worker with unreadable "
-                "pairing evidence — refusing to spawn or adopt",
-                worker_port,
-            )
-            return False
-        declared_target = existing.body.get("gateway_url")
-        if not isinstance(declared_target, str) or not declared_target.strip():
-            logger.error(
-                "Worker port %d is held by a healthy worker without an exact "
-                "gateway target — refusing to spawn, adopt, or evict",
-                worker_port,
-            )
-            return False
-        if _same_gateway(
-            declared_target,
-            settings.gateway_url,
-        ):
-            logger.info(
-                "Worker already running at %s targeting this gateway (%s)"
-                " — skipping auto-spawn",
-                worker_url,
-                settings.gateway_url,
-            )
-            return False
-        # A worker of ours that heartbeats a gateway that no longer exists. It
-        # still holds the port, and spawning a competitor onto it is the
-        # adoption hazard this guard closes: our new worker cannot bind, and the
-        # readiness probe would find the SURVIVING worker healthy and hand it
-        # back as ours. Report the conflict instead of terminating it.
+    body = await _ready_occupant_body(
+        worker_url, worker_port, internal_token=internal_token
+    )
+    if body is None:
+        return False
+    declared_target = body.get("gateway_url")
+    if not isinstance(declared_target, str) or not declared_target.strip():
         logger.error(
-            "Worker at %s targets a foreign gateway (%s != %s) — refusing to"
-            " spawn onto the held port; an unarmed gateway does not evict, so"
-            " reap the stale worker through the dev-process registry",
+            "Worker port %d is held by a healthy worker without an exact "
+            "gateway target — refusing to spawn, adopt, or evict",
+            worker_port,
+        )
+        return False
+    if _same_gateway(declared_target, settings.gateway_url):
+        logger.info(
+            "Worker already running at %s targeting this gateway (%s)"
+            " — skipping auto-spawn",
             worker_url,
-            declared_target,
             settings.gateway_url,
         )
         return False
-
-    return True
+    # A worker of ours that heartbeats a gateway that no longer exists. It
+    # still holds the port, and spawning a competitor onto it is the adoption
+    # hazard this guard closes: our new worker cannot bind, and the readiness
+    # probe would find the SURVIVING worker healthy and hand it back as ours.
+    # Report the conflict instead of terminating it.
+    logger.error(
+        "Worker at %s targets a foreign gateway (%s != %s) — refusing to"
+        " spawn onto the held port; an unarmed gateway does not evict, so"
+        " reap the stale worker through the dev-process registry",
+        worker_url,
+        declared_target,
+        settings.gateway_url,
+    )
+    return False

@@ -729,7 +729,9 @@ async def _checkpoint_health_check(app_state: object) -> dict[str, str]:
 async def _worker_health_check(
     worker_client: httpx.AsyncClient, *, include_pairing: bool
 ) -> tuple[dict[str, str], dict[str, object]]:
-    # The pooled-client probe is the same exact-200 authority used by the watchdog.
+    # The pooled-client probe is the same readiness authority the watchdog reads:
+    # an exact 200 whose body names the worker role and reports it ready, so this
+    # surface and a restart decision can never disagree about the same worker.
     worker_probe = await probe_worker_health(
         settings.worker_url,
         timeout=SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,

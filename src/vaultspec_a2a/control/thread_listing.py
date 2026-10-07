@@ -15,20 +15,22 @@ from typing import TYPE_CHECKING, Any
 from ..database import (
     CheckpointRead,
     CheckpointReadStatus,
-    actionable_pending_permissions,
     list_threads,
     read_latest_checkpoint,
 )
 from ..domain_config import domain_config
 from ..thread.enums import DegradedReason, RepairStatus, ThreadStatus
-from ..thread.snapshots import ThreadStateSnapshot, record_repair_posture
+from ..thread.snapshots import ThreadStateSnapshot
 from ..utils.coercion import coerce_nonempty_str, decode_json_object
+from .pause import project_checkpoint_read
 from .projection import (
     clear_permissions_without_checkpoint_truth,
-    durable_approval,
+    enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
     finalize_snapshot_replay_status,
     mark_degraded,
+    reconcile_checkpoint_permissions_with_durable_state,
+    withhold_terminal_interrupt_disclosure,
 )
 
 if TYPE_CHECKING:
@@ -149,18 +151,24 @@ async def _judge_run_posture(
     """Judge one thread's repair posture and approval as run-status judges them.
 
     The summary serves only the posture fields of the snapshot, so this applies
-    the read-model steps run-status applies, in its order, and nothing else:
-    the durable approval, what the checkpoint read says about it, the
-    execution-state row, then the replay verdict. ``probe`` is ``None`` when no
-    checkpointer was given, and then no claim is made about the checkpoint
-    either way.
+    the read-model steps run-status applies, in its order, and nothing else: the
+    durable state, what the checkpoint read says about it, the execution-state
+    row, then the replay verdict. ``probe`` is ``None`` when no checkpointer was
+    given, and then no claim is made about the checkpoint either way.
+
+    The durable step is run-status's own
+    :func:`enrich_snapshot_from_durable_state`, not a second reading of the
+    approval alone. The listing is the reading an operator scans first, and the
+    three facts it used to miss are exactly the ones worth scanning for: a
+    settled run still holding an unanswerable request, a request whose cached
+    offer cannot be read, and a checkpoint parked on a permission no durable row
+    can serve. Each of them calls for a human, and the listing reported healthy.
     """
     snapshot = ThreadStateSnapshot(
         thread_id=thread.id, status=ThreadStatus(thread.status), last_sequence=0
     )
-    record_repair_posture(snapshot, thread.repair_status)
-    snapshot.approval_status, snapshot.approval_request_id = durable_approval(
-        await actionable_pending_permissions(db, thread_id=thread.id)
+    snapshot = await enrich_snapshot_from_durable_state(
+        db, thread=thread, snapshot=snapshot
     )
     if probe is None:
         return await enrich_snapshot_from_execution_state(
@@ -178,8 +186,16 @@ async def _judge_run_posture(
             DegradedReason.CHECKPOINT_UNAVAILABLE,
             repair=RepairStatus.CHECKPOINT_UNAVAILABLE,
         )
+    projection = project_checkpoint_read(probe, thread.id)
+    if projection is not None:
+        snapshot = reconcile_checkpoint_permissions_with_durable_state(
+            snapshot, projection
+        )
     if not checkpoint_present:
         clear_permissions_without_checkpoint_truth(snapshot)
+    snapshot = withhold_terminal_interrupt_disclosure(
+        snapshot, thread_status=thread.status
+    )
     snapshot = await enrich_snapshot_from_execution_state(
         db,
         thread=thread,

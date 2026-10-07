@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,12 +18,12 @@ from ...database import (
     record_permission_response_submission,
 )
 from ...streaming import RelayHub
+from ...testing import seed_accepted_thread
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
+from ...thread.enums import TranscriptAvailability
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from langchain_core.runnables import RunnableConfig
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -87,13 +88,19 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """A missing checkpoint must not leave the snapshot looking healthy."""
+    """A missing checkpoint must not leave the snapshot looking healthy.
+
+    Asserted on a run that OWES a transcript. A run parked on an interrupt was
+    checkpointed to park, so an absent checkpoint there is a loss rather than a
+    run that has yet to speak; the window before a run's first checkpoint is the
+    sibling case below.
+    """
     async with session_factory() as session:
         await create_thread(
             session,
             write_authority=make_test_write_authority(),
             thread_id="thread-missing-checkpoint",
-            status="running",
+            status="input_required",
             repair_status="healthy",
         )
         await session.commit()
@@ -116,6 +123,47 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(
     assert snapshot.repair_status == "replay_gap"
     assert snapshot.execution_readiness == "replay_gap"
     assert "checkpoint_missing" in snapshot.degraded_reasons
+
+
+@pytest.mark.asyncio
+async def test_a_freshly_dispatched_run_is_not_reported_as_a_replay_gap(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """A run marked running before its first checkpoint write is normal startup.
+
+    A run is marked running the moment it dispatches, well before the worker
+    writes anything. Calling that a replay gap fired the signal on healthy
+    traffic, and disagreed with the transcript verdict read from the same four
+    facts, which has always called this window not-yet-recorded.
+    """
+    async with session_factory() as session:
+        # Accepted as a real dispatch leaves it - its action journaled with the
+        # frozen definition and the execution authority of its metadata - so the
+        # read has nothing BUT the absent checkpoint to report.
+        await seed_accepted_thread(
+            session,
+            thread_id="thread-fresh-dispatch",
+            workspace=Path(__file__).resolve().parent,
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        capture = await capture_thread_state(
+            session,
+            thread_id="thread-fresh-dispatch",
+            relay_hub=RelayHub(),
+            checkpointer=checkpointer,
+        )
+
+    assert capture is not None
+    assert capture.transcript is TranscriptAvailability.NOT_YET_RECORDED
+    snapshot = capture.snapshot
+    assert snapshot.replay_status == "unknown"
+    assert snapshot.repair_status == "healthy"
+    assert snapshot.execution_readiness == "healthy"
+    assert snapshot.degraded_reasons == []
+    assert snapshot.snapshot_complete is True
 
 
 @pytest.mark.asyncio
@@ -210,9 +258,12 @@ async def test_submitted_thread_missing_checkpoint_clears_stale_pending_approval
     assert snapshot.approval_status is None
     assert snapshot.approval_request_id is None
     assert snapshot.pause_cause is None
-    assert snapshot.snapshot_complete is True
     assert snapshot.replay_status == "unknown"
     assert "pending_permission_without_checkpoint_truth" in snapshot.degraded_reasons
+    # A read that listed a reason is not a complete read. The excused window
+    # withholds the replay accusation, not the degradation some earlier step of
+    # the same read established - claiming both at once contradicted itself.
+    assert snapshot.snapshot_complete is False
 
 
 @pytest.mark.asyncio

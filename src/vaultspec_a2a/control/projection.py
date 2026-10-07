@@ -58,7 +58,6 @@ __all__ = [
     "apply_execution_state_projection",
     "classify_transcript_availability",
     "clear_permissions_without_checkpoint_truth",
-    "durable_approval",
     "enrich_snapshot_from_durable_state",
     "enrich_snapshot_from_execution_state",
     "finalize_snapshot_replay_status",
@@ -133,36 +132,6 @@ def mark_degraded(
         )
 
 
-def finalize_snapshot_replay_status(
-    snapshot: ThreadStateSnapshot,
-    *,
-    checkpoint_loaded: bool,
-    checkpoint_present: bool,
-    checkpoint_error: bool,
-    thread_status: str,
-) -> ThreadStateSnapshot:
-    """Apply the reconnect snapshot replay/degradation contract."""
-    if checkpoint_loaded:
-        snapshot.replay_status = ReplayStatus.DURABLE.value
-    elif checkpoint_error:
-        snapshot.snapshot_complete = False
-        snapshot.replay_status = ReplayStatus.UNKNOWN.value
-    elif checkpoint_present:
-        snapshot.snapshot_complete = False
-        snapshot.replay_status = ReplayStatus.BEST_EFFORT.value
-    elif thread_status == ThreadStatus.SUBMITTED.value:
-        snapshot.snapshot_complete = True
-        snapshot.replay_status = ReplayStatus.UNKNOWN.value
-    else:
-        mark_degraded(snapshot, DegradedReason.CHECKPOINT_MISSING)
-        # The probe succeeded and found nothing, so the history a replay would
-        # rebuild from is provably absent: a replay gap, not the unknown that an
-        # unavailable checkpoint reports.
-        record_repair_posture(snapshot, RepairStatus.REPLAY_GAP.value)
-        snapshot.replay_status = ReplayStatus.GAP_DETECTED.value
-    return snapshot
-
-
 # The only statuses a run can hold before its first checkpoint exists: it is
 # marked running on dispatch, and can be cancelled during that same window. An
 # absent checkpoint in any OTHER status means the record was lost, not unwritten.
@@ -175,6 +144,53 @@ _PRE_TRANSCRIPT_STATUSES: frozenset[str] = frozenset(
 )
 
 
+def finalize_snapshot_replay_status(
+    snapshot: ThreadStateSnapshot,
+    *,
+    checkpoint_loaded: bool,
+    checkpoint_present: bool,
+    checkpoint_error: bool,
+    thread_status: str,
+) -> ThreadStateSnapshot:
+    """Apply the reconnect snapshot replay/degradation contract.
+
+    Excuses an absent checkpoint in ``_PRE_TRANSCRIPT_STATUSES``, the same
+    window :func:`classify_transcript_availability` excuses, because both answer
+    from the SAME four facts: a window one of them calls normal startup while the
+    other calls a lost record is a disagreement about one run, and the one that
+    fires on healthy traffic teaches every reader to ignore it.
+
+    The gap ESCALATES the repair posture rather than replacing it. ``replay_gap``
+    is the mildest degraded posture, so overwriting let this last step of a read
+    undo what an earlier one established and list a run recorded as
+    ``checkpoint_unavailable`` as a mere replay gap.
+    """
+    if checkpoint_loaded:
+        snapshot.replay_status = ReplayStatus.DURABLE.value
+    elif checkpoint_error:
+        snapshot.snapshot_complete = False
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
+    elif checkpoint_present:
+        snapshot.snapshot_complete = False
+        snapshot.replay_status = ReplayStatus.BEST_EFFORT.value
+    elif thread_status in _PRE_TRANSCRIPT_STATUSES:
+        # Completeness is left as the read found it. Asserting it here would let
+        # the absence a run is EXCUSED for overwrite a degradation some earlier
+        # step of the same read established.
+        snapshot.replay_status = ReplayStatus.UNKNOWN.value
+    else:
+        # The probe succeeded and found nothing, so the history a replay would
+        # rebuild from is provably absent: a replay gap, not the unknown that an
+        # unavailable checkpoint reports.
+        mark_degraded(
+            snapshot,
+            DegradedReason.CHECKPOINT_MISSING,
+            repair=RepairStatus.REPLAY_GAP,
+        )
+        snapshot.replay_status = ReplayStatus.GAP_DETECTED.value
+    return snapshot
+
+
 def classify_transcript_availability(
     *,
     checkpoint_loaded: bool,
@@ -184,10 +200,11 @@ def classify_transcript_availability(
 ) -> TranscriptAvailability:
     """Classify whether a run's conversation is readable from its checkpoint.
 
-    Takes the SAME four facts as :func:`finalize_snapshot_replay_status` and
-    sits beside it deliberately: both answer from one checkpoint read, and
-    splitting them across modules would let the replay verdict and the
-    transcript verdict drift out of agreement on the same run.
+    Takes the SAME four facts as :func:`finalize_snapshot_replay_status`, excuses
+    the same ``_PRE_TRANSCRIPT_STATUSES`` window, and sits beside it
+    deliberately: both answer from one checkpoint read, and splitting them across
+    modules would let the replay verdict and the transcript verdict drift out of
+    agreement on the same run.
 
     Distinct from the replay verdict rather than derived from it. Replay status
     answers "can this run resume", which folds the not-yet-dispatched case and
@@ -499,6 +516,9 @@ def durable_approval(
     respond route would accept. An unreadable plan-approval request withholds the
     approval altogether: once one of them cannot be read, the run's approval
     state can no longer be trusted, whichever request it would have named.
+
+    Module-internal since the listing stopped reading the approval on its own and
+    took the whole durable step through :func:`enrich_snapshot_from_durable_state`.
     """
     plan_approvals = [
         entry
@@ -517,21 +537,44 @@ def durable_approval(
 def _merge_durable_permissions(
     snapshot: ThreadStateSnapshot, pending: Sequence[PendingPermission]
 ) -> None:
-    if pending and snapshot.pause_cause is None:
-        snapshot.pause_cause = pending[0].request.pause_reason_type
+    """Disclose the durable rows a response could still be addressed to.
+
+    ONE visibility rule, the same :func:`pending_option_ids` question the team
+    status and the listing's approval read ask: a row is disclosed when it offers
+    an option a response could name. The respond verb validates an answer against
+    the offer, so a row that offers nothing usable is a pause no caller can lift,
+    and disclosing it as pending invites an answer that is refused.
+
+    An offer that cannot be READ at all and one that reads as nothing usable are
+    withheld alike, and both degrade this read. The tool-permission model refuses
+    a request with no usable option at the worker, so neither row should exist: a
+    run parked on one is a fault in the record, and dropping it silently would
+    leave the run looking idle while it is held.
+    """
     existing = {permission.request_id for permission in snapshot.pending_permissions}
+    disclosed_cause: str | None = None
     for entry in pending:
-        if entry.request.request_id in existing:
-            continue
-        projected = _permission_snapshot_from_pending(entry)
-        if projected is None:
-            mark_degraded(
-                snapshot,
-                DegradedReason.PERMISSION_PROJECTION_UNREADABLE,
-                repair=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+        if entry.request.request_id not in existing:
+            projected = (
+                _permission_snapshot_from_pending(entry)
+                if pending_option_ids(entry)
+                else None
             )
-            continue
-        snapshot.pending_permissions.append(projected)
+            if projected is None:
+                mark_degraded(
+                    snapshot,
+                    DegradedReason.PERMISSION_PROJECTION_UNREADABLE,
+                    repair=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+                )
+                continue
+            snapshot.pending_permissions.append(projected)
+        if disclosed_cause is None:
+            disclosed_cause = entry.request.pause_reason_type
+    # Named by what was DISCLOSED, not by what the query returned: a cause naming
+    # a request no surface serves describes a pause the reader cannot see, and the
+    # checkpoint - the pause authority - supplies the cause for that run instead.
+    if disclosed_cause is not None and snapshot.pause_cause is None:
+        snapshot.pause_cause = disclosed_cause
 
 
 async def enrich_snapshot_from_durable_state(

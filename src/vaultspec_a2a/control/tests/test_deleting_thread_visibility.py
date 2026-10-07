@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from ...control.repositories import create_deletion_saga
+from ...control.deletion_saga import create_deletion_saga
 from ...control.thread_listing import list_threads_service
 from ...control.thread_state_service import capture_thread_state
 from ...database import create_control_action, create_thread, get_thread

@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import func, select, update
 
-from ....control.repositories import (
+from ...database import create_control_action, create_thread, get_thread
+from ...database.models import ThreadDeletionSagaModel
+from ...tests._write_authority import make_test_write_authority
+from ...thread.enums import CleanupKind, ThreadStatus
+from ..deletion_saga import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
@@ -32,11 +36,7 @@ from ....control.repositories import (
     serialize_manifest,
     serialize_results,
 )
-from ....control.thread_service import archive_thread
-from ....database import create_control_action, create_thread, get_thread
-from ....database.models import ThreadDeletionSagaModel
-from ....tests._write_authority import make_test_write_authority
-from ....thread.enums import CleanupKind, ThreadStatus
+from ..thread_service import archive_thread
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

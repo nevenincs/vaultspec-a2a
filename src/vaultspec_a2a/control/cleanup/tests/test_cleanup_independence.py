@@ -20,7 +20,7 @@ from ....control.cleanup import (
     build_cleanup_manifest,
     execute_cleanup_manifest,
 )
-from ....control.repositories import (
+from ....control.deletion_saga import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,

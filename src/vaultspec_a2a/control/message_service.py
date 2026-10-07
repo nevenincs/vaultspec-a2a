@@ -34,8 +34,7 @@ from ..thread.message_policy import (
     can_send_followup,
 )
 from .accepted_input import freeze_accepted_input
-from .leased_dispatch import DispatchRefusal, build_followon_dispatch
-from .repositories.continuation_queue import (
+from .continuation_queue import (
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
     lock_run_for_continuation_decision,
@@ -43,6 +42,7 @@ from .repositories.continuation_queue import (
     run_lifetime_deadline,
     served_continuation_queue_limits,
 )
+from .leased_dispatch import DispatchRefusal, build_followon_dispatch
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +55,7 @@ _REPLAYED = QueuedContinuationDisposition.REPLAYED
 
 #: What each queue disposition means to a caller of this verb. Spelled as a
 #: mapping rather than a chain of branches so a disposition added to the queue
-#: repository cannot be answered here by falling through to "accepted".
+#: cannot be answered here by falling through to "accepted".
 _REFUSALS: dict[QueuedContinuationDisposition, tuple[FailureType, str]] = {
     QueuedContinuationDisposition.CONFLICT: (
         FailureType.CONFLICT,

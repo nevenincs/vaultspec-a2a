@@ -56,14 +56,14 @@ from ..thread.idempotency import thread_create_action_key
 from ..thread.lifecycle_guards import can_archive, can_delete
 from ..thread.repair_policy import RepairPhase, repair_state_for_action
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
-from .leased_dispatch import accepted_recursion_budget, dispatch_leased
-from .repositories import (
+from .deletion_saga import (
     CleanupItemResult,
     advance_deletion_cleanup_item,
     claim_deletion_saga,
     create_deletion_saga,
     finalize_deletion_saga,
 )
+from .leased_dispatch import accepted_recursion_budget, dispatch_leased
 from .workspace import require_admitted_workspace_root
 
 if TYPE_CHECKING:

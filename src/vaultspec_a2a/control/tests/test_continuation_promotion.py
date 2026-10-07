@@ -2,7 +2,7 @@
 
 Driven end to end against the real pieces: a real LangGraph run over a real
 ``AsyncSqliteSaver`` produces the completion receipt, a real journal row
-reserved through the production queue repository is the continuation, and the
+reserved through the production continuation queue is the continuation, and the
 real reconciliation authority reads one and promotes the other. Nothing here
 stands in for anything.
 

@@ -29,11 +29,11 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ..thread.repair_policy import terminal_repair_transition
-from .repair_transitions import apply_repair_transition
-from .repositories.continuation_queue import (
+from .continuation_queue import (
     lock_run_for_continuation_decision,
     refuse_queued_continuations,
 )
+from .repair_transitions import apply_repair_transition
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

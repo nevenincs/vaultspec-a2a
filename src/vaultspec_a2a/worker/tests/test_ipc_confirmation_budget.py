@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import sys
 import textwrap
@@ -26,7 +25,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
 from ...domain_config import domain_config
-from ...testing import serve_on_loopback
+from ...testing import inherited_environment, serve_on_loopback
 from ..ipc import WorkerBridge, event_client_timeout
 
 # The worst case the gateway is allowed: a checkpoint read that spends its whole
@@ -65,8 +64,7 @@ def _probe_client_budget(*, bound_env: str) -> dict[str, Any]:
     ``domain_config`` resolves once at import, so the knob only reaches a
     process that has it in the environment before the import runs.
     """
-    env = os.environ.copy()
-    env["VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS"] = bound_env
+    env = inherited_environment({"VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS": bound_env})
     result = subprocess.run(
         [sys.executable, "-c", _TIMEOUT_PROBE],
         capture_output=True,

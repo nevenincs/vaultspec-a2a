@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+
+from ...testing import inherited_environment
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -52,11 +53,9 @@ def _run_child(
     env_extra: dict[str, str],
     timeout: float = 30.0,
 ) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
-    env.update(env_extra)
     return subprocess.run(
         [sys.executable, str(child)],
-        env=env,
+        env=inherited_environment(env_extra),
         cwd=str(REPO),
         capture_output=True,
         text=True,

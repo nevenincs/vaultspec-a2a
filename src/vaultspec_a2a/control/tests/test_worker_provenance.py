@@ -9,7 +9,6 @@ classification and eviction helpers.
 from __future__ import annotations
 
 import http.server
-import os
 import subprocess
 import sys
 import textwrap
@@ -22,7 +21,7 @@ from ...control._worker_health import WorkerHealthProbe, probe_worker_health
 from ...control.config import settings
 from ...control.infra_config import INTERNAL_TOKEN_ENV
 from ...control.worker_management import LazyWorkerSpawner
-from ...testing import JsonReplyHandler, serve_handler
+from ...testing import JsonReplyHandler, inherited_environment, serve_handler
 from ...utils import bearer_header
 
 if TYPE_CHECKING:
@@ -223,11 +222,12 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
         "gateway_url": "http://127.0.0.1:59999",
     }
     with _worker_like(body) as (url, port, observer):
-        child_environment = os.environ.copy()
-        child_environment.pop(INTERNAL_TOKEN_ENV, None)
-        child_environment["VAULTSPEC_A2A_ENVIRONMENT"] = "development"
-        if internal_token is not None:
-            child_environment[INTERNAL_TOKEN_ENV] = internal_token
+        child_environment = inherited_environment(
+            {
+                INTERNAL_TOKEN_ENV: internal_token,
+                "VAULTSPEC_A2A_ENVIRONMENT": "development",
+            }
+        )
         child_program = textwrap.dedent(
             f"""
             import asyncio

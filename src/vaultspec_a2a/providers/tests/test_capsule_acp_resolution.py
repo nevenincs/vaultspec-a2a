@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing import session_scratch_dir
+from ...testing import inherited_environment, session_scratch_dir
 from ...thread.errors import ConfigError
 from .._factory_commands import (
     _classify_acp_command,
@@ -211,9 +211,12 @@ print(json.dumps({{
     }},
 }}))
 """
-    env = os.environ.copy()
-    env["VAULTSPEC_A2A_CAPSULE_ASSETS"] = str(configured_root)
-    env["VAULTSPEC_A2A_INSTALL_ROOT"] = str(repository_root)
+    env = inherited_environment(
+        {
+            "VAULTSPEC_A2A_CAPSULE_ASSETS": str(configured_root),
+            "VAULTSPEC_A2A_INSTALL_ROOT": str(repository_root),
+        }
+    )
 
     completed = subprocess.run(
         [sys.executable, "-I", "-c", script],

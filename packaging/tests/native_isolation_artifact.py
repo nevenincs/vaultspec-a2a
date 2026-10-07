@@ -13,7 +13,6 @@ import runpy
 import shutil
 import ssl
 import subprocess
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
@@ -25,6 +24,7 @@ from vaultspec_a2a.desktop.native_isolation import (
     linux_isolated_launch,
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
+from vaultspec_a2a.testing import LivenessWatch, ProgressDeadline, wait_until
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -329,11 +329,22 @@ def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:
     )
     try:
         ready = authority.workspace.path / "descendant-ready"
-        deadline = time.monotonic() + 15
-        while not ready.exists() and time.monotonic() < deadline:
-            assert owner.poll() is None
-            time.sleep(0.05)
-        assert ready.exists()
+
+        def _owner_exited() -> str | None:
+            code = owner.poll()
+            if code is None:
+                return None
+            return f"exited with code {code} before the descendant was ready"
+
+        wait_until(
+            ready.exists,
+            deadline=ProgressDeadline(
+                idle_window_s=15.0,
+                watches=(LivenessWatch(label="frozen owner", verdict=_owner_exited),),
+            ),
+            interval_s=0.05,
+            stalled=lambda: f"the frozen owner never wrote {ready.name}",
+        )
         descendants: list[tuple[Path, int]] = []
         for entry in Path("/proc").iterdir():
             if not entry.name.isdecimal():
@@ -348,18 +359,29 @@ def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:
         owner.kill()
         owner.wait(timeout=5)
         path, identity = descendants[0]
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
+        observed = "unread"
+
+        def _descendant_gone() -> bool:
+            nonlocal observed
             try:
                 if path.stat().st_ino != identity:
-                    break
-                if (path / "stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
-                    break
+                    observed = "pid reused"
+                    return True
+                observed = (path / "stat").read_text().rsplit(")", 1)[1].split()[0]
             except (FileNotFoundError, ProcessLookupError):
-                break
-            time.sleep(0.05)
-        else:
-            pytest.fail("detached child survived its frozen retained owner")
+                observed = "gone"
+                return True
+            return observed == "Z"
+
+        wait_until(
+            _descendant_gone,
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.05,
+            stalled=lambda: (
+                "detached child survived its frozen retained owner "
+                f"(last state {observed})"
+            ),
+        )
     finally:
         if owner.poll() is None:
             owner.kill()

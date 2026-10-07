@@ -10,7 +10,6 @@ tree reaping, log tails and the run-start verb are the shared primitives of
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -34,6 +33,7 @@ from ..testing import (
     fetch_in_process_selection,
     free_port,
     gateway_process_env,
+    inherited_environment,
     log_tail,
     prune_stale_dirs,
     reap_process,
@@ -90,8 +90,7 @@ _GATEWAY_SERVICE_TOKEN = "vaultspec-integration-gateway-token"
 
 
 def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
-    env = os.environ.copy()
-    env.update(
+    return inherited_environment(
         {
             "COMPOSE_PROJECT_NAME": project_name,
             "COMPOSE_DISABLE_ENV_FILE": "1",
@@ -101,7 +100,6 @@ def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
             "JAEGER_OTLP_PORT": str(ports["jaeger_otlp"]),
         }
     )
-    return env
 
 
 def _compose_base_command(project_name: str) -> list[str]:

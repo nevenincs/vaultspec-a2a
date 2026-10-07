@@ -37,10 +37,11 @@ import contextlib
 import http.server
 import json
 import threading
-import time
 from typing import TYPE_CHECKING, Literal, override
 
 import uvicorn
+
+from .progress import LivenessWatch, ProgressDeadline, wait_for_async, wait_until
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
@@ -177,6 +178,13 @@ def loopback_uvicorn(
     )
 
 
+def _unbound(server: uvicorn.Server) -> str:
+    return (
+        f"uvicorn did not start within {_START_BUDGET_S}s "
+        f"(started={server.started}, listening sockets={len(server.servers)})"
+    )
+
+
 def _base_url(server: uvicorn.Server) -> str:
     port = server.servers[0].sockets[0].getsockname()[1]
     return f"http://127.0.0.1:{port}"
@@ -189,14 +197,21 @@ async def uvicorn_started(server: uvicorn.Server, serving: asyncio.Task[None]) -
     it binds re-raises its own failure here rather than leaving the caller to
     wait out the budget for a socket that will never exist.
     """
-    deadline = time.monotonic() + _START_BUDGET_S
-    while not (server.started and server.servers):
+
+    async def _bound() -> bool | None:
+        if server.started and server.servers:
+            return True
         if serving.done():
             await serving
             raise AssertionError("uvicorn exited before it started")
-        if time.monotonic() > deadline:
-            raise AssertionError("uvicorn did not start")
-        await asyncio.sleep(0.01)
+        return None
+
+    await wait_for_async(
+        _bound,
+        deadline=ProgressDeadline(idle_window_s=_START_BUDGET_S),
+        interval_s=0.01,
+        stalled=lambda: _unbound(server),
+    )
     return _base_url(server)
 
 
@@ -233,13 +248,22 @@ def serve_on_loopback_in_thread(
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     try:
-        deadline = time.monotonic() + _START_BUDGET_S
-        while not (server.started and server.servers):
-            if not thread.is_alive():
-                raise AssertionError("uvicorn exited before it started")
-            if time.monotonic() > deadline:
-                raise AssertionError("uvicorn did not start")
-            time.sleep(0.01)
+        wait_until(
+            lambda: bool(server.started and server.servers),
+            deadline=ProgressDeadline(
+                idle_window_s=_START_BUDGET_S,
+                watches=(
+                    LivenessWatch(
+                        label="uvicorn server thread",
+                        verdict=lambda: (
+                            None if thread.is_alive() else "exited before it started"
+                        ),
+                    ),
+                ),
+            ),
+            interval_s=0.01,
+            stalled=lambda: _unbound(server),
+        )
         yield _base_url(server)
     finally:
         server.should_exit = True

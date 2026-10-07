@@ -23,7 +23,7 @@ import pytest
 
 from ...control.config import setting_env
 from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
-from ...testing import free_port
+from ...testing import ProgressDeadline, free_port, wait_for, wait_until
 from ...utils._process_tree import pid_is_live, wait_pid_gone
 from ..boot import (
     build_cwd_for,
@@ -647,20 +647,22 @@ class _ForeignWorkerListener:
     def is_alive(self) -> bool:
         return self._thread.is_alive()
 
-    def _wait_for_reservation_marker(self, *, deadline: float) -> Path | None:
-        while time.monotonic() < deadline:
-            markers = list(self._tmp_path.glob(f"{self._role}-*.reserved"))
-            if markers:
-                return markers[0]
-            time.sleep(0.01)
-        return None
+    def _reservation_marker(self) -> Path | None:
+        markers = list(self._tmp_path.glob(f"{self._role}-*.reserved"))
+        return markers[0] if markers else None
 
     def _run(self) -> None:
         listener: socket.socket | None = None
         try:
-            marker = self._wait_for_reservation_marker(deadline=time.monotonic() + 10.0)
-            if marker is None:
-                raise AssertionError("serve_up did not create a worker reservation")
+            marker = wait_for(
+                self._reservation_marker,
+                deadline=ProgressDeadline(idle_window_s=10.0),
+                interval_s=0.01,
+                stalled=lambda: (
+                    f"serve_up did not create a {self._role} reservation in "
+                    f"{self._tmp_path} (found {sorted(self._tmp_path.iterdir())})"
+                ),
+            )
             foreign_port = int(marker.stem.rsplit("-", 1)[1])
             listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             listener.bind(("127.0.0.1", foreign_port))
@@ -1072,9 +1074,12 @@ def test_resume_reproduces_recorded_engine_service_json(tmp_path: Path) -> None:
     updated = resume("rev", home=tmp_path, config=config)
     try:
         assert updated.engine_service_json == seat
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and not sentinel.exists():
-            time.sleep(0.05)
+        wait_until(
+            sentinel.exists,
+            deadline=ProgressDeadline(idle_window_s=10.0),
+            interval_s=0.05,
+            stalled=lambda: f"the resumed child never wrote {sentinel}",
+        )
         assert sentinel.read_text() == seat
     finally:
         tree_kill(updated.pid)

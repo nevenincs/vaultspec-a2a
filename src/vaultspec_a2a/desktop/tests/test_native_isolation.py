@@ -11,14 +11,21 @@ import runpy
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
 
-from ...testing import JsonReplyHandler, combined_output, serve_handler
+from ...testing import (
+    JsonReplyHandler,
+    LivenessWatch,
+    ProgressDeadline,
+    combined_output,
+    inherited_environment,
+    serve_handler,
+    wait_until,
+)
 from ...tests.native_build import linux_isolation_helper
 from ...utils import ProcessContainmentError
 from ..native_isolation import (
@@ -231,16 +238,17 @@ request.on('error', e => { out.loopback = e.code; console.log(JSON.stringify(out
             .replace("PORT", str(relay_port)),
             encoding="utf-8",
         )
-        env = {
-            **os.environ,
-            "VAULTSPEC_A2A_GATEWAY_TOKEN": "synthetic-gateway",
-            "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-worker",
-            "DATABASE_URL": "synthetic-database",
-            "gateway_token": "synthetic-alias",
-            "VAULTSPEC_A2A_AUTHORING_BEARER": "synthetic-engine",
-            "VAULTSPEC_A2A_AUTHORING_BASE_URL": "http://127.0.0.1:1",
-            "VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN": "synthetic-role",
-        }
+        env = inherited_environment(
+            {
+                "VAULTSPEC_A2A_GATEWAY_TOKEN": "synthetic-gateway",
+                "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-worker",
+                "DATABASE_URL": "synthetic-database",
+                "gateway_token": "synthetic-alias",
+                "VAULTSPEC_A2A_AUTHORING_BEARER": "synthetic-engine",
+                "VAULTSPEC_A2A_AUTHORING_BASE_URL": "http://127.0.0.1:1",
+                "VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN": "synthetic-role",
+            }
+        )
         descriptor = os.open(private, os.O_RDONLY | os.O_DIRECTORY)
         try:
             launch = linux_isolated_launch(
@@ -458,11 +466,22 @@ def test_owner_death_removes_a_detached_native_descendant(tmp_path: Path) -> Non
     )
     try:
         ready = authority.workspace.path / "descendant-ready"
-        deadline = time.monotonic() + 10
-        while not ready.exists() and time.monotonic() < deadline:
-            assert owner.poll() is None
-            time.sleep(0.05)
-        assert ready.exists()
+
+        def _owner_exited() -> str | None:
+            code = owner.poll()
+            if code is None:
+                return None
+            return f"exited with code {code} before the descendant was ready"
+
+        wait_until(
+            ready.exists,
+            deadline=ProgressDeadline(
+                idle_window_s=10.0,
+                watches=(LivenessWatch(label="isolated owner", verdict=_owner_exited),),
+            ),
+            interval_s=0.05,
+            stalled=lambda: f"isolated owner never wrote {ready.name}",
+        )
         descendants: list[tuple[Path, int]] = []
         for entry in Path("/proc").iterdir():
             if not entry.name.isdecimal():
@@ -477,19 +496,29 @@ def test_owner_death_removes_a_detached_native_descendant(tmp_path: Path) -> Non
         owner.kill()
         owner.wait(timeout=5)
         path, identity = descendants[0]
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
+        observed = "unread"
+
+        def _descendant_gone() -> bool:
+            nonlocal observed
             try:
                 if path.stat().st_ino != identity:
-                    break
-                state = (path / "stat").read_text().rsplit(")", 1)[1].split()[0]
-                if state == "Z":
-                    break
+                    observed = "pid reused"
+                    return True
+                observed = (path / "stat").read_text().rsplit(")", 1)[1].split()[0]
             except (FileNotFoundError, ProcessLookupError):
-                break
-            time.sleep(0.05)
-        else:
-            pytest.fail("isolated detached descendant survived its retained owner")
+                observed = "gone"
+                return True
+            return observed == "Z"
+
+        wait_until(
+            _descendant_gone,
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.05,
+            stalled=lambda: (
+                "isolated detached descendant survived its retained owner "
+                f"(last state {observed})"
+            ),
+        )
     finally:
         if owner.poll() is None:
             owner.kill()

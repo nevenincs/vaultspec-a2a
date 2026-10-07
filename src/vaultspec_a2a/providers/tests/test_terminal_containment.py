@@ -16,12 +16,11 @@ where a regression in the shared refusal is actually visible.
 
 from __future__ import annotations
 
-import asyncio
-import time
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing import ProgressDeadline, wait_for_async, wait_until_async
 from ...utils import ProcessContainment
 from ...utils._process_tree import pid_is_live, wait_pid_gone_async
 from .._acp_request import jsonrpc_error, jsonrpc_result
@@ -87,12 +86,19 @@ async def test_terminal_child_contained_and_reaped_whole(
     containment = process_containment(process)
     assert isinstance(containment, ProcessContainment)
 
-    async with asyncio.timeout(10):
-        while not acp_session_context.terminal_outputs[terminal_id].output.strip():
-            await asyncio.sleep(0.01)
-    grandchild_pid = int(
-        acp_session_context.terminal_outputs[terminal_id].output.strip()
+    def _printed() -> str:
+        return acp_session_context.terminal_outputs[terminal_id].output.strip()
+
+    await wait_until_async(
+        lambda: bool(_printed()),
+        deadline=ProgressDeadline(idle_window_s=10.0),
+        interval_s=0.01,
+        stalled=lambda: (
+            "the terminal child never printed its grandchild pid "
+            f"(output: {_printed()!r})"
+        ),
     )
+    grandchild_pid = int(_printed())
     try:
         assert pid_is_live(grandchild_pid)
 
@@ -361,9 +367,10 @@ async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
     process = acp_session_context.terminals[terminal_id]
 
     # Observe the retained marker before kill, then require the same snapshot.
-    deadline = time.monotonic() + 10.0
-    seen = ""
-    while time.monotonic() < deadline and "pre-kill-marker" not in seen:
+    observed = ""
+
+    async def _retained_output() -> str | None:
+        nonlocal observed
         live = await on_terminal_output(
             70,
             {"sessionId": acp_session_context.session_id, "terminalId": terminal_id},
@@ -372,8 +379,17 @@ async def test_a_killed_terminal_still_answers_output_and_exit_until_released(
         )
         live_result = live.get("result")
         assert isinstance(live_result, dict)
-        seen = str(live_result["output"])
-        await asyncio.sleep(0.01)
+        observed = str(live_result["output"])
+        return observed if "pre-kill-marker" in observed else None
+
+    seen = await wait_for_async(
+        _retained_output,
+        deadline=ProgressDeadline(idle_window_s=10.0),
+        interval_s=0.01,
+        stalled=lambda: (
+            f"the terminal never reported the pre-kill marker (last: {observed!r})"
+        ),
+    )
     assert seen == "pre-kill-marker"
 
     killed = await on_terminal_kill(

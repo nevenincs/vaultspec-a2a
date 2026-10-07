@@ -53,7 +53,6 @@ import contextlib
 import json
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -78,6 +77,7 @@ from .ports import (
     hold_for_process_lifetime,
     reserve_scratch_ports,
 )
+from .progress import ProgressDeadline, wait_until
 
 if TYPE_CHECKING:
     from collections.abc import (
@@ -382,9 +382,10 @@ def await_ready(
     as a Compose-managed container - keeps the plain deadline, because there is
     no exit status to consult.
     """
-    deadline = time.monotonic() + timeout
     last: str | None = None
-    while time.monotonic() < deadline:
+
+    def _ready() -> bool:
+        nonlocal last
         for watched in watch:
             if watched.process.poll() is not None:
                 raise GatewayBootError(
@@ -392,12 +393,17 @@ def await_ready(
                     f"(exit {watched.process.returncode}){_tails([watched])}"
                 )
         try:
-            if probe():
-                return
+            return probe()
         except (httpx.HTTPError, ValueError) as exc:  # not up yet
             last = repr(exc)
-        time.sleep(interval)
-    raise AssertionError(f"{what} readiness never came up ({last}){_tails(watch)}")
+            return False
+
+    wait_until(
+        _ready,
+        deadline=ProgressDeadline(idle_window_s=timeout),
+        interval_s=interval,
+        stalled=lambda: f"{what} readiness never came up ({last}){_tails(watch)}",
+    )
 
 
 def _answers_health(base: str, *, timeout: float) -> bool:

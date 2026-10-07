@@ -11,14 +11,18 @@ and could never serve.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from typing import TYPE_CHECKING
 
 from ....authoring import AgentTool, CatalogSnapshot
 from ....authoring.catalog import snapshot_to_catalog_payload
-from ....testing import LivenessWatch, ProgressDeadline, wait_until
+from ....testing import (
+    LivenessWatch,
+    ProgressDeadline,
+    inherited_environment,
+    wait_until,
+)
 from ..authoring_stdio import (
     ENV_ACTOR_TOKEN,
     ENV_BASE_URL,
@@ -62,16 +66,17 @@ def test_bridge_serves_from_handed_catalog_without_engine(tmp_path: Path) -> Non
     snapshot = _snapshot()
     # Inherit the real environment so the child interpreter starts, then pin the
     # bridge's own vars (unreachable engine + handed catalog).
-    env = {
-        **os.environ,
-        ENV_BASE_URL: _UNREACHABLE,
-        ENV_BEARER: "bogus-bearer",
-        ENV_ACTOR_TOKEN: "bogus-actor",
-        ENV_RUN_ID: "handoff-run",
-        ENV_SERVER_NAME: "vaultspec-authoring",
-        ENV_CATALOG_JSON: json.dumps(snapshot_to_catalog_payload(snapshot)),
-        _ENV_DEBUG_MARKER: str(marker),
-    }
+    env = inherited_environment(
+        {
+            ENV_BASE_URL: _UNREACHABLE,
+            ENV_BEARER: "bogus-bearer",
+            ENV_ACTOR_TOKEN: "bogus-actor",
+            ENV_RUN_ID: "handoff-run",
+            ENV_SERVER_NAME: "vaultspec-authoring",
+            ENV_CATALOG_JSON: json.dumps(snapshot_to_catalog_payload(snapshot)),
+            _ENV_DEBUG_MARKER: str(marker),
+        }
+    )
     proc = subprocess.Popen(
         [sys.executable, "-m", _MODULE],
         env=env,

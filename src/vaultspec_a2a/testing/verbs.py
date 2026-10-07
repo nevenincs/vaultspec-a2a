@@ -30,12 +30,15 @@ from .boot import FIRST_DEMAND_TIMEOUT, GatewayBootError
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-__all__ = ["RunVerbs", "actor_tokens_body", "status_and_json"]
+__all__ = ["DEFAULT_RUN_MESSAGE", "RunVerbs", "actor_tokens_body", "status_and_json"]
 
 type RunStage = Literal["start", "prepare", "commit", "release"]
 
 # The run the first-demand warm-up reserves and immediately releases.
 _WARM_UP_RUN_ID = "run-first-demand-warmup"
+
+# The prompt a run-start body carries unless the scenario names its own.
+DEFAULT_RUN_MESSAGE = "build it"
 
 
 def status_and_json(response: httpx.Response) -> tuple[int, dict[str, Any]]:
@@ -73,7 +76,7 @@ class RunVerbs:
     workspace_root: str
     selection: Callable[[str], Mapping[str, object]]
     tokens: Mapping[str, str] | None = None
-    message: str = "build it"
+    message: str = DEFAULT_RUN_MESSAGE
     engine_bearer: str = "bearer"
 
     def prepare(

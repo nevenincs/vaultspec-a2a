@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
+    RUN_NOT_FOUND,
     ControlActionClaim,
     ControlActionClaimRequest,
     ControlActionOutcome,
@@ -81,7 +82,7 @@ async def _cancel_preflight(
     if thread is None:
         return ControlActionOutcome(
             thread_id=thread_id,
-            error_detail="Thread not found",
+            error_detail=RUN_NOT_FOUND,
             failure_type=FailureType.NOT_FOUND,
         )
 
@@ -447,6 +448,7 @@ async def _dispatch_cancellation(
             thread_id=thread_id,
             thread_status=ThreadStatus.CANCELLING.value,
             idempotency_key=response_idempotency_key,
+            error_detail="Cancel dispatch failed",
             failure_type=failure.failure_type,
         )
 

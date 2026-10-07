@@ -39,7 +39,7 @@ from ..thread.message_policy import (
     can_send_followup,
 )
 from .accepted_input import freeze_accepted_input
-from .action_lease import ControlActionOutcome
+from .action_lease import RUN_NOT_FOUND, ControlActionOutcome
 from .continuation_queue import (
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
@@ -163,9 +163,7 @@ async def send_followup_message(
     thread = await lock_thread_row(db, options["thread_id"])
     if thread is None:
         await db.rollback()
-        return _refused(
-            options["thread_id"], "", FailureType.NOT_FOUND, "Run not found"
-        )
+        return _refused(options["thread_id"], "", FailureType.NOT_FOUND, RUN_NOT_FOUND)
 
     # Read before any rollback below expires the loaded row.
     thread_status = thread.status

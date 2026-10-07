@@ -40,6 +40,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
+from ..control.action_lease import RUN_NOT_FOUND
 from ..control.config import settings
 from ..database import get_thread
 from ..domain_config import domain_config
@@ -111,7 +112,6 @@ class ThreadStreamRequest:
     frames the replay table does not have yet, so a resume taken between an
     allocation and its flush still sees them. A caller with none - a host
     embedding this stream without the relay - serves the table alone.
-    *not_found_detail* lets a caller's 404 speak its own resource vocabulary.
     """
 
     thread_id: str
@@ -119,7 +119,6 @@ class ThreadStreamRequest:
     session_factory: async_sessionmaker[AsyncSession]
     resume_cursor: str | None = None
     replay_writer: RunEventWriter | None = None
-    not_found_detail: str = "Thread not found"
 
 
 def offered_resume_cursor(header: str | None, query: str | None) -> str | None:
@@ -604,7 +603,7 @@ async def build_thread_stream_response(
 
     thread = await get_thread(db, request.thread_id)
     if thread is None:
-        raise HTTPException(status_code=404, detail=request.not_found_detail)
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
 
     return StreamingResponse(
         _stream_thread_events(request),

@@ -40,8 +40,7 @@ from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...control.worker_status import WorkerConnectionStatus
-from ...database import get_db
-from ...database.checkpoints import Checkpointer
+from ...database import Checkpointer, get_db
 from ...domain_config import domain_config
 from ...providers.provider_catalog_service import (
     ProviderCatalogScopeCapacityError,
@@ -447,7 +446,7 @@ async def run_cancel_endpoint(
         transport=dependencies.transport(),
     )
 
-    refusal = refused_outcome(result, fallback_detail="Cancel dispatch failed")
+    refusal = refused_outcome(result)
     if refusal is not None:
         raise refusal
 

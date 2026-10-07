@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFINITE_NON_DELIVERY",
+    "RUN_NOT_FOUND",
     "ControlActionClaim",
     "ControlActionClaimRequest",
     "ControlActionOutcome",
@@ -59,6 +60,9 @@ work in flight, so releasing the claim would invite a second dispatcher to
 redeliver what the worker is already executing. Live dispatch and recovery read
 this one set, because the rule is one rule and two copies of it drift.
 """
+
+RUN_NOT_FOUND = "Run not found"
+"""The reason served for a run that does not exist, whichever layer found it missing."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

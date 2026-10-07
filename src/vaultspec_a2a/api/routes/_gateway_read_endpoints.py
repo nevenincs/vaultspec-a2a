@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control._thread_metadata import run_lease_binding, run_lease_id
 from ...control._worker_health import worker_liveness
+from ...control.action_lease import RUN_NOT_FOUND
 from ...control.execution_authority import read_frozen_team_selection_from_fields
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
@@ -244,7 +245,7 @@ async def run_status_endpoint(
         db, thread_id=run_id, relay_hub=relay_hub, checkpointer=checkpointer
     )
     if capture is None:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
 
     snapshot = capture.snapshot
     semantic = derive_run_semantic_context(capture.checkpoint_projection)
@@ -397,7 +398,6 @@ async def run_stream_endpoint(
             session_factory=resolve_session_factory(request.app.state),
             resume_cursor=offered_resume_cursor(last_event_id_header, last_event_id),
             replay_writer=replay_writer_seat(request.app),
-            not_found_detail="Run not found",
         ),
         db=db,
     )
@@ -448,7 +448,7 @@ async def run_history_endpoint(
         checkpointer=checkpointer,
     )
     if capture is None:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     snapshot = capture.snapshot
 
     # A run past dispatch owes a transcript. Reporting the absence on the wire
@@ -508,7 +508,7 @@ async def run_archive_endpoint(
     """
     result = await archive_thread(db, run_id)
     if result.not_found:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     if not result.archived:
         raise HTTPException(status_code=409, detail=result.error_detail)
     return RunArchiveResponse(run_id=run_id)
@@ -586,7 +586,7 @@ async def run_delete_endpoint(
     """
     result = await delete_thread_service(db, run_id, checkpointer=checkpointer)
     if result.not_found:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     if result.error_detail is not None:
         raise HTTPException(status_code=409, detail=result.error_detail)
     if result.cleanup_incomplete:

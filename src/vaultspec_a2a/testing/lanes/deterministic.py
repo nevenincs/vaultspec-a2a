@@ -66,6 +66,7 @@ __all__ = [
     "UNATTENDED_REPLY",
     "DeterministicResearchAdrChatModel",
     "branch_researcher",
+    "path_writer",
     "scripted_supervisor",
 ]
 
@@ -82,6 +83,7 @@ class _DeterministicScript(StrEnum):
     CANCEL_WINDOW = "cancel_window"
     RELAY_BURST = "relay_burst"
     LOOPING = "looping"
+    WRITES_TO_PATH = "writes_to_path"
     HOLD_THEN_COMPLETE = "hold_then_complete"
 
 
@@ -92,6 +94,7 @@ _ROUTED_WORKER_ID = "deterministic-permission-pause"
 
 _SCRIPTED_SUPERVISOR_ID = "deterministic-scripted-supervisor"
 _BRANCH_RESEARCHER_ID = "deterministic-branch-researcher"
+_PATH_WRITER_ID = "deterministic-path-writer"
 
 # These agents deliberately select a scenario through the same ``AgentConfig``
 # injection that the production ``ProviderFactory`` uses for the role-keyed
@@ -119,6 +122,7 @@ _SCRIPT_BY_AGENT_ID: dict[str, _DeterministicScript] = {
     "deterministic-relay-burst": _DeterministicScript.RELAY_BURST,
     "deterministic-looping": _DeterministicScript.LOOPING,
     "deterministic-hold-then-complete": _DeterministicScript.HOLD_THEN_COMPLETE,
+    _PATH_WRITER_ID: _DeterministicScript.WRITES_TO_PATH,
 }
 
 # The supervisor node's own completion route.
@@ -146,6 +150,9 @@ _LOOP_INTERVAL_SECONDS = 0.05
 # signal, never on elapsed time, so this bounds only the release latency.
 _HOLD_POLL_SECONDS = 0.05
 _HELD_TURN_REPLY = "Deterministic held turn completed after its release."
+
+_WRITTEN_DOCUMENT_REPLY = "Deterministic document written to disk."
+_WRITTEN_DOCUMENT_BODY = "# plan\n"
 
 # A completing turn's content: it carries no revision sentinel, so a reviewer that
 # answers it ends a review loop on its first pass.
@@ -323,6 +330,18 @@ def branch_researcher(*tools: str) -> AgentConfig:
     return _scripted_preset(_BRANCH_RESEARCHER_ID, tools)
 
 
+def path_writer(path: Path) -> AgentConfig:
+    """Return a preset that writes a fixed document to *path* when its turn runs.
+
+    *path*'s absolute form is the agent's one-line script, read back through
+    the persona the way every other scripted scenario carries its lines - so
+    a test that compiles its own topology directly in-process names the
+    target with no settings field or environment variable to arm first, the
+    way :func:`armed_lane_environment`'s hold gate needs for a child process.
+    """
+    return _scripted_preset(_PATH_WRITER_ID, (str(Path(path).resolve()),))
+
+
 def _research_branch(messages: list[BaseMessage]) -> str:
     """Return the research branch the producer stated for this turn."""
     for message in messages:
@@ -487,6 +506,22 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
             await asyncio.sleep(_HOLD_POLL_SECONDS)
         return _HELD_TURN_REPLY
 
+    def _write_document_content(self) -> str:
+        """Write a fixed document to the one path this model's script names.
+
+        The real worker turn this scenario stands in for: a document lands on
+        disk from the model's own turn, not from a test reaching around it, so
+        a caller exercising a downstream read (a vault-index refresh, a gate
+        that checks the file is there) sees exactly what a real write leaves.
+        """
+        lines = self._script()
+        if len(lines) != 1:
+            raise RuntimeError(
+                "deterministic path writer was served without exactly one target path"
+            )
+        Path(lines[0]).write_text(_WRITTEN_DOCUMENT_BODY, encoding="utf-8")
+        return _WRITTEN_DOCUMENT_REPLY
+
     async def _looping_chunks(self) -> AsyncIterator[ChatGenerationChunk]:
         """Generate output forever; only cancelling the turn ends it."""
         iteration = 0
@@ -529,6 +564,9 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
 
         if script is _DeterministicScript.HOLD_THEN_COMPLETE:
             return await self._held_turn_content()
+
+        if script is _DeterministicScript.WRITES_TO_PATH:
+            return self._write_document_content()
 
         if script is _DeterministicScript.CANCEL_WINDOW:
             self._cancel_window_entered.set()

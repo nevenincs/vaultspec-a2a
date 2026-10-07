@@ -55,6 +55,7 @@ if TYPE_CHECKING:
         DeterministicResearchAdrChatModel as DeterministicResearchAdrChatModel,
     )
     from .deterministic import branch_researcher as branch_researcher
+    from .deterministic import path_writer as path_writer
     from .deterministic import scripted_supervisor as scripted_supervisor
 
 __all__ = [
@@ -67,6 +68,7 @@ __all__ = [
     "deterministic_model_assignment",
     "frozen_deterministic_selection",
     "held_turns",
+    "path_writer",
     "register_lanes",
     "scripted_supervisor",
     "seated_lanes",
@@ -76,6 +78,7 @@ _LAZY_IMPORTS = {
     "DeterministicResearchAdrChatModel": ".deterministic",
     "UNATTENDED_REPLY": ".deterministic",
     "branch_researcher": ".deterministic",
+    "path_writer": ".deterministic",
     "scripted_supervisor": ".deterministic",
 }
 

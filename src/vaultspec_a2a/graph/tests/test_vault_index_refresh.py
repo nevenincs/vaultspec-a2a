@@ -9,20 +9,18 @@ missing while it sits on disk.
 Driven against a real workspace: the writer worker writes a real file into a
 real ``.vault/`` tree and the compiled star graph is run over a real
 checkpointer, so the refresh is exercised as a filesystem read rather than
-described. The supervisor is the deterministic lane's scripted supervisor and
-every other role runs on the lane through the real provider factory, but for
-the writer: no lane scenario puts a document on disk, so that one turn is the
-test's own.
+described. Every role, the writer included, runs on the deterministic lane
+through the real provider factory: the supervisor is the lane's scripted
+supervisor and the writer is its path-writer scenario, which puts a real
+document on disk from its own turn.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from ...providers import ProviderFactory
@@ -35,7 +33,7 @@ from ...team.team_config import (
     load_agent_config,
 )
 from ...testing import deterministic_model_assignment
-from ...testing.lanes import scripted_supervisor
+from ...testing.lanes import path_writer, scripted_supervisor
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -46,62 +44,9 @@ from ..compiler import compile_team_graph
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PLAN_AUTHOR = "vaultspec-plan-author"
+_PLAN_AUTHOR = "deterministic-path-writer"
 _CODER = "vaultspec-coder"
 _FEATURE = "index-refresh"
-
-
-class _PlanWritingChat(BaseChatModel):
-    """A writer whose turn really does put a plan document on disk."""
-
-    plan_path: Any = None
-
-    @property
-    @override
-    def _llm_type(self) -> str:
-        return "plan-writing"
-
-    @override
-    def _generate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        del messages, stop, run_manager, kwargs
-        path = cast("Path", self.plan_path)
-        path.write_text("# plan\n", encoding="utf-8")
-        return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content="plan written"))]
-        )
-
-
-class _PlanWritingFactory:
-    """The real factory for every role but the plan author, whose turn writes."""
-
-    def __init__(self, plan_path: Path) -> None:
-        self._plan_path = plan_path
-        self._factory = ProviderFactory()
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> BaseChatModel:
-        if getattr(agent_config, "id", None) == _PLAN_AUTHOR:
-            return _PlanWritingChat(plan_path=self._plan_path)
-        return self._factory.create(
-            provider,
-            model=model,
-            agent_config=agent_config,
-            workspace_root=workspace_root,
-            **kwargs,
-        )
 
 
 def _run_input(thread_id: str, prompt: str) -> dict[str, Any]:
@@ -162,9 +107,12 @@ async def test_the_supervisor_gates_on_a_plan_its_own_worker_just_wrote(
     team = _star_team()
     graph: Any = compile_team_graph(
         team_config=team,
-        agent_configs={a: load_agent_config(a) for a in (_PLAN_AUTHOR, _CODER)},
+        agent_configs={
+            _PLAN_AUTHOR: path_writer(plan_path),
+            _CODER: load_agent_config(_CODER),
+        },
         supervisor_agent_config=scripted_supervisor(_PLAN_AUTHOR, _CODER, "FINISH"),
-        provider_factory=_PlanWritingFactory(plan_path),
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
         workspace_root=tmp_path,
@@ -210,11 +158,15 @@ async def test_the_first_supervisor_pass_sees_a_vault_it_was_not_seeded_with(
     (vault / "adr").mkdir(parents=True)
     (vault / "plan").mkdir(parents=True)
     (vault / "adr" / f"2026-09-30-{_FEATURE}-adr.md").write_text("# adr\n")
+    plan_path = vault / "plan" / f"2026-09-30-{_FEATURE}-plan.md"
 
     team = _star_team()
     graph: Any = compile_team_graph(
         team_config=team,
-        agent_configs={a: load_agent_config(a) for a in (_PLAN_AUTHOR, _CODER)},
+        agent_configs={
+            _PLAN_AUTHOR: path_writer(plan_path),
+            _CODER: load_agent_config(_CODER),
+        },
         supervisor_agent_config=scripted_supervisor(_PLAN_AUTHOR, "FINISH"),
         provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),

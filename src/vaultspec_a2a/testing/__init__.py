@@ -6,7 +6,9 @@ processes and sessions (``leases``), progress-based deadlines that fail on
 death or stall rather than on elapsed wall clock (``progress``), registry-
 backed service endpoint resolution (``endpoints``), and the pytest plugin
 (``plugin``) that derives scheduling groups, timeout backstops, and lease
-acquisition from the declarations.
+acquisition from the declarations. The ACP test peer (``acp``) is the simulated
+agent side of the protocol over stdio, with the frame reader a client-side test
+uses against it.
 
 The plugin is loaded by the repository-root ``conftest.py``, which is the one
 channel that neither an ``addopts`` override can strip nor a consumer
@@ -19,6 +21,12 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .acp import (
+        ACP_SIMULATOR_PATH,
+        read_acp_frame,
+        request_permission_request,
+        simulator_command,
+    )
     from .children import (
         DEFAULT_IDLE_WINDOW_S,
         await_child,
@@ -101,6 +109,13 @@ if TYPE_CHECKING:
 #: naming ``vaultspec_a2a.testing.children``, leaving every submodule this
 #: facade lazily loads misreported as reachable only through type checking.
 _LAZY_EXPORTS = {
+    "ACP_SIMULATOR_PATH": ("vaultspec_a2a.testing.acp", "ACP_SIMULATOR_PATH"),
+    "read_acp_frame": ("vaultspec_a2a.testing.acp", "read_acp_frame"),
+    "request_permission_request": (
+        "vaultspec_a2a.testing.acp",
+        "request_permission_request",
+    ),
+    "simulator_command": ("vaultspec_a2a.testing.acp", "simulator_command"),
     "DEFAULT_IDLE_WINDOW_S": (
         "vaultspec_a2a.testing.children",
         "DEFAULT_IDLE_WINDOW_S",
@@ -207,6 +222,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "ACP_SIMULATOR_PATH",
     "CPU_BUDGET_ENV",
     "DEFAULT_IDLE_WINDOW_S",
     "IMPURE_FIXTURES",
@@ -247,8 +263,10 @@ __all__ = [
     "machine_cpu_budget",
     "measured_child_startup_s",
     "plant_link_to_file",
+    "read_acp_frame",
     "register_session",
     "registry_watch",
+    "request_permission_request",
     "reserve_scratch_ports",
     "reserved_port",
     "resolve_gateway_url",
@@ -258,6 +276,7 @@ __all__ = [
     "run_child",
     "session_scratch_dir",
     "settings_override",
+    "simulator_command",
     "uses_impure_fixture",
     "wait_for",
 ]

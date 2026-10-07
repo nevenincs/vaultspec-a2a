@@ -12,23 +12,21 @@ authoring tool names without dropping either.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from langchain_core.messages import HumanMessage
 
 from ....providers._acp_authoring import authoring_allowed_tool_names
+from ....testing import simulator_command
 from ...nodes.worker import create_worker_node
 from ._native_read_floor import scoped_read_floor
 from .test_worker_authoring_wiring import binding, stdio_provider
 
 if TYPE_CHECKING:
-    from ....thread.state import TeamState
+    from pathlib import Path
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
+    from ....thread.state import TeamState
 
 
 def _make_state() -> TeamState:
@@ -47,14 +45,12 @@ def _model(record_file: Path, tmp_path: Path):
     from ....providers.acp_chat_model import AcpChatModel
 
     return AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "researched",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         # Armed run: an env auth token so config-home isolation engages, which the
         # harness-armed spawn assertion now requires. Production-faithful - a real
         # armed run always carries its lane token.

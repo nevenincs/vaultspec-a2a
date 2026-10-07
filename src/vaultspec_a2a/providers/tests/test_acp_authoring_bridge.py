@@ -36,6 +36,7 @@ from ...authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ...control.config import settings
 from ...graph.enums import Provider
 from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
+from ...testing import read_acp_frame
 from ...testing.ports import free_port
 from ...workspace.environment import resolve_env_vars
 from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
@@ -45,7 +46,6 @@ from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 from ..factory import claude_auth_env
-from ._acp_frames import read_acp_frame
 
 _CATALOG: JsonObject = {
     "schema_version": CATALOG_SCHEMA_VERSION,

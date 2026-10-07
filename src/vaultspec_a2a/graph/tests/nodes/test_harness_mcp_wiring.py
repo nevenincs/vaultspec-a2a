@@ -14,35 +14,31 @@ branch - so the researcher is asserted specifically, not just a generic worker.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage
 
+from ....testing import simulator_command
 from ..._compiler_research import _make_research_producer
 from ...nodes.worker import create_worker_node
 
 if TYPE_CHECKING:
-    from ....thread.state import TeamState
+    from pathlib import Path
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
+    from ....thread.state import TeamState
 
 
 def _recording_model(record_file: Path, tmp_path: Path):
     from ....providers.acp_chat_model import AcpChatModel
 
     return AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "done",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         # Armed run: an env auth token so config-home isolation engages, which the
         # harness-armed spawn assertion now requires. Production-faithful - a real
         # armed run always carries its lane token.

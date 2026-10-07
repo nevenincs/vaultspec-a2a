@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from ...control.config import settings
 from ...control.infra_config import InfraConfig
 from ...team.team_config import AgentConfig
-from ...testing import settings_override
+from ...testing import read_acp_frame, settings_override
 from .._acp_protocol import _dispatch_stdout_line, process_stdout_loop
 from .._acp_request import issue_request
 from .._acp_rpc_handlers import (
@@ -31,7 +31,6 @@ from .._acp_rpc_handlers import (
 from .._acp_rpc_terminal_handlers import release_owned_terminal
 from .._acp_session import initialize_session, setup_session
 from .._acp_types import AcpModelConfig, AcpSessionContext
-from ._acp_frames import read_acp_frame
 
 if TYPE_CHECKING:
     from .._json_contract import JsonObject, JsonValue

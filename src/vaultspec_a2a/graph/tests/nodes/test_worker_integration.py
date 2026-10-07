@@ -16,6 +16,7 @@ from langgraph.types import Command
 from pydantic import PrivateAttr
 
 from ....conftest import materialize_schema
+from ....testing import ACP_SIMULATOR_PATH, simulator_command
 from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState
 from ...nodes.worker import WorkerNode, create_worker_node
@@ -24,7 +25,6 @@ from .._state_graph_helpers import add_test_node, compile_test_graph
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 
 # The ACP lane now requires the run's active project at construction - it is no
 # longer inferred from the serving process - so these integration models name a
@@ -108,7 +108,7 @@ async def test_worker_execution_integration() -> None:
     from ....providers.acp_chat_model import AcpChatModel
 
     model = AcpChatModel(
-        command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "HelloWorld"],
+        command=simulator_command("--response", "HelloWorld"),
         env_vars={},
         workspace_root=str(_PROJECT),
     )
@@ -148,8 +148,8 @@ async def test_acp_worker_records_initialized_subprocess_identity(
             )
             await session.commit()
         model = AcpChatModel(
-            command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "pong"],
-            command_target=str(SIMULATOR_PATH),
+            command=simulator_command("--response", "pong"),
+            command_target=str(ACP_SIMULATOR_PATH),
             provider="kimi",
             execution_mode="kimi-code-acp",
             runtime_authority="test_subprocess",
@@ -188,7 +188,7 @@ async def test_worker_context_compaction_integration() -> None:
     from ....providers.acp_chat_model import AcpChatModel
 
     model = AcpChatModel(
-        command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "Compacted"],
+        command=simulator_command("--response", "Compacted"),
         env_vars={},
         workspace_root=str(_PROJECT),
     )
@@ -213,7 +213,7 @@ async def test_worker_error_handling_integration() -> None:
     from ....providers.acp_chat_model import AcpChatModel
 
     model = AcpChatModel(
-        command=[PYTHON_EXE, str(SIMULATOR_PATH), "--error", "Internal agent failure"],
+        command=simulator_command("--error", "Internal agent failure"),
         env_vars={},
         workspace_root=str(_PROJECT),
     )
@@ -290,7 +290,7 @@ async def test_worker_turn_consumes_a_rejection_and_keeps_an_approval() -> None:
 
     def _node() -> WorkerNode:
         model = AcpChatModel(
-            command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "approved once"],
+            command=simulator_command("--response", "approved once"),
             env_vars={},
             workspace_root=str(_PROJECT),
         )

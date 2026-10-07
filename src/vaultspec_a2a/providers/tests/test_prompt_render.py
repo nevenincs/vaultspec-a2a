@@ -10,8 +10,7 @@ string.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import (
@@ -23,13 +22,13 @@ from langchain_core.messages import (
 )
 from markdown_it import MarkdownIt
 
+from ...testing import simulator_command
 from .._codex_protocol import _messages_to_prompt
 from .._prompt_render import render_prompt_blocks, speaker_label
 from ..acp_chat_model import AcpChatModel
 
-_SIMULATOR = (
-    Path(__file__).parent.parent.parent / "graph" / "tests" / "acp_simulator.py"
-)
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _conversation() -> list[BaseMessage]:
@@ -242,14 +241,12 @@ async def test_the_served_acp_prompt_is_the_rendered_one(tmp_path: Path) -> None
     """
     recorded = tmp_path / "session_prompt.json"
     model = AcpChatModel(
-        command=[
-            sys.executable,
-            str(_SIMULATOR),
+        command=simulator_command(
             "--response",
             "done",
             "--record-session-prompt",
             str(recorded),
-        ],
+        ),
         env_vars={},
         workspace_root=str(tmp_path),
     )

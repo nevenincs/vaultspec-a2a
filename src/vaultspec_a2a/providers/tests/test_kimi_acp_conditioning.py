@@ -9,22 +9,21 @@ stays unconditional for BOTH families.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage
 from pydantic import TypeAdapter
 
 from ...authoring import AgentTool, CatalogSnapshot
+from ...testing import simulator_command
 from ...thread.errors import ConfigError
 from .._acp_authoring import AuthoringToolBinding, build_authoring_stdio_mcp_servers
 from .._json_contract import JsonObject
 from ..acp_chat_model import AcpChatModel
 
-_SIMULATOR = (
-    Path(__file__).parent.parent.parent / "graph" / "tests" / "acp_simulator.py"
-)
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # A composed tool whose project is fixed at its server's launch, so it is one
 # the CLI may be told about ahead of the call. The search server's tools take
@@ -45,16 +44,14 @@ async def _drive_and_record(
     init_file = tmp_path / f"init_{acp_family}{tag}.json"
     new_file = tmp_path / f"new_{acp_family}{tag}.json"
     model = AcpChatModel(
-        command=[
-            sys.executable,
-            str(_SIMULATOR),
+        command=simulator_command(
             "--response",
             "done",
             "--record-initialize",
             str(init_file),
             "--record-session-new",
             str(new_file),
-        ],
+        ),
         env_vars={},
         allowed_tools=_ALLOWED if allowed_tools is None else allowed_tools,
         mcp_servers=mcp_servers or [],
@@ -275,7 +272,7 @@ async def test_claude_family_refuses_an_undeclared_session_server(
     riding in through a composed model.
     """
     model = AcpChatModel(
-        command=[sys.executable, str(_SIMULATOR), "--response", "done"],
+        command=simulator_command("--response", "done"),
         env_vars={},
         mcp_servers=[{"name": "operator-extra", "command": "npx"}],
         acp_family="claude",

@@ -43,8 +43,6 @@ as darkness, not as a raised error.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -64,17 +62,18 @@ from ....providers.lane_admission import (
     WebLaneProof,
     web_tool_names_for,
 )
+from ....testing import simulator_command
 from ...enums import Provider
 from ...nodes.worker import create_worker_node
 from ._native_read_floor import scoped_read_floor
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from langchain_core.language_models import BaseChatModel
 
     from ....thread.state import TeamState
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
 
 # The web built-ins, read off the declaration that governs them rather than
 # restated. Sorted for a stable payload assertion; the composition seam preserves
@@ -133,14 +132,12 @@ def _model(tmp_path: Path, *, session_new: Path, provider: str = "claude"):
     from ....providers.acp_chat_model import AcpChatModel
 
     return AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "grounded",
             "--record-session-new",
             str(session_new),
-        ],
+        ),
         # Armed run: an env auth token so config-home isolation engages, as a real
         # armed run always carries its lane token.
         env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},

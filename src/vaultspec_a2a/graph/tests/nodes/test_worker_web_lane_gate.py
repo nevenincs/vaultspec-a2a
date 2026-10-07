@@ -30,8 +30,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -39,14 +37,15 @@ from langchain_core.messages import HumanMessage
 
 from ....providers.lane_admission import web_tool_names_for
 from ....team import load_agent_config
+from ....testing import simulator_command
 from ...nodes.worker import create_worker_node
 from ._native_read_floor import scoped_read_floor
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ....thread.state import TeamState
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
 
 # Lanes driven through the real spawn, none of which carries web proof: one with
 # completed-turn proof (zai), one with none (kimi), and a model that declared no
@@ -88,7 +87,7 @@ def _model(
     """A real ACP model on *provider*'s lane, recording what the CLI receives."""
     from ....providers.acp_chat_model import AcpChatModel
 
-    command = [PYTHON_EXE, str(SIMULATOR_PATH), "--response", "researched"]
+    command = simulator_command("--response", "researched")
     if session_new is not None:
         command += ["--record-session-new", str(session_new)]
     if session_prompt is not None:

@@ -24,8 +24,6 @@ established way to ask what the CLI was actually handed.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -37,14 +35,15 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing import simulator_command
 from ..compiler import compile_team_graph
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ...thread.state import TeamState
 
-SIMULATOR_PATH = Path(__file__).parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
 
 #: The server the shipped doc-editor preset declares. Read from the preset in the
 #: precondition test below rather than trusted here, so a preset that stops
@@ -97,14 +96,12 @@ class _SessionRecordingProviderFactory:
         record = self.record_dir / f"{key}.session-new.json"
         self.records[key] = record
         return AcpChatModel(
-            command=[
-                PYTHON_EXE,
-                str(SIMULATOR_PATH),
+            command=simulator_command(
                 "--response",
                 response,
                 "--record-session-new",
                 str(record),
-            ],
+            ),
             # An armed run always carries its lane token; without it the spawn's
             # config-home isolation does not engage.
             env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},

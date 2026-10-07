@@ -14,7 +14,6 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +26,7 @@ from ....providers._acp_authoring import (
     AuthoringToolBinding,
     authoring_allowed_tool_names,
 )
+from ....testing import simulator_command
 from ....thread.actor_tokens import ActorTokenBundle
 from ....worker.authoring_binding import AuthoringBindingProvider
 from ....worker.catalog_store import RunCatalogStore
@@ -34,9 +34,10 @@ from ....worker.token_store import RunTokenStore
 from ...nodes.worker import create_worker_node
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ....thread.state import TeamState
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 PYTHON_EXE = sys.executable
 
 # The thread id _make_state carries; the provider keys tokens/catalog by it and
@@ -128,14 +129,12 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
 
     record_file = tmp_path / "session_new.json"
     model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "authored",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         # Armed run: an env auth token so config-home isolation engages (matching
         # test_stdio_binding_surfaces_bridge_into_isolated_home), which the
         # harness-armed spawn assertion now requires. Production-faithful: a real
@@ -209,14 +208,12 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
 
     record_file = tmp_path / "session_new.json"
     model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "authored",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         # Armed run: an env auth token so config-home isolation engages (matching
         # test_stdio_binding_surfaces_bridge_into_isolated_home), which the
         # harness-armed spawn assertion now requires. Production-faithful: a real
@@ -279,14 +276,12 @@ async def test_stdio_binding_hoists_actor_scope_without_machine_bearer(
 
     record_file = tmp_path / "config_home.json"
     model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "authored",
             "--record-config-home",
             str(record_file),
-        ],
+        ),
         env_vars={},
         workspace_root=str(tmp_path),
     )
@@ -335,14 +330,12 @@ async def test_no_binding_leaves_session_without_mcp_servers(
 
     record_file = tmp_path / "session_new.json"
     model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "plain",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         env_vars={},
         workspace_root=str(tmp_path),
     )

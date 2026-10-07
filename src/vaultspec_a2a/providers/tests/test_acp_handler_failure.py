@@ -23,6 +23,7 @@ from typing import Any, cast
 
 import pytest
 
+from ...testing import request_permission_request
 from .._acp_protocol import ServerRpcRequest, handle_client_response, handle_server_rpc
 from .._acp_types import AcpModelConfig, AcpSessionContext
 from ..acp_exceptions import AcpPromptError
@@ -268,9 +269,7 @@ def test_an_unknown_method_still_reports_method_not_found() -> None:
 # (silence read as EOF, a non-error reply) exits non-42.
 _AGENT_SENDS_SERVER_RPC = r"""
 import sys, json
-sys.stdout.write(json.dumps(
-    {"jsonrpc": "2.0", "id": 100, "method": "session/request_permission", "params": {}}
-) + "\n")
+sys.stdout.write(REQUEST_LINE + "\n")
 sys.stdout.flush()
 line = sys.stdin.readline()
 try:
@@ -278,7 +277,9 @@ try:
 except Exception:
     sys.exit(7)
 sys.exit(42 if reply.get("error", {}).get("code") == -32603 else 8)
-"""
+""".replace(
+    "REQUEST_LINE", repr(json.dumps(request_permission_request(100, "agent-session")))
+)
 
 
 @pytest.mark.asyncio

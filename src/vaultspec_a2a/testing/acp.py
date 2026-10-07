@@ -244,16 +244,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "Omitted by default, so every existing caller is unaffected.",
     )
     parser.add_argument(
-        "--advertise-commands",
-        nargs="*",
-        default=None,
-        metavar="NAME",
-        help="After session/new, send an available_commands_update advertising "
-        "these native commands. Given with no names it advertises an empty "
-        "catalog, which is how an agent says it offers none; omitted, no update "
-        "is sent at all.",
-    )
-    parser.add_argument(
         "--omit-modes",
         action="store_true",
         help="Answer session/new with no modes block. The pinned adapter always "
@@ -350,14 +340,6 @@ def _initialize_frames(
     ]
 
 
-def _available_command(name: str) -> JsonObject:
-    return {
-        "name": name,
-        "description": f"Simulated {name} command.",
-        "input": {"hint": "optional focus"},
-    }
-
-
 def _session_new_frames(
     args: argparse.Namespace, req: JsonObject, msg_id: JsonValue
 ) -> list[JsonObject]:
@@ -384,20 +366,7 @@ def _session_new_frames(
                 ],
             }
         ]
-    frames = [_result(msg_id, session_result)]
-    if args.advertise_commands is not None:
-        frames.append(
-            _session_update(
-                args.session_id,
-                {
-                    "sessionUpdate": "available_commands_update",
-                    "availableCommands": [
-                        _available_command(name) for name in args.advertise_commands
-                    ],
-                },
-            )
-        )
-    return frames
+    return [_result(msg_id, session_result)]
 
 
 def _die_after_session(args: argparse.Namespace) -> None:

@@ -83,7 +83,6 @@ async def test_shared_fixture_child_keeps_session_state_function_scoped(
     assert sibling.background_tasks == set()
     assert sibling.terminals == {}
     assert sibling.tool_calls == {}
-    assert sibling.native_command_catalogs == {}
     assert sibling.config_options == []
     assert sibling.stdin_lock is not acp_session_context.stdin_lock
 

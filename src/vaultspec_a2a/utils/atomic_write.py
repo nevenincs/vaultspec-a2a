@@ -44,11 +44,13 @@ from __future__ import annotations
 import contextlib
 import os
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
+
+from ._file_checks import path_is_link_like
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 __all__ = ["atomic_write_text"]
 
@@ -91,7 +93,7 @@ def _open_refusing_a_link(
 
     This is the only place either write path opens its temporary file.
     """
-    if os.path.islink(path) or os.path.isjunction(path):
+    if path_is_link_like(Path(path)):
         raise OSError(f"refusing to write through a link planted at {path}")
     return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), mode)
 
@@ -154,8 +156,9 @@ def atomic_write_text(
             bytes directly.
 
     Raises:
-        OSError: If the temporary path is a link, or the write or the rename
-            fails; the temporary file is removed before the error propagates.
+        OSError: If the temporary path is a link or cannot be inspected, or the
+            write or the rename fails; the temporary file is removed before the
+            error propagates.
     """
     encoding = options.get("encoding", "utf-8")
     retry_seconds = options.get("retry_seconds", REPLACE_RETRY_SECONDS)

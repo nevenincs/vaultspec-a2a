@@ -27,9 +27,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from ..utils import path_is_link_like
 from ..utils.atomic_write import atomic_write_text
 from ._filesystem_authority import PrivateFileError, read_private_file
-from ._platform_acl import harden_credential_path, path_is_link_like
+from ._platform_acl import harden_credential_path
 
 __all__ = [
     "ATTACH_CREDENTIAL_NAME",

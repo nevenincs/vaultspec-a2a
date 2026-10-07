@@ -31,7 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..control.state_layout import StateLayout, seal_state_home, state_layout
-from ._platform_acl import harden_credential_path, path_is_link_like
+from ..utils import is_single_regular_file, path_is_link_like
+from ._platform_acl import harden_credential_path
 
 __all__ = [
     "DesktopProfile",
@@ -181,7 +182,7 @@ def _restrict_state_path(
                 return
             if ephemeral and stat.S_ISREG(info.st_mode) and info.st_nlink == 0:
                 return
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            if not is_single_regular_file(info):
                 raise OSError("state files must be regular files without hard links")
         try:
             harden_credential_path(path)
@@ -237,7 +238,6 @@ class DesktopProfile:
     already validated their inputs.
     """
 
-    app_home: Path
     capsule_root: Path
     state: StateLayout
 
@@ -264,7 +264,16 @@ class DesktopProfile:
                 "immutable runtime generation."
             )
         _validate_app_home(home)
-        return cls(app_home=home, capsule_root=capsule, state=state)
+        return cls(capsule_root=capsule, state=state)
+
+    @property
+    def app_home(self) -> Path:
+        """Return the application home, which is the state layout's own home.
+
+        Derived rather than stored, so the home a profile reports can never
+        diverge from the one its databases, credentials and logs live under.
+        """
+        return self.state.home
 
     @property
     def capsule_assets_root(self) -> Path:

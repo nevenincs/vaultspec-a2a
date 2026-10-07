@@ -1,11 +1,11 @@
 """Cross-platform owner-restriction primitives for local credential files.
 
 Single authority for the questions asked of every local secret file this product
-writes or reads: "make this file reachable only by its owner", "is this file
-owner-restricted?" and "is this name a link?". The answer spans POSIX permission
-bits and Windows discretionary access-control lists (DACLs). The gateway discovery
-credential and the desktop attach, ownership, and worker-interprocess-communication
-(IPC) credentials all protect a local secret with the same guarantee, so the native
+writes or reads: "make this file reachable only by its owner" and "is this file
+owner-restricted?". The answer spans POSIX permission bits and Windows
+discretionary access-control lists (DACLs). The gateway discovery credential and
+the desktop attach, ownership, and worker-interprocess-communication (IPC)
+credentials all protect a local secret with the same guarantee, so the native
 Windows ACL machinery lives here once rather than being restated in each consumer.
 
 The Windows helpers stay read-only where they inspect and use only native ACL APIs
@@ -25,12 +25,13 @@ from enum import Enum, auto
 from functools import cache
 from pathlib import Path
 
+from ..utils import path_is_link_like
+
 __all__ = [
     "confirm_opened_secret",
     "credential_file_is_owner_restricted",
     "harden_credential_path",
     "owner_only_mode",
-    "path_is_link_like",
     "path_is_owner_restricted",
     "restrict_windows_file",
     "unfollowed_read_flags",
@@ -246,11 +247,6 @@ def windows_file_is_restricted(path: Path, *, allow_inherited: bool = False) -> 
             kernel32.LocalFree(rendered)
     finally:
         kernel32.LocalFree(descriptor)
-
-
-def path_is_link_like(path: Path) -> bool:
-    """Return whether *path* is a symlink or Windows junction."""
-    return path.is_symlink() or path.is_junction()
 
 
 def _owner_only_bits(*, directory: bool) -> int:

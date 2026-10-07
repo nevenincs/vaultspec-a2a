@@ -337,6 +337,25 @@ def kill(name: str, *, home: Path | None = None) -> ProcRecord:
     return record
 
 
+def _run_role_build(record: ProcRecord, role: RoleConfig, *, verb: str) -> Path:
+    """Run *role*'s build command in *record*'s build tree and return that tree.
+
+    The build's output streams to the operator rather than being captured; only
+    its exit status is read.
+
+    Raises:
+        LifecycleError: If the build exits non-zero.
+    """
+    cwd = build_cwd_for(record)
+    result = subprocess.run(role.build, cwd=str(cwd), check=False, encoding="utf-8")
+    if result.returncode != 0:
+        raise LifecycleError(
+            f"{verb} for {record.role}-{record.name} failed "
+            f"(exit {result.returncode}): {' '.join(role.build)}"
+        )
+    return cwd
+
+
 def rebuild(
     name: str, *, home: Path | None = None, config: ProcsConfig | None = None
 ) -> str | None:
@@ -352,13 +371,7 @@ def rebuild(
         raise LifecycleError(
             f"role {record.role!r} declares no build command in procs.toml"
         )
-    cwd = build_cwd_for(record)
-    result = subprocess.run(role.build, cwd=str(cwd), check=False)
-    if result.returncode != 0:
-        raise LifecycleError(
-            f"build for {record.role}-{record.name} failed "
-            f"(exit {result.returncode}): {' '.join(role.build)}"
-        )
+    cwd = _run_role_build(record, role, verb="build")
     sha = build_sha(cwd)
     if read_record(record_path(record.role, record.name, home=home)) is not None:
         from dataclasses import replace
@@ -431,13 +444,7 @@ def rerun(
             "replacement (record left unchanged)"
         )
     if role.build:
-        cwd = build_cwd_for(record)
-        result = subprocess.run(role.build, cwd=str(cwd), check=False)
-        if result.returncode != 0:
-            raise LifecycleError(
-                f"rebuild for {record.role}-{record.name} failed "
-                f"(exit {result.returncode})"
-            )
+        _run_role_build(record, role, verb="rebuild")
     return _start_from_record(
         record, home=home, config=resolved_config, ready_timeout=ready_timeout
     )

@@ -15,21 +15,16 @@ frame was fanned out to the subscriber, and it became a row in the replay
 log - each ahead of the control plane deciding whether the run was ending at
 all. The row is the worse of the two, since every later reconnect is served
 it again.
-
-Both ingest transports are driven. The gate sits in the one path they share,
-and a gate proven on one of them is a gate proven in the wrong place.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 import pytest_asyncio
-from websockets.asyncio.client import connect
 
 from ...control.tests._continuation import (
     RUN,
@@ -56,9 +51,9 @@ if TYPE_CHECKING:
 
     from .conftest import SessionFactory
 
-#: Hands one already-shaped worker payload to the gateway over whichever
-#: transport the case is proving. Neither transport reports what the relay
-#: then did with it, which is why the assertions below read durable state.
+#: Hands one already-shaped worker payload to the gateway. The route reports
+#: nothing of what the relay then did with it, which is why the assertions
+#: below read durable state.
 type Relay = Callable[[dict[str, Any]], Awaitable[None]]
 
 
@@ -99,24 +94,6 @@ async def _retained(session_factory: SessionFactory) -> list[tuple[int, str]]:
         thread_id=RUN, after_sequence=0, limit=100
     )
     return [(record.sequence, record.event_type) for record in records]
-
-
-async def _retained_once(
-    session_factory: SessionFactory, *, at_least: int, timeout: float = 10.0
-) -> list[tuple[int, str]]:
-    """Read the replay log once it holds *at_least* rows, or fail the budget.
-
-    The WebSocket ingest answers its sender nothing, so there is no reply to
-    wait on before reading the table. Waiting for a count and then asserting
-    the exact contents is what keeps that honest: an extra row the gate should
-    have stopped either arrives inside the count or fails the equality.
-    """
-    deadline = asyncio.get_running_loop().time() + timeout
-    retained = await _retained(session_factory)
-    while len(retained) < at_least and asyncio.get_running_loop().time() < deadline:
-        await asyncio.sleep(0.02)
-        retained = await _retained(session_factory)
-    return retained
 
 
 async def _await_promotion(
@@ -189,7 +166,7 @@ async def _watch_two_turns(
         # Not 3: the withheld frame took no number, so the run's positions
         # stay consecutive and a resume reads a window with no hole in it.
         assert second.sequence == 2
-        assert await _retained_once(session_factory, at_least=2) == [
+        assert await _retained(session_factory) == [
             (1, "agent_status"),
             (2, "agent_status"),
         ], "the terminal of a promoted turn was retained for replay"
@@ -200,7 +177,7 @@ async def _watch_two_turns(
     assert last.type == "thread_terminal"
     assert last.sequence == 3
     assert await _run_status(session_factory) == ThreadStatus.COMPLETED.value
-    assert await _retained_once(session_factory, at_least=3) == [
+    assert await _retained(session_factory) == [
         (1, "agent_status"),
         (2, "agent_status"),
         (3, "thread_terminal"),
@@ -248,40 +225,6 @@ async def test_the_http_relay_withholds_a_promoted_turn_s_terminal(
                 json={"events": [{"thread_id": RUN, "ts": 1.0, "payload": payload}]},
             )
             assert posted.status_code == 200, posted.text
-
-        received = await _watch_two_turns(
-            base,
-            relay,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
-            continuation=continuation,
-        )
-
-    assert _types(received).count("thread_terminal") == 1
-    assert _sequences(received) == [1, 2, 3]
-
-
-@pytest.mark.asyncio(loop_scope="function")
-async def test_the_worker_websocket_withholds_a_promoted_turn_s_terminal(
-    staged_run: tuple[FastAPI, str],
-    session_factory: SessionFactory,
-    checkpointer: AsyncSqliteSaver,
-) -> None:
-    """The same gate holds on the worker's streaming channel.
-
-    Driven over a real client socket speaking the envelope the worker speaks,
-    because the gate is only in the shared path if both transports reach it.
-    """
-    app, continuation = staged_run
-    async with (
-        _live_server(app) as base,
-        connect(base.replace("http://", "ws://") + "/internal/ws") as ws,
-    ):
-
-        async def relay(payload: dict[str, Any]) -> None:
-            await ws.send(
-                json.dumps({"type": "event", "thread_id": RUN, "payload": payload})
-            )
 
         received = await _watch_two_turns(
             base,

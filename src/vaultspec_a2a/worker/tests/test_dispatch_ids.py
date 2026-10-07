@@ -16,7 +16,7 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...domain_config import domain_config
-from ...ipc.schemas import DispatchRequest
+from ...ipc.schemas import DispatchRequest, WorkerEventEnvelope
 from ...team.team_config import load_team_config
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -88,13 +88,13 @@ async def _wait_for_same_thread_dispatch_contention(
 
 async def _buffered_terminal_events(
     bridge: WorkerBridge,
-) -> list[dict[str, Any]]:
+) -> list[WorkerEventEnvelope]:
     """Inspect the retained batch after any in-flight flush returns it."""
     async with bridge._batch.flush_lock:
         return [
             item
             for item in bridge._event_buffer
-            if item["payload"].get("event_type") == "thread_terminal"
+            if item.payload.get("event_type") == "thread_terminal"
         ]
 
 
@@ -146,7 +146,7 @@ def test_duplicate_worker_dispatch_schedules_one_real_executor_task(
         bridge: WorkerBridge = app.state.bridge
         portal = client.portal
         assert portal is not None
-        terminal_events: list[dict[str, Any]] = []
+        terminal_events: list[WorkerEventEnvelope] = []
         while time.monotonic() < deadline:
             terminal_events = portal.call(_buffered_terminal_events, bridge)
             if terminal_events:

@@ -33,6 +33,8 @@ __all__ = [
     "ExecutionStateProjectionPayload",
     "ExecutionTaskProjectionPayload",
     "HeartbeatRequest",
+    "WorkerEventBatch",
+    "WorkerEventEnvelope",
     "canonical_project_root",
     "to_dispatch_action",
 ]
@@ -367,3 +369,27 @@ class ExecutionStateProjectionPayload(BaseModel):
     task_count: int = 0
     tasks: list[ExecutionTaskProjectionPayload] = Field(default_factory=list)
     degraded_reasons: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Worker -> gateway event ingress
+# ---------------------------------------------------------------------------
+
+
+class WorkerEventEnvelope(BaseModel):
+    """One worker event on its way to the gateway relay.
+
+    ``ts`` is the worker's monotonic stamp: the gateway orders a batch by it, so
+    an entry assembled out of order still relays in the order it was emitted.
+    The default keeps an unstamped entry sorting first rather than refusing it.
+    """
+
+    thread_id: str = Field(min_length=1, max_length=128)
+    payload: dict[str, Any] = Field(min_length=1)
+    ts: float = Field(default=0.0, allow_inf_nan=False)
+
+
+class WorkerEventBatch(BaseModel):
+    """The body the worker posts to the gateway's batch ingress route."""
+
+    events: list[WorkerEventEnvelope]

@@ -668,15 +668,8 @@ async def _wait_for_receipt(
 ) -> dict[str, object]:
     with anyio.fail_after(5.0):
         while True:
-            buffered = cast(
-                "list[dict[str, object]]",
-                getattr(bridge, "_event_buffer", []),
-            )
-            for item in buffered:
-                candidate = item.get("payload")
-                if not isinstance(candidate, dict):
-                    continue
-                receipt = cast("dict[str, object]", candidate)
+            for item in bridge._event_buffer:
+                receipt = item.payload
                 if (
                     receipt.get("type") == "dispatch_applied"
                     and receipt.get("dispatch_id") == dispatch_id

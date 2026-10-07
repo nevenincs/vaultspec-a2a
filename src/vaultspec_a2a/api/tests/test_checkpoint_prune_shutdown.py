@@ -147,11 +147,17 @@ async def test_a_relayed_terminal_prunes_through_the_relaying_apps_registry(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         relayed = await client.post(
-            "/internal/events",
+            "/internal/events/batch",
             json={
-                "type": "event",
-                "thread_id": thread_id,
-                "payload": {"event_type": "thread_terminal", "status": "completed"},
+                "events": [
+                    {
+                        "thread_id": thread_id,
+                        "payload": {
+                            "event_type": "thread_terminal",
+                            "status": "completed",
+                        },
+                    }
+                ]
             },
         )
         assert relayed.status_code == 200

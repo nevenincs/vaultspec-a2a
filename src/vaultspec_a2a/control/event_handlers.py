@@ -1179,11 +1179,6 @@ async def relay_event(
         payload,
         session_factory=session_factory,
     )
-    await _handle_execution_state_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
     applied_permission_id = await _handle_progress_event(
         thread_id,
         payload,

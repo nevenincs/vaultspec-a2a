@@ -27,7 +27,8 @@ def gateway_body_limit(scope: Scope) -> tuple[int, str]:
     """Preserve the versioned allowance and the larger event-batch allowance."""
     path = str(scope.get("path", ""))
     if path.startswith("/v1/"):
-        return _MAX_V1_WRITE_BODY_BYTES, "v1 request body exceeds 1048576 bytes"
+        limit = _MAX_V1_WRITE_BODY_BYTES
+        return limit, f"v1 request body exceeds {limit} bytes"
     if path.rstrip("/") == "/internal/events/batch":
         limit = settings.internal_max_event_batch_bytes
         return limit, f"Payload too large (max {limit} bytes)"

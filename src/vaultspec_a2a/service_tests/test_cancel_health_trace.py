@@ -82,10 +82,10 @@ def _assert_worker_ipc_trace(service_stack: ServiceStack, start_us: int) -> None
                 for operation_name in [span.get("operationName")]
                 if isinstance(operation_name, str)
             }
-            if "vaultspec-a2a" in trace_services and operation_names & {
-                "POST /internal/events",
-                "POST /internal/events/batch",
-            }:
+            if (
+                "vaultspec-a2a" in trace_services
+                and "POST /internal/events/batch" in operation_names
+            ):
                 found = True
                 break
         if found:

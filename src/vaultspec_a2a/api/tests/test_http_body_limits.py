@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 _TOKEN = "body-limit-test"
 _AUTH = {"authorization": f"Bearer {_TOKEN}", "content-type": "application/json"}
 _ROUTES = (
-    "/internal/events",
     "/internal/events/batch",
     "/internal/heartbeat",
     "/dispatch",
@@ -48,9 +47,7 @@ def _app(path: str) -> FastAPI:
 
 def _body(path: str, size: int) -> bytes:
     payload: dict[str, object]
-    if path == "/internal/events":
-        payload = {"thread_id": "t", "payload": {"type": "token", "content": "ok"}}
-    elif path == "/internal/events/batch":
+    if path == "/internal/events/batch":
         payload = {"events": []}
     elif path == "/internal/heartbeat":
         payload = {"type": "heartbeat", "active_threads": ["t"]}

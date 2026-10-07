@@ -860,11 +860,7 @@ class InfraConfig(ProjectSettings):
         ),
     )
 
-    # Internal IPC frame/body limits
-    internal_max_frame_bytes: int = Field(
-        default=1_048_576,
-        description="Maximum worker→gateway WebSocket frame size (bytes).",
-    )
+    # Internal IPC body limits
     internal_max_http_body_bytes: int = Field(
         default=1_048_576,
         ge=1,

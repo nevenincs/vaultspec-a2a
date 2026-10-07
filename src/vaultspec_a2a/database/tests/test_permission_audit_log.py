@@ -23,8 +23,9 @@ import httpx
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...control._permission_response_contract import PermissionInput, PermissionRuntime
+from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
 from ...control.tests.test_dispatch_failure_transitions import (
     _seed_accepted_initial_action,
@@ -40,6 +41,7 @@ from ...worker.ipc import WorkerBridge
 from .. import (
     create_thread,
     get_permission_logs_by_thread,
+    get_permission_request,
     record_permission_request,
 )
 
@@ -142,15 +144,18 @@ async def _decide(
     idempotency_key: str,
 ):
     async with session_factory() as db:
+        permission = await get_permission_request(db, request_id)
+        assert permission is not None
         return await respond_to_permission(
             db,
+            permission=permission,
             response=PermissionInput(request_id, option_id, idempotency_key),
-            runtime=PermissionRuntime(
-                WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0),
-                _spawner(),
-                worker_client,
-                25,
-                None,
+            transport=DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=_spawner(),
             ),
         )
 

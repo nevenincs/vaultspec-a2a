@@ -19,13 +19,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from ..control.config import settings
-from ..database.run_event_repository import RunEventStore, retained_high_water_mark
+from ..database import RunEventStore, retained_high_water_mark
 from ._replay_writer_seat import replay_writer_seat
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..database.run_event_repository import RunEventRecord
+    from ..database import RunEventRecord
     from ..streaming import RelayHub
     from ..streaming.run_event_writer import RunEventWriter
 

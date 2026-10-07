@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...conftest import SqlitePosture
 from ...database import create_control_action, create_thread, get_thread
-from ...database.reconciliation import reconcile_threads_on_startup
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
@@ -39,6 +38,7 @@ from ...thread.state import TeamState
 from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..graph_definition import read_accepted_graph_definition
+from ..reconciliation import reconcile_threads_on_startup
 from ..recovery_authority import (
     RecoveryRequest,
     RecoveryTrigger,

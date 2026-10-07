@@ -25,6 +25,7 @@ from ..control.repair_transitions import (
     record_undelivered_dispatch,
 )
 from ..database import (
+    ThreadModel,
     ThreadStatusElectionOutcome,
     begin_write_transaction,
     elect_thread_status,
@@ -33,7 +34,6 @@ from ..database import (
     retry_write_contention,
     thread_write_expectation,
 )
-from ..database.models import ThreadModel
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.cancel_policy import can_cancel
 from ..thread.dispatch_policy import FailureType

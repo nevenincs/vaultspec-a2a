@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.models import ThreadModel
+    from ..database import ThreadModel
     from ..providers.team_selection import FrozenLaneAssignment
     from .circuit_breaker import DispatchAdmission, WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner

@@ -53,19 +53,21 @@ from ..control.health import (
     probe_desktop_readiness,
 )
 from ..control.leased_dispatch import DispatchTransport
+from ..control.reconciliation import reconcile_threads_on_startup
 from ..control.settings_base import build_now
 from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ..database import (
+    Checkpointer,
     close_db,
     get_db,
     get_session_factory,
     init_db,
+    open_checkpointer,
     seat_sqlite_posture,
+    sweep_replay_log_periodically,
+    validate_desktop_schema,
 )
-from ..database.checkpoints import Checkpointer, open_checkpointer
-from ..database.reconciliation import reconcile_threads_on_startup
-from ..database.run_event_retention import sweep_replay_log_periodically
 from ..domain_config import domain_config
 from ..ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
 from ..lifecycle.discovery import (
@@ -314,8 +316,6 @@ async def _initialize_gateway_database(app: FastAPI, *, armed: bool) -> AsyncEng
     engine = await init_db(settings.database_url, apply_migrations=not armed)
     if armed:
         # Desktop boot validates the seated stores without migrating them.
-        from ..database.compatibility import validate_desktop_schema
-
         await validate_desktop_schema(
             database_url=settings.database_url,
             checkpoint_path=settings.checkpoint_path,

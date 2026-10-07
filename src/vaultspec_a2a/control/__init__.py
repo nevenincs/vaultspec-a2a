@@ -2,8 +2,8 @@
 
 Services supervise workers, monitor health, dispatch work, handle events,
 maintain projections, and orchestrate threads, messages, cancellation,
-permissions, teams, and repair. Run-start policy and authoring verdict
-subscription also live in this layer.
+permissions, teams, repair, and startup reconciliation. Run-start policy and
+authoring verdict subscription also live in this layer.
 
 Import implementations from direct child modules, including
 :mod:`vaultspec_a2a.control.cancel_service`,

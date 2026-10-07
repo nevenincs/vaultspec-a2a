@@ -20,10 +20,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from ...database import count_queued_continuations, get_thread
-from ...database.models import ControlActionModel
-from ...database.reconciliation import reconcile_threads_on_startup
+from ...database import ControlActionModel, count_queued_continuations, get_thread
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
+from ..reconciliation import reconcile_threads_on_startup
 from ..recovery_authority import (
     HOLDS_QUEUED_CONTINUATION,
     RecoveryRequest,

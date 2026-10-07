@@ -31,11 +31,11 @@ from ...control.thread_state_service import (
     project_semantic_phase,
 )
 from ...database import (
+    Checkpointer,
     get_db,
     get_permission_logs_by_thread,
     resolve_session_factory,
 )
-from ...database.checkpoints import Checkpointer
 from ...providers import ProviderCondition
 from ...streaming import RelayHub
 from ...thread.constants import (

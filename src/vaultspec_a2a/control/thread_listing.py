@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.models import ThreadModel
+    from ..database import ThreadModel
 
 __all__ = [
     "list_threads_service",

@@ -7,56 +7,25 @@ from typing import TYPE_CHECKING, override
 from sqlalchemy import and_
 
 if TYPE_CHECKING:
+    from enum import StrEnum
+
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.elements import ColumnElement
 
     from ..thread import RunWriteAuthority
 
-from ..thread.enums import (
-    ApprovalStatus,
-    ControlActionResultStatus,
-    ControlActionType,
-    PermissionRequestStatus,
-    RepairStatus,
-    ThreadStatus,
-)
-from .models import (
-    ArtifactModel,
-    ControlActionModel,
-    CostTrackingModel,
-    PermissionLogModel,
-    PermissionRequestModel,
-    RecoveryAttemptModel,
-    ThreadExecutionStateModel,
-    ThreadModel,
-)
+from .models import Base, ControlActionModel
 
 __all__ = [
     "_UNSET",
     "_UnsetType",
-    "_coerce_approval_status",
-    "_coerce_control_action_type",
-    "_coerce_control_result",
-    "_coerce_permission_request_status",
-    "_coerce_repair_status",
-    "_coerce_status",
+    "_coerce",
     "_journal_row_for",
     "save_model",
 ]
 
 
-async def save_model[
-    M: (
-        ThreadModel,
-        ArtifactModel,
-        PermissionLogModel,
-        PermissionRequestModel,
-        ControlActionModel,
-        RecoveryAttemptModel,
-        CostTrackingModel,
-        ThreadExecutionStateModel,
-    )
-](session: AsyncSession, model: M) -> M:
+async def save_model[M: Base](session: AsyncSession, model: M) -> M:
     """Persist any database model instance."""
     session.add(model)
     await session.flush()
@@ -92,53 +61,15 @@ class _UnsetType:
 _UNSET = _UnsetType()
 
 
-def _coerce_status(status: ThreadStatus | str) -> ThreadStatus:
-    if isinstance(status, ThreadStatus):
-        return status
+def _coerce[E: StrEnum](enum: type[E], value: E | str, *, label: str) -> E:
+    """Return *value* as a member of *enum*, naming *label* when it is not one.
+
+    Constructing a ``StrEnum`` from one of its own members returns that member,
+    so a member and its stored value take the same path.
+    """
     try:
-        return ThreadStatus(status)
+        return enum(value)
     except ValueError:
-        valid = ", ".join(s.value for s in ThreadStatus)
-        msg = f"Invalid thread status: {status!r}. Must be one of: {valid}"
+        valid = ", ".join(member.value for member in enum)
+        msg = f"Invalid {label}: {value!r}. Must be one of: {valid}"
         raise ValueError(msg) from None
-
-
-def _coerce_repair_status(status: RepairStatus | str) -> RepairStatus:
-    if isinstance(status, RepairStatus):
-        return status
-    try:
-        return RepairStatus(status)
-    except ValueError:
-        valid = ", ".join(s.value for s in RepairStatus)
-        msg = f"Invalid repair status: {status!r}. Must be one of: {valid}"
-        raise ValueError(msg) from None
-
-
-def _coerce_control_action_type(
-    action_type: ControlActionType | str,
-) -> ControlActionType:
-    if isinstance(action_type, ControlActionType):
-        return action_type
-    return ControlActionType(action_type)
-
-
-def _coerce_control_result(
-    status: ControlActionResultStatus | str,
-) -> ControlActionResultStatus:
-    if isinstance(status, ControlActionResultStatus):
-        return status
-    return ControlActionResultStatus(status)
-
-
-def _coerce_permission_request_status(
-    status: PermissionRequestStatus | str,
-) -> PermissionRequestStatus:
-    if isinstance(status, PermissionRequestStatus):
-        return status
-    return PermissionRequestStatus(status)
-
-
-def _coerce_approval_status(status: ApprovalStatus | str) -> ApprovalStatus:
-    if isinstance(status, ApprovalStatus):
-        return status
-    return ApprovalStatus(status)

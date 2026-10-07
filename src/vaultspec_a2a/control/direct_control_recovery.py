@@ -24,6 +24,7 @@ from ..database import (
     thread_owned_by,
     thread_write_expectation,
 )
+from ..domain_config import domain_config
 from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
@@ -74,7 +75,6 @@ if TYPE_CHECKING:
 __all__ = ["DirectControlRecoverySummary", "redrive_direct_control_actions"]
 
 logger = logging.getLogger(__name__)
-_RECOVERY_PAGE_SIZE = 64
 _RECOVERY_CLAIM_TTL = timedelta(seconds=45)
 
 
@@ -101,6 +101,7 @@ async def _expire_overdue_actions(
     db: AsyncSession,
     *,
     observed_at: datetime,
+    page_size: int,
 ) -> int:
     rows = (
         await db.execute(
@@ -119,7 +120,7 @@ async def _expire_overdue_actions(
                 ),
             )
             .order_by(ControlActionModel.recovery_deadline_at)
-            .limit(_RECOVERY_PAGE_SIZE)
+            .limit(page_size)
         )
     ).all()
     # Every overdue row is snapshotted before the first settlement, because a
@@ -697,20 +698,25 @@ async def redrive_direct_control_actions(
 ) -> DirectControlRecoverySummary:
     """Claim due durable recovery records and resend their stable dispatch."""
     instant = datetime.now(UTC)
+    # Paging by the service-wide continuation cap lets one pass reach every
+    # continuation the service could have admitted, whatever the operator set.
+    page_size = domain_config.run_continuation_service_queue_cap
     async with session_factory() as db:
-        expired = await _expire_overdue_actions(db, observed_at=instant)
+        expired = await _expire_overdue_actions(
+            db, observed_at=instant, page_size=page_size
+        )
     async with session_factory() as db:
         await begin_write_transaction(db)
         await seed_recovery_attempts(
             db,
             observed_at=instant,
-            limit=_RECOVERY_PAGE_SIZE,
+            limit=page_size,
         )
         recovery_claims = await acquire_due_recovery_attempts(
             db,
             acquired_at=instant,
             claim_expires_at=instant + _RECOVERY_CLAIM_TTL,
-            limit=_RECOVERY_PAGE_SIZE,
+            limit=page_size,
         )
         await db.commit()
 

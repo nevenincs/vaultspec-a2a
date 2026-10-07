@@ -5,6 +5,7 @@ and cost tracking. Uses ``DeclarativeBase`` with ``Mapped`` / ``mapped_column``
 for full type-safety.
 """
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, override
@@ -37,13 +38,21 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from .control_action_schema import (
-    CONTROL_ACTION_SQL_VALUES,
     QUEUE_POSITION_BOUNDED_PREDICATE,
     QUEUED_RESERVATION_PREDICATE,
     QUEUED_ROW_PREDICATE,
     RECOVERY_ACTION_SQL_VALUES,
+    RECOVERY_DEADLINE_CHECKS,
 )
-from .write_authority_schema import WRITE_ACTION_SQL_VALUES
+from .write_authority_schema import (
+    ACTION_TYPE_MAX_LENGTH,
+    RUN_REVISION_NONNEGATIVE,
+    WRITE_AUTHORITY_CHECKS,
+    WRITE_AUTHORITY_RECEIPT_INDEX,
+    WRITE_AUTHORITY_RECEIPT_INDEX_COLUMNS,
+    WRITER_GENERATION_POSITIVE,
+    receipt_id_bounded,
+)
 
 __all__ = [
     "MONEY_PRECISION",
@@ -93,6 +102,13 @@ def utcnow() -> datetime:
 
 
 _utcnow = utcnow
+
+
+def _named_checks(checks: Mapping[str, str]) -> tuple[CheckConstraint, ...]:
+    """Build one table's CHECKs from the schema identity its guards validate."""
+    return tuple(
+        CheckConstraint(predicate, name=name) for name, predicate in checks.items()
+    )
 
 
 class UTCDateTime(TypeDecorator[datetime]):
@@ -256,25 +272,10 @@ class ThreadModel(Base):
     __tablename__ = "threads"
 
     __table_args__ = (
-        CheckConstraint(
-            "run_revision >= 0", name="ck_threads_run_revision_nonnegative"
-        ),
-        CheckConstraint(
-            "writer_generation >= 1",
-            name="ck_threads_writer_generation_positive",
-        ),
-        CheckConstraint(
-            f"writer_action_type IN ({WRITE_ACTION_SQL_VALUES})",
-            name="ck_threads_writer_action_type_current",
-        ),
-        CheckConstraint(
-            "length(trim(writer_action_receipt_id)) >= 1 "
-            f"AND length(writer_action_receipt_id) <= {RECEIPT_ID_MAX_LENGTH}",
-            name="ck_threads_writer_action_receipt_id_bounded",
-        ),
+        *_named_checks(WRITE_AUTHORITY_CHECKS),
         Index(
-            "ux_threads_writer_action_receipt_id",
-            "writer_action_receipt_id",
+            WRITE_AUTHORITY_RECEIPT_INDEX,
+            *WRITE_AUTHORITY_RECEIPT_INDEX_COLUMNS,
             unique=True,
         ),
         Index("ix_threads_nickname", "nickname", unique=True),
@@ -315,7 +316,7 @@ class ThreadModel(Base):
     id: Mapped[str] = mapped_column(primary_key=True)
     run_revision: Mapped[int] = mapped_column()
     writer_generation: Mapped[int] = mapped_column()
-    writer_action_type: Mapped[str] = mapped_column(String(32))
+    writer_action_type: Mapped[str] = mapped_column(String(ACTION_TYPE_MAX_LENGTH))
     writer_action_receipt_id: Mapped[str] = mapped_column(String(RECEIPT_ID_MAX_LENGTH))
     title: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
@@ -530,17 +531,7 @@ class ControlActionModel(Base):
     __tablename__ = "control_actions"
 
     __table_args__ = (
-        CheckConstraint(
-            f"action_type IN ({CONTROL_ACTION_SQL_VALUES})",
-            name="ck_control_actions_action_type_current",
-        ),
-        CheckConstraint(
-            f"(action_type IN ({RECOVERY_ACTION_SQL_VALUES}) "
-            "AND recovery_deadline_at IS NOT NULL) OR "
-            f"(action_type NOT IN ({RECOVERY_ACTION_SQL_VALUES}) "
-            "AND recovery_deadline_at IS NULL)",
-            name="ck_control_actions_recovery_deadline_required",
-        ),
+        *_named_checks(RECOVERY_DEADLINE_CHECKS),
         CheckConstraint(
             QUEUE_POSITION_BOUNDED_PREDICATE,
             name="ck_control_actions_queue_position_bounded",
@@ -618,11 +609,11 @@ class RecoveryAttemptModel(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "run_revision >= 0",
+            RUN_REVISION_NONNEGATIVE,
             name="ck_recovery_attempts_run_revision_nonnegative",
         ),
         CheckConstraint(
-            "writer_generation >= 1",
+            WRITER_GENERATION_POSITIVE,
             name="ck_recovery_attempts_writer_generation_positive",
         ),
         CheckConstraint(
@@ -652,8 +643,7 @@ class RecoveryAttemptModel(Base):
             name="ck_recovery_attempts_action_type_current",
         ),
         CheckConstraint(
-            "length(trim(action_receipt_id)) >= 1 "
-            f"AND length(action_receipt_id) <= {RECEIPT_ID_MAX_LENGTH}",
+            receipt_id_bounded("action_receipt_id"),
             name="ck_recovery_attempts_action_receipt_id_bounded",
         ),
         UniqueConstraint(
@@ -676,7 +666,7 @@ class RecoveryAttemptModel(Base):
     thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
     run_revision: Mapped[int] = mapped_column()
     writer_generation: Mapped[int] = mapped_column()
-    action_type: Mapped[str] = mapped_column(String(32))
+    action_type: Mapped[str] = mapped_column(String(ACTION_TYPE_MAX_LENGTH))
     action_receipt_id: Mapped[str] = mapped_column(String(RECEIPT_ID_MAX_LENGTH))
     condition: Mapped[str] = mapped_column(String(32))
     attempt_count: Mapped[int] = mapped_column()

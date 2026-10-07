@@ -25,12 +25,7 @@ from ..thread.enums import (
     PermissionRequestStatus,
     ThreadStatus,
 )
-from ._helpers import (
-    _coerce_control_action_type,
-    _coerce_control_result,
-    _coerce_permission_request_status,
-    save_model,
-)
+from ._helpers import _coerce, save_model
 from .models import ControlActionModel, PermissionRequestModel, ThreadModel, utcnow
 
 __all__ = [
@@ -284,7 +279,9 @@ async def mark_permission_request_applied(
     permission = await session.get(PermissionRequestModel, request_id)
     if permission is None:
         return None
-    permission.request_status = _coerce_permission_request_status(status).value
+    permission.request_status = _coerce(
+        PermissionRequestStatus, status, label="permission request status"
+    ).value
     permission.applied_at = utcnow()
     await session.flush()
     return permission
@@ -386,7 +383,9 @@ async def create_control_action(
 ) -> ControlActionModel:
     """Append a durable control journal record."""
     thread_id = kwargs["thread_id"]
-    resolved_type = _coerce_control_action_type(kwargs["action_type"])
+    resolved_type = _coerce(
+        ControlActionType, kwargs["action_type"], label="control action type"
+    )
     request_id = kwargs.get("request_id")
     payload = kwargs.get("payload")
     worker_generation = kwargs.get("worker_generation", 0)
@@ -407,7 +406,11 @@ async def create_control_action(
         idempotency_key=kwargs["idempotency_key"],
         payload_json=_encode_payload(payload),
         worker_generation=worker_generation,
-        result_status=_coerce_control_result(result_status).value,
+        result_status=_coerce(
+            ControlActionResultStatus,
+            result_status,
+            label="control action result status",
+        ).value,
         dispatch_id=dispatch_id or uuid4().hex,
         recovery_deadline_at=recovery_deadline_at,
     )
@@ -472,7 +475,9 @@ async def reserve_control_action(
     session: AsyncSession, **kwargs: Unpack[_ReserveActionArgs]
 ) -> ControlActionReservation:
     """Reserve one durable intention and compare any replay with its winner."""
-    resolved_type = _coerce_control_action_type(kwargs["action_type"]).value
+    resolved_type = _coerce(
+        ControlActionType, kwargs["action_type"], label="control action type"
+    ).value
     action, created = await get_or_create_control_action(
         session,
         thread_id=kwargs["thread_id"],
@@ -588,7 +593,11 @@ async def settle_control_action_lease(
             )
             .values(
                 applied_at=applied_at or utcnow(),
-                result_status=_coerce_control_result(result_status).value,
+                result_status=_coerce(
+                    ControlActionResultStatus,
+                    result_status,
+                    label="control action result status",
+                ).value,
                 claim_token=None,
                 claim_expires_at=None,
             )
@@ -638,7 +647,9 @@ async def get_latest_control_action(
     if action_type is not None:
         stmt = stmt.where(
             ControlActionModel.action_type
-            == _coerce_control_action_type(action_type).value
+            == _coerce(
+                ControlActionType, action_type, label="control action type"
+            ).value
         )
     return (await session.execute(stmt.limit(1))).scalar_one_or_none()
 
@@ -654,7 +665,9 @@ async def mark_control_action_applied(
     if action is None:
         return None
     action.applied_at = applied_at or utcnow()
-    action.result_status = _coerce_control_result(result_status).value
+    action.result_status = _coerce(
+        ControlActionResultStatus, result_status, label="control action result status"
+    ).value
     action.claim_token = None
     action.claim_expires_at = None
     await session.flush()

@@ -208,10 +208,10 @@ class DomainConfig(ProjectSettings):
         ge=1,
         description=(
             "How many continuations may wait across the whole service. "
-            "Deliberately conservative and matched to the recovery pass's own "
-            "page size, so one pass can examine every continuation the "
-            "service admitted rather than leaving a tail of them to the next "
-            "pass. At the served per-run depth of one this is also the number "
+            "Deliberately conservative, and also the recovery pass's page "
+            "size, so one pass can examine every continuation the service "
+            "admitted rather than leaving a tail of them to the next pass. "
+            "At the served per-run depth of one this is also the number "
             "of distinct runs that may hold a waiting turn at once. Exceeding "
             "it is a typed refusal, never a silent drop."
         ),

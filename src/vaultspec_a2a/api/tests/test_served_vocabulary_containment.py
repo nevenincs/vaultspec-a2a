@@ -271,24 +271,24 @@ def test_approval_status_write_gate_admits_only_declared_members() -> None:
     the coercion every writer goes through constructs the enum and raises
     otherwise. Proven against the real coercion, not asserted.
     """
-    from ...database._helpers import _coerce_approval_status
+    from ...database._helpers import _coerce
 
     for member in ApprovalStatus:
-        assert _coerce_approval_status(member.value) is member
-        assert _coerce_approval_status(member) is member
-    with pytest.raises(ValueError):
-        _coerce_approval_status("archived")
+        assert _coerce(ApprovalStatus, member.value, label="approval status") is member
+        assert _coerce(ApprovalStatus, member, label="approval status") is member
+    with pytest.raises(ValueError, match="Invalid approval status"):
+        _coerce(ApprovalStatus, "archived", label="approval status")
 
 
 def test_repair_status_write_gate_admits_only_declared_members() -> None:
     """The same proof for the vocabulary repair_status/execution_readiness share."""
-    from ...database._helpers import _coerce_repair_status
+    from ...database._helpers import _coerce
 
     for member in RepairStatus:
-        assert _coerce_repair_status(member.value) is member
-        assert _coerce_repair_status(member) is member
-    with pytest.raises(ValueError):
-        _coerce_repair_status("reconciling")
+        assert _coerce(RepairStatus, member.value, label="repair status") is member
+        assert _coerce(RepairStatus, member, label="repair status") is member
+    with pytest.raises(ValueError, match="Invalid repair status"):
+        _coerce(RepairStatus, "reconciling", label="repair status")
 
 
 def test_degraded_reason_producers_hand_over_members_not_literals() -> None:

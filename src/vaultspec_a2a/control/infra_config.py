@@ -7,6 +7,7 @@ from typing import Annotated, Literal, get_args
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import NoDecode, SettingsConfigDict
 
+from ..desktop.credentials import MAX_CREDENTIAL_BYTES
 from ..utils import redact_url
 from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
 from .env_prefix import ENV_PREFIX
@@ -618,7 +619,9 @@ class InfraConfig(ProjectSettings):
         description=(
             "Optional dedicated bearer for the engine-facing /v1 gateway. "
             "When absent, the gateway generates a per-process credential; it "
-            "is never shared with worker IPC or embedded in discovery."
+            "is never shared with worker IPC or embedded in discovery. Bounded "
+            f"at {MAX_CREDENTIAL_BYTES} bytes, the size a reader will load the "
+            "handoff credential this token is published into."
         ),
     )
     auto_spawn_worker: bool = Field(
@@ -904,6 +907,30 @@ class InfraConfig(ProjectSettings):
         """Treat blank configured tokens as absent."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("gateway_service_token")
+    @classmethod
+    def _publishable_gateway_token(cls, value: str | None) -> str | None:
+        """Refuse a gateway bearer too long to publish as a handoff credential.
+
+        This token is written verbatim into the owner-restricted credential file
+        beside the discovery record, and every reader loads that file under a
+        bound of ``MAX_CREDENTIAL_BYTES``. Without this check an over-long token
+        starts a gateway that looks healthy and publishes a credential nothing
+        can read, so the operator meets the mistake as an unexplained attach
+        failure instead of as the configuration error it is.
+
+        Measured in bytes, as the file bound is: a token inside the character
+        count can still be over the byte bound.
+        """
+        token_env = env_name(cls, "gateway_service_token")
+        if value is not None and len(value.encode("utf-8")) > MAX_CREDENTIAL_BYTES:
+            raise ValueError(
+                f"{token_env} must be at most {MAX_CREDENTIAL_BYTES} bytes: a "
+                "longer bearer cannot be published as the handoff credential "
+                "readers load under that bound"
+            )
         return value
 
     @field_validator("lane_plugins", mode="before")

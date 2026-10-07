@@ -13,10 +13,8 @@ from typing import IO, TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 from ._process_tree import (
     POLL_INTERVAL,
-    PROBE_DECODE_ERRORS,
-    PROBE_ENCODING,
-    PS_TIMEOUT,
-    pid_in_tree,
+    descendant_pids,
+    process_group_members,
     win_kernel32,
 )
 from .async_cleanup import complete_cleanup
@@ -94,92 +92,8 @@ def _posix_group_is_live(pgid: int) -> bool | None:
         return False
     except PermissionError:
         pass
-    if sys.platform != "linux":
-        return _ps_group_is_live(pgid)
-    try:
-        entries = os.listdir("/proc")
-    except OSError:
-        return _ps_group_is_live(pgid)
-    return _proc_group_has_live_member(entries, pgid)
-
-
-def _proc_group_has_live_member(entries: list[str], pgid: int) -> bool | None:
-    uncertain = False
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        live = _proc_group_member_is_live(int(entry), pgid)
-        if live:
-            return True
-        uncertain = uncertain or live is None
-    return None if uncertain else False
-
-
-def _proc_group_member_is_live(pid: int, pgid: int) -> bool | None:
-    if sys.platform == "win32":
-        return None
-    try:
-        if os.getpgid(pid) != pgid:
-            return False
-        with open(f"/proc/{pid}/stat", encoding="ascii", errors="replace") as fh:
-            fields = fh.read().rpartition(")")[2].split()
-    except (FileNotFoundError, ProcessLookupError):
-        return False
-    except OSError:
-        return None
-    if len(fields) < 3 or not fields[2].isdigit():
-        return None
-    return int(fields[2]) == pgid and fields[0] not in {"Z", "X"}
-
-
-def _ps_group_is_live(pgid: int) -> bool | None:
-    """Use the macOS/POSIX process table with a bounded, reaped probe."""
-    try:
-        completed = subprocess.run(
-            ["ps", "-A", "-o", "pgid=,stat="],
-            capture_output=True,
-            text=True,
-            encoding=PROBE_ENCODING,
-            errors=PROBE_DECODE_ERRORS,
-            timeout=PS_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0 or not completed.stdout.strip():
-        return None
-    uncertain = False
-    for line in completed.stdout.splitlines():
-        fields = line.split()
-        if len(fields) != 2 or not fields[0].isdigit():
-            uncertain = True
-        elif int(fields[0]) == pgid and fields[1][0] not in {"Z", "X"}:
-            return True
-    return None if uncertain else False
-
-
-def _posix_group_process_ids(pgid: int | None) -> tuple[int, ...] | None:
-    """Return a safe diagnostic snapshot of live members in an owned group."""
-    if pgid is None or sys.platform == "win32":
-        return None
-    if sys.platform != "linux":
-        return None
-    try:
-        entries = os.listdir("/proc")
-    except OSError:
-        return None
-    pids: list[int] = []
-    uncertain = False
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        pid = int(entry)
-        live = _proc_group_member_is_live(pid, pgid)
-        if live is True:
-            pids.append(pid)
-        elif live is None:
-            uncertain = True
-    return None if uncertain else tuple(sorted(pids))
+    members = process_group_members(pgid)
+    return None if members is None else bool(members)
 
 
 async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
@@ -187,7 +101,8 @@ async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
     deadline = loop.time() + timeout
     empty_observations = 0
     while True:
-        # ps is bounded, but may still block for seconds on a busy host.
+        # The membership read scans the host's process table, which may block
+        # for a while on a busy host.
         if await asyncio.to_thread(_posix_group_is_live, pgid) is False:
             empty_observations += 1
             if empty_observations == 2:
@@ -547,7 +462,8 @@ class ProcessContainment:
         pgid = self._pgid
         if pgid is None:
             return None
-        return not _posix_group_is_live(pgid)
+        live = _posix_group_is_live(pgid)
+        return None if live is None else not live
 
     async def terminate(
         self, *, term_timeout: float = 10.0, kill_timeout: float = 5.0
@@ -687,8 +603,10 @@ class ProcessContainment:
             return "owned_pids=unassigned"
         if sys.platform == "win32":
             pids = self._win_job_process_ids(win_kernel32())
+        elif self._pgid is None:
+            pids = None
         else:
-            pids = _posix_group_process_ids(self._pgid)
+            pids = process_group_members(self._pgid)
         if pids is None:
             return "owned_pids=unknown"
         return "owned_pids=" + ",".join(str(pid) for pid in pids)
@@ -706,7 +624,7 @@ class ProcessContainment:
         if sys.platform != "win32":
             return pid == self._pid
         pids = self._win_job_process_ids(win_kernel32())
-        return bool(pids and pid in pids and pid_in_tree(self._pid, pid) is True)
+        return bool(pids and pid in pids and pid in descendant_pids(self._pid))
 
     def _query_job_pid_list(
         self, kernel32: Any, size: int, header_size: int, pointer_size: int
@@ -785,7 +703,7 @@ class ProcessContainment:
         pgid = self._pgid
         if pgid is None or pgid != self._pid or pgid <= 1 or pgid == os.getpgrp():
             raise ProcessContainmentError("Refusing to signal an unowned process group")
-        # Confirm an empty snapshot before returning: the /proc walk can
+        # Confirm an empty snapshot before returning: the membership scan can
         # transiently miss a member while the root exits and is reparented.
         if (
             await asyncio.to_thread(_posix_group_is_live, pgid) is False

@@ -33,18 +33,19 @@ import contextlib
 import getpass
 import json
 import os
-import sys
 import time
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
-from typing import NoReturn, TypeGuard, cast
+from typing import TYPE_CHECKING, NoReturn, TypeGuard, cast
 
 from ..control.state_layout import seal_state_home, state_layout
-from ..utils._process_tree import pid_is_live
+from ..utils._process_tree import pid_is_live, process_start_identity
 from ..utils.atomic_write import atomic_write_text
 from ..utils.file_lock import open_lock_file, release_lock, try_lock
 from .registry import now_ms
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = [
     "SINGLETON_RECORD_VERSION",
@@ -163,64 +164,12 @@ def process_start_fingerprint(pid: int) -> str | None:
 
     The fingerprint guards pid reuse: a recorded pid that is live again but was
     started later carries a different fingerprint, so a dead recorded process is not
-    mistaken for a live one. Windows reads the process creation ``FILETIME``; Linux
-    reads ``starttime`` from ``/proc/<pid>/stat``. Platforms without a cheap source
+    mistaken for a live one. It is the kernel's clock-independent start stamp
+    (:func:`~vaultspec_a2a.utils._process_tree.process_start_identity`), so a
+    recorded value stays comparable across clock adjustments. Platforms without one
     (notably macOS) return ``None``, and callers degrade to pid-liveness alone.
     """
-    if pid <= 0:
-        return None
-    if sys.platform == "win32":
-        return _windows_start_fingerprint(pid)
-    if sys.platform.startswith("linux"):
-        return _linux_start_fingerprint(pid)
-    return None
-
-
-def _windows_start_fingerprint(pid: int) -> str | None:
-    if sys.platform != "win32":
-        return None
-    import ctypes
-    from ctypes import wintypes
-
-    process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(process_query, False, pid)
-    if not handle:
-        return None
-    try:
-        creation = wintypes.FILETIME()
-        exit_time = wintypes.FILETIME()
-        kernel_time = wintypes.FILETIME()
-        user_time = wintypes.FILETIME()
-        ok = kernel32.GetProcessTimes(
-            handle,
-            ctypes.byref(creation),
-            ctypes.byref(exit_time),
-            ctypes.byref(kernel_time),
-            ctypes.byref(user_time),
-        )
-        if not ok:
-            return None
-        return f"{creation.dwHighDateTime}:{creation.dwLowDateTime}"
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-def _linux_start_fingerprint(pid: int) -> str | None:
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    # comm (field 2) is wrapped in parentheses and may itself contain spaces and
-    # parentheses, so split after the final ')': the remaining fields start at the
-    # process state (field 3). starttime is field 22 -> index 19 of that tail.
-    close = stat.rfind(")")
-    if close == -1:
-        return None
-    tail = stat[close + 2 :].split()
-    if len(tail) < 20:
-        return None
-    return tail[19]
+    return process_start_identity(pid)
 
 
 def current_process_fingerprint() -> str | None:

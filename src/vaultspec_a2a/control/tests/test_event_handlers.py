@@ -946,6 +946,14 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
             .all()
         )
         assert len(actions) == 1
+        # An applied journal row says WHEN it was applied. The request creation
+        # action is applied the moment it is written - nothing dispatches it -
+        # so it is settled through the one settler rather than by assigning the
+        # status alone, which left `applied_at` null on every such row and made
+        # a settled action read as one still owed a dispatch.
+        assert actions[0].result_status == ControlActionResultStatus.APPLIED.value
+        assert actions[0].applied_at is not None
+        assert actions[0].claim_token is None
 
 
 @pytest.mark.asyncio

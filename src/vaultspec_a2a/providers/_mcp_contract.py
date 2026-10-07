@@ -470,9 +470,10 @@ async def verify_declared_tool_contract(
                 # rather than a bare cancellation, so every reachable probe failure
                 # - an unresolvable requirement, an absent command, a broken
                 # handshake, the deadline - arrives here as one actionable refusal.
+                reason = redact_text(str(exc))
                 raise HarnessToolContractError(
                     f"harness MCP server {name!r} could not be verified: probing "
-                    f"{launch!r} failed ({type(exc).__name__}: {exc}). The run "
+                    f"{launch!r} failed ({type(exc).__name__}: {reason}). The run "
                     f"declares the tools {', '.join(declared)} and refuses to "
                     f"launch an agent whose grounding tools cannot be confirmed."
                     f"{_stderr_tail(captured_stderr)}"

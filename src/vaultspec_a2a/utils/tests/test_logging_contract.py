@@ -99,11 +99,11 @@ def test_credentials_are_redacted_and_counts_are_not(
     (line,) = _lines(stream)
     assert "abcdefghijklmnop" not in line["message"]
     assert "sk-live0123456789abcdef" not in line["message"]
-    assert line["api_key"] == "[redacted]"
-    assert line["actor_token"] == "[redacted]"
+    assert line["api_key"] == "<redacted>"
+    assert line["actor_token"] == "<redacted>"
     assert line["input_tokens"] == 12
     assert line["token_usage"] == {"coder": {"input_tokens": 12}}
-    assert line["headers"] == {"Authorization": "[redacted]", "Accept": "text/plain"}
+    assert line["headers"] == {"Authorization": "<redacted>", "Accept": "text/plain"}
 
 
 def test_an_extra_named_like_a_line_field_is_kept_beside_it(

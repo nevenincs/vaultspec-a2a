@@ -19,6 +19,7 @@ from ..lifecycle.pairing import (
     classify_worker_pairing,
     eviction_is_authorized,
 )
+from ..utils import redact_text
 from .config import settings
 from .worker_status import WorkerConnectionStatus
 
@@ -348,7 +349,7 @@ def _build_worker_restart_detail(
     detail = f"returncode={returncode}"
     stderr_tail = _read_log_tail(stderr_log_path) if stderr_log_path is not None else ""
     if stderr_tail:
-        compact_tail = re.sub(r"\s+", " ", stderr_tail)[:500]
+        compact_tail = redact_text(re.sub(r"\s+", " ", stderr_tail))[:500]
         detail += f"; stderr_tail={compact_tail}"
     detail += f"; stderr_log={stderr_log_path}"
     return detail

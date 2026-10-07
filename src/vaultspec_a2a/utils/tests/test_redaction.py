@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from ...utils import redact_text
+from .. import redact_text
 
 
 @pytest.mark.parametrize(

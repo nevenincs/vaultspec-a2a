@@ -31,7 +31,7 @@ def test_a_rejected_database_url_never_carries_its_password(tmp_path: Path) -> N
     assert "hunter2" not in reported
     assert "dbuser" not in reported
     # The scheme and the host survive, which is what names the store.
-    assert "postgresql+asyncpg://***@dbhost/app" in reported
+    assert "postgresql+asyncpg://<redacted>@dbhost/app" in reported
 
 
 def test_a_rejected_backend_never_carries_the_urls_password(tmp_path: Path) -> None:

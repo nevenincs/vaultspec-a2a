@@ -32,9 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "RESUME_WINDOW_START",
     "ReplayFrame",
-    "ReplayWindow",
     "ResumePosition",
     "replay_is_served",
     "replay_window",
@@ -44,7 +42,7 @@ __all__ = [
     "run_stream_resumability",
 ]
 
-RESUME_WINDOW_START = "-"
+_RESUME_WINDOW_START = "-"
 """The cursor meaning "from the start of whatever is still retained".
 
 A client with no position of its own - a fresh viewer that wants the recent
@@ -88,7 +86,7 @@ def resume_position(cursor: str, thread_id: str) -> ResumePosition | None:
     live-only stream while it believed it had resumed. Both answers are the
     same to the caller - this stream will not replay from what you sent.
     """
-    if cursor == RESUME_WINDOW_START:
+    if cursor == _RESUME_WINDOW_START:
         return ResumePosition(after_sequence=0, from_window_start=True)
     run_id, separator, decimal = cursor.rpartition(":")
     if not separator or run_id != thread_id:
@@ -251,7 +249,7 @@ async def retained_after(
 
 
 @dataclass(frozen=True, slots=True)
-class ReplayWindow:
+class _ReplayWindow:
     """What a resume can actually be served, and what it costs to say so."""
 
     frames: list[ReplayFrame]
@@ -292,7 +290,7 @@ async def replay_window(
     writer: RunEventWriter | None,
     thread_id: str,
     resume: ResumePosition,
-) -> ReplayWindow:
+) -> _ReplayWindow:
     """Read what this resume can be served, and classify what it cannot.
 
     Three honest answers, and the difference between them is the whole point
@@ -306,7 +304,7 @@ async def replay_window(
     here is live-only rather than being left to assume it resumed.
     """
     if not settings.stream_replay_enabled:
-        return ReplayWindow([], _REPLAY_UNAVAILABLE)
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
     try:
         frames = await retained_after(
             session_factory=session_factory,
@@ -322,7 +320,7 @@ async def replay_window(
             exc_info=True,
             extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
         )
-        return ReplayWindow([], _REPLAY_UNAVAILABLE)
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
 
     if not frames:
         return await _empty_replay_window(
@@ -346,8 +344,8 @@ async def replay_window(
     # claim to hold everything up to it is one the window just corroborated.
     floor = resume.after_sequence
     if complete:
-        return ReplayWindow(served, dedup_floor=floor)
-    return ReplayWindow(
+        return _ReplayWindow(served, dedup_floor=floor)
+    return _ReplayWindow(
         served, _REPLAY_WINDOW_EXCEEDED, served[0].sequence, dedup_floor=floor
     )
 
@@ -358,7 +356,7 @@ async def _empty_replay_window(
     writer: RunEventWriter | None,
     thread_id: str,
     resume: ResumePosition,
-) -> ReplayWindow:
+) -> _ReplayWindow:
     """Classify a resume with nothing after its cursor.
 
     Three cases wear the same empty answer and must not be reported the same
@@ -394,14 +392,14 @@ async def _empty_replay_window(
             exc_info=True,
             extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
         )
-        return ReplayWindow([], _REPLAY_UNAVAILABLE)
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
     # The ring holds what the table does not have yet, so the run's mark is
     # the higher of the two rather than the durable one alone.
     held = [record.sequence for record in writer.pending(thread_id)] if writer else []
     if retained is not None:
         held.append(retained)
     if not held:
-        return ReplayWindow([], _REPLAY_UNAVAILABLE)
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
     mark = max(held)
     if resume.after_sequence > mark:
         logger.info(
@@ -415,5 +413,5 @@ async def _empty_replay_window(
                 "sequence": resume.after_sequence,
             },
         )
-        return ReplayWindow([], _REPLAY_UNAVAILABLE, dedup_floor=mark)
-    return ReplayWindow([], dedup_floor=min(resume.after_sequence, mark))
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE, dedup_floor=mark)
+    return _ReplayWindow([], dedup_floor=min(resume.after_sequence, mark))

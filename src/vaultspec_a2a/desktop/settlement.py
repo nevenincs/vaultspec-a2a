@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from ..thread.enums import ThreadStatus
 
 __all__ = [
-    "SettlementResult",
     "emit_run_settlement",
 ]
 
@@ -50,7 +49,7 @@ _BACKOFF_MAX_SECONDS = 2.0
 
 
 @dataclass(frozen=True, slots=True)
-class SettlementResult:
+class _SettlementResult:
     """The bounded outcome of a terminal-settlement callback.
 
     ``delivered`` is ``True`` only on an accepted callback. ``skipped`` is ``True``
@@ -108,7 +107,7 @@ async def emit_run_settlement(
     lease_id: str,
     terminal_status: ThreadStatus,
     client: httpx.AsyncClient | None = None,
-) -> SettlementResult:
+) -> _SettlementResult:
     """Deliver one bounded, attach-authenticated terminal-settlement callback.
 
     Builds the settlement body from the run and its non-secret lease identity plus
@@ -124,7 +123,7 @@ async def emit_run_settlement(
 
     endpoint = settlement_endpoint()
     if endpoint is None:
-        return SettlementResult(
+        return _SettlementResult(
             delivered=False,
             skipped=True,
             attempts=0,
@@ -132,7 +131,7 @@ async def emit_run_settlement(
         )
     attach_credential = _resolve_attach_credential()
     if attach_credential is None:
-        return SettlementResult(
+        return _SettlementResult(
             delivered=False,
             skipped=True,
             attempts=0,
@@ -160,7 +159,7 @@ async def _deliver(
     payload: dict[str, object],
     headers: dict[str, str],
     run_id: str,
-) -> SettlementResult:
+) -> _SettlementResult:
     """POST the settlement with bounded, backed-off retries."""
     import httpx
 
@@ -185,7 +184,7 @@ async def _deliver(
         else:
             last_status = response.status_code
             if response.is_success:
-                return SettlementResult(
+                return _SettlementResult(
                     delivered=True,
                     skipped=False,
                     attempts=attempt,
@@ -204,7 +203,7 @@ async def _deliver(
             await asyncio.sleep(
                 min(_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)), _BACKOFF_MAX_SECONDS)
             )
-    return SettlementResult(
+    return _SettlementResult(
         delivered=False,
         skipped=False,
         attempts=_MAX_ATTEMPTS,

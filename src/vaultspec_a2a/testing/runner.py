@@ -35,8 +35,6 @@ __all__ = [
     "DESCENDANT_TIMEOUT_EXIT",
     "RUN_TIMEOUT_EXIT",
     "TEARDOWN_TIMEOUT_EXIT",
-    "main",
-    "run_pytest",
 ]
 
 TEARDOWN_TIMEOUT_EXIT = 124
@@ -385,7 +383,7 @@ def _await_pytest_exit(
             containment.close()
 
 
-def run_pytest(
+def _run_pytest(
     pytest_args: Sequence[str],
     *,
     exit_timeout_s: float,
@@ -440,7 +438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if pytest_args[:1] == ["--"]:
         pytest_args.pop(0)
     try:
-        return run_pytest(
+        return _run_pytest(
             pytest_args,
             exit_timeout_s=args.exit_timeout,
             run_timeout_s=args.run_timeout,

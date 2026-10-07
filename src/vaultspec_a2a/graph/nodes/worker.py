@@ -66,7 +66,6 @@ __all__ = [
     "compose_worker_turn_model",
     "create_worker_node",
     "render_research_findings",
-    "resolve_effective_worker_model",
     "worker_turn_preamble",
 ]
 
@@ -310,7 +309,7 @@ def _build_worker_messages(
     return messages
 
 
-def resolve_effective_worker_model(
+def _resolve_effective_worker_model(
     *,
     model: BaseChatModel,
     autonomous: bool,
@@ -722,11 +721,11 @@ def compose_worker_turn_model(
     graph never owns a run's grants.
 
     *answers_reach_the_node* is False for a node whose input is fixed when it is
-    dispatched; see :func:`resolve_effective_worker_model`.
+    dispatched; see :func:`_resolve_effective_worker_model`.
     """
     autonomous = options["autonomous"]
     workspace_root = options["workspace_root"]
-    effective_model = resolve_effective_worker_model(
+    effective_model = _resolve_effective_worker_model(
         model=model,
         autonomous=autonomous,
         answers=answers,

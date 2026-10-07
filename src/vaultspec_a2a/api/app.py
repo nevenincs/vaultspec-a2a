@@ -104,7 +104,6 @@ _RECOVERY_POLL_SECONDS = 2.0
 
 __all__ = [
     "create_app",
-    "gateway_lifespan",
     "main",
 ]
 
@@ -764,7 +763,7 @@ def _start_gateway_recovery(
 
 
 @asynccontextmanager
-async def gateway_lifespan(app: FastAPI) -> AsyncGenerator[None]:
+async def _gateway_lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: startup and shutdown hooks.
 
     The gateway no longer runs agent execution.  All
@@ -865,7 +864,7 @@ def create_app(lifespan: Any | None = None) -> FastAPI:
 
     Args:
         lifespan: Optional lifespan override for testing. When ``None``
-            the production ``gateway_lifespan`` is used.
+            the production ``_gateway_lifespan`` is used.
 
     Returns:
         A fully configured ``FastAPI`` instance ready for ``uvicorn.run()``.
@@ -873,7 +872,7 @@ def create_app(lifespan: Any | None = None) -> FastAPI:
     app = FastAPI(
         title="Vaultspec A2A Orchestrator",
         version=package_version(),
-        lifespan=lifespan or gateway_lifespan,
+        lifespan=lifespan or _gateway_lifespan,
     )
     # The engine-facing credential is distinct from worker IPC by default. It is
     # immutable for this app generation, published only through the owner-restricted

@@ -26,10 +26,10 @@ from ..providers.team_selection import model_assignment_digest
 from ..streaming import INGEST_DRAINED, GraphInvocation
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import operation_span
-from ..thread import PermissionAnswer
 from ..thread.action_receipts import receipt_channels
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
+from ..thread.resume_values import PermissionAnswer
 from ..utils.logging import log_context
 from ._authoring_close import close_authoring_session_best_effort
 from ._dispatch_contract import (

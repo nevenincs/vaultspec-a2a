@@ -491,7 +491,7 @@ async def test_an_unknown_server_request_is_refused_loudly() -> None:
 def test_the_codex_model_declares_a_permission_callback() -> None:
     """The field the supervised worker wiring probes for exists on this lane.
 
-    ``resolve_effective_worker_model`` attaches the human rung only to a model
+    ``_resolve_effective_worker_model`` attaches the human rung only to a model
     that DECLARES ``permission_callback``; without the field a supervised Codex
     run silently skipped the rung altogether rather than failing.
     """

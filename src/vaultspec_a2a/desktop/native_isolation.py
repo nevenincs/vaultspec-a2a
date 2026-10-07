@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "LinuxRuntimeClosure",
-    "NativeLaunch",
     "NativeLaunchAuthority",
     "NativeWorkspaceAuthority",
     "RuntimeFile",
@@ -296,7 +295,7 @@ def decode_launch_environment(environment: Mapping[str, str]) -> dict[str, str]:
 
 
 @dataclass(frozen=True, slots=True)
-class NativeLaunch:
+class _NativeLaunch:
     """An inseparable trusted bootstrap command, environment and working directory."""
 
     command: tuple[str, ...]
@@ -310,7 +309,7 @@ def linux_isolated_launch(
     *,
     cwd: str,
     environment: Mapping[str, str],
-) -> NativeLaunch:
+) -> _NativeLaunch:
     """Render a clean bootstrap; this alone never grants served eligibility."""
     if sys.platform != "linux":
         raise ProcessContainmentError("native namespace isolation requires Linux")
@@ -337,7 +336,7 @@ def linux_isolated_launch(
         *command,
         isolated=True,
     )
-    return NativeLaunch(
+    return _NativeLaunch(
         command=tuple(argv),
         environment=MappingProxyType(bootstrap_env),
         cwd=str(authority.capsule.path),

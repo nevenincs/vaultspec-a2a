@@ -28,15 +28,13 @@ if TYPE_CHECKING:
     from ._json_contract import JsonObject, JsonValue
 
 __all__ = [
-    "PathArgumentScan",
     "RunProjectScope",
     "foreign_project_argument",
     "path_arguments_in_project",
-    "project_scope_key",
 ]
 
 
-def project_scope_key(value: str | os.PathLike[str]) -> str:
+def _project_scope_key(value: str | os.PathLike[str]) -> str:
     """Return one project path in the single form scope decisions compare.
 
     The active project reaches a scope decision in several spellings - the
@@ -111,7 +109,7 @@ class RunProjectScope:
         if not self._workspace_root:
             return None
         try:
-            return project_scope_key(self._workspace_root)
+            return _project_scope_key(self._workspace_root)
         except (OSError, ValueError):
             return None
 
@@ -132,7 +130,7 @@ class RunProjectScope:
         if bound is None:
             return False
         try:
-            key = project_scope_key(candidate)
+            key = _project_scope_key(candidate)
         except (OSError, ValueError):
             return False
         # Both sides are reduced to the scope key, so this is a pure lexical
@@ -194,7 +192,7 @@ def foreign_project_argument(args: JsonObject, scope: RunProjectScope) -> str | 
 
 
 @dataclass(frozen=True, slots=True)
-class PathArgumentScan:
+class _PathArgumentScan:
     """Where a tool call said it would work, measured against the run's project."""
 
     inside: tuple[str, ...]
@@ -262,7 +260,7 @@ def _anchored_to(value: str, bound: str) -> str:
 
 def path_arguments_in_project(
     args: JsonObject, locations: Sequence[JsonObject], scope: RunProjectScope
-) -> PathArgumentScan:
+) -> _PathArgumentScan:
     """Measure a tool call's path arguments against the project the run is bound to.
 
     Both halves of the ACP tool-call payload are read: ``rawInput``, which is
@@ -292,4 +290,4 @@ def path_arguments_in_project(
             inside.append(value)
         else:
             outside.append(value)
-    return PathArgumentScan(tuple(inside), tuple(outside))
+    return _PathArgumentScan(tuple(inside), tuple(outside))

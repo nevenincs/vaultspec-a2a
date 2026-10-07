@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, Unpack, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -41,9 +41,10 @@ if TYPE_CHECKING:
     from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from ..streaming import RunEventProducer
-    from ._graph_lifecycle_options import GraphLifecycleOptions
     from .authoring_binding import AuthoringBindingProvider
+    from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
+    from .token_store import RunTokenStore
 
 __all__ = [
     "GraphCacheKey",
@@ -147,6 +148,17 @@ def _validated_checkpoint_digest(values: dict[str, object], field: str) -> str:
     return digest
 
 
+class _GraphLifecycleRequired(TypedDict):
+    token_store: RunTokenStore
+    catalog_store: RunCatalogStore
+
+
+class _GraphLifecycleOptions(_GraphLifecycleRequired, total=False):
+    """Keyword options of ``GraphLifecycleManager`` beyond its three collaborators."""
+
+    checkpoint_read_timeout_seconds: float | None
+
+
 class GraphLifecycleManager:
     """Manages graph compilation, LRU caching, and input construction.
 
@@ -165,7 +177,7 @@ class GraphLifecycleManager:
         checkpointer: Checkpointer,
         bridge: WorkerBridge,
         producer: RunEventProducer,
-        **options: Unpack[GraphLifecycleOptions],
+        **options: Unpack[_GraphLifecycleOptions],
     ) -> None:
         from ..database import get_session_factory
         from ..providers.factory import ProviderFactory

@@ -71,7 +71,6 @@ __all__ = [
     "AdmissionState",
     "AuthenticationState",
     "CacheFreshness",
-    "CatalogCacheSnapshot",
     "CatalogRefreshCache",
     "CatalogRefreshInvalidatedError",
     "CatalogRefreshSuppressedError",
@@ -499,7 +498,7 @@ class SelectionReference:
 
 
 @dataclass(frozen=True, slots=True)
-class CatalogCacheSnapshot:
+class _CatalogCacheSnapshot:
     """A catalog plus local refresh-cache timing state."""
 
     catalog: ProviderCatalog
@@ -656,18 +655,18 @@ class CatalogRefreshCache:
         )
 
     @staticmethod
-    def _snapshot(entry: _StoredCatalog, now: float) -> CatalogCacheSnapshot:
+    def _snapshot(entry: _StoredCatalog, now: float) -> _CatalogCacheSnapshot:
         freshness = (
             CacheFreshness.FRESH if now < entry.deadline else CacheFreshness.STALE
         )
-        return CatalogCacheSnapshot(
+        return _CatalogCacheSnapshot(
             catalog=entry.catalog,
             refreshed_at=entry.refreshed_at,
             expires_at=entry.expires_at,
             freshness=freshness,
         )
 
-    def peek(self, key: ProviderCatalogKey) -> CatalogCacheSnapshot | None:
+    def peek(self, key: ProviderCatalogKey) -> _CatalogCacheSnapshot | None:
         """Return the snapshot, including stale data, without refreshing."""
         entry = self._snapshots.entries.get(key)
         return None if entry is None else self._snapshot(entry, monotonic())
@@ -688,7 +687,7 @@ class CatalogRefreshCache:
 
     async def _store_catalog(
         self, key: ProviderCatalogKey, catalog: ProviderCatalog, generation: int
-    ) -> CatalogCacheSnapshot:
+    ) -> _CatalogCacheSnapshot:
         refreshed_at = datetime.now(UTC)
         expires_at = refreshed_at + self._ttl
         if catalog.state.expires_at is not None:
@@ -714,7 +713,7 @@ class CatalogRefreshCache:
 
     def _available_snapshot(
         self, key: ProviderCatalogKey, now: float
-    ) -> CatalogCacheSnapshot | None:
+    ) -> _CatalogCacheSnapshot | None:
         current = self._snapshots.entries.get(key)
         if current is not None and now < current.deadline:
             return self._snapshot(current, now)
@@ -729,7 +728,7 @@ class CatalogRefreshCache:
         loader: CatalogLoader,
         *,
         force_refresh: bool = False,
-    ) -> CatalogCacheSnapshot:
+    ) -> _CatalogCacheSnapshot:
         """Return a fresh snapshot, coalescing concurrent refreshes per lane."""
         now = monotonic()
         current = self._snapshots.entries.get(key)

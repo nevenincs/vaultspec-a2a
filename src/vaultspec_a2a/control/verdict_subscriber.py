@@ -51,7 +51,6 @@ from ..database import (
     set_authoring_cursor,
     thread_write_expectation,
 )
-from ..thread import ApprovalVerdict
 from ..thread.enums import (
     VERDICT_APPROVED,
     VERDICT_REJECTED,
@@ -63,6 +62,7 @@ from ..thread.idempotency import (
     AUTHORING_VERDICT_KEY_PREFIX,
     authoring_verdict_action_key,
 )
+from ..thread.resume_values import ApprovalVerdict
 from ..utils.coercion import (
     coerce_nonempty_str,
     coerce_object_list,

@@ -15,7 +15,6 @@ __all__ = [
     "JsonObject",
     "JsonValue",
     "freeze_json",
-    "json_object",
     "lenient_json_object",
     "lenient_json_object_list",
 ]
@@ -49,29 +48,16 @@ def freeze_json(value: JsonValue) -> FrozenJsonValue:
 # yields the whole union and the NEXT step is unsubscriptable. Describing the
 # shape honestly and navigating it are in tension, and the tension resolves at
 # the reader rather than by widening the type back to ``Any``: a consumer that
-# knows it is holding an object says so, once, and gets a typed value plus a
-# loud failure when the payload disagrees.
-#
-# These raise rather than return a default deliberately. A caller reaching two
-# levels into a protocol response has an expectation about its shape; if that is
-# wrong, saying which key held what beats an empty dict flowing onward to fail
-# somewhere less informative.
+# knows it is holding an object says so, once, and gets a typed value.
 # ---------------------------------------------------------------------------
 
 
 def lenient_json_object(value: JsonValue | None) -> JsonObject:
     """Return an object payload, or the empty object for anything malformed.
 
-    The LENIENT counterpart to :func:`json_object`, and the difference is the
-    whole point of it existing separately. The raising trio below signals a
-    broken internal invariant - something this process built wrongly. These two
-    read UNTRUSTED provider output, where a malformed field is an ordinary event
-    that must degrade to an empty value rather than abort a live turn.
-
-    Kept beside the raising trio rather than merged with it: three failure
-    postures already share overlapping names in this package, and a caller
-    reaching for the wrong one gets either a crash on ordinary provider noise or
-    silence where an invariant should have shouted.
+    These readers take UNTRUSTED provider output, where a malformed field is an
+    ordinary event that must degrade to an empty value rather than abort a live
+    turn.
     """
     return value if isinstance(value, dict) else {}
 
@@ -88,11 +74,3 @@ def lenient_json_object_list(value: JsonValue | None) -> list[JsonObject]:
         if isinstance(value, list)
         else []
     )
-
-
-def json_object(value: JsonValue, *, at: str = "value") -> JsonObject:
-    """Return *value* as a JSON object, or raise naming what it actually was."""
-    if not isinstance(value, dict):
-        msg = f"expected a JSON object at {at}, got {type(value).__name__}"
-        raise TypeError(msg)
-    return value

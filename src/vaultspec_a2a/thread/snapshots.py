@@ -47,7 +47,6 @@ __all__ = [
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
     "MAX_REPAIR_REASON_CHARS",
     "MODEL_ASSIGNMENT_DIGEST_CHARS",
-    "MODEL_ASSIGNMENT_DIGEST_PATTERN",
     "PERMISSION_REQUEST_EVENT_TYPES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "AgentData",
@@ -57,7 +56,6 @@ __all__ = [
     "ExecutionTaskData",
     "LiveInterrupt",
     "MessageData",
-    "ModelAssignmentDigest",
     "PermissionData",
     "PermissionOptionData",
     "ProjectedInterrupt",
@@ -74,7 +72,6 @@ __all__ = [
     "checkpoint_tuple_id",
     "classify_message_role",
     "classify_permission_pause_reason",
-    "coerce_provider",
     "derive_message_id",
     "extract_checkpoint_fields",
     "extract_message_timestamp",
@@ -89,7 +86,6 @@ __all__ = [
     "project_checkpoint_tuple",
     "record_repair_posture",
     "stamp_message_created_at",
-    "tasks_past_their_interrupt",
     "unanswered_interrupt_values",
     "wire_event_type",
 ]
@@ -285,10 +281,12 @@ MODEL_ASSIGNMENT_DIGEST_CHARS: int = len(sha256_hex(b""))
 
 #: The spelling of that digest. Carried as dataclass field metadata rather than
 #: ``Annotated``, which has no vocabulary for a pattern.
-MODEL_ASSIGNMENT_DIGEST_PATTERN: str = rf"^[a-f0-9]{{{MODEL_ASSIGNMENT_DIGEST_CHARS}}}$"
+_MODEL_ASSIGNMENT_DIGEST_PATTERN: str = (
+    rf"^[a-f0-9]{{{MODEL_ASSIGNMENT_DIGEST_CHARS}}}$"
+)
 
 #: The digest binding a run's checkpoints to the model assignment they ran under.
-ModelAssignmentDigest = Annotated[
+_ModelAssignmentDigest = Annotated[
     str,
     MinLen(MODEL_ASSIGNMENT_DIGEST_CHARS),
     MaxLen(MODEL_ASSIGNMENT_DIGEST_CHARS),
@@ -477,8 +475,8 @@ class ThreadStateData:
     artifacts: list[ArtifactData] = field(default_factory=list)
     plan: list[PlanEntry] = field(default_factory=list)
     agents: list[AgentData] = field(default_factory=list)
-    model_assignment_digest: ModelAssignmentDigest | None = field(
-        default=None, metadata={"pattern": MODEL_ASSIGNMENT_DIGEST_PATTERN}
+    model_assignment_digest: _ModelAssignmentDigest | None = field(
+        default=None, metadata={"pattern": _MODEL_ASSIGNMENT_DIGEST_PATTERN}
     )
     last_sequence: int
     checkpoint_id: str | None = None
@@ -566,7 +564,7 @@ def record_repair_posture(snapshot: ThreadStateData, posture: str | None) -> Non
     snapshot.execution_readiness = resolved
 
 
-def coerce_provider(value: object) -> Provider | None:
+def _coerce_provider(value: object) -> Provider | None:
     """Coerce a node-metadata value to a :class:`Provider`, else ``None``.
 
     Node metadata is a flat string map, so an agent whose provider was never
@@ -599,7 +597,7 @@ def build_agent_descriptor(
         agent_id=summary.get("agent_id") or summary.get("node_name", ""),
         node_name=summary.get("node_name", ""),
         state=state,
-        provider=coerce_provider(summary.get("provider")),
+        provider=_coerce_provider(summary.get("provider")),
         model_name=summary.get("model_name") or None,
         role=summary.get("role", ""),
         display_name=summary.get("display_name", ""),
@@ -716,7 +714,7 @@ def _held_write_entries(pending_writes: Iterable[Any]) -> list[Sequence[object]]
     return entries
 
 
-def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
+def _tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
     """Return the tasks whose held interrupt is a leftover, not a live question.
 
     A task's interrupt write is never cleared when the answer lets that task
@@ -749,12 +747,12 @@ def unanswered_interrupt_values(pending_writes: Iterable[Any]) -> list[object]:
     """Return the held interrupt writes of the tasks still asking their question.
 
     The one reading of a checkpoint's held writes as questions: an interrupt
-    write whose task has since run past it (:func:`tasks_past_their_interrupt`)
+    write whose task has since run past it (:func:`_tasks_past_their_interrupt`)
     is a leftover, not a pause. Each value is the write as held - one interrupt
     or a sequence of them. A malformed write is skipped.
     """
     entries = _held_write_entries(pending_writes)
-    answered = tasks_past_their_interrupt(entries)
+    answered = _tasks_past_their_interrupt(entries)
     return [
         entry[2]
         for entry in entries
@@ -796,7 +794,7 @@ def live_interrupts(
     two apart, so a task they show finished contributes nothing. Without them
     every listed interrupt reads as open, which is the snapshot's own reading.
     """
-    answered = tasks_past_their_interrupt(held_writes)
+    answered = _tasks_past_their_interrupt(held_writes)
     found: list[LiveInterrupt] = []
     for task in getattr(state, "tasks", None) or ():
         task_id = str(getattr(task, "id", ""))

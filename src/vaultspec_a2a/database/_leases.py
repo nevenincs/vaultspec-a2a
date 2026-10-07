@@ -31,7 +31,6 @@ __all__ = [
     "DELETION_SAGA_CLAIM_LEASE",
     "RECOVERY_ATTEMPT_LEASE",
     "RECOVERY_CLAIM_TTL",
-    "LeaseColumns",
     "clear_lease",
     "lease_free_from",
     "new_claim_token",
@@ -56,7 +55,7 @@ dead process to the next delete request.
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class LeaseColumns:
+class _LeaseColumns:
     """The token and expiry columns that together hold one row's lease.
 
     The two are written and cleared as a pair, so a predicate over a holder is
@@ -95,10 +94,10 @@ class LeaseColumns:
         return {self.token.key: None, self.expires_at.key: None}
 
 
-CONTROL_ACTION_LEASE = LeaseColumns(
+CONTROL_ACTION_LEASE = _LeaseColumns(
     ControlActionModel.claim_token, ControlActionModel.claim_expires_at
 )
-RECOVERY_ATTEMPT_LEASE = LeaseColumns(
+RECOVERY_ATTEMPT_LEASE = _LeaseColumns(
     RecoveryAttemptModel.claim_token, RecoveryAttemptModel.claim_expires_at
 )
 

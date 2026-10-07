@@ -45,7 +45,6 @@ __all__ = [
     "CREDENTIAL_VARIABLES",
     "ENV_FILE_VARIABLE",
     "FOREIGN_PROVIDER_ENV_NAMES",
-    "LANE_PLUGINS_VARIABLE",
 ]
 
 #: The distribution name whose install mode gates the workspace ``.env``.
@@ -97,7 +96,7 @@ ENV_FILE_VARIABLE: Final = ConfigVariable(
 #: The modules whose in-process lanes a process imports. A setting, never a
 #: credential: neither a workspace ``.env`` nor the project store may supply it,
 #: so it reaches a process only through the environment its launcher hands it.
-LANE_PLUGINS_VARIABLE: Final = ConfigVariable(
+_LANE_PLUGINS_VARIABLE: Final = ConfigVariable(
     env_name=f"{ENV_PREFIX}LANE_PLUGINS",
     attr_name=None,
     var_type=str,
@@ -183,7 +182,7 @@ register_registry(
     PACKAGE,
     (
         ENV_FILE_VARIABLE,
-        LANE_PLUGINS_VARIABLE,
+        _LANE_PLUGINS_VARIABLE,
         *(entry for entries in CREDENTIAL_VARIABLES.values() for entry in entries),
     ),
 )

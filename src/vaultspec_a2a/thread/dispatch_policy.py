@@ -14,7 +14,7 @@ __all__ = [
 class FailureType(StrEnum):
     """Typed dispatch failure categories.
 
-    Each value corresponds to a ``DispatchOutcome.failure_type`` string
+    Each value corresponds to a ``_DispatchOutcome.failure_type`` string
     produced by :func:`safe_dispatch`.  Route handlers use these to map
     failures to HTTP status codes without string parsing.
     """
@@ -87,7 +87,7 @@ def evaluate_dispatch_failure(
     from deriving the pair differently.
 
     Args:
-        failure_type: The ``DispatchOutcome.failure_type`` string, or None on
+        failure_type: The ``_DispatchOutcome.failure_type`` string, or None on
             success.
 
     Returns:

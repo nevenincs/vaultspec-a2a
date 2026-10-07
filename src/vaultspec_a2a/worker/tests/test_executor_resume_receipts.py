@@ -25,12 +25,12 @@ from ...graph.nodes._worker_permissions import (
 )
 from ...providers.team_selection import model_assignment_digest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ...thread import permission_resume_value
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
+from ...thread.resume_values import permission_resume_value
 from .._dispatch_receipts import DispatchReceiptReporter
 from ..executor import Executor
 from .test_executor import (

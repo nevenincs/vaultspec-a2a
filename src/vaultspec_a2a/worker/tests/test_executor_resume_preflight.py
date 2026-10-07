@@ -18,8 +18,8 @@ from langchain_core.messages import AIMessage
 
 from ...providers.team_selection import model_assignment_digest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ...thread import permission_resume_value
 from ...thread.enums import ThreadStatus
+from ...thread.resume_values import permission_resume_value
 from ..executor import Executor
 from ..state_projection import ResumeRefusalCause
 from .test_executor import (

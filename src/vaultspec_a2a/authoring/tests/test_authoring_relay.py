@@ -307,25 +307,27 @@ async def test_revocation_during_discovery_cannot_start_engine_session(
                 workspace_root=tmp_path / "workspace",
                 engine_service_json=record,
             ):
-                async with running_relay(tokens, catalogs) as (_app, origin):
-                    async with AuthoringRelayClient(
+                async with (
+                    running_relay(tokens, catalogs) as (_app, origin),
+                    AuthoringRelayClient(
                         origin, _ACTOR, "relay-run", "writer"
-                    ) as client:
-                        call = asyncio.create_task(
-                            client.dispatch(
-                                "propose_changeset",
-                                {"operation": "create"},
-                                tool_call_id="revoked-call",
-                            )
+                    ) as client,
+                ):
+                    call = asyncio.create_task(
+                        client.dispatch(
+                            "propose_changeset",
+                            {"operation": "create"},
+                            tool_call_id="revoked-call",
                         )
-                        try:
-                            assert await asyncio.to_thread(entered.wait, 5)
-                            tokens.drop("relay-run")
-                        finally:
-                            release.set()
-                        with pytest.raises(httpx.HTTPStatusError) as refusal:
-                            await call
-                        assert refusal.value.response.status_code == 403
-                    assert state.requests == []
+                    )
+                    try:
+                        assert await asyncio.to_thread(entered.wait, 5)
+                        tokens.drop("relay-run")
+                    finally:
+                        release.set()
+                    with pytest.raises(httpx.HTTPStatusError) as refusal:
+                        await call
+                    assert refusal.value.response.status_code == 403
+                assert state.requests == []
         finally:
             release.set()

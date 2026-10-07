@@ -46,7 +46,6 @@ from .async_cleanup import complete_cleanup
 
 __all__ = [
     "POLL_INTERVAL",
-    "DetachedSpawnFlags",
     "ListenerOwnership",
     "classify_listener_ownership",
     "descendant_pids",
@@ -73,14 +72,14 @@ _EXITED_STATUSES = frozenset({psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD})
 
 
 @dataclass(frozen=True, slots=True)
-class DetachedSpawnFlags:
+class _DetachedSpawnFlags:
     """The ``subprocess.Popen`` flag pair that detaches a child from this process."""
 
     creationflags: int
     start_new_session: bool
 
 
-def detached_spawn_kwargs() -> DetachedSpawnFlags:
+def detached_spawn_kwargs() -> _DetachedSpawnFlags:
     """Return the flags that detach a spawned child from this process.
 
     Windows gets a new process group (``CREATE_NEW_PROCESS_GROUP``); POSIX gets a
@@ -97,10 +96,10 @@ def detached_spawn_kwargs() -> DetachedSpawnFlags:
     overloaded constructor's static resolution.
     """
     if sys.platform == "win32":
-        return DetachedSpawnFlags(
+        return _DetachedSpawnFlags(
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP, start_new_session=False
         )
-    return DetachedSpawnFlags(creationflags=0, start_new_session=True)
+    return _DetachedSpawnFlags(creationflags=0, start_new_session=True)
 
 
 def pid_is_live(pid: int) -> bool:

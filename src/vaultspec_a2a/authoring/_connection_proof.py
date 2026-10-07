@@ -26,13 +26,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EngineConnectionError",
-    "ProofMessage",
     "authenticated_client",
 ]
 
 #: Builds the bytes a listener's proof signs from its reported
 #: ``(port, pid, started_ms)``, the proof request target, and the challenge.
-type ProofMessage = Callable[[int, int, int, str, str], bytes]
+type _ProofMessage = Callable[[int, int, int, str, str], bytes]
 
 
 class EngineConnectionError(AuthoringError):
@@ -45,7 +44,7 @@ async def _prove_stream(
     port: int,
     bearer: str,
     proof_path: str,
-    proof_message: ProofMessage | None,
+    proof_message: _ProofMessage | None,
 ) -> None:
     challenge = secrets.token_hex(32)
     protocol = h11.Connection(h11.CLIENT, max_incomplete_event_size=16_384)
@@ -109,7 +108,7 @@ def authenticated_client(
     timeout: float,
     *,
     proof_path: str = "/health",
-    proof_message: ProofMessage | None = None,
+    proof_message: _ProofMessage | None = None,
 ) -> httpx.AsyncClient:
     """Gate every new connection, including reconnects; reused streams stay proven.
 

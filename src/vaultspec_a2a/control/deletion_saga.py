@@ -78,8 +78,6 @@ __all__ = [
     "CleanupItem",
     "CleanupItemResult",
     "CleanupItemState",
-    "DeletionSaga",
-    "DeletionSagaContentionError",
     "FinalizeOutcome",
     "advance_deletion_cleanup_item",
     "claim_deletion_saga",
@@ -87,7 +85,6 @@ __all__ = [
     "deserialize_manifest",
     "deserialize_results",
     "finalize_deletion_saga",
-    "manifest_is_complete",
     "serialize_manifest",
     "serialize_results",
 ]
@@ -113,7 +110,7 @@ dropped result is unrecoverable.
 """
 
 
-class DeletionSagaContentionError(RuntimeError):
+class _DeletionSagaContentionError(RuntimeError):
     """Raised when a cleanup result cannot be recorded under sustained contention.
 
     Recording a result is not optional - a dropped result leaves a manifest that
@@ -176,7 +173,7 @@ class CleanupItemResult:
 
 
 @dataclass(frozen=True, slots=True)
-class DeletionSaga:
+class _DeletionSaga:
     """A hydrated view of one durable deletion saga.
 
     ``claimed`` reports that a durable ownership marker exists - which says
@@ -286,8 +283,8 @@ def _hydrate(
     *,
     created: bool = False,
     owned: bool = False,
-) -> DeletionSaga:
-    return DeletionSaga(
+) -> _DeletionSaga:
+    return _DeletionSaga(
         thread_id=row.thread_id,
         manifest=tuple(deserialize_manifest(row.manifest_json)),
         results=deserialize_results(row.result_json),
@@ -297,7 +294,7 @@ def _hydrate(
     )
 
 
-def manifest_is_complete(
+def _manifest_is_complete(
     manifest: Sequence[CleanupItem],
     results: Mapping[str, CleanupItemResult],
 ) -> bool:
@@ -320,7 +317,7 @@ def _abandoned_items(
     a later pass can still complete, so the manifest is not settled and
     finalization must keep refusing.
     """
-    if manifest_is_complete(manifest, results):
+    if _manifest_is_complete(manifest, results):
         return ()
     abandoned: list[CleanupItemResult] = []
     for item in manifest:
@@ -402,7 +399,7 @@ async def _resume_existing_saga(
     thread_id: str,
     existing: ThreadDeletionSagaModel,
     expectation: ThreadWriteExpectation,
-) -> DeletionSaga | None:
+) -> _DeletionSaga | None:
     if expectation.status is ThreadStatus.DELETING:
         return _hydrate(existing, created=False)
     try:
@@ -425,7 +422,7 @@ async def create_deletion_saga(
     *,
     thread_id: str,
     manifest: Sequence[CleanupItem],
-) -> DeletionSaga | None:
+) -> _DeletionSaga | None:
     """Create one deletion saga and transition the thread to ``deleting``.
 
     Idempotent: when a saga already exists for the thread the captured manifest
@@ -475,7 +472,7 @@ async def claim_deletion_saga(
     session: AsyncSession,
     *,
     thread_id: str,
-) -> DeletionSaga | None:
+) -> _DeletionSaga | None:
     """Claim exclusive ownership of one deletion saga for a cleanup pass.
 
     Returns ``None`` when no saga exists (already finalized or never created),
@@ -559,7 +556,7 @@ async def advance_deletion_cleanup_item(
         f"Could not record cleanup result {result.key!r} for thread "
         f"{thread_id!r} after {_MAX_ADVANCE_ATTEMPTS} attempts"
     )
-    raise DeletionSagaContentionError(msg)
+    raise _DeletionSagaContentionError(msg)
 
 
 async def finalize_deletion_saga(

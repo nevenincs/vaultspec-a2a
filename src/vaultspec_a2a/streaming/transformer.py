@@ -39,7 +39,6 @@ from .translation import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "INTERRUPT_UPDATE_KEY",
     "STREAM_MODES",
     "EventProjectionServices",
     "StreamFrame",
@@ -50,7 +49,7 @@ __all__ = [
 ]
 
 #: The ``updates`` key LangGraph writes a parked run's interrupts under.
-INTERRUPT_UPDATE_KEY = "__interrupt__"
+_INTERRUPT_UPDATE_KEY = "__interrupt__"
 
 #: The stream modes this projection consumes, in the order they are requested.
 #: ``checkpoints`` is included because the run's own lifecycle reads it (the
@@ -116,7 +115,7 @@ def frame_reports_interrupt(frame: StreamFrame) -> bool:
     """
     payload = frame.payload
     if frame.mode == "updates" and isinstance(payload, dict):
-        return INTERRUPT_UPDATE_KEY in cast("dict[str, object]", payload)
+        return _INTERRUPT_UPDATE_KEY in cast("dict[str, object]", payload)
     if frame.mode == "tasks" and isinstance(payload, dict):
         return bool(cast("dict[str, object]", payload).get("interrupts"))
     return False

@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 from ..utils import is_single_regular_file
 from ._linux_helper import GROUP_OTHER_WRITE_BITS, PRIVILEGED_MODE_BITS
 
-__all__ = ["RESOLVER_TARGET", "ResolverData", "host_resolver_data", "parse_resolver"]
+__all__ = ["RESOLVER_TARGET", "host_resolver_data", "parse_resolver"]
 
 RESOLVER_TARGET = PurePosixPath("/etc/resolv.conf")
 _MAX_BYTES = 16384
@@ -50,7 +50,7 @@ _NUMERIC_OPTIONS = {"ndots": (0, 15), "timeout": (1, 30), "attempts": (1, 5)}
 
 
 @dataclass(frozen=True, slots=True)
-class ResolverData:
+class _ResolverData:
     nameservers: tuple[str, ...]
     search: tuple[str, ...]
     options: tuple[str, ...]
@@ -90,7 +90,7 @@ def _option(value: str) -> str:
     return value
 
 
-def parse_resolver(data: bytes) -> ResolverData:
+def parse_resolver(data: bytes) -> _ResolverData:
     """Refuse ambiguous/unsupported settings rather than silently changing DNS."""
     if len(data) > _MAX_BYTES:
         raise ValueError("native resolver data exceeds its bound")
@@ -127,7 +127,7 @@ def parse_resolver(data: bytes) -> ResolverData:
             raise ValueError("native resolver settings exceed their bound")
     if not nameservers:
         raise ValueError("native resolver requires an explicit nameserver")
-    return ResolverData(tuple(nameservers), search, tuple(options))
+    return _ResolverData(tuple(nameservers), search, tuple(options))
 
 
 def _resolver_owners(target: PurePosixPath) -> frozenset[int]:

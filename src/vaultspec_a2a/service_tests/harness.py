@@ -48,7 +48,6 @@ __all__ = [
     "COMPOSE_FILE",
     "INTERNAL_TOKEN",
     "REPO_ROOT",
-    "RETAINED_RUNTIME_DIRS",
     "RUNTIME_ROOT",
     "ServiceStack",
     "build_service_stack",
@@ -147,7 +146,7 @@ def _run_compose(
 _DIAGNOSTIC_LOG_TAIL_BYTES = 20000
 
 
-RETAINED_RUNTIME_DIRS = 5
+_RETAINED_RUNTIME_DIRS = 5
 """How many earlier service-test runtime directories survive beside the current one.
 
 Deleting a run's directory outright would destroy the compose logs and session
@@ -183,7 +182,7 @@ class ServiceStack:
         """Create the runtime directory at the point something will write to it."""
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         prune_stale_dirs(
-            RUNTIME_ROOT, kept_newest=RETAINED_RUNTIME_DIRS, keep=self.runtime_dir
+            RUNTIME_ROOT, kept_newest=_RETAINED_RUNTIME_DIRS, keep=self.runtime_dir
         )
 
     @property

@@ -56,7 +56,6 @@ if TYPE_CHECKING:
 __all__ = [
     "EngineSeatError",
     "engine_command",
-    "main",
     "resolve_data_seat",
     "serve",
 ]

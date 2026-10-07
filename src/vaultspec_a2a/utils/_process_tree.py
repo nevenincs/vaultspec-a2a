@@ -47,7 +47,10 @@ from .async_cleanup import complete_cleanup
 __all__ = [
     "POLL_INTERVAL",
     "ListenerOwnership",
+    "PortClaim",
     "classify_listener_ownership",
+    "classify_port_claim",
+    "classify_port_claim_async",
     "descendant_pids",
     "detached_spawn_kwargs",
     "kill_pid_tree_async",
@@ -367,11 +370,14 @@ class ListenerOwnership(StrEnum):
 def classify_listener_ownership(port: int, root_pid: int) -> ListenerOwnership:
     """Classify whether *root_pid*'s own tree holds the TCP listener on *port*.
 
-    The only "is this listener ours" gate. It reads the TCP sockets of the root
+    The only "is this listener ours" read. It reads the TCP sockets of the root
     and each of its descendants, never the host socket table, so it needs no
     elevation and a squatter that answers like ours still reads as ``OUTSIDE``.
-    It says nothing about whether anything listens on *port* at all; the
-    caller's connect probe establishes that.
+    It says nothing about whether anything listens on *port* at all, so a caller
+    deciding whether an occupant may receive a credential wants
+    :func:`classify_port_claim`, which folds in that connect probe; a caller with
+    its own policy for an unreadable tree, such as a non-HTTP role's bound-port
+    readiness fallback, reads the three verdicts here directly.
 
     A root that is already gone owns nothing, so it is ``OUTSIDE``. A tree member
     whose sockets cannot be read leaves the verdict ``UNRESOLVED`` unless another
@@ -407,6 +413,67 @@ def classify_listener_ownership(port: int, root_pid: int) -> ListenerOwnership:
     if unreadable:
         return ListenerOwnership.UNRESOLVED
     return ListenerOwnership.OUTSIDE
+
+
+class PortClaim(StrEnum):
+    """What a caller may do with whatever holds a loopback port.
+
+    The single credential gate: **only** :attr:`OURS` authorizes presenting a
+    credential to, adopting, or terminating the occupant. Everything else is a
+    conflict, and the two conflict members are kept apart for the diagnostic
+    only - a port read in full and found to be someone else's is a different
+    operator story from one that could not be read at all.
+
+    Folds the connect probe into :func:`classify_listener_ownership` because the
+    decision needs both halves and reading only one of them is how a free port
+    and a stranger's port came to look alike: ownership alone reports ``OUTSIDE``
+    for a port nobody holds, which must license a bind rather than a refusal.
+    """
+
+    FREE = "free"
+    """Nothing accepts on the port: it is clear to bind, and holds no occupant."""
+
+    OURS = "ours"
+    """The root or one of its descendants holds the listener."""
+
+    FOREIGN = "foreign"
+    """The root's whole tree was read and the listener is held outside it."""
+
+    UNRESOLVED = "unresolved"
+    """Part of the root's tree could not be read, so ownership was not established."""
+
+
+def _claim_for_held_port(port: int, root_pid: int) -> PortClaim:
+    """Map the ownership verdict for an occupied *port* onto its claim."""
+    match classify_listener_ownership(port, root_pid):
+        case ListenerOwnership.CONFIRMED:
+            return PortClaim.OURS
+        case ListenerOwnership.OUTSIDE:
+            return PortClaim.FOREIGN
+        case ListenerOwnership.UNRESOLVED:
+            return PortClaim.UNRESOLVED
+
+
+def classify_port_claim(port: int, root_pid: int, *, timeout: float) -> PortClaim:
+    """Classify *port*: unheld, held by *root_pid*'s tree, or held in conflict.
+
+    *timeout* bounds the connect probe only; the ownership read is a local
+    process query. A caller that already knows the port is occupied still goes
+    through here rather than calling the two halves itself, so "which occupants
+    may receive a credential" has exactly one answer in the package.
+    """
+    if not port_has_listener(port, timeout=timeout):
+        return PortClaim.FREE
+    return _claim_for_held_port(port, root_pid)
+
+
+async def classify_port_claim_async(
+    port: int, root_pid: int, *, timeout: float
+) -> PortClaim:
+    """The event-loop form of :func:`classify_port_claim`."""
+    if not await port_has_listener_async(port, timeout=timeout):
+        return PortClaim.FREE
+    return _claim_for_held_port(port, root_pid)
 
 
 def _posix_signal_all(pids: list[int], signal_number: int) -> None:

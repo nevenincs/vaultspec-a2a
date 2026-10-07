@@ -10,19 +10,31 @@ process, socket, or SQLite file.
 
 from __future__ import annotations
 
+import contextlib
+import http.server
 import json
 import socket
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import pytest
 
-from ...testing import free_port, run_cli
+from ...testing import (
+    DEFAULT_OWNERSHIP_CAPABILITY,
+    JsonReplyHandler,
+    free_port,
+    run_cli,
+    serve_handler,
+    settings_override,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
+from ...desktop._platform_acl import harden_credential_path
+from ...desktop.credentials import OWNERSHIP_CAPABILITY_NAME
 from ...desktop.profile import derive_state_paths
 from ...lifecycle.discovery import (
     read_resident_service,
@@ -31,6 +43,7 @@ from ...lifecycle.discovery import (
 )
 from ...utils._process_tree import pid_is_live, wait_pid_gone
 from ..service import (
+    ServiceVerbError,
     StartOptions,
     restart_service,
     service_status,
@@ -38,6 +51,53 @@ from ..service import (
     start_service,
     stop_service,
 )
+
+# A well-formed handoff credential, so the record resolves a real attach bearer
+# the way a live resident's does.
+_SERVICE_TOKEN = "stop-verb-service-token-0123456789"
+
+
+class _ReceivedRequest(TypedDict):
+    """One request the recorded endpoint's occupant actually received."""
+
+    method: str
+    path: str
+    authorization: str | None
+    capability: str | None
+
+
+@contextlib.contextmanager
+def _recording_occupant() -> Generator[tuple[int, list[_ReceivedRequest]]]:
+    """A real loopback listener that logs every request, including its headers.
+
+    The log is what separates "no credential was sent" from "no request was
+    sent", and the stop verb owes a foreign occupant the stronger of the two.
+    """
+    from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
+
+    received: list[_ReceivedRequest] = []
+
+    class _Handler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
+        def _record(self, method: str) -> None:
+            received.append(
+                {
+                    "method": method,
+                    "path": self.path,
+                    "authorization": self.headers.get("Authorization"),
+                    "capability": self.headers.get(LIFECYCLE_CAPABILITY_HEADER),
+                }
+            )
+
+        def do_GET(self) -> None:
+            self._record("GET")
+            self._reply(200, {"service": "gateway", "ready": True})
+
+        def do_POST(self) -> None:
+            self._record("POST")
+            self._reply_empty(202)
+
+    with serve_handler(_Handler) as port:
+        yield port, received
 
 
 def test_status_on_empty_home_reports_stopped(tmp_path: Path) -> None:
@@ -70,6 +130,47 @@ def test_status_with_dead_recorded_pid_reports_stopped(tmp_path: Path) -> None:
     status = service_status(home)
     assert status.state == "stopped"
     assert status.pid == dead.pid
+
+
+def test_stop_sends_nothing_to_an_endpoint_the_recorded_pid_does_not_own(
+    tmp_path: Path,
+) -> None:
+    """A recorded pid that does not hold the listener is a conflict, not a target.
+
+    The record names a live process and a real loopback endpoint, but a DIFFERENT
+    process holds that endpoint - the shape a pid-reused record, a crashed
+    resident whose port was taken, or an outright squatter produces. The stop
+    verb must confirm the recorded process owns the listener BEFORE it presents
+    the attach bearer or the receipt-bound lifecycle capability, so the occupant
+    receives no request at all; and because ownership was never established, the
+    recorded process is not felled either.
+    """
+    home = tmp_path / "home"
+    state = derive_state_paths(home)
+    state.credentials_dir.mkdir(parents=True, exist_ok=True)
+    capability = state.credentials_dir / OWNERSHIP_CAPABILITY_NAME
+    capability.write_text(DEFAULT_OWNERSHIP_CAPABILITY, encoding="utf-8")
+    harden_credential_path(capability)
+
+    # Live, and holding nothing: the record's pid must not be read as the owner
+    # of a listener merely because it is alive.
+    stranger = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        with _recording_occupant() as (port, received):
+            write_service_json(
+                service_json_path(home),
+                port=port,
+                pid=stranger.pid,
+                service_token=_SERVICE_TOKEN,
+            )
+            with settings_override(a2a_home=home), pytest.raises(ServiceVerbError):
+                stop_service(home)
+            seen_by_the_occupant = list(received)
+        assert seen_by_the_occupant == []
+        assert pid_is_live(stranger.pid) is True
+    finally:
+        stranger.kill()
+        stranger.wait(timeout=10)
 
 
 def test_setup_initialises_fresh_stores_and_is_idempotent(tmp_path: Path) -> None:

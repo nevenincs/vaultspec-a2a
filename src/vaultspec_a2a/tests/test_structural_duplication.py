@@ -80,15 +80,6 @@ _ACCEPTED: Final[tuple[frozenset[str], ...]] = (
             "thread/__init__.py::__getattr__",
         }
     ),
-    # Same repository, differing only in the column grouped by. Two named
-    # queries say which aggregate is being asked for at the call site; one
-    # parametrized query moves that into an argument the reader must resolve.
-    frozenset(
-        {
-            "database/artifact_repository.py::sum_cost_by_agent",
-            "database/artifact_repository.py::sum_cost_by_thread",
-        }
-    ),
     # Same module, differing in which debounced event kind is broadcast.
     frozenset(
         {

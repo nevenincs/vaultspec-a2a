@@ -2,8 +2,8 @@
 
 :mod:`vaultspec_a2a.database.models` defines SQLAlchemy models, and
 :mod:`vaultspec_a2a.database.session` owns asynchronous sessions. Repository
-modules manage audit logs, authoring cursors, the control action journal,
-deletion sagas, permissions, and threads.
+modules manage authoring cursors, cost records, the control action journal,
+deletion sagas, permissions and their decision log, and threads.
 
 Migration support belongs to :mod:`vaultspec_a2a.database.migrations`.
 Persistence stores :mod:`vaultspec_a2a.thread` state for
@@ -14,13 +14,6 @@ operation. This package re-exports the supported persistence API.
 """
 
 from ._helpers import save_model as save_model
-from .artifact_repository import append_cost_record as append_cost_record
-from .artifact_repository import append_permission_log as append_permission_log
-from .artifact_repository import (
-    get_permission_logs_by_thread as get_permission_logs_by_thread,
-)
-from .artifact_repository import sum_cost_by_agent as sum_cost_by_agent
-from .artifact_repository import sum_cost_by_thread as sum_cost_by_thread
 from .authoring_cursor_repository import (
     DEFAULT_SUBSCRIBER_ID as DEFAULT_SUBSCRIBER_ID,
 )
@@ -98,6 +91,9 @@ from .control_action_repository import reserve_control_action as reserve_control
 from .control_action_repository import (
     settle_control_action_lease as settle_control_action_lease,
 )
+from .cost_repository import append_cost_record as append_cost_record
+from .cost_repository import sum_cost_by_agent as sum_cost_by_agent
+from .cost_repository import sum_cost_by_thread as sum_cost_by_thread
 from .deletion_saga_repository import (
     claim_deletion_saga_row as claim_deletion_saga_row,
 )
@@ -136,11 +132,15 @@ from .permission_repository import PendingPermission as PendingPermission
 from .permission_repository import (
     actionable_pending_permissions as actionable_pending_permissions,
 )
+from .permission_repository import append_permission_log as append_permission_log
 from .permission_repository import (
     expire_pending_permission_requests as expire_pending_permission_requests,
 )
 from .permission_repository import (
     get_pending_permission_requests as get_pending_permission_requests,
+)
+from .permission_repository import (
+    get_permission_logs_by_thread as get_permission_logs_by_thread,
 )
 from .permission_repository import get_permission_request as get_permission_request
 from .permission_repository import (

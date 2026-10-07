@@ -60,7 +60,7 @@ from ...tests._write_authority import make_test_thread_authority_columns
 from ...thread.models import TokenUsageEntry
 from ...thread.state import merge_token_usage
 from ...worker.cost_port import SqlCostPort
-from ..artifact_repository import (
+from ..cost_repository import (
     append_cost_record,
     sum_cost_by_agent,
     sum_cost_by_thread,

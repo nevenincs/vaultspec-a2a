@@ -27,12 +27,14 @@ import httpx
 import pytest
 
 from ...database import get_thread
+from ...providers.provider_catalog import SELECTION_SCHEMA_VERSION
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     async_catalog_run_fields,
     async_run_start_body,
     serve_on_loopback,
 )
+from ..routes import PROVIDER_CATALOG_PATH
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
@@ -113,7 +115,7 @@ async def test_launch_freezes_the_served_catalog_entry(
         selection = cast("dict[str, Any]", fields["selection"])
         metadata = cast("dict[str, Any]", fields["metadata"])
         catalog = await client.get(
-            "/v1/provider-catalog",
+            PROVIDER_CATALOG_PATH,
             params={"workspace_root": metadata["workspace_root"]},
         )
         assert catalog.status_code == 200, catalog.text
@@ -356,7 +358,10 @@ async def test_run_start_persists_no_secrets_in_db_row(
 
     # The frozen selection record is persisted (restart reads it) ...
     persisted = json.loads(raw_metadata)
-    assert persisted["provider_catalog_selection"]["schema_version"] == 1
+    assert (
+        persisted["provider_catalog_selection"]["schema_version"]
+        == SELECTION_SCHEMA_VERSION
+    )
     assert persisted["provider_catalog_selection"]["roles"]
     # ... but no token, bearer, or credential material appears in the DB row.
     lowered = raw_metadata.lower()

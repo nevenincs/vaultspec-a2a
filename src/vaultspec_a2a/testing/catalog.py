@@ -61,6 +61,7 @@ declared, and the settings singleton must not be reached by that import.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -68,9 +69,10 @@ from typing import TYPE_CHECKING, Any, Final, cast
 import httpx
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
     from ..api.schemas.gateway import ProviderCatalogSelection
+    from ..conftest import ExternalPrerequisiteRule
     from ..graph.enums import Provider
     from ..providers import LaneRegistration
     from ..providers.provider_catalog import ProviderRecord, SelectionReference
@@ -88,8 +90,10 @@ __all__ = [
     "fetch_in_process_selection",
     "fetch_in_process_selection_at",
     "fetch_provider_catalog",
+    "in_process_lane_required",
     "in_process_lane_selection",
     "in_process_selection",
+    "is_selectable",
     "live_provider_catalog_selector_is_configured",
     "live_provider_override_selector_is_configured",
     "named_lane_selection",
@@ -97,8 +101,6 @@ __all__ = [
     "selection_from_served_catalog",
     "unvalidated_selection",
 ]
-
-_CATALOG_PATH: Final = "/v1/provider-catalog"
 
 # The first catalog read for a workspace probes every registered lane over real
 # subprocesses and sockets, so it legitimately outlasts the short budgets callers
@@ -128,6 +130,24 @@ class NoSelectableLaneError(RuntimeError):
     """
 
 
+@contextmanager
+def in_process_lane_required(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> Iterator[None]:
+    """Report a refusal to select an in-process lane as an absent prerequisite.
+
+    A stack that serves no selectable in-process lane did not arm them. That is a
+    fact about the environment under test rather than a defect in the code being
+    tested, so the repository's prerequisite rule decides between a skip and a
+    failure, naming what was served, instead of each caller choosing its own way
+    to report it.
+    """
+    try:
+        yield
+    except NoSelectableLaneError as exc:
+        external_prerequisite.absent("in-process-lanes", str(exc))
+
+
 def _lanes(payload: Any) -> list[dict[str, Any]]:
     """Return the served provider records, or fail naming what arrived instead."""
     if not isinstance(payload, dict):
@@ -146,7 +166,7 @@ def _lanes(payload: Any) -> list[dict[str, Any]]:
     return [record for record in providers if isinstance(record, dict)]
 
 
-def _is_selectable(record: dict[str, Any]) -> bool:
+def is_selectable(record: dict[str, Any]) -> bool:
     """Whether the gateway reports this lane as usable right now.
 
     Both terms matter and neither implies the other: a lane can be healthy while
@@ -207,7 +227,7 @@ def _served_summary(records: list[dict[str, Any]]) -> str:
     return (
         ", ".join(
             f"{record.get('provider_id')}/{record.get('execution_mode')}"
-            f"{'' if _is_selectable(record) else ' (not selectable)'}"
+            f"{'' if is_selectable(record) else ' (not selectable)'}"
             for record in records
         )
         or "nothing at all"
@@ -219,9 +239,7 @@ def _choose_in_process(
 ) -> ProviderCatalogSelection:
     records = _lanes(payload)
     candidates = [
-        record
-        for record in records
-        if _is_in_process(record) and _is_selectable(record)
+        record for record in records if _is_in_process(record) and is_selectable(record)
     ]
     if not candidates:
         from .lanes import armed_lane_environment
@@ -266,7 +284,7 @@ def _named_selection(
             f"({len(matching)} matches). Served: " + _served_summary(records)
         )
     record = matching[0]
-    if not _is_selectable(record):
+    if not is_selectable(record):
         raise NoSelectableLaneError(
             f"the lane {provider_id}/{execution_mode} is served but not currently "
             "selectable, or advertises no models"
@@ -340,9 +358,13 @@ def fetch_provider_catalog(
     timeout: float = _CATALOG_READ_TIMEOUT_S,
 ) -> Any:
     """Read the catalog the gateway serves for *workspace_root*."""
+    from ..api.routes import PROVIDER_CATALOG_PATH
+
     return _catalog_body(
         client.get(
-            _CATALOG_PATH, params={"workspace_root": workspace_root}, timeout=timeout
+            PROVIDER_CATALOG_PATH,
+            params={"workspace_root": workspace_root},
+            timeout=timeout,
         )
     )
 
@@ -354,9 +376,13 @@ async def async_fetch_provider_catalog(
     timeout: float = _CATALOG_READ_TIMEOUT_S,
 ) -> Any:
     """The async twin of :func:`fetch_provider_catalog`."""
+    from ..api.routes import PROVIDER_CATALOG_PATH
+
     return _catalog_body(
         await client.get(
-            _CATALOG_PATH, params={"workspace_root": workspace_root}, timeout=timeout
+            PROVIDER_CATALOG_PATH,
+            params={"workspace_root": workspace_root},
+            timeout=timeout,
         )
     )
 

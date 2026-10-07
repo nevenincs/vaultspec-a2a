@@ -20,6 +20,7 @@ from ...testing import (
 )
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
+from ..routes import PROVIDER_CATALOG_PATH
 from ..routes._gateway_run_start import _require_settled_predecessor
 from .conftest import SEATED_ATTACH_TOKEN, make_app
 
@@ -93,7 +94,7 @@ def _secured_app(session_factory: Any, checkpointer: Any) -> Any:
         ),
         (
             "GET",
-            "/v1/provider-catalog",
+            PROVIDER_CATALOG_PATH,
             {"params": {"workspace_root": "relative/workspace"}},
         ),
     ),
@@ -158,7 +159,7 @@ async def test_authenticated_caller_can_select_an_arbitrary_existing_root(
         headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
     ) as client:
         catalog = await client.get(
-            "/v1/provider-catalog", params={"workspace_root": str(workspace)}
+            PROVIDER_CATALOG_PATH, params={"workspace_root": str(workspace)}
         )
         presets = await client.get(
             "/v1/presets", params={"workspace_root": str(workspace)}
@@ -203,7 +204,7 @@ async def test_configured_unarmed_profile_confines_every_workspace_route(
         base_url="http://gateway.test",
         headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
     ) as client:
-        for route in ("/v1/provider-catalog", "/v1/presets", "/v1/runs"):
+        for route in (PROVIDER_CATALOG_PATH, "/v1/presets", "/v1/runs"):
             admitted = await client.get(
                 route, params={"workspace_root": str(workspace)}
             )
@@ -281,7 +282,7 @@ async def test_armed_desktop_confines_queries_and_run_admission(
             base_url="http://gateway.test",
             headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
         ) as client:
-            for route in ("/v1/provider-catalog", "/v1/presets", "/v1/runs"):
+            for route in (PROVIDER_CATALOG_PATH, "/v1/presets", "/v1/runs"):
                 allowed = await client.get(
                     route, params={"workspace_root": str(managed)}
                 )
@@ -350,7 +351,7 @@ async def test_configured_profile_refuses_symlink_escape(
     ) as client:
         fields = await async_catalog_run_fields(client, workspace_root=str(managed))
         response = await client.get(
-            "/v1/provider-catalog", params={"workspace_root": str(escape)}
+            PROVIDER_CATALOG_PATH, params={"workspace_root": str(escape)}
         )
         stage_responses = [
             await client.post(

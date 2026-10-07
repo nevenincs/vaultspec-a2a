@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from ...providers.in_process_catalog import BUILT_IN_LANES
+from ...providers.provider_catalog import SELECTION_SCHEMA_VERSION
 from ..catalog import (
     NoSelectableLaneError,
     in_process_selection,
@@ -142,7 +143,7 @@ def test_a_named_lane_carries_the_revision_the_catalog_just_served() -> None:
         controls={"effort": "low"},
     )
     assert selection == {
-        "schema_version": 1,
+        "schema_version": SELECTION_SCHEMA_VERSION,
         "provider_id": "codex",
         "execution_mode": "codex-app-server",
         "catalog_revision": "rev-99",

@@ -2,47 +2,25 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeChatModel
 
 from ...control.run_start_policy import required_role_ids
+from ...providers import ProviderFactory
 from ...providers.team_selection import FrozenLaneAssignment, freeze_team_selection
 from ...testing import in_process_lane_selection
 from ..enums import Provider
-from ..protocols import ProviderFactoryProtocol
 
 if TYPE_CHECKING:
     from ...team.team_config import TeamConfig
-
-# ---------------------------------------------------------------------------
-# Layer 1 test stub — avoids importing the Layer 2 ProviderFactory
-# ---------------------------------------------------------------------------
-
-
-class _StubProviderFactory:
-    """Returns a ``FakeChatModel`` for any provider."""
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeChatModel:
-        _kwargs: dict[str, Any] = {"responses": ["stub response"]}
-        return FakeChatModel(**_kwargs)
+    from ..protocols import ProviderFactoryProtocol
 
 
 @pytest.fixture
 def pf() -> ProviderFactoryProtocol:
-    """Stub provider factory for graph compilation tests (Layer 1 only)."""
-    factory = _StubProviderFactory()
-    assert isinstance(factory, ProviderFactoryProtocol)
-    return factory
+    """The real provider factory, which serves the deterministic lane in tests."""
+    return ProviderFactory()
 
 
 def deterministic_model_assignment(

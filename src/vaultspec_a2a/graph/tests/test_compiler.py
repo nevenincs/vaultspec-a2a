@@ -8,17 +8,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
-from langchain_core.language_models.fake_chat_models import (
-    FakeChatModel,
-    FakeListChatModel,
-)
+from langchain_core.callbacks import AsyncCallbackHandler
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 from langgraph.types import RetryPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from uuid import UUID
 
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import BaseMessage
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...thread.state import TeamState
@@ -109,6 +109,63 @@ def _pipeline_team() -> TeamConfig:
     )
 
 
+class _ObservedFactory:
+    """The real provider factory, with every request it receives recorded.
+
+    A model named in *unavailable* is refused the way a lane whose runtime has
+    gone away refuses, so the frozen fallback chain can be driven through the
+    factory a run really uses.
+    """
+
+    def __init__(self, *, unavailable: frozenset[str] = frozenset()) -> None:
+        self._factory = ProviderFactory()
+        self._unavailable = unavailable
+        self.calls: list[dict[str, Any]] = []
+
+    def create(
+        self,
+        provider: Any,
+        *,
+        model: Any,
+        agent_config: Any | None = None,
+        workspace_root: Any | None = None,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        self.calls.append(
+            {
+                "provider": provider,
+                "model": model,
+                "agent_config": agent_config,
+                "workspace_root": workspace_root,
+            }
+        )
+        if model in self._unavailable:
+            raise ProviderRuntimeUnavailableError(
+                "current lane is temporarily unavailable"
+            )
+        return self._factory.create(
+            provider,
+            model=model,
+            agent_config=agent_config,
+            workspace_root=workspace_root,
+            **kwargs,
+        )
+
+
+def _deterministic_lane(model_name: str) -> dict[str, Any]:
+    """One frozen deterministic lane record, selected under *model_name*."""
+    return {
+        "schema_version": 1,
+        "provider_id": Provider.DETERMINISTIC.value,
+        "execution_mode": "in-process-deterministic",
+        "catalog_revision": "rev",
+        "entry_id": model_name,
+        "model_name": model_name,
+        "controls": [],
+        "defaulted_control_ids": [],
+    }
+
+
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
     ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
@@ -182,44 +239,12 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
     worker = team.workers[0]
     agent = load_agent_config(worker.agent_id)
 
-    class RuntimeFailingFactory:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        def create(
-            self, provider: Any, *, model: str, **kwargs: Any
-        ) -> FakeListChatModel:
-            self.calls.append(model)
-            if model == "primary":
-                raise ProviderRuntimeUnavailableError(
-                    "current lane is temporarily unavailable"
-                )
-            return FakeListChatModel(responses=["ok"])
-
-    factory = RuntimeFailingFactory()
+    factory = _ObservedFactory(unavailable=frozenset({"primary"}))
     lane = FrozenLaneAssignment.model_validate(
         {
-            "schema_version": 1,
-            "provider_id": "codex",
-            "execution_mode": "codex-app-server",
-            "catalog_revision": "rev",
-            "entry_id": "primary",
-            "model_name": "primary",
-            "controls": [],
-            "defaulted_control_ids": [],
+            **_deterministic_lane("primary"),
             "provenance": {"selection_source": "team_selection"},
-            "fallbacks": [
-                {
-                    "schema_version": 1,
-                    "provider_id": "codex",
-                    "execution_mode": "codex-app-server",
-                    "catalog_revision": "rev",
-                    "entry_id": "fallback",
-                    "model_name": "fallback",
-                    "controls": [],
-                    "defaulted_control_ids": [],
-                }
-            ],
+            "fallbacks": [_deterministic_lane("fallback")],
         }
     )
     _model, provider, model_name = resolve_model_for_worker(
@@ -229,8 +254,8 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
         provider_factory=factory,
         frozen_assignment={worker.agent_id: lane},
     )
-    assert factory.calls == ["primary", "fallback"]
-    assert provider is Provider.CODEX
+    assert [call["model"] for call in factory.calls] == ["primary", "fallback"]
+    assert provider is Provider.DETERMINISTIC
     assert model_name == "fallback"
 
 
@@ -312,16 +337,7 @@ def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() ->
     worker = team.workers[0]
     agent = load_agent_config(worker.agent_id)
 
-    class RecordingFactory:
-        calls = 0
-
-        def create(
-            self, provider: Any, *, model: str, **kwargs: Any
-        ) -> FakeListChatModel:
-            self.calls += 1
-            return FakeListChatModel(responses=["must not run"])
-
-    factory = RecordingFactory()
+    factory = _ObservedFactory()
     lane = FrozenLaneAssignment.model_validate(
         {
             "schema_version": 1,
@@ -355,7 +371,7 @@ def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() ->
             provider_factory=factory,
             frozen_assignment={worker.agent_id: lane},
         )
-    assert factory.calls == 0
+    assert factory.calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -416,17 +432,7 @@ async def test_compile_prevalidates_all_roles_before_any_provider_contact(
         update={"execution_mode": "codex-app-server"}
     )
 
-    class RecordingFactory:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def create(
-            self, provider: Any, *, model: str, **kwargs: Any
-        ) -> FakeListChatModel:
-            self.calls += 1
-            return FakeListChatModel(responses=["must not run"])
-
-    factory = RecordingFactory()
+    factory = _ObservedFactory()
     with pytest.raises(ValueError, match="cannot execute mode"):
         compile_team_graph(
             team_config=team,
@@ -435,7 +441,7 @@ async def test_compile_prevalidates_all_roles_before_any_provider_contact(
             provider_factory=factory,
             model_assignment=assignment,
         )
-    assert factory.calls == 0
+    assert factory.calls == []
 
 
 @pytest.mark.asyncio
@@ -487,17 +493,7 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
             update={"fallbacks": (duplicate_effort,)}
         )
 
-    class RecordingFactory:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def create(
-            self, provider: Any, *, model: str, **kwargs: Any
-        ) -> FakeListChatModel:
-            self.calls += 1
-            return FakeListChatModel(responses=["must not run"])
-
-    factory = RecordingFactory()
+    factory = _ObservedFactory()
     with pytest.raises(ValueError, match=r"native.?control"):
         compile_team_graph(
             team_config=team,
@@ -506,7 +502,7 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
             provider_factory=factory,
             model_assignment=assignment,
         )
-    assert factory.calls == 0
+    assert factory.calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -1000,34 +996,10 @@ async def test_compile_team_graph_passes_supervisor_agent_config_to_provider_fac
     checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Supervisor model resolution must preserve the supervisor agent identity."""
-
-    class _RecordingProviderFactory:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
-
-        def create(
-            self,
-            provider: object,
-            *,
-            model: object | None = None,
-            agent_config: object | None = None,
-            workspace_root: object | None = None,
-            **kwargs: object,
-        ) -> FakeChatModel:
-            self.calls.append(
-                {
-                    "provider": provider,
-                    "model": model,
-                    "agent_config": agent_config,
-                    "workspace_root": workspace_root,
-                }
-            )
-            return FakeChatModel()
-
-    team = load_team_config("mock-supervisor-human-in-loop")
+    team = load_team_config("deterministic-supervisor-routing")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_cfg = load_agent_config("vaultspec-supervisor")
-    factory = _RecordingProviderFactory()
+    factory = _ObservedFactory()
 
     graph = compile_team_graph(
         team_config=team,
@@ -1405,7 +1377,7 @@ async def test_every_model_backed_node_carries_the_production_retry_policy(
         ),
         worker_ids=["vaultspec-plan-author", "vaultspec-coder"],
     )
-    research_adr = load_team_config("vaultspec-adr-research-mock")
+    research_adr = load_team_config("vaultspec-adr-research-deterministic")
 
     cases: list[tuple[str, Any, dict[str, Any]]] = [
         ("pipeline", _pipeline_team(), {}),
@@ -1443,8 +1415,27 @@ async def test_every_model_backed_node_carries_the_production_retry_policy(
         )
 
 
+class _TurnRecorder(AsyncCallbackHandler):
+    """Records the exact message list of every chat-model turn it observes."""
+
+    def __init__(self) -> None:
+        self.turns: list[list[BaseMessage]] = []
+
+    @override
+    async def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list[list[BaseMessage]],
+        *,
+        run_id: UUID,
+        **kwargs: Any,
+    ) -> None:
+        del serialized, run_id, kwargs
+        self.turns.extend(list(batch) for batch in messages)
+
+
 @pytest.mark.asyncio
-async def test_research_producer_injects_scoped_conventions(tmp_path: Any) -> None:
+async def test_research_producer_injects_scoped_conventions(tmp_path: Path) -> None:
     """The researcher's model turn receives the role-scoped bundled conventions.
 
     The researcher is the fourth research_adr document persona but runs through
@@ -1452,31 +1443,17 @@ async def test_research_producer_injects_scoped_conventions(tmp_path: Any) -> No
     behavior that wires the scoped document-authoring conventions into its turn so
     it is not conventions-blind.
     """
-    from typing import cast
-
-    from langchain_core.messages import AIMessage, BaseMessage
-    from langchain_core.outputs import ChatGeneration, ChatResult
-
-    captured: dict[str, list[BaseMessage]] = {}
-
-    class _RecordingModel(FakeChatModel):
-        @override
-        async def _agenerate(
-            self,
-            messages: Any,
-            stop: Any = None,
-            run_manager: Any = None,
-            **kwargs: Any,
-        ) -> ChatResult:
-            captured["messages"] = list(messages)
-            return ChatResult(
-                generations=[ChatGeneration(message=AIMessage(content="finding"))]
-            )
+    recorder = _TurnRecorder()
+    model = ProviderFactory().create(
+        Provider.DETERMINISTIC,
+        model="deterministic",
+        agent_config=load_agent_config("vaultspec-researcher"),
+    )
 
     # A bare tmp workspace with no .vaultspec rules: the scoped conventions can
     # only arrive from the shipped bundled default.
     producer = _make_research_producer(
-        cast("Any", _RecordingModel()),
+        model.model_copy(update={"callbacks": [recorder]}),
         "RESEARCHER SYSTEM PROMPT",
         workspace_root=tmp_path,
     )
@@ -1485,7 +1462,8 @@ async def test_research_producer_injects_scoped_conventions(tmp_path: Any) -> No
         {"thread_id": "t", "topic": "x", "instructions": "y"},
     )
 
-    texts = "\n".join(str(m.content) for m in captured["messages"])
+    assert len(recorder.turns) == 1
+    texts = "\n".join(str(m.content) for m in recorder.turns[0])
     assert "RESEARCHER SYSTEM PROMPT" in texts
     # A stable heading from the bundled document-authoring conventions.
     assert "Emission mechanics" in texts

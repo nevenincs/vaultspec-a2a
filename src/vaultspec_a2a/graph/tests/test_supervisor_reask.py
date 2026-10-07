@@ -21,6 +21,7 @@ from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from ...domain_config import domain_config
+from ...providers import ProviderFactory
 from ...team.team_config import (
     TeamConfig,
     TeamGraphConfig,
@@ -609,7 +610,7 @@ def test_a_star_preset_too_short_for_its_finish_budget_is_refused() -> None:
         compile_team_graph(
             team_config=team,
             agent_configs={a: load_agent_config(a) for a in workers},
-            provider_factory=_ScriptedFactory(["FINISH"]),
+            provider_factory=ProviderFactory(),
             model_assignment=deterministic_model_assignment(team),
             checkpointer=InMemorySaver(),
         )
@@ -628,7 +629,7 @@ def test_a_star_preset_at_the_required_limit_compiles() -> None:
     assert compile_team_graph(
         team_config=team,
         agent_configs={a: load_agent_config(a) for a in workers},
-        provider_factory=_ScriptedFactory(["FINISH"]),
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
     )
@@ -648,7 +649,7 @@ def test_a_star_team_that_cannot_spend_the_budget_is_not_held_to_it() -> None:
     assert compile_team_graph(
         team_config=team,
         agent_configs={a: load_agent_config(a) for a in workers},
-        provider_factory=_ScriptedFactory(["FINISH"]),
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
     )

@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessageChunk, BaseMessageChunk
 
 from ...graph.enums import ToolCallStatus
 from ...providers._codex_protocol import _completed_action_chunk
+from ...thread.enums import ThreadStatus
 from ...thread.snapshots import ThreadStateData
 from ..snapshot import MinimalState, enrich_snapshot_from_state
 
@@ -50,7 +51,9 @@ def _state_with_messages(*messages: object) -> MinimalState:
 
 
 def _snapshot(thread_id: str = "thread-1") -> ThreadStateData:
-    return ThreadStateData(thread_id=thread_id, status="completed", last_sequence=1)
+    return ThreadStateData(
+        thread_id=thread_id, status=ThreadStatus.COMPLETED, last_sequence=1
+    )
 
 
 class TestSettledSnapshotReachesTerminalToolCallStatus:
@@ -154,7 +157,7 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
         call = result.tool_calls[0]
         assert call.status == str(ToolCallStatus.COMPLETED)
         assert call.locations, "expected the changed file paths as locations"
-        paths = {loc["path"] for loc in call.locations}
+        paths = {loc.path for loc in call.locations}
         assert paths == {"src/module.py", "README.md"}
 
     def test_a_genuine_tool_node_call_still_correlates_against_tool_message(

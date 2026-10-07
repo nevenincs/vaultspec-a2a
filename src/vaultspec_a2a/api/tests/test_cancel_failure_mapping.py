@@ -15,6 +15,7 @@ from ...control.action_lease import ControlActionOutcome
 from ...thread.cancel_policy import can_cancel
 from ...thread.dispatch_policy import FailureType
 from .._dispatch_refusals import refused_outcome
+from ..schemas.gateway import RunMessageRefusalCode, RunMessageRefusalDetail
 
 
 def _result(
@@ -109,8 +110,9 @@ class TestSettledRunIsNotAnUpstreamFailure:
         # body names it by code; the message names the state, so a caller
         # learns to re-read the run rather than to retry a request that can
         # never succeed.
-        assert refused.detail["code"] == FailureType.TERMINAL.value
-        assert status in refused.detail["message"]
+        body = RunMessageRefusalDetail.model_validate(refused.detail)
+        assert body.code is RunMessageRefusalCode.TERMINAL
+        assert status in body.message
 
     def test_a_dispatch_failure_is_still_a_bad_gateway(self) -> None:
         """The narrowing must not swallow the case 502 is genuinely for."""
@@ -155,4 +157,5 @@ class TestSettledRunIsNotAnUpstreamFailure:
         )
 
         assert refused is not None
-        assert refused.detail["message"] == "Cannot cancel thread in 'failed' state"
+        body = RunMessageRefusalDetail.model_validate(refused.detail)
+        assert body.message == "Cannot cancel thread in 'failed' state"

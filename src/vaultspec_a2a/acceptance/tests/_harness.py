@@ -64,7 +64,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CertifiedGateway(GatewayVerbs):
     """An authenticated handle to one running broker certification stack.
 

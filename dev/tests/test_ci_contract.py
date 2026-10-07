@@ -103,14 +103,14 @@ def test_ci_contract() -> None:
         == STRICT_SENTINELS
     )
 
-    lint_all = lint.find("all")
+    lint_all = LINT.find("all")
     assert lint_all is not None
     lint_all_targets = tuple(
         step.target for step in lint_all.steps if isinstance(step, Ref)
     )
 
     for name in STRICT_SENTINELS:
-        target = lint.find(name)
+        target = LINT.find(name)
         assert target is not None
         assert not target.advisory
         workflow_steps = _run_steps(steps, f"just check-{name}")
@@ -119,7 +119,7 @@ def test_ci_contract() -> None:
         assert workflow_step.get("if") == "${{ !cancelled() }}"
         assert workflow_step.get("continue-on-error") is (name not in lint_all_targets)
 
-    duplication = audit.find("duplication")
+    duplication = AUDIT.find("duplication")
     assert duplication is not None
     assert not duplication.advisory
     assert "duplication" not in lint_all_targets
@@ -128,7 +128,7 @@ def test_ci_contract() -> None:
     assert duplication_steps[0].get("if") == "${{ !cancelled() }}"
     assert duplication_steps[0].get("continue-on-error") is True
 
-    type_platforms = lint.find("type-platforms")
+    type_platforms = LINT.find("type-platforms")
     assert type_platforms is not None
     assert not type_platforms.keep_going
     assert len(type_platforms.steps) == 1
@@ -142,7 +142,7 @@ def test_ci_contract() -> None:
         "--platforms",
     )
 
-    ci_all = ci.find("all")
+    ci_all = CI.find("all")
     assert ci_all is not None
     ci_steps = ci_all.steps
     vault_index = next(

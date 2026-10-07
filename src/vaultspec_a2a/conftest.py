@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import pytest
 import pytest_asyncio
@@ -995,11 +995,14 @@ async def engine(
     timeout=...)`` on the test, its class or its module chooses a
     :class:`SqlitePosture` and the driver's lock wait in seconds.
     """
-    marker = request.node.get_closest_marker(SQLITE_ENGINE_MARK)
-    posture = (
+    # pytest leaves ``FixtureRequest.node`` unannotated; for a function-scoped
+    # fixture it is the requesting test item.
+    node = cast("pytest.Item", request.node)
+    marker = node.get_closest_marker(SQLITE_ENGINE_MARK)
+    posture: SqlitePosture = (
         marker.args[0] if marker is not None and marker.args else SqlitePosture.DRIVER
     )
-    timeout = marker.kwargs.get("timeout") if marker is not None else None
+    timeout: float | None = marker.kwargs.get("timeout") if marker is not None else None
     eng = _sqlite_engine(database_file, posture, timeout=timeout)
     yield eng
     await eng.dispose()

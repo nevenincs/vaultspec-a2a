@@ -89,27 +89,21 @@ def _relay_permission_request(
     client: TestClient, *, thread_id: str, request_id: str, description: str
 ) -> None:
     """Relay one permission request through the route the worker posts to."""
-    response = client.post(
-        "/internal/events/batch",
-        json={
-            "events": [
-                {
-                    "thread_id": thread_id,
-                    "ts": 1.0,
-                    "payload": {
-                        "type": "permission_request",
-                        "event_type": "permission_request",
-                        "thread_id": thread_id,
-                        "agent_id": "vaultspec-coder",
-                        "request_id": request_id,
-                        "description": description,
-                        "options": [],
-                        "sequence": 1,
-                    },
-                }
-            ]
+    envelope: JsonObject = {
+        "thread_id": thread_id,
+        "ts": 1.0,
+        "payload": {
+            "type": "permission_request",
+            "event_type": "permission_request",
+            "thread_id": thread_id,
+            "agent_id": "vaultspec-coder",
+            "request_id": request_id,
+            "description": description,
+            "options": [],
+            "sequence": 1,
         },
-    )
+    }
+    response = client.post("/internal/events/batch", json={"events": [envelope]})
     assert response.status_code == 200, response.text
 
 

@@ -62,12 +62,12 @@ import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 import httpx
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
 
     from ..api.schemas.gateway import ProviderCatalogSelection
     from ..conftest import ExternalPrerequisiteRule
@@ -117,6 +117,34 @@ type _SelectionKey = tuple[str, str]
 _SELECTION_CACHE: dict[_SelectionKey, ProviderCatalogSelection] = {}
 
 
+class _CatalogResponse(Protocol):
+    """The part of a catalog reply the read consumes."""
+
+    @property
+    def status_code(self) -> int: ...
+
+    @property
+    def text(self) -> str: ...
+
+    def json(self) -> Any: ...
+
+
+class _CatalogClient(Protocol):
+    """The part of a synchronous HTTP client the catalog read uses.
+
+    Structural rather than ``httpx.Client`` because the in-process tiers hold
+    Starlette's ``TestClient``, which is built on ``httpx2`` and so shares no
+    nominal base with an ``httpx`` client while answering the same calls.
+    """
+
+    @property
+    def base_url(self) -> object: ...
+
+    def get(
+        self, url: str, /, *, params: Mapping[str, str], timeout: float
+    ) -> _CatalogResponse: ...
+
+
 class NoSelectableLaneError(RuntimeError):
     """The served catalog offers no lane matching what the caller asked for.
 
@@ -131,7 +159,7 @@ class NoSelectableLaneError(RuntimeError):
 @contextmanager
 def in_process_lane_required(
     external_prerequisite: ExternalPrerequisiteRule,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Report a refusal to select an in-process lane as an absent prerequisite.
 
     A stack that serves no selectable in-process lane did not arm them. That is a
@@ -204,7 +232,8 @@ def _selection(
     from ..api.schemas.gateway import ProviderCatalogSelection
     from ..providers.provider_catalog import SELECTION_SCHEMA_VERSION
 
-    revision = (record["catalog"].get("state") or {}).get("revision")
+    state: dict[str, Any] = record["catalog"].get("state") or {}
+    revision = state.get("revision")
     if not revision:
         raise NoSelectableLaneError(
             f"the lane {record.get('provider_id')}/{record.get('execution_mode')} "
@@ -333,7 +362,7 @@ def named_lane_selection(
 
 
 def fetch_provider_catalog(
-    client: httpx.Client,
+    client: _CatalogClient,
     workspace_root: str,
     *,
     timeout: float = _CATALOG_READ_TIMEOUT_S,
@@ -368,7 +397,7 @@ async def async_fetch_provider_catalog(
     )
 
 
-def _catalog_body(response: httpx.Response) -> Any:
+def _catalog_body(response: _CatalogResponse) -> Any:
     assert response.status_code == 200, (
         f"the gateway could not serve its provider catalog: "
         f"{response.status_code} {response.text}"
@@ -377,13 +406,13 @@ def _catalog_body(response: httpx.Response) -> Any:
 
 
 def _selection_key(
-    client: httpx.Client | httpx.AsyncClient, workspace_root: str
+    client: _CatalogClient | httpx.AsyncClient, workspace_root: str
 ) -> _SelectionKey:
     return (str(client.base_url), workspace_root)
 
 
 def fetch_in_process_selection(
-    client: httpx.Client,
+    client: _CatalogClient,
     workspace_root: str,
     *,
     cache: bool = False,
@@ -447,7 +476,7 @@ def fetch_in_process_selection_at(
 
 
 def catalog_run_fields(
-    client: httpx.Client, *, workspace_root: str | None = None
+    client: _CatalogClient, *, workspace_root: str | None = None
 ) -> dict[str, Any]:
     """Return the run-start fields an explicit catalog selection now requires.
 

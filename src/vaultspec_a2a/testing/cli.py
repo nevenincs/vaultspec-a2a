@@ -15,7 +15,7 @@ test has named the variables it cares about.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from ..utils.runtime_exec import CLI_MODULE, self_command
 from .children import run_child
@@ -81,7 +81,17 @@ def clean_subprocess_environment() -> dict[str, str]:
     )
 
 
-def combined_output(result: subprocess.CompletedProcess[str]) -> str:
+class _CapturedOutput(Protocol):
+    """A finished child's captured text streams, however its runner records them."""
+
+    @property
+    def stdout(self) -> str: ...
+
+    @property
+    def stderr(self) -> str: ...
+
+
+def combined_output(result: _CapturedOutput) -> str:
     """*result*'s standard output followed by its standard error."""
     return result.stdout + result.stderr
 

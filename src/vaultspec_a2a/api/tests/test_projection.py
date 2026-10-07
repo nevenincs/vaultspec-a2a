@@ -22,7 +22,7 @@ from ...database import (
     record_thread_execution_state,
 )
 from ...tests._write_authority import make_test_write_authority
-from ...thread.enums import DegradedReason, RepairStatus
+from ...thread.enums import DegradedReason, RepairStatus, ThreadStatus
 from ...thread.snapshots import (
     CheckpointProjection,
     ExecutionStateProjection,
@@ -159,7 +159,7 @@ def test_a_checkpoint_only_permission_is_flagged_rather_than_merged() -> None:
     """
     snapshot = ThreadStateData(
         thread_id="thread-1",
-        status="input_required",
+        status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
     )
     projection = CheckpointProjection(
@@ -238,7 +238,7 @@ def test_apply_checkpoint_projection_discards_runtime_corrupt_interrupt_payload(
     """A corrupt checkpoint payload cannot surface an actionable interrupt."""
     snapshot = ThreadStateData(
         thread_id="thread-corrupt-interrupt",
-        status="input_required",
+        status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
     )
     projection = CheckpointProjection(
@@ -272,7 +272,7 @@ def test_apply_checkpoint_projection_merges_clarification_request() -> None:
     """
     snapshot = ThreadStateData(
         thread_id="thread-1",
-        status="input_required",
+        status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
     )
     projection = CheckpointProjection(
@@ -320,7 +320,7 @@ def test_apply_checkpoint_projection_uses_later_valid_clarification_sibling() ->
     """A corrupt clarification interrupt must not hide a later valid sibling."""
     snapshot = ThreadStateData(
         thread_id="thread-corrupt-clarification-sibling",
-        status="input_required",
+        status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
     )
     projection = CheckpointProjection(
@@ -457,7 +457,7 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
 
         snapshot = ThreadStateData(
             thread_id=thread.id,
-            status=thread.status,
+            status=ThreadStatus(thread.status),
             last_sequence=0,
         )
         projected = await enrich_snapshot_from_durable_state(
@@ -476,7 +476,7 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     """Durable execution-state projection should enrich reconnect snapshots."""
     snapshot = ThreadStateData(
         thread_id="thread-1",
-        status="running",
+        status=ThreadStatus.RUNNING,
         last_sequence=0,
     )
     projection = ExecutionStateProjection(
@@ -534,7 +534,7 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
 
         snapshot = ThreadStateData(
             thread_id="thread-1",
-            status=thread.status,
+            status=ThreadStatus(thread.status),
             last_sequence=0,
             checkpoint_id="cp-new",
         )
@@ -587,7 +587,7 @@ async def test_degraded_only_projection_keeps_the_prior_lineage(
 
         snapshot = ThreadStateData(
             thread_id="thread-degraded-only",
-            status=thread.status,
+            status=ThreadStatus(thread.status),
             last_sequence=0,
         )
         snapshot = await enrich_snapshot_from_execution_state(
@@ -636,7 +636,7 @@ async def test_unreadable_execution_state_requires_operator_intervention(
 
         snapshot = ThreadStateData(
             thread_id=thread.id,
-            status=thread.status,
+            status=ThreadStatus(thread.status),
             last_sequence=0,
         )
         snapshot = await enrich_snapshot_from_execution_state(

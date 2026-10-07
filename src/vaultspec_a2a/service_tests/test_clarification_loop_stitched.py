@@ -385,11 +385,15 @@ def _start_document_run(
     The target feature rides in the run metadata, which run-start reads when the
     request names no top-level feature.
     """
+
+    def served(_workspace: str) -> JsonObject:
+        return selection
+
     verbs = replace(
         gateway.runs,
         team_preset=_CLARIFY_PRESET,
         workspace_root=str(_WORKSPACE_ROOT),
-        selection=lambda _workspace: selection,
+        selection=served,
         tokens=role_tokens(_required_roles()),
     )
     return verbs.start(

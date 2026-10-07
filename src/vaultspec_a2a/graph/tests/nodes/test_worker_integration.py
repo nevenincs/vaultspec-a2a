@@ -71,6 +71,7 @@ async def test_acp_worker_records_initialized_subprocess_identity(
     """A real ACP subprocess records initialize and session/new before its prompt."""
     from ....database.models import ProviderRuntimeIdentityModel
     from ....database.thread_repository import create_thread
+    from ....providers._factory_commands import ProviderCommand
     from ....providers.acp_chat_model import AcpChatModel
     from ....providers.binary_version import probe_binary_version
     from ....thread.enums import ThreadStatus
@@ -84,12 +85,19 @@ async def test_acp_worker_records_initialized_subprocess_identity(
             status=ThreadStatus.RUNNING,
         )
         await session.commit()
+    command = simulator_command("--response", "pong")
     model = AcpChatModel(
-        command=simulator_command("--response", "pong"),
-        command_target=str(ACP_SIMULATOR_PATH),
+        command=command,
+        provider_command=ProviderCommand(
+            argv=tuple(command),
+            runtime_authority="test_subprocess",
+            command_origin="test_subprocess",
+            command_kind="acp_simulator",
+            command_executable=Path(PYTHON_EXE).name,
+            command_target=str(ACP_SIMULATOR_PATH),
+        ),
         provider="kimi",
         execution_mode="kimi-code-acp",
-        runtime_authority="test_subprocess",
         auth_mode="test",
         acp_family="kimi",
         env_vars={},

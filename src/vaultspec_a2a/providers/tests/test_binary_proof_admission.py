@@ -235,6 +235,14 @@ async def test_model_rechecks_changed_launcher_before_child_spawn(
     assert probe_binary_version(launcher) == proof.proved_version
     model = CodexChatModel(
         command=[str(launcher), "app-server"],
+        provider_command=ProviderCommand(
+            argv=(str(launcher), "app-server"),
+            runtime_authority="system_cli",
+            command_origin="system_path_executable",
+            command_kind="codex_cli",
+            command_executable=launcher.name,
+            command_target=str(launcher),
+        ),
         workspace_root=str(tmp_path),
         version_proof_required=True,
     )

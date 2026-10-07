@@ -27,7 +27,8 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.event_handlers import CheckpointPruneRegistry
 from ...database import create_thread
-from ...providers.in_process_catalog import in_process_catalog_key, in_process_lanes
+from ...providers.in_process_catalog import in_process_catalog_key
+from ...providers.lane_registry import registered_lanes
 from ...streaming import RelayHub
 from ...testing import LaneInventoryFactory, adopted_spawner
 from ...tests._write_authority import make_test_write_authority
@@ -227,7 +228,7 @@ def _in_process_only(
     served: tuple[ProviderCatalogRegistration, ...],
 ) -> tuple[ProviderCatalogRegistration, ...]:
     """Keep production's in-process registrations, so no provider CLI is probed."""
-    in_process = {in_process_catalog_key(lane) for lane in in_process_lanes()}
+    in_process = {in_process_catalog_key(lane) for lane in registered_lanes()}
     return tuple(
         registration for registration in served if registration.key in in_process
     )

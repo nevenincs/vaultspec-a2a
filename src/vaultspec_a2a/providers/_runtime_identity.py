@@ -10,10 +10,12 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
     from ..graph.protocols import RuntimeIdentityPort
+    from ._factory_commands import ProviderCommand
 
 __all__ = [
     "RuntimeIdentityBinding",
     "bind_model_runtime_identity",
+    "identity_command",
     "identity_path",
     "identity_text",
 ]
@@ -46,6 +48,13 @@ def bind_model_runtime_identity(
     if not thread_id:
         raise ValueError("provider runtime identity requires a run thread ID")
     return model.with_runtime_identity(RuntimeIdentityBinding(thread_id, port))
+
+
+def identity_command(command: ProviderCommand | None) -> ProviderCommand:
+    """Require the classified launch a model's runtime evidence is read from."""
+    if command is None:
+        raise ValueError("provider runtime command classification is unavailable")
+    return command
 
 
 def identity_text(value: object, *, field: str, maximum: int = 128) -> str:

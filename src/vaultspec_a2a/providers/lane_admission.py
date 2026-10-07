@@ -89,7 +89,8 @@ from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .binary_version import next_minor_version, parse_binary_version
 from .execution_modes import EXTERNAL_EXECUTION_MODES
-from .in_process_catalog import in_process_catalog_key, in_process_lanes
+from .in_process_catalog import in_process_catalog_key
+from .lane_registry import registered_lanes
 from .provider_catalog import ProviderCatalogKey
 
 if TYPE_CHECKING:
@@ -333,7 +334,7 @@ def is_catalog_lane_admissible(key: ProviderCatalogKey) -> bool:
     second place for a renamed execution mode to be forgotten.
     """
     return key in PROVEN_CATALOG_TURN_LANES or any(
-        in_process_catalog_key(lane) == key for lane in in_process_lanes()
+        in_process_catalog_key(lane) == key for lane in registered_lanes()
     )
 
 

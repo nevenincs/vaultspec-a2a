@@ -345,12 +345,7 @@ def _config_with_authoring(workspace_root: str) -> AcpModelConfig:
         allowed_tools=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
     )
 

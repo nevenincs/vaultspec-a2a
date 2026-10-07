@@ -3,8 +3,10 @@
 Every frame this client puts on an agent's stdin is built here: a request for a
 call the client initiates, a result or an error for a server-initiated call the
 client answers. ``encode_frame`` is the one serialization of a frame to its
-newline-delimited line, and ``write_frame`` the one write of it under the lock
-that keeps concurrent writers from interleaving lines.
+newline-delimited line, shared with the Codex app-server client, whose
+envelopes differ but whose wire format is the same. ``write_frame`` is the one
+write of it under the lock that keeps concurrent writers from interleaving
+lines.
 
 Every ACP RPC the client itself initiates - as opposed to a server-initiated
 request the client answers - reserves ONE integer id per operation KIND

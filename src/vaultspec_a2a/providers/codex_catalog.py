@@ -8,7 +8,6 @@ budget across stdout and stderr, and always reaps the contained process tree.
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 
@@ -22,6 +21,7 @@ if TYPE_CHECKING:
 
 from ..thread import canonical_json, sha256_hex
 from ..utils import package_version
+from ._acp_request import encode_frame
 from ._catalog_discovery import (
     ProviderCatalogDiscovery,
     available_catalog,
@@ -372,7 +372,7 @@ class _CatalogRpc:
         if self.process.stdin is None or self.process.stdout is None:
             raise CodexCatalogProtocolError("Codex discovery stdio is unavailable")
         request: JsonObject = {"id": request_id, "method": method, "params": params}
-        self.process.stdin.write(json.dumps(request).encode() + b"\n")
+        self.process.stdin.write(encode_frame(request))
         await self.process.stdin.drain()
         response = await read_response(
             self.process.stdout,
@@ -394,9 +394,7 @@ class _CatalogRpc:
 async def _notify_initialized(process: asyncio.subprocess.Process) -> None:
     if process.stdin is None:
         raise CodexCatalogProtocolError("Codex discovery stdin is unavailable")
-    process.stdin.write(
-        json.dumps({"method": "initialized", "params": {}}).encode() + b"\n"
-    )
+    process.stdin.write(encode_frame({"method": "initialized", "params": {}}))
     await process.stdin.drain()
 
 

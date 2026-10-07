@@ -1,7 +1,6 @@
 """Codex app-server subprocess transport and JSON-RPC client."""
 
 import asyncio
-import json
 import logging
 from collections import deque
 from collections.abc import Mapping
@@ -13,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..utils import package_version
 from ..utils.async_cleanup import complete_cleanup
+from ._acp_request import encode_frame
 from ._cleanup import cancel_owned_tasks, run_independent_cleanups
 from ._codex_permission import (
     DECLINE_ACTION,
@@ -375,7 +375,7 @@ class _CodexAppServerClient:
         self._session.pending.clear()
 
     def _send(self, message: JsonObject) -> None:
-        self._transport.stdin.write((json.dumps(message) + "\n").encode("utf-8"))
+        self._transport.stdin.write(encode_frame(message))
 
     async def request(self, method: str, params: JsonObject) -> JsonObject:
         """Send a request and await its matching response frame."""

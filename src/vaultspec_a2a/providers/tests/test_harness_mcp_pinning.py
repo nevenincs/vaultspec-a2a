@@ -1275,12 +1275,7 @@ def _strict_config(specs: list[JsonObject]) -> AcpModelConfig:
         mcp_servers=specs,
         use_exec=False,
         provider="claude",
-        runtime_authority=None,
-        acp_backend="node",
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
     )
 

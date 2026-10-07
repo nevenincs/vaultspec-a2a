@@ -34,7 +34,6 @@ from ..in_process_catalog import (
     discover_in_process_catalog,
     in_process_catalog_key,
     in_process_lane,
-    in_process_lanes,
     served_in_process_lanes,
 )
 from ..lane_admission import (
@@ -42,7 +41,7 @@ from ..lane_admission import (
     catalog_lane_admission_reason,
     is_catalog_lane_admissible,
 )
-from ..lane_registry import LanePluginError
+from ..lane_registry import LanePluginError, registered_lanes
 from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,
@@ -63,7 +62,7 @@ _DETERMINISTIC = in_process_catalog_key(DETERMINISTIC_LANE)
 
 
 def _held_keys() -> set[ProviderCatalogKey]:
-    return {in_process_catalog_key(lane) for lane in in_process_lanes()}
+    return {in_process_catalog_key(lane) for lane in registered_lanes()}
 
 
 # -- the lane-plugin seam -----------------------------------------------------
@@ -71,7 +70,7 @@ def _held_keys() -> set[ProviderCatalogKey]:
 
 def test_the_plugin_lane_is_the_only_lane_held() -> None:
     """The build compiles in no lane, so the plugin's lane is the whole set."""
-    assert in_process_lanes() == (DETERMINISTIC_LANE,)
+    assert registered_lanes() == (DETERMINISTIC_LANE,)
     assert in_process_lane(Provider.DETERMINISTIC) is DETERMINISTIC_LANE
 
 
@@ -102,7 +101,7 @@ def test_a_plugin_named_under_the_desktop_profile_refuses_the_process(
         seated_lanes(),
         pytest.raises(LanePluginError, match="desktop profile"),
     ):
-        in_process_lanes()
+        registered_lanes()
 
 
 @pytest.mark.parametrize(
@@ -119,7 +118,7 @@ def test_a_plugin_that_cannot_register_refuses_the_process(
         settings_override(lane_plugins=(module,)),
         pytest.raises(LanePluginError, match=reason),
     ):
-        in_process_lanes()
+        registered_lanes()
 
 
 def _plugins_from(value: str | None) -> tuple[str, ...]:

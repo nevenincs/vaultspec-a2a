@@ -215,7 +215,7 @@ def enrich_snapshot_from_state(
 
     Maps LangChain ``BaseMessage`` objects to ``MessageData`` and
     extracts ``checkpoint_id``, plan, artifacts from the state config.
-    Populates agents and pending permissions from the aggregator.
+    Populates agents from the aggregator.
     """
     msgs = _checkpoint_messages(state.values)
 

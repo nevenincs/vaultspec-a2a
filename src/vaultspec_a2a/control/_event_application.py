@@ -193,7 +193,7 @@ async def commit_proven_application(
     thread_id: str,
     application: DispatchApplicationReceiptPayload,
     stored_receipt: GraphActionReceipt,
-) -> str | None:
+) -> None:
     from sqlalchemy import select
 
     from ..database import (
@@ -231,17 +231,17 @@ async def commit_proven_application(
         or action.applied_at is not None
         or validate_current_graph_receipt(thread, action) != stored_receipt
     ):
-        return None
+        return
     if action.action_type == ControlActionType.INGEST.value:
         await mark_control_action_applied(db, action.id)
         await mark_ingest_applied(db, thread_id)
         await db.commit()
-        return None
+        return
     if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
         await mark_control_action_applied(db, action.id)
         await mark_message_followup_applied(db, thread_id)
         await db.commit()
-        return None
+        return
     if (
         action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
         and action.request_id is not None
@@ -255,9 +255,8 @@ async def commit_proven_application(
         if thread.status not in TERMINAL_STATUS_VALUES:
             await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
         await db.commit()
-        return action.request_id
+        return
     from .verdict_subscriber import settle_verdict_dispatch_receipt
 
     if await settle_verdict_dispatch_receipt(db, action):
         await db.commit()
-    return None

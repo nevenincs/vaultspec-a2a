@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langchain_core.runnables.graph import Graph as DrawableGraph
     from langgraph.checkpoint.base import BaseCheckpointSaver
+    from langgraph.store.base import BaseStore
     from langgraph.types import Command, RetryPolicy
 
     from ..authoring import FeedbackContextReader
@@ -74,13 +75,15 @@ __all__ = [
     "STEP_BACKSTOP_GRACE_SECONDS",
     "_ROLE_TO_PHASE",
     "CompiledTeamGraph",
-    "_add_node",
     "_agent_node_metadata",
     "_compile_worker_node",
     "_loop_route",
     "_route_from_supervisor",
     "_wire_diverge_stage",
+    "add_graph_node",
+    "compile_graph_builder",
     "compile_team_graph",
+    "new_graph_builder",
     "required_recursion_limit_for_finish_blocks",
 ]
 
@@ -131,11 +134,26 @@ class _TypedBuilder(Protocol):
         checkpointer: BaseCheckpointSaver[str] | bool | None = ...,
         *,
         interrupt_before: list[str] | None = ...,
+        store: BaseStore | None = ...,
         name: str | None = ...,
     ) -> object: ...
 
 
-def _add_node(
+def new_graph_builder(
+    state_schema: type[Any],
+    *,
+    context_schema: type[Any] | None = None,
+) -> StateGraph[Any, Any, Any, Any]:
+    """Return a ``StateGraph`` builder over ``state_schema``.
+
+    The schema reaches langgraph as ``Any``, so any ``TypedDict`` state is
+    accepted without each caller repeating the cast. ``context_schema`` declares
+    the per-run context a node receives; unset, the graph carries none.
+    """
+    return StateGraph(cast("Any", state_schema), context_schema=context_schema)
+
+
+def add_graph_node(
     builder: StateGraph[Any, Any, Any, Any],
     name: str,
     node: Callable[..., Any],
@@ -146,10 +164,11 @@ def _add_node(
     langgraph's own ``add_node`` overloads default ``cache_policy`` to a bare
     ``CachePolicy[Unknown]`` in its shipped source (not just a stub gap), so
     the member access itself is permanently partially-typed regardless of the
-    arguments passed at a given call site. Every ``add_node`` call in this
-    module routes through here instead of the library method directly, so
-    that irreducible diagnostic is paid once, at this boundary, rather than at
-    each of the two dozen call sites that would otherwise repeat it.
+    arguments passed at a given call site. Every ``add_node`` call in the
+    compiler, and in the test-side graph builders, routes through here instead
+    of the library method directly, so that irreducible diagnostic is paid
+    once, at this boundary, rather than at each of the call sites that would
+    otherwise repeat it.
 
     Every key is forwarded whether or not the caller set it, so an unset
     option reaches langgraph as the explicit ``None`` this boundary has always
@@ -179,36 +198,41 @@ def _set_node_defaults(
 ) -> None:
     """Apply graph-wide node defaults behind the same typed call boundary.
 
-    Mirrors ``_add_node``: langgraph declares ``cache_policy`` here as a bare
-    ``CachePolicy[Unknown]`` too, so the member read is partially unknown
+    Mirrors ``add_graph_node``: langgraph declares ``cache_policy`` here as a
+    bare ``CachePolicy[Unknown]`` too, so the member read is partially unknown
     whatever this module passes. Going through the protocol is what makes the
     one argument this project actually sets a checked argument.
     """
     cast("_TypedBuilder", builder).set_node_defaults(timeout=timeout)
 
 
-def _compile_graph(
+def compile_graph_builder(
     builder: StateGraph[Any, Any, Any, Any],
     *,
-    checkpointer: BaseCheckpointSaver[str] | None,
-    interrupt_before: list[str] | None,
-    name: str,
+    checkpointer: BaseCheckpointSaver[str] | bool | None = None,
+    interrupt_before: list[str] | None = None,
+    store: BaseStore | None = None,
+    name: str | None = None,
 ) -> CompiledTeamGraph:
     """Compile ``builder`` behind one fully-typed call boundary.
 
-    Mirrors ``_add_node``: langgraph's ``compile`` overloads carry the same
+    Mirrors ``add_graph_node``: langgraph's ``compile`` overloads carry the same
     unresolved ``BaseCheckpointSaver[Unknown]``-shaped defaults in their own
     source, so this is the single place that diagnostic is paid.
 
     ``name`` is the team the graph was compiled from. Unnamed, every compiled
     graph reports itself as ``LangGraph``, so a trace, a stream event or a
     subgraph label could not say which team produced it - and a worker process
-    holds several compiled graphs at once.
+    holds several compiled graphs at once. Only a graph with no team behind it,
+    such as a test fixture, is left unnamed.
     """
     return cast(
         "CompiledTeamGraph",
         cast("_TypedBuilder", builder).compile(
-            checkpointer, interrupt_before=interrupt_before, name=name
+            checkpointer,
+            interrupt_before=interrupt_before,
+            store=store,
+            name=name,
         ),
     )
 
@@ -445,7 +469,7 @@ def _wire_diverge_stage(
     researcher_names: list[str] = []
     for index, spec in enumerate(specs):
         name = researcher_node_name(dispatch_name, index)
-        _add_node(
+        add_graph_node(
             builder,
             name,
             make_researcher(spec),
@@ -455,7 +479,7 @@ def _wire_diverge_stage(
         builder.add_edge(name, synthesis_name)
         researcher_names.append(name)
 
-    _add_node(
+    add_graph_node(
         builder,
         dispatch_name,
         create_research_dispatch_node(researcher_names),
@@ -700,14 +724,12 @@ def compile_team_graph(
 
     validate_frozen_assignment_inventory(model_assignment)
 
-    builder: StateGraph[Any, RunContext, Any, Any] = StateGraph(
-        cast("Any", TeamState), context_schema=RunContext
-    )
+    builder = new_graph_builder(TeamState, context_schema=RunContext)
     # Every node attempt is capped at the preset's step budget. No idle limit:
     # a provider CLI running a long tool call relays no LangChain callback while
     # it works, so an idle clock would fell agents that are making progress.
     _set_node_defaults(builder, timeout=TimeoutPolicy(run_timeout=step_timeout))
-    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    add_graph_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
 
@@ -777,7 +799,7 @@ def compile_team_graph(
             "Expected 'star', 'pipeline', 'pipeline_loop', or 'research_adr'."
         )
 
-    graph = _compile_graph(
+    graph = compile_graph_builder(
         builder,
         checkpointer=options.get("checkpointer"),
         interrupt_before=interrupt_nodes,

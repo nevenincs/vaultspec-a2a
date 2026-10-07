@@ -3,25 +3,25 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import create_control_action, create_thread, get_thread
 from ...database.models import Base
 from ...database.reconciliation import reconcile_threads_on_startup
 from ...database.session import configure_sqlite_transactions
-from ...graph.compiler import CompiledTeamGraph, _add_node, _compile_graph
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread import RunWriteAuthority
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.checkpoint_evidence import (
@@ -47,6 +47,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+
+    from ...graph.compiler import CompiledTeamGraph
 
 DurableRun = tuple[
     async_sessionmaker[AsyncSession], AsyncSqliteSaver, GraphActionReceipt
@@ -124,13 +126,13 @@ def _work(state: TeamState) -> dict[str, object]:
 
 
 def _graph(saver: AsyncSqliteSaver, *, pause: bool = False) -> CompiledTeamGraph:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
-    _add_node(builder, "work", _work)
-    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder = new_state_graph(TeamState)
+    add_test_node(builder, "work", _work)
+    add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, "work")
     builder.add_edge("work", GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
-    return _compile_graph(
+    return compile_test_graph(
         builder,
         checkpointer=saver,
         interrupt_before=["work"] if pause else [],

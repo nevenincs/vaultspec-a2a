@@ -11,12 +11,12 @@ import asyncio
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import pytest
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.runtime import Runtime
 
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_agent_config, load_team_config
-from ...testing import add_test_node, compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..compiler import compile_team_graph
 from ..run_context import RunContext, run_thread_id
 from .conftest import deterministic_model_assignment
@@ -64,9 +64,7 @@ async def test_ingest_delivers_the_run_context_to_graph_nodes() -> None:
         received.append(runtime.context)
         return {"seen": "yes"}
 
-    builder: StateGraph[Any, RunContext, Any, Any] = StateGraph(
-        cast("Any", _Seen), context_schema=RunContext
-    )
+    builder = new_state_graph(_Seen, context_schema=RunContext)
     add_test_node(builder, "record", record)
     builder.add_edge(START, "record")
     builder.add_edge("record", END)

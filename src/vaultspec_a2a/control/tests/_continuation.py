@@ -17,10 +17,10 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
 from ...database import (
     create_control_action,
@@ -28,13 +28,13 @@ from ...database import (
     get_control_action_by_dispatch_id,
 )
 from ...database.tests._backends import migrated_session_factory
-from ...graph.compiler import CompiledTeamGraph, _add_node, _compile_graph
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...database.models import ControlActionModel
+    from ...graph.compiler import CompiledTeamGraph
     from ...thread.action_receipts import GraphActionReceipt
 
 RUN = "promotion-run"
@@ -174,13 +175,13 @@ def _work(_state: TeamState) -> dict[str, object]:
 
 def probe_graph(saver: AsyncSqliteSaver) -> CompiledTeamGraph:
     """Compile the smallest real graph that records a completion receipt."""
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
-    _add_node(builder, "work", _work)
-    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder = new_state_graph(TeamState)
+    add_test_node(builder, "work", _work)
+    add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, "work")
     builder.add_edge("work", GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
-    return _compile_graph(
+    return compile_test_graph(
         builder, checkpointer=saver, interrupt_before=[], name="continuation-probe"
     )
 

@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter, ValidationError
 
 from ..database import (
+    actionable_pending_permissions,
     get_pending_permission_requests,
     get_thread_execution_state,
 )
 from ..utils.coercion import coerce_object_mapping
-from .permission_options import decode_allowed_options
 from .repositories.continuation_queue import count_queued_continuations
 
 if TYPE_CHECKING:
@@ -21,12 +21,12 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import (
-        PermissionRequestModel,
+        PendingPermission,
         ThreadExecutionStateModel,
         ThreadModel,
     )
 
-from ..graph.acp_options import option_id_of, option_kind, valid_option_ids
+from ..graph.acp_options import option_id_of, option_kind
 from ..graph.enums import PermissionType
 from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
@@ -199,13 +199,14 @@ def clear_permissions_without_checkpoint_truth(
     return snapshot
 
 
-def _permission_data_from_model(
-    permission: PermissionRequestModel,
+def _permission_data_from_pending(
+    pending: PendingPermission,
 ) -> PermissionData | None:
-    """Project one durable permission row, or None when its options are unreadable."""
-    raw_options = decode_allowed_options(permission.allowed_options_json)
+    """Project one pending request, or None when its options are unreadable."""
+    raw_options = pending.offered
     if raw_options is None:
         return None
+    permission = pending.request
     tool_call = permission.tool_call
     if (
         tool_call in (None, "")
@@ -378,43 +379,39 @@ def apply_execution_state_projection(
 
 
 def durable_approval(
-    permissions: Sequence[PermissionRequestModel],
+    pending: Sequence[PendingPermission],
 ) -> tuple[ApprovalStatus | None, str | None]:
-    """Return the plan approval a run's durable pending rows leave actionable.
+    """Return the plan approval a run's live pending requests leave actionable.
 
-    The latest plan-approval row is pending when it offers an option the respond
-    route would accept. An unreadable plan-approval row withholds the approval
-    altogether: once one of them cannot be read, the run's approval state can no
-    longer be trusted, whichever row it would have named.
+    The latest plan-approval request is pending when it offers an option the
+    respond route would accept. An unreadable plan-approval request withholds the
+    approval altogether: once one of them cannot be read, the run's approval
+    state can no longer be trusted, whichever request it would have named.
     """
     plan_approvals = [
-        permission
-        for permission in permissions
-        if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
+        entry
+        for entry in pending
+        if entry.request.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
     ]
     if not plan_approvals:
         return None, None
-    decoded = [
-        decode_allowed_options(permission.allowed_options_json)
-        for permission in plan_approvals
-    ]
-    if any(options is None for options in decoded):
+    if any(entry.offered is None for entry in plan_approvals):
         return None, None
-    if not valid_option_ids(decoded[-1]):
+    if not plan_approvals[-1].option_ids:
         return None, None
-    return ApprovalStatus.PENDING, plan_approvals[-1].request_id
+    return ApprovalStatus.PENDING, plan_approvals[-1].request.request_id
 
 
 def _merge_durable_permissions(
-    snapshot: ThreadStateData, durable_permissions: Sequence[PermissionRequestModel]
+    snapshot: ThreadStateData, pending: Sequence[PendingPermission]
 ) -> None:
-    if durable_permissions and snapshot.pause_cause is None:
-        snapshot.pause_cause = durable_permissions[0].pause_reason_type
+    if pending and snapshot.pause_cause is None:
+        snapshot.pause_cause = pending[0].request.pause_reason_type
     existing = {permission.request_id for permission in snapshot.pending_permissions}
-    for permission in durable_permissions:
-        if permission.request_id in existing:
+    for entry in pending:
+        if entry.request.request_id in existing:
             continue
-        projected = _permission_data_from_model(permission)
+        projected = _permission_data_from_pending(entry)
         if projected is None:
             mark_degraded(
                 snapshot,
@@ -442,15 +439,15 @@ async def enrich_snapshot_from_durable_state(
     snapshot.queued_messages = await count_queued_continuations(
         session, thread_id=thread.id
     )
-    is_terminal_thread = thread.status in TERMINAL_STATUS_VALUES
-
-    durable_permissions = await get_pending_permission_requests(
-        session,
-        thread_id=thread.id,
-        include_answered_pending_apply=False,
-    )
-    if is_terminal_thread:
-        if durable_permissions or snapshot.approval_status == ApprovalStatus.PENDING:
+    if thread.status in TERMINAL_STATUS_VALUES:
+        # A settled run is outside the live-run query, so what it never
+        # answered is read directly.
+        residue = await get_pending_permission_requests(
+            session,
+            thread_id=thread.id,
+            include_answered_pending_apply=False,
+        )
+        if residue or snapshot.approval_status == ApprovalStatus.PENDING:
             mark_degraded(
                 snapshot,
                 DegradedReason.TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE,
@@ -462,10 +459,9 @@ async def enrich_snapshot_from_durable_state(
         snapshot.approval_request_id = None
         return snapshot
 
-    _merge_durable_permissions(snapshot, durable_permissions)
-    snapshot.approval_status, snapshot.approval_request_id = durable_approval(
-        durable_permissions
-    )
+    pending = await actionable_pending_permissions(session, thread_id=thread.id)
+    _merge_durable_permissions(snapshot, pending)
+    snapshot.approval_status, snapshot.approval_request_id = durable_approval(pending)
     _clear_non_actionable_pause_state(snapshot)
 
     return snapshot

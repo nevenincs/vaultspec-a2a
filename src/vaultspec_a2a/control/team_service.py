@@ -10,17 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-
-from ..database import (
-    ThreadModel,
-    get_pending_permission_requests,
-    path_safe_run_id_clause,
-)
+from ..database import actionable_pending_permissions
 from ..graph.enums import AgentLifecycleState
-from ..thread.enums import TERMINAL_STATUS_VALUES, RepairStatus
 from ..thread.snapshots import AgentData, build_agent_descriptor
-from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,37 +41,6 @@ class TeamStatus:
     pending_permissions: list[PendingPermissionInfo] = field(default_factory=list)
 
 
-async def _pending_thread_sets(
-    db: AsyncSession, thread_ids: list[str]
-) -> tuple[set[str], set[str], set[str]]:
-    if not thread_ids:
-        return set(), set(), set()
-    # Path-unsafe or missing thread ids stay absent from known_thread_ids, so
-    # their permissions are excluded below. The respond route cannot address
-    # those ids; passing them to the status serializer would hide valid rows
-    # behind a whole-response validation error.
-    rows = await db.execute(
-        select(
-            ThreadModel.id,
-            ThreadModel.status,
-            ThreadModel.repair_status,
-        ).where(ThreadModel.id.in_(thread_ids), path_safe_run_id_clause())
-    )
-    known_rows = rows.all()
-    known_thread_ids = {thread_id for thread_id, *_rest in known_rows}
-    terminal_thread_ids = {
-        thread_id
-        for thread_id, status, _repair_status in known_rows
-        if status in TERMINAL_STATUS_VALUES
-    }
-    checkpoint_unavailable_thread_ids = {
-        thread_id
-        for thread_id, _status, repair_status in known_rows
-        if repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
-    }
-    return known_thread_ids, terminal_thread_ids, checkpoint_unavailable_thread_ids
-
-
 def _active_agent_descriptors(
     aggregator: EventAggregator, active_threads: list[str]
 ) -> list[AgentData]:
@@ -104,38 +65,23 @@ async def build_team_status(
     heartbeat_threads: list[str],
 ) -> TeamStatus:
     """Assemble the full team status from DB and in-memory aggregator state."""
-    durable_pending = await get_pending_permission_requests(
-        db,
-        include_answered_pending_apply=False,
-    )
-    thread_ids = sorted({permission.thread_id for permission in durable_pending})
-    (
-        known_thread_ids,
-        terminal_thread_ids,
-        checkpoint_unavailable_thread_ids,
-    ) = await _pending_thread_sets(db, thread_ids)
-
-    nonterminal_durable_pending = [
-        permission
-        for permission in durable_pending
-        if permission.thread_id in known_thread_ids
-        and permission.thread_id not in terminal_thread_ids
-    ]
+    live_pending = await actionable_pending_permissions(db)
+    # A run holding any unanswered request is active even when none of them is
+    # actionable; only the actionable ones are advertised as waiting.
     public_pending: list[PendingPermissionInfo] = [
         PendingPermissionInfo(
-            request_id=p.request_id,
-            thread_id=p.thread_id,
-            description=p.description,
-            request_status=p.request_status,
+            request_id=p.request.request_id,
+            thread_id=p.request.thread_id,
+            description=p.request.description,
+            request_status=p.request.request_status,
         )
-        for p in nonterminal_durable_pending
-        if extract_allowed_option_ids(p.allowed_options_json)
-        and p.thread_id not in checkpoint_unavailable_thread_ids
+        for p in live_pending
+        if p.actionable
     ]
     active_threads = sorted(
         set(heartbeat_threads)
         | set(aggregator.get_active_thread_ids())
-        | {permission.thread_id for permission in nonterminal_durable_pending}
+        | {p.request.thread_id for p in live_pending}
     )
 
     # Public pending permissions must be durable-backed; aggregator state is

@@ -41,7 +41,11 @@ from ..provider_catalog import (
     ProviderRecord,
     SelectionReference,
 )
-from ..provider_catalog_service import _DISPLAY_NAMES, _health_for
+from ..provider_catalog_service import (
+    _DISPLAY_NAMES,
+    _health_for,
+    stamp_catalog_expiry,
+)
 from ..team_selection import freeze_team_selection
 
 if TYPE_CHECKING:
@@ -105,16 +109,21 @@ def test_an_absent_declaration_leaves_the_lanes_hidden() -> None:
 def test_the_static_catalog_carries_everything_a_selection_revalidates(
     key: ProviderCatalogKey,
 ) -> None:
-    """Available, revisioned, bounded-expiry, non-empty - the selectable shape."""
+    """Available, revisioned, non-empty, and bounded once the service stamps it."""
     before = datetime.now(UTC)
     catalog = build_in_process_catalog(key)
 
     assert catalog.key == key
     assert catalog.state.status is CatalogStatus.AVAILABLE
     assert catalog.state.revision
-    assert catalog.state.expires_at is not None
-    assert catalog.state.expires_at > before
+    assert catalog.state.expires_at is None
     assert catalog.models
+
+    stamped = stamp_catalog_expiry(catalog)
+    assert stamped.state.expires_at is not None
+    assert stamped.state.expires_at > before
+    assert stamped.state.revision == catalog.state.revision
+    assert stamped.models == catalog.models
 
 
 @pytest.mark.parametrize("key", (_DETERMINISTIC, _MOCK))
@@ -241,11 +250,11 @@ async def test_an_in_process_lane_is_selectable_freezable_and_constructible(
     """Drive discovery -> health -> freeze -> construction, for real.
 
     Every stage is the production one: the factory's own discovery adapter, the
-    service's own health derivation, the real selection freezer, and the real
-    construction path. The point of running them together is that a broken link
-    anywhere - an unadmitted key, a health axis that never reaches available, an
-    execution mode the factory refuses - fails here rather than surfacing as a
-    skipped certification run.
+    service's own health derivation and expiry stamp, the real selection freezer,
+    and the real construction path. The point of running them together is that a
+    broken link anywhere - an unadmitted key, a health axis that never reaches
+    available, an execution mode the factory refuses - fails here rather than
+    surfacing as a skipped certification run.
 
     Discovery is driven through the adapter rather than a registration because
     the mock lane's registration additionally requires a configured tape server;
@@ -271,7 +280,7 @@ async def test_an_in_process_lane_is_selectable_freezable_and_constructible(
         display_name=_DISPLAY_NAMES[Provider(key.provider_id)],
         execution_mode=key.execution_mode,
         health=health,
-        catalog=discovery.catalog,
+        catalog=stamp_catalog_expiry(discovery.catalog),
     )
     entry = discovery.catalog.models[0]
     frozen = freeze_team_selection(

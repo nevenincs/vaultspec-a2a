@@ -18,15 +18,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import pytest
 
-from ..factory import (
-    ProviderCatalogDiscovery,
-    ProviderCatalogRegistration,
-    ProviderFactory,
-)
+from ..factory import ProviderCatalogRegistration, ProviderFactory
 from ..provider_catalog import (
     AuthenticationState,
     CacheFreshness,
@@ -40,6 +36,9 @@ from ..provider_catalog import (
     ProviderCatalogKey,
 )
 from ..provider_catalog_service import ProviderCatalogService
+
+if TYPE_CHECKING:
+    from .._catalog_discovery import ProviderCatalogDiscovery
 
 _LANE = ProviderCatalogKey("openai", "openai-api")
 

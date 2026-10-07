@@ -475,9 +475,10 @@ def in_process_lane_selection(
     """Build an in-process lane's served record offline, and name its first entry.
 
     The record is what the gateway would serve for the lane, assembled without a
-    gateway for a test that freezes a selection directly. The reference takes the
-    lane's first entry under the same rule as :func:`in_process_selection`: legal
-    on a lane that bills nothing, and only there.
+    gateway for a test that freezes a selection directly, with the expiry the
+    service would have stamped on it. The reference takes the lane's first entry
+    under the same rule as :func:`in_process_selection`: legal on a lane that
+    bills nothing, and only there.
     """
     from datetime import UTC, datetime
 
@@ -495,6 +496,7 @@ def in_process_lane_selection(
         SelectionReference,
         StructuredProviderHealth,
     )
+    from ..providers.provider_catalog_service import stamp_catalog_expiry
 
     key = in_process_catalog_key(provider)
     record = ProviderRecord(
@@ -511,7 +513,7 @@ def in_process_lane_selection(
             ),
             checked_at=datetime.now(UTC),
         ),
-        catalog=discover_in_process_catalog(key).catalog,
+        catalog=stamp_catalog_expiry(discover_in_process_catalog(key).catalog),
     )
     reference = SelectionReference(
         provider_id=key.provider_id,

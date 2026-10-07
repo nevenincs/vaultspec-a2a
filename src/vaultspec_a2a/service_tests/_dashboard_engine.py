@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
 import subprocess
 from contextlib import contextmanager
@@ -37,8 +36,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = ["dashboard_engine", "provision_workspace"]
-
-_ENGINE_COMMAND_ENV = "VAULTSPEC_A2A_ENGINE_SERVE_CMD"
 
 
 def provision_workspace(workspace: Path) -> None:
@@ -97,15 +94,21 @@ def provision_workspace(workspace: Path) -> None:
 
 
 def _engine_command(port: int, workspace: Path) -> list[str]:
-    """Render the declared dashboard serve command.
+    """The declared dashboard serve command, rendered by production.
 
-    Only reached once the ``dashboard-engine`` prerequisite has been asserted
-    present, so a blank template is impossible here and every remaining check is
-    a real defect in a command the caller did supply.
+    Rendering goes through ``engine_command``, the launcher's own renderer, so
+    this proof launches the engine the way the product does - host-aware quoting,
+    substitution per token - rather than through a second reading of the same
+    template that could drift from it.
+
+    What stays here is the prerequisite's own shape check. Only reached once the
+    ``dashboard-engine`` prerequisite has been asserted present, so a blank
+    template is impossible and every remaining check is a real defect in a
+    command the caller did supply.
     """
-    template = os.environ[_ENGINE_COMMAND_ENV].strip()
-    rendered = template.format(port=port, workspace=str(workspace))
-    command = shlex.split(rendered, posix=os.name != "nt")
+    from ..lifecycle.engine_serve import engine_command
+
+    command = engine_command(port, str(workspace))
     assert command and os.path.isabs(command[0]), (
         "engine command must use an absolute binary"
     )

@@ -50,7 +50,7 @@ directive = """
 Same phase machine as vaultspec-adr-research (Ground -> Diverge -> Synthesize ->
 Gate 1 -> Decide -> Gate 2 -> Plan -> Gate 3), with one addition: the run parks
 on a declared questionnaire before the research fans out, and the human's
-answers are durable run state the later stages can read.
+answers reach the later stages as a human turn in the transcript.
 
 - Vault documents only; no direct filesystem writes; all authoring goes through
   engine proposals.

@@ -668,6 +668,141 @@ async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "evidence_overrides",
+    [
+        # Wrong schema version: this evidence kind is versioned, so an older
+        # or newer shape must never be read as this one.
+        {"schema_version": "cancellation-evidence-v0"},
+        # Outcome outside the closed vocabulary the settlement maps from.
+        {"outcome": "partially_ceased"},
+        # Missing the one field that names what actually happened.
+        {"outcome": None},
+        # The model forbids extra fields, so a field it does not declare must
+        # refuse the whole payload rather than being silently dropped.
+        {"unexpected_field": "smuggled"},
+    ],
+)
+async def test_malformed_cancellation_evidence_is_refused_without_settling(
+    session_factory: async_sessionmaker[AsyncSession],
+    evidence_overrides: dict[str, object],
+) -> None:
+    """A cancellation terminal whose evidence fails validation settles nothing.
+
+    Posted exactly as the real relay would receive it from a worker: through
+    :func:`_handle_terminal_event`, the one entry point ``api/internal.py``
+    hands every worker-relayed event to. Evidence that does not even parse as
+    :class:`CancellationEvidence` must be refused the same way stale evidence
+    already is - the run stays where it was, and the journaled cancel action
+    stays unapplied. *dispatch_id* is the run's OWN current dispatch in every
+    case, so a refusal here can only come from the malformed field: nothing is
+    left for a dispatch mismatch to explain instead.
+    """
+    thread_id = "malformed-cancellation-evidence"
+    dispatch_id = f"dispatch-{thread_id}"
+    action_id = await _seed_current_cancel(
+        session_factory, thread_id=thread_id, dispatch_id=dispatch_id
+    )
+    evidence: dict[str, object] = {
+        "schema_version": "cancellation-evidence-v1",
+        "dispatch_id": dispatch_id,
+        "outcome": "ceased",
+        **evidence_overrides,
+    }
+    evidence = {key: value for key, value in evidence.items() if value is not None}
+
+    await _handle_terminal_event(
+        thread_id,
+        {
+            "event_type": "thread_terminal",
+            "status": "cancelled",
+            "cancellation_evidence": evidence,
+        },
+        services=RelayServices(session_factory=session_factory),
+    )
+
+    async with session_factory() as session:
+        action = await session.get(ControlActionModel, action_id)
+        thread = await session.get(ThreadModel, thread_id)
+    assert action is not None
+    assert action.applied_at is None
+    assert thread is not None
+    assert thread.status == ThreadStatus.CANCELLING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_evidence_overrides",
+    [
+        {"schema_version": "graph-failure-v0"},
+        {"outcome": "errored"},
+        {"provider_condition": ""},
+        {"detail_fingerprint": "not-a-fingerprint"},
+    ],
+)
+async def test_malformed_failure_evidence_is_refused_without_settling(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    bad_evidence_overrides: dict[str, object],
+) -> None:
+    """A failure terminal whose evidence fails validation settles nothing.
+
+    Posted through :func:`_handle_terminal_event`, exactly as a worker's
+    relayed event reaches the control plane from the real internal endpoint.
+    A payload that does not even parse as :class:`GraphFailureEvidence` must
+    be refused before it is ever matched against the run's accepted action.
+    """
+    detail = "provider transport ended before a response"
+    condition = "network_unreachable"
+    thread_id = "malformed-failure-evidence"
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.RUNNING,
+        )
+        action, receipt, _checkpoint = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread.id,
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                idempotency_key="message:malformed-failure",
+            ),
+        )
+        await session.commit()
+    evidence = {
+        "schema_version": "graph-failure-v1",
+        "action": receipt.model_dump(mode="json"),
+        "outcome": "failed",
+        "detail_fingerprint": failure_detail_fingerprint(detail),
+        "provider_condition": condition,
+        **bad_evidence_overrides,
+    }
+
+    await _handle_terminal_event(
+        thread.id,
+        {
+            "event_type": "thread_terminal",
+            "status": "failed",
+            "error_detail": detail,
+            "provider_condition": condition,
+            "failure_evidence": evidence,
+        },
+        services=RelayServices(session_factory=session_factory),
+    )
+
+    async with session_factory() as session:
+        refused_thread = await session.get(ThreadModel, thread.id)
+        refused_action = await session.get(ControlActionModel, action.id)
+    assert refused_thread is not None
+    assert refused_thread.status == ThreadStatus.RUNNING.value
+    assert refused_action is not None
+    assert refused_action.applied_at is None
+
+
+@pytest.mark.asyncio
 async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,

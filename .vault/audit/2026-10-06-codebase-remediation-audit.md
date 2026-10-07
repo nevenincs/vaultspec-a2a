@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:10d3280d41c5f35edae4da46ecb61b1d0b0bc945ed6215666c0daca70b05039b'
+body_hash: 'sha256:511da00ea9bde80b0c5ddae1fe18b4bfaad7c3cfe086a275b7ed8bccdae0b811'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1203,3 +1203,27 @@ Status: open. Type: contract-drift. `openapi.json` (file-local to the reporting 
 ### bk-dead-dev-code-symbols | low | Three dev-tooling symbols have no non-default or real caller
 
 Status: open. Type: dead-code. `Target.findings_codes`, `advisory_result(findings=...)` and `dev/__main__.py:128` have no non-default user; `configured_script_imports` (`dev/audit/unreachable_code.py:447`) matches no real `procs.toml` script (line numbers from the reporting branch).
+
+### v3-worker-flush-stranded-events | high | Events buffered during an in-flight cadence flush waited for another run's event
+
+Status: fixed refactor/centralize@05bd5a02. Type: correctness (pre-existing; the scheduling code is identical on `main`). `worker/ipc.py` `_schedule_flush` treated the in-flight cadence flush as the pending one after it had already taken its snapshot, so an event appended during the post armed nothing; a run that parked right after such an event emitted nothing further and its `permission_request` sat in the worker buffer. Live evidence from a service store: a run's events 1-9 persisted at 18:32:37 and its `permission_request` at 18:34:50, released only when the next run's dispatch stirred the bridge. Fix: the finishing cadence flush arms the next one when events remain. Verification: `worker/tests/test_ipc_batch_bounds.py::test_an_event_buffered_during_a_cadence_post_is_delivered_unprompted` red (5s timeout) then green; `service_tests/test_permissions_resume.py` + `test_stream_followup.py` went from 3/8 passed in 746s to 6/8 passed in 222s.
+
+### v3-assignment-agreement-workspace | low | The assignment-agreement service test sited its run outside the desktop workspace boundary
+
+Status: fixed refactor/centralize@75ab6b14. Type: test-integrity. `service_tests/test_dispatch_assignment_agreement.py` sent `tmp_path` as the run workspace while the centralized harness seats a desktop app home whose boundary is `state.workspaces_root`; the catalog read answered 422. The run now uses the harness's own workspace; the test passes (47.8s).
+
+### v3-gateway-history-read-hang | medium | A gateway run-history read hung for the full client timeout under concurrent service load
+
+Status: open; owner: a dedicated investigation after the PV wave (not reproduced in isolation). Type: correctness-risk. In two of three paired runs (`test_permissions_resume.py::test_supervisor_plan_rejection_requires_revision_before_reapproval` then `test_stream_followup.py`), a `GET /v1/runs/{id}/history` never answered within the 300s client timeout, shortly after a gateway "Direct recovery pass failed; the owner will retry" with `sqlite3.OperationalError: database is locked` on `BEGIN IMMEDIATE`. A py-spy dump during a stall showed every gateway and worker thread idle (the wait is at the asyncio level, not a SQLite busy wait). `test_stream_followup.py` alone passes (32.4s).
+
+### v3-pv29-pv40-live-confirmation | medium | PV29 and PV40 reproduce on the centralized tree
+
+Status: open; owner PVB (PV29, PV40). Type: correctness. PV29: `test_supervisor_plan_rejection_requires_revision_before_reapproval` fails in isolation: after the rejection the run stays `input_required` with `approval_status='rejected'` and no fresh pending plan approval. PV40: every `permission_request_created` and `permission_response_applied` journal row in a live service store has `result_status='applied'` with `applied_at` NULL.
+
+### v3-service-tier-environment | info | Service-tier skips and residual failures that are environmental
+
+Status: recorded. Type: environment. Service tier on refactor/centralize@2cb4fdc3: 99 passed, 10 failed, 71 skipped. The 71 skips need a running `vaultspec serve` engine, an opted-in live provider selection, or a Z.ai credential (main skips the same). Four `providers/tests/test_harness_mcp_pinning.py` failures come from the host vaultspec-rag service owning the GPU (`gpu_owner: owned_elsewhere`); thirteen unit-tier vaultspec-rag failures come from the host service (0.5.3) against the unpinned client (0.6.0), and `main` fails them too (DECISIONS Q50).
+
+### v5-openapi-doc-residue | low | Three published-description defects found while regenerating openapi.json
+
+Status: open; owners PVC (403) and PVA (descriptions). Type: contract-drift. Permission-respond serves 403 for document-approval pauses (`control/permission_service.py`) but `openapi.json` does not declare it, on `main` either; the published `AgentSnapshot` description says "`model` carry the real enums" while the field is `model_name: str | None`; the published `ThreadStateSnapshot` description carries developer-facing implementation notes.

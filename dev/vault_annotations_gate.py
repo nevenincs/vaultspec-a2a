@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from dev.process import run_captured
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-_ROOT = Path(__file__).resolve().parents[1]
 _SCHEMA = "vaultspec.vault.check.annotations.v2"
 
 
@@ -58,13 +58,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.target is not None:
         command.extend(("--target", str(args.target)))
 
-    completed = subprocess.run(
-        command,
-        cwd=_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    completed = run_captured(command, timeout=None)
     if completed.stdout:
         sys.stdout.write(completed.stdout)
     if completed.stderr:

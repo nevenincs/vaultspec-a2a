@@ -80,11 +80,12 @@ The phase plan and selector policy are specific to this repository.
 | `stamp.py`    | Input digests and the idempotence stamp.                       |
 | `plan.py`     | **This repository's** phases. The only file that differs.      |
 
-The package imports only the standard library and `dev.exit_codes`. It must
-never import `dev.toolchain`, `dev.runner`, or anything reached through
-`uv run --no-sync python -m dev`: it runs *before* the virtual environment
-exists, on an ephemeral interpreter, which is the whole reason it is separate
-from the rest of the harness.
+The package imports only the standard library and the harness modules that are
+themselves stdlib-only: `dev.exit_codes`, `dev.paths`, and the subprocess
+helpers `dev.process` and `dev.runner`. It must never import `dev.toolchain`,
+or anything reached through `uv run --no-sync python -m dev`: it runs *before*
+the virtual environment exists, on an ephemeral interpreter, which is the
+whole reason it is separate from the rest of the harness.
 
 ## Adding a step
 

@@ -37,6 +37,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dev.exit_codes import FINDINGS_CODES
+from dev.paths import PACKAGE_PATH, PYTHON_PATHS, SKIPPED_DIRS, TEST_TIERS
 from dev.runner import (
     Cmd,
     Echo,
@@ -47,14 +48,6 @@ from dev.runner import (
     uv_run,
     uv_run_env,
 )
-
-#: The shipped package. Every production-scoped scan is rooted here.
-PACKAGE = "src/vaultspec_a2a"
-
-#: Python trees that carry committed source and are therefore linted. Naming
-#: the trees rather than the repository root is what stops a new top-level
-#: folder from linting itself into an exception by simply existing.
-PYTHON_PATHS = ("src", "dev", "docs", "scripts", "packaging")
 
 #: Shell scripts invoked from outside any Python entry point: by a workflow
 #: step, or as a cloud environment's setup script. actionlint shellchecks a
@@ -69,27 +62,15 @@ SHELL_PATHS = (
 #: cannot encode them, which aborts the run before any finding is reported.
 UTF8 = {"PYTHONIOENCODING": "utf-8"}
 
-#: The test tiers, as glob suffixes. Every production-scoped scan excludes all
-#: four; naming only the two top-level ones covers a fraction of the tree,
-#: because most test code lives in per-package `*/tests/` directories.
-TEST_TIERS = ("tests", "service_tests", "desktop_tests", "acceptance")
-
 #: Complexipy exclusion patterns scoped to the production-only ``lint complexity``
-#: target. Patterns are relative to :data:`PACKAGE`; direct and nested forms cover
-#: each test tier and cache directory without changing the test-focused audit target.
-COMPLEXIPY_EXCLUDE_PATTERNS = (
-    "tests/**",
-    "**/tests/**",
-    "service_tests/**",
-    "**/service_tests/**",
-    "desktop_tests/**",
-    "**/desktop_tests/**",
-    "acceptance/**",
-    "**/acceptance/**",
-    "__pycache__/**",
-    "**/__pycache__/**",
-    ".pytest_cache/**",
-    "**/.pytest_cache/**",
+#: target. Patterns are relative to the package; direct and nested forms cover
+#: each test tier and skipped directory without changing the test-focused audit
+#: target. The nested form is the load-bearing one: most test code lives in
+#: per-package `*/tests/` directories, not in the top-level tiers.
+COMPLEXIPY_EXCLUDE_PATTERNS = tuple(
+    pattern
+    for name in (*TEST_TIERS, *sorted(SKIPPED_DIRS))
+    for pattern in (f"{name}/**", f"**/{name}/**")
 )
 
 #: Complexipy parses repeated ``--exclude`` flags independently, so retain all
@@ -399,17 +380,21 @@ LINT = Verb(
         Target(
             "complexity",
             "Cognitive complexity over production code (Sonar limit 15).",
-            (uv_run_env(UTF8, "complexipy", PACKAGE, *COMPLEXIPY_EXCLUDES),),
+            (uv_run_env(UTF8, "complexipy", PACKAGE_PATH, *COMPLEXIPY_EXCLUDES),),
         ),
         Target(
             "limits",
             "Function-shape limits: paths, branches, returns, arguments, statements.",
-            (uv_run("ruff", "check", PACKAGE, "--select", FUNCTION_LIMITS),),
+            (uv_run("ruff", "check", PACKAGE_PATH, "--select", FUNCTION_LIMITS),),
         ),
         Target(
             "nesting",
             "Nesting depth (PLR1702, preview-scoped, ruff default of 5).",
-            (uv_run("ruff", "check", PACKAGE, "--select", "PLR1702", "--preview"),),
+            (
+                uv_run(
+                    "ruff", "check", PACKAGE_PATH, "--select", "PLR1702", "--preview"
+                ),
+            ),
         ),
         Target(
             "size",
@@ -417,7 +402,7 @@ LINT = Verb(
             (
                 uv_run(
                     "pylint",
-                    PACKAGE,
+                    PACKAGE_PATH,
                     "--rcfile=pyproject.toml",
                     "--recursive=y",
                     "--score=n",
@@ -643,7 +628,7 @@ AUDIT = Verb(
                     "-c",
                     "pyproject.toml",
                     "-r",
-                    PACKAGE,
+                    PACKAGE_PATH,
                     *BANDIT_EXCLUDES,
                     "-q",
                 ),
@@ -680,13 +665,13 @@ AUDIT = Verb(
         Target(
             "docstrings",
             "Docstring coverage over the public surface.",
-            (uv_run("interrogate", "-c", "pyproject.toml", PACKAGE),),
+            (uv_run("interrogate", "-c", "pyproject.toml", PACKAGE_PATH),),
             advisory=True,
         ),
         Target(
             "complexity",
             "Cognitive complexity over the test tree.",
-            (uv_run_env(UTF8, "complexipy", PACKAGE, "--failed"),),
+            (uv_run_env(UTF8, "complexipy", PACKAGE_PATH, "--failed"),),
             advisory=True,
         ),
         Target(
@@ -770,10 +755,10 @@ TEST = Verb(
                     "-m",
                     "service",
                     "--require-prerequisite=docker",
-                    "src/vaultspec_a2a/service_tests/test_lifecycle.py",
-                    "src/vaultspec_a2a/service_tests/test_cancel_health_trace.py",
-                    "src/vaultspec_a2a/service_tests/test_worker_attach_provenance.py",
-                    "src/vaultspec_a2a/service_tests/test_development_fixture_boundary.py",
+                    f"{PACKAGE_PATH}/service_tests/test_lifecycle.py",
+                    f"{PACKAGE_PATH}/service_tests/test_cancel_health_trace.py",
+                    f"{PACKAGE_PATH}/service_tests/test_worker_attach_provenance.py",
+                    f"{PACKAGE_PATH}/service_tests/test_development_fixture_boundary.py",
                 ),
             ),
         ),
@@ -789,7 +774,7 @@ TEST = Verb(
                 _pytest(
                     "-m",
                     "not service",
-                    f"--cov={PACKAGE}",
+                    f"--cov={PACKAGE_PATH}",
                     "--cov-report=term-missing",
                 ),
             ),

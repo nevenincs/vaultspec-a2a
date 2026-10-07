@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import re
 import tomllib
-from pathlib import Path
 from typing import Any, cast
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[2]
-WORKFLOWS = ROOT / ".github" / "workflows"
+from dev.paths import REPO_ROOT
+
+WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 
 def _workflow(name: str) -> dict[str, Any]:
@@ -29,9 +29,11 @@ def _triggers(workflow: dict[Any, Any]) -> dict[str, Any]:
 
 def test_release_please_owns_reviewable_version_proposals() -> None:
     """Keep release proposals reviewed and their version the one released."""
-    config = json.loads((ROOT / "release-please-config.json").read_text("utf-8"))
-    manifest = json.loads((ROOT / ".release-please-manifest.json").read_text("utf-8"))
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))
+    config = json.loads((REPO_ROOT / "release-please-config.json").read_text("utf-8"))
+    manifest = json.loads(
+        (REPO_ROOT / ".release-please-manifest.json").read_text("utf-8")
+    )
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text("utf-8"))
     package = config["packages"]["."]
 
     assert package["release-type"] == "python"

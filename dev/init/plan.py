@@ -162,7 +162,7 @@ TOOLS = Phase(
     steps=(
         Step(
             name="vault-enroll",
-            argv=(*TOOLING, "python", "dev/vault/enroll.py"),
+            argv=(*TOOLING, "python", "-m", "dev.vault.enroll"),
             summary="Enroll every Vaultspec Core provider projection in dev mode.",
         ),
         Step(

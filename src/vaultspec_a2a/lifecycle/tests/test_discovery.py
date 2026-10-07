@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import subprocess
 import threading
 import time
@@ -32,27 +31,11 @@ from ..discovery import (
     DiscoveryState,
     another_resident_is_live,
     classify_discovery,
-    port_has_listener,
     read_resident_service,
     remove_service_json_if_owned,
     service_json_path,
     write_service_json,
 )
-
-
-def test_port_has_listener_true_on_a_real_listener_false_on_a_free_port() -> None:
-    """The shared connect-probe: a real listener answers, a free port does not."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("127.0.0.1", 0))
-    sock.listen(1)
-    bound_port = sock.getsockname()[1]
-    try:
-        assert port_has_listener(bound_port, timeout=1.0) is True
-    finally:
-        sock.close()
-    # Once closed, the same port no longer accepts a connect.
-    assert port_has_listener(bound_port, timeout=0.5) is False
 
 
 class _HealthServer:

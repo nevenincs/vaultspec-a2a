@@ -41,7 +41,7 @@ from ...control._worker_readiness import (
 from ...control.worker_management import LazyWorkerSpawner
 from ...lifecycle.shutdown import ShutdownDeadline
 from ...utils import kill_pid_tree_async
-from ...utils._process_tree import pid_is_live
+from ...utils._process_tree import pid_is_live, port_has_listener_async, wait_pid_gone
 from ...utils.process import ProcessContainment, ProcessContainmentError
 
 # A stand-in for the half-started worker: spawns real grandchildren, prints their
@@ -150,14 +150,9 @@ async def _serving_contained_worker(
     spawner.replace_process(process, containment)
     ready_deadline = time.monotonic() + 5.0
     while time.monotonic() < ready_deadline:
-        try:
-            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
-        except OSError:
-            await asyncio.sleep(0.02)
-            continue
-        writer.close()
-        await writer.wait_closed()
-        return process, containment, spawner
+        if await port_has_listener_async(port, timeout=0.5):
+            return process, containment, spawner
+        await asyncio.sleep(0.02)
     await _force_cleanup([process.pid])
     containment.close()
     raise AssertionError("contained worker socket did not become ready")
@@ -165,9 +160,7 @@ async def _serving_contained_worker(
 
 def _await_gone(pids: list[int], *, timeout: float = 20.0) -> list[int]:
     """Wait for every pid to die, returning any survivors."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(pid_is_live(p) for p in pids):
-        time.sleep(0.05)
+    wait_pid_gone(*pids, timeout=timeout)
     return [p for p in pids if pid_is_live(p)]
 
 

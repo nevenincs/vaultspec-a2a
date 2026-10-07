@@ -24,14 +24,16 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict, Unpack, cast
-
-import httpx
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 from ..utils._process_tree import (
+    ListenerOwnership,
+    classify_listener_ownership,
     detached_spawn_kwargs,
     kill_pid_tree_async,
     pid_is_live,
+    port_has_listener,
+    wait_pid_gone,
 )
 from .boot import (
     build_cwd_for,
@@ -43,7 +45,7 @@ from .boot import (
     serve_cwd_for,
     serve_env,
 )
-from .discovery import port_has_listener
+from .discovery import health_payload_ready, probe_health
 from .errors import LifecycleError
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
@@ -100,6 +102,10 @@ SPAWN_LOG_CAP_BYTES = 10 * 1024 * 1024
 # tells a held port from a free one.
 _PORT_PROBE_TIMEOUT_SECONDS = 1.0
 
+# How long a felled generation may take to exit before a resume/rerun refuses to
+# spawn a replacement that could overlap it on the same port.
+_TERMINATION_CONFIRM_SECONDS = 10.0
+
 
 @dataclass(frozen=True, slots=True)
 class ProcVerdict:
@@ -133,26 +139,11 @@ def endpoint_for(record: ProcRecord) -> str:
     return f"http://127.0.0.1:{record.port}"
 
 
-def _confirm_terminated(pid: int, *, timeout: float = 10.0) -> bool:
-    """Poll until *pid* is no longer a live process; ``False`` if it survives.
-
-    A bounded confirmation that a felled generation actually terminated, so a
-    replacement is never spawned while the old process is still alive on the same
-    port. Returns ``False`` when the pid is still alive at the deadline (a kill
-    that did not take), so the caller can refuse rather than overlap generations.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not pid_is_live(pid):
-            return True
-        time.sleep(0.05)
-    return not pid_is_live(pid)
-
-
 def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     """Kill *pid* and its whole process tree, returning ``True`` once it is dead.
 
-    A thin synchronous wrapper over :func:`~..utils.process.kill_pid_tree_async`,
+    A thin synchronous wrapper over
+    :func:`~vaultspec_a2a.utils._process_tree.kill_pid_tree_async`,
     the single asynchronous escalation this project owns (Windows
     ``taskkill /T /F``; POSIX snapshot-then-``SIGTERM``-then-``SIGKILL``) - this
     module used to carry an independent ~70-line synchronous copy of that same
@@ -398,7 +389,7 @@ def resume(
     # termination before spawning, so the replacement generation cannot overlap a
     # surviving old-tree member on the same port.
     tree_kill(record.pid)
-    if not _confirm_terminated(record.pid):
+    if not wait_pid_gone(record.pid, timeout=_TERMINATION_CONFIRM_SECONDS):
         raise LifecycleError(
             f"resume could not confirm {record.role}-{record.name} pid "
             f"{record.pid} terminated; refusing to spawn an overlapping "
@@ -429,7 +420,7 @@ def rerun(
     # and resume both guard before acting, and rerun must match that ordering.
     ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     tree_kill(record.pid)
-    if not _confirm_terminated(record.pid):
+    if not wait_pid_gone(record.pid, timeout=_TERMINATION_CONFIRM_SECONDS):
         # The old tree did not confirm dead: refuse to spawn a replacement that
         # could overlap the surviving old generation on the same port. The record
         # is left unchanged - no new generation is published.
@@ -658,37 +649,6 @@ def _worker_auth_headers(
     return {"Authorization": f"Bearer {token}"}
 
 
-def _health_payload_is_ready(payload: object, *, is_gateway: bool) -> bool:
-    """Whether a parsed ``/health`` JSON body proves THIS role is ready."""
-    if not isinstance(payload, dict):
-        return False
-    body = cast("dict[str, object]", payload)
-    if is_gateway:
-        return body.get("service") == "gateway" and body.get("ready") is True
-    return body.get("service") == "worker" and body.get("status") == "ok"
-
-
-def _probe_health(
-    port: int, *, headers: dict[str, str], is_gateway: bool, request_timeout: float
-) -> bool:
-    """One bounded ``GET /health``, reduced to a readiness bool."""
-    try:
-        response = httpx.get(
-            f"http://127.0.0.1:{port}/health",
-            headers=headers,
-            timeout=request_timeout,
-        )
-    except httpx.HTTPError:
-        return False
-    if response.status_code != 200:
-        return False
-    try:
-        payload = response.json()
-    except ValueError:
-        return False
-    return _health_payload_is_ready(payload, is_gateway=is_gateway)
-
-
 def _health_probe_for(
     role_cfg: RoleConfig,
     port: int,
@@ -714,14 +674,12 @@ def _health_probe_for(
         internal_token_file=internal_token_file,
         label=role_cfg.name,
     )
+    role: Literal["gateway", "worker"] = "gateway" if is_gateway else "worker"
+    base_url = f"http://127.0.0.1:{port}"
 
     def _probe(request_timeout: float) -> bool:
-        return _probe_health(
-            port,
-            headers=headers,
-            is_gateway=is_gateway,
-            request_timeout=request_timeout,
-        )
+        body = probe_health(base_url, timeout=request_timeout, headers=headers)
+        return health_payload_ready(body, role)
 
     return _probe
 
@@ -780,12 +738,11 @@ def _listener_ready(
 
     Does not accept a bound port until the listening pid is confirmed to be the
     child or a descendant of it
-    (:func:`~vaultspec_a2a.utils.process.listener_belongs_to`). A foreign holder
-    of the port - an un-reaped orphan of a felled generation, or a racer on a
-    fixed resume/rerun port - therefore never reads as our process being ready.
+    (:func:`~vaultspec_a2a.utils._process_tree.classify_listener_ownership`). A
+    foreign holder of the port - an un-reaped orphan of a felled generation, or a
+    racer on a fixed resume/rerun port - therefore never reads as our process
+    being ready.
     """
-    from ..utils._process_tree import ListenerOwnership, classify_listener_ownership
-
     if not port_has_listener(port, timeout=_PORT_PROBE_TIMEOUT_SECONDS):
         return False
     ownership = classify_listener_ownership(port, process.pid)
@@ -820,11 +777,12 @@ def _await_listener(
 
     Returns ``False`` if the spawned child dies first, and does not accept a bound
     port until the listening pid is confirmed to be the child or a descendant of
-    it (:func:`~vaultspec_a2a.utils.process.listener_belongs_to`). A foreign holder
-    of the port - an un-reaped orphan of a felled generation, or a racer on a
-    fixed resume/rerun port - therefore never reads as our process being ready, so
-    a record is not published pointing at a listener we do not own. An A2A HTTP
-    role additionally must satisfy *health_probe* within the same deadline.
+    it (:func:`~vaultspec_a2a.utils._process_tree.classify_listener_ownership`). A
+    foreign holder of the port - an un-reaped orphan of a felled generation, or a
+    racer on a fixed resume/rerun port - therefore never reads as our process
+    being ready, so a record is not published pointing at a listener we do not
+    own. An A2A HTTP role additionally must satisfy *health_probe* within the same
+    deadline.
     """
     deadline = time.monotonic() + timeout
     unresolved_logger = _UnresolvedOwnershipLogger(port, process.pid)

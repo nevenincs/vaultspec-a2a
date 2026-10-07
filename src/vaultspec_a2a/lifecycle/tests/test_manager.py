@@ -24,7 +24,7 @@ import pytest
 from ...control.config import setting_env
 from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ...testing.ports import free_port
-from ...utils._process_tree import pid_is_live
+from ...utils._process_tree import pid_is_live, wait_pid_gone
 from ..boot import (
     build_cwd_for,
     render_command,
@@ -55,16 +55,6 @@ from ..registry import (
     remove_record,
     write_record,
 )
-
-
-def wait_pid_dead(pid: int, *, timeout: float = 10.0) -> bool:
-    """Poll until *pid* is no longer a live process, or *timeout* elapses."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not pid_is_live(pid):
-            return True
-        time.sleep(0.05)
-    return not pid_is_live(pid)
 
 
 def _sleeper() -> subprocess.Popen[bytes]:
@@ -174,7 +164,7 @@ def test_tree_kill_fells_a_live_child_and_is_idempotent_on_dead() -> None:
     child = _sleeper()
     try:
         assert tree_kill(child.pid) is True
-        assert wait_pid_dead(child.pid)
+        assert wait_pid_gone(child.pid, timeout=10.0)
     finally:
         if child.poll() is None:
             child.kill()
@@ -189,7 +179,7 @@ def test_kill_verb_removes_the_record_after_felling_the_tree(tmp_path: Path) -> 
         write_record(_record(name="killme", pid=child.pid, port=18902), home=tmp_path)
         record = kill("killme", home=tmp_path)
         assert record.pid == child.pid
-        assert wait_pid_dead(child.pid)
+        assert wait_pid_gone(child.pid, timeout=10.0)
         assert read_record(record_path("scratch", "killme", home=tmp_path)) is None
     finally:
         if child.poll() is None:
@@ -213,7 +203,7 @@ def test_kill_verb_deletes_the_record_log_file(tmp_path: Path) -> None:
             home=tmp_path,
         )
         kill("killme-log", home=tmp_path)
-        assert wait_pid_dead(child.pid)
+        assert wait_pid_gone(child.pid, timeout=10.0)
         assert not log_file.exists()
     finally:
         if child.poll() is None:
@@ -1325,28 +1315,9 @@ def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
         # The serve reached readiness, so it recorded its pid before the commit.
         spawned_pid = int(pid_file.read_text(encoding="utf-8").strip())
         # The ready owned process was reaped, not leaked.
-        assert wait_pid_dead(spawned_pid)
+        assert wait_pid_gone(spawned_pid, timeout=10.0)
         # No half-committed record survived beside the injected directory.
         assert list_records(tmp_path) == []
     finally:
         if spawned_pid is not None and pid_is_live(spawned_pid):
             tree_kill(spawned_pid)
-
-
-def test_confirm_terminated_detects_a_live_and_a_dead_pid() -> None:
-    """The termination gate returns True only once the pid is actually gone."""
-    from ..manager import _confirm_terminated
-
-    child = _sleeper()
-    try:
-        # A live pid is not confirmed terminated within a short window.
-        assert _confirm_terminated(child.pid, timeout=0.3) is False
-    finally:
-        tree_kill(child.pid)
-    # Once felled, it confirms terminated.
-    assert _confirm_terminated(child.pid, timeout=10.0) is True
-
-    # tree_kill's bounded-wedged-killer property (formerly tested here against
-    # the private _win_taskkill_tree/_TASKKILL_REAP_WAIT this module owned) now
-    # lives with the shared async primitive tree_kill wraps - see
-    # utils/tests/test_process.py's taskkill-budget test.

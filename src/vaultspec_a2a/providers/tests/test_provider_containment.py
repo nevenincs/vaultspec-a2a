@@ -26,7 +26,7 @@ from ...providers._subprocess import (
     kill_process_tree,
     spawn_acp_process,
 )
-from ...utils._process_tree import pid_is_live
+from ...utils._process_tree import pid_is_live, wait_pid_gone
 from ...utils.process import ProcessContainment, ProcessContainmentError
 
 # A "provider" that spawns a long-lived grandchild, prints its pid, then sleeps.
@@ -59,9 +59,7 @@ def _base_interpreter() -> str:
 
 
 def _await_gone(pids: list[int], *, timeout: float = 10.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(pid_is_live(pid) for pid in pids):
-        time.sleep(0.05)
+    wait_pid_gone(*pids, timeout=timeout)
     survivors = [pid for pid in pids if pid_is_live(pid)]
     assert not survivors, f"provider descendants survived reap: {survivors}"
 

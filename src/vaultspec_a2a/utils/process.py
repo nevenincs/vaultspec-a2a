@@ -11,49 +11,12 @@ import sys
 from typing import Any, TypedDict
 
 from ._process_tree import (
-    CREATE_SUSPENDED as _CREATE_SUSPENDED,
-)
-from ._process_tree import (
-    JOB_BASIC_INFO_CLASS as _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS,
-)
-from ._process_tree import (
-    JOB_EXTENDED_INFO_CLASS as _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
-)
-from ._process_tree import (
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE as _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-)
-from ._process_tree import (
-    JOB_PROCESS_ID_LIST_CLASS as _JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS,
-)
-from ._process_tree import (
-    POLL_INTERVAL as _POLL_INTERVAL,
-)
-from ._process_tree import (
-    PROBE_DECODE_ERRORS as _PROBE_DECODE_ERRORS,
-)
-from ._process_tree import (
-    PROBE_ENCODING as _PROBE_ENCODING,
-)
-from ._process_tree import (
-    PROCESS_SET_QUOTA as _PROCESS_SET_QUOTA,
-)
-from ._process_tree import (
-    PROCESS_TERMINATE as _PROCESS_TERMINATE,
-)
-from ._process_tree import (
-    PS_TIMEOUT as _PS_TIMEOUT,
-)
-from ._process_tree import (
-    TH32CS_SNAPTHREAD as _TH32CS_SNAPTHREAD,
-)
-from ._process_tree import (
-    THREAD_SUSPEND_RESUME as _THREAD_SUSPEND_RESUME,
-)
-from ._process_tree import (
-    pid_in_tree as _pid_in_tree,
-)
-from ._process_tree import (
-    win_kernel32 as _win_kernel32,
+    POLL_INTERVAL,
+    PROBE_DECODE_ERRORS,
+    PROBE_ENCODING,
+    PS_TIMEOUT,
+    pid_in_tree,
+    win_kernel32,
 )
 from .async_cleanup import complete_cleanup
 
@@ -63,6 +26,20 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# Windows Job Object constants (winnt.h). A job created with
+# KILL_ON_JOB_CLOSE terminates every assigned process when the job is terminated
+# OR when the last handle to it is closed, so an owner that crashes still reaps
+# the whole contained tree.
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInformation
+_JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1  # JobObjectBasicAccountingInformation
+_JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS = 3  # JobObjectBasicProcessIdList
+_PROCESS_TERMINATE = 0x0001
+_PROCESS_SET_QUOTA = 0x0100
+_CREATE_SUSPENDED = 0x00000004
+_TH32CS_SNAPTHREAD = 0x00000004
+_THREAD_SUSPEND_RESUME = 0x0002
 
 
 class _SpawnKwargs(TypedDict, total=False):
@@ -126,9 +103,9 @@ def _ps_group_is_live(pgid: int) -> bool | None:
             ["ps", "-A", "-o", "pgid=,stat="],
             capture_output=True,
             text=True,
-            encoding=_PROBE_ENCODING,
-            errors=_PROBE_DECODE_ERRORS,
-            timeout=_PS_TIMEOUT,
+            encoding=PROBE_ENCODING,
+            errors=PROBE_DECODE_ERRORS,
+            timeout=PS_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -184,7 +161,7 @@ async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
         remaining = deadline - loop.time()
         if remaining <= 0:
             return False
-        await asyncio.sleep(min(_POLL_INTERVAL, remaining))
+        await asyncio.sleep(min(POLL_INTERVAL, remaining))
 
 
 def _win_job_structures() -> tuple[Any, int]:
@@ -292,7 +269,7 @@ class ProcessContainment:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
         job = kernel32.CreateJobObjectW(None, None)
@@ -364,7 +341,7 @@ class ProcessContainment:
         # This pid-only entry point is for roots already running. Owners that must
         # establish containment before the first instruction use
         # ``assign_suspended_process`` and retain the Popen process handle.
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         kernel32.OpenProcess.restype = wintypes.HANDLE
         kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
         handle = kernel32.OpenProcess(
@@ -436,7 +413,7 @@ class ProcessContainment:
                 ("dwFlags", wintypes.DWORD),
             )
 
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
         kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
         snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
@@ -503,7 +480,7 @@ class ProcessContainment:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
         kernel32.AssignProcessToJobObject.argtypes = (
             wintypes.HANDLE,
@@ -536,7 +513,7 @@ class ProcessContainment:
         if sys.platform == "win32":
             if self._job is None:
                 return None
-            return self._win_active_processes(_win_kernel32()) == 0
+            return self._win_active_processes(win_kernel32()) == 0
         pgid = self._pgid
         if pgid is None:
             return None
@@ -624,7 +601,7 @@ class ProcessContainment:
                 return False
             if active == 0:
                 return True
-            await asyncio.sleep(_POLL_INTERVAL)
+            await asyncio.sleep(POLL_INTERVAL)
         return self._win_active_processes(kernel32) == 0
 
     def _win_active_processes(self, kernel32: Any) -> int | None:
@@ -679,7 +656,7 @@ class ProcessContainment:
         if self._pid is None or not self._assigned:
             return "owned_pids=unassigned"
         if sys.platform == "win32":
-            pids = self._win_job_process_ids(_win_kernel32())
+            pids = self._win_job_process_ids(win_kernel32())
         else:
             pids = _posix_group_process_ids(self._pgid)
         if pids is None:
@@ -698,8 +675,8 @@ class ProcessContainment:
             return False
         if sys.platform != "win32":
             return pid == self._pid
-        pids = self._win_job_process_ids(_win_kernel32())
-        return bool(pids and pid in pids and _pid_in_tree(self._pid, pid) is True)
+        pids = self._win_job_process_ids(win_kernel32())
+        return bool(pids and pid in pids and pid_in_tree(self._pid, pid) is True)
 
     def _query_job_pid_list(
         self, kernel32: Any, size: int, header_size: int, pointer_size: int
@@ -804,7 +781,7 @@ class ProcessContainment:
             return
         import ctypes
 
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         if not kernel32.CloseHandle(self._job):
             raise ctypes.WinError(ctypes.get_last_error())
         self._job = None

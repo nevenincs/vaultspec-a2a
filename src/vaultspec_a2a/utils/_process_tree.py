@@ -1,4 +1,8 @@
-"""Platform-aware process-tree termination and OS containment.
+"""Platform-aware process liveness, loopback port probes and process-tree kills.
+
+Every "is this pid alive", "wait until these pids are gone" and "is something
+listening on this loopback port" question in the package is answered here, each
+in a blocking and an event-loop form where callers need both.
 
 The single async "kill this pid and its whole tree" escalation shared by the
 worker-management shutdown and the ACP subprocess reaper. It works by PID (never a
@@ -27,16 +31,41 @@ import os
 import socket
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from .async_cleanup import complete_cleanup
 
+__all__ = [
+    "POLL_INTERVAL",
+    "PROBE_DECODE_ERRORS",
+    "PROBE_ENCODING",
+    "PS_TIMEOUT",
+    "DetachedSpawnFlags",
+    "ListenerOwnership",
+    "classify_listener_ownership",
+    "detached_spawn_kwargs",
+    "kill_pid_tree_async",
+    "parse_netstat_listener_pid",
+    "pid_in_tree",
+    "pid_is_live",
+    "port_has_listener",
+    "port_has_listener_async",
+    "port_listener_pid",
+    "posix_descendant_pids",
+    "posix_parent_map",
+    "wait_pid_gone",
+    "wait_pid_gone_async",
+    "win_kernel32",
+]
+
 logger = logging.getLogger(__name__)
 
-_POLL_INTERVAL = 0.1
-_PS_TIMEOUT = 5.0
+POLL_INTERVAL = 0.1
+PS_TIMEOUT = 5.0
+_LOOPBACK_HOST = "127.0.0.1"
 
 # Decode settings for every process-table probe below. Each of them parses ASCII
 # tokens ONLY - pids, ppids, protocol names, dotted/hex addresses - while the
@@ -57,22 +86,8 @@ _PS_TIMEOUT = 5.0
 # surface as a catchable subprocess failure: it is raised inside subprocess's
 # reader thread, so ``run`` returns with ``stdout`` set to None and the parse
 # dies on an AttributeError that names nothing about encodings.
-_PROBE_ENCODING = "ascii"
-_PROBE_DECODE_ERRORS = "replace"
-
-# Windows Job Object constants (winnt.h). A job created with
-# KILL_ON_JOB_CLOSE terminates every assigned process when the job is terminated
-# OR when the last handle to it is closed, so an owner that crashes still reaps
-# the whole contained tree.
-_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
-_JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInformation
-_JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1  # JobObjectBasicAccountingInformation
-_JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS = 3  # JobObjectBasicProcessIdList
-_PROCESS_TERMINATE = 0x0001
-_PROCESS_SET_QUOTA = 0x0100
-_CREATE_SUSPENDED = 0x00000004
-_TH32CS_SNAPTHREAD = 0x00000004
-_THREAD_SUSPEND_RESUME = 0x0002
+PROBE_ENCODING = "ascii"
+PROBE_DECODE_ERRORS = "replace"
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +148,7 @@ def _windows_pid_is_live(pid: int) -> bool:
 
     process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
     still_active = 259  # STILL_ACTIVE
-    kernel32 = _win_kernel32()
+    kernel32 = win_kernel32()
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
     kernel32.GetExitCodeProcess.restype = wintypes.BOOL
@@ -151,6 +166,37 @@ def _windows_pid_is_live(pid: int) -> bool:
         return code.value == still_active
     finally:
         kernel32.CloseHandle(handle)
+
+
+def _all_gone(pids: tuple[int, ...]) -> bool:
+    return not any(pid_is_live(pid) for pid in pids)
+
+
+def wait_pid_gone(*pids: int, timeout: float) -> bool:
+    """Block until every one of *pids* is gone; ``False`` if any outlives *timeout*.
+
+    The single "confirm it actually died" poll, so a caller that felled a tree
+    never starts a replacement while the old generation still runs. Liveness is
+    :func:`pid_is_live`, which reads an unreaped zombie as gone, so a caller still
+    holding the child's handle need not reap it first.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _all_gone(pids):
+            return True
+        time.sleep(POLL_INTERVAL)
+    return _all_gone(pids)
+
+
+async def wait_pid_gone_async(*pids: int, timeout: float) -> bool:
+    """The event-loop form of :func:`wait_pid_gone`, yielding between polls."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if _all_gone(pids):
+            return True
+        await asyncio.sleep(POLL_INTERVAL)
+    return _all_gone(pids)
 
 
 def _posix_pid_is_zombie(pid: int) -> bool:
@@ -221,9 +267,9 @@ def _ps_pid_state(pid: int) -> str:
             ["ps", "-p", str(pid), "-o", "stat="],
             capture_output=True,
             text=True,
-            encoding=_PROBE_ENCODING,
-            errors=_PROBE_DECODE_ERRORS,
-            timeout=_PS_TIMEOUT,
+            encoding=PROBE_ENCODING,
+            errors=PROBE_DECODE_ERRORS,
+            timeout=PS_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -274,9 +320,9 @@ def _ps_parent_map() -> dict[int, int]:
             ["ps", "-A", "-o", "pid=,ppid="],
             capture_output=True,
             text=True,
-            encoding=_PROBE_ENCODING,
-            errors=_PROBE_DECODE_ERRORS,
-            timeout=_PS_TIMEOUT,
+            encoding=PROBE_ENCODING,
+            errors=PROBE_DECODE_ERRORS,
+            timeout=PS_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -318,6 +364,40 @@ def posix_descendant_pids(pid: int) -> list[int]:
     return descendants
 
 
+def port_has_listener(port: int, *, timeout: float) -> bool:
+    """Return ``True`` when a loopback ``connect`` to *port* is accepted.
+
+    The single connect-probe primitive: a successful ``connect_ex`` to
+    ``127.0.0.1:port`` proves a live listener is accepting there. It is the ONLY
+    reliable "is this port taken" signal on Windows, where a plain ``bind``
+    succeeds even when another process already serves the port (no
+    ``SO_EXCLUSIVEADDRUSE``); a caller that must also catch a bound-but-not-yet-
+    listening port pairs this with a bind-probe. *timeout* is required rather than
+    defaulted because a readiness poll (fast) and a liveness check (patient) want
+    different budgets.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        return sock.connect_ex((_LOOPBACK_HOST, port)) == 0
+
+
+async def port_has_listener_async(port: int, *, timeout: float) -> bool:
+    """The event-loop form of :func:`port_has_listener`.
+
+    A refused connection and one that does not complete within *timeout* both
+    read as no listener.
+    """
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(_LOOPBACK_HOST, port), timeout=timeout
+        )
+        writer.close()
+        await writer.wait_closed()
+    except (OSError, TimeoutError):
+        return False
+    return True
+
+
 class ListenerOwnership(StrEnum):
     """How much a readiness probe actually established about a bound port."""
 
@@ -345,7 +425,7 @@ def classify_listener_ownership(port: int, root_pid: int) -> ListenerOwnership:
     listener_pid = port_listener_pid(port)
     if listener_pid is None:
         return ListenerOwnership.UNRESOLVED
-    belongs = _pid_in_tree(root_pid, listener_pid)
+    belongs = pid_in_tree(root_pid, listener_pid)
     if belongs is None:
         return ListenerOwnership.UNRESOLVED
     if belongs:
@@ -374,7 +454,7 @@ def port_listener_pid(port: int) -> int | None:
     return _lsof_listener_pid(port)
 
 
-def _pid_in_tree(root_pid: int, candidate_pid: int) -> bool | None:
+def pid_in_tree(root_pid: int, candidate_pid: int) -> bool | None:
     """Whether *candidate_pid* belongs to the tree; ``None`` if ancestry is unknown.
 
     An unresolved parent map proves neither ownership nor foreign ancestry.
@@ -442,7 +522,7 @@ def _win_snapshot_parent_map() -> dict[int, int]:
             ("szExeFile", wintypes.WCHAR * 260),
         )
 
-    kernel32 = _win_kernel32()
+    kernel32 = win_kernel32()
     kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
     for read_entry in (kernel32.Process32FirstW, kernel32.Process32NextW):
@@ -626,9 +706,9 @@ def _netstat_listener_pid(port: int) -> int | None:
             ["netstat", "-ano", "-p", "tcp"],
             capture_output=True,
             text=True,
-            encoding=_PROBE_ENCODING,
-            errors=_PROBE_DECODE_ERRORS,
-            timeout=_PS_TIMEOUT,
+            encoding=PROBE_ENCODING,
+            errors=PROBE_DECODE_ERRORS,
+            timeout=PS_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -745,9 +825,9 @@ def _lsof_listener_pid(port: int) -> int | None:
             ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
             capture_output=True,
             text=True,
-            encoding=_PROBE_ENCODING,
-            errors=_PROBE_DECODE_ERRORS,
-            timeout=_PS_TIMEOUT,
+            encoding=PROBE_ENCODING,
+            errors=PROBE_DECODE_ERRORS,
+            timeout=PS_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -781,17 +861,6 @@ def _posix_signal_all(pids: list[int], signal_number: int) -> None:
             continue
         with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
             os.kill(target, signal_number)
-
-
-async def _await_pids_gone(pids: list[int], *, timeout: float) -> bool:
-    """Poll until every pid is gone or *timeout* elapses; report whether all are."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while loop.time() < deadline:
-        if not any(pid_is_live(pid) for pid in pids):
-            return True
-        await asyncio.sleep(_POLL_INTERVAL)
-    return not any(pid_is_live(pid) for pid in pids)
 
 
 async def _win_tree_kill(pid: int, *, timeout: float) -> bool:
@@ -856,13 +925,13 @@ async def _kill_pid_tree(pid: int, *, term_timeout: float, kill_timeout: float) 
 
     targets = [pid, *posix_descendant_pids(pid)]
     _posix_signal_all(targets, signal.SIGTERM)
-    if await _await_pids_gone(targets, timeout=term_timeout):
+    if await wait_pid_gone_async(*targets, timeout=term_timeout):
         return True
     _posix_signal_all(targets, signal.SIGKILL)
-    return await _await_pids_gone(targets, timeout=kill_timeout)
+    return await wait_pid_gone_async(*targets, timeout=kill_timeout)
 
 
-def _win_kernel32() -> Any:
+def win_kernel32() -> Any:
     """Load native handle release with pointer-sized arguments on every caller."""
     if sys.platform != "win32":
         raise OSError("kernel32 requires Windows")
@@ -873,21 +942,3 @@ def _win_kernel32() -> Any:
     kernel32.CloseHandle.restype = wintypes.BOOL
     kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
     return kernel32
-
-
-# Stable internal exports for the containment facade and existing test seams.
-POLL_INTERVAL = _POLL_INTERVAL
-PS_TIMEOUT = _PS_TIMEOUT
-PROBE_ENCODING = _PROBE_ENCODING
-PROBE_DECODE_ERRORS = _PROBE_DECODE_ERRORS
-JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-JOB_EXTENDED_INFO_CLASS = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS
-JOB_BASIC_INFO_CLASS = _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS
-JOB_PROCESS_ID_LIST_CLASS = _JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS
-PROCESS_TERMINATE = _PROCESS_TERMINATE
-PROCESS_SET_QUOTA = _PROCESS_SET_QUOTA
-CREATE_SUSPENDED = _CREATE_SUSPENDED
-TH32CS_SNAPTHREAD = _TH32CS_SNAPTHREAD
-THREAD_SUSPEND_RESUME = _THREAD_SUSPEND_RESUME
-win_kernel32 = _win_kernel32
-pid_in_tree = _pid_in_tree

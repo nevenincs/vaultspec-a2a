@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -47,7 +46,7 @@ from ..tests.gateway_boot import (
     worker_lifecycle_gateway_script,
 )
 from ..utils import kill_pid_tree_async
-from ..utils._process_tree import pid_is_live
+from ..utils._process_tree import pid_is_live, port_has_listener, wait_pid_gone
 from ..utils.process import ProcessContainment
 
 if TYPE_CHECKING:
@@ -75,9 +74,7 @@ async def _read_pids(stream: Any, count: int) -> list[int]:
 
 
 def _await_gone(pids: list[int], *, timeout: float = 10.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(pid_is_live(p) for p in pids):
-        time.sleep(0.05)
+    wait_pid_gone(*pids, timeout=timeout)
     survivors = [p for p in pids if pid_is_live(p)]
     assert not survivors, f"descendants survived reap: {survivors}"
 
@@ -253,14 +250,6 @@ _PRESET = "mock-success-single"
 _GATEWAY = worker_lifecycle_gateway_script()
 
 
-def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
 def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     tmp_path: Path,
 ) -> None:
@@ -327,9 +316,14 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
         assert start.status_code == 503, start.text
         assert "OS isolation backend" in start.json()["detail"]
         deadline = time.monotonic() + 30.0
-        while not _port_listening(worker_port) and time.monotonic() < deadline:
+        while (
+            not port_has_listener(worker_port, timeout=0.5)
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.25)
-        assert _port_listening(worker_port), "lifecycle driver must start its worker"
+        assert port_has_listener(worker_port, timeout=0.5), (
+            "lifecycle driver must start its worker"
+        )
 
         # Graceful, receipt-owned administrative shutdown: the handler runs the
         # authenticated ownership-gated stop (an in-process SIGINT), so the
@@ -351,9 +345,11 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
             proc.wait(timeout=30)
         assert proc.poll() is not None, "graceful shutdown must stop the gateway"
         deadline = time.monotonic() + 15.0
-        while _port_listening(worker_port) and time.monotonic() < deadline:
+        while (
+            port_has_listener(worker_port, timeout=0.5) and time.monotonic() < deadline
+        ):
             time.sleep(0.25)
-        assert not _port_listening(worker_port), (
+        assert not port_has_listener(worker_port, timeout=0.5), (
             "graceful shutdown must reap the gateway-owned worker"
         )
     finally:

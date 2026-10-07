@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from ...testing import settings_override
-from ...utils._process_tree import kill_pid_tree_async, pid_is_live
+from ...utils._process_tree import kill_pid_tree_async, pid_is_live, wait_pid_gone
 from ..engine_serve import EngineSeatError, engine_command, resolve_data_seat, serve
 
 
@@ -142,10 +142,7 @@ def test_wrapper_termination_reaps_engine_and_descendant(tmp_path: Path) -> None
         wrapper.wait(timeout=30)
         if sys.platform != "win32":
             assert wrapper.returncode == 143
-        deadline = time.monotonic() + 5
-        while any(pid_is_live(pid) for pid in pids) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert not any(pid_is_live(pid) for pid in pids)
+        assert wait_pid_gone(*pids, timeout=5)
     finally:
         if wrapper.poll() is None:
             wrapper.kill()

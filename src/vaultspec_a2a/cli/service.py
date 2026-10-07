@@ -49,7 +49,7 @@ from ..lifecycle.discovery import (
     read_resident_service,
 )
 from ..lifecycle.manager import spawn, tree_kill
-from ..utils._process_tree import pid_is_live
+from ..utils._process_tree import pid_is_live, wait_pid_gone
 from ..utils.runtime_exec import self_command
 
 if TYPE_CHECKING:
@@ -259,15 +259,6 @@ def _lifecycle_capability(app_home: Path) -> str | None:
         return None
 
 
-def _wait_pid_dead(pid: int, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not pid_is_live(pid):
-            return True
-        time.sleep(_POLL_INTERVAL_SECONDS)
-    return not pid_is_live(pid)
-
-
 def stop_service(
     app_home: Path | None = None,
     *,
@@ -306,7 +297,7 @@ def stop_service(
         accepted = response.status_code == 202
     except httpx.HTTPError:
         accepted = False
-    if accepted and _wait_pid_dead(info.pid, timeout):
+    if accepted and wait_pid_gone(info.pid, timeout=timeout):
         return service_status(home)
     if not tree_kill(info.pid):
         raise ServiceVerbError(

@@ -235,7 +235,7 @@ def _refuse_while_service_listening() -> None:
     connection is the evidence that something is serving the port.
     """
     from ..control.config import settings
-    from ..lifecycle.discovery import port_has_listener
+    from ..utils._process_tree import port_has_listener
 
     for port in (settings.port, settings.worker_port):
         if port_has_listener(port, timeout=2.0):

@@ -120,8 +120,8 @@ async def test_deleting_thread_with_pending_permission_is_never_swept(
     (``thread.transitions``), set out of band by the deletion saga alone. Before
     ``list_non_terminal_threads`` excluded it explicitly, this exact shape - a
     pending permission survives restart AND its checkpoint is available, the
-    one branch that assigns a new thread status - would have driven
-    ``update_thread_status`` to request ``DELETING -> input_required`` and raise
+    one branch that assigns a new thread status - would have driven a status
+    election to request ``DELETING -> input_required`` and raise
     ``InvalidTransitionError`` out of startup reconciliation.
     """
     thread_id = "thread-deleting-pending-permission"

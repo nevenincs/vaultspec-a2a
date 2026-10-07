@@ -10,6 +10,7 @@ verification, cross-session durability, and cascade-delete behaviour.
 import json
 from collections.abc import AsyncGenerator
 from decimal import Decimal
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -37,10 +38,10 @@ from .. import (
     append_permission_log,
     create_thread,
     delete_thread,
+    elect_thread_status,
     get_permission_logs_by_thread,
     get_permission_request,
     get_thread,
-    get_thread_metadata,
     list_threads,
     record_permission_request,
     save_model,
@@ -48,13 +49,13 @@ from .. import (
     sum_cost_by_agent,
     sum_cost_by_thread,
     supersede_permission_requests,
-    update_thread_status,
 )
 from .. import session as _session_module
 from ..models import (
     ArtifactModel,
     CostTrackingModel,
     PermissionLogModel,
+    ThreadModel,
 )
 from ..session import (
     close_db,
@@ -64,6 +65,7 @@ from ..session import (
     init_db,
     verify_wal_mode,
 )
+from .test_thread_status_election import _seed
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -77,6 +79,39 @@ EXPECTED_TABLES = {"artifacts", "cost_tracking", "permission_logs", "threads"}
 # from the repository so these assertions measure the production cap against the
 # requirement it exists to satisfy instead of against itself.
 _CONSUMER_REASON_BYTES = 500
+
+
+async def _elect_from(
+    session_factory: async_sessionmaker[AsyncSession],
+    source: ThreadStatus,
+    target: ThreadStatus,
+    *,
+    run: str,
+    failure_reason: str | None = None,
+) -> ThreadModel:
+    """Seed a run in *source* with its accepted action, elect *target*, read it back.
+
+    The election is made as the run's current writer from the witness the seed
+    returns, so what comes back is what the production lifecycle write leaves
+    durable.
+    """
+    expectation = await _seed(session_factory, run, source, f"{run}-receipt")
+    authority = expectation.authority
+    async with session_factory() as session:
+        await elect_thread_status(
+            session,
+            run,
+            expectation=expectation,
+            status=target,
+            action_type=authority.action_type,
+            action_receipt_id=authority.action_receipt_id,
+            failure_reason=failure_reason,
+        )
+        await session.commit()
+    async with session_factory() as reader:
+        durable = await get_thread(reader, run)
+    assert durable is not None
+    return durable
 
 
 # ---------------------------------------------------------------------------
@@ -207,34 +242,38 @@ class TestThreadCRUD:
             )
 
     @pytest.mark.asyncio
-    async def test_get_thread_metadata(self, session: AsyncSession) -> None:
-        """get_thread_metadata returns the metadata JSON string."""
-        meta = json.dumps({"workspace_root": "Y:/code/vaultspec"})
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Meta",
-            metadata=meta,
-        )
-        result = await get_thread_metadata(session, thread.id)
-        assert result == meta
-
-    @pytest.mark.asyncio
-    async def test_get_thread_metadata_none(self, session: AsyncSession) -> None:
-        """get_thread_metadata returns None for threads without metadata."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="No Meta"
-        )
-        result = await get_thread_metadata(session, thread.id)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_thread_metadata_missing_thread(
-        self, session: AsyncSession
+    async def test_thread_metadata_round_trips_through_get_thread(
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
-        """get_thread_metadata returns None for nonexistent thread."""
-        result = await get_thread_metadata(session, "nonexistent-thread")
-        assert result is None
+        """A stored metadata JSON string is read back off the thread row."""
+        meta = json.dumps({"workspace_root": "Y:/code/vaultspec"})
+        async with session_factory() as session:
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                title="Meta",
+                metadata=meta,
+            )
+            await session.commit()
+        async with session_factory() as reader:
+            found = await get_thread(reader, thread.id)
+        assert found is not None
+        assert found.thread_metadata == meta
+
+    @pytest.mark.asyncio
+    async def test_thread_without_metadata_reads_none(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """A thread created without metadata reads back None."""
+        async with session_factory() as session:
+            thread = await create_thread(
+                session, write_authority=make_test_write_authority(), title="No Meta"
+            )
+            await session.commit()
+        async with session_factory() as reader:
+            found = await get_thread(reader, thread.id)
+        assert found is not None
+        assert found.thread_metadata is None
 
     @pytest.mark.asyncio
     async def test_get_thread_found(self, session: AsyncSession) -> None:
@@ -283,62 +322,55 @@ class TestThreadCRUD:
         assert len(threads) == 0
 
     @pytest.mark.asyncio
-    async def test_update_thread_status(self, session: AsyncSession) -> None:
-        """update_thread_status should change the status field."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="Updatable"
-        )
-        assert thread.status == "submitted"
-
-        updated = await update_thread_status(session, thread.id, "running")
-        assert updated is not None
-        assert updated.status == "running"
-
-    @pytest.mark.asyncio
-    async def test_idempotent_status_write_repairs_active_projection(
-        self, session: AsyncSession
+    async def test_an_election_restores_the_active_projection(
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         """Lifecycle writes restore the denormalized discovery selector."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Projection repair",
-            status=ThreadStatus.COMPLETED,
+        run = "stale-selector"
+        expectation = await _seed(
+            session_factory, run, ThreadStatus.RUNNING, f"{run}-receipt"
         )
-        thread.is_active = True
-        await session.flush()
+        authority = expectation.authority
+        async with session_factory() as session:
+            thread = await get_thread(session, run)
+            assert thread is not None
+            thread.is_active = False
+            await session.flush()
+            await elect_thread_status(
+                session,
+                run,
+                expectation=expectation,
+                status=ThreadStatus.INPUT_REQUIRED,
+                action_type=authority.action_type,
+                action_receipt_id=authority.action_receipt_id,
+            )
+            await session.commit()
+        async with session_factory() as reader:
+            durable = await get_thread(reader, run)
 
-        updated = await update_thread_status(session, thread.id, ThreadStatus.COMPLETED)
-
-        assert updated is not None
-        assert updated.is_active is False
+        assert durable is not None
+        assert durable.is_active is True
 
     @pytest.mark.asyncio
     async def test_an_overlong_ascii_reason_is_truncated_and_marked(
-        self, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         """The durable column never grows past the bound its consumer enforces."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Long ASCII reason",
-        )
-
-        updated = await update_thread_status(
-            session,
-            thread.id,
+        failed = await _elect_from(
+            session_factory,
+            ThreadStatus.RUNNING,
             ThreadStatus.FAILED,
+            run="long-ascii-reason",
             failure_reason="x" * 4000,
         )
 
-        assert updated is not None
-        assert updated.failure_reason is not None
-        assert len(updated.failure_reason.encode("utf-8")) <= _CONSUMER_REASON_BYTES
-        assert updated.failure_reason.endswith("…")
+        assert failed.failure_reason is not None
+        assert len(failed.failure_reason.encode("utf-8")) <= _CONSUMER_REASON_BYTES
+        assert failed.failure_reason.endswith("…")
 
     @pytest.mark.asyncio
     async def test_a_multibyte_reason_is_bounded_in_bytes_not_characters(
-        self, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         """A non-ASCII reason must fit the reader's bound, not merely look short.
 
@@ -347,30 +379,25 @@ class TestThreadCRUD:
         limit, and the consumer then rejects it outright - so the run reports
         nothing rather than a shortened something.
         """
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Multibyte reason",
-        )
         # Three bytes per character, so a character-counted cap would admit
         # roughly three times the consumer's budget.
         reason = "провайдер отказал" * 60
 
-        updated = await update_thread_status(
-            session,
-            thread.id,
+        failed = await _elect_from(
+            session_factory,
+            ThreadStatus.RUNNING,
             ThreadStatus.FAILED,
+            run="multibyte-reason",
             failure_reason=reason,
         )
 
-        assert updated is not None
-        assert updated.failure_reason is not None
-        assert len(updated.failure_reason) < len(reason)
-        assert len(updated.failure_reason.encode("utf-8")) <= _CONSUMER_REASON_BYTES
+        assert failed.failure_reason is not None
+        assert len(failed.failure_reason) < len(reason)
+        assert len(failed.failure_reason.encode("utf-8")) <= _CONSUMER_REASON_BYTES
 
     @pytest.mark.asyncio
     async def test_truncation_cuts_on_a_character_boundary(
-        self, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         """A cut mid-sequence would store bytes that are not valid UTF-8.
 
@@ -378,25 +405,20 @@ class TestThreadCRUD:
         character: a column holding half a character is worse than one holding a
         slightly shorter reason, and a strict decode is what tells the two apart.
         """
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Boundary reason",
-        )
         # One ASCII character then three-byte characters, so successive budgets
         # fall at differing offsets within a character rather than aligning.
         reason = "e" + "字" * 400
 
-        updated = await update_thread_status(
-            session,
-            thread.id,
+        failed = await _elect_from(
+            session_factory,
+            ThreadStatus.RUNNING,
             ThreadStatus.FAILED,
+            run="boundary-reason",
             failure_reason=reason,
         )
 
-        assert updated is not None
-        assert updated.failure_reason is not None
-        stored = updated.failure_reason
+        assert failed.failure_reason is not None
+        stored = failed.failure_reason
         assert len(stored.encode("utf-8")) <= _CONSUMER_REASON_BYTES
         # Round-trips through a strict decode: every character is whole.
         assert stored.encode("utf-8").decode("utf-8") == stored
@@ -405,23 +427,20 @@ class TestThreadCRUD:
 
     @pytest.mark.asyncio
     async def test_a_reason_within_the_bound_is_stored_verbatim(
-        self, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         """Only an overlong reason is touched; a short one keeps its own text."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="Short reason"
-        )
         reason = "Graph event stream failed unexpectedly: AcpPromptError: 402"
 
-        updated = await update_thread_status(
-            session,
-            thread.id,
+        failed = await _elect_from(
+            session_factory,
+            ThreadStatus.RUNNING,
             ThreadStatus.FAILED,
+            run="short-reason",
             failure_reason=reason,
         )
 
-        assert updated is not None
-        assert updated.failure_reason == reason
+        assert failed.failure_reason == reason
 
     @pytest.mark.asyncio
     async def test_set_thread_approval_state(self, session: AsyncSession) -> None:
@@ -489,12 +508,6 @@ class TestThreadCRUD:
         assert new_request.request_status == PermissionRequestStatus.PENDING.value
 
     @pytest.mark.asyncio
-    async def test_update_thread_status_not_found(self, session: AsyncSession) -> None:
-        """update_thread_status should return None for missing thread."""
-        result = await update_thread_status(session, "missing", "running")
-        assert result is None
-
-    @pytest.mark.asyncio
     async def test_get_thread_not_found_returns_none(
         self, session: AsyncSession
     ) -> None:
@@ -506,25 +519,33 @@ class TestThreadCRUD:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_thread_after_status_update_has_fresh_updated_at(
-        self, session: AsyncSession
+    async def test_get_thread_after_an_election_has_fresh_updated_at(
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
-        """updated_at in the returned object should reflect the update time.
+        """updated_at on the loaded object should reflect the election time.
 
         With expire_on_commit=False and onupdate= on the column, the in-memory
-        value is stale after flush unless we set it explicitly.
+        value is stale after the update unless the election refreshes the row.
         """
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Staleness Check",
+        run = "staleness-check"
+        expectation = await _seed(
+            session_factory, run, ThreadStatus.SUBMITTED, f"{run}-receipt"
         )
-        original_updated_at = thread.updated_at
-
-        updated = await update_thread_status(session, thread.id, "running")
-        assert updated is not None
-        # The returned object must have a fresh timestamp, not the original one.
-        assert updated.updated_at >= original_updated_at
+        authority = expectation.authority
+        async with session_factory() as session:
+            thread = await get_thread(session, run)
+            assert thread is not None
+            original_updated_at = thread.updated_at
+            await elect_thread_status(
+                session,
+                run,
+                expectation=expectation,
+                status=ThreadStatus.RUNNING,
+                action_type=authority.action_type,
+                action_receipt_id=authority.action_receipt_id,
+            )
+            # The loaded object must carry a fresh timestamp, not the original.
+            assert thread.updated_at >= original_updated_at
 
     @pytest.mark.asyncio
     async def test_nickname_conflict_via_create_thread(
@@ -565,15 +586,25 @@ class TestThreadCRUD:
             )
 
     @pytest.mark.asyncio
-    async def test_update_thread_status_invalid_raises(
-        self, session: AsyncSession
+    async def test_elect_thread_status_rejects_an_untyped_status(
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
-        """update_thread_status() rejects invalid status strings."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="Valid Thread"
+        """elect_thread_status() refuses a status that is not a ThreadStatus."""
+        run = "untyped-status"
+        expectation = await _seed(
+            session_factory, run, ThreadStatus.SUBMITTED, f"{run}-receipt"
         )
-        with pytest.raises(ValueError, match="Invalid thread status"):
-            await update_thread_status(session, thread.id, "not-a-real-status")
+        authority = expectation.authority
+        async with session_factory() as session:
+            with pytest.raises(TypeError, match="ThreadStatus"):
+                await elect_thread_status(
+                    session,
+                    run,
+                    expectation=expectation,
+                    status=cast("ThreadStatus", "not-a-real-status"),
+                    action_type=authority.action_type,
+                    action_receipt_id=authority.action_receipt_id,
+                )
 
     @pytest.mark.asyncio
     async def test_create_thread_all_valid_statuses(
@@ -978,124 +1009,115 @@ class TestInvalidTransitionError:
     """_VALID_TRANSITIONS state machine — allowed and forbidden paths."""
 
     @pytest.mark.asyncio
-    async def test_submitted_to_running_is_allowed(self, session: AsyncSession) -> None:
+    async def test_submitted_to_running_is_allowed(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """submitted → running is a valid forward transition."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-01",
-            status="submitted",
+        updated = await _elect_from(
+            session_factory, ThreadStatus.SUBMITTED, ThreadStatus.RUNNING, run="sm-01"
         )
-        updated = await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
-        assert updated is not None
         assert updated.status == "running"
 
     @pytest.mark.asyncio
-    async def test_running_to_completed_is_allowed(self, session: AsyncSession) -> None:
+    async def test_running_to_completed_is_allowed(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """running → completed is a valid terminal transition."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-02",
-            status="running",
+        updated = await _elect_from(
+            session_factory, ThreadStatus.RUNNING, ThreadStatus.COMPLETED, run="sm-02"
         )
-        updated = await update_thread_status(session, thread.id, ThreadStatus.COMPLETED)
-        assert updated is not None
         assert updated.status == "completed"
 
     @pytest.mark.asyncio
-    async def test_running_to_failed_is_allowed(self, session: AsyncSession) -> None:
+    async def test_running_to_failed_is_allowed(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """running → failed is valid (error path)."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-03",
-            status="running",
+        updated = await _elect_from(
+            session_factory, ThreadStatus.RUNNING, ThreadStatus.FAILED, run="sm-03"
         )
-        updated = await update_thread_status(session, thread.id, ThreadStatus.FAILED)
-        assert updated is not None
         assert updated.status == "failed"
 
     @pytest.mark.asyncio
-    async def test_terminal_to_archived_is_allowed(self, session: AsyncSession) -> None:
+    async def test_terminal_to_archived_is_allowed(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """completed → archived is allowed (soft-delete path)."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-04",
-            status="completed",
+        updated = await _elect_from(
+            session_factory, ThreadStatus.COMPLETED, ThreadStatus.ARCHIVED, run="sm-04"
         )
-        updated = await update_thread_status(session, thread.id, ThreadStatus.ARCHIVED)
-        assert updated is not None
         assert updated.status == "archived"
 
     @pytest.mark.asyncio
-    async def test_running_to_submitted_raises(self, session: AsyncSession) -> None:
+    async def test_running_to_submitted_raises(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """running → submitted is a backward transition — must raise."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-05",
-            status="running",
-        )
         with pytest.raises(InvalidTransitionError, match=r"running.*submitted"):
-            await update_thread_status(session, thread.id, ThreadStatus.SUBMITTED)
+            await _elect_from(
+                session_factory,
+                ThreadStatus.RUNNING,
+                ThreadStatus.SUBMITTED,
+                run="sm-05",
+            )
 
     @pytest.mark.asyncio
-    async def test_completed_to_running_raises(self, session: AsyncSession) -> None:
+    async def test_completed_to_running_raises(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """completed → running is a terminal regression — must raise."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-06",
-            status="completed",
-        )
         with pytest.raises(InvalidTransitionError, match=r"completed.*running"):
-            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
+            await _elect_from(
+                session_factory,
+                ThreadStatus.COMPLETED,
+                ThreadStatus.RUNNING,
+                run="sm-06",
+            )
 
     @pytest.mark.asyncio
-    async def test_failed_to_running_raises(self, session: AsyncSession) -> None:
+    async def test_failed_to_running_raises(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """failed → running is a terminal regression — must raise."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-07",
-            status="failed",
-        )
         with pytest.raises(InvalidTransitionError, match=r"failed.*running"):
-            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
+            await _elect_from(
+                session_factory, ThreadStatus.FAILED, ThreadStatus.RUNNING, run="sm-07"
+            )
 
     @pytest.mark.asyncio
-    async def test_archived_to_any_raises(self, session: AsyncSession) -> None:
-        """archived → any is forbidden (truly terminal state)."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-08",
-            status="archived",
-        )
-        for target in (
+    @pytest.mark.parametrize(
+        "target",
+        [
             ThreadStatus.SUBMITTED,
             ThreadStatus.RUNNING,
             ThreadStatus.COMPLETED,
             ThreadStatus.FAILED,
-        ):
-            with pytest.raises(InvalidTransitionError):
-                await update_thread_status(session, thread.id, target)
+        ],
+    )
+    async def test_archived_to_any_raises(
+        self, session_factory: async_sessionmaker[AsyncSession], target: ThreadStatus
+    ) -> None:
+        """archived → any is forbidden (truly terminal state)."""
+        with pytest.raises(InvalidTransitionError):
+            await _elect_from(
+                session_factory,
+                ThreadStatus.ARCHIVED,
+                target,
+                run=f"sm-08-{target.value}",
+            )
 
     @pytest.mark.asyncio
     async def test_invalid_transition_error_is_value_error(
-        self, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         """InvalidTransitionError is a subclass of ValueError for broad catching."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="SM-09",
-            status="completed",
-        )
         with pytest.raises(ValueError):
-            await update_thread_status(session, thread.id, ThreadStatus.SUBMITTED)
+            await _elect_from(
+                session_factory,
+                ThreadStatus.COMPLETED,
+                ThreadStatus.SUBMITTED,
+                run="sm-09",
+            )
 
 
 # ---------------------------------------------------------------------------

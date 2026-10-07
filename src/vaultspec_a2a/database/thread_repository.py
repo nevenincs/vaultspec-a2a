@@ -67,7 +67,6 @@ __all__ = [
     "elect_thread_status",
     "get_thread",
     "get_thread_execution_state",
-    "get_thread_metadata",
     "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
@@ -80,7 +79,6 @@ __all__ = [
     "set_thread_repair_state",
     "thread_owned_by",
     "thread_write_expectation",
-    "update_thread_status",
 ]
 
 
@@ -578,6 +576,14 @@ async def elect_thread_status(
     derived from the witness here, and its receipt must already identify a
     same-thread, same-action journal row; absence is a typed refusal and never
     causes authority to be invented.
+
+    ``failure_reason`` and ``provider_condition`` leave their columns unchanged
+    when falsy, and there is deliberately no explicit-clear path: a run's failure
+    account is written once, on the election that fails it. The reason is
+    flattened to one line and capped here, the one write boundary every producer
+    passes through. The condition is written independently of the reason because
+    the two answer different questions (what happened versus what the reader
+    should do), so a caller that knows only one must still be able to record it.
     """
     expectation = kwargs["expectation"]
     status = kwargs["status"]
@@ -711,65 +717,6 @@ async def _compare_and_set_thread(
     if not matching_receipt:
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.RECEIPT_MISMATCH)
     return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)
-
-
-async def update_thread_status(
-    session: AsyncSession,
-    thread_id: str,
-    status: ThreadStatus | str,
-    *,
-    failure_reason: str | None = None,
-    provider_condition: str | None = None,
-) -> ThreadModel | None:
-    """Update a thread's status with transition validation.
-
-    ``failure_reason`` is additive and leaves the column UNCHANGED when
-    falsy (``None`` or empty), so every existing caller — completed,
-    cancelled, and every already-shipped failed-status write that doesn't
-    pass it — is untouched; there is deliberately no explicit-clear path,
-    since a thread's failure reason is write-once per terminal transition.
-    Pass a non-empty value only on a FAILED transition that has a reason to
-    durably record; the text is capped and flattened to a single line here,
-    the one write boundary every producer passes through, regardless of
-    whether the caller already capped it.
-
-    ``provider_condition`` is the machine-readable counterpart and follows the
-    same additive, falsy-leaves-unchanged rule. It is written INDEPENDENTLY of
-    the reason rather than only alongside it: the two answer different questions
-    (what happened versus what the reader should do), and a caller that knows one
-    but not the other must be able to record what it knows. A caller that knows
-    neither leaves both untouched, which is why a failure carrying no
-    classification reads as NULL here rather than as a fabricated floor.
-    """
-    coerced_status = _coerce(ThreadStatus, status, label="thread status")
-    thread = await session.get(ThreadModel, thread_id)
-    if thread is None:
-        return None
-
-    current = _coerce(ThreadStatus, thread.status, label="thread status")
-    if current == coerced_status:
-        # Idempotent writes also repair a stale denormalized selector (for
-        # example after an interrupted migration or legacy direct write).
-        thread.is_active = coerced_status in ACTIVE_STATUSES
-        thread.updated_at = _utcnow()
-        if failure_reason:
-            thread.failure_reason = _capped_single_line(failure_reason)
-        if provider_condition:
-            thread.provider_condition = provider_condition
-        await session.flush()
-        return thread
-
-    validate_transition(current, coerced_status, thread_id=thread_id)
-
-    thread.status = coerced_status.value
-    thread.is_active = coerced_status in ACTIVE_STATUSES
-    thread.updated_at = _utcnow()
-    if failure_reason:
-        thread.failure_reason = _capped_single_line(failure_reason)
-    if provider_condition:
-        thread.provider_condition = provider_condition
-    await session.flush()
-    return thread
 
 
 class _RepairOptional(TypedDict, total=False):
@@ -953,10 +900,3 @@ async def get_thread_execution_state(
 ) -> ThreadExecutionStateModel | None:
     """Return the latest execution-state projection for a thread."""
     return await session.get(ThreadExecutionStateModel, thread_id)
-
-
-async def get_thread_metadata(session: AsyncSession, thread_id: str) -> str | None:
-    thread = await session.get(ThreadModel, thread_id)
-    if thread is None:
-        return None
-    return thread.thread_metadata

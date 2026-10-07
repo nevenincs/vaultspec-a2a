@@ -50,7 +50,6 @@ from ..database import (
     read_latest_checkpoint,
     set_authoring_cursor,
     thread_write_expectation,
-    update_thread_status,
 )
 from ..thread import ApprovalVerdict
 from ..thread.enums import (
@@ -126,7 +125,9 @@ async def settle_verdict_dispatch_receipt(
     Stable dispatch identity selects the action before this helper is called. The
     journal key then distinguishes verdict resumes from clarification and permission
     resumes that share the same wire action but have different application owners.
-    The caller owns the transaction commit.
+    The settlement moves no status: the run leaves its pause through the pause
+    recorder, which the same receipt prompts. The caller owns the transaction
+    commit.
     """
     if (
         action.action_type != ControlActionType.RESUME.value
@@ -142,7 +143,6 @@ async def settle_verdict_dispatch_receipt(
     )
     for permission in pending:
         await mark_permission_request_applied(db, request_id=permission.request_id)
-    await update_thread_status(db, action.thread_id, ThreadStatus.RUNNING)
     return True
 
 
@@ -530,8 +530,9 @@ class VerdictSubscriber:
         """Dispatch ``Command(resume={"verdict", "notes"})`` to a parked run.
 
         The worker HTTP response acknowledges scheduling only. The exact internal
-        ``dispatch_applied`` receipt owns journal, permission-row, and RUNNING
-        settlement after graph execution actually begins.
+        ``dispatch_applied`` receipt owns journal and permission-row settlement
+        after graph execution actually begins, and prompts the pause recorder
+        that returns the run to RUNNING.
 
         Two ordering invariants close the intermittent request_changes-recovery
         race, both keyed on the run's CURRENT gate proposal:

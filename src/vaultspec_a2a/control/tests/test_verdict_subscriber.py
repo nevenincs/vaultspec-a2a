@@ -61,7 +61,6 @@ from ...database import (
     mark_permission_request_applied,
     pending_document_approval_thread,
     record_permission_request,
-    update_thread_status,
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
@@ -187,6 +186,7 @@ class _ParkedThreadSeed:
     changeset_ids: list[str]
     gate_pending: str | None = None
     team_preset: str | None = None
+    status: ThreadStatus = ThreadStatus.INPUT_REQUIRED
 
 
 async def _seed_parked_thread(
@@ -194,7 +194,7 @@ async def _seed_parked_thread(
     checkpointer: AsyncSqliteSaver,
     seed: _ParkedThreadSeed,
 ) -> None:
-    """Create an INPUT_REQUIRED thread with a checkpoint carrying authoring ids.
+    """Create a thread, parked unless seeded otherwise, with authoring-id checkpoint.
 
     A ``gate_pending`` proposal also records the gate's pending
     ``document_approval_request`` row under that proposal id, as the gate's
@@ -242,6 +242,7 @@ async def _seed_parked_thread(
             thread_id=thread_id,
             team_preset=seed.team_preset,
             metadata=metadata,
+            status=seed.status,
         )
         if seed.team_preset is not None and definition is not None:
             dispatch = DispatchRequest(
@@ -272,7 +273,6 @@ async def _seed_parked_thread(
                 dispatch_id=authority.action_receipt_id,
             )
             assert receipt is not None
-        await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
         if seed.gate_pending is not None:
             await record_permission_request(
                 session,
@@ -372,11 +372,10 @@ async def test_non_parked_thread_is_not_correlated(
             proposal_ids=["prop_running"],
             changeset_ids=[],
             gate_pending="prop_running",
+            status=ThreadStatus.RUNNING,
         ),
     )
     async with session_factory() as session:
-        await update_thread_status(session, "thread-running", ThreadStatus.RUNNING)
-        await session.commit()
         assert (
             await pending_document_approval_thread(
                 session, request_ids={"prop_running"}

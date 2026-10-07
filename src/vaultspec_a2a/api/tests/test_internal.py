@@ -25,11 +25,15 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...database import (
+    ThreadStatusElectionOutcome,
     create_control_action,
     create_thread,
+    elect_thread_status,
     get_permission_request,
+    get_thread,
     get_thread_execution_state,
     set_thread_repair_state,
+    thread_write_expectation,
 )
 from ...database.models import ThreadExecutionStateModel
 from ...ipc.schemas import DispatchRequest
@@ -52,6 +56,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ...thread.action_receipts import GraphActionReceipt
+    from ...thread.enums import ThreadStatus
     from .conftest import SessionFactory
 
 # Every dispatch names an active project, as a real one does. This package's own
@@ -104,6 +109,38 @@ async def _seed_accepted_thread(
     )
     assert receipt is not None
     return thread.id, receipt
+
+
+async def _elect_status(
+    session: AsyncSession,
+    thread_id: str,
+    status: ThreadStatus,
+    *,
+    failure_reason: str | None = None,
+    provider_condition: str | None = None,
+) -> None:
+    """Move a run to *status* as the action that owns it does, from its own row.
+
+    The witness is the row as it stands and the writer is the action already
+    holding the run, so this is the state-only election a settlement makes. It
+    fails loudly when the run holds no journal row for its writer, which no
+    election accepts.
+    """
+    thread = await get_thread(session, thread_id)
+    assert thread is not None
+    expectation = thread_write_expectation(thread)
+    authority = expectation.authority
+    election = await elect_thread_status(
+        session,
+        thread_id,
+        expectation=expectation,
+        status=status,
+        action_type=authority.action_type,
+        action_receipt_id=authority.action_receipt_id,
+        failure_reason=failure_reason,
+        provider_condition=provider_condition,
+    )
+    assert election.outcome is ThreadStatusElectionOutcome.WON
 
 
 async def _record_completed_checkpoint(
@@ -889,17 +926,16 @@ class TestAggregatorGCOnTerminal:
     ) -> None:
         """A refused completion identifies the thread and evidence failure."""
         from ...control.event_handlers import _handle_terminal_event
-        from ...database import update_thread_status
         from ...thread.enums import ThreadStatus
 
         aggregator = EventAggregator()
         async with session_factory() as session:
-            thread = await create_thread(
+            await create_thread(
                 session,
                 write_authority=make_test_write_authority(),
                 thread_id="t-logged",
+                status=ThreadStatus.RUNNING,
             )
-            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
             await session.commit()
 
         with caplog.at_level(
@@ -1429,10 +1465,8 @@ class TestNoFailedRunPersistsWithoutACondition:
         from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-dispatch-failure",
+            await _seed_accepted_thread(
+                session, thread_id="t-dispatch-failure", status="submitted"
             )
             await session.commit()
 
@@ -1471,10 +1505,8 @@ class TestNoFailedRunPersistsWithoutACondition:
         from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-undelivered-resume",
+            await _seed_accepted_thread(
+                session, thread_id="t-undelivered-resume", status="submitted"
             )
             await session.commit()
 

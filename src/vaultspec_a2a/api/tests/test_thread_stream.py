@@ -19,13 +19,14 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
-from ...database.thread_repository import create_thread, update_thread_status
+from ...database.thread_repository import create_thread
 from ...providers.conditions import ProviderCondition
 from ...streaming.sse_frames import decode_sse_text
 from ...testing import SseFrame
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import SessionFactory, make_app
+from .test_internal import _elect_status, _seed_accepted_thread
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -99,20 +100,18 @@ class TestStreamThreadEvents:
 
         async def _seed() -> str:
             async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    title="throttled run",
+                thread_id, _receipt = await _seed_accepted_thread(
+                    session, status="running"
                 )
-                await update_thread_status(
+                await _elect_status(
                     session,
-                    thread.id,
+                    thread_id,
                     ThreadStatus.FAILED,
                     failure_reason="RateLimitError: too many requests",
                     provider_condition=ProviderCondition.THROTTLED.value,
                 )
                 await session.commit()
-                return thread.id
+                return thread_id
 
         thread_id = asyncio.run(_seed())
 
@@ -156,19 +155,17 @@ class TestStreamThreadEvents:
 
         async def _seed() -> str:
             async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    title="legacy failure",
+                thread_id, _receipt = await _seed_accepted_thread(
+                    session, status="running"
                 )
-                await update_thread_status(
+                await _elect_status(
                     session,
-                    thread.id,
+                    thread_id,
                     ThreadStatus.FAILED,
                     failure_reason="ValueError: bad workspace root",
                 )
                 await session.commit()
-                return thread.id
+                return thread_id
 
         thread_id = asyncio.run(_seed())
 

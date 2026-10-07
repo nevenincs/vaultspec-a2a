@@ -74,7 +74,6 @@ from ...database import (
     get_thread,
     pending_document_approval_thread,
     record_permission_request,
-    update_thread_status,
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
@@ -331,9 +330,11 @@ async def _seed_parked(
     )
     async with session_factory() as session:
         await create_thread(
-            session, write_authority=make_test_write_authority(), thread_id=thread_id
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.INPUT_REQUIRED,
         )
-        await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
         # The gate parks under its proposal id; this row is what a verdict
         # correlates to.
         await record_permission_request(
@@ -553,6 +554,7 @@ async def _seed_parked_gate(
             thread_id=thread_id,
             team_preset=seed.team_preset,
             metadata=metadata,
+            status=seed.status,
         )
         if seed.team_preset is not None and definition is not None:
             dispatch = DispatchRequest(
@@ -582,7 +584,6 @@ async def _seed_parked_gate(
                 dispatch_id=authority.action_receipt_id,
             )
             assert receipt is not None
-        await update_thread_status(session, thread_id, seed.status)
         await record_permission_request(
             session,
             request_id=proposal_id,

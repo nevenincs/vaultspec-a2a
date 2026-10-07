@@ -51,6 +51,7 @@ from .projection import (
     finalize_snapshot_replay_status,
     mark_degraded,
     reconcile_checkpoint_permissions_with_durable_state,
+    withhold_terminal_interrupt_disclosure,
 )
 from .recovery_authority import (
     RecoveryRequest,
@@ -457,6 +458,13 @@ async def capture_thread_state(
 
     if not checkpoint_present:
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
+
+    # Both halves of the run's interrupt state have landed, so this is the one
+    # place a settled run's disclosure is withdrawn. Every surface serving this
+    # capture - run-status and run-history alike - reads the gated snapshot.
+    snapshot = withhold_terminal_interrupt_disclosure(
+        snapshot, thread_status=thread.status
+    )
 
     snapshot = await enrich_snapshot_from_execution_state(
         db,

@@ -105,7 +105,6 @@ def _payload_matches(stored: str | None, expected: dict[str, object] | None) -> 
 class _ControlActionOptional(TypedDict, total=False):
     request_id: str | None
     payload: dict[str, object] | None
-    worker_generation: int
     result_status: ControlActionResultStatus | str
     dispatch_id: str | None
     recovery_deadline_at: datetime | None
@@ -120,7 +119,6 @@ class _ControlActionArgs(_ControlActionOptional):
 class _ReserveActionOptional(TypedDict, total=False):
     request_id: str | None
     payload: dict[str, object] | None
-    worker_generation: int
     dispatch_id: str | None
     recovery_deadline_at: datetime | None
 
@@ -141,7 +139,6 @@ async def create_control_action(
     )
     request_id = kwargs.get("request_id")
     payload = kwargs.get("payload")
-    worker_generation = kwargs.get("worker_generation", 0)
     result_status = kwargs.get(
         "result_status", ControlActionResultStatus.ACCEPTED_NOT_APPLIED
     )
@@ -158,7 +155,6 @@ async def create_control_action(
         request_id=request_id,
         idempotency_key=kwargs["idempotency_key"],
         payload_json=_encode_payload(payload),
-        worker_generation=worker_generation,
         result_status=_coerce(
             ControlActionResultStatus,
             result_status,
@@ -205,7 +201,6 @@ async def get_or_create_control_action(
                 idempotency_key=idempotency_key,
                 request_id=kwargs.get("request_id"),
                 payload=kwargs.get("payload"),
-                worker_generation=kwargs.get("worker_generation", 0),
                 result_status=kwargs.get(
                     "result_status", ControlActionResultStatus.ACCEPTED_NOT_APPLIED
                 ),
@@ -238,7 +233,6 @@ async def reserve_control_action(
         idempotency_key=kwargs["idempotency_key"],
         request_id=kwargs.get("request_id"),
         payload=kwargs.get("payload"),
-        worker_generation=kwargs.get("worker_generation", 0),
         dispatch_id=kwargs.get("dispatch_id"),
         recovery_deadline_at=kwargs.get("recovery_deadline_at"),
     )

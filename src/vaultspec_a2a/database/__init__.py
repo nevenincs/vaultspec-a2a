@@ -46,6 +46,7 @@ from .checkpoints import open_checkpointer as open_checkpointer
 from .checkpoints import read_latest_checkpoint as read_latest_checkpoint
 from .checkpoints import surviving_transcript as surviving_transcript
 from .compatibility import SchemaCompatibilityError as SchemaCompatibilityError
+from .compatibility import read_alembic_version as read_alembic_version
 from .compatibility import supported_migration_head as supported_migration_head
 from .compatibility import validate_desktop_schema as validate_desktop_schema
 from .control_action_repository import (
@@ -141,7 +142,6 @@ from .migrate import migration_script_location as migration_script_location
 from .migrate import run_migrations as run_migrations
 from .migrations import backfill_teamstate_sdd_fields as backfill_teamstate_sdd_fields
 from .migrations import count_pending_sdd_backfill as count_pending_sdd_backfill
-from .models import ArtifactModel as ArtifactModel
 from .models import AuthoringEventCursorModel as AuthoringEventCursorModel
 from .models import Base as Base
 from .models import ControlActionModel as ControlActionModel
@@ -299,7 +299,6 @@ __all__ = [
     "DELETION_SAGA_CLAIM_LEASE",
     "RECOVERY_CLAIM_TTL",
     "ActiveThreadProjection",
-    "ArtifactModel",
     "AuthoringEventCursorModel",
     "Base",
     "CheckpointRead",
@@ -395,6 +394,7 @@ __all__ = [
     "pending_document_approval_thread",
     "persist_graph_action_receipt",
     "prune_settled_checkpoints",
+    "read_alembic_version",
     "read_cleanup_ledger",
     "read_latest_checkpoint",
     "read_next_queued_continuation",

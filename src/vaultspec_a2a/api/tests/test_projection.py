@@ -370,7 +370,6 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
         task_count=1,
         interrupt_count=1,
         next_nodes_json='["supervisor"]',
-        interrupt_types_json='["permission_request"]',
         tasks_json=(
             '[{"task_id":"task-1","name":"supervisor","path":["supervisor"],'
             '"has_error":false,"error_type":null,"interrupt_ids":["interrupt-1"],'
@@ -412,7 +411,6 @@ def test_project_execution_state_model_recovers_valid_task_siblings() -> None:
         task_count=2,
         interrupt_count=0,
         next_nodes_json="[]",
-        interrupt_types_json="[]",
         tasks_json=(
             '[{"task_id":"task-first","name":"first"},'
             '"not-a-task",'
@@ -526,11 +524,9 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
             thread_id="thread-1",
             checkpoint_id="cp-old",
             parent_checkpoint_id=None,
-            snapshot_created_at=None,
             task_count=0,
             interrupt_count=0,
             next_nodes=["supervisor"],
-            interrupt_types=[],
             tasks=[],
             degraded_reasons=[],
         )
@@ -570,11 +566,9 @@ async def test_degraded_only_projection_keeps_the_prior_lineage(
             thread_id="thread-degraded-only",
             checkpoint_id="cp-good",
             parent_checkpoint_id=None,
-            snapshot_created_at=None,
             task_count=0,
             interrupt_count=0,
             next_nodes=["worker"],
-            interrupt_types=[],
             tasks=[],
             degraded_reasons=[],
         )
@@ -583,11 +577,9 @@ async def test_degraded_only_projection_keeps_the_prior_lineage(
             thread_id="thread-degraded-only",
             checkpoint_id=None,
             parent_checkpoint_id=None,
-            snapshot_created_at=None,
             task_count=0,
             interrupt_count=0,
             next_nodes=[],
-            interrupt_types=[],
             tasks=[],
             degraded_reasons=[DegradedReason.EXECUTION_STATE_PROJECTION_UNAVAILABLE],
         )
@@ -636,7 +628,6 @@ async def test_unreadable_execution_state_requires_operator_intervention(
                 task_count=0,
                 interrupt_count=0,
                 next_nodes_json="{",
-                interrupt_types_json="[]",
                 tasks_json="[]",
                 degraded_reasons_json="[]",
             )

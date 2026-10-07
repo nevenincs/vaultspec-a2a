@@ -178,20 +178,20 @@ class TestUnnamedForeignKeysAreTargetable:
         engine = create_engine(f"sqlite:///{migrated_database_file}")
         try:
             with engine.connect() as connection:
-                before = inspect(connection).get_foreign_keys("artifacts")
+                before = inspect(connection).get_foreign_keys("permission_logs")
                 assert [key["constrained_columns"] for key in before] == [
                     ["thread_id"]
-                ], f"expected one unnamed thread_id FK on artifacts, got {before}"
+                ], f"expected one unnamed thread_id FK on permission_logs, got {before}"
 
                 operations = Operations(MigrationContext.configure(connection))
                 with operations.batch_alter_table(
-                    "artifacts", naming_convention=_FK_CONVENTION
+                    "permission_logs", naming_convention=_FK_CONVENTION
                 ) as batch_op:
                     batch_op.drop_constraint(
-                        "fk_artifacts_thread_id_threads", type_="foreignkey"
+                        "fk_permission_logs_thread_id_threads", type_="foreignkey"
                     )
 
-                after = inspect(connection).get_foreign_keys("artifacts")
+                after = inspect(connection).get_foreign_keys("permission_logs")
 
             assert after == [], (
                 "the unnamed foreign key survived a batch drop that named it "

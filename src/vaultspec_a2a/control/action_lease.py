@@ -90,7 +90,6 @@ class ControlActionClaimRequest:
     payload: dict[str, object] | None
     dispatch_id: str
     request_id: str | None = None
-    worker_generation: int = 0
     now: datetime | None = None
     write_expectation: ThreadWriteExpectation | None = None
     recovery_timeout_seconds: int | None = None
@@ -226,7 +225,6 @@ async def prepare_control_action_claim(
         request_id=request.request_id,
         payload=request.payload,
         dispatch_id=request.dispatch_id,
-        worker_generation=request.worker_generation,
         recovery_deadline_at=recovery_deadline_at,
     )
     action = reservation.action

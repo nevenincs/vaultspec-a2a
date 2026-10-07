@@ -19,7 +19,6 @@ from ..database import (
     ThreadStatusElectionOutcome,
     begin_write_transaction,
     elect_thread_status,
-    get_permission_request,
     get_thread,
     lock_thread_row,
     read_latest_checkpoint,
@@ -201,15 +200,11 @@ async def _record_pause(
     if writes.repair is not None:
         await apply_repair_transition(db, thread_id, writes.repair)
     if writes.pending_approval is not None:
-        # The journal caches the gate's description; the row may not be there
-        # yet when a resume's receipt is relayed before the request it raised.
-        journal = await get_permission_request(db, writes.pending_approval)
         await set_thread_approval_state(
             db,
             thread_id,
             approval_status=ApprovalStatus.PENDING,
             approval_request_id=writes.pending_approval,
-            approval_reason=journal.description if journal is not None else None,
             approval_response_action_id=None,
         )
     elif writes.clear_approval:
@@ -218,7 +213,6 @@ async def _record_pause(
             thread_id,
             approval_status=None,
             approval_request_id=None,
-            approval_reason=None,
             approval_response_action_id=None,
         )
     return True

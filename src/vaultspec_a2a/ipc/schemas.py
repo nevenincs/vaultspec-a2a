@@ -300,9 +300,7 @@ class ExecutionStateProjectionPayload(BaseModel):
     type: str = "execution_state_projection"
     checkpoint_id: str | None = None
     parent_checkpoint_id: str | None = None
-    snapshot_created_at: str | None = None
     next_nodes: list[str] = Field(default_factory=list)
-    interrupt_types: list[str] = Field(default_factory=list)
     interrupt_count: int = 0
     task_count: int = 0
     tasks: list[ExecutionTaskData] = Field(default_factory=list)

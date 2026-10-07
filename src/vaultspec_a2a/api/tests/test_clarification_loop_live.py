@@ -470,7 +470,6 @@ async def _prepare_expired_claim(
                 ),
                 dispatch_id=idempotency_key,
                 write_expectation=thread_write_expectation(thread),
-                worker_generation=thread.repair_generation,
                 now=datetime.now(UTC) - CONTROL_ACTION_LEASE_TTL - timedelta(seconds=1),
                 recovery_timeout_seconds=300,
             ),

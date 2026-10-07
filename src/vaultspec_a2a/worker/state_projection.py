@@ -11,7 +11,6 @@ import asyncio
 import logging
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, cast
 
@@ -170,9 +169,6 @@ class _ExecutionStateSnapshot(Protocol):
     def tasks(self) -> Collection[object]: ...
 
     @property
-    def created_at(self) -> object: ...
-
-    @property
     def config(self) -> Mapping[str, object]: ...
 
     @property
@@ -184,7 +180,6 @@ def _is_execution_state_snapshot(value: object) -> TypeGuard[_ExecutionStateSnap
     required_attributes = (
         "next",
         "tasks",
-        "created_at",
         "config",
         "parent_config",
     )
@@ -289,15 +284,6 @@ def _addressed_admission(
             pending_request_ids=tuple(pending),
         )
     return ResumeAdmission(interrupt_id=pending[named])
-
-
-def _snapshot_created_at_value(created_at: object) -> str | None:
-    """Serialize LangGraph's timestamp variants for the wire payload."""
-    if isinstance(created_at, datetime):
-        return created_at.isoformat()
-    if isinstance(created_at, str):
-        return created_at
-    return None
 
 
 def _checkpoint_id(config: Mapping[str, object] | None) -> str | None:
@@ -621,15 +607,7 @@ class StateProjector:
         return ExecutionStateProjectionPayload(
             checkpoint_id=_checkpoint_id(state.config),
             parent_checkpoint_id=_checkpoint_id(state.parent_config),
-            snapshot_created_at=_snapshot_created_at_value(state.created_at),
             next_nodes=_parked_next_nodes(state.next, tasks),
-            interrupt_types=list(
-                dict.fromkeys(
-                    interrupt.interrupt_type
-                    for interrupt in live
-                    if interrupt.interrupt_type is not None
-                )
-            ),
             interrupt_count=len(live),
             task_count=len(tasks),
             tasks=tasks,

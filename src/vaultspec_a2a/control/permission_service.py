@@ -755,7 +755,6 @@ async def _record_permission_transition(
             context.thread_id,
             approval_status=context.submitted_approval_status,
             approval_request_id=context.request_id,
-            approval_reason=context.permission_description,
             approval_response_action_id=claim.action_id,
         )
     await apply_repair_transition(

@@ -251,7 +251,6 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
                 task_count=0,
                 interrupt_count=0,
                 next_nodes_json="{",
-                interrupt_types_json="[]",
                 tasks_json="[]",
                 degraded_reasons_json="[]",
             )
@@ -311,7 +310,6 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
                 task_count=1,
                 interrupt_count=0,
                 next_nodes_json='["worker"]',
-                interrupt_types_json="[]",
                 tasks_json="[]",
                 degraded_reasons_json="[]",
             )

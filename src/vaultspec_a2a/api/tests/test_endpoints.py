@@ -631,7 +631,6 @@ class TestListThreads:
                         task_count=1,
                         interrupt_count=0,
                         next_nodes_json='["worker"]',
-                        interrupt_types_json="[]",
                         tasks_json="[]",
                         degraded_reasons_json="[]",
                     )
@@ -677,7 +676,6 @@ class TestListThreads:
                         task_count=1,
                         interrupt_count=0,
                         next_nodes_json='["worker"]',
-                        interrupt_types_json="[]",
                         tasks_json="[]",
                         degraded_reasons_json="[]",
                     )
@@ -992,7 +990,6 @@ class TestThreadState:
                         task_count=1,
                         interrupt_count=0,
                         next_nodes_json='["worker"]',
-                        interrupt_types_json="[]",
                         tasks_json="[]",
                         degraded_reasons_json="[]",
                     )

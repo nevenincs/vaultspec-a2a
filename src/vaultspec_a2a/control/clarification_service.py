@@ -378,7 +378,6 @@ async def _claim_and_dispatch(
     # async I/O and raise MissingGreenlet.
     thread_status = thread.status
     write_expectation = thread_write_expectation(thread)
-    worker_generation = thread.repair_generation
     dispatch = await build_followon_dispatch(
         db,
         thread_id=context.thread_id,
@@ -406,7 +405,6 @@ async def _claim_and_dispatch(
             request_id=context.request_id,
             payload=freeze_accepted_input(dispatch, intent=context.payload),
             dispatch_id=dispatch.dispatch_id,
-            worker_generation=worker_generation,
             recovery_timeout_seconds=(
                 dispatch.require_graph_definition().run_timeout_seconds
             ),

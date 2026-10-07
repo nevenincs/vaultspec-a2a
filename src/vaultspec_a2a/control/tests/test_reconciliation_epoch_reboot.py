@@ -2,7 +2,7 @@
 
 Current recovery uses the accepted graph action and checkpoint evidence. An
 unfinished checkpoint leaves the run reconciling without appending a repair
-journal row, so a second boot and historical repair key stay harmless.
+journal row, so a second boot stays harmless.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...database import (
-    create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
     get_or_create_control_action,
@@ -92,7 +91,6 @@ async def test_unfinished_graph_survives_reboot_without_repair_journal_growth(
     assert after1 is not None
     assert after1.status == "reconciling"
     assert after1.repair_status == "needs_reconciliation"
-    assert after1.recovery_epoch == 0
     assert started1 is None
 
     # Boot 2: a reboot must not crash with an IntegrityError.
@@ -107,42 +105,7 @@ async def test_unfinished_graph_survives_reboot_without_repair_journal_growth(
     assert summary2["paused_resumable"] == 0
     assert after2 is not None
     assert after2.repair_status == "needs_reconciliation"
-    assert after2.recovery_epoch == 0
     assert started2 is None
-
-
-@pytest.mark.asyncio
-async def test_historical_repair_row_does_not_crash_graph_recovery(
-    session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: AsyncSqliteSaver,
-) -> None:
-    """A historical repair row does not collide with current recovery."""
-    tid = "thread-historical-stuck"
-
-    await _put_checkpoint(checkpointer, tid)
-    async with session_factory() as session:
-        await _seed_paused_thread(session, tid)
-        # Simulate the pre-fix crash state: the repair action was journaled at
-        # epoch key :1 but the epoch never advanced (still 0 on the thread row).
-        await create_control_action(
-            session,
-            thread_id=tid,
-            action_type=ControlActionType.REPAIR_STARTED,
-            idempotency_key=f"startup-repair:{tid}:1",
-            payload={"status": "input_required"},
-        )
-        await session.commit()
-
-    # Boot: must not raise IntegrityError; the duplicate key replays as a no-op.
-    async with session_factory() as session:
-        summary = await reconcile_threads_on_startup(session, checkpointer)
-        await session.commit()
-        healed = await get_thread(session, tid)
-
-    assert summary["paused_resumable"] == 0
-    assert healed is not None
-    assert healed.status == "reconciling"
-    assert healed.recovery_epoch == 0
 
 
 @pytest.mark.asyncio
@@ -156,7 +119,7 @@ async def test_get_or_create_control_action_is_idempotent_across_sessions(
     UNIQUE constraint - the guarantee its name makes under concurrent boots.
     """
     tid = "thread-idempotent-key"
-    key = f"startup-repair:{tid}:1"
+    key = f"permission-request:{tid}:1"
 
     async with session_factory() as session:
         await create_thread(
@@ -171,7 +134,7 @@ async def test_get_or_create_control_action_is_idempotent_across_sessions(
         row_a, created_a = await get_or_create_control_action(
             session_a,
             thread_id=tid,
-            action_type=ControlActionType.REPAIR_STARTED,
+            action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
             idempotency_key=key,
         )
         await session_a.commit()
@@ -180,7 +143,7 @@ async def test_get_or_create_control_action_is_idempotent_across_sessions(
         row_b, created_b = await get_or_create_control_action(
             session_b,
             thread_id=tid,
-            action_type=ControlActionType.REPAIR_STARTED,
+            action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
             idempotency_key=key,
         )
         await session_b.commit()

@@ -37,6 +37,7 @@ from ..database import (
     checkpoint_wal,
     install_checkpoint_schema_identity,
     migration_script_location,
+    read_alembic_version,
     run_migrations,
 )
 from .profile import DesktopProfileError, derive_state_paths, ensure_private_state
@@ -183,23 +184,6 @@ def package_migration_range() -> MigrationRange:
     return MigrationRange(base=bases[0], head=heads[0])
 
 
-def _read_revision(db_path: Path) -> str | None:
-    """Return the store's recorded Alembic revision, or ``None`` when absent."""
-    if not db_path.is_file():
-        return None
-    conn = sqlite3.connect(str(db_path))
-    try:
-        try:
-            row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
-        except sqlite3.OperationalError as exc:
-            if "no such table" in str(exc).lower():
-                return None
-            raise
-    finally:
-        conn.close()
-    return None if row is None else str(row[0])
-
-
 def _ensure_unlocked(db_path: Path) -> None:
     """Refuse a store that another connection holds live or locked.
 
@@ -319,7 +303,7 @@ async def _apply_mutations(
     _ensure_unlocked(checkpoint_path)
 
     try:
-        from_revision = _read_revision(database_path)
+        from_revision = read_alembic_version(database_path)
         await run_migrations(database_url)
     except Exception as exc:
         raise _StageError(MigrationStage.PRIMARY, type(exc).__name__) from exc
@@ -488,7 +472,7 @@ async def migrate_stores(
             detail="Desktop state requires owner-only access and unlinked paths.",
         )
     if expect_from is not None:
-        observed = _read_revision(state.database_path)
+        observed = read_alembic_version(state.database_path)
         if observed != expect_from:
             return _failed_result(
                 started,
@@ -524,7 +508,7 @@ async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
             type(exc).__name__,
             detail="Desktop state requires owner-only access and unlinked paths.",
         )
-    observed = _read_revision(state.database_path)
+    observed = read_alembic_version(state.database_path)
     if observed is not None:
         return _failed_result(
             started,

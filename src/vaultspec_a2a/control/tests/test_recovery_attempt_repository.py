@@ -72,12 +72,13 @@ async def test_recoverable_action_deadline_is_a_storage_invariant(
                 idempotency_key="missing-deadline",
             )
         with pytest.raises(
-            ValueError, match="repair_started cannot carry a recovery deadline"
+            ValueError,
+            match="permission_request_created cannot carry a recovery deadline",
         ):
             await create_control_action(
                 db,
                 thread_id="unexpected",
-                action_type=ControlActionType.REPAIR_STARTED,
+                action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
                 idempotency_key="unexpected-deadline",
                 recovery_deadline_at=deadline,
             )
@@ -105,8 +106,10 @@ async def test_recoverable_action_deadline_is_a_storage_invariant(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action_type", ["unknown_action", "repair_started"])
 async def test_control_action_storage_refuses_unknown_action_types(
     session_factory: async_sessionmaker[AsyncSession],
+    action_type: str,
 ) -> None:
     authority = RunWriteAuthority(
         0,
@@ -124,7 +127,7 @@ async def test_control_action_storage_refuses_unknown_action_types(
             ControlActionModel(
                 id="unknown-action-row",
                 thread_id="schema-current-action",
-                action_type="unknown_action",
+                action_type=action_type,
                 idempotency_key="unknown-action-row",
             )
         )

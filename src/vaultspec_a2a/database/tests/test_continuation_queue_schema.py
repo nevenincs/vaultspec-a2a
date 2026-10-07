@@ -264,7 +264,6 @@ def test_stepping_back_refuses_while_a_continuation_is_still_waiting(
                             "result_status": (
                                 ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value
                             ),
-                            "worker_generation": 0,
                             "dispatch_id": "seed-receipt",
                             "recovery_deadline_at": _deadline(),
                             "queue_position": None,
@@ -278,7 +277,6 @@ def test_stepping_back_refuses_while_a_continuation_is_still_waiting(
                             "idempotency_key": "waiting",
                             "requested_at": datetime.now(UTC),
                             "result_status": (ControlActionResultStatus.QUEUED.value),
-                            "worker_generation": 0,
                             "dispatch_id": "waiting-dispatch",
                             "recovery_deadline_at": _deadline(),
                             "queue_position": 1,
@@ -292,7 +290,8 @@ def test_stepping_back_refuses_while_a_continuation_is_still_waiting(
     with pytest.raises(Exception, match="queued continuation"):
         downgrade(url, _PREDECESSOR)
 
-    # The refusal left the store at head rather than half torn down.
+    # The refusal left the queue position and its index in place rather than
+    # half torn down.
     columns, indexes = _control_action_schema(url)
     assert _COLUMN in columns
     assert _INDEX in indexes

@@ -40,7 +40,6 @@ __all__ = [
     "_internal_auth_headers",
     "_read_log_tail",
     "_shared_worker_port_clear",
-    "_tcp_port_ready",
     "_worker_stderr_log_path",
     "probe_worker_health",
     "sweep_orphan_worker_logs",
@@ -353,24 +352,6 @@ def _build_worker_restart_detail(
         detail += f"; stderr_tail={compact_tail}"
     detail += f"; stderr_log={stderr_log_path}"
     return detail
-
-
-async def _tcp_port_ready(host: str, port: int) -> bool:
-    """Fast-path: check if a TCP port is accepting connections.
-
-    Much cheaper than a full HTTP health check — used to skip expensive
-    httpx probes while the process is still binding.
-    """
-    try:
-        _reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=0.5,
-        )
-        writer.close()
-        await writer.wait_closed()
-    except (OSError, TimeoutError):
-        return False
-    return True
 
 
 def _internal_auth_headers() -> dict[str, str] | None:

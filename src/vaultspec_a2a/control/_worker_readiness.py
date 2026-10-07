@@ -7,10 +7,10 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..utils._process_tree import port_has_listener_async
 from ..utils.async_cleanup import complete_cleanup
 from ._worker_health import (
     _build_worker_restart_detail,
-    _tcp_port_ready,
     worker_ready_and_ours,
 )
 from ._worker_process_stop import _stop_worker_tree
@@ -126,8 +126,8 @@ async def _await_worker_ready_inner(
         # Ready only when OUR worker answers: the port being open and healthy is not
         # enough when a foreign orphan can squat a shared band port, so readiness
         # requires the responding worker to declare THIS gateway as its target.
-        if await _tcp_port_ready(
-            "127.0.0.1", worker_port
+        if await port_has_listener_async(
+            worker_port, timeout=0.5
         ) and await worker_ready_and_ours(worker_url, current_generation=generation):
             elapsed = asyncio.get_event_loop().time() - started
             logger.info(

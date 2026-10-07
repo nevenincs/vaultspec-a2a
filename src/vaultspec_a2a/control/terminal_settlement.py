@@ -65,7 +65,9 @@ class TerminalEvidence:
     *action_receipt_id* name the action the election installs as the run's
     final writer, and *action_id* is that action's journal row. The action is
     marked applied with *result_status*; the failure fields are written only
-    by a failed terminal.
+    by a failed terminal. *queue_refusal_reason* replaces the terminal's own
+    account of why the waiting continuations are refused, for a settlement
+    that ends the run for a more specific reason.
     """
 
     expectation: ThreadWriteExpectation
@@ -75,6 +77,7 @@ class TerminalEvidence:
     result_status: ControlActionResultStatus = ControlActionResultStatus.APPLIED
     failure_reason: str | None = None
     provider_condition: str | None = None
+    queue_refusal_reason: str | None = None
 
 
 async def lock_terminal_run(db: AsyncSession, thread_id: str) -> ThreadModel | None:
@@ -107,6 +110,8 @@ async def settle_terminal(
     either way, and ending the transaction stays with the caller.
     """
     refusal_reason = _QUEUE_REFUSAL_REASONS[status]
+    if evidence.queue_refusal_reason is not None:
+        refusal_reason = evidence.queue_refusal_reason
     election = await elect_thread_status(
         db,
         thread.id,

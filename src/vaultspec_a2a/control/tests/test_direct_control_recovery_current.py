@@ -19,6 +19,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import (
+    Base,
+    RecoveryAttemptModel,
+    ThreadStatusElectionOutcome,
+    configure_sqlite_transactions,
     create_control_action,
     create_thread,
     elect_thread_status,
@@ -27,9 +31,6 @@ from ...database import (
     mark_control_action_applied,
     thread_write_expectation,
 )
-from ...database.models import Base, RecoveryAttemptModel
-from ...database.session import configure_sqlite_transactions
-from ...database.thread_repository import ThreadStatusElectionOutcome
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...thread import RunWriteAuthority
@@ -186,6 +187,15 @@ async def _persist_case(
             dispatch_id=case.dispatch.dispatch_id,
         )
         assert receipt is not None
+
+
+async def _recovery_attempt(
+    db: AsyncSession, thread_id: str
+) -> RecoveryAttemptModel | None:
+    """Read the run's one durable retry record as it is stored."""
+    return await db.scalar(
+        select(RecoveryAttemptModel).where(RecoveryAttemptModel.thread_id == thread_id)
+    )
 
 
 async def _run_recovery(
@@ -415,11 +425,7 @@ async def test_expired_run_is_quarantined_without_dispatch(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
         )
         thread = await get_thread(db, case.thread_id)
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert action is not None and action.applied_at is not None
     assert thread is not None
     assert thread.status == ThreadStatus.RECONCILING.value
@@ -460,11 +466,7 @@ async def test_applied_action_wins_over_deadline_quarantine(
     assert summary.refused == 0
     async with sessions() as db:
         thread = await get_thread(db, case.thread_id)
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert thread is not None
     assert thread.status == ThreadStatus.RUNNING.value
     assert thread.repair_status == RepairStatus.HEALTHY.value
@@ -497,11 +499,7 @@ async def test_corrupt_accepted_input_is_atomically_quarantined(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
         )
         thread = await get_thread(db, case.thread_id)
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert action is not None
     assert action.applied_at is not None
     assert (
@@ -542,11 +540,7 @@ async def test_missing_accepted_action_quarantines_its_exact_run(
     assert summary.refused == 1
     async with sessions() as db:
         thread = await get_thread(db, case.thread_id)
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert thread is not None
     # With the receipt absent there is no lawful evidence for a lifecycle
     # election. The last proven status remains while readiness blocks execution.
@@ -604,11 +598,7 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
             trace_headers=None,
         )
         async with sessions() as db:
-            attempt = await db.scalar(
-                select(RecoveryAttemptModel).where(
-                    RecoveryAttemptModel.thread_id == case.thread_id
-                )
-            )
+            attempt = await _recovery_attempt(db, case.thread_id)
             assert attempt is not None
             assert attempt.condition == RecoveryCondition.AT_CAPACITY.value
             assert attempt.attempt_count == 2
@@ -628,11 +618,7 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
                 thread_id=case.thread_id,
                 dispatch_id=case.dispatch.dispatch_id,
             )
-            attempt = await db.scalar(
-                select(RecoveryAttemptModel).where(
-                    RecoveryAttemptModel.thread_id == case.thread_id
-                )
-            )
+            attempt = await _recovery_attempt(db, case.thread_id)
             assert action is not None and attempt is not None
             await mark_control_action_applied(db, action.id)
             attempt.next_eligible_at = attempt.created_at
@@ -652,11 +638,7 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
     assert fourth.dispatched == 0
     assert received == 2
     async with sessions() as db:
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert attempt is not None and attempt.settled_at is not None
 
 
@@ -739,11 +721,7 @@ async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
             thread_id=case.thread_id,
             dispatch_id=case.dispatch.dispatch_id,
         )
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert action is not None
     assert action.applied_at is None
     assert action.claim_token is not None

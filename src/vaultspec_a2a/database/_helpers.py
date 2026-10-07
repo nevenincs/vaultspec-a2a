@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, override
 
+from sqlalchemy import and_
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import ColumnElement
+
+    from ..thread import RunWriteAuthority
 
 from ..thread.enums import (
     ApprovalStatus,
@@ -35,6 +40,7 @@ __all__ = [
     "_coerce_permission_request_status",
     "_coerce_repair_status",
     "_coerce_status",
+    "_journal_row_for",
     "save_model",
 ]
 
@@ -55,6 +61,17 @@ async def save_model[
     session.add(model)
     await session.flush()
     return model
+
+
+def _journal_row_for(
+    thread_id: str, authority: RunWriteAuthority
+) -> ColumnElement[bool]:
+    """Match the journal row whose receipt names *authority*'s action on a run."""
+    return and_(
+        ControlActionModel.thread_id == thread_id,
+        ControlActionModel.action_type == authority.action_type.value,
+        ControlActionModel.dispatch_id == authority.action_receipt_id,
+    )
 
 
 class _UnsetType:

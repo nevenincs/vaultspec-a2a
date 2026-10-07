@@ -46,6 +46,7 @@ from ._helpers import (
     _coerce_control_action_type,
     _coerce_repair_status,
     _coerce_status,
+    _journal_row_for,
     _UnsetType,
     save_model,
 )
@@ -629,11 +630,7 @@ async def _compare_and_set_thread(
     """
     current = expectation.authority
     receipt_exists = exists(
-        select(ControlActionModel.id).where(
-            ControlActionModel.thread_id == thread_id,
-            ControlActionModel.action_type == successor.action_type.value,
-            ControlActionModel.dispatch_id == successor.action_receipt_id,
-        )
+        select(ControlActionModel.id).where(_journal_row_for(thread_id, successor))
     )
     statement = (
         update(ThreadModel)

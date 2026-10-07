@@ -43,6 +43,11 @@ from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
+    Base,
+    RecoveryAttemptModel,
+    ThreadModel,
+    begin_write_transaction,
+    configure_sqlite_engine,
     create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
@@ -50,8 +55,6 @@ from ...database import (
     get_thread,
     record_permission_request,
 )
-from ...database.models import Base, RecoveryAttemptModel, ThreadModel
-from ...database.session import begin_write_transaction, configure_sqlite_engine
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (

@@ -26,9 +26,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from ..desktop.credentials import (
-    ATTACH_CREDENTIAL_NAME,
-)
+from ..desktop.credentials import ATTACH_CREDENTIAL_NAME, credential_paths
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_OWNERSHIP_CAPABILITY,
@@ -135,7 +133,9 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
     ) as gateway:
         base = gateway.base_url
         # The gateway minted the worker IPC secret; read it to scan for its leak.
-        worker_ipc = (credentials_dir / "worker-ipc.cred").read_text(encoding="utf-8")
+        worker_ipc = credential_paths(credentials_dir).worker_ipc_path.read_text(
+            encoding="utf-8"
+        )
         assert worker_ipc and worker_ipc not in (
             DEFAULT_ATTACH_CREDENTIAL,
             DEFAULT_OWNERSHIP_CAPABILITY,

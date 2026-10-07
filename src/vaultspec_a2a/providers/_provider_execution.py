@@ -10,12 +10,18 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from ..control.config import settings
-from ..control.provider_execution import native_execution_refusal_reason
+from ..control.provider_execution import require_native_execution
 from ..desktop.native_isolation import NativeLaunchAuthority, linux_isolated_launch
 from ..utils.process import ProcessContainmentError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+__all__ = [
+    "ProviderLaunch",
+    "provider_execution_command",
+    "provider_execution_launch",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,9 +35,7 @@ def provider_execution_command(
     command: list[str], *, supervise: bool = False
 ) -> list[str]:
     """Admit a native command, then apply the POSIX identity boundary."""
-    reason = native_execution_refusal_reason()
-    if reason is not None:
-        raise ProcessContainmentError(reason)
+    require_native_execution()
     launcher = settings.provider_identity_launcher
     uid = settings.provider_agent_uid
     gid = settings.provider_agent_gid

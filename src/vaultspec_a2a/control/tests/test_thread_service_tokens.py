@@ -41,6 +41,7 @@ from ...database import (
     thread_write_expectation,
 )
 from ...database.models import ControlActionModel, ThreadModel
+from ...team import load_team_config
 from ...testing import adopted_spawner
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.dispatch_policy import FailureType
@@ -95,6 +96,7 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "invalid-initial-dispatch"
+    relative_project = Path("relative-project")
     captured: dict[str, Any] = {}
     async with (
         httpx.AsyncClient(
@@ -115,7 +117,10 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
                     nickname=None,
                     metadata=None,
                     metadata_json=None,
-                    workspace_root=Path("relative-project"),
+                    workspace_root=relative_project,
+                    team_config=load_team_config(
+                        _PRESET, workspace_root=relative_project
+                    ),
                 ),
                 transport=DispatchTransport(
                     circuit_breaker=WorkerCircuitBreaker(
@@ -262,6 +267,7 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
+                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
                 actor_tokens=bundle,
             ),
             transport=DispatchTransport(
@@ -335,6 +341,7 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
+                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
@@ -382,6 +389,7 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
+                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
@@ -430,6 +438,7 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
+                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
@@ -472,6 +481,7 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
+                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
@@ -548,6 +558,7 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
                         metadata=None,
                         metadata_json=None,
                         workspace_root=tmp_path,
+                        team_config=load_team_config(_PRESET, workspace_root=tmp_path),
                     ),
                     transport=DispatchTransport(
                         circuit_breaker=breaker,
@@ -616,6 +627,7 @@ async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
+                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(

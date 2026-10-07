@@ -9,7 +9,7 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..control.provider_execution import native_execution_refusal_reason
+from ..control.provider_execution import NativeExecutionRefusedError
 from ..utils.process import ProcessContainmentError
 from ..workspace.environment import scrub_agent_environment
 from ._provider_execution import provider_execution_launch
@@ -130,14 +130,11 @@ def probe_binary_version(
             cwd=None,
             native_authority=native_authority,
         )
-    except ProcessContainmentError as exc:
+    except NativeExecutionRefusedError as exc:
         # Other containment refusals can name configured launcher paths, so only
         # the profile refusal's own sentence is carried through.
-        refusal = native_execution_refusal_reason()
-        raise BinaryVersionProbeError(
-            refusal if exc.args == (refusal,) else _AUTHORITY_UNAVAILABLE
-        ) from exc
-    except (OSError, ValueError) as exc:
+        raise BinaryVersionProbeError(str(exc)) from exc
+    except (OSError, ValueError, ProcessContainmentError) as exc:
         raise BinaryVersionProbeError(_AUTHORITY_UNAVAILABLE) from exc
     result = _reported_version(str(path), identity, native_authority)
     if result is None:

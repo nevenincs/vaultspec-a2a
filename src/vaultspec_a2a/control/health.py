@@ -563,6 +563,7 @@ def _desktop_run_admission(
     worker_state: WorkerLifecycleState,
     provider_eligibility: ProviderEligibility,
     recovery_owner_error: object,
+    native_refusal: str | None,
 ) -> RunAdmission:
     from ..api.schemas.gateway_readiness import (
         GatewayReadiness,
@@ -574,7 +575,7 @@ def _desktop_run_admission(
     if (
         gateway_readiness is not GatewayReadiness.READY
         or recovery_owner_error is not None
-        or native_execution_refusal_reason() is not None
+        or native_refusal is not None
     ):
         return RunAdmission.BLOCKED
     if (
@@ -651,19 +652,24 @@ def assemble_desktop_readiness(
         reasons.append(worker_reason)
 
     # --- Provider eligibility via the credential-aware readiness probe. ---
+    native_refusal = native_execution_refusal_reason()
     eligible_providers = _eligible_provider_names()
     if eligible_providers:
         provider_eligibility = ProviderEligibility.ELIGIBLE
     else:
         provider_eligibility = ProviderEligibility.INELIGIBLE
         reasons.append(
-            native_execution_refusal_reason()
+            native_refusal
             or "no subprocess provider is installed and credentialed here"
         )
 
     # --- Run admission: execution readiness, distinct from gateway readiness. ---
     run_admission = _desktop_run_admission(
-        gateway_readiness, worker_state, provider_eligibility, recovery_owner_error
+        gateway_readiness,
+        worker_state,
+        provider_eligibility,
+        recovery_owner_error,
+        native_refusal,
     )
 
     return DesktopReadiness(

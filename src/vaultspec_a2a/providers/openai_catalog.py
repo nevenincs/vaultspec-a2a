@@ -10,15 +10,20 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import TYPE_CHECKING, Final
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
+from ._catalog_discovery import (
+    ProviderCatalogDiscovery,
+    available_catalog,
+    unavailable_catalog,
+    unavailable_discovery,
+)
 from ._catalog_fields import (
+    MAX_DISCOVERY_READ_BYTES,
     CatalogFieldReader,
     display_label,
     local_id,
@@ -28,8 +33,6 @@ from ._json_contract import JsonObject, JsonValue
 from .provider_catalog import (
     MAX_MODELS,
     AuthenticationState,
-    CatalogState,
-    CatalogStatus,
     ModelCatalogEntry,
     ProviderCatalog,
     ProviderCatalogKey,
@@ -37,6 +40,7 @@ from .provider_catalog import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import datetime
 
 __all__ = [
     "OpenAICompatibleCatalogError",
@@ -44,9 +48,7 @@ __all__ = [
     "discover_openai_compatible_catalog",
 ]
 
-_MAX_RESPONSE_BYTES: Final = 1_048_576
 _MAX_API_KEY_LENGTH: Final = 4_096
-_CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 _LINK_RELATION: Final = re.compile(
     r"(?:^|;)\s*rel\s*=\s*(?:\"([^\"]*)\"|([^;,\s]+))",
@@ -57,14 +59,6 @@ _NEXT_FIELDS: Final = ("next", "next_page", "next_cursor")
 
 class OpenAICompatibleCatalogError(RuntimeError):
     """The OpenAI-compatible model-list contract was unsafe or incomplete."""
-
-
-@dataclass(frozen=True, slots=True)
-class OpenAICompatibleCatalogDiscovery:
-    """One bounded model-list result and its authentication evidence."""
-
-    catalog: ProviderCatalog
-    authentication: AuthenticationState
 
 
 def _protocol_error(message: str) -> OpenAICompatibleCatalogError:
@@ -113,23 +107,6 @@ def _api_key(value: str) -> str:
 
 def _entry_id(key: ProviderCatalogKey, provider_value: str) -> str:
     return local_id(f"{key.provider_id}:{key.execution_mode}:model", provider_value)
-
-
-def _unavailable_catalog(
-    key: ProviderCatalogKey,
-    *,
-    reason: str,
-    checked_at: datetime | None = None,
-) -> ProviderCatalog:
-    return ProviderCatalog(
-        key=key,
-        state=CatalogState(
-            status=CatalogStatus.UNAVAILABLE,
-            checked_at=(checked_at or datetime.now(UTC)).astimezone(UTC),
-            reason=reason,
-        ),
-        models=(),
-    )
 
 
 def _has_next_page(link_header: str | None) -> bool:
@@ -211,12 +188,11 @@ def catalog_from_model_list(
     """Normalize only opaque model IDs from one complete model-list response."""
     raw_models = _validated_model_list_items(result)
     model_values = _validated_model_values(raw_models)
-    now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not model_values:
-        return _unavailable_catalog(
+        return unavailable_catalog(
             key,
-            checked_at=now,
             reason="provider returned no models",
+            checked_at=checked_at,
         )
     models = tuple(
         ModelCatalogEntry(
@@ -226,33 +202,27 @@ def catalog_from_model_list(
         )
         for model_value in sorted(model_values)
     )
-    return ProviderCatalog(
-        key=key,
-        state=CatalogState(
-            status=CatalogStatus.AVAILABLE,
-            checked_at=now,
-            revision=model_list_revision(key, models),
-            expires_at=now + _CATALOG_TTL,
-        ),
+    return available_catalog(
+        key,
+        revision=model_list_revision(key, models),
         models=models,
+        checked_at=checked_at,
     )
 
 
 async def _read_model_list_response(
     response: httpx.Response, key: ProviderCatalogKey
-) -> bytes | OpenAICompatibleCatalogDiscovery:
+) -> bytes | ProviderCatalogDiscovery:
     if response.status_code == 401:
-        return OpenAICompatibleCatalogDiscovery(
-            catalog=_unavailable_catalog(
-                key, reason="provider model-list authentication failed"
-            ),
+        return unavailable_discovery(
+            key,
+            reason="provider model-list authentication failed",
             authentication=AuthenticationState.UNAUTHENTICATED,
         )
     if response.status_code == 403:
-        return OpenAICompatibleCatalogDiscovery(
-            catalog=_unavailable_catalog(
-                key, reason="provider model-list request was forbidden"
-            ),
+        return unavailable_discovery(
+            key,
+            reason="provider model-list request was forbidden",
             authentication=AuthenticationState.UNKNOWN,
         )
     if response.status_code != 200:
@@ -265,7 +235,7 @@ async def _read_model_list_response(
         )
     body = bytearray()
     async for chunk in response.aiter_bytes():
-        if len(body) + len(chunk) > _MAX_RESPONSE_BYTES:
+        if len(body) + len(chunk) > MAX_DISCOVERY_READ_BYTES:
             raise OpenAICompatibleCatalogError(
                 "OpenAI-compatible model-list response exceeds one MiB"
             )
@@ -284,15 +254,13 @@ async def discover_openai_compatible_catalog(
     api_key: str | None,
     key: ProviderCatalogKey,
     timeout: float = 30.0,
-) -> OpenAICompatibleCatalogDiscovery:
+) -> ProviderCatalogDiscovery:
     """Get the complete model list without following redirects or sending a prompt."""
     models_url = _models_url(base_url)
     if not isinstance(api_key, str) or not api_key or api_key != api_key.strip():
-        return OpenAICompatibleCatalogDiscovery(
-            catalog=_unavailable_catalog(
-                key,
-                reason="provider model-list requires an API key",
-            ),
+        return unavailable_discovery(
+            key,
+            reason="provider model-list requires an API key",
             authentication=AuthenticationState.UNAUTHENTICATED,
         )
     bearer = _api_key(api_key)
@@ -323,7 +291,7 @@ async def discover_openai_compatible_catalog(
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list request failed"
         ) from None
-    if isinstance(body_or_discovery, OpenAICompatibleCatalogDiscovery):
+    if isinstance(body_or_discovery, ProviderCatalogDiscovery):
         return body_or_discovery
     try:
         result = _JSON_OBJECT.validate_json(body_or_discovery)
@@ -331,7 +299,7 @@ async def discover_openai_compatible_catalog(
         raise OpenAICompatibleCatalogError(
             "OpenAI-compatible model-list returned malformed JSON"
         ) from None
-    return OpenAICompatibleCatalogDiscovery(
+    return ProviderCatalogDiscovery(
         catalog=catalog_from_model_list(result, key=key),
         authentication=AuthenticationState.AUTHENTICATED,
     )

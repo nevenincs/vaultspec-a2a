@@ -116,7 +116,7 @@ async def test_both_pipes_drain_without_output_polling_and_retain_bounded_output
         config,
         "import sys\nfrom pathlib import Path\n"
         "for stream in (sys.stdout.buffer, sys.stderr.buffer):\n"
-        "    stream.write(b'x' * 32 * 1024 * 1024)\n"
+        f"    stream.write(b'x' * {32 * MAX_TERMINAL_OUTPUT_BYTES})\n"
         "    stream.flush()\n"
         "Path('finished').touch()\n",
         cap,

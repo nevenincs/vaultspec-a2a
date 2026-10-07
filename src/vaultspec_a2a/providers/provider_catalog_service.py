@@ -8,8 +8,10 @@ from collections import OrderedDict
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Final
 
 from ..graph.enums import Provider
+from ._catalog_discovery import unavailable_catalog
 from .cli_resolution import ProviderRuntimeUnavailableReason
 from .factory import (
     ProviderCatalogRegistration,
@@ -27,7 +29,6 @@ from .provider_catalog import (
     CacheFreshness,
     CatalogRefreshCache,
     CatalogRefreshSuppressedError,
-    CatalogState,
     CatalogStatus,
     HealthState,
     ProviderCatalog,
@@ -39,7 +40,9 @@ from .provider_catalog import (
 
 logger = logging.getLogger(__name__)
 
-PROVIDER_CATALOG_CACHE_TTL = timedelta(minutes=5)
+# Lanes report no expiry of their own, so the service TTL - this default unless a
+# caller passes another - alone decides when a served catalog goes stale.
+PROVIDER_CATALOG_CACHE_TTL: Final = timedelta(minutes=5)
 _MAX_WORKSPACE_SCOPES = 16
 _DISPLAY_NAMES = {
     Provider.ANTIGRAVITY: "Antigravity",
@@ -216,16 +219,7 @@ class ProviderCatalogService:
         configured = scope.configured.get(key, HealthState.UNKNOWN)
         transport = scope.transport.get(key, HealthState.UNKNOWN)
         if snapshot is None:
-            now = datetime.now(UTC)
-            catalog = ProviderCatalog(
-                key=key,
-                state=CatalogState(
-                    status=CatalogStatus.UNAVAILABLE,
-                    checked_at=now,
-                    reason="provider catalog refresh failed",
-                ),
-                models=(),
-            )
+            catalog = unavailable_catalog(key, reason="provider catalog refresh failed")
         else:
             state = snapshot.catalog.state
             status = state.status

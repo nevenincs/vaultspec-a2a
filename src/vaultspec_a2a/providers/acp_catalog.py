@@ -11,22 +11,32 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
 from typing import TYPE_CHECKING, Final, TypedDict, Unpack, cast
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from ..desktop.native_isolation import NativeLaunchAuthority
+    from ._cleanup import CleanupStep
 from ._acp_auth import is_auth_required_error
+from ._catalog_discovery import (
+    ProviderCatalogDiscovery,
+    available_catalog,
+    finish_discovery,
+    unavailable_catalog,
+    unavailable_discovery,
+)
 from ._catalog_fields import (
+    MAX_DISCOVERY_FRAMES,
+    MAX_DISCOVERY_READ_BYTES,
+    CatalogFieldReader,
     display_text,
     local_id,
     optional_description,
     optional_text,
 )
-from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
@@ -36,8 +46,6 @@ from .provider_catalog import (
     MAX_MODELS,
     MAX_OPTIONS,
     AuthenticationState,
-    CatalogState,
-    CatalogStatus,
     ControlKind,
     ModelCatalogEntry,
     NativeControl,
@@ -52,9 +60,6 @@ __all__ = [
     "discover_acp_catalog",
 ]
 
-_MAX_FRAME_BYTES: Final = 1_048_576
-_MAX_FRAMES: Final = 64
-_CATALOG_TTL: Final = timedelta(minutes=5)
 _SUPPORTED_CONTROL_CATEGORIES: Final = frozenset({"thought_level", "model_config"})
 
 
@@ -66,17 +71,12 @@ class _AcpCatalogAuthenticationRequiredError(AcpSessionError):
     """Internal signal used to return factual unauthenticated evidence."""
 
 
-@dataclass(frozen=True, slots=True)
-class AcpCatalogDiscovery:
-    """Prompt-free catalog result plus authentication evidence."""
-
-    catalog: ProviderCatalog
-    authentication: AuthenticationState
-
-
 def _protocol_error(message: str) -> AcpCatalogProtocolError:
     """Raise ACP's own dialect of a discovery protocol refusal."""
     return AcpCatalogProtocolError(f"ACP {message}", code=AcpErrorCode.INTERNAL_ERROR)
+
+
+_FIELDS: Final = CatalogFieldReader(_protocol_error)
 
 
 def _rpc_error(method: str, error: JsonValue) -> AcpSessionError:
@@ -103,52 +103,24 @@ def _rpc_error(method: str, error: JsonValue) -> AcpSessionError:
     )
 
 
-def _unauthenticated_discovery(key: ProviderCatalogKey) -> AcpCatalogDiscovery:
-    return AcpCatalogDiscovery(
-        catalog=ProviderCatalog(
-            key=key,
-            state=CatalogState(
-                status=CatalogStatus.UNAVAILABLE,
-                checked_at=datetime.now(UTC),
-                reason="provider session requires authentication",
-            ),
-            models=(),
-        ),
+def _unauthenticated_discovery(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
+    return unavailable_discovery(
+        key,
+        reason="provider session requires authentication",
         authentication=AuthenticationState.UNAUTHENTICATED,
     )
-
-
-def _objects(
-    value: JsonValue | None, *, field: str, limit: int
-) -> tuple[JsonObject, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        raise AcpCatalogProtocolError(
-            f"ACP catalog field {field!r} must be a list",
-            code=AcpErrorCode.INTERNAL_ERROR,
-        )
-    if len(value) > limit:
-        raise AcpCatalogProtocolError(
-            f"ACP catalog field {field!r} exceeds {limit} items",
-            code=AcpErrorCode.INTERNAL_ERROR,
-        )
-    if not all(isinstance(item, dict) for item in value):
-        raise AcpCatalogProtocolError(
-            f"ACP catalog field {field!r} contains a non-object item",
-            code=AcpErrorCode.INTERNAL_ERROR,
-        )
-    return tuple(item for item in value if isinstance(item, dict))
 
 
 def _flatten_options(
     value: JsonValue | None, *, field: str, limit: int
 ) -> tuple[JsonObject, ...]:
     flattened: list[JsonObject] = []
-    for option in _objects(value, field=field, limit=limit):
+    for option in _FIELDS.optional_objects(value, field=field, limit=limit):
         nested = option.get("options")
         if isinstance(nested, list) and optional_text(option.get("value")) is None:
-            flattened.extend(_objects(nested, field=f"{field}.options", limit=limit))
+            flattened.extend(
+                _FIELDS.optional_objects(nested, field=f"{field}.options", limit=limit)
+            )
         else:
             flattened.append(option)
     if len(flattened) > limit:
@@ -272,7 +244,7 @@ def _normalized_payload(
 ) -> tuple[tuple[ModelCatalogEntry, ...], tuple[NativeControl, ...]]:
     models: tuple[ModelCatalogEntry, ...] = ()
     controls: list[NativeControl] = []
-    config_options = _objects(
+    config_options = _FIELDS.optional_objects(
         result.get("configOptions"),
         field="configOptions",
         # ACP carries the model selector in the same list as the controls, so a
@@ -351,45 +323,18 @@ def catalog_from_session_result(
         models = tuple(
             replace(model, native_control_ids=control_ids) for model in models
         )
-    now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not models:
-        return ProviderCatalog(
-            key=key,
-            state=CatalogState(
-                status=CatalogStatus.UNAVAILABLE,
-                checked_at=now,
-                reason="provider session did not advertise model enumeration",
-            ),
-            models=(),
+        return unavailable_catalog(
+            key,
+            reason="provider session did not advertise model enumeration",
+            checked_at=checked_at,
         )
-    return ProviderCatalog(
-        key=key,
-        state=CatalogState(
-            status=CatalogStatus.AVAILABLE,
-            checked_at=now,
-            revision=_revision(key, models, controls),
-            expires_at=now + _CATALOG_TTL,
-        ),
+    return available_catalog(
+        key,
+        revision=_revision(key, models, controls),
         models=models,
         native_controls=controls,
-    )
-
-
-async def _read_response(
-    stdout: asyncio.StreamReader,
-    *,
-    request_id: int,
-    timeout: float,
-    output_budget: OutputBudget,
-) -> JsonObject:
-    return await read_response(
-        stdout,
-        request_id=request_id,
-        timeout=timeout,
-        output_budget=output_budget,
-        max_frames=_MAX_FRAMES,
-        max_frame_bytes=_MAX_FRAME_BYTES,
-        protocol_error=_protocol_error,
+        checked_at=checked_at,
     )
 
 
@@ -420,11 +365,14 @@ async def _request(
     }
     process.stdin.write(json.dumps(request).encode() + b"\n")
     await process.stdin.drain()
-    response = await _read_response(
+    response = await read_response(
         process.stdout,
         request_id=request_id,
         timeout=timeout,
         output_budget=output_budget,
+        max_frames=MAX_DISCOVERY_FRAMES,
+        max_frame_bytes=MAX_DISCOVERY_READ_BYTES,
+        protocol_error=_protocol_error,
     )
     if "error" in response:
         error = response.get("error")
@@ -459,7 +407,7 @@ class _DiscoverAcpCatalogOptions(_DiscoverAcpCatalogRequired, total=False):
 async def discover_acp_catalog(
     command: tuple[str, ...],
     **options: Unpack[_DiscoverAcpCatalogOptions],
-) -> AcpCatalogDiscovery:
+) -> ProviderCatalogDiscovery:
     """Discover a provider catalog without sending a completion-bearing prompt."""
     env = options["env"]
     cwd = options["cwd"]
@@ -482,7 +430,7 @@ async def discover_acp_catalog(
     stderr_task = asyncio.create_task(
         drain_stderr(process.stderr, process, metadata, output_budget)
     )
-    outcome: AcpCatalogDiscovery | None = None
+    outcome: ProviderCatalogDiscovery | None = None
     failure: BaseException | None = None
     try:
         await _request(
@@ -518,7 +466,7 @@ async def discover_acp_catalog(
             timeout=timeout,
             output_budget=output_budget,
         )
-        outcome = AcpCatalogDiscovery(
+        outcome = ProviderCatalogDiscovery(
             catalog=catalog_from_session_result(session, key=key),
             authentication=AuthenticationState.AUTHENTICATED,
         )
@@ -536,27 +484,6 @@ async def discover_acp_catalog(
             ("acp-catalog-stderr", lambda: cancel_task(stderr_task)),
         ]
     )
-    cleanup_failures = await run_independent_cleanups(*cleanup_steps)
-    return _catalog_outcome_or_raise(outcome, failure, cleanup_failures)
-
-
-def _catalog_outcome_or_raise(
-    outcome: AcpCatalogDiscovery | None,
-    failure: BaseException | None,
-    cleanup_failures: list[tuple[str, Exception]],
-) -> AcpCatalogDiscovery:
-    if failure is not None:
-        if cleanup_failures:
-            failure.add_note(
-                "ACP catalog cleanup also failed: "
-                + ", ".join(name for name, _ in cleanup_failures)
-            )
-        raise failure
-    if cleanup_failures:
-        raise RuntimeError(
-            "ACP catalog cleanup failed: "
-            + ", ".join(name for name, _ in cleanup_failures)
-        )
-    if outcome is None:
-        raise RuntimeError("ACP catalog discovery completed without an outcome")
-    return outcome
+    return await finish_discovery(
+        "ACP", outcome, failure, cleanup_steps, AcpCatalogProtocolError
+    )

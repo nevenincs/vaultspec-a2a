@@ -137,7 +137,8 @@ async def test_shared_spawn_and_terminals_keep_session_authority(
         for cap in (0, 4, 2**64 - 1):
             output_script = authority.workspace.path / "large-output.js"
             output_script.write_text(
-                "process.stdout.write('x'.repeat(2 * 1024 * 1024));\n", encoding="utf-8"
+                f"process.stdout.write('x'.repeat({2 * MAX_TERMINAL_OUTPUT_BYTES}));\n",
+                encoding="utf-8",
             )
             created = await on_terminal_create(
                 3,

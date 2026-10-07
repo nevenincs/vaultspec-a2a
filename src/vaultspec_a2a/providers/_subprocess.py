@@ -51,6 +51,11 @@ enough to explain the failure and no longer.
 
 logger = logging.getLogger(__name__)
 
+# The reader buffer bound for a provider's pipes, the same on every spawn path.
+# One JSON-RPC line from a provider can carry a whole tool result, far past
+# asyncio's 64 KiB default, and a line over the bound fails the read outright.
+_STREAM_LIMIT_BYTES = 10 * 1024 * 1024
+
 
 class _SpawnRequired(TypedDict):
     use_exec: bool
@@ -312,7 +317,7 @@ async def _spawn_acp_process(
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
                     cwd=cwd,
-                    limit=10 * 1024 * 1024,
+                    limit=_STREAM_LIMIT_BYTES,
                 )
             else:
                 process = await asyncio.create_subprocess_shell(
@@ -326,7 +331,7 @@ async def _spawn_acp_process(
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
                     cwd=cwd,
-                    limit=10 * 1024 * 1024,
+                    limit=_STREAM_LIMIT_BYTES,
                 )
         else:
             process = await asyncio.create_subprocess_exec(
@@ -337,7 +342,7 @@ async def _spawn_acp_process(
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=cwd,
-                limit=10 * 1024 * 1024,
+                limit=_STREAM_LIMIT_BYTES,
                 start_new_session=True,
             )
     except BaseException as exc:

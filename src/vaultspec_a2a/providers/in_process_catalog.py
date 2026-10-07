@@ -29,17 +29,14 @@ cannot drift into disagreeing about what an in-process lane is called.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from ..graph.enums import Provider
+from ._catalog_discovery import ProviderCatalogDiscovery, available_catalog
 from ._catalog_fields import local_id, model_list_revision
 from .provider_catalog import (
     AuthenticationState,
-    CatalogState,
-    CatalogStatus,
     ModelCatalogEntry,
     ProviderCatalog,
     ProviderCatalogKey,
@@ -47,21 +44,17 @@ from .provider_catalog import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
 __all__ = [
     "IN_PROCESS_EXECUTION_MODES",
+    "IN_PROCESS_MODEL_VALUES",
     "build_in_process_catalog",
     "discover_in_process_catalog",
     "in_process_catalog_key",
     "served_in_process_lanes",
 ]
 
-
-# The catalog TTL matches the external lanes'. A static catalog cannot go stale
-# in the sense a fetched one can, but selection revalidation requires a bounded
-# expiry, and a lane whose entries never expire would be the only one in the
-# service exempt from that rule.
-_CATALOG_TTL: Final = timedelta(minutes=5)
 
 # The exact execution mode each in-process lane is served under. Catalog identity
 # is execution-mode specific by decision, so these strings are lane identity, not
@@ -95,20 +88,6 @@ _DESCRIPTIONS: Mapping[Provider, str] = MappingProxyType(
         ),
     }
 )
-
-
-@dataclass(frozen=True, slots=True)
-class InProcessCatalogDiscovery:
-    """One in-process catalog and its authentication evidence.
-
-    Mirrors the external discoverers' result shape so the factory normalizes every
-    lane through one boundary. ``authentication`` is always
-    :data:`AuthenticationState.NOT_APPLICABLE`: there is no credential to hold and
-    none to be missing, which is a different fact from ``UNKNOWN``.
-    """
-
-    catalog: ProviderCatalog
-    authentication: AuthenticationState
 
 
 def in_process_catalog_key(provider: Provider) -> ProviderCatalogKey:
@@ -165,7 +144,6 @@ def build_in_process_catalog(
         ValueError: If *key* does not name a served in-process lane identity.
     """
     provider = _in_process_provider(key)
-    now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     description = _DESCRIPTIONS[provider]
     models = tuple(
         ModelCatalogEntry(
@@ -176,15 +154,11 @@ def build_in_process_catalog(
         )
         for provider_value in _provider_values(provider)
     )
-    return ProviderCatalog(
-        key=key,
-        state=CatalogState(
-            status=CatalogStatus.AVAILABLE,
-            checked_at=now,
-            revision=model_list_revision(key, models),
-            expires_at=now + _CATALOG_TTL,
-        ),
+    return available_catalog(
+        key,
+        revision=model_list_revision(key, models),
         models=models,
+        checked_at=checked_at,
     )
 
 
@@ -209,7 +183,7 @@ def _in_process_provider(key: ProviderCatalogKey) -> Provider:
     return provider
 
 
-def discover_in_process_catalog(key: ProviderCatalogKey) -> InProcessCatalogDiscovery:
+def discover_in_process_catalog(key: ProviderCatalogKey) -> ProviderCatalogDiscovery:
     """Return the in-process lane's catalog without performing any round trip.
 
     Synchronous on purpose. The external discoverers are coroutines because they
@@ -217,10 +191,14 @@ def discover_in_process_catalog(key: ProviderCatalogKey) -> InProcessCatalogDisc
     ``async def`` would suggest an I/O boundary that is not there. The factory
     adapts it to the registration's awaitable contract.
 
+    ``authentication`` is always :data:`AuthenticationState.NOT_APPLICABLE`:
+    there is no credential to hold and none to be missing, which is a different
+    fact from ``UNKNOWN``.
+
     Raises:
         ValueError: If *key* does not name a served in-process lane identity.
     """
-    return InProcessCatalogDiscovery(
+    return ProviderCatalogDiscovery(
         catalog=build_in_process_catalog(key),
         authentication=AuthenticationState.NOT_APPLICABLE,
     )

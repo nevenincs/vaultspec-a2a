@@ -1,17 +1,13 @@
-"""Shared fixtures for api/tests/.
+"""The app factory and in-process worker shared by api/tests/.
 
-Centralises engine, session_factory, session, checkpointer, and make_app so
-that all test modules use the same isolated file-backed SQLite setup and
-app-state injection.
+``make_app`` injects the root ``session_factory`` and ``checkpointer`` fixtures
+- a per-test SQLite file and a real ``AsyncSqliteSaver`` - into app state, so
+every test module shares one isolated store setup.
 
 The gateway no longer runs agent execution locally.  Tests wire a
 real in-process dispatch receiver (a minimal FastAPI ASGI app served via
 ``httpx.ASGITransport``) so that HTTP serialisation and routing are exercised
 without a live worker process.  No ``MockTransport``, no ``unittest.mock``.
-
-The ``checkpointer`` fixture uses ``AsyncSqliteSaver`` backed by a per-test
-SQLite file so that gateway read-path enrichment exercises the real
-checkpointer implementation, not a ``MemorySaver`` stub.
 """
 
 from __future__ import annotations
@@ -21,20 +17,13 @@ from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any, cast, override
 
 import httpx
-import pytest_asyncio
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.event_handlers import CheckpointPruneRegistry
@@ -49,10 +38,9 @@ from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..internal import internal_router
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
-    import pytest
     from starlette.types import ASGIApp, Receive, Scope, Send
 
     from ...providers.provider_catalog_service import ProviderCatalogService
@@ -77,41 +65,6 @@ type DispatchPayload = dict[str, Any]
 __all__: list[str] = []
 
 
-# ---------------------------------------------------------------------------
-# Engine / Session fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def engine(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncEngine]:
-    """File-backed async SQLAlchemy engine with all tables created."""
-    case_dir = tmp_path_factory.mktemp("api-test-db")
-    # Copy the session schema template instead of replaying the DDL. The DDL is
-    # byte-identical every time and cost ~340ms - more than this package's tests
-    # spent doing their actual work. The database is still per-test and still
-    # real; only its materialization changes.
-    db_file = materialize_schema(case_dir / "test.db")
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine: AsyncEngine) -> SessionFactory:
-    """Async session factory bound to the file-backed engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
-    """Provide a fresh async session for direct DB assertions."""
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
-
-
 async def seed_run_with_status(
     session_factory: SessionFactory, thread_id: str, status: ThreadStatus
 ) -> None:
@@ -129,26 +82,6 @@ async def seed_run_with_status(
             status=status,
         )
         await session.commit()
-
-
-# ---------------------------------------------------------------------------
-# Real checkpointer fixture — AsyncSqliteSaver backed by a per-test file
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def checkpointer(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncSqliteSaver]:
-    """Real AsyncSqliteSaver backed by a temporary SQLite file per test.
-
-    Replaces the former MemorySaver stub so that gateway read-path enrichment
-    exercises the real checkpointer implementation (AsyncSqliteSaver).
-    """
-    case_dir = tmp_path_factory.mktemp("api-test-checkpoints")
-    db_file = case_dir / "test_checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
-        yield cp
 
 
 # ---------------------------------------------------------------------------

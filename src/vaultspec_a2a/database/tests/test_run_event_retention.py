@@ -8,10 +8,9 @@ coupling would make one store's lifetime quietly decide the other's: a run
 whose checkpoints were pruned would lose a resumable window it was promised,
 or a run whose window expired would lose the state it resumes execution from.
 
-The sweep itself runs against both backends this service ships, because it is
-application schema and a bound proved on one of them is half a proof. The
-pair of directions above runs on the SQLite saver, which is the one whose
-store this project writes retention statements against directly.
+The sweep runs against the migrated application schema, and the pair of
+directions above runs on the SQLite saver, which is the one whose store this
+project writes retention statements against directly.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 from sqlalchemy import update
 
@@ -33,12 +31,12 @@ from ..models import ThreadModel
 from ..run_event_repository import RunEventRecord, RunEventStore
 from ..run_event_retention import sweep_replay_log
 from ..thread_repository import create_thread
-from ._backends import BACKENDS, migrated_session_factory
 from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..checkpoints import Checkpointer
@@ -123,9 +121,8 @@ async def _retained(store: RunEventStore, thread_id: str) -> list[int]:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-@pytest.mark.parametrize("backend_name", BACKENDS)
 async def test_the_sweep_expires_a_window_by_age_and_by_settlement(
-    tmp_path: Path, backend_name: str
+    tmp_path: Path, migrated_session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Both bounds, and the frames each one alone would miss.
 
@@ -136,63 +133,67 @@ async def test_the_sweep_expires_a_window_by_age_and_by_settlement(
     cannot reach: a week-long run must not accumulate a week of frames just
     because it has not ended.
     """
-    async with migrated_session_factory(backend_name, tmp_path) as (_target, factory):
-        await _seed_run(
-            factory,
-            _SETTLED_LONG_AGO,
-            status=ThreadStatus.COMPLETED,
-            settled_hours_ago=48,
-        )
-        await _seed_run(
-            factory,
-            _SETTLED_JUST_NOW,
-            status=ThreadStatus.COMPLETED,
-            settled_hours_ago=1,
-        )
-        await _seed_run(factory, _STILL_RUNNING, status=ThreadStatus.RUNNING)
+    await _seed_run(
+        migrated_session_factory,
+        _SETTLED_LONG_AGO,
+        status=ThreadStatus.COMPLETED,
+        settled_hours_ago=48,
+    )
+    await _seed_run(
+        migrated_session_factory,
+        _SETTLED_JUST_NOW,
+        status=ThreadStatus.COMPLETED,
+        settled_hours_ago=1,
+    )
+    await _seed_run(
+        migrated_session_factory, _STILL_RUNNING, status=ThreadStatus.RUNNING
+    )
 
-        store = RunEventStore(factory)
-        await store.append(
-            [
-                _frame(_SETTLED_LONG_AGO, 1, age_hours=50),
-                _frame(_SETTLED_LONG_AGO, 2, age_hours=0.5),
-                _frame(_SETTLED_JUST_NOW, 1, age_hours=1),
-                _frame(_STILL_RUNNING, 1, age_hours=200),
-                _frame(_STILL_RUNNING, 2, age_hours=1),
-            ]
-        )
+    store = RunEventStore(migrated_session_factory)
+    await store.append(
+        [
+            _frame(_SETTLED_LONG_AGO, 1, age_hours=50),
+            _frame(_SETTLED_LONG_AGO, 2, age_hours=0.5),
+            _frame(_SETTLED_JUST_NOW, 1, age_hours=1),
+            _frame(_STILL_RUNNING, 1, age_hours=200),
+            _frame(_STILL_RUNNING, 2, age_hours=1),
+        ]
+    )
 
-        deleted = await sweep_replay_log(
-            factory, retention_hours=_BOUND_HOURS, now=_NOW
-        )
+    deleted = await sweep_replay_log(
+        migrated_session_factory, retention_hours=_BOUND_HOURS, now=_NOW
+    )
 
-        assert await _retained(store, _SETTLED_LONG_AGO) == []
-        assert await _retained(store, _SETTLED_JUST_NOW) == [1]
-        assert await _retained(store, _STILL_RUNNING) == [2]
-        assert deleted == 3
+    assert await _retained(store, _SETTLED_LONG_AGO) == []
+    assert await _retained(store, _SETTLED_JUST_NOW) == [1]
+    assert await _retained(store, _STILL_RUNNING) == [2]
+    assert deleted == 3
 
 
 @pytest.mark.asyncio(loop_scope="function")
-@pytest.mark.parametrize("backend_name", BACKENDS)
 async def test_a_sweep_with_nothing_to_expire_deletes_nothing(
-    tmp_path: Path, backend_name: str
+    tmp_path: Path, migrated_session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """The counterweight: a sweep that deletes a live run's window is a bug."""
-    async with migrated_session_factory(backend_name, tmp_path) as (_target, factory):
-        await _seed_run(factory, _STILL_RUNNING, status=ThreadStatus.RUNNING)
-        store = RunEventStore(factory)
-        await store.append(
-            [_frame(_STILL_RUNNING, sequence, age_hours=1) for sequence in (1, 2, 3)]
-        )
+    await _seed_run(
+        migrated_session_factory, _STILL_RUNNING, status=ThreadStatus.RUNNING
+    )
+    store = RunEventStore(migrated_session_factory)
+    await store.append(
+        [_frame(_STILL_RUNNING, sequence, age_hours=1) for sequence in (1, 2, 3)]
+    )
 
-        swept = await sweep_replay_log(factory, retention_hours=_BOUND_HOURS, now=_NOW)
-        assert swept == 0
-        assert await _retained(store, _STILL_RUNNING) == [1, 2, 3]
+    swept = await sweep_replay_log(
+        migrated_session_factory, retention_hours=_BOUND_HOURS, now=_NOW
+    )
+    assert swept == 0
+    assert await _retained(store, _STILL_RUNNING) == [1, 2, 3]
 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_replay_sweep_leaves_every_checkpoint_where_it_was(
-    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """One store's retention must not become the other's.
 
@@ -201,35 +202,34 @@ async def test_the_replay_sweep_leaves_every_checkpoint_where_it_was(
     on their own schedule. A sweep that reached them would silently shorten
     checkpoint retention to the replay bound.
     """
-    async with (
-        migrated_session_factory("sqlite", tmp_path) as (_target, factory),
-        AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as saver,
-    ):
-        await _two_step_graph(saver).ainvoke(
-            {"log": []}, cast("Any", config_for(_SETTLED_LONG_AGO))
-        )
-        before = await stored_history(saver, _SETTLED_LONG_AGO)
-        assert sum(len(ids) for ids in before.values()) > 1, (
-            "the run left too little history for the claim to mean anything"
-        )
+    await _two_step_graph(checkpointer).ainvoke(
+        {"log": []}, cast("Any", config_for(_SETTLED_LONG_AGO))
+    )
+    before = await stored_history(checkpointer, _SETTLED_LONG_AGO)
+    assert sum(len(ids) for ids in before.values()) > 1, (
+        "the run left too little history for the claim to mean anything"
+    )
 
-        await _seed_run(
-            factory,
-            _SETTLED_LONG_AGO,
-            status=ThreadStatus.COMPLETED,
-            settled_hours_ago=48,
-        )
-        store = RunEventStore(factory)
-        await store.append([_frame(_SETTLED_LONG_AGO, 1, age_hours=50)])
+    await _seed_run(
+        migrated_session_factory,
+        _SETTLED_LONG_AGO,
+        status=ThreadStatus.COMPLETED,
+        settled_hours_ago=48,
+    )
+    store = RunEventStore(migrated_session_factory)
+    await store.append([_frame(_SETTLED_LONG_AGO, 1, age_hours=50)])
 
-        assert await sweep_replay_log(factory, retention_hours=_BOUND_HOURS, now=_NOW)
-        assert await _retained(store, _SETTLED_LONG_AGO) == []
-        assert await stored_history(saver, _SETTLED_LONG_AGO) == before
+    assert await sweep_replay_log(
+        migrated_session_factory, retention_hours=_BOUND_HOURS, now=_NOW
+    )
+    assert await _retained(store, _SETTLED_LONG_AGO) == []
+    assert await stored_history(checkpointer, _SETTLED_LONG_AGO) == before
 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_checkpoint_prune_leaves_every_retained_frame_where_it_was(
-    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The same independence, read from the other side.
 
@@ -238,33 +238,26 @@ async def test_the_checkpoint_prune_leaves_every_retained_frame_where_it_was(
     timing: the checkpoint prune leaves them because they are not its rows,
     not because they are young.
     """
-    async with (
-        migrated_session_factory("sqlite", tmp_path) as (_target, factory),
-        AsyncSqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as saver,
-    ):
-        await _two_step_graph(saver).ainvoke(
-            {"log": []}, cast("Any", config_for(_SETTLED_LONG_AGO))
-        )
-        before = await stored_history(saver, _SETTLED_LONG_AGO)
+    await _two_step_graph(checkpointer).ainvoke(
+        {"log": []}, cast("Any", config_for(_SETTLED_LONG_AGO))
+    )
+    before = await stored_history(checkpointer, _SETTLED_LONG_AGO)
 
-        await _seed_run(
-            factory,
-            _SETTLED_LONG_AGO,
-            status=ThreadStatus.COMPLETED,
-            settled_hours_ago=48,
-        )
-        store = RunEventStore(factory)
-        await store.append(
-            [
-                _frame(_SETTLED_LONG_AGO, sequence, age_hours=50)
-                for sequence in (1, 2, 3)
-            ]
-        )
+    await _seed_run(
+        migrated_session_factory,
+        _SETTLED_LONG_AGO,
+        status=ThreadStatus.COMPLETED,
+        settled_hours_ago=48,
+    )
+    store = RunEventStore(migrated_session_factory)
+    await store.append(
+        [_frame(_SETTLED_LONG_AGO, sequence, age_hours=50) for sequence in (1, 2, 3)]
+    )
 
-        assert await prune_settled_checkpoints(saver, _SETTLED_LONG_AGO) is True
+    assert await prune_settled_checkpoints(checkpointer, _SETTLED_LONG_AGO) is True
 
-        after = await stored_history(saver, _SETTLED_LONG_AGO)
-        assert sum(len(ids) for ids in after.values()) < sum(
-            len(ids) for ids in before.values()
-        ), "the prune removed nothing, so it proves nothing about what it kept"
-        assert await _retained(store, _SETTLED_LONG_AGO) == [1, 2, 3]
+    after = await stored_history(checkpointer, _SETTLED_LONG_AGO)
+    assert sum(len(ids) for ids in after.values()) < sum(
+        len(ids) for ids in before.values()
+    ), "the prune removed nothing, so it proves nothing about what it kept"
+    assert await _retained(store, _SETTLED_LONG_AGO) == [1, 2, 3]

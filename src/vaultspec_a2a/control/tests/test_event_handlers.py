@@ -10,14 +10,12 @@ from uuid import uuid4
 
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -47,7 +45,6 @@ from ...database import (
 )
 from ...database.models import ControlActionModel, ThreadModel
 from ...database.session import configure_sqlite_transactions
-from ...database.tests._backends import BACKENDS, migrated_session_factory
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...streaming.sse_frames import enforce_progress_allowlist
@@ -80,7 +77,7 @@ class _SeedActionSpec:
 
 async def _seed_unapplied_leased_action(
     session: AsyncSession,
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
     *,
     thread_id: str,
     spec: _SeedActionSpec,
@@ -208,7 +205,7 @@ async def _seed_unapplied_leased_action(
 @pytest.mark.asyncio
 async def test_dispatch_application_receipt_settles_exact_message_action(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A worker receipt settles its named follow-up, never another action."""
     async with session_factory() as session:
@@ -271,11 +268,9 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend_name", BACKENDS)
 async def test_dispatch_application_receipt_settles_ingest_action(
-    backend_name: str,
-    tmp_path: Path,
-    checkpointer: InMemorySaver,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A proven ingest settles its own journal row without waiting on terminal.
 
@@ -284,53 +279,52 @@ async def test_dispatch_application_receipt_settles_ingest_action(
     it as the thread's last applied action - not leave it to whatever later
     reconciles the run's eventual completion.
     """
-    async with migrated_session_factory(backend_name, tmp_path) as (_target, factory):
-        async with factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="ingest-receipt-thread",
-                status="running",
-            )
-            action, receipt, checkpoint_id = await _seed_unapplied_leased_action(
-                session,
-                checkpointer,
-                thread_id=thread.id,
-                spec=_SeedActionSpec(
-                    action_type=ControlActionType.INGEST,
-                    idempotency_key=thread_create_action_key(thread.id),
-                ),
-            )
-            await session.commit()
-
-        await _handle_progress_event(
-            thread.id,
-            {
-                "type": "dispatch_applied",
-                "dispatch_id": action.dispatch_id,
-                "action": "ingest",
-                "graph_action_receipt": receipt.model_dump(mode="json"),
-                "checkpoint_id": checkpoint_id,
-            },
-            session_factory=factory,
-            checkpointer=checkpointer,
+    async with migrated_session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="ingest-receipt-thread",
+            status="running",
         )
+        action, receipt, checkpoint_id = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread.id,
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.INGEST,
+                idempotency_key=thread_create_action_key(thread.id),
+            ),
+        )
+        await session.commit()
 
-        async with factory() as session:
-            stored_action = await session.get(ControlActionModel, action.id)
-            stored_thread = await session.get(ThreadModel, thread.id)
+    await _handle_progress_event(
+        thread.id,
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": action.dispatch_id,
+            "action": "ingest",
+            "graph_action_receipt": receipt.model_dump(mode="json"),
+            "checkpoint_id": checkpoint_id,
+        },
+        session_factory=migrated_session_factory,
+        checkpointer=checkpointer,
+    )
 
-        assert stored_action is not None
-        assert stored_action.applied_at is not None
-        assert stored_action.claim_token is None
-        assert stored_thread is not None
-        assert stored_thread.last_applied_action == ControlActionType.INGEST.value
+    async with migrated_session_factory() as session:
+        stored_action = await session.get(ControlActionModel, action.id)
+        stored_thread = await session.get(ThreadModel, thread.id)
+
+    assert stored_action is not None
+    assert stored_action.applied_at is not None
+    assert stored_action.claim_token is None
+    assert stored_thread is not None
+    assert stored_thread.last_applied_action == ControlActionType.INGEST.value
 
 
 @pytest.mark.asyncio
 async def test_dispatch_application_receipt_requires_named_durable_checkpoint(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     async with session_factory() as session:
         thread = await create_thread(
@@ -368,29 +362,6 @@ async def test_dispatch_application_receipt_requires_named_durable_checkpoint(
     assert stored is not None
     assert stored.applied_at is None
     assert stored.claim_token is not None
-
-
-@pytest_asyncio.fixture
-async def engine(tmp_path_factory: pytest.TempPathFactory):
-    """Create a file-backed engine for replay-focused control tests."""
-    case_dir = tmp_path_factory.mktemp("control-event-handler-db")
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    """Provide an async session factory bound to the test engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest.fixture
-def checkpointer() -> InMemorySaver:
-    """Keep exact incorporated checkpoints for application receipts."""
-    return InMemorySaver()
 
 
 async def _seed_current_cancel(
@@ -663,7 +634,7 @@ async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
 @pytest.mark.asyncio
 async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A replayed permission_resolved event must not append a second applied action."""
     async with session_factory() as session:
@@ -774,7 +745,7 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
 @pytest.mark.asyncio
 async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_failed(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The answer settles; the run is not marked running again after it ended.
 
@@ -993,7 +964,7 @@ async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
 @pytest.mark.asyncio
 async def test_terminal_event_expires_pending_plan_approval_projection(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Checkpoint completion atomically expires pending approval residue."""
     async with session_factory() as session:
@@ -1066,7 +1037,7 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
 @pytest.mark.asyncio
 async def test_failure_evidence_elects_only_its_current_graph_action(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     detail = "provider transport ended before a response"
     condition = "network_unreachable"
@@ -1199,7 +1170,7 @@ class _RejectionSpec:
 
 async def _answered_rejection(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
     *,
     spec: _RejectionSpec,
 ) -> tuple[str, str, str, GraphActionReceipt, str]:
@@ -1291,7 +1262,7 @@ _KIMI_OPTIONS: list[dict[str, object]] = [
 @pytest.mark.asyncio
 async def test_plan_rejection_survives_the_resolution_projection(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The resolution handler must not overwrite a denial with an approval.
 
@@ -1337,7 +1308,7 @@ async def test_plan_rejection_survives_the_resolution_projection(
 @pytest.mark.asyncio
 async def test_generic_progress_does_not_settle_an_answered_permission(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Uncorrelated progress must not settle any answered permission."""
     (
@@ -1376,7 +1347,7 @@ async def test_generic_progress_does_not_settle_an_answered_permission(
 @pytest.mark.asyncio
 async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A provider-defined rejecting id must settle as a denial, not an approval.
 

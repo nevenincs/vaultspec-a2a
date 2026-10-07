@@ -20,14 +20,11 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import text, update
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from ...database.migrate import run_migrations
 from ...database.models import ThreadModel
 from ...database.run_event_repository import RunEventRecord, RunEventStore
-from ...database.session import configure_sqlite_engine
 from ...database.thread_repository import create_thread
 from ...graph.enums import AgentLifecycleState
 from ...tests._write_authority import make_test_write_authority
@@ -38,9 +35,6 @@ from ..subscribers import RunSequenceAllocator
 from ..types import SequencedEvent
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 _RUN = "sequence-authority-proof"
@@ -97,17 +91,10 @@ class _Backend:
             await connection.execute(text("DROP TABLE run_events"))
 
 
-@pytest_asyncio.fixture
-async def backend(tmp_path: Path) -> AsyncIterator[_Backend]:
-    """A real file-backed application database at the chain's head."""
-    url = f"sqlite+aiosqlite:///{tmp_path / 'application.db'}"
-    await run_migrations(url)
-    engine = create_async_engine(url)
-    configure_sqlite_engine(engine)
-    try:
-        yield _Backend(engine)
-    finally:
-        await engine.dispose()
+@pytest.fixture
+def backend(migrated_engine: AsyncEngine) -> _Backend:
+    """The root migrated store, behind the operations these proofs drive."""
+    return _Backend(migrated_engine)
 
 
 def _worker_frame(sequence: int, *, thread_id: str = _RUN) -> dict[str, object]:

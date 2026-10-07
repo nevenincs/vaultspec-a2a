@@ -15,10 +15,8 @@ the run's admission slot.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
 
 from ...database import get_thread
 from ...thread.enums import (
@@ -40,23 +38,12 @@ from ._continuation import (
     FIRST_RECEIPT,
     RUN,
     BusyRun,
-    busy_run_state,
     checkpoint_count,
     definition,
     finish_turn,
     journal_action,
     queue_continuation,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
-
-@pytest_asyncio.fixture
-async def busy_run(tmp_path: Path) -> AsyncIterator[BusyRun]:
-    async with busy_run_state(tmp_path) as state:
-        yield state
 
 
 async def _reconcile(run: BusyRun) -> RecoveryObservation:

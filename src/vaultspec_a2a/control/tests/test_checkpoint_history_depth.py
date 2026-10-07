@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 
@@ -28,7 +27,7 @@ from ...database.checkpoint_retention import prune_settled_checkpoints
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import Mapping
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
@@ -102,13 +101,6 @@ def _recorded_parent(checkpoint_tuple: Any) -> str | None:
     return parent.get("configurable", {}).get("checkpoint_id") if parent else None
 
 
-@pytest_asyncio.fixture
-async def saver(tmp_path: Path) -> AsyncIterator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.db")) as store:
-        await store.setup()
-        yield store
-
-
 def test_no_checkpoint_has_no_depth_to_report() -> None:
     """Absent is not zero: the caller degrades the snapshot on an unknown depth."""
     assert checkpoint_history_depth(None) is None
@@ -138,7 +130,7 @@ async def test_the_depth_needs_no_second_read_of_the_store(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_the_depth_agrees_with_the_parent_id_served_beside_it(
-    saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A snapshot must not report a parent and no ancestry at once.
 
@@ -147,27 +139,27 @@ async def test_the_depth_agrees_with_the_parent_id_served_beside_it(
     same snapshot still carried. Both describe what the surviving checkpoint
     RECORDS, and they now say the same thing.
     """
-    graph = _flat_graph(saver)
+    graph = _flat_graph(checkpointer)
     thread_id = f"pruned-flat-{uuid4()}"
     for turn in ("one", "two", "three"):
         await graph.ainvoke(
             cast("Any", {"log": [turn]}), cast("Any", _config(thread_id))
         )
 
-    assert await prune_settled_checkpoints(saver, thread_id) is True
+    assert await prune_settled_checkpoints(checkpointer, thread_id) is True
 
-    latest = await saver.aget_tuple(cast("Any", _config(thread_id)))
+    latest = await checkpointer.aget_tuple(cast("Any", _config(thread_id)))
     assert latest is not None
     parent_id = _recorded_parent(latest)
     assert parent_id is not None, "the surviving checkpoint still names a parent"
     # One row left, so a row count would have said one, contradicting that id.
-    assert await _rows(saver, thread_id) == 1
+    assert await _rows(checkpointer, thread_id) == 1
     assert checkpoint_history_depth(latest) == 2
 
     # And the named parent really is gone, which is what the served field warns
     # about: the reference outlives the checkpoint it points at.
     assert (
-        await saver.aget_tuple(
+        await checkpointer.aget_tuple(
             cast(
                 "Any",
                 {
@@ -185,7 +177,7 @@ async def test_the_depth_agrees_with_the_parent_id_served_beside_it(
 
 @pytest.mark.asyncio
 async def test_the_depth_describes_one_checkpoint_not_the_thread_s_rows(
-    saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Listing the thread counted every namespace's rows as root history.
 
@@ -194,16 +186,16 @@ async def test_the_depth_describes_one_checkpoint_not_the_thread_s_rows(
     root checkpoint included rows from a subgraph it has no ancestry relation
     to. The depth is now a fact about the checkpoint being described.
     """
-    graph = _nested_graph(saver)
+    graph = _nested_graph(checkpointer)
     thread_id = f"namespaces-{uuid4()}"
     await graph.ainvoke(cast("Any", {"log": ["one"]}), cast("Any", _config(thread_id)))
 
     namespaces: set[str] = set()
-    async for item in saver.alist(cast("Any", _config(thread_id))):
+    async for item in checkpointer.alist(cast("Any", _config(thread_id))):
         namespaces.add(_checkpoint_namespace(item.config))
     assert len(namespaces) > 1, "the thread must span namespaces for this to matter"
 
-    latest = await saver.aget_tuple(cast("Any", _config(thread_id)))
+    latest = await checkpointer.aget_tuple(cast("Any", _config(thread_id)))
     assert latest is not None
     assert _checkpoint_namespace(latest.config) == ""
 
@@ -211,20 +203,20 @@ async def test_the_depth_describes_one_checkpoint_not_the_thread_s_rows(
     expected = 2 if _recorded_parent(latest) is not None else 1
     assert depth == expected
     # More rows in the store than the depth: it is not counting them.
-    assert await _rows(saver, thread_id) > 2
+    assert await _rows(checkpointer, thread_id) > 2
 
 
 @pytest.mark.asyncio
 async def test_the_first_checkpoint_of_a_thread_reports_no_ancestry(
-    saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Depth one means first, and only the checkpoint itself can say so."""
-    graph = _flat_graph(saver)
+    graph = _flat_graph(checkpointer)
     thread_id = f"first-{uuid4()}"
     await graph.ainvoke(cast("Any", {"log": ["one"]}), cast("Any", _config(thread_id)))
 
     oldest = None
-    async for item in saver.alist(cast("Any", _config(thread_id))):
+    async for item in checkpointer.alist(cast("Any", _config(thread_id))):
         if _checkpoint_namespace(item.config) == "":
             oldest = item
     assert oldest is not None

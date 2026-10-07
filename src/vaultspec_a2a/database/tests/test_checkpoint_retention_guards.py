@@ -31,7 +31,6 @@ from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
-    from pathlib import Path
 
     from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
@@ -79,16 +78,9 @@ def _one_step_graph(saver: Checkpointer, state_schema: type[Any]) -> Any:
     return compile_test_graph(builder, checkpointer=saver)
 
 
-@pytest_asyncio.fixture
-async def sqlite_saver(tmp_path: Path) -> AsyncIterator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.db")) as saver:
-        await saver.setup()
-        yield saver
-
-
 @pytest.mark.asyncio
 async def test_a_delta_channel_thread_is_left_alone(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Its value lives in the history, so deleting the history deletes the value.
 
@@ -97,20 +89,20 @@ async def test_a_delta_channel_thread_is_left_alone(
     nothing raises: the channel simply reconstructs as empty. The guard is the
     only thing standing between a settled delta thread and silent data loss.
     """
-    graph = _one_step_graph(sqlite_saver, _DeltaLog)
+    graph = _one_step_graph(checkpointer, _DeltaLog)
     thread_id = f"delta-{uuid4()}"
     for turn in ("one", "two", "three"):
         await graph.ainvoke(
             cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
         )
-    before = await stored_history(sqlite_saver, thread_id)
+    before = await stored_history(checkpointer, thread_id)
     settled = (await graph.aget_state(cast("Any", config_for(thread_id)))).values
     assert settled["log"], "the delta channel must hold a value to lose"
     assert all(len(ids) > 1 for ids in before.values())
 
-    assert await prune_settled_checkpoints(sqlite_saver, thread_id) is False
+    assert await prune_settled_checkpoints(checkpointer, thread_id) is False
 
-    assert await stored_history(sqlite_saver, thread_id) == before
+    assert await stored_history(checkpointer, thread_id) == before
     assert (
         await graph.aget_state(cast("Any", config_for(thread_id)))
     ).values == settled
@@ -118,7 +110,7 @@ async def test_a_delta_channel_thread_is_left_alone(
 
 @pytest.mark.asyncio
 async def test_a_delta_thread_whose_head_is_a_snapshot_is_pruned_without_loss(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A snapshot head needs no history, so refusing it only keeps dead rows.
 
@@ -128,20 +120,20 @@ async def test_a_delta_thread_whose_head_is_a_snapshot_is_pruned_without_loss(
     exactly as it was - the check that refused this case guarded nothing and
     leaned on a type LangGraph does not publish.
     """
-    graph = _one_step_graph(sqlite_saver, _SnapshottingDeltaLog)
+    graph = _one_step_graph(checkpointer, _SnapshottingDeltaLog)
     thread_id = f"delta-snapshot-{uuid4()}"
     for turn in ("one", "two", "three"):
         await graph.ainvoke(
             cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
         )
-    before = await stored_history(sqlite_saver, thread_id)
+    before = await stored_history(checkpointer, thread_id)
     settled = (await graph.aget_state(cast("Any", config_for(thread_id)))).values
     assert settled["log"], "the delta channel must hold a value to lose"
     assert all(len(ids) > 1 for ids in before.values())
 
-    assert await prune_settled_checkpoints(sqlite_saver, thread_id) is True
+    assert await prune_settled_checkpoints(checkpointer, thread_id) is True
 
-    assert await stored_history(sqlite_saver, thread_id) == {
+    assert await stored_history(checkpointer, thread_id) == {
         namespace: [max(ids)] for namespace, ids in before.items()
     }
     assert (
@@ -151,28 +143,28 @@ async def test_a_delta_thread_whose_head_is_a_snapshot_is_pruned_without_loss(
 
 @pytest.mark.asyncio
 async def test_a_plain_thread_on_the_same_store_is_still_pruned(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The delta guard is per thread, not a blanket refusal for the store."""
-    graph = _one_step_graph(sqlite_saver, _Log)
+    graph = _one_step_graph(checkpointer, _Log)
     thread_id = f"plain-{uuid4()}"
     for turn in ("one", "two"):
         await graph.ainvoke(
             cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
         )
-    before = await stored_history(sqlite_saver, thread_id)
+    before = await stored_history(checkpointer, thread_id)
     assert all(len(ids) > 1 for ids in before.values())
 
-    assert await prune_settled_checkpoints(sqlite_saver, thread_id) is True
+    assert await prune_settled_checkpoints(checkpointer, thread_id) is True
 
-    assert await stored_history(sqlite_saver, thread_id) == {
+    assert await stored_history(checkpointer, thread_id) == {
         namespace: [max(ids)] for namespace, ids in before.items()
     }
 
 
 @pytest.mark.asyncio
 async def test_a_sqlite_store_with_another_table_layout_is_refused(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """SQLite keeps no migration ledger, so the tables are their own version.
 
@@ -180,24 +172,24 @@ async def test_a_sqlite_store_with_another_table_layout_is_refused(
     layout they were not written for, and the class of the saver holding it
     says nothing about that.
     """
-    graph = _one_step_graph(sqlite_saver, _Log)
+    graph = _one_step_graph(checkpointer, _Log)
     thread_id = f"layout-{uuid4()}"
     for turn in ("one", "two"):
         await graph.ainvoke(
             cast("Any", {"log": [turn]}), cast("Any", config_for(thread_id))
         )
-    before = await stored_history(sqlite_saver, thread_id)
-    await sqlite_saver.conn.execute("ALTER TABLE writes ADD COLUMN retained INTEGER")
-    await sqlite_saver.conn.commit()
+    before = await stored_history(checkpointer, thread_id)
+    await checkpointer.conn.execute("ALTER TABLE writes ADD COLUMN retained INTEGER")
+    await checkpointer.conn.commit()
 
-    assert await prune_settled_checkpoints(sqlite_saver, thread_id) is False
+    assert await prune_settled_checkpoints(checkpointer, thread_id) is False
 
-    assert await stored_history(sqlite_saver, thread_id) == before
+    assert await stored_history(checkpointer, thread_id) == before
 
 
 @pytest.mark.asyncio
 async def test_a_saver_that_prunes_itself_is_asked_to(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A saver's own pruning is authoritative where these statements guess.
 
@@ -214,7 +206,7 @@ async def test_a_saver_that_prunes_itself_is_asked_to(
         ) -> None:
             calls.append((list(thread_ids), strategy))
 
-    saver = _PruningSaver(sqlite_saver.conn)
+    saver = _PruningSaver(checkpointer.conn)
     saver.is_setup = True
     graph = _one_step_graph(saver, _Log)
     thread_id = f"self-pruning-{uuid4()}"
@@ -349,29 +341,29 @@ async def test_a_postgres_store_at_another_schema_version_is_refused(
 
 @pytest.mark.asyncio
 async def test_a_sqlite_prune_still_rolls_back_a_failure(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The guards must not have moved the rollback off the failure path.
 
     The saver shares one connection, so deletes a failed prune leaves open are
     committed by its next write.
     """
-    graph = _one_step_graph(sqlite_saver, _Log)
+    graph = _one_step_graph(checkpointer, _Log)
     thread_id = f"refused-{uuid4()}"
     await graph.ainvoke(
         cast("Any", {"log": ["one"]}), cast("Any", config_for(thread_id))
     )
-    before = await stored_history(sqlite_saver, thread_id)
-    await sqlite_saver.conn.execute(
+    before = await stored_history(checkpointer, thread_id)
+    await checkpointer.conn.execute(
         "CREATE TRIGGER refuse_prune BEFORE DELETE ON checkpoints "
         "BEGIN SELECT RAISE(ABORT, 'prune refused'); END"
     )
-    await sqlite_saver.conn.commit()
+    await checkpointer.conn.commit()
 
     with pytest.raises(sqlite3.DatabaseError, match="prune refused"):
-        await prune_settled_checkpoints(sqlite_saver, thread_id)
+        await prune_settled_checkpoints(checkpointer, thread_id)
 
-    await sqlite_saver.conn.execute("DROP TRIGGER refuse_prune")
+    await checkpointer.conn.execute("DROP TRIGGER refuse_prune")
     await graph.ainvoke(cast("Any", {"log": ["two"]}), cast("Any", config_for("other")))
 
-    assert await stored_history(sqlite_saver, thread_id) == before
+    assert await stored_history(checkpointer, thread_id) == before

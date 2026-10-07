@@ -13,19 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...conftest import materialize_schema
 from ...control._permission_response_contract import PermissionInput, PermissionRuntime
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
@@ -41,6 +33,12 @@ from ...database.models import ControlActionModel
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+    )
+
 _CONFLICT = 409
 _FORBIDDEN = 403
 
@@ -48,22 +46,6 @@ _OPTIONS: list[dict[str, object]] = [
     {"optionId": "allow_once", "name": "Allow once"},
     {"optionId": "reject_once", "name": "Reject once"},
 ]
-
-
-@pytest_asyncio.fixture
-async def engine(tmp_path_factory: pytest.TempPathFactory):
-    """A file-backed engine so a second session reads only committed state."""
-    case_dir = tmp_path_factory.mktemp("permission-rejection-db")
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def _respond(

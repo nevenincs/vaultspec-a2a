@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...control._permission_response_contract import (
     PermissionInput,
@@ -21,7 +20,6 @@ from ...database import (
     get_control_action_by_idempotency_key,
     record_permission_request,
 )
-from ...database.models import Base
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
@@ -32,20 +30,19 @@ from .test_dispatch_failure_transitions import _seed_accepted_initial_action
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 _OPTIONS: list[dict[str, object]] = [
     {"optionId": "allow_once", "name": "Allow once"},
     {"optionId": "reject_once", "name": "Reject once"},
 ]
 
 
-async def _run_case(runtime_dir: Path, bodies: list[tuple[str, str | None]]):
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{runtime_dir / 'permission-leases.db'}",
-        connect_args={"timeout": 5},
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def _run_case(
+    sessions: async_sessionmaker[AsyncSession],
+    runtime_dir: Path,
+    bodies: list[tuple[str, str | None]],
+):
     async with sessions() as session:
         thread = await create_thread(
             session,
@@ -98,15 +95,16 @@ async def _run_case(runtime_dir: Path, bodies: list[tuple[str, str | None]]):
             thread_id=thread_id,
             idempotency_key=permission_response_action_key(request_id),
         )
-    await engine.dispose()
     return results, action
 
 
 @pytest.mark.asyncio
 async def test_identical_concurrent_retries_share_one_request_lease(
+    session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
     results, action = await _run_case(
+        session_factory,
         tmp_path,
         [("allow_once", "same"), ("allow_once", "same")],
     )
@@ -120,9 +118,11 @@ async def test_identical_concurrent_retries_share_one_request_lease(
 
 @pytest.mark.asyncio
 async def test_competing_concurrent_bodies_conflict_without_second_dispatch(
+    session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
     results, action = await _run_case(
+        session_factory,
         tmp_path,
         [("allow_once", "first"), ("reject_once", "second")],
     )

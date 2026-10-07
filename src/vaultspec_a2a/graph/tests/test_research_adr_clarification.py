@@ -18,9 +18,7 @@ import inspect
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import pytest_asyncio
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from ...team.team_config import (
@@ -36,7 +34,7 @@ from ..compiler import compile_team_graph
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ..protocols import ProviderFactoryProtocol
 
@@ -54,13 +52,6 @@ class _FakeSubmitter:
     async def __call__(self, state: Any, phase: str) -> str:
         self.phases.append(phase)
         return f"prop-{phase}"
-
-
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
 
 
 def _team(preset_id: str) -> Any:

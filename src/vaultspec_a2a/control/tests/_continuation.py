@@ -1,25 +1,19 @@
 """Real durable state for the continuation suites: one busy run and a queue.
 
 Everything here builds production objects through production verbs - a real
-application database brought to head by the packaged migration chain, a real
 frozen graph definition, a real accepted dispatch envelope, a real journal
 reservation through the queue repository, and a real LangGraph run over a real
-``AsyncSqliteSaver`` for the completion receipt. The suites that import it
-assert on what those produce.
-
-The application store is reachable on either backend, so a suite whose claim
-depends on row locking can parametrize over both rather than prove half of it
-on the backend where ``FOR UPDATE`` is a no-op.
+``AsyncSqliteSaver`` for the completion receipt - inside the root
+``migrated_session_factory`` and ``checkpointer`` stores the suite hands in. The
+suites that import it assert on what those produce.
 """
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 
 from ...database import (
@@ -27,7 +21,6 @@ from ...database import (
     create_thread,
     get_control_action_by_dispatch_id,
 )
-from ...database.tests._backends import migrated_session_factory
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
@@ -50,22 +43,37 @@ from ..repositories import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...database.models import ControlActionModel
     from ...graph.compiler import CompiledTeamGraph
     from ...thread.action_receipts import GraphActionReceipt
 
+__all__ = [
+    "FIRST_RECEIPT",
+    "PRESET",
+    "ROOMY",
+    "RUN",
+    "BusyRun",
+    "checkpoint_count",
+    "definition",
+    "envelope",
+    "finish_turn",
+    "journal_action",
+    "probe_graph",
+    "queue_continuation",
+    "seed_busy_run",
+    "start_busy_run",
+]
+
 RUN = "promotion-run"
 PRESET = "mock-success-single"
 FIRST_RECEIPT = "first-turn-dispatch"
 ROOMY = ContinuationQueueLimits(per_run_depth=3, service_cap=9)
-#: The backend a suite gets when it makes no claim about row locking.
-DEFAULT_BACKEND = "sqlite"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,14 +116,12 @@ async def seed_busy_run(
 ) -> GraphActionReceipt:
     """Write one run mid-first-turn into an already-open application database.
 
-    Separate from :func:`busy_run_state` so a suite that owns its own stores -
+    Separate from :func:`start_busy_run` so a suite that owns its own stores -
     a live gateway's database and checkpointer - reaches the same run through
     the same production verbs rather than through a second description of it.
 
     *created_at* backdates the run's own creation, which is the only way to
-    reach the total-lifetime bound without waiting a day for it. *backend*
-    names the application store this run lives in, so a suite asserting a
-    locked read can run the same proof where the lock is real.
+    reach the total-lifetime bound without waiting a day for it.
     """
     thread = await create_thread(
         db,
@@ -146,27 +152,21 @@ async def seed_busy_run(
     return receipt
 
 
-@asynccontextmanager
-async def busy_run_state(
-    tmp_path: Path,
+async def start_busy_run(
+    sessions: async_sessionmaker[AsyncSession],
+    saver: AsyncSqliteSaver,
+    workspace: Path,
     *,
     created_at: datetime | None = None,
-    backend: str = DEFAULT_BACKEND,
-) -> AsyncGenerator[BusyRun]:
-    """Open a real application database holding one run mid-first-turn.
+) -> BusyRun:
+    """Seed one run mid-first-turn into the stores a suite was handed.
 
     *created_at* backdates the run's own creation, which is the only way to
-    reach the total-lifetime bound without waiting a day for it. *backend*
-    names the application store this run lives in, so a suite asserting a
-    locked read can run the same proof where the lock is real.
+    reach the total-lifetime bound without waiting a day for it.
     """
-    async with migrated_session_factory(backend, tmp_path) as (_target, sessions):
-        async with sessions() as db:
-            receipt = await seed_busy_run(db, tmp_path, created_at=created_at)
-        async with AsyncSqliteSaver.from_conn_string(
-            str(tmp_path / "graph.db")
-        ) as saver:
-            yield BusyRun(sessions, saver, receipt, tmp_path)
+    async with sessions() as db:
+        receipt = await seed_busy_run(db, workspace, created_at=created_at)
+    return BusyRun(sessions, saver, receipt, workspace)
 
 
 def _work(_state: TeamState) -> dict[str, object]:

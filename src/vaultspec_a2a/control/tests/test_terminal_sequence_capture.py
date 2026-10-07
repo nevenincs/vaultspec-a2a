@@ -31,16 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...conftest import materialize_schema
 from ...database import create_control_action, create_thread
 from ...database.models import ThreadModel
 from ...ipc.schemas import DispatchRequest
@@ -58,41 +49,12 @@ from ..event_handlers import _handle_terminal_event
 from ..thread_state_service import capture_thread_state
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
     from langchain_core.runnables import RunnableConfig
-
-
-@pytest_asyncio.fixture
-async def engine(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncEngine]:
-    """Real SQLite-backed engine, isolated per test."""
-    case_dir = tmp_path_factory.mktemp("terminal-sequence-capture-db")
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Async session factory bound to the test engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def checkpointer(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncSqliteSaver]:
-    """Real AsyncSqliteSaver, isolated per test (matches api/tests/conftest.py)."""
-    case_dir = tmp_path_factory.mktemp("terminal-sequence-capture-checkpoints")
-    db_file = case_dir / "test_checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
-        yield cp
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+    )
 
 
 async def _seed_completed_authority(

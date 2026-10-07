@@ -10,17 +10,9 @@ from typing import TYPE_CHECKING
 import anyio
 import httpx
 import pytest
-import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 from ...api.tests.clarification_harness import park_clarification
-from ...conftest import materialize_schema
 from ...control._permission_response_contract import (
     PermissionInput,
     PermissionRuntime,
@@ -61,7 +53,12 @@ from ...worker.ipc import WorkerBridge
 from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator
+
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+    )
 
 _TEST_INTERNAL_TOKEN = "dispatch-failure-transition-test-token"
 
@@ -104,27 +101,6 @@ async def _saturated_worker(
             tasks.cancel_scope.cancel()
         await executor.shutdown()
         await bridge.close()
-
-
-@pytest_asyncio.fixture
-async def engine(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncEngine]:
-    """Create a file-backed engine for dispatch-failure tests."""
-    case_dir = tmp_path_factory.mktemp("dispatch-failure-db")
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Provide an async session factory bound to the test engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 # A follow-up inherits the active project its run was created with, so a thread

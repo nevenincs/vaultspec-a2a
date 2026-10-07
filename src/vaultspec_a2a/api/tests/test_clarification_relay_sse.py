@@ -34,8 +34,8 @@ from ...testing import (
     async_catalog_run_fields,
     compile_test_graph,
     new_state_graph,
+    read_frame,
 )
-from ...testing.tests._support.sse import read_frame
 from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,

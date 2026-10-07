@@ -22,11 +22,10 @@ from ...database.run_event_repository import RunEventStore
 from ...streaming.aggregator import EventAggregator
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
-from ...testing import settings_override
+from ...testing import SseReader, settings_override
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import ResumePosition, replay_window
-from ._sse_reader import SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
 from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 from .test_stream_resume_replay import _progress_event, _relay, _terminal_event
@@ -87,7 +86,7 @@ async def test_a_cursor_behind_the_trimmed_window_is_told_where_the_replay_start
             ) as response,
         ):
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             notice = await reader.next_frame()
             replayed = [await reader.next_frame() for _ in range(_RETAINED)]
@@ -124,7 +123,7 @@ async def test_a_resume_with_the_feature_off_is_told_the_replay_is_unavailable(
             ) as response,
         ):
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             notice = await reader.next_frame()
 
@@ -157,7 +156,7 @@ async def test_a_store_that_cannot_answer_is_reported_rather_than_assumed_empty(
         ) as response,
     ):
         assert response.status_code == 200
-        reader = SseReader(response.aiter_bytes())
+        reader = SseReader(response.aiter_lines())
         assert (await reader.next_frame()).type == "stream_snapshot"
         notice = await reader.next_frame()
 
@@ -181,7 +180,7 @@ async def test_a_run_with_nothing_retained_cannot_serve_a_cursor(
         ) as response,
     ):
         assert response.status_code == 200
-        reader = SseReader(response.aiter_bytes())
+        reader = SseReader(response.aiter_lines())
         assert (await reader.next_frame()).type == "stream_snapshot"
         notice = await reader.next_frame()
 
@@ -226,7 +225,7 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
             headers={"Last-Event-ID": f"{_RUN}:5000"},
         ) as response:
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             notice = await reader.next_frame()
 
@@ -266,7 +265,7 @@ async def test_a_caught_up_resume_is_given_no_notice_at_all(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:2"}
         ) as response:
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             await _relay(client, [_progress_event(_RUN, 3)])
             following = await reader.next_frame()

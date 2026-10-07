@@ -25,7 +25,7 @@ import pytest
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
-from ...testing.tests._support.sse import read_frame
+from ...testing import read_frame
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import AppFixture, SessionFactory, _live_server, make_app

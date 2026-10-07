@@ -35,12 +35,25 @@ while an English one streamed fine. That coupling is enforced here rather than
 asserted: :func:`catalog_worst_case_frame_bytes` derives the true worst case
 from the catalog itself, and a cap that cannot cover it is a design error the
 streaming tests fail on.
+
+The module also owns the read side of the same wire grammar. :class:`SseEvent`
+and the ``decode_sse_*`` / :func:`iter_sse_events` functions are the one
+decoder, so a client and a test read ``id``, ``event`` and ``data`` the same way
+rather than each carrying a parser of its own.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import (
+    AsyncIterable,
+    AsyncIterator,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 from typing import Final, TypeGuard, cast
 
@@ -70,9 +83,13 @@ __all__ = [
     "MAX_SSE_FRAME_BYTES",
     "PROGRESS_CATALOG",
     "SSE_FRAME_VERSION",
+    "SseEvent",
     "catalog_worst_case_frame_bytes",
+    "decode_sse_lines",
+    "decode_sse_text",
     "encode_sse_frame",
     "enforce_progress_allowlist",
+    "iter_sse_events",
     "transport_frame",
 ]
 
@@ -644,3 +661,120 @@ def transport_frame(
     return encode_sse_frame(
         _transport_payload(kind, thread_id, fields), event=kind, thread_id=thread_id
     )
+
+
+_DEFAULT_EVENT_TYPE: Final = "message"
+
+# The grammar's three line terminators. ``str.splitlines`` is not a substitute:
+# it also breaks on U+2028, U+2029, U+0085 and the C0 separators, none of which
+# the grammar treats as a line end.
+_LINE_BREAK: Final = re.compile(r"\r\n|\r|\n")
+
+
+@dataclass(frozen=True, slots=True)
+class SseEvent:
+    """One dispatched event, as the wire carried it.
+
+    ``event_id`` is the ``id`` field of this event alone, ``None`` when the
+    event named none. The grammar's persistent last-event-id is deliberately not
+    synthesised: a resuming consumer keeps the last id it saw, and an unnumbered
+    frame must leave that exactly where the last numbered one put it (see
+    :func:`_encode`).
+    """
+
+    data: str
+    event: str = _DEFAULT_EVENT_TYPE
+    event_id: str | None = None
+
+
+class _SseDecoder:
+    """Assemble dispatched events from stream lines, one line at a time.
+
+    A line is ``field:value`` with at most one space after the colon dropped; a
+    line without a colon is a field with an empty value, and a line starting
+    with a colon is a comment. ``data`` lines accumulate and join with a
+    newline, ``event`` names the type (``message`` when absent or empty), ``id``
+    is taken unless it carries a NUL, and every other field, ``retry`` included,
+    is ignored. A blank line dispatches the buffered event, and an event with no
+    ``data`` line is not dispatched at all.
+    """
+
+    def __init__(self) -> None:
+        self._data: list[str] = []
+        self._event = ""
+        self._event_id: str | None = None
+
+    def feed(self, line: str) -> SseEvent | None:
+        """Consume one line, returning the event it dispatches, if any."""
+        line = line.removesuffix("\r")
+        if not line:
+            return self.dispatch()
+        if line.startswith(":"):
+            return None
+        name, _, value = line.partition(":")
+        value = value.removeprefix(" ")
+        if name == "data":
+            self._data.append(value)
+        elif name == "event":
+            self._event = value
+        elif name == "id" and "\0" not in value:
+            self._event_id = value
+        return None
+
+    def dispatch(self) -> SseEvent | None:
+        """Dispatch whatever is buffered and reset for the next event."""
+        data, event, event_id = self._data, self._event, self._event_id
+        self._data = []
+        self._event = ""
+        self._event_id = None
+        if not data:
+            return None
+        return SseEvent(
+            data="\n".join(data),
+            event=event or _DEFAULT_EVENT_TYPE,
+            event_id=event_id,
+        )
+
+
+def decode_sse_lines(lines: Iterable[str]) -> Iterator[SseEvent]:
+    """Decode already-split stream lines into the events they dispatch.
+
+    Lines arrive without their terminator, as ``httpx.Response.iter_lines``
+    yields them. An event still buffered when the lines run out is dispatched
+    rather than discarded, so a stream cut after its last frame's final field
+    does not lose that frame.
+    """
+    decoder = _SseDecoder()
+    for line in lines:
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
+    event = decoder.dispatch()
+    if event is not None:
+        yield event
+
+
+async def iter_sse_events(lines: AsyncIterable[str]) -> AsyncIterator[SseEvent]:
+    """Decode a stream of lines into events as each one completes.
+
+    The asynchronous form of :func:`decode_sse_lines`, over
+    ``httpx.Response.aiter_lines``. Each event is yielded the moment its blank
+    line arrives, so a caller bounding its wait on a live stream is never held
+    behind a later frame.
+    """
+    decoder = _SseDecoder()
+    async for line in lines:
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
+    event = decoder.dispatch()
+    if event is not None:
+        yield event
+
+
+def decode_sse_text(text: str) -> list[SseEvent]:
+    """Decode a complete, already-buffered stream body into its events.
+
+    Lines break on CRLF, LF or a bare CR, the grammar's own terminators.
+    """
+    return list(decode_sse_lines(_LINE_BREAK.split(text)))

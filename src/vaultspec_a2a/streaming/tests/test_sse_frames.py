@@ -3,29 +3,26 @@
 from __future__ import annotations
 
 import json
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from ...graph.enums import RESEARCH_ADR_NODE_PHASE
+from ...testing import decode_frame
 from ..sse_frames import (
     MAX_PROGRESS_CONTENT_CHARS,
     MAX_SSE_FRAME_BYTES,
     SSE_FRAME_VERSION,
+    SseEvent,
     catalog_worst_case_frame_bytes,
+    decode_sse_lines,
+    decode_sse_text,
     encode_sse_frame,
+    iter_sse_events,
 )
 
-
-def _data_payload(frame: bytes) -> dict[str, object]:
-    """Extract the JSON object from the ``data:`` lines of one SSE frame."""
-    text = frame.decode("utf-8")
-    data = "".join(
-        line.removeprefix("data: ")
-        for line in text.splitlines()
-        if line.startswith("data: ")
-    )
-    return json.loads(data)
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 def _agents_of(payload: dict[str, object]) -> list[dict[str, object]]:
@@ -46,7 +43,7 @@ def test_frame_is_stamped_with_the_contract_version() -> None:
         {"type": "stream_rejected", "reason": "stream_limit_exceeded"},
         event="stream_rejected",
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["api_version"] == SSE_FRAME_VERSION
     assert payload["type"] == "stream_rejected"
     assert frame.startswith(b"event: stream_rejected\n")
@@ -58,7 +55,7 @@ def test_version_stamp_is_idempotent() -> None:
         "type": "stream_rejected",
         "reason": "stream_limit_exceeded",
     }
-    payload = _data_payload(encode_sse_frame(already))
+    payload = decode_frame(encode_sse_frame(already)).data
     # No nested/duplicated version wrapper is introduced.
     assert payload == already
 
@@ -78,7 +75,7 @@ def test_oversized_frame_degrades_to_a_versioned_drop_sentinel() -> None:
     }
     frame = encode_sse_frame(huge, event="message_chunk", thread_id="run-1")
     assert len(frame) <= MAX_SSE_FRAME_BYTES
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["api_version"] == SSE_FRAME_VERSION
     assert payload["type"] == "progress_dropped"
     assert payload["dropped_type"] == "message_chunk"
@@ -138,7 +135,7 @@ def test_team_status_within_character_caps_survives_non_ascii(
         event="team_status",
         thread_id="run-1",
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["type"] == "team_status", (
         f"{label} team_status degraded to {payload['type']!r} despite every "
         f"field sitting inside its character cap"
@@ -179,7 +176,7 @@ def test_unicode_line_separators_never_split_a_data_line(
         line for line in body.decode("utf-8").splitlines() if line.startswith("data: ")
     ]
     assert len(data_lines) == 1, f"{name} split the frame into {len(data_lines)} lines"
-    assert _data_payload(frame)["content"] == content
+    assert decode_frame(frame).data["content"] == content
 
 
 def test_over_cap_catalogued_text_truncates_instead_of_dropping_the_frame() -> None:
@@ -193,7 +190,7 @@ def test_over_cap_catalogued_text_truncates_instead_of_dropping_the_frame() -> N
         event="message_chunk",
         thread_id="run-1",
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["type"] == "message_chunk"
     content = payload["content"]
     assert isinstance(content, str)
@@ -208,7 +205,7 @@ def test_an_uncatalogued_frame_keeps_only_its_identity_keys() -> None:
     that classifies frames by name is not silently rerouted.
     """
     frame = encode_sse_frame({"type": "progress", "n": 2}, event="progress")
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["type"] == "progress"
     assert "n" not in payload
 
@@ -230,7 +227,7 @@ def test_clarification_pending_carries_only_the_request_id() -> None:
         event="clarification_pending",
         thread_id="run-1",
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["type"] == "clarification_pending"
     assert payload["request_id"] == "abc123"
     # The questions themselves never cross the relay - a nudge to re-read
@@ -249,7 +246,7 @@ def test_clarification_pending_request_id_truncates_over_cap() -> None:
         event="clarification_pending",
         thread_id="run-1",
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     request_id = payload["request_id"]
     # Narrowed rather than cast: the frame carries JSON, so the decoded value is
     # object until something proves otherwise. Asserting the type here also pins
@@ -276,25 +273,25 @@ def test_stamped_frames_agree_with_the_shared_phase_map_for_every_node() -> None
     assert RESEARCH_ADR_NODE_PHASE, "the shared phase map must not be empty"
     for node, expected in RESEARCH_ADR_NODE_PHASE.items():
         frame = encode_sse_frame({"type": "agent_status", "node_name": node})
-        assert _data_payload(frame)["semantic_phase"] == expected, node
+        assert decode_frame(frame).data["semantic_phase"] == expected, node
         mounted = encode_sse_frame(
             {"type": "agent_status", "node_name": f"mount_{node}"}
         )
-        assert _data_payload(mounted)["semantic_phase"] == expected, node
+        assert decode_frame(mounted).data["semantic_phase"] == expected, node
 
 
 def test_fan_out_nodes_stamp_the_researching_phase() -> None:
     """The dispatch and researcher fan-out resolve by prefix, not by map entry."""
     for node in ("research_dispatch", "research_dispatch_researcher_00"):
         frame = encode_sse_frame({"type": "agent_status", "node_name": node})
-        assert _data_payload(frame)["semantic_phase"] == "researching", node
+        assert decode_frame(frame).data["semantic_phase"] == "researching", node
 
 
 @pytest.mark.parametrize("node", ["supervisor", "__end__", ""])
 def test_nodes_outside_the_topology_stamp_no_phase(node: str) -> None:
     """A node the vocabulary does not cover never has a phase fabricated for it."""
     frame = encode_sse_frame({"type": "agent_status", "node_name": node})
-    assert "semantic_phase" not in _data_payload(frame)
+    assert "semantic_phase" not in decode_frame(frame).data
 
 
 def test_frame_is_stamped_with_semantic_phase_from_node_name() -> None:
@@ -302,7 +299,7 @@ def test_frame_is_stamped_with_semantic_phase_from_node_name() -> None:
         {"type": "agent_status", "node_name": "synthesis", "state": "working"},
         event="agent_status",
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["semantic_phase"] == "synthesizing_research"
 
 
@@ -310,7 +307,7 @@ def test_frame_semantic_phase_falls_back_to_agent_id() -> None:
     frame = encode_sse_frame(
         {"type": "agent_status", "agent_id": "adr_review", "state": "working"}
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["semantic_phase"] == "reviewing_adr"
 
 
@@ -318,13 +315,13 @@ def test_non_research_adr_frame_carries_no_semantic_phase() -> None:
     frame = encode_sse_frame(
         {"type": "agent_status", "node_name": "vaultspec-coder", "state": "working"}
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert "semantic_phase" not in payload
 
 
 def test_frame_without_node_carries_no_semantic_phase() -> None:
     frame = encode_sse_frame({"type": "heartbeat"}, event="heartbeat")
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert "semantic_phase" not in payload
 
 
@@ -332,7 +329,7 @@ def test_existing_semantic_phase_is_not_overwritten() -> None:
     frame = encode_sse_frame(
         {"type": "agent_status", "node_name": "synthesis", "semantic_phase": "custom"}
     )
-    payload = _data_payload(frame)
+    payload = decode_frame(frame).data
     assert payload["semantic_phase"] == "custom"
 
 
@@ -426,4 +423,71 @@ def test_the_oversized_frame_sentinel_keeps_its_position() -> None:
         sequence=13,
     )
     assert _id_lines(frame) == ["id: run-7:13"]
-    assert _data_payload(frame)["reason"] == "frame_exceeds_cap"
+    assert decode_frame(frame).data["reason"] == "frame_exceeds_cap"
+
+
+def test_a_numbered_frame_decodes_to_its_id_type_and_payload() -> None:
+    """The decoder reads back every field the encoder wrote."""
+    frame = encode_sse_frame(
+        {"type": "agent_status", "state": "working"},
+        event="agent_status",
+        thread_id="run-7",
+        sequence=3,
+    )
+    (event,) = decode_sse_text(frame.decode("utf-8"))
+    assert event.event == "agent_status"
+    assert event.event_id == "run-7:3"
+    assert json.loads(event.data)["state"] == "working"
+
+
+def test_data_lines_join_with_newlines_and_comments_are_ignored() -> None:
+    events = decode_sse_text(": keep-alive\nevent: note\ndata: one\ndata:  two\n\n")
+    assert events == [SseEvent(data="one\n two", event="note")]
+
+
+def test_an_event_without_data_is_not_dispatched() -> None:
+    assert decode_sse_text("id: 1\nevent: note\n\n: only a comment\n\n") == []
+
+
+def test_the_event_type_defaults_to_message() -> None:
+    events = decode_sse_text("data: x\n\nevent:\ndata: y\n\n")
+    assert events == [SseEvent(data="x"), SseEvent(data="y")]
+
+
+def test_an_id_belongs_to_its_own_event_alone() -> None:
+    events = decode_sse_text("id: run-1:1\ndata: x\n\ndata: y\n\n")
+    assert [event.event_id for event in events] == ["run-1:1", None]
+
+
+def test_an_id_carrying_a_nul_is_ignored() -> None:
+    (event,) = decode_sse_text("id: a\0b\ndata: x\n\n")
+    assert event.event_id is None
+
+
+@pytest.mark.parametrize("terminator", ["\n", "\r\n", "\r"])
+def test_every_grammar_line_terminator_ends_a_line(terminator: str) -> None:
+    text = terminator.join(["event: note", "data: x", "", ""])
+    assert decode_sse_text(text) == [SseEvent(data="x", event="note")]
+
+
+def test_a_unicode_line_separator_inside_data_does_not_end_the_line() -> None:
+    (event,) = decode_sse_text("data: before\N{LINE SEPARATOR}after\n\n")
+    assert event.data == "before\N{LINE SEPARATOR}after"
+
+
+def test_an_event_still_buffered_at_end_of_stream_is_dispatched() -> None:
+    assert decode_sse_text("data: x") == [SseEvent(data="x")]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_the_async_decoder_yields_the_events_the_sync_decoder_does() -> None:
+    text = "id: r:1\nevent: a\ndata: x\n\n: c\ndata: y\ndata: z\n\ndata: tail"
+    lines = text.split("\n")
+
+    async def _stream() -> AsyncIterator[str]:
+        for line in lines:
+            yield line
+
+    events = [event async for event in iter_sse_events(_stream())]
+    assert events == list(decode_sse_lines(lines))
+    assert [event.data for event in events] == ["x", "y\nz", "tail"]

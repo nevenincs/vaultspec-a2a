@@ -37,12 +37,12 @@ from ...team.team_config import (
     WorkerRef,
     load_agent_config,
 )
+from ...testing import SseReader
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
-from ._sse_reader import SseReader
 from .conftest import SessionFactory, _live_server, make_app, seed_run_with_status
 
 if TYPE_CHECKING:
@@ -230,7 +230,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
             )
             async with client.stream("GET", f"/v1/runs/{thread_id}/stream") as response:
                 assert response.status_code == 200
-                reader = SseReader(response.aiter_bytes())
+                reader = SseReader(response.aiter_lines())
                 assert (await reader.next_frame()).type == "stream_snapshot"
 
                 # Only agent_id/node_name/state, exactly as the lifecycle

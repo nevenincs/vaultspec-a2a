@@ -36,10 +36,10 @@ from ...control.tests._continuation import (
 from ...database import get_thread
 from ...database.run_event_repository import RunEventStore
 from ...streaming.aggregator import EventAggregator
+from ...testing import SseFrame, SseReader
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
-from ._sse_reader import SseFrame, SseReader
 from .conftest import _live_server, make_app
 
 if TYPE_CHECKING:
@@ -145,7 +145,7 @@ async def _watch_two_turns(
         client.stream("GET", f"/v1/runs/{RUN}/stream") as stream,
     ):
         assert stream.status_code == 200, stream.reason_phrase
-        reader = SseReader(stream.aiter_bytes())
+        reader = SseReader(stream.aiter_lines())
         assert (await reader.next_frame()).type == "stream_snapshot"
 
         await relay(_progress_payload(1))

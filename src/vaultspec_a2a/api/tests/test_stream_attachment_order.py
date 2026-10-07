@@ -21,7 +21,6 @@ true.
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -29,6 +28,7 @@ import pytest
 from ...database.thread_repository import update_thread_status
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
+from ...testing import decode_frame
 from ...testing.environment import settings_override
 from ...thread.enums import ThreadStatus
 from ..thread_stream import ThreadStreamRequest, _stream_thread_events
@@ -40,23 +40,6 @@ if TYPE_CHECKING:
     from .conftest import SessionFactory
 
 _RUN = "run-attachment-order"
-
-
-def _frame(raw: bytes) -> dict[str, object]:
-    """Decode one encoded SSE frame into its payload."""
-    for line in raw.decode("utf-8").splitlines():
-        if line.startswith("data: "):
-            payload: dict[str, object] = json.loads(line.removeprefix("data: "))
-            return payload
-    raise AssertionError(f"no data line in frame: {raw!r}")
-
-
-def _frame_id(raw: bytes) -> str | None:
-    """Return the SSE ``id`` field of one encoded frame, if it carries one."""
-    for line in raw.decode("utf-8").splitlines():
-        if line.startswith("id: "):
-            return line.removeprefix("id: ").strip()
-    return None
 
 
 def _progress(run_id: str, *, sequence: int, content: str) -> dict[str, object]:
@@ -109,7 +92,7 @@ async def test_a_viewer_is_subscribed_before_it_is_told_the_run_state(
         )
     )
     try:
-        snapshot = _frame(await anext(stream))
+        snapshot = decode_frame(await anext(stream)).data
 
         assert snapshot["type"] == "stream_snapshot"
         assert snapshot["status"] == ThreadStatus.RUNNING.value
@@ -119,7 +102,7 @@ async def test_a_viewer_is_subscribed_before_it_is_told_the_run_state(
         # And the queue attached that early really is the delivery path: an
         # outcome relayed now arrives rather than being missed.
         aggregator.relay_payload(_RUN, _terminal(_RUN, ThreadStatus.COMPLETED))
-        terminal = _frame(await anext(stream))
+        terminal = decode_frame(await anext(stream)).data
         assert terminal["type"] == "thread_terminal"
         assert terminal["status"] == ThreadStatus.COMPLETED.value
 
@@ -154,13 +137,13 @@ async def test_no_frame_claims_an_sse_id_the_stream_cannot_resume_from(
     )
     try:
         snapshot_raw = await anext(stream)
-        assert _frame_id(snapshot_raw) is None
+        assert decode_frame(snapshot_raw).event_id is None
 
         aggregator.relay_payload(_RUN, _progress(_RUN, sequence=7, content="tick"))
         progress_raw = await anext(stream)
 
-        assert _frame_id(progress_raw) is None
-        assert _frame(progress_raw)["sequence"] == 7
+        assert decode_frame(progress_raw).event_id is None
+        assert decode_frame(progress_raw).data["sequence"] == 7
     finally:
         await _close(stream)
 
@@ -189,7 +172,7 @@ async def test_a_run_that_settles_unheard_still_closes_the_stream(
             )
         )
         try:
-            assert _frame(await anext(stream))["type"] == "stream_snapshot"
+            assert decode_frame(await anext(stream)).data["type"] == "stream_snapshot"
 
             async with session_factory() as session:
                 await update_thread_status(
@@ -203,7 +186,7 @@ async def test_a_run_that_settles_unheard_still_closes_the_stream(
             frames: list[dict[str, object]] = []
             async with asyncio.timeout(10):
                 async for raw in stream:
-                    frames.append(_frame(raw))
+                    frames.append(decode_frame(raw).data)
                     if frames[-1]["type"] == "thread_terminal":
                         break
         finally:
@@ -244,7 +227,7 @@ async def test_a_viewer_that_overflows_its_queue_is_told_to_resynchronize(
         )
     )
     try:
-        assert _frame(await anext(stream))["type"] == "stream_snapshot"
+        assert decode_frame(await anext(stream)).data["type"] == "stream_snapshot"
 
         for sequence in range(overflow):
             aggregator.relay_payload(
@@ -254,7 +237,7 @@ async def test_a_viewer_that_overflows_its_queue_is_told_to_resynchronize(
         notices: list[dict[str, object]] = []
         first_progress: dict[str, object] | None = None
         for _ in range(4):
-            frame = _frame(await anext(stream))
+            frame = decode_frame(await anext(stream)).data
             if frame["type"] == "progress_dropped":
                 notices.append(frame)
                 continue

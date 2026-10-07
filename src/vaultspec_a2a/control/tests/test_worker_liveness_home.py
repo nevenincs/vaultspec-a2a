@@ -234,6 +234,7 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
     otherwise satisfy the survival assertion while enforcing nothing.
     """
     from ...streaming.sse_frames import enforce_progress_allowlist, transport_frame
+    from ...testing import decode_frame
 
     uncatalogued = enforce_progress_allowlist(
         {"type": "definitely_not_catalogued", "server_uptime_seconds": 99.5}
@@ -261,14 +262,7 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
         timestamp=1_700_000_000.25,
         server_uptime_seconds=42.5,
     )
-    text = raw.decode("utf-8")
-    decoded = json.loads(
-        "".join(
-            line.removeprefix("data: ")
-            for line in text.splitlines()
-            if line.startswith("data: ")
-        )
-    )
+    decoded = decode_frame(raw).data
     assert decoded["server_uptime_seconds"] == 42.5
     assert decoded["type"] == ServerEventType.HEARTBEAT.value
     assert decoded["event_type"] == ServerEventType.HEARTBEAT.value
@@ -300,7 +294,7 @@ async def test_the_shared_frame_reader_skips_heartbeats_under_either_wire_key(
     under the other as untyped - which means it neither skips the keep-alive it
     was asked to skip nor recognises the frame it was asked to wait for.
     """
-    from ...testing.tests._support.sse import read_frame
+    from ...testing import read_frame
 
     frames = [
         json.dumps({key: ServerEventType.HEARTBEAT.value, "server_uptime_seconds": 1}),

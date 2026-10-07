@@ -22,9 +22,9 @@ from ...database.run_event_repository import RunEventRecord, RunEventStore
 from ...streaming.aggregator import EventAggregator
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
+from ...testing import SseFrame, SseReader
 from ...thread.enums import ThreadStatus
 from .._stream_replay import retained_after
-from ._sse_reader import SseFrame, SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
 from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 
@@ -104,7 +104,7 @@ async def test_a_reconnect_covers_every_sequence_to_the_terminal_exactly_once(
     ):
         async with client.stream("GET", f"/v1/runs/{_RUN}/stream") as first:
             assert first.status_code == 200
-            reader = SseReader(first.aiter_bytes())
+            reader = SseReader(first.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             await _relay(client, [_progress_event(_RUN, index) for index in (1, 2, 3)])
             seen_first = [await reader.next_frame() for _ in range(3)]
@@ -123,7 +123,7 @@ async def test_a_reconnect_covers_every_sequence_to_the_terminal_exactly_once(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": cursor}
         ) as second:
             assert second.status_code == 200
-            resumed = SseReader(second.aiter_bytes())
+            resumed = SseReader(second.aiter_lines())
             assert (await resumed.next_frame()).type == "stream_snapshot"
             seen_second = await resumed.until("thread_terminal")
 
@@ -167,7 +167,7 @@ async def test_the_window_sentinel_replays_everything_still_retained_once(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": "-"}
         ) as response:
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             replayed = [await reader.next_frame() for _ in range(3)]
             await _relay(client, [_progress_event(_RUN, 4)])
@@ -194,7 +194,7 @@ async def test_a_resume_at_the_head_of_the_window_replays_nothing(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:2"}
         ) as response:
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             await _relay(client, [_progress_event(_RUN, 3)])
             live = await reader.next_frame()

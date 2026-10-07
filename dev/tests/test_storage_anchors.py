@@ -15,7 +15,7 @@ from pathlib import Path
 
 from dev.exit_codes import TOOL_BROKEN
 from dev.guards import storage_anchors
-from dev.paths import PACKAGE_PATH, PACKAGE_ROOT, REPO_ROOT, is_test_code
+from dev.paths import PACKAGE_PATH, REPO_ROOT, is_test_code
 from dev.process import combined_output, run_captured
 
 #: The gate as the harness runs it: a module of the ``dev`` package.
@@ -198,22 +198,12 @@ def test_tests_and_tooling_are_held_to_the_tempfile_rule_alone(tmp_path: Path) -
 def test_the_gate_passes_against_this_repository() -> None:
     """The real invariant, run the way the harness runs it.
 
-    Exit 0 means every remaining violation is one of the explicitly deferred
-    modules. A new anchor in production code fails this test.
+    Exit 0 means no anchor violation remains anywhere in the scanned trees. A
+    new one in production code fails this test.
     """
     result = run_captured(GATE, timeout=None)
     assert result.returncode == 0, (
         f"the storage-anchor gate failed:\n{result.stderr}\n{result.stdout}"
-    )
-
-
-def test_every_deferred_module_still_exists() -> None:
-    """A deferred entry naming a module that is gone is stale debt bookkeeping."""
-    missing = [
-        key for key in storage_anchors.DEFERRED if not (PACKAGE_ROOT / key).is_file()
-    ]
-    assert missing == [], (
-        f"deferred entries name modules that no longer exist: {missing}"
     )
 
 

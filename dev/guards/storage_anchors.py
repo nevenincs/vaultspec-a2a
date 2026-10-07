@@ -44,10 +44,11 @@ Run through the harness::
 A genuinely correct use is exempted with a trailing ``# storage-anchor-ok``
 comment on the offending line, next to a comment saying why.
 
-``DEFERRED`` lists modules whose violations are known, owned, and not yet
-closed. It is a debt list, not an exemption list: the gate reports its contents
-on every run so the remaining work stays visible, and an entry is deleted as
-its module is fixed rather than left to accumulate.
+This gate carries no deferral list. It held one once, for violations that
+were known, owned, and not yet closed; the last entry was fixed, the dict
+emptied, and an empty debt list is not a design decision worth a module of
+machinery to keep re-proving - the gate already fails loudly the moment a
+real violation reappears, deferred or not.
 """
 
 from __future__ import annotations
@@ -66,7 +67,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ALLOW",
-    "DEFERRED",
     "INSTALL_ROOT_READERS",
     "NAME_DECLARING_MODULES",
     "SETTINGS_MODULES",
@@ -116,11 +116,6 @@ _TEMPFILE_CALLS = frozenset(
         "SpooledTemporaryFile",
     }
 )
-
-#: Modules with known, owned violations that are not yet closed, each mapped to
-#: the reason it is still open. Delete an entry when its module is fixed; do not
-#: add one without an owner for the work.
-DEFERRED: dict[str, str] = {}
 
 
 def _parents_to_package_root(relative: Path) -> int:
@@ -319,10 +314,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: The argument vector, or ``None`` to read :data:`sys.argv`.
 
     Returns:
-        :data:`OK` when no undeferred violation remains, :data:`FAILED` when
-        any does, and :data:`TOOL_BROKEN` when the gate could not run - the
-        package is missing beneath the scanned root, or a module does not
-        parse - which must not read as a pass.
+        :data:`OK` when no violation remains, :data:`FAILED` when any does,
+        and :data:`TOOL_BROKEN` when the gate could not run - the package is
+        missing beneath the scanned root, or a module does not parse - which
+        must not read as a pass.
     """
     parser = argparse.ArgumentParser(
         prog="python -m dev.guards.storage_anchors",
@@ -344,7 +339,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return TOOL_BROKEN
 
     violations: list[str] = []
-    deferred_hits: dict[str, int] = {}
 
     scanned: list[tuple[Path, Path | None]] = [
         (path, path.relative_to(package)) for path in sorted(package.rglob("*.py"))
@@ -373,38 +367,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 + _install_root_violations(tree, relative)
                 + _name_literal_violations(tree, relative)
             )
-        key = relative.as_posix() if relative is not None else shown
         for lineno, reason in sorted(found):
             source = lines[lineno - 1] if lineno <= len(lines) else ""
             if ALLOW in source:
                 continue
-            if key in DEFERRED:
-                deferred_hits[key] = deferred_hits.get(key, 0) + 1
-                continue
             violations.append(f"{shown}:{lineno}: {reason}")
-
-    if deferred_hits:
-        total = sum(deferred_hits.values())
-        print(
-            f"{total} known violation(s) remain in {len(deferred_hits)} deferred "
-            f"module(s) - open debt, not accepted design:",
-            file=sys.stderr,
-        )
-        for key in sorted(deferred_hits):
-            print(
-                f"  {key}: {deferred_hits[key]} - {DEFERRED[key]}",
-                file=sys.stderr,
-            )
-
-    stale = sorted(set(DEFERRED) - set(deferred_hits))
-    if stale:
-        print(
-            "deferred entries no longer match any violation and must be deleted:",
-            file=sys.stderr,
-        )
-        for key in stale:
-            print(f"  {key}", file=sys.stderr)
-        return FAILED
 
     if violations:
         print(

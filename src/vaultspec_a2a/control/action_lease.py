@@ -6,14 +6,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from ..database import (
+    CONTROL_ACTION_LEASE_TTL,
     ControlActionModel,
     ControlActionReservation,
-    ThreadModel,
     acquire_control_action_lease,
     commit_control_action_lease,
+    get_control_action,
+    lock_thread_row,
+    new_claim_token,
     release_control_action_lease,
     reserve_control_action,
     thread_write_expectation,
@@ -34,7 +36,6 @@ if TYPE_CHECKING:
     from ..thread import RunWriteAuthority, ThreadWriteExpectation
 
 __all__ = [
-    "CONTROL_ACTION_LEASE_TTL",
     "DEFINITE_NON_DELIVERY",
     "ControlActionClaim",
     "ControlActionClaimRequest",
@@ -43,11 +44,9 @@ __all__ = [
     "finalize_control_action_acceptance",
     "prepare_control_action_claim",
     "record_dispatch_failure",
+    "take_action_lease",
 ]
 
-
-CONTROL_ACTION_LEASE_TTL = timedelta(seconds=90)
-"""Fresh ownership window before an unapplied dispatch may be redriven."""
 
 DEFINITE_NON_DELIVERY = frozenset(
     {FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY, FailureType.REJECTED}
@@ -162,29 +161,41 @@ def _resolved_recovery_deadline(
     return deadline_at
 
 
+async def take_action_lease(
+    db: AsyncSession, action_id: str, *, now: datetime, ttl: timedelta
+) -> str | None:
+    """Take the unapplied action's lease for *ttl* under a fresh claim token.
+
+    Returns the token when this call won the lease, and ``None`` when another
+    dispatcher holds it.
+    """
+    claim_token = new_claim_token()
+    won = await acquire_control_action_lease(
+        db,
+        action_id,
+        claim_token=claim_token,
+        claim_expires_at=now + ttl,
+        now=now,
+    )
+    return claim_token if won else None
+
+
 async def _claim_reserved_action(
     db: AsyncSession,
     reservation: ControlActionReservation,
     action_type: ControlActionType,
     instant: datetime,
     lease_ttl: timedelta,
-) -> tuple[str | None, bool, bool]:
+) -> tuple[str | None, bool]:
     action = reservation.action
     authority_matches = action_type not in RECOVERY_ACTION_TYPES or (
         action.recovery_deadline_at is not None
         and action.recovery_deadline_at > instant
     )
     if not authority_matches or not reservation.payload_matches or action.applied_at:
-        return None, False, authority_matches
-    claim_token = uuid4().hex
-    acquired = await acquire_control_action_lease(
-        db,
-        action.id,
-        claim_token=claim_token,
-        claim_expires_at=instant + lease_ttl,
-        now=instant,
-    )
-    return claim_token, acquired, authority_matches
+        return None, authority_matches
+    claim_token = await take_action_lease(db, action.id, now=instant, ttl=lease_ttl)
+    return claim_token, authority_matches
 
 
 async def prepare_control_action_claim(
@@ -229,9 +240,10 @@ async def prepare_control_action_claim(
     applied = action.applied_at is not None
     result_status = action.result_status
 
-    claim_token, acquired, authority_matches = await _claim_reserved_action(
+    claim_token, authority_matches = await _claim_reserved_action(
         db, reservation, resolved_type, instant, request.lease_ttl
     )
+    acquired = claim_token is not None
 
     if acquired and request.action_type != ControlActionType.CANCEL:
         receipt = await prepare_graph_action_receipt(
@@ -277,7 +289,7 @@ async def finalize_control_action_acceptance(
 async def _failure_action(
     db: AsyncSession, claim: ControlActionClaim, instant: datetime
 ) -> tuple[ControlActionModel, str, datetime] | DispatchFailureDisposition:
-    action = await db.get(ControlActionModel, claim.action_id, with_for_update=True)
+    action = await get_control_action(db, claim.action_id, lock=True)
     if action is None or action.dispatch_id != claim.dispatch_id:
         return DispatchFailureDisposition.AUTHORITY_LOST
     if action.applied_at is not None:
@@ -294,12 +306,7 @@ async def _failure_action(
 async def _failure_thread_authority(
     db: AsyncSession, action: ControlActionModel
 ) -> RunWriteAuthority | DispatchFailureDisposition:
-    thread = await db.get(
-        ThreadModel,
-        action.thread_id,
-        with_for_update=True,
-        populate_existing=True,
-    )
+    thread = await lock_thread_row(db, action.thread_id)
     if thread is None or not thread.is_active:
         return DispatchFailureDisposition.AUTHORITY_LOST
     authority = thread_write_expectation(thread).authority

@@ -20,6 +20,7 @@ from ..database import (
     begin_write_transaction,
     elect_thread_status,
     get_permission_request,
+    lock_thread_row,
     read_latest_checkpoint,
     set_thread_approval_state,
     thread_write_expectation,
@@ -258,9 +259,7 @@ async def reconcile_run_pause(
         return
     await begin_write_transaction(db)
     try:
-        locked = await db.get(
-            ThreadModel, thread_id, with_for_update=True, populate_existing=True
-        )
+        locked = await lock_thread_row(db, thread_id)
         if locked is None:
             return
         current = _RecordedPause.of(locked)

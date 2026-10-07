@@ -13,12 +13,13 @@ Both limits are enforced inside the caller's write transaction, against rows
 read under the lock that transaction already holds, so two admissions racing
 for the last place cannot both find room.
 
-That lock is named here rather than assumed. One admission and one terminal
-settlement are two transactions deciding opposite things about the same run,
-and the only thing that orders them is a lock they both take on the run's own
-row before they read it. Without it a settlement can read an empty queue while
-an uncommitted admission reads a live run, and both commit - leaving a waiting
-turn on a settled run, the one outcome the queue rules say cannot exist.
+That lock is the run's own row lock, taken through ``lock_thread_row``. One
+admission and one terminal settlement are two transactions deciding opposite
+things about the same run, and the only thing that orders them is the lock they
+both take on that row before they read it. Without it a settlement can read an
+empty queue while an uncommitted admission reads a live run, and both commit -
+leaving a waiting turn on a settled run, the one outcome the queue rules say
+cannot exist.
 """
 
 from __future__ import annotations
@@ -28,15 +29,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import select
 
 from ..database import (
+    CONTROL_ACTION_LEASE_TTL,
     ControlActionModel,
-    ThreadModel,
-    acquire_control_action_lease,
+    clear_lease,
     count_queued_continuations,
     enqueue_continuation,
     get_control_action_by_idempotency_key,
@@ -47,7 +46,7 @@ from ..domain_config import domain_config
 from ..thread.enums import ControlActionResultStatus, ControlActionType
 from ..thread.executable_graph import FrozenGraphDefinition
 from .accepted_input import AcceptedActionInput
-from .action_lease import CONTROL_ACTION_LEASE_TTL
+from .action_lease import take_action_lease
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,7 +56,6 @@ __all__ = [
     "QueuedContinuation",
     "QueuedContinuationDisposition",
     "QueuedContinuationRequest",
-    "lock_run_for_continuation_decision",
     "open_promoted_continuation",
     "promoted_turn_deadline",
     "promotion_dispatch_pending",
@@ -146,30 +144,6 @@ class QueuedContinuationRequest:
     limits: ContinuationQueueLimits
     now: datetime | None = None
     lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL
-
-
-async def lock_run_for_continuation_decision(
-    session: AsyncSession, *, thread_id: str
-) -> ThreadModel | None:
-    """Return a run's row with its write lock held until this transaction ends.
-
-    The single ordering point between admitting a continuation and settling
-    the run. Both sides read the run through this, so whichever arrives second
-    waits and then reads what the first committed: an admission that loses the
-    race sees the settled status and refuses, and a settlement that loses it
-    sees the waiting turn and promotes or refuses it. The row is re-read rather
-    than reused from the identity map, because a stale copy is exactly what the
-    lock exists to prevent.
-
-    SQLite takes no row lock and needs none: its write transaction already
-    excludes a second writer for the whole transaction.
-    """
-    return await session.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == thread_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
 
 
 def promoted_turn_deadline(
@@ -269,8 +243,7 @@ def open_promoted_continuation(
     """
     action.result_status = ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value
     action.recovery_deadline_at = deadline_at
-    action.claim_token = None
-    action.claim_expires_at = None
+    clear_lease(action)
 
 
 async def reserve_queued_continuation(
@@ -332,13 +305,8 @@ async def reserve_queued_continuation(
             None,
             action.result_status,
         )
-    claim_token = uuid4().hex
-    acquired = await acquire_control_action_lease(
-        session,
-        action.id,
-        claim_token=claim_token,
-        claim_expires_at=instant + request.lease_ttl,
-        now=instant,
+    claim_token = await take_action_lease(
+        session, action.id, now=instant, ttl=request.lease_ttl
     )
     position = await enqueue_continuation(session, action)
     return QueuedContinuation(
@@ -346,7 +314,7 @@ async def reserve_queued_continuation(
         action.id,
         action.dispatch_id,
         position,
-        claim_token if acquired else None,
+        claim_token,
     )
 
 

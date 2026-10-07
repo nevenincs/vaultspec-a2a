@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
+from ..database import CONTROL_ACTION_LEASE_TTL
 from ..graph.enums import Provider
 from ..testing import (
     await_ready,

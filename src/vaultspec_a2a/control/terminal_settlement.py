@@ -20,6 +20,7 @@ from ..database import (
     begin_write_transaction,
     elect_thread_status,
     expire_pending_permission_requests,
+    lock_thread_row,
     mark_control_action_applied,
     set_thread_approval_state,
 )
@@ -29,10 +30,7 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ..thread.repair_policy import terminal_repair_transition
-from .continuation_queue import (
-    lock_run_for_continuation_decision,
-    refuse_queued_continuations,
-)
+from .continuation_queue import refuse_queued_continuations
 from .repair_transitions import apply_repair_transition
 
 if TYPE_CHECKING:
@@ -92,7 +90,7 @@ async def lock_terminal_run(db: AsyncSession, thread_id: str) -> ThreadModel | N
     commit, stranding the waiting turn on a settled run.
     """
     await begin_write_transaction(db)
-    return await lock_run_for_continuation_decision(db, thread_id=thread_id)
+    return await lock_thread_row(db, thread_id)
 
 
 async def settle_terminal(

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 from ..database import (
     begin_write_transaction,
     idempotency_key_admitted,
+    lock_thread_row,
     outstanding_permission_pause,
 )
 from ..thread.dispatch_policy import FailureType
@@ -42,7 +43,6 @@ from .action_lease import ControlActionOutcome
 from .continuation_queue import (
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
-    lock_run_for_continuation_decision,
     reserve_queued_continuation,
     run_lifetime_deadline,
     served_continuation_queue_limits,
@@ -160,9 +160,7 @@ async def send_followup_message(
     await begin_write_transaction(db)
     # Every refusal before the reservation wrote nothing; each releases the
     # lock before it returns.
-    thread = await lock_run_for_continuation_decision(
-        db, thread_id=options["thread_id"]
-    )
+    thread = await lock_thread_row(db, options["thread_id"])
     if thread is None:
         await db.rollback()
         return _refused(

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Unpack
-from uuid import uuid4
 
 from ..database import (
     claim_recovery_attempt,
     due_recovery_attempt_ids,
+    lease_free_from,
+    new_claim_token,
     release_recovery_claim,
+    require_lease_window,
     reschedule_recovery_claim,
     schedule_recovery_attempt,
     settle_expired_recovery_attempt,
@@ -145,7 +147,7 @@ async def seed_recovery_attempts(
             condition=RecoveryCondition.DISPATCH_PENDING,
             observed_at=observed_at,
             next_eligible_at=min(
-                max(observed_at, action.claim_expires_at or observed_at),
+                lease_free_from(action.claim_expires_at, observed_at),
                 action.recovery_deadline_at,
             ),
             deadline_at=action.recovery_deadline_at,
@@ -164,14 +166,13 @@ async def acquire_due_recovery_attempts(
 ) -> tuple[RecoveryAttemptClaim, ...]:
     """Claim a bounded due page using an exact compare-and-set per row."""
     _validate_page_limit(limit)
-    if claim_expires_at <= acquired_at:
-        raise ValueError("claim_expires_at must be later than acquired_at")
+    require_lease_window(acquired_at, claim_expires_at)
 
     claims: list[RecoveryAttemptClaim] = []
     for attempt_id in await due_recovery_attempt_ids(
         session, at=acquired_at, limit=limit
     ):
-        claim_token = uuid4().hex
+        claim_token = new_claim_token()
         row = await claim_recovery_attempt(
             session,
             attempt_id,

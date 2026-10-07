@@ -2,9 +2,10 @@
 
 One row per deleting thread holds the cleanup manifest and the per-item result
 ledger as opaque JSON, plus the claim marker that lets one cleanup pass drive
-it at a time. What the manifest and ledger mean, when an item is abandoned,
-how long a claim lives and how the saga ends belong to ``control``; this module
-holds the queries and conditional writes they stand on.
+it at a time. What the manifest and ledger mean, when an item is abandoned and
+how the saga ends belong to ``control``, and the claim's lease duration is
+declared with the other lease durations; this module holds the queries and
+conditional writes they stand on.
 """
 
 from __future__ import annotations

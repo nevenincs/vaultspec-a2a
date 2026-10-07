@@ -12,10 +12,10 @@ from httpx import ASGITransport
 
 from ...api.app import _bind_server_shutdown_owner, create_app
 from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
-from ...api.routes._gateway_action_endpoints import route_signature
 from ...api.routes.gateway import admission_gate
 from ...control.drain import AdmissionState
 from ...testing import loopback_uvicorn, uvicorn_started
+from ..routes import route_signature
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

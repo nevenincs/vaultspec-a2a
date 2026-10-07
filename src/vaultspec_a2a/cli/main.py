@@ -294,7 +294,7 @@ def _expected_route_signature() -> list[str]:
     route table off the code on disk.
     """
     from ..api.app import create_app
-    from ..api.routes._gateway_action_endpoints import route_signature
+    from ..api.routes import route_signature
 
     return route_signature(create_app())
 
@@ -403,7 +403,7 @@ def _resolve_catalog_selection(
     what the caller chose, and choosing on their behalf is how a CLI quietly
     decides what a provider charges for.
     """
-    from ..api.routes._gateway_action_endpoints import PROVIDER_CATALOG_PATH
+    from ..api.routes import PROVIDER_CATALOG_PATH
 
     # The catalog is resolved in the caller's project: what a lane serves is a
     # property of the workspace the run will execute in, not of the gateway.

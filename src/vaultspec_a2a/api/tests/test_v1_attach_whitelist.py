@@ -10,7 +10,7 @@ import pytest
 from httpx import ASGITransport
 
 from ...api.app import create_app
-from ...api.routes._gateway_action_endpoints import route_signature
+from ..routes import route_signature
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

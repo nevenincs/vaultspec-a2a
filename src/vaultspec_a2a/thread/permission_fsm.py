@@ -6,10 +6,8 @@ descriptor dataclasses.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
-from ..graph.enums import is_rejection_response
 from .enums import (
     ApprovalStatus,
     ControlActionType,
@@ -22,33 +20,7 @@ from .snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 __all__ = [
     "compute_permission_request_effects",
     "compute_permission_resolution_effects",
-    "response_is_rejection",
 ]
-
-
-def response_is_rejection(
-    allowed_options_json: str | None,
-    response_option_id: str | None,
-) -> bool:
-    """Decode a durable options column and return the one rejection verdict.
-
-    The offered options are stored as a JSON string, so this owns only the decode
-    and delegates the actual judgement to :func:`~..graph.enums.is_rejection_response`.
-    It exists so the three settlement sites — the submission stamp in the control
-    service, the ``permission_resolved`` projection, and the progress-inferred
-    fallback — share one decode *and* one verdict instead of each re-deriving
-    rejection from whichever field it happened to have in scope.
-
-    A column that is absent, empty, or malformed JSON yields no options, which
-    routes the verdict to the option-id fallback rather than reading as approved.
-    """
-    options: object = None
-    if isinstance(allowed_options_json, str) and allowed_options_json:
-        try:
-            options = json.loads(allowed_options_json)
-        except json.JSONDecodeError:
-            options = None
-    return is_rejection_response(options, response_option_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,22 +63,27 @@ class PermissionResolutionEffects:
 
 
 def compute_permission_resolution_effects(
-    response_option_id: str | None,
     pause_reason_type: str | None,
-    allowed_options_json: str | None = None,
+    *,
+    rejected: bool,
 ) -> PermissionResolutionEffects:
-    """Compute state-machine effects of a permission resolution event."""
-    is_rejected = response_is_rejection(allowed_options_json, response_option_id)
+    """Compute state-machine effects of a permission resolution event.
+
+    *rejected* is the rejection verdict over the options the request offered.
+    It is decided by the owner of the durable row, which holds those options,
+    so this computation settles the verdict it is handed rather than deriving
+    a second one.
+    """
     target_status = (
         PermissionRequestStatus.REJECTED
-        if is_rejected
+        if rejected
         else PermissionRequestStatus.APPLIED
     )
     is_plan = (pause_reason_type or "") in PLAN_APPROVAL_PAUSE_CAUSES
 
     approval: ApprovalStatus | None = None
     if is_plan:
-        approval = ApprovalStatus.REJECTED if is_rejected else ApprovalStatus.APPROVED
+        approval = ApprovalStatus.REJECTED if rejected else ApprovalStatus.APPROVED
 
     return PermissionResolutionEffects(
         target_status=target_status,

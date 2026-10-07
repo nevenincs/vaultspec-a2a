@@ -19,12 +19,12 @@ from langgraph.graph import END, START
 from langgraph.types import interrupt
 from typing_extensions import TypedDict
 
+from ...graph.acp_options import option_kind
 from ...graph.enums import PermissionOptionKind
 from ...graph.events import PermissionRequest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import EventAggregator
 from ..transformer import emit_interrupt_events
-from ..types import resolve_acp_option_kind
 
 if TYPE_CHECKING:
     from ..types import SequencedEvent, StreamableGraph
@@ -189,22 +189,21 @@ async def test_an_agent_declaring_no_kind_still_derives_one_from_the_id() -> Non
     assert [str(opt["kind"]) for opt in options] == ["allow_always", "reject_once"]
 
 
-def test_resolve_prefers_a_declared_kind_over_the_id_heuristic() -> None:
-    """The resolver's contract, exercised directly on every input shape."""
+def test_option_kind_prefers_a_declared_kind_over_the_id_heuristic() -> None:
+    """The kind reader's contract, exercised directly on every input shape."""
     # A schema-valid declaration is honoured even when the id disagrees.
-    assert resolve_acp_option_kind("reject_once", "approve") is (
+    assert option_kind({"optionId": "approve", "kind": "reject_once"}) is (
         PermissionOptionKind.REJECT_ONCE
     )
     # A PermissionOptionKind member is as valid as its bare string value.
-    assert resolve_acp_option_kind(PermissionOptionKind.ALLOW_ALWAYS, "nope") is (
-        PermissionOptionKind.ALLOW_ALWAYS
-    )
+    always = {"optionId": "nope", "kind": PermissionOptionKind.ALLOW_ALWAYS}
+    assert option_kind(always) is PermissionOptionKind.ALLOW_ALWAYS
     # Absent, empty, non-string, and unrecognised declarations all fall back.
     for declared in (None, "", "refuse", 7, {"kind": "reject_once"}):
-        assert resolve_acp_option_kind(declared, "deny_always") is (
+        assert option_kind({"optionId": "deny_always", "kind": declared}) is (
             PermissionOptionKind.REJECT_ALWAYS
         )
     # With nothing to go on at either end, the permissive default stands: the
     # heuristic recognises only rejecting spellings, so flipping it would classify
     # every approving id this system mints as a denial.
-    assert resolve_acp_option_kind(None, "approve") is PermissionOptionKind.ALLOW_ONCE
+    assert option_kind({"optionId": "approve"}) is PermissionOptionKind.ALLOW_ONCE

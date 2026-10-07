@@ -1,6 +1,5 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
-import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -29,6 +28,7 @@ from ...control.event_handlers import (
     _handle_progress_event,
     _handle_terminal_event,
 )
+from ...control.permission_options import decode_allowed_options
 from ...database import (
     ThreadStatusElectionOutcome,
     acquire_control_action_lease,
@@ -867,7 +867,10 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         assert permission.pause_reason_type == "plan_approval_request"
         assert permission.request_status == "pending"
         assert permission.tool_call == "plan_approval"
-        assert json.loads(permission.allowed_options_json) == payload["options"]
+        assert (
+            decode_allowed_options(permission.allowed_options_json)
+            == payload["options"]
+        )
 
         thread = await session.get(ThreadModel, thread_id)
         assert thread is not None

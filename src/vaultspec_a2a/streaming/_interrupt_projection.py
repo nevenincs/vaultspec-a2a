@@ -8,15 +8,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
 
 from ..domain_config import domain_config
-from ..graph.acp_options import option_id_of
+from ..graph.acp_options import option_id_of, option_kind
 from ..graph.enums import AgentLifecycleState, PermissionOptionKind, PermissionType
 from ..thread import InterruptType
-from .types import StreamableGraph, resolve_acp_option_kind
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .emitters import EventEmitters
+    from .types import StreamableGraph
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +284,7 @@ def _permission_option(option: object) -> dict[str, Any]:
     fields: dict[str, Any] = option if _is_payload(option) else {}
     option_id = option_id_of(option)
     declared_kind = fields.get("kind")
-    kind = resolve_acp_option_kind(declared_kind, option_id or "")
+    kind = option_kind(option)
     if declared_kind and kind != declared_kind:
         logger.warning(
             "Permission option %r declared unrecognised kind %r; "

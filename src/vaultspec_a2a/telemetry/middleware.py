@@ -162,8 +162,6 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
                     span.set_status(StatusCode.OK)
 
                 return response
-        except Exception:
-            raise
         finally:
             otel_context.detach(token)
 

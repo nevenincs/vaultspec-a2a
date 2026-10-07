@@ -161,7 +161,6 @@ def _install_probe_graph(
         observed["coder_token"] = store.actor_token(thread_id, "coder")
         observed["unheld_role"] = store.actor_token(thread_id, "no-such-role")
         observed["bearer"] = store.engine_bearer(thread_id)
-        observed["held_during_run"] = store.has(thread_id)
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
     builder = new_state_graph()
@@ -202,11 +201,10 @@ async def test_tokens_injected_during_run_and_dropped_after() -> None:
             # Injection: the owning role received its own token while running.
             assert observed["coder_token"] == _CODER_TOKEN
             assert observed["bearer"] == _BEARER
-            assert observed["held_during_run"] is True
             # Isolation: a role the run does not hold reads nothing.
             assert observed["unheld_role"] is None
             # Disposal: the active window closed, so the run holds nothing now.
-            assert executor.token_store.has(thread_id) is False
+            assert executor.token_store.engine_bearer(thread_id) is None
             assert executor.token_store.actor_token(thread_id, "coder") is None
         finally:
             await bridge.close()
@@ -235,14 +233,14 @@ async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None
 
             # Retained across the park: the run interrupted, not terminated, so its
             # tokens must survive to serve a later gate resume.
-            assert executor.token_store.has(thread_id) is True
+            assert executor.token_store.engine_bearer(thread_id) == _BEARER
             assert executor.token_store.actor_token(thread_id, "coder") == _CODER_TOKEN
 
             resume = _accepted_resume(ingest)
             await executor.handle_dispatch(resume)
 
             # Terminal (completed): the active window truly closed, tokens dropped.
-            assert executor.token_store.has(thread_id) is False
+            assert executor.token_store.engine_bearer(thread_id) is None
         finally:
             await bridge.close()
             await executor.shutdown()
@@ -260,7 +258,7 @@ async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
             ingest = _accepted_ingest(thread_id, _bundle())
             _install_gated_graph(executor, ingest)
             await executor.handle_dispatch(ingest)
-            assert executor.token_store.has(thread_id) is True
+            assert executor.token_store.engine_bearer(thread_id) == _BEARER
 
             # No ingest is active for the parked run, so the cancel is itself the
             # terminal boundary and releases the tokens here.
@@ -272,7 +270,7 @@ async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
                     recursion_limit=10,
                 )
             )
-            assert executor.token_store.has(thread_id) is False
+            assert executor.token_store.engine_bearer(thread_id) is None
         finally:
             await bridge.close()
             await executor.shutdown()

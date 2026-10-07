@@ -254,17 +254,6 @@ class RunEventStore:
                 )
             ).scalar_one_or_none()
 
-    async def trim_to_window(self, thread_id: str, window: int) -> int:
-        """Keep *thread_id*'s newest *window* rows, delete the rest, count them."""
-        async with self.session_factory() as session:
-            await begin_write_transaction(session)
-            result = cast(
-                "CursorResult[Any]",
-                await session.execute(_trim_statement(thread_id, window)),
-            )
-            await session.commit()
-            return result.rowcount
-
     async def delete_for_runs_settled_before(self, cutoff: datetime) -> int:
         """Delete every retained frame of a run that settled before *cutoff*.
 

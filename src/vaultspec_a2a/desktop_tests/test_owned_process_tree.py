@@ -30,7 +30,6 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from ..lifecycle.discovery import is_pid_alive
 from ..providers._acp_rpc_handlers import on_terminal_kill
 from ..providers._acp_rpc_terminal_handlers import release_owned_terminal
 from ..providers._acp_types import AcpModelConfig, AcpSessionContext
@@ -47,6 +46,7 @@ from ..tests.gateway_boot import (
     worker_lifecycle_gateway_script,
 )
 from ..utils import kill_pid_tree_async
+from ..utils._process_tree import pid_is_live
 from ..utils.process import ProcessContainment
 from ._catalog import catalog_selection
 
@@ -76,15 +76,15 @@ async def _read_pids(stream: Any, count: int) -> list[int]:
 
 def _await_gone(pids: list[int], *, timeout: float = 10.0) -> None:
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(is_pid_alive(p) for p in pids):
+    while time.monotonic() < deadline and any(pid_is_live(p) for p in pids):
         time.sleep(0.05)
-    survivors = [p for p in pids if is_pid_alive(p)]
+    survivors = [p for p in pids if pid_is_live(p)]
     assert not survivors, f"descendants survived reap: {survivors}"
 
 
 async def _reap_pids(pids: list[int]) -> None:
     for pid in pids:
-        if is_pid_alive(pid):
+        if pid_is_live(pid):
             with contextlib.suppress(Exception):
                 await kill_pid_tree_async(pid)
 
@@ -110,7 +110,7 @@ async def test_provider_tree_contained_before_work_and_reaped_graceful() -> None
 
     mcp_pids = await _read_pids(process.stdout, 3)
     try:
-        assert all(is_pid_alive(p) for p in mcp_pids)
+        assert all(pid_is_live(p) for p in mcp_pids)
         # Graceful terminal: the whole provider subtree is reaped as one.
         await kill_process_tree(process)
         assert process.returncode is not None
@@ -137,7 +137,7 @@ async def test_provider_tree_reaped_on_forced_orphaned_terminal() -> None:
         process.kill()
         with contextlib.suppress(Exception):
             await asyncio.wait_for(process.wait(), timeout=10.0)
-        assert all(is_pid_alive(p) for p in mcp_pids), "descendants should be orphaned"
+        assert all(pid_is_live(p) for p in mcp_pids), "descendants should be orphaned"
 
         # Provider cleanup still reaps the orphaned descendants via job / group
         # membership and releases the asyncio transport after the dead root.
@@ -228,7 +228,7 @@ async def test_terminal_child_tree_contained_and_reaped(
             await asyncio.sleep(0.01)
     grandchild_pid = int(ctx.terminal_outputs[terminal_id].output.strip())
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
         # Graceful terminal/kill reaps the whole terminal subtree via containment.
         await on_terminal_kill(
             2,

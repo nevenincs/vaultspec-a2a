@@ -26,11 +26,11 @@ if TYPE_CHECKING:
 
 from ...desktop.profile import derive_state_paths
 from ...lifecycle.discovery import (
-    is_pid_alive,
     read_resident_service,
     service_json_path,
     write_service_json,
 )
+from ...utils._process_tree import pid_is_live
 from ..service import (
     restart_service,
     service_status,
@@ -139,7 +139,7 @@ def test_start_status_stop_restart_cycle_on_scratch_home(tmp_path: Path) -> None
     started = start_service(home, port=port, log_path=str(tmp_path / "gateway.log"))
     assert started.state == "running", started
     assert started.port == port
-    assert started.pid is not None and is_pid_alive(started.pid)
+    assert started.pid is not None and pid_is_live(started.pid)
 
     observed = service_status(home)
     assert observed.state == "running"
@@ -147,17 +147,17 @@ def test_start_status_stop_restart_cycle_on_scratch_home(tmp_path: Path) -> None
 
     restarted = restart_service(home, port=port, log_path=str(tmp_path / "gateway.log"))
     assert restarted.state == "running", restarted
-    assert restarted.pid is not None and is_pid_alive(restarted.pid)
+    assert restarted.pid is not None and pid_is_live(restarted.pid)
     assert restarted.pid != started.pid
-    assert not is_pid_alive(started.pid)
+    assert not pid_is_live(started.pid)
 
     stopped = stop_service(home)
     assert stopped.state == "stopped", stopped
     assert restarted.pid is not None
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and is_pid_alive(restarted.pid):
+    while time.monotonic() < deadline and pid_is_live(restarted.pid):
         time.sleep(0.1)
-    assert not is_pid_alive(restarted.pid)
+    assert not pid_is_live(restarted.pid)
 
 
 @pytest.mark.timeout(120)
@@ -204,6 +204,6 @@ def test_start_failure_fells_the_spawn_and_raises(tmp_path: Path) -> None:
                 ready_timeout=3.0,
             )
         _, info = read_resident_service(home)
-        assert info is None or not is_pid_alive(info.pid)
+        assert info is None or info.pid is None or not pid_is_live(info.pid)
     finally:
         holder.close()

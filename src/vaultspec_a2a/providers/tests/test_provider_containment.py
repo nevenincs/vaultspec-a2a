@@ -21,12 +21,12 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from ...lifecycle.discovery import is_pid_alive
 from ...providers._subprocess import (
     _spawn_acp_process,
     kill_process_tree,
     spawn_acp_process,
 )
+from ...utils._process_tree import pid_is_live
 from ...utils.process import ProcessContainment, ProcessContainmentError
 
 # A "provider" that spawns a long-lived grandchild, prints its pid, then sleeps.
@@ -60,9 +60,9 @@ def _base_interpreter() -> str:
 
 def _await_gone(pids: list[int], *, timeout: float = 10.0) -> None:
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(is_pid_alive(pid) for pid in pids):
+    while time.monotonic() < deadline and any(pid_is_live(pid) for pid in pids):
         time.sleep(0.05)
-    survivors = [pid for pid in pids if is_pid_alive(pid)]
+    survivors = [pid for pid in pids if pid_is_live(pid)]
     assert not survivors, f"provider descendants survived reap: {survivors}"
 
 
@@ -70,7 +70,7 @@ async def _force_reap(pids: list[int]) -> None:
     from ...utils._process_tree import kill_pid_tree_async
 
     for pid in pids:
-        if is_pid_alive(pid):
+        if pid_is_live(pid):
             await kill_pid_tree_async(pid, term_timeout=0.2, kill_timeout=2.0)
 
 
@@ -93,7 +93,7 @@ async def test_provider_tree_contained_and_reaped_whole(use_exec: bool) -> None:
     line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
     grandchild_pid = int(line.strip())
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
 
         await kill_process_tree(process)
 
@@ -120,7 +120,7 @@ async def test_late_provider_child_remains_in_owned_containment() -> None:
         (await asyncio.wait_for(process.stdout.readline(), timeout=10.0)).strip()
     )
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
         await kill_process_tree(process)
         _await_gone([grandchild_pid])
     finally:
@@ -145,7 +145,7 @@ async def test_containment_reaps_child_after_provider_root_exits() -> None:
         while process.returncode is None and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
         assert process.returncode == 0
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
         await kill_process_tree(process)
         _await_gone([grandchild_pid])
     finally:
@@ -179,4 +179,4 @@ async def test_assignment_failure_reaps_suspended_root_before_first_instruction(
     pid_match = re.search(r"process (\d+)", str(caught.value))
     assert pid_match is not None
     assert not marker.exists(), "provider executed before failed Job assignment"
-    assert not is_pid_alive(int(pid_match.group(1)))
+    assert not pid_is_live(int(pid_match.group(1)))

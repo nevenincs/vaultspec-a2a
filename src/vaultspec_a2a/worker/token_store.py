@@ -54,14 +54,6 @@ class RunTokenStore:
         bundle = self._bundles.get(thread_id)
         return bundle.engine_bearer if bundle is not None else None
 
-    def has(self, thread_id: str) -> bool:
-        """Return ``True`` while a bundle is held for *thread_id*."""
-        return thread_id in self._bundles
-
-    def active_run_count(self) -> int:
-        """Number of runs currently holding a bundle (for diagnostics/tests)."""
-        return len(self._bundles)
-
     def drop(self, thread_id: str) -> None:
         """Drop *thread_id*'s bundle at run end. Idempotent."""
         self._bundles.pop(thread_id, None)

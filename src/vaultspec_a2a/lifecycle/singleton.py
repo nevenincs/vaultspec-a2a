@@ -41,9 +41,9 @@ from pathlib import Path
 from typing import NoReturn, TypeGuard, cast
 
 from ..control.state_layout import seal_state_home, state_layout
+from ..utils._process_tree import pid_is_live
 from ..utils.atomic_write import atomic_write_text
 from ..utils.file_lock import open_lock_file, release_lock, try_lock
-from .discovery import is_pid_alive
 from .registry import now_ms
 
 __all__ = [
@@ -319,7 +319,7 @@ def recorded_process_is_live(record: SingletonRecord) -> bool:
     reused pid belonging to an unrelated process reads as dead. When either side
     cannot produce a fingerprint the check degrades to pid-liveness alone.
     """
-    if not is_pid_alive(record.pid):
+    if not pid_is_live(record.pid):
         return False
     if record.start_fingerprint is None:
         return True

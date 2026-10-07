@@ -54,7 +54,6 @@ from ..utils import (
     reconfigure_console_utf8,
     verify_internal_bearer,
 )
-from ..utils.asyncio_compat import configure_asyncio_runtime
 from ._dispatch_contract import CAPACITY_DRAINING, CAPACITY_THREAD_ACTIVE
 from .authoring_relay import AuthoringRelay
 from .authoring_relay import router as authoring_router
@@ -572,7 +571,6 @@ def _serve() -> None:
     """Configure the process and run the worker's server until shutdown."""
     reconfigure_console_utf8()
     configure_logging("service", service_name="worker")
-    configure_asyncio_runtime()
     logger.info(
         "Worker main config: gateway_port=%d worker_host=%s"
         " worker_port=%d worker_url=%s",
@@ -598,7 +596,3 @@ def _serve() -> None:
     )
     app.state.request_server_shutdown = lambda: setattr(server, "should_exit", True)
     server.run()
-
-
-if __name__ == "__main__":
-    main()

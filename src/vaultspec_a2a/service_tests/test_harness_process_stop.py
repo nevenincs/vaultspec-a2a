@@ -14,8 +14,8 @@ import subprocess
 import sys
 import time
 
-from ..lifecycle.discovery import is_pid_alive
 from ..lifecycle.manager import tree_kill
+from ..utils._process_tree import pid_is_live
 from .harness import ServiceStack
 
 # A parent that spawns a long-lived grandchild, prints the grandchild pid, then
@@ -38,20 +38,20 @@ def test_stop_process_tree_kills_grandchildren() -> None:
     assert parent.stdout is not None
     grandchild_pid = int(parent.stdout.readline().strip())
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
 
         stack._stop_process(parent)
 
         # Parent reaped, and the grandchild felled with it (the tree-kill win).
         assert parent.poll() is not None
         deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and is_pid_alive(grandchild_pid):
+        while time.monotonic() < deadline and pid_is_live(grandchild_pid):
             time.sleep(0.05)
-        assert not is_pid_alive(grandchild_pid)
+        assert not pid_is_live(grandchild_pid)
     finally:
         if parent.poll() is None:
             parent.kill()
             parent.wait(timeout=10.0)
-        if is_pid_alive(grandchild_pid):
+        if pid_is_live(grandchild_pid):
             tree_kill(grandchild_pid)
         shutil.rmtree(stack.runtime_dir, ignore_errors=True)

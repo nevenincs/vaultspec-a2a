@@ -82,7 +82,6 @@ from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..telemetry.aggregator_hook import OTelAggregatorHook
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
-from ..utils.asyncio_compat import configure_asyncio_runtime
 from ..utils.ipc_auth import BearerVerdict
 from ._utils import trace_headers
 from .auth import verify_attach_bearer
@@ -699,14 +698,12 @@ async def _direct_recovery_pass(
     worker_spawner: LazyWorkerSpawner,
 ) -> None:
     try:
-        app.state.direct_control_recovery_summary = (
-            await redrive_direct_control_actions(
-                get_session_factory(),
-                worker_client=worker_client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                trace_headers=trace_headers(),
-            )
+        await redrive_direct_control_actions(
+            get_session_factory(),
+            worker_client=worker_client,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=worker_spawner,
+            trace_headers=trace_headers(),
         )
         app.state.direct_control_recovery_error = None
     except asyncio.CancelledError:
@@ -741,18 +738,16 @@ def _start_gateway_recovery(
         except Exception:
             logger.exception("Startup reconciliation dispatch failed")
         try:
-            app.state.clarification_recovery_summary = (
-                await redrive_clarification_actions(
-                    get_session_factory(),
-                    runtime=ClarificationRuntime(
-                        checkpointer,
-                        worker_client,
-                        circuit_breaker,
-                        worker_spawner,
-                        domain_config.graph_recursion_limit,
-                        trace_headers(),
-                    ),
-                )
+            await redrive_clarification_actions(
+                get_session_factory(),
+                runtime=ClarificationRuntime(
+                    checkpointer,
+                    worker_client,
+                    circuit_breaker,
+                    worker_spawner,
+                    domain_config.graph_recursion_limit,
+                    trace_headers(),
+                ),
             )
         except asyncio.CancelledError:
             raise
@@ -857,14 +852,13 @@ def _bind_server_shutdown_owner(app: FastAPI, server: uvicorn.Server) -> None:
 
 
 def main() -> None:
-    """Launch the vaultspec-a2a server.
+    """Launch the vaultspec-a2a gateway.
 
-    Entry point for the ``vaultspec`` CLI command defined in
-    ``[project.scripts]``.
+    Invoked by the ``serve`` subcommand of the ``vaultspec-a2a`` script
+    (``cli.main:main``) defined in ``[project.scripts]``.
     """
     reconfigure_console_utf8()
     configure_logging("service", service_name="gateway")
-    configure_asyncio_runtime()
     app = create_app()
     config = uvicorn.Config(
         app,
@@ -991,7 +985,3 @@ def create_app(
         }
 
     return app
-
-
-if __name__ == "__main__":
-    main()

@@ -40,46 +40,24 @@ and the resume payload is a
 shapes, and every bound on them, are owned by
 :mod:`vaultspec_a2a.thread.clarification` so the node, the wire, and the
 snapshot cannot disagree about what was asked.
-
-:func:`bound_clarification_questions` is the producer-side complement to that
-contract, and the two are complementary rather than redundant. The models refuse
-a malformed request by RAISING, which is right at the wire: a caller that writes
-an out-of-bounds question has a bug. But the question list a model TURN proposes
-is untrusted input, and failing a whole run because a turn over-generated is the
-wrong trade, so the coercion here degrades a proposal to its valid capped subset
-instead. It stays honest about the bounds by deferring to the same models for the
-verdict - a coerced question is admitted only if
-:class:`~vaultspec_a2a.thread.clarification.ClarificationQuestion` accepts it - so
-there is one definition of "valid question" rather than a producer-side copy free
-to drift from the wire-side one.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Protocol, cast, get_args
+from typing import TYPE_CHECKING, Any, Protocol
 
-from annotated_types import MaxLen
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command, interrupt
-from pydantic import ValidationError
 
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
-    MAX_OPTIONS_PER_QUESTION,
-    MAX_QUESTIONS_PER_REQUEST,
     ClarificationAnswers,
     ClarificationDecline,
-    ClarificationKind,
-    ClarificationQuestion,
     ClarificationRequest,
-    OptionLabel,
-    PromptText,
-    QuestionId,
     clarification_resolution_fingerprint,
     parse_clarification_resolution,
     render_clarification_answers,
-    strip_control_characters,
 )
 from ...thread.snapshots import stamp_message_created_at
 
@@ -89,7 +67,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ClarificationQuestionProducer",
-    "bound_clarification_questions",
     "create_clarification_gate_node",
     "create_clarification_request_node",
 ]
@@ -115,130 +92,6 @@ class ClarificationQuestionProducer(Protocol):
     async def __call__(self, state: TeamState) -> ClarificationRequest | None:
         """Return the question set to ask, or ``None`` to proceed unasked."""
         ...
-
-
-def _annotated_max_length(annotated_type: object) -> int:
-    """Read the ``MaxLen`` an ``Annotated[...]`` wire type alias declares.
-
-    Single source of truth: the coercion below truncates to exactly what the
-    wire model (:mod:`vaultspec_a2a.thread.clarification`) admits, read off the
-    model's own constraint, rather than a separately-declared constant that can
-    silently drift from it. That drift is exactly what previously dropped every
-    question landing at the canonical bound: truncation cut to the full
-    ``MAX_PROMPT_CHARS``/``MAX_OPTION_CHARS``, while ``PromptText``/``OptionLabel``
-    enforced one character less, so ``ClarificationQuestion(...)`` refused the
-    truncated result and the whole question was coerced away as unrecoverable.
-    """
-    for arg in get_args(annotated_type):
-        metadata = getattr(arg, "metadata", None)
-        if metadata is None:
-            continue
-        for constraint in metadata:
-            if isinstance(constraint, MaxLen):
-                return constraint.max_length
-    msg = f"{annotated_type!r} declares no MaxLen constraint to derive from"
-    raise ValueError(msg)
-
-
-# Derived once at import time from the wire models themselves (see
-# _annotated_max_length) rather than restated as independent constants.
-_QUESTION_ID_MAX_CHARS = _annotated_max_length(QuestionId)
-_PROMPT_MAX_CHARS = _annotated_max_length(PromptText)
-_OPTION_MAX_CHARS = _annotated_max_length(OptionLabel)
-
-
-def _bounded_text(value: object, max_chars: int) -> str:
-    """Render *value* as a single-line string truncated to *max_chars*.
-
-    A newline inside a prompt or an option would survive into the checkpoint and
-    out to a renderer that lays each question out as one line, so it is removed
-    where the untrusted text enters rather than guarded against at each place it
-    is displayed. What counts as a control character is the contract module's
-    call, not this one's.
-    """
-    text = value if isinstance(value, str) else str(value)
-    return strip_control_characters(text)[:max_chars]
-
-
-def _coerce_question(raw: object) -> ClarificationQuestion | None:
-    """Coerce one proposed question into a valid model, or ``None`` to drop it.
-
-    Coercion is confined to what is unambiguously recoverable - trimming an
-    overlong string, dropping a blank or repeated option, reading an unknown
-    kind as ``text``. Everything past that is left to
-    :class:`~vaultspec_a2a.thread.clarification.ClarificationQuestion`, whose
-    refusal is taken as the drop verdict: a blank or missing id or prompt, an id
-    outside the answer-key grammar, and a ``choice`` left with no usable option
-    all fail there, so this function does not restate any of those rules.
-
-    ``required`` defaults to ``False`` here rather than to the model's ``True``:
-    an unstated requirement in a proposal is a producer that did not say, and
-    holding a run to an answer nobody asked for is the worse reading of silence.
-    """
-    if not isinstance(raw, dict):
-        return None
-    raw = cast("dict[str, object]", raw)
-
-    try:
-        kind = ClarificationKind(raw.get("kind"))
-    except ValueError:
-        kind = ClarificationKind.TEXT
-
-    options: list[str] | None = None
-    if kind is ClarificationKind.CHOICE:
-        options = []
-        proposed = raw.get("options")
-        if isinstance(proposed, list):
-            proposed_options = cast("list[object]", proposed)
-            for candidate in proposed_options[:MAX_OPTIONS_PER_QUESTION]:
-                label = _bounded_text(candidate, _OPTION_MAX_CHARS)
-                if label and label not in options:
-                    options.append(label)
-
-    try:
-        return ClarificationQuestion(
-            id=_bounded_text(raw.get("id", ""), _QUESTION_ID_MAX_CHARS),
-            prompt=_bounded_text(raw.get("prompt", ""), _PROMPT_MAX_CHARS),
-            kind=kind,
-            options=options,
-            required=bool(raw.get("required", False)),
-        )
-    except ValidationError:
-        return None
-
-
-def bound_clarification_questions(questions: list[Any]) -> list[dict[str, Any]]:
-    """Degrade a proposed question list to its valid, capped subset.
-
-    Truncate, never raise. The input is what a model turn proposed, so an
-    over-generous, malformed, or partly unusable list must cost the run its
-    surplus questions and nothing more - a producer that over-generates is not a
-    reason to fail a run that was otherwise going fine.
-
-    Filter THEN cap, not the reverse: :data:`MAX_QUESTIONS_PER_REQUEST` bounds
-    the VALID result, not the raw input window, so malformed leading entries can
-    never push valid ones out of the cap. A six-entry list whose first two
-    entries are unusable still yields the four valid trailing questions, not two.
-
-    Returns JSON-safe dicts rather than models because the destination is
-    ``clarification_questions`` in graph state, which is checkpointed as plain
-    JSON. A ``text`` question carries no ``options`` key at all - the absent key
-    and a null both read back as "no options", and omitting it keeps the
-    checkpointed shape to what was actually asked.
-    """
-    bounded: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for raw in questions:
-        if len(bounded) >= MAX_QUESTIONS_PER_REQUEST:
-            break
-        question = _coerce_question(raw)
-        # Duplicate ids are dropped rather than renamed: answers are keyed by
-        # id, so two questions sharing one would make an answer unroutable.
-        if question is None or question.id in seen_ids:
-            continue
-        seen_ids.add(question.id)
-        bounded.append(question.model_dump(mode="json", exclude_none=True))
-    return bounded
 
 
 def _committed_request(state: TeamState) -> ClarificationRequest | None:

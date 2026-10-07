@@ -24,6 +24,7 @@ import pytest
 from ...control.config import setting_env
 from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ...testing.ports import free_port
+from ...utils._process_tree import pid_is_live
 from ..boot import (
     build_cwd_for,
     render_command,
@@ -31,7 +32,6 @@ from ..boot import (
     serve_cwd_for,
     serve_env,
 )
-from ..discovery import is_pid_alive
 from ..errors import LifecycleError
 from ..manager import (
     attach,
@@ -61,10 +61,10 @@ def wait_pid_dead(pid: int, *, timeout: float = 10.0) -> bool:
     """Poll until *pid* is no longer a live process, or *timeout* elapses."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not is_pid_alive(pid):
+        if not pid_is_live(pid):
             return True
         time.sleep(0.05)
-    return not is_pid_alive(pid)
+    return not pid_is_live(pid)
 
 
 def _sleeper() -> subprocess.Popen[bytes]:
@@ -578,7 +578,7 @@ def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path: Path) -> No
     try:
         # Two live processes on two DIFFERENT band ports — the collision the race
         # would have caused cannot happen because reserve_port is exclusive.
-        assert is_pid_alive(first.pid) and is_pid_alive(second.pid)
+        assert pid_is_live(first.pid) and pid_is_live(second.pid)
         assert first.port != second.port
         assert first.port in range(band[0], band[1] + 1)
         assert second.port in range(band[0], band[1] + 1)
@@ -620,7 +620,7 @@ def test_gateway_serve_up_requires_http_readiness_before_registration(
         "gateway-dev", "ready", home=tmp_path, config=ready, ready_timeout=5.0
     )
     try:
-        assert is_pid_alive(record.pid)
+        assert pid_is_live(record.pid)
         assert read_record(record_path("gateway-dev", "ready", home=tmp_path)) == record
     finally:
         tree_kill(record.pid)
@@ -1230,7 +1230,7 @@ def test_rerun_refuses_require_repo_role_before_killing(tmp_path: Path) -> None:
         with pytest.raises(LifecycleError, match="requires an explicit repo"):
             rerun("rr", home=tmp_path, config=config)
         # The refusal happened before tree_kill: the process is still alive.
-        assert is_pid_alive(child.pid)
+        assert pid_is_live(child.pid)
     finally:
         tree_kill(child.pid)
 
@@ -1329,7 +1329,7 @@ def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
         # No half-committed record survived beside the injected directory.
         assert list_records(tmp_path) == []
     finally:
-        if spawned_pid is not None and is_pid_alive(spawned_pid):
+        if spawned_pid is not None and pid_is_live(spawned_pid):
             tree_kill(spawned_pid)
 
 

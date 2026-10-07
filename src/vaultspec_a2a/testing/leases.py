@@ -41,7 +41,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
-from ..lifecycle import is_pid_alive, procs_home
+from ..lifecycle import procs_home
+from ..utils._process_tree import pid_is_live
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -122,7 +123,7 @@ def _marker_is_live(path: Path, *, now_ms: int) -> bool:
     pid = _read_holder_pid(path)
     if pid is None:
         return True
-    return is_pid_alive(pid)
+    return pid_is_live(pid)
 
 
 def _read_holder_pid(path: Path) -> int | None:

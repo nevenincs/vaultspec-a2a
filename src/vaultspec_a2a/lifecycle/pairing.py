@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from ..control.infra_config import GATEWAY_URL_ENV, WORKER_URL_ENV
-from .discovery import is_pid_alive
+from ..utils._process_tree import pid_is_live
 from .procs_config import ProcsConfigError, load_procs_config
 from .registry import list_records
 
@@ -93,7 +93,7 @@ def verify_dispatch_pairing(
     band_workers = [
         rec
         for rec in list_records(home)
-        if rec.role == _WORKER_ROLE and rec.port in band and is_pid_alive(rec.pid)
+        if rec.role == _WORKER_ROLE and rec.port in band and pid_is_live(rec.pid)
     ]
     if band_workers:
         rec = band_workers[0]
@@ -242,7 +242,7 @@ def resolve_worker_gateway_target(
     band_gateways = [
         rec
         for rec in list_records(home)
-        if rec.role == _GATEWAY_ROLE and rec.port in band and is_pid_alive(rec.pid)
+        if rec.role == _GATEWAY_ROLE and rec.port in band and pid_is_live(rec.pid)
     ]
 
     return _band_gateway_target(

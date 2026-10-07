@@ -24,7 +24,7 @@ import time
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from ..lifecycle.discovery import (
-    DesktopDiscoveryState,
+    DiscoveryState,
     classify_desktop_discovery,
     service_json_path,
 )
@@ -179,7 +179,7 @@ def test_owner_restart_after_real_kill_reclaims_via_stale(tmp_path: Path) -> Non
         restart_ready = cast("_ReadyPayload", json.loads(_await(restart["ready"])))
         assert restart_ready["pid"] != first_pid
         new_state, new_record = classify_desktop_discovery(service_json_path(app_home))
-        assert new_state is DesktopDiscoveryState.FRESH
+        assert new_state is DiscoveryState.FRESH
         assert new_record is not None
         assert new_record.pid == restart_ready["pid"]
         assert new_record.port == 8303

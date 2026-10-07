@@ -1474,7 +1474,7 @@ def _make_observing_bridge(
                     "dispatch_action": payload.get("action"),
                     "status": payload.get("status"),
                     "tokens_held": (
-                        executor.token_store.has(thread_id)
+                        executor.token_store.engine_bearer(thread_id) is not None
                         if executor is not None
                         else None
                     ),
@@ -1663,7 +1663,7 @@ class TestSettleOrdering:
                 assert terminal["tokens_held"] is True
                 assert terminal["tracked"] is True
                 # And the window closes once the settle finishes.
-                assert executor.token_store.has(thread_id) is False
+                assert executor.token_store.engine_bearer(thread_id) is None
                 assert thread_id not in bridge.active_threads
             finally:
                 await bridge.close()
@@ -1695,7 +1695,7 @@ class TestSettleOrdering:
                 _install_gated_graph(executor, ingest)
                 await executor.handle_dispatch(ingest)
                 # Parked at the gate: not terminal, so the tokens survive.
-                assert executor.token_store.has(thread_id) is True
+                assert executor.token_store.engine_bearer(thread_id) == "settle-bearer"
                 observations.clear()
 
                 await executor.handle_dispatch(
@@ -1713,7 +1713,7 @@ class TestSettleOrdering:
                 assert terminal["status"] == ThreadStatus.COMPLETED
                 assert terminal["tokens_held"] is True
                 assert terminal["tracked"] is True
-                assert executor.token_store.has(thread_id) is False
+                assert executor.token_store.engine_bearer(thread_id) is None
                 assert thread_id not in bridge.active_threads
             finally:
                 await bridge.close()

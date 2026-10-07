@@ -299,19 +299,6 @@ def test_configure_telemetry_langsmith_flag() -> None:
     assert isinstance(cfg.langsmith_enabled, bool)
 
 
-def test_telemetry_config_langsmith_enabled_field() -> None:
-    """TelemetryConfig stores langsmith_enabled=True when constructed with True."""
-    cfg = TelemetryConfig(
-        sdk_available=False,
-        otlp_available=False,
-        sdk_enabled=False,
-        service_name="test-svc",
-        otlp_endpoint="http://localhost:4317",
-        langsmith_enabled=True,
-    )
-    assert cfg.langsmith_enabled is True
-
-
 def test_configure_telemetry_langsmith_off(tmp_path: Path) -> None:
     """The reported LangSmith state tracks the process environment, both ways.
 

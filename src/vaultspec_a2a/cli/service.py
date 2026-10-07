@@ -44,11 +44,11 @@ from ..gateway_auth import gateway_auth_headers
 from ..lifecycle.discovery import (
     DiscoveryState,
     another_resident_is_live,
-    is_pid_alive,
     probe_health,
     read_resident_service,
 )
 from ..lifecycle.manager import spawn, tree_kill
+from ..utils._process_tree import pid_is_live
 from ..utils.runtime_exec import self_command
 
 if TYPE_CHECKING:
@@ -106,7 +106,7 @@ def service_status(app_home: Path | None = None) -> ServiceStatus:
             state="stopped", pid=None, port=None, healthy=False, base_url=None
         )
     base_url = f"http://127.0.0.1:{info.port}"
-    if not is_pid_alive(info.pid):
+    if info.pid is None or not pid_is_live(info.pid):
         return ServiceStatus(
             state="stopped",
             pid=info.pid,
@@ -261,10 +261,10 @@ def _lifecycle_capability(app_home: Path) -> str | None:
 def _wait_pid_dead(pid: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not is_pid_alive(pid):
+        if not pid_is_live(pid):
             return True
         time.sleep(_POLL_INTERVAL_SECONDS)
-    return not is_pid_alive(pid)
+    return not pid_is_live(pid)
 
 
 def stop_service(
@@ -286,7 +286,7 @@ def stop_service(
     """
     home = _resolved_app_home(app_home)
     _, info = read_resident_service(home)
-    if info is None or info.pid is None or not is_pid_alive(info.pid):
+    if info is None or info.pid is None or not pid_is_live(info.pid):
         return service_status(home)
     base_url = f"http://127.0.0.1:{info.port}"
     headers = dict(gateway_auth_headers(base_url))

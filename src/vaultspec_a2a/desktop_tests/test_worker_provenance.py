@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..lifecycle.discovery import is_pid_alive
 from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     armed_gateway_env,
@@ -44,6 +43,7 @@ from ..tests.gateway_boot import (
     spawn_until_ready,
     worker_lifecycle_gateway_script,
 )
+from ..utils._process_tree import pid_is_live
 from ._catalog import catalog_selection
 from .test_run_admission import _ATTACH, _OWNERSHIP
 
@@ -521,7 +521,7 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
 
         # Eviction failed: the wedged squatter ignored the shutdown and still
         # holds the port - and was NOT adopted regardless.
-        assert is_pid_alive(squatter_pid), (
+        assert pid_is_live(squatter_pid), (
             "the wedged prior-generation worker must survive a failed eviction"
         )
     finally:

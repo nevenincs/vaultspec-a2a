@@ -190,11 +190,13 @@ async def test_the_window_trim_keeps_the_newest_rows_of_one_run(
         assert await _sequences(factory, _OTHER) == [1, 2]
 
         # A run shorter than its window keeps every row it has.
-        assert await store.trim_to_window(_OTHER, 10) == 0
-        assert await _sequences(factory, _OTHER) == [1, 2]
+        await store.append([_record(3, thread_id=_OTHER)], window=10)
+        assert await _sequences(factory, _OTHER) == [1, 2, 3]
 
-        assert await store.trim_to_window(_RUN, 1) == 2
-        assert await _sequences(factory, _RUN) == [5]
+        # A later batch re-applies the bound to the run it touches, and only that run.
+        await store.append([_record(6)], window=1)
+        assert await _sequences(factory, _RUN) == [6]
+        assert await _sequences(factory, _OTHER) == [1, 2, 3]
 
 
 @pytest.mark.asyncio

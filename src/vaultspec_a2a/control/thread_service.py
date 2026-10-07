@@ -37,7 +37,6 @@ from ..control.repair_transitions import (
 from ..database import (
     ThreadStatusElectionOutcome,
     begin_write_transaction,
-    create_control_action,
     create_thread,
     elect_thread_status,
     get_artifacts_by_thread,
@@ -54,7 +53,7 @@ from ..ipc.schemas import (
     to_dispatch_action,
 )
 from ..team.team_config import load_team_config
-from ..thread.creation import requires_dispatch, resolve_autonomous
+from ..thread.creation import resolve_autonomous
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
     CleanupKind,
@@ -107,7 +106,7 @@ class ThreadCreationRequest:  # pylint: disable=too-many-instance-attributes
     thread_id: str
     title: str | None
     initial_message: str | None
-    team_preset: str | None
+    team_preset: str
     autonomous: bool | None
     nickname: str | None
     metadata: ThreadMetadata | None
@@ -239,8 +238,6 @@ def _initial_dispatch(
             if isinstance(preamble_msg.content, str)
             else str(preamble_msg.content)
         )
-    if req.team_preset is None:
-        raise ValueError("initial graph admission requires an explicit preset")
     team_config = load_team_config(req.team_preset, workspace_root=req.workspace_root)
     graph_definition = freeze_graph_definition(
         team_config, workspace_root=req.workspace_root
@@ -346,17 +343,11 @@ async def create_and_dispatch_thread(
     action_receipt_id = uuid4().hex
     if not req.thread_id.strip():
         raise ValueError("run admission requires an allocated thread identity")
-    dispatch = (
-        _initial_dispatch(
-            req, dispatch_id=action_receipt_id, recursion_limit=runtime.recursion_limit
-        )
-        if requires_dispatch(req.team_preset)
-        else None
+    dispatch = _initial_dispatch(
+        req, dispatch_id=action_receipt_id, recursion_limit=runtime.recursion_limit
     )
-    accepted_input = (
-        freeze_accepted_input(dispatch, intent={"initial_message": req.initial_message})
-        if dispatch is not None
-        else None
+    accepted_input = freeze_accepted_input(
+        dispatch, intent={"initial_message": req.initial_message}
     )
     # Concurrent run starts each read (the nickname check) before they write;
     # only a transaction holding the write lock from its start can wait for
@@ -392,25 +383,6 @@ async def create_and_dispatch_thread(
             "thread_nickname": req.nickname,
         },
     )
-
-    if dispatch is None:
-        await create_control_action(
-            db,
-            thread_id=thread.id,
-            action_type=ControlActionType.INGEST,
-            dispatch_id=action_receipt_id,
-            idempotency_key=f"thread-create:{thread.id}",
-            payload={"dispatch_required": False},
-        )
-        await mark_ingest_requested(db, thread.id)
-        await db.commit()
-        return ThreadCreationResult(
-            thread_id=thread.id,
-            status=thread.status,
-            nickname=req.nickname,
-            dispatched=False,
-            error_detail=None,
-        )
 
     # Durable acceptance includes the actual graph input. Recovery cannot
     # reconstruct a user's message from title/preset metadata after a crash.

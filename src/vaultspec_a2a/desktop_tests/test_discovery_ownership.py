@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, TypedDict, cast
 import pytest
 
 from ..lifecycle.discovery import (
-    DesktopDiscoveryState,
+    DiscoveryState,
     classify_desktop_discovery,
     desktop_record_process_is_live,
     service_json_path,
@@ -140,7 +140,7 @@ def test_foreign_contender_validates_but_never_owns(tmp_path: Path) -> None:
     try:
         _await(resident["ready"])
         state, record = classify_desktop_discovery(service_json_path(app_home))
-        assert state is DesktopDiscoveryState.FRESH
+        assert state is DiscoveryState.FRESH
         assert record is not None
         # Validate: process live, protocol compatible, attach reference named.
         assert desktop_record_process_is_live(record) is True
@@ -185,7 +185,7 @@ def test_live_malformed_discovery_is_immutable_conflict(tmp_path: Path) -> None:
         service_json_path(app_home).write_text("{ not json", encoding="utf-8")
         assert (
             classify_desktop_discovery(service_json_path(app_home))[0]
-            is DesktopDiscoveryState.MALFORMED
+            is DiscoveryState.MALFORMED
         )
         # The singleton still proves a live resident: no takeover.
         with pytest.raises(SingletonConflictError) as conflict:

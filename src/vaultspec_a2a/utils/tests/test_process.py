@@ -2,7 +2,7 @@
 
 Real subprocesses, no mocks: a process that spawns a grandchild is felled whole,
 so no orphan survives (the Windows taskkill /T behaviour the two former copies
-existed to provide). Liveness is asserted with the canonical is_pid_alive probe.
+existed to provide). Liveness is asserted with the canonical pid_is_live probe.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from typing import Any
 
 import pytest
 
-from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.manager import _await_listener
 from ...testing.ports import free_port
 from ...utils._process_tree import (
@@ -50,7 +49,7 @@ async def test_kill_pid_tree_fells_the_whole_tree() -> None:
     assert parent.stdout is not None
     grandchild_pid = int(parent.stdout.readline().strip())
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
 
         killed = await kill_pid_tree_async(
             parent.pid, term_timeout=10.0, kill_timeout=5.0
@@ -61,15 +60,20 @@ async def test_kill_pid_tree_fells_the_whole_tree() -> None:
         assert parent.poll() is not None
         # The grandchild is felled with the parent — no orphan.
         deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and is_pid_alive(grandchild_pid):
+        while time.monotonic() < deadline and pid_is_live(grandchild_pid):
             time.sleep(0.05)
-        assert not is_pid_alive(grandchild_pid)
+        assert not pid_is_live(grandchild_pid)
     finally:
         if parent.poll() is None:
             parent.kill()
             parent.wait()
-        if is_pid_alive(grandchild_pid):
+        if pid_is_live(grandchild_pid):
             await kill_pid_tree_async(grandchild_pid)
+
+
+def test_pid_is_live_separates_this_process_from_an_unallocated_pid() -> None:
+    assert pid_is_live(os.getpid()) is True
+    assert pid_is_live(2**31 - 1) is False
 
 
 def test_pid_is_live_reports_a_killed_but_unreaped_child_as_dead() -> None:
@@ -116,7 +120,7 @@ def test_descendant_walk_finds_a_grandchild_per_the_platform_contract() -> None:
     finally:
         parent.kill()
         parent.wait()
-        if is_pid_alive(grandchild_pid):
+        if pid_is_live(grandchild_pid):
             asyncio.run(kill_pid_tree_async(grandchild_pid))
 
 
@@ -162,9 +166,9 @@ async def test_the_taskkill_wait_is_bounded_by_the_callers_kill_budget() -> None
     finally:
         await kill_pid_tree_async(child.pid)
         deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and is_pid_alive(child.pid):
+        while time.monotonic() < deadline and pid_is_live(child.pid):
             time.sleep(0.05)
-        assert not is_pid_alive(child.pid)
+        assert not pid_is_live(child.pid)
 
 
 # A process that binds a fresh loopback port, prints it, then holds it open.
@@ -208,7 +212,7 @@ def test_port_listener_pid_resolves_a_real_listener() -> None:
     try:
         resolved = port_listener_pid(port)
         assert resolved is not None
-        assert is_pid_alive(resolved)
+        assert pid_is_live(resolved)
         assert (
             classify_listener_ownership(port, listener.pid)
             is ListenerOwnership.CONFIRMED

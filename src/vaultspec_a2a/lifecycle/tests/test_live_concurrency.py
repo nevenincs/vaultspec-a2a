@@ -72,14 +72,14 @@ def _wait_listener(port: int, *, timeout: float = 10.0) -> bool:
 
 
 def _wait_pid_dead(pid: int, *, timeout: float = 10.0) -> bool:
-    from ..discovery import is_pid_alive
+    from ...utils._process_tree import pid_is_live
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not is_pid_alive(pid):
+        if not pid_is_live(pid):
             return True
         time.sleep(0.05)
-    return not is_pid_alive(pid)
+    return not pid_is_live(pid)
 
 
 def test_sequential_stacks_no_collision_reap_and_rerun(tmp_path: Path) -> None:

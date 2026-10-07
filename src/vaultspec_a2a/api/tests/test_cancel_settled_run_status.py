@@ -38,6 +38,7 @@ from ...graph.nodes.action_completion import (
 )
 from ...providers import ProviderCondition
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     async_run_start_body,
     compile_test_graph,
@@ -53,7 +54,6 @@ from .conftest import SessionFactory, _InProcessWorker, make_app
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
 
 
@@ -77,7 +77,7 @@ async def _start_run(client: httpx.AsyncClient) -> str:
     body = await async_run_start_body(
         client,
         f"cancel-settled-{next(_RUN_SEQ):02d}",
-        team_preset=_PRESET,
+        team_preset=DEFAULT_TEAM_PRESET,
         tokens={"coder": "tok-coder"},
     )
     resp = await client.post("/v1/runs", json=body)

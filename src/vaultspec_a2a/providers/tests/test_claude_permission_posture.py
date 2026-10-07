@@ -16,7 +16,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ...team.team_config import load_agent_config
-from ...testing import read_acp_frame, simulator_command
+from ...testing import DEFAULT_REQUIRED_ROLE, read_acp_frame, simulator_command
 from ...utils.enums import AcpRequestId
 from .._acp_session import claude_session_options, setup_session
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
@@ -131,7 +131,7 @@ def test_session_options_admit_no_ambient_settings_source(tmp_path: Path) -> Non
             id="write-but-no-terminal",
         ),
         pytest.param(
-            "mock-coder-success",
+            DEFAULT_REQUIRED_ROLE,
             (),
             CLAUDE_FILE_WRITE_TOOLS + CLAUDE_TERMINAL_TOOLS,
             id="write-and-terminal",
@@ -558,7 +558,7 @@ def test_every_session_denies_the_credential_and_process_trees(
     where one mistake about that is unrecoverable.
     """
     options = claude_session_options(
-        _config(agent_id="mock-coder-success", workspace_root=tmp_path)
+        _config(agent_id=DEFAULT_REQUIRED_ROLE, workspace_root=tmp_path)
     )
 
     disallowed = _tool_names(options["disallowedTools"])

@@ -27,7 +27,7 @@ from httpx import ASGITransport
 
 from ...database import create_thread, get_thread, record_permission_request
 from ...database.models import ControlActionModel
-from ...testing import async_catalog_run_fields
+from ...testing import DEFAULT_TEAM_PRESET, async_catalog_run_fields
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
@@ -39,15 +39,13 @@ if TYPE_CHECKING:
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 
-_PRESET = "mock-success-single"
-
 
 async def _start_run(client: httpx.AsyncClient, run_id: str) -> str:
     response = await client.post(
         "/v1/runs",
         json={
             "run_id": run_id,
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "start the turn",
             **await async_catalog_run_fields(client),
         },
@@ -203,7 +201,7 @@ async def _park_run(
             write_authority=make_test_write_authority(),
             thread_id=run_id,
             status=ThreadStatus.INPUT_REQUIRED,
-            team_preset=_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
         )
         if request_id is not None:
             await record_permission_request(

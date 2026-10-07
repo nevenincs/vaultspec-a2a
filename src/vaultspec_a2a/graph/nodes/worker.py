@@ -39,7 +39,6 @@ from ._worker_permissions import (
     permission_callback_for,
     recorded_permission_answers,
 )
-from ._worker_tool_calls import resolve_worker_tool_calls
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -369,8 +368,9 @@ def _describe_worker_model(model: BaseChatModel) -> str:
     report built from it could not distinguish which vendor was called, let alone
     which model.
 
-    Degrades rather than guesses: a model declaring neither (the in-process mock,
-    a hosted API model) falls back to its class name, which is at least true.
+    Degrades rather than guesses: a model declaring neither (an in-process
+    fixture lane, a hosted API model) falls back to its class name, which is at
+    least true.
     That fallback is a DISPLAY affordance for a human-readable failure reason and
     is deliberately not reused by the accounting writer, where a class name in a
     provider column would read as a lane that never existed.
@@ -886,8 +886,8 @@ def create_worker_node(
         """Execute the worker's task and return the generated message."""
         thread_id = run_thread_id(state, runtime)
         # Every permission request this run has had answered, read once per
-        # execution and bound onto both permission lanes. A replayed turn
-        # finds its earlier approvals here rather than in the order its
+        # execution and bound onto the model's permission callback. A replayed
+        # turn finds its earlier approvals here rather than in the order its
         # interrupts happened to fall in.
         permission_answers = recorded_permission_answers(state)
         feedback_grounding = await _feedback_for_state(
@@ -954,14 +954,6 @@ def create_worker_node(
         attempt_config = _config_with_relay_watch(config, relay_watch)
         try:
             response = await effective_model.ainvoke(messages, config=attempt_config)
-            response = await resolve_worker_tool_calls(
-                messages=messages,
-                response=response,
-                model=effective_model,
-                autonomous=settings["autonomous"],
-                config=attempt_config,
-                permission_answers=permission_answers,
-            )
         except GraphBubbleUp:
             raise
         except Exception as exc:

@@ -3,9 +3,9 @@
 The scenario uses the bundled ``vaultspec-adr-research-deterministic`` preset.
 Its model is selected by the production :class:`ProviderFactory`; the gateway,
 worker process, dispatch transport, graph, checkpoint store, and history read
-remain real.  Unlike the tape-backed completion test, there is no optional
-network backend and no skip path: a missing scenario, failed run, history, or
-emitted review artifact is a test failure.
+remain real.  There is no optional network backend and no skip path: a
+missing scenario, failed run, history, or emitted review artifact is a test
+failure.
 
 The automated lane writes a run-bound review bundle, under the test's scratch
 directory, containing the authored output and durable execution evidence.  It

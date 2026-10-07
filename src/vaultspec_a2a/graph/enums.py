@@ -175,7 +175,6 @@ class Provider(StrEnum):
     CODEX = "codex"
     DETERMINISTIC = "deterministic"
     KIMI = "kimi"
-    MOCK = "mock"
     OPENAI = "openai"
     ZAI = "zai"
     ZHIPU = "zhipu"

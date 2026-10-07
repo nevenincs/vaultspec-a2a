@@ -16,6 +16,7 @@ offloaded cases would pass for free on a fast host.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -24,6 +25,8 @@ from typing import TYPE_CHECKING, Any
 
 import psutil
 import pytest
+
+from ...testing import armed_lane_environment
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -55,7 +58,11 @@ pytestmark = pytest.mark.middleware
 
 
 def _probe(mode: str, workspace: Path) -> dict[str, Any]:
-    """Run one measurement in a cold interpreter and return its report."""
+    """Run one measurement in a cold interpreter and return its report.
+
+    The child is armed through its environment, as a test gateway's worker is, so
+    the compile it measures reaches the deterministic lane.
+    """
     completed = subprocess.run(
         [
             sys.executable,
@@ -64,6 +71,7 @@ def _probe(mode: str, workspace: Path) -> dict[str, Any]:
             mode,
             str(workspace),
         ],
+        env={**os.environ, **armed_lane_environment()},
         capture_output=True,
         text=True,
         timeout=300,
@@ -168,9 +176,9 @@ def test_compiling_a_graph_keeps_the_loop_serving(
     """The production compile seam pays the import without stalling the loop.
 
     Drives ``GraphLifecycleManager.get_or_compile_graph`` for a bundled preset.
-    The preset resolves to the in-process mock lane, which needs no credential
-    and no network, and still pays the identical cost: ``create`` imports the
-    model stack before it branches on the requested provider.
+    The preset resolves to the in-process deterministic lane, which needs no
+    credential and no network, and still pays the identical cost: ``create``
+    imports the model stack before it branches on the requested provider.
     """
     compiled = cold_compile_probe
 

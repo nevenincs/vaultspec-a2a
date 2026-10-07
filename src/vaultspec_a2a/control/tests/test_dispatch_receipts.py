@@ -18,6 +18,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import DEFAULT_TEAM_PRESET
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -81,9 +82,9 @@ async def test_delivery_cannot_create_missing_acceptance_evidence(
                 content="first",
                 workspace_root=str(tmp_path),
                 recursion_limit=25,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=freeze_graph_definition(
-                    load_team_config("mock-success-single", workspace_root=tmp_path),
+                    load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                     workspace_root=tmp_path,
                 ),
             ),
@@ -118,10 +119,10 @@ async def test_retry_preserves_original_receipt_after_state_revision(
                         thread_id="run",
                         option_id="yes",
                         recursion_limit=25,
-                        team_preset="mock-success-single",
+                        team_preset=DEFAULT_TEAM_PRESET,
                         graph_definition=freeze_graph_definition(
                             load_team_config(
-                                "mock-success-single", workspace_root=tmp_path
+                                DEFAULT_TEAM_PRESET, workspace_root=tmp_path
                             ),
                             workspace_root=tmp_path,
                         ),
@@ -150,9 +151,9 @@ async def test_retry_preserves_original_receipt_after_state_revision(
         thread_id="run",
         option_id="yes",
         recursion_limit=25,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=tmp_path),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
             workspace_root=tmp_path,
         ),
     )
@@ -193,9 +194,9 @@ async def test_identical_direct_replayer_can_install_visible_unowned_action(
         thread_id="run",
         option_id="yes",
         recursion_limit=25,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=tmp_path),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
             workspace_root=tmp_path,
         ),
     )
@@ -252,9 +253,9 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
         thread_id="run",
         option_id="yes",
         recursion_limit=25,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=tmp_path),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
             workspace_root=tmp_path,
         ),
     )
@@ -283,10 +284,10 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
                         thread_id="run",
                         option_id="yes",
                         recursion_limit=25,
-                        team_preset="mock-success-single",
+                        team_preset=DEFAULT_TEAM_PRESET,
                         graph_definition=freeze_graph_definition(
                             load_team_config(
-                                "mock-success-single", workspace_root=tmp_path
+                                DEFAULT_TEAM_PRESET, workspace_root=tmp_path
                             ),
                             workspace_root=tmp_path,
                         ),
@@ -333,10 +334,10 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
                         thread_id="run",
                         option_id="yes",
                         recursion_limit=25,
-                        team_preset="mock-success-single",
+                        team_preset=DEFAULT_TEAM_PRESET,
                         graph_definition=freeze_graph_definition(
                             load_team_config(
-                                "mock-success-single", workspace_root=tmp_path
+                                DEFAULT_TEAM_PRESET, workspace_root=tmp_path
                             ),
                             workspace_root=tmp_path,
                         ),
@@ -360,9 +361,9 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
                 thread_id="run",
                 option_id="yes",
                 recursion_limit=25,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=freeze_graph_definition(
-                    load_team_config("mock-success-single", workspace_root=tmp_path),
+                    load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                     workspace_root=tmp_path,
                 ),
             ),

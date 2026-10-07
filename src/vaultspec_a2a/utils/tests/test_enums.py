@@ -44,7 +44,6 @@ class TestProvider:
             "codex",
             "deterministic",
             "kimi",
-            "mock",
             "openai",
             "zai",
             "zhipu",

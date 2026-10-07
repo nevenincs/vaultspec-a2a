@@ -3,26 +3,6 @@
 # No application services or production dependencies are defined here.
 
 services:
-  vidaimock:
-    build:
-      context: ..
-      dockerfile: service/docker/vidaimock.Dockerfile
-    restart: unless-stopped
-    ports:
-      - '127.0.0.1:${VIDAIMOCK_PORT:-8100}:8100'
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'python',
-          '-c',
-          "import socket, sys; sock = socket.socket(); sock.settimeout(1); sys.exit(0 if sock.connect_ex(('127.0.0.1', 8100)) == 0 else 1)",
-        ]
-      interval: 5s
-      timeout: 2s
-      retries: 20
-      start_period: 5s
-
   jaeger:
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.16.0
     restart: unless-stopped

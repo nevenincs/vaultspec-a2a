@@ -4,12 +4,10 @@ display_name = "Vaultspec ADR Research (asks first)"
 description  = """
 Deterministic variant of vaultspec-adr-research that asks its human a bounded
 questionnaire BEFORE the research fans out. It uses the in-process deterministic
-provider rather than the tape server: the tape corpus carries no turns for the
-document roles this topology runs, and an in-process provider needs no container,
-so the loop certifies on hosts least able to run one. Identical research_adr topology and
-the same five worker agent_ids as the mock variant (so actor-token bundle keys
-and submitter role keys are unchanged); the only difference is the declared
-[team.clarification] block.
+provider, which needs no container, so the loop certifies on hosts least able to
+run one. Identical research_adr topology and the same five worker agent_ids as
+the deterministic variant (so actor-token bundle keys and submitter role keys are
+unchanged); the only difference is the declared [team.clarification] block.
 
 It exists as a separate preset rather than as a flag on an existing one because
 asking changes what a run does to the human: a preset that parks for an answer

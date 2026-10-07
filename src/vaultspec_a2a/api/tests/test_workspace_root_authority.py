@@ -14,6 +14,7 @@ from ...control.config import settings
 from ...control.state_layout import state_layout
 from ...database import create_thread
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     armed_desktop_app_home,
     async_catalog_run_fields,
     unvalidated_selection,
@@ -48,7 +49,7 @@ async def test_saved_project_aliases_remain_valid_for_successors(
                     db,
                     thread_id=predecessor_id,
                     status=ThreadStatus.COMPLETED,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     metadata=ThreadMetadata(workspace_root=alias).model_dump_json(),
                     write_authority=make_test_write_authority(),
                 )
@@ -79,7 +80,7 @@ def _secured_app(session_factory: Any, checkpointer: Any) -> Any:
             "/v1/runs",
             {
                 "json": {
-                    "team_preset": "mock-success-single",
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "start",
                     "metadata": {"workspace_root": "relative/workspace"},
                 }
@@ -169,7 +170,7 @@ async def test_authenticated_caller_can_select_an_arbitrary_existing_root(
             "/v1/runs",
             json={
                 "run_id": "arbitrary-workspace-authority",
-                "team_preset": "mock-success-single",
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "start",
                 "metadata": {"workspace_root": str(workspace)},
                 "selection": fields["selection"],
@@ -218,7 +219,7 @@ async def test_configured_unarmed_profile_confines_every_workspace_route(
             "/v1/runs",
             json={
                 "run_id": "managed-workspace-admitted",
-                "team_preset": "mock-success-single",
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "start",
                 "metadata": {"workspace_root": str(workspace)},
                 "selection": fields["selection"],
@@ -228,7 +229,7 @@ async def test_configured_unarmed_profile_confines_every_workspace_route(
             "/v1/runs",
             json={
                 "run_id": "managed-workspace-refused",
-                "team_preset": "mock-success-single",
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "start",
                 "metadata": {"workspace_root": str(foreign)},
                 "selection": fields["selection"],
@@ -246,7 +247,7 @@ async def test_configured_unarmed_profile_confines_every_workspace_route(
                                 f"reserved-{label}-root" if stage == "commit" else None
                             ),
                             "run_id": f"managed-{stage}-{label}-refused",
-                            "team_preset": "mock-success-single",
+                            "team_preset": DEFAULT_TEAM_PRESET,
                             "message": "commit message" if stage == "commit" else "",
                             "metadata": {"workspace_root": str(refused_root)},
                             "selection": fields["selection"],
@@ -304,7 +305,7 @@ async def test_armed_desktop_confines_queries_and_run_admission(
                         if stage == "commit"
                         else None,
                         "run_id": f"desktop-{stage}-refused",
-                        "team_preset": "mock-success-single",
+                        "team_preset": DEFAULT_TEAM_PRESET,
                         "message": "start" if stage != "prepare" else "",
                         "metadata": {"workspace_root": str(desktop_home)},
                         "selection": selection,
@@ -316,7 +317,7 @@ async def test_armed_desktop_confines_queries_and_run_admission(
                 "/v1/runs",
                 json={
                     "run_id": "desktop-admitted-project",
-                    "team_preset": "mock-success-single",
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "start",
                     "metadata": {"workspace_root": str(managed)},
                     "selection": selection,
@@ -361,7 +362,7 @@ async def test_configured_profile_refuses_symlink_escape(
                         "reserved-symlink-root" if stage == "commit" else None
                     ),
                     "run_id": f"managed-{stage}-symlink-refused",
-                    "team_preset": "mock-success-single",
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "commit message" if stage == "commit" else "",
                     "metadata": {"workspace_root": str(escape)},
                     "selection": fields["selection"],

@@ -2,7 +2,7 @@
 
 Pure logic over real ``TeamConfig`` objects loaded from the bundled presets and a
 real ``ActorTokenBundle`` - no mocks. The document-authoring preset is
-``vaultspec-adr-research`` (research_adr topology); ``mock-success-single`` is a
+``vaultspec-adr-research`` (research_adr topology); the default test preset is a
 non-authoring coder preset.
 """
 
@@ -15,10 +15,10 @@ from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...team.team_config import load_team_config
+from ...testing import DEFAULT_TEAM_PRESET
 from ...thread.actor_tokens import ActorTokenBundle
 
 _AUTHORING = "vaultspec-adr-research"
-_CODER = "mock-success-single"
 
 
 def _authoring_roles() -> tuple[str, ...]:
@@ -45,7 +45,7 @@ def test_research_adr_is_document_authoring() -> None:
 
 
 def test_coder_preset_is_not_document_authoring() -> None:
-    assert is_document_authoring_preset(load_team_config(_CODER)) is False
+    assert is_document_authoring_preset(load_team_config(DEFAULT_TEAM_PRESET)) is False
 
 
 def test_required_role_ids_are_the_worker_agent_ids() -> None:
@@ -110,7 +110,7 @@ def test_authoring_preset_with_no_bundle_is_ineligible() -> None:
 
 def test_coder_preset_is_eligible_without_feature_or_tokens() -> None:
     result = evaluate_run_start_eligibility(
-        load_team_config(_CODER),
+        load_team_config(DEFAULT_TEAM_PRESET),
         feature_tag=None,
         actor_tokens=None,
     )
@@ -146,7 +146,7 @@ def test_ready_harness_leaves_authoring_run_eligible() -> None:
 def test_harness_is_not_enforced_on_non_authoring_presets() -> None:
     """A coder preset never gates on harness, even with a broken verdict."""
     result = evaluate_run_start_eligibility(
-        load_team_config(_CODER),
+        load_team_config(DEFAULT_TEAM_PRESET),
         feature_tag=None,
         actor_tokens=None,
         harness=HarnessReadiness(ready=False, reasons=["rules corpus absent"]),

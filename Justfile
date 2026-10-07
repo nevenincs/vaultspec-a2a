@@ -511,7 +511,7 @@ test-parallel:
 test-service:
     {{creds}} live-tests -- {{dev}} test service
 
-# Certify native services against development-only trace and mock fixtures.
+# Certify native services against the development-only trace fixture.
 [group('test')]
 test-native-integration:
     {{dev}} test native-integration
@@ -603,17 +603,12 @@ test-collect-all *ARGS:
 build-package:
     {{dev}} build package
 
-# Build the development-only VidaiMock fixture image.
-[group('build')]
-build-docker:
-    {{dev}} build docker
-
 # Remove generated package, documentation, and Python cache artifacts.
 [group('build')]
 build-clean:
     {{dev}} build clean
 
-# Build every artifact producible without Docker.
+# Build every artifact.
 [group('build')]
 build-all:
     {{dev}} build all

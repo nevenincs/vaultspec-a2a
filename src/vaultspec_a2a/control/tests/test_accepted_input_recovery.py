@@ -16,7 +16,7 @@ from ...database.models import Base
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import adopted_spawner, current_execution_metadata
+from ...testing import DEFAULT_TEAM_PRESET, adopted_spawner, current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -46,9 +46,9 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
         thread_id="run",
         workspace_root=str(tmp_path),
         option_id={"decision": "approved"},
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=tmp_path),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
             workspace_root=tmp_path,
         ),
         recursion_limit=37,
@@ -114,7 +114,7 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
             delivered = DispatchRequest.model_validate(received[0])
             assert delivered.dispatch_id == "accepted"
             assert delivered.recursion_limit == 37
-            assert delivered.team_preset == "mock-success-single"
+            assert delivered.team_preset == DEFAULT_TEAM_PRESET
             delivered_option_id = cast("object", delivered.option_id)
             assert delivered_option_id == {"decision": "approved"}
             assert delivered.model_assignment == accepted_dispatch.model_assignment

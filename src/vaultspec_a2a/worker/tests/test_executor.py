@@ -41,6 +41,7 @@ from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_agent_config, load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     compile_test_graph,
     current_execution_metadata,
@@ -140,14 +141,6 @@ def _current_assignment() -> dict[str, FrozenLaneAssignment]:
     ).model_assignment
 
 
-def _mock_assignment() -> dict[str, FrozenLaneAssignment]:
-    return resolve_execution_authority(
-        current_execution_metadata(
-            pathlib.Path.cwd(), required_roles=("mock-coder-success",)
-        )
-    ).model_assignment
-
-
 def _test_graph_definition_digest(team_preset: str) -> str:
     """Deterministic stand-in for a frozen graph definition's digest.
 
@@ -176,20 +169,18 @@ def _current_ingest_dispatch(
     thread_id: str, *, recursion_limit: int = 10
 ) -> DispatchRequest:
     workspace = pathlib.Path(_WORKSPACE)
-    definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
-        workspace_root=workspace,
-    )
+    team = load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace)
+    definition = freeze_graph_definition(team, workspace_root=workspace)
     request = DispatchRequest(
         dispatch_id=f"{thread_id}-dispatch",
         action="ingest",
         thread_id=thread_id,
         content="build it",
         workspace_root=_WORKSPACE,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=definition,
         recursion_limit=recursion_limit,
-        model_assignment=_mock_assignment(),
+        model_assignment=deterministic_model_assignment(team),
     )
     accepted = freeze_accepted_input(request, intent={"content": "build it"})
     receipt = GraphActionReceipt(

@@ -5,8 +5,8 @@ description  = """
 Scripted pipeline_loop scenario: the coder's work goes to a reviewer that requests
 revision on every pass, so each turn runs the loop to its ceiling and no further.
 
-Runs on the in-process deterministic provider, so it needs no credential, no
-network, and no tape server.
+Runs on the in-process deterministic provider, so it needs no credential and no
+network.
 """
 
 [team.topology]

@@ -807,10 +807,6 @@ TEST = Verb(
 BUILD = Verb(
     name="build",
     summary="Build the distributable artifacts.",
-    note=(
-        "The container targets require Docker and say so through the doctor "
-        "probe rather than failing on a missing binary."
-    ),
     targets=(
         Target(
             "package",
@@ -860,36 +856,6 @@ BUILD = Verb(
             ),
         ),
         Target(
-            "docker",
-            "Build the development-only VidaiMock fixture image.",
-            (
-                Cmd(
-                    (
-                        "uv",
-                        "run",
-                        "--no-sync",
-                        "--frozen",
-                        "--no-default-groups",
-                        "--group",
-                        "tooling",
-                        "python",
-                        "-m",
-                        "dev.doctor",
-                        "docker",
-                    )
-                ),
-                Cmd(
-                    (
-                        "docker",
-                        "compose",
-                        "-f",
-                        "service/docker-compose.integration.yml",
-                        "build",
-                    )
-                ),
-            ),
-        ),
-        Target(
             "clean",
             "Remove generated package, documentation, and cache artifacts.",
             (
@@ -909,7 +875,7 @@ BUILD = Verb(
         ),
         Target(
             "all",
-            "Build every artifact producible without Docker.",
+            "Build every artifact.",
             (Ref("package"), Ref("docs")),
             keep_going=True,
         ),

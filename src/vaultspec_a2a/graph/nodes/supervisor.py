@@ -174,7 +174,7 @@ _REFUSED_TEXT_CHARS = 200
 def _named_options(text: str, options: list[str]) -> list[str]:
     """Every route the reply names, minus the ones only named inside another.
 
-    A worker id can contain another ("coder" inside "mock-coder"), so a reply
+    A worker id can contain another ("coder" inside "vaultspec-coder"), so a reply
     naming the longer one matches both. Dropping a match that is a substring
     of another match is what separates that from a reply that really does name
     two different routes.

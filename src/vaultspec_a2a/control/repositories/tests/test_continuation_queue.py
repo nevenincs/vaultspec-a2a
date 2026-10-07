@@ -34,6 +34,7 @@ from ....database.models import ControlActionModel
 from ....domain_config import domain_config
 from ....ipc.schemas import DispatchRequest
 from ....team.team_config import load_team_config
+from ....testing import DEFAULT_TEAM_PRESET
 from ....tests._write_authority import make_test_write_authority
 from ....thread.enums import (
     ControlActionResultStatus,
@@ -49,7 +50,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 _RUN = "continuation-queue-run"
-_PRESET = "mock-success-single"
 _ONE_EACH = ContinuationQueueLimits(per_run_depth=1, service_cap=1)
 _ROOMY = ContinuationQueueLimits(per_run_depth=3, service_cap=9)
 
@@ -70,9 +70,9 @@ def _envelope(
             agent_id="vaultspec-supervisor",
             content=content,
             workspace_root=str(workspace),
-            team_preset=_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=freeze_graph_definition(
-                load_team_config(_PRESET, workspace_root=workspace),
+                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
                 workspace_root=workspace,
             ),
             recursion_limit=37,

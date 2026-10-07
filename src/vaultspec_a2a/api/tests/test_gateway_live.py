@@ -42,6 +42,7 @@ from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     ProgressDeadline,
     ProgressStalledError,
     actor_tokens_body,
@@ -124,9 +125,6 @@ async def _apply_sql_trace_callback(
     await connection.set_trace_callback(trace_callback)
 
 
-_PRESET = "mock-success-single"
-
-
 async def _seed_live_thread(
     session_factory: SessionFactory, *, title: str
 ) -> tuple[str, GraphActionReceipt]:
@@ -139,7 +137,7 @@ async def _seed_live_thread(
             session,
             write_authority=authority,
             status=ThreadStatus.RUNNING,
-            team_preset=_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             title=title,
             metadata=metadata,
         )
@@ -149,9 +147,9 @@ async def _seed_live_thread(
             content="live stream fixture",
             workspace_root=str(workspace),
             recursion_limit=25,
-            team_preset=_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=freeze_graph_definition(
-                load_team_config(_PRESET, workspace_root=workspace),
+                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
                 workspace_root=workspace,
             ),
             model_assignment=resolve_execution_authority(metadata).model_assignment,
@@ -221,7 +219,7 @@ async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
             "/v1/runs",
             json={
                 "run_id": "gwlive-01",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "remember this",
                 "autonomous": True,
                 **await async_catalog_run_fields(client),
@@ -272,7 +270,7 @@ async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
             "/v1/runs",
             json={
                 "run_id": "gwlive-02",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "work",
                 "autonomous": True,
                 **await async_catalog_run_fields(client),
@@ -329,7 +327,7 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
         start = await client.post(
             "/v1/runs",
             json={
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "first turn",
                 "autonomous": True,
                 "run_id": "r-followup",
@@ -344,7 +342,7 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
         replay = await client.post(
             "/v1/runs",
             json={
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "first turn",
                 "autonomous": True,
                 "run_id": "r-followup",
@@ -415,7 +413,7 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
                 "/v1/runs",
                 json={
                     "run_id": run_id,
-                    "team_preset": _PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": message,
                     "autonomous": True,
                     **await async_catalog_run_fields(client),
@@ -537,7 +535,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
             thread_id=thread_id,
             status=ThreadStatus.RUNNING,
             title="coherent tuple",
-            team_preset=_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             metadata=json.dumps(metadata),
         )
         await session.commit()
@@ -582,7 +580,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     assert body["changeset_ids"] == ["changeset-coherent"]
     assert body["feature_tag"] == "feature-coherent"
     assert body["authoring_session_id"] == "session-coherent"
-    assert body["topology"]["team_preset"] == _PRESET
+    assert body["topology"]["team_preset"] == DEFAULT_TEAM_PRESET
     assert body["lease_id"] == "lease-coherent"
     latest_tuple_reads = [
         statement
@@ -707,7 +705,7 @@ async def _exercise_five_verbs(
     assert presets.status_code == 200
     pbody = presets.json()
     assert pbody["api_version"] == "v1"
-    assert any(p["id"] == _PRESET for p in pbody["presets"])
+    assert any(p["id"] == DEFAULT_TEAM_PRESET for p in pbody["presets"])
 
     sbody = await _await_service_worker_ready(client)
     assert sbody["api_version"] == "v1"
@@ -719,7 +717,10 @@ async def _exercise_five_verbs(
     start = await client.post(
         "/v1/runs",
         json=await async_run_start_body(
-            client, "gwlive-06", team_preset=_PRESET, tokens={"coder": "tok-coder"}
+            client,
+            "gwlive-06",
+            team_preset=DEFAULT_TEAM_PRESET,
+            tokens={"coder": "tok-coder"},
         ),
     )
     assert start.status_code == 201
@@ -735,7 +736,7 @@ async def _exercise_five_verbs(
     rbody = status.json()
     assert rbody["api_version"] == "v1"
     assert rbody["run_id"] == run_id
-    assert rbody["topology"]["team_preset"] == _PRESET
+    assert rbody["topology"]["team_preset"] == DEFAULT_TEAM_PRESET
     assert "roles" in rbody
     assert isinstance(rbody["proposal_ids"], list)
     # Semantic phase projection: a dispatched coder run is a generic
@@ -765,7 +766,7 @@ async def _run_nickname_insert_race(
     left_id = "rid-modern-nickname-left"
     right_id = "rid-modern-nickname-right"
     nickname_base: dict[str, object] = {
-        "team_preset": _PRESET,
+        "team_preset": DEFAULT_TEAM_PRESET,
         "message": "nickname collision",
         "selection": selection,
         "metadata": {
@@ -860,7 +861,7 @@ async def _run_modern_selection_races(
 ]:
     """Run the same-id and inverse nickname races for one catalog selection."""
     payload = {
-        "team_preset": _PRESET,
+        "team_preset": DEFAULT_TEAM_PRESET,
         "message": "same durable intention",
         "run_id": run_id,
         "selection": selection,
@@ -1256,10 +1257,9 @@ async def test_presets_list_is_truthful_and_resilient(
         assert str(tmp_path) not in broken_reason
         assert ".vaultspec" not in broken_reason and ".toml" not in broken_reason
 
-        # A bundled coder preset loads and is marked mock.
-        assert by_id[_PRESET]["loadable"] is True
-        assert by_id[_PRESET]["is_mock"] is True
-        assert by_id[_PRESET]["authoring_capability"] == "coding"
+        # A bundled coder preset loads and reads as a coding preset.
+        assert by_id[DEFAULT_TEAM_PRESET]["loadable"] is True
+        assert by_id[DEFAULT_TEAM_PRESET]["authoring_capability"] == "coding"
 
         # The document-authoring preset reports its capability and roles.
         authoring = by_id["vaultspec-adr-research"]
@@ -1353,7 +1353,7 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
             "/v1/runs",
             json={
                 "run_id": "gwlive-08",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "revise the draft",
                 "autonomous": True,
                 "feedback_batch_id": "feedback-batch:deadbeefcafe",
@@ -1383,7 +1383,7 @@ async def test_run_start_without_feedback_batch_id_dispatches_none(
             "/v1/runs",
             json={
                 "run_id": "gwlive-09",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "build it",
                 "autonomous": True,
                 **await async_catalog_run_fields(client),
@@ -1409,7 +1409,7 @@ async def test_run_start_refusals_over_live_socket(
             "/v1/runs",
             json={
                 "run_id": "gwlive-10",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "   ",
                 **await async_catalog_run_fields(client),
             },
@@ -1468,7 +1468,7 @@ async def test_run_start_refusals_over_live_socket(
             invalid_id = await client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "go",
                     "run_id": invalid_run_id,
                     **await async_catalog_run_fields(client),
@@ -1487,7 +1487,7 @@ async def test_run_start_refusals_over_live_socket(
         dashboard_id = await client.post(
             "/v1/runs",
             json={
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "run_id": "run-0123456789abcdef0123456789abcdef",
                 **await async_catalog_run_fields(client),
@@ -1511,7 +1511,7 @@ async def test_run_start_client_id_is_dispatch_exactly_once(
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         payload = {
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "build it",
             "autonomous": True,
             "run_id": "client-run-0001",
@@ -1550,7 +1550,7 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     worker.hold_dispatch_response()
     payload = {
-        "team_preset": _PRESET,
+        "team_preset": DEFAULT_TEAM_PRESET,
         "message": "build it",
         "autonomous": True,
         "run_id": "run-0123456789abcdef0123456789abcdef",
@@ -1839,7 +1839,7 @@ async def test_run_start_freezes_and_discloses_catalog_selection(
             "/v1/runs",
             json={
                 "run_id": "gwlive-20",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "autonomous": True,
                 **await async_catalog_run_fields(client),
@@ -1889,7 +1889,7 @@ async def test_run_start_rejects_retired_profile_field(
             "/v1/runs",
             json={
                 "run_id": "gwlive-21",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "profile_id": "ghost",
                 **await async_catalog_run_fields(client),
@@ -1915,7 +1915,7 @@ async def test_run_start_conflicts_on_selection_request_change_retry(
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         payload = {
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "go",
             "run_id": "rid-conflict",
         }
@@ -1983,7 +1983,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         # Every post below shares this run id ON PURPOSE: the test is about
         # what a second request wearing an existing id is allowed to mean.
         payload = {
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "go",
             "run_id": "rid-body-conflict",
             "actor_tokens": actor_tokens_body(
@@ -2056,7 +2056,11 @@ async def test_run_start_idempotency_is_race_safe(
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        payload = {"team_preset": _PRESET, "message": "go", "run_id": "rid-race"}
+        payload = {
+            "team_preset": DEFAULT_TEAM_PRESET,
+            "message": "go",
+            "run_id": "rid-race",
+        }
         # Resolved ONCE, outside the racing comprehension. Awaiting inside it
         # would make the argument an async generator rather than the iterable of
         # coroutines gather expects, and every racer must post a byte-identical
@@ -2150,7 +2154,7 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
     # that pairing is the whole subject, since the loser of the insert race must
     # be refused precisely because its body differs from the winner's.
     shared = {
-        "team_preset": _PRESET,
+        "team_preset": DEFAULT_TEAM_PRESET,
         "run_id": run_id,
         "autonomous": True,
     }

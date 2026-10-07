@@ -41,7 +41,7 @@ def test_worker_exception_chains_original_cause() -> None:
     wrapped = _wrap_worker_exception(
         exc=original,
         worker="coder",
-        model_label="mock/coder",
+        model_label="deterministic/deterministic",
         message_count=1,
     )
     assert isinstance(wrapped, WorkerExecutionError)
@@ -108,7 +108,7 @@ def test_build_worker_messages_adds_rejection_revision_instruction() -> None:
     """Rejected supervisor plans should add a deterministic revision instruction."""
     state: TeamState = {
         "messages": [HumanMessage(content="Implement the approved feature.")],
-        "active_agent": "mock-coder-human",
+        "active_agent": "coder",
         "artifacts": [],
         "current_plan": [],
         "thread_id": "thread-worker-reject",
@@ -123,7 +123,7 @@ def test_build_worker_messages_adds_rejection_revision_instruction() -> None:
 
     messages = _build_worker_messages(
         state=state,
-        system_prompt="You are a mock coder.",
+        system_prompt="You are a coder.",
         workspace_root=None,
     )
 

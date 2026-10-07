@@ -204,7 +204,7 @@ packages = ["src/vaultspec_a2a"]
 # Production package data retained by this denylist:
 #   - database/migrations/**  — Alembic scripts, env.py, and script.py.mako
 #     resolved from installed package resources (see database/migrate.py).
-#   - team/presets/{agents,teams}/**  — product agent and team presets; mock and
+#   - team/presets/{agents,teams}/**  — product agent and team presets; the
 #     deterministic certification variants remain available only in source and
 #     native integration test environments.
 #   - context/presets/**  — bundled authoring rule corpus.
@@ -233,30 +233,26 @@ exclude = [
   "src/vaultspec_a2a/service_tests/**",
   "src/vaultspec_a2a/acceptance",
   "src/vaultspec_a2a/acceptance/**",
-  "src/vaultspec_a2a/team/presets/mock",
-  "src/vaultspec_a2a/team/presets/mock/**",
-  "src/vaultspec_a2a/team/presets/agents/mock-*.toml",
-  "src/vaultspec_a2a/team/presets/agents/*-mock.toml",
-  "src/vaultspec_a2a/team/presets/teams/mock-*.toml",
-  "src/vaultspec_a2a/team/presets/teams/*-mock.toml",
   "src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-deterministic.toml",
   "src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-clarify.toml",
-  # Certification-only lanes that the mock-* patterns above do not match by
-  # name. Every one is a scripted fixture - forced failure, a bridge-free
-  # provider-condition probe, and the in-process scenarios that drive a
-  # supervised permission pause, a cancellation window, a relay burst,
-  # supervisor routing, an endless generation loop, a turn held until its
-  # test releases it, a scripted supervisor, a reviewer that never passes and
-  # research branches that ask before they report - so they
-  # belong with the other certification variants: available in source and
-  # native integration tests, absent from a product wheel. The agent halves are listed beside
-  # their teams because a scenario agent is no more shippable than the scenario
-  # that names it.
+  # Certification-only fixtures, each scripted: a completing coder, a passing
+  # review loop, a forced failure, a bridge-free provider-condition probe, and
+  # the in-process scenarios that drive a supervised permission pause, a
+  # cancellation window, a relay burst, supervisor routing, an endless
+  # generation loop, a turn held until its test releases it, a scripted
+  # supervisor, a reviewer that never passes and research branches that ask
+  # before they report - so they belong with the other certification variants:
+  # available in source and native integration tests, absent from a product
+  # wheel. The agent halves are listed beside their teams because a scenario
+  # agent is no more shippable than the scenario that names it.
+  "src/vaultspec_a2a/team/presets/teams/deterministic-success-single.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-passing-loop.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-coder-success.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-passing-reviewer.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-failure.toml",
   "src/vaultspec_a2a/team/presets/teams/provider-condition-probe.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-cancel-window.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-permission-pause.toml",
-  "src/vaultspec_a2a/team/presets/agents/deterministic-failure.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-cancel-window.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-permission-pause.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-relay-burst.toml",

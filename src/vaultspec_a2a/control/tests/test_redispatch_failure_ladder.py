@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing import adopted_spawner
+from ...testing import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET, adopted_spawner
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
@@ -166,7 +166,7 @@ def _current_metadata(workspace_root: str | None) -> dict[str, object]:
         ),
         overrides={},
         fallbacks=(),
-        required_roles=("mock-coder-success",),
+        required_roles=(DEFAULT_REQUIRED_ROLE,),
         records=(record,),
     )
     metadata: dict[str, object] = {"provider_catalog_selection": frozen.to_record()}
@@ -200,7 +200,7 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="retired-authority",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(
                     {
                         "workspace_root": str(tmp_path),
@@ -267,7 +267,7 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="unchanged-digest-extra-field",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(valid_with_extra),
             )
             # list_threads orders newest first, so create the absent thread before
@@ -275,13 +275,13 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="absent-after-corrupt",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps({"workspace_root": str(tmp_path)}),
             )
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="corrupt-modern-freeze",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(
                     {
                         "workspace_root": str(tmp_path),
@@ -368,13 +368,13 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="healthy-after-projectless",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="projectless",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(
                     {**_current_metadata(None), "feature_tag": "no-project-here"}
                 ),
@@ -444,13 +444,13 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="healthy-after-relative",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="relative-project",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(_current_metadata("workspaces/project")),
             )
             await session.commit()
@@ -500,7 +500,7 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
                 await _create_reconciling_thread_with_receipt(
                     session,
                     thread_id=thread_id,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     metadata=json.dumps(_current_metadata(str(tmp_path))),
                 )
             await session.commit()
@@ -568,7 +568,7 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="single-failure",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await session.commit()

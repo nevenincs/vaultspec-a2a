@@ -21,7 +21,7 @@ from ...database.models import Base
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import settings_override
+from ...testing import DEFAULT_TEAM_PRESET, settings_override
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -135,7 +135,7 @@ def test_frozen_dispatch_rechecks_desktop_authority_and_cancel_remains_available
     project = state_layout(home).workspaces_root / "project"
     project.mkdir(parents=True)
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=project),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=project),
         workspace_root=project,
     )
     with settings_override(desktop_app_home=home):
@@ -144,7 +144,7 @@ def test_frozen_dispatch_rechecks_desktop_authority_and_cancel_remains_available
                 action="resume",
                 thread_id="saved-run",
                 workspace_root=str(root),
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=definition,
                 recursion_limit=25,
             )
@@ -189,7 +189,7 @@ async def test_saved_project_aliases_remain_valid_for_restart_reconciliation(
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
         definition = freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=project),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=project),
             workspace_root=project,
         )
         with settings_override(desktop_app_home=home):
@@ -201,7 +201,7 @@ async def test_saved_project_aliases_remain_valid_for_restart_reconciliation(
                         action="resume",
                         thread_id=run_id,
                         workspace_root=alias,
-                        team_preset="mock-success-single",
+                        team_preset=DEFAULT_TEAM_PRESET,
                         graph_definition=definition,
                         recursion_limit=25,
                     )
@@ -209,7 +209,7 @@ async def test_saved_project_aliases_remain_valid_for_restart_reconciliation(
                         db,
                         thread_id=run_id,
                         status=ThreadStatus.RECONCILING,
-                        team_preset="mock-success-single",
+                        team_preset=DEFAULT_TEAM_PRESET,
                         metadata=json.dumps({"workspace_root": alias}),
                         write_authority=RunWriteAuthority(
                             0, 1, ControlActionType.RESUME, dispatch_id

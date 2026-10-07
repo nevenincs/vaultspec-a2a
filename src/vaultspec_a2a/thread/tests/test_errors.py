@@ -317,9 +317,11 @@ class TestWorkerExecutionErrorRetainsItsCause:
 
     def test_a_wrapper_with_no_cause_reports_attribution_only(self) -> None:
         """Nothing is appended when there is no failure to attribute."""
-        err = WorkerExecutionError(worker="coder", model="mock", message_count=2)
+        err = WorkerExecutionError(
+            worker="coder", model="deterministic", message_count=2
+        )
 
-        assert str(err) == "worker='coder' model=mock messages=2"
+        assert str(err) == "worker='coder' model=deterministic messages=2"
         assert err.message == str(err)
 
 

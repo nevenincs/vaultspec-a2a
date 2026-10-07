@@ -19,7 +19,6 @@ from .state_layout import DEFAULT_HOME
 
 __all__ = [
     "ACP_BACKENDS",
-    "DEFAULT_MOCK_API_BASE",
     "GATEWAY_URL_ENV",
     "INTERNAL_TOKEN_ENV",
     "WORKER_URL_ENV",
@@ -40,10 +39,8 @@ _INSTALL_ROOT: Path = (
 # Canonical service-endpoint defaults. This module is the ONE home for every
 # production host:port literal; consumers import these rather than repeating
 # the value, and each remains environment-overridable at its point of use
-# (VAULTSPEC_A2A_MOCK_API_BASE overrides the VidaiMock base;
-# OTEL_EXPORTER_OTLP_ENDPOINT is read by the telemetry module at import time
+# (OTEL_EXPORTER_OTLP_ENDPOINT is read by the telemetry module at import time
 # per the standard OTel contract).
-DEFAULT_MOCK_API_BASE = "http://localhost:8100"
 DEFAULT_OTLP_ENDPOINT = "http://localhost:4317"
 
 logger = logging.getLogger("vaultspec_a2a.control.config")
@@ -346,9 +343,9 @@ class InfraConfig(ProjectSettings):
     serve_in_process_lanes: bool = Field(
         default=False,
         description=(
-            "Serve the in-process provider lanes: the built-in mock lane and any "
-            "lane a configured lane plugin registers. Off by default so a "
-            "deployment sees them only when it arms them."
+            "Serve the in-process provider lanes that configured lane plugins "
+            "register. Off by default so a deployment sees them only when it "
+            "arms them."
         ),
     )
     lane_plugins: Annotated[tuple[str, ...], NoDecode] = Field(
@@ -444,14 +441,6 @@ class InfraConfig(ProjectSettings):
             "VAULTSPEC_A2A_OTEL_METRICS_EXPORTER", "OTEL_METRICS_EXPORTER"
         ),
         description="'none' builds no metric reader at all.",
-    )
-    mock_api_base: str | None = Field(
-        default=None,
-        description=(
-            "Base URL for the VidaiMock tape-replay server.  Used by "
-            "MockChatModel when Provider.MOCK is selected.  "
-            "Example: http://vidaimock:8100"
-        ),
     )
     provider_timeout_seconds: int = Field(
         default=120,

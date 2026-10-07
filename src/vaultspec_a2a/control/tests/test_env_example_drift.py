@@ -57,7 +57,6 @@ _DOCUMENTED_OVERRIDES = {
     "VAULTSPEC_A2A_DATABASE_BACKEND": "the Postgres profile",
     "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "the Postgres profile",
     "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": "the Postgres profile",
-    "VAULTSPEC_A2A_MOCK_API_BASE": "the integration profile's VidaiMock address",
     "VAULTSPEC_A2A_ENGINE_SERVE_CMD": "unset, the launcher runs this same template",
     "OTEL_SERVICE_VERSION": "a sample service identity",
     "OTEL_SDK_DISABLED": "an opt-in switch shown switched on",

@@ -29,7 +29,7 @@ Install these host prerequisites:
 - [Just](https://just.systems/man/en/packages.html) 1.31 or later
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - [Node.js](https://nodejs.org/) matching `.node-version`, with npm, for Claude and Z.ai ACP workflows
-- Docker, only for development/test Jaeger and VidaiMock fixtures
+- Docker, only for the development/test Jaeger fixture
 
 The project requires Python 3.13 or later and currently selects the Python 3.13
 series.

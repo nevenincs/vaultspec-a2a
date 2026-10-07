@@ -12,14 +12,11 @@ The lifecycle primitives and the run-start verb themselves live in
 owns only what is genuinely specific to certification: the bundled deterministic
 preset it certifies against, and the authenticated handle scenarios drive.
 
-The deterministic provider backend the worker proxies to (VidaiMock) is a
-separate real process. Where a certifying environment runs it, pass its base URL
-as ``VAULTSPEC_A2A_MOCK_API_BASE`` through the keyword environment and the
-gateway-owned worker inherits it, so runs complete against a real deterministic
-provider. The provider is not required to certify the provider-independent
-gateway contract - run creation, status, cancellation routing, streaming,
-deletion, and authentication all hold whether a run ultimately completes or
-fails - so those scenarios drive this stack without it.
+The broker profile arms the deterministic in-process lane and the gateway-owned
+worker inherits it, so runs complete against a real deterministic provider with
+no separate process. The provider-independent gateway contract - run creation,
+status, cancellation routing, streaming, deletion, and authentication - holds
+whether a run ultimately completes or fails.
 
 ``CertifiedGateway`` is the authenticated handle scenarios drive: the shared
 :class:`~vaultspec_a2a.testing.gateway_verbs.GatewayVerbs` reads and controls,
@@ -165,10 +162,8 @@ def certified_gateway(
     Seats the dashboard credentials and a real migrated database under a fresh
     application home, spawns the production gateway with worker auto-spawn so the
     gateway owns its worker, waits for readiness, and yields an authenticated
-    :class:`CertifiedGateway`. A certifying environment that runs the
-    deterministic provider passes ``VAULTSPEC_A2A_MOCK_API_BASE`` through
-    *extra_env* so the gateway-owned worker reaches it. The gateway-owned process
-    tree is reaped regardless of scenario outcome, so no worker or gateway leaks.
+    :class:`CertifiedGateway`. The gateway-owned process tree is reaped
+    regardless of scenario outcome, so no worker or gateway leaks.
 
     The broker profile arms the in-process lane serving this stack exists to
     certify against. The lanes are hidden by default so no product deployment

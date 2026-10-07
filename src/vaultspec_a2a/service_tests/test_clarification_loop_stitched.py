@@ -154,8 +154,7 @@ def _require_engine(rule: ExternalPrerequisiteRule) -> None:
     """Report, naming the substrate, when the loop cannot honestly run.
 
     Only ONE substrate is needed. The preset runs the in-process deterministic
-    provider, so no model container is involved - the tape corpus carries no
-    turns for this topology's document roles anyway, and depending on a container
+    provider, so no model container is involved, and depending on a container
     would narrow the lane on the hosts least able to run one.
     """
     # The bounded poll production itself uses at this decision point, not a

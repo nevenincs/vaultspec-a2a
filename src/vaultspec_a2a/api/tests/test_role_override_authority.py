@@ -19,7 +19,13 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
-from ...testing import catalog_run_fields, fetch_provider_catalog, named_lane_selection
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    catalog_run_fields,
+    fetch_provider_catalog,
+    named_lane_selection,
+)
 from .conftest import make_app
 
 
@@ -112,12 +118,12 @@ class TestRoleOverrideAuthority:
             response = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": "mock-success-single",
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "run_id": "role-override-authority-01",
                     "message": "override one role",
                     "metadata": metadata,
                     "selection": baseline,
-                    "overrides": {"mock-coder-success": overridden},
+                    "overrides": {DEFAULT_REQUIRED_ROLE: overridden},
                 },
             )
             assert response.status_code == 201, response.text
@@ -153,12 +159,12 @@ class TestRoleOverrideAuthority:
             response = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": "mock-success-single",
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "run_id": "role-override-authority-02",
                     "message": "override with an unserved entry",
                     "metadata": metadata,
                     "selection": fields["selection"],
-                    "overrides": {"mock-coder-success": bogus},
+                    "overrides": {DEFAULT_REQUIRED_ROLE: bogus},
                 },
             )
 

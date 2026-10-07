@@ -7,7 +7,6 @@ from ..service_tests.harness import _INTERNAL_TOKEN, ServiceStack
 _PORTS = {
     "gateway": 18000,
     "worker": 18001,
-    "vidaimock": 8100,
     "jaeger_ui": 16686,
     "jaeger_otlp": 4317,
 }

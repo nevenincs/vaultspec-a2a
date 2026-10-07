@@ -42,7 +42,7 @@ from ...database import (
 )
 from ...database.models import ControlActionModel, ThreadModel
 from ...team import load_team_config
-from ...testing import adopted_spawner
+from ...testing import DEFAULT_TEAM_PRESET, adopted_spawner
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -53,7 +53,6 @@ if TYPE_CHECKING:
 _CODER_TOKEN = "secret-coder-xyz"
 _REVIEWER_TOKEN = "secret-reviewer-xyz"
 _BEARER = "secret-bearer-xyz"
-_PRESET = "mock-success-single"
 
 
 def _capturing_worker(
@@ -112,14 +111,14 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
                     thread_id=thread_id,
                     title="invalid project",
                     initial_message="must not be accepted",
-                    team_preset=_PRESET,
+                    team_preset=DEFAULT_TEAM_PRESET,
                     autonomous=True,
                     nickname=None,
                     metadata=None,
                     metadata_json=None,
                     workspace_root=relative_project,
                     team_config=load_team_config(
-                        _PRESET, workspace_root=relative_project
+                        DEFAULT_TEAM_PRESET, workspace_root=relative_project
                     ),
                 ),
                 transport=DispatchTransport(
@@ -261,13 +260,15 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
                 thread_id=thread_id,
                 title="token run",
                 initial_message="build it",
-                team_preset=_PRESET,
+                team_preset=DEFAULT_TEAM_PRESET,
                 autonomous=True,
                 nickname=None,
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
-                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
+                team_config=load_team_config(
+                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                ),
                 actor_tokens=bundle,
             ),
             transport=DispatchTransport(
@@ -335,13 +336,15 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
                 thread_id=thread_id,
                 title="early terminal",
                 initial_message="finish immediately",
-                team_preset=_PRESET,
+                team_preset=DEFAULT_TEAM_PRESET,
                 autonomous=True,
                 nickname=None,
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
-                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
+                team_config=load_team_config(
+                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                ),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
@@ -383,13 +386,15 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
                 thread_id=thread_id,
                 title="deleted before ack",
                 initial_message="start",
-                team_preset=_PRESET,
+                team_preset=DEFAULT_TEAM_PRESET,
                 autonomous=True,
                 nickname=None,
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
-                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
+                team_config=load_team_config(
+                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                ),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
@@ -432,13 +437,15 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
                 thread_id=thread_id,
                 title="terminal before lost ack",
                 initial_message="finish",
-                team_preset=_PRESET,
+                team_preset=DEFAULT_TEAM_PRESET,
                 autonomous=True,
                 nickname=None,
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
-                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
+                team_config=load_team_config(
+                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                ),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
@@ -475,13 +482,15 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
                 thread_id=thread_id,
                 title="cancel wins before capacity response",
                 initial_message="start",
-                team_preset=_PRESET,
+                team_preset=DEFAULT_TEAM_PRESET,
                 autonomous=True,
                 nickname=None,
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
-                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
+                team_config=load_team_config(
+                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                ),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
@@ -552,13 +561,15 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
                         thread_id=thread_id,
                         title="fresh lease race",
                         initial_message="hold worker acknowledgement",
-                        team_preset=_PRESET,
+                        team_preset=DEFAULT_TEAM_PRESET,
                         autonomous=True,
                         nickname=None,
                         metadata=None,
                         metadata_json=None,
                         workspace_root=tmp_path,
-                        team_config=load_team_config(_PRESET, workspace_root=tmp_path),
+                        team_config=load_team_config(
+                            DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                        ),
                     ),
                     transport=DispatchTransport(
                         circuit_breaker=breaker,
@@ -621,13 +632,15 @@ async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
                 thread_id=thread_id,
                 title="ambiguous delivery",
                 initial_message="do not acknowledge",
-                team_preset=_PRESET,
+                team_preset=DEFAULT_TEAM_PRESET,
                 autonomous=True,
                 nickname=None,
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
-                team_config=load_team_config(_PRESET, workspace_root=tmp_path),
+                team_config=load_team_config(
+                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                ),
             ),
             transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(

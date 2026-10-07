@@ -21,7 +21,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from ...testing import async_catalog_run_fields
+from ...testing import DEFAULT_TEAM_PRESET, async_catalog_run_fields
 from ...thread.idempotency import IDEMPOTENCY_KEY_MAX_LENGTH
 from .conftest import make_app
 
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 
-_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
 
 
@@ -40,7 +39,7 @@ async def _start_run(client: httpx.AsyncClient) -> str:
         "/v1/runs",
         json={
             "run_id": f"followup-key-{next(_RUN_SEQ):02d}",
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "start the turn",
             **await async_catalog_run_fields(client),
         },

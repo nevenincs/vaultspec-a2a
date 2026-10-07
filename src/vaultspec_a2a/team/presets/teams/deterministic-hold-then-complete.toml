@@ -7,8 +7,8 @@ stack's hold gate is closed and completes as soon as the test opens it, so a run
 is busy mid-turn for exactly as long as the test needs. A later turn on the same
 run completes at once unless the gate is closed again.
 
-Runs on the in-process deterministic provider, so it needs no credential, no
-network, and no tape server.
+Runs on the in-process deterministic provider, so it needs no credential and no
+network.
 """
 
 [team.topology]

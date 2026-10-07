@@ -24,7 +24,7 @@ vault-document content into the world, phase machine or solo editing lane). A
 solo document-editing preset on the ``pipeline`` topology is therefore covered by
 the ROLE signal - the blind spot this file previously named is closed in the
 predicate, not by naming a preset here, so the guard still cannot be defeated by
-adding a preset. Coder-lane presets (``vaultspec-solo-coder``) and the mock
+adding a preset. Coder-lane presets (``vaultspec-solo-coder``) and the deterministic
 certification fixtures match neither signal, keep their write capability
 legitimately, and are outside this guard;
 ``test_coder_lane_is_outside_the_guard`` pins that exemption so it stays a

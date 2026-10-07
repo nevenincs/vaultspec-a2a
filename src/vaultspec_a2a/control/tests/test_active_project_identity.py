@@ -35,6 +35,7 @@ from ...providers.team_selection import FrozenLaneAssignment, model_assignment_d
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     compile_test_graph,
     deterministic_model_assignment,
@@ -74,7 +75,7 @@ def _assignment(model_name: str) -> dict[str, FrozenLaneAssignment]:
     The model name is the one field varied, so two assignments built under
     different names differ in identity and in nothing else.
     """
-    team = load_team_config("mock-success-single")
+    team = load_team_config(DEFAULT_TEAM_PRESET)
     return {
         role: lane.model_copy(update={"model_name": model_name})
         for role, lane in deterministic_model_assignment(team).items()
@@ -83,7 +84,7 @@ def _assignment(model_name: str) -> dict[str, FrozenLaneAssignment]:
 
 def _definition(workspace: Path) -> FrozenGraphDefinition:
     return freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
 
@@ -339,7 +340,7 @@ class TestGraphStateNamesTheProject:
         return DispatchRequest(
             action="ingest",
             thread_id="run-1",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=_uncanonical_spelling(workspace),
             content=content,
             recursion_limit=25,
@@ -560,7 +561,7 @@ class TestOneWorkspaceOneGraphEntry:
             manager.register_compiled_graph(
                 thread_id,
                 (
-                    "mock-success-single",
+                    DEFAULT_TEAM_PRESET,
                     spelling,
                     False,
                     model_assignment_digest(_assignment("current")),
@@ -591,7 +592,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "mock-success-single",
+                DEFAULT_TEAM_PRESET,
                 str(workspace),
                 False,
                 model_assignment_digest(_assignment("current")),
@@ -603,7 +604,7 @@ class TestOneWorkspaceOneGraphEntry:
         follow_up = DispatchRequest(
             action="ingest",
             thread_id="run-1",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=_uncanonical_spelling(workspace),
             recursion_limit=25,
             model_assignment=_assignment("current"),
@@ -627,7 +628,7 @@ class TestOneWorkspaceOneGraphEntry:
             return DispatchRequest(
                 action="ingest",
                 thread_id=thread_id,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=assignment,
@@ -653,7 +654,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "mock-success-single",
+                DEFAULT_TEAM_PRESET,
                 str(workspace),
                 False,
                 model_assignment_digest(accepted),
@@ -670,7 +671,7 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-1",
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
@@ -687,7 +688,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "mock-success-single",
+                DEFAULT_TEAM_PRESET,
                 str(workspace),
                 False,
                 model_assignment_digest(accepted),
@@ -702,7 +703,7 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-1",
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
@@ -745,7 +746,7 @@ class TestOneWorkspaceOneGraphEntry:
             return DispatchRequest(
                 action="ingest",
                 thread_id="run-race",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=assignment,
@@ -798,7 +799,7 @@ class TestOneWorkspaceOneGraphEntry:
         req = DispatchRequest(
             action="ingest",
             thread_id="run-equal-race",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=str(workspace),
             recursion_limit=25,
             model_assignment=_assignment("same"),
@@ -846,7 +847,7 @@ class TestOneWorkspaceOneGraphEntry:
             return DispatchRequest(
                 action="ingest",
                 thread_id=thread_id,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=_assignment("same"),
@@ -902,7 +903,7 @@ class TestOneWorkspaceOneGraphEntry:
             return DispatchRequest(
                 action="ingest",
                 thread_id=thread_id,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=_assignment(model_name),
@@ -945,7 +946,7 @@ class TestOneWorkspaceOneGraphEntry:
                         DispatchRequest(
                             action="ingest",
                             thread_id="held-read",
-                            team_preset="mock-success-single",
+                            team_preset=DEFAULT_TEAM_PRESET,
                             workspace_root=str(workspace),
                             recursion_limit=25,
                             model_assignment=_assignment("current"),
@@ -986,7 +987,7 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-fresh-worker",
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
@@ -1027,7 +1028,7 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-noncurrent-checkpoint",
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("current"),
@@ -1066,7 +1067,7 @@ class TestOneWorkspaceOneGraphEntry:
         req = DispatchRequest(
             action="ingest",
             thread_id="run-retry",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=str(workspace),
             recursion_limit=25,
             model_assignment=_assignment("same"),

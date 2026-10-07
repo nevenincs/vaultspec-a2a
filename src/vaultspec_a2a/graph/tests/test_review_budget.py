@@ -24,7 +24,7 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from ...testing import deterministic_model_assignment
+from ...testing import DEFAULT_REQUIRED_ROLE, deterministic_model_assignment
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -40,9 +40,11 @@ if TYPE_CHECKING:
 _RESEARCH = "vaultspec-adr-research"
 # The research team with its document reviewer replaced by one that never passes.
 _REVISING_RESEARCH = "deterministic-research-revising-review"
-# A review loop whose loop node never passes.
+# A review loop whose loop node never passes, and one whose loop node always does.
 _REVISING_LOOP = "deterministic-revising-loop"
 _REVISING_REVIEWER = "deterministic-revising-reviewer"
+_PASSING_LOOP = "deterministic-passing-loop"
+_PASSING_REVIEWER = "deterministic-passing-reviewer"
 
 
 class _Submitter:
@@ -319,12 +321,12 @@ def _loop_graph(team_id: str) -> Any:
 
 @pytest.mark.asyncio
 async def test_a_loop_ends_when_its_loop_node_asks_for_nothing_more() -> None:
-    graph = _loop_graph("mock-autonomous")
+    graph = _loop_graph(_PASSING_LOOP)
 
     visited = await _updates(graph, _receipt_input("loop-pass"), "loop-pass")
 
-    assert visited.count("mock-reviewer") == 1
-    assert visited.count("mock-coder-success") == 1
+    assert visited.count(_PASSING_REVIEWER) == 1
+    assert visited.count(DEFAULT_REQUIRED_ROLE) == 1
 
 
 @pytest.mark.asyncio

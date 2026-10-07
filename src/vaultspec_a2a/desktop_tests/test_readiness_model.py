@@ -26,6 +26,8 @@ import httpx
 from ..control.health import SERVICE_WORKER_PROBE_TIMEOUT_SECONDS
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
     RunVerbs,
     armed_gateway_env,
     booted_gateway,
@@ -157,7 +159,7 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     verbs = RunVerbs(
         base_url=str(client.base_url),
         authorization=_AUTH,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         workspace_root=workspace,
         selection=lambda _workspace: selection,
         message="synthetic read",
@@ -168,7 +170,7 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
         verbs.commit(
             "native-isolation-commit",
             "unissued-reservation",
-            tokens={"mock-coder-success": "synthetic-actor-token"},
+            tokens={DEFAULT_REQUIRED_ROLE: "synthetic-actor-token"},
         ),
     ):
         assert refusal.status_code == 503, refusal.text

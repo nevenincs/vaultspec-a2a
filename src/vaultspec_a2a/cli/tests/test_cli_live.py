@@ -29,12 +29,11 @@ from ...api.tests.conftest import SEATED_ATTACH_TOKEN, make_app
 from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     fetch_in_process_selection_at,
     run_cli,
     serve_on_loopback_in_thread,
 )
-
-_PRESET = "mock-success-single"
 
 
 class _GatewayFixture:
@@ -174,7 +173,7 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
         assert presets.returncode == 0, presets.stdout + presets.stderr
         pbody = json.loads(presets.stdout)
         assert pbody["api_version"] == "v1"
-        assert any(p["id"] == _PRESET for p in pbody["presets"])
+        assert any(p["id"] == DEFAULT_TEAM_PRESET for p in pbody["presets"])
 
         # doctor (service-state)
         doctor = run_cli("doctor", "--url", base, env=_SEATED_TOKEN_ENV)
@@ -192,7 +191,7 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
             "run",
             "start",
             "--preset",
-            _PRESET,
+            DEFAULT_TEAM_PRESET,
             "--message",
             "build it",
             "--provider",

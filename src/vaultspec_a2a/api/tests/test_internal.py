@@ -30,9 +30,11 @@ from ...database.models import ThreadExecutionStateModel
 from ...graph.enums import AgentLifecycleState
 from ...providers import ProviderCondition
 from ...streaming import RelayHub
-from ...testing import park_plan_approval
-from ...testing import record_completed_checkpoint as _record_completed_checkpoint
-from ...testing import seed_accepted_thread as _seed_accepted_thread
+from ...testing import (
+    park_plan_approval,
+    record_completed_checkpoint,
+    seed_accepted_thread,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ...worker.ipc import WorkerBridge
@@ -458,7 +460,7 @@ class TestInternalEvents:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async with session_factory() as session:
-            thread_id, _receipt = await _seed_accepted_thread(session)
+            thread_id, _receipt = await seed_accepted_thread(session)
             await session.commit()
 
         request_id = await park_plan_approval(checkpointer, thread_id=thread_id)
@@ -794,9 +796,9 @@ class TestAggregatorGCOnTerminal:
         _mirror_working_agent(aggregator, "t-pruned")
         _mirror_working_agent(aggregator, "t-active")
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(session, thread_id="t-pruned")
+            _, receipt = await seed_accepted_thread(session, thread_id="t-pruned")
             await session.commit()
-        await _record_completed_checkpoint(checkpointer, receipt)
+        await record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-pruned",
@@ -858,11 +860,11 @@ class TestAggregatorGCOnTerminal:
 
         aggregator = RelayHub()
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-terminal-skip"
             )
             await session.commit()
-        await _record_completed_checkpoint(checkpointer, receipt)
+        await record_completed_checkpoint(checkpointer, receipt)
         _mirror_working_agent(aggregator, "t-terminal-skip")
 
         await _handle_terminal_event(
@@ -900,7 +902,7 @@ class TestTerminalEventFailureReasonPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-failed-with-reason"
             )
             await session.commit()
@@ -933,11 +935,11 @@ class TestTerminalEventFailureReasonPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-completed-no-reason"
             )
             await session.commit()
-        await _record_completed_checkpoint(checkpointer, receipt)
+        await record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-completed-no-reason",
@@ -964,7 +966,7 @@ class TestTerminalEventFailureReasonPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-malformed-detail"
             )
             await session.commit()
@@ -1003,7 +1005,7 @@ class TestTerminalEventProviderConditionPersistence:
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-failed-throttled"
             )
             await session.commit()
@@ -1039,7 +1041,7 @@ class TestTerminalEventProviderConditionPersistence:
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-failed-unclassified"
             )
             await session.commit()
@@ -1073,7 +1075,7 @@ class TestTerminalEventProviderConditionPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-failed-bogus-condition"
             )
             await session.commit()
@@ -1103,11 +1105,11 @@ class TestTerminalEventProviderConditionPersistence:
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-completed-condition"
             )
             await session.commit()
-        await _record_completed_checkpoint(checkpointer, receipt)
+        await record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-completed-condition",
@@ -1151,7 +1153,7 @@ class TestConditionSurvivesAReload:
             session_factory, checkpointer
         )
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-reload-condition"
             )
             await session.commit()
@@ -1358,7 +1360,7 @@ class TestNoFailedRunPersistsWithoutACondition:
         from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            await _seed_accepted_thread(
+            await seed_accepted_thread(
                 session, thread_id="t-dispatch-failure", status="submitted"
             )
             await session.commit()
@@ -1398,7 +1400,7 @@ class TestNoFailedRunPersistsWithoutACondition:
         from ...thread.enums import ThreadStatus
 
         async with session_factory() as session:
-            await _seed_accepted_thread(
+            await seed_accepted_thread(
                 session, thread_id="t-undelivered-resume", status="submitted"
             )
             await session.commit()

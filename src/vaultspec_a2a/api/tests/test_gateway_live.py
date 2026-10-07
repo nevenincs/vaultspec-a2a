@@ -41,10 +41,10 @@ from ...testing import (
     async_run_start_body,
     park_permission,
     read_frame,
+    seed_live_thread,
     serve_on_loopback,
     wait_for_async,
 )
-from ...testing import seed_live_thread as _seed_live_thread
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType
@@ -1084,7 +1084,7 @@ async def test_run_status_carries_reconnect_cursor(
     from ...control.event_handlers import _handle_terminal_event
     from ...thread.action_receipts import GraphCompletionReceipt
 
-    run_id, receipt = await _seed_live_thread(session_factory, title="cursor")
+    run_id, receipt = await seed_live_thread(session_factory, title="cursor")
     config: RunnableConfig = {
         "configurable": {"thread_id": run_id, "checkpoint_ns": ""}
     }
@@ -1561,7 +1561,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
 ) -> None:
     aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    run_id, _receipt = await _seed_live_thread(session_factory, title="live")
+    run_id, _receipt = await seed_live_thread(session_factory, title="live")
 
     async with (
         serve_on_loopback(app) as base,
@@ -1630,7 +1630,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
 
-    run_id, _receipt = await _seed_live_thread(session_factory, title="live")
+    run_id, _receipt = await seed_live_thread(session_factory, title="live")
 
     async with (
         serve_on_loopback(app) as base,
@@ -1724,7 +1724,7 @@ async def test_run_stream_verb_reserves_versioned_frames(
     """
     aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    run_id, _receipt = await _seed_live_thread(session_factory, title="run")
+    run_id, _receipt = await seed_live_thread(session_factory, title="run")
 
     async with (
         serve_on_loopback(app) as base,

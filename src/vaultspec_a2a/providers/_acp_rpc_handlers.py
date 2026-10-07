@@ -480,12 +480,11 @@ async def on_fs_write_text_file(
 ) -> JsonObject:
     """Handle fs/write_text_file RPC.
 
-    Acquires the global git mutex before writing to prevent races with
-    concurrent git operations. Uses asyncio.to_thread so
-    blocking I/O does not stall the event loop.
+    Holds the run's write lock for the target file, so two writers of one path
+    cannot truncate and fill it at the same time while writers of different
+    paths stay independent. Uses asyncio.to_thread so blocking I/O does not
+    stall the event loop.
     """
-    from ..workspace.concurrency import git_workspace_mutex
-
     try:
         request = AcpSessionRequest.model_validate(params)
         request.require_active_session(ctx)
@@ -504,7 +503,7 @@ async def on_fs_write_text_file(
 
         content = _required_string(params, "content")
 
-        async with git_workspace_mutex:
+        async with config.write_lock.hold(file_path):
             request.require_active_session(ctx)
             await asyncio.to_thread(_write_workspace_text, path, content, config)
         return jsonrpc_result(rpc_id, {})

@@ -80,8 +80,8 @@ from ..authoring import (
     mint_actor_token,
     resolve_engine,
 )
-from ..graph.acp_options import option_id_of_kind
-from ..graph.enums import PermissionOptionKind, ServerEventType, ToolKind
+from ..graph.acp_options import narrowest_option_id
+from ..graph.enums import ServerEventType, ToolKind
 from ..streaming.sse_frames import iter_sse_events
 from .catalog import (
     NoSelectableLaneError,
@@ -1160,16 +1160,14 @@ class AcceptanceHarness:
             )
             tool_kind = perm.get("tool_kind")
             if isinstance(tool_kind, str) and tool_kind in _READ_ONLY_TOOL_KINDS:
-                option_id = option_id_of_kind(
-                    options, PermissionOptionKind.ALLOW_ALWAYS
-                )
+                option_id = narrowest_option_id(options, approving=True)
                 if option_id is not None:
                     await self._respond_permission(hc, request_id, option_id)
             else:
                 self._permission_violations.append(
                     f"{tool_kind!r}: {perm.get('description', '')}"
                 )
-                deny_id = option_id_of_kind(options, PermissionOptionKind.REJECT_ALWAYS)
+                deny_id = narrowest_option_id(options, approving=False)
                 if deny_id is not None:
                     await self._respond_permission(hc, request_id, deny_id)
 

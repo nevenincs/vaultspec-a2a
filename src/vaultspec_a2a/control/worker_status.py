@@ -6,13 +6,13 @@ reads this vocabulary without needing anything else from it; a reader that only
 has to answer "what can this field say" should not import a supervisor to find
 out. :mod:`vaultspec_a2a.control.drain` is the same shape.
 
-Deliberately NOT merged with the gateway contract's ``WorkerLifecycleState``,
-which reads cold / starting / ready / unavailable. That one is the readiness
-LADDER a client is served: it treats a worker that has never been asked for as
-a resting state rather than a fault. This one is the watchdog's raw observation
-of a process it supervises, and it has no notion of "not yet wanted". The
-health projection maps this onto that, and collapsing the two would erase the
-distinction that mapping exists to draw.
+Deliberately NOT merged with the readiness vocabulary's ``WorkerLifecycleState``
+(:mod:`vaultspec_a2a.control.readiness`), which reads cold / starting / ready /
+unavailable. That one is the readiness LADDER a client is served: it treats a
+worker that has never been asked for as a resting state rather than a fault.
+This one is the watchdog's raw observation of a process it supervises, and it
+has no notion of "not yet wanted". The health projection maps this onto that,
+and collapsing the two would erase the distinction that mapping exists to draw.
 """
 
 from __future__ import annotations

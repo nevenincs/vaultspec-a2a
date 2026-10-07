@@ -27,6 +27,15 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...context.metadata import ThreadMetadata
+from ...control.readiness import (
+    API_VERSION as _API_VERSION,
+)
+from ...control.readiness import (
+    DesktopReadiness,
+    ProviderEligibility,
+    RunAdmission,
+    WorkerLifecycleState,
+)
 from ...control.worker_status import WorkerConnectionStatus
 from ...graph.enums import SemanticPhase
 from ...providers.conditions import ProviderCondition
@@ -70,15 +79,6 @@ from ...thread.enums import (
     RepairStatus,
     ThreadStatus,
     TranscriptAvailability,
-)
-from .gateway_readiness import (
-    API_VERSION as _API_VERSION,
-)
-from .gateway_readiness import (
-    DesktopReadiness,
-    ProviderEligibility,
-    RunAdmission,
-    WorkerLifecycleState,
 )
 from .snapshots import ThreadStateSnapshot
 

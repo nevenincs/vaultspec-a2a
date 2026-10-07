@@ -32,7 +32,12 @@ from ..thread.enums import (
     PermissionRequestStatus,
     ThreadStatus,
 )
-from ..thread.idempotency import default_permission_response_key
+from ..thread.idempotency import (
+    default_permission_response_key,
+    permission_duplicate_action_key,
+    permission_rejection_action_key,
+    permission_response_action_key,
+)
 from ..thread.snapshots import (
     LOCALLY_RESPONDABLE_PAUSE_CAUSES,
     PLAN_APPROVAL_PAUSE_CAUSES,
@@ -44,7 +49,6 @@ from ._permission_response_contract import (
     PermissionInput,
     PermissionResult,
     PermissionRuntime,
-    permission_response_action_key,
 )
 from ._permission_response_contract import (
     PermissionTransition as _PermissionTransition,
@@ -63,9 +67,6 @@ from ._permission_response_contract import (
 )
 from ._permission_response_contract import (
     existing_rejection_error as _existing_rejection_error,
-)
-from ._permission_response_contract import (
-    permission_rejection_action_key as _permission_rejection_action_key,
 )
 from ._permission_response_contract import (
     rejected_payload as _rejected_payload,
@@ -138,7 +139,7 @@ async def _journal_rejection(
         thread_id=thread_id,
         action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
         request_id=request_id,
-        idempotency_key=_permission_rejection_action_key(idempotency_key),
+        idempotency_key=permission_rejection_action_key(idempotency_key),
         payload=_rejected_payload(option_id, error_detail),
         result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
         recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
@@ -233,7 +234,7 @@ async def _deduplicate_permission_response(
     existing_action = await get_control_action_by_idempotency_key(
         db,
         thread_id=thread_id,
-        idempotency_key=_permission_rejection_action_key(resolved_idempotency_key),
+        idempotency_key=permission_rejection_action_key(resolved_idempotency_key),
     )
     if existing_action is not None:
         if (
@@ -502,7 +503,7 @@ async def _authorize_pending_permission(
             thread_id=thread_id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
             request_id=request_id,
-            idempotency_key=f"permission-duplicate:{resolved_idempotency_key}",
+            idempotency_key=permission_duplicate_action_key(resolved_idempotency_key),
             payload={"option_id": option_id},
             result_status=ControlActionResultStatus.DUPLICATE,
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),

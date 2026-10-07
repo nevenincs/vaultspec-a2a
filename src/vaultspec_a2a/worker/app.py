@@ -313,7 +313,7 @@ because slots are freed by runs ending, which the caller cannot observe.
 
 
 def _require_dispatch_receipt(req: DispatchRequest) -> None:
-    if req.action == "cancel":
+    if not req.requires_graph_receipt:
         return
     try:
         req.require_graph_action_receipt()

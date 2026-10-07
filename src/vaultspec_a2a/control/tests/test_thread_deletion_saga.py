@@ -51,6 +51,7 @@ from ...database import (
 )
 from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind, ThreadStatus
+from ...thread.idempotency import thread_create_action_key
 
 
 @pytest_asyncio.fixture
@@ -114,7 +115,7 @@ async def _create_terminal_thread(
         thread_id=thread_id,
         action_type=authority.action_type,
         dispatch_id=authority.action_receipt_id,
-        idempotency_key=f"thread-create:{thread_id}",
+        idempotency_key=thread_create_action_key(thread_id),
         recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
 

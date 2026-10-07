@@ -36,6 +36,7 @@ from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import RunSequenceAllocator
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
+from ...thread.idempotency import thread_create_action_key
 from .._replay_writer_seat import replay_writer_seat
 from .conftest import _live_server, make_app, seed_run_with_status
 
@@ -80,7 +81,7 @@ async def _seed_deletable_run(factory: SessionFactory, run_id: str) -> None:
             session,
             thread_id=run_id,
             action_type=authority.action_type,
-            idempotency_key=f"thread-create:{run_id}",
+            idempotency_key=thread_create_action_key(run_id),
             dispatch_id=authority.action_receipt_id,
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )

@@ -49,6 +49,7 @@ from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ..routes.gateway import admission_gate
 from .conftest import make_app
 
@@ -153,7 +154,7 @@ async def _seed_live_thread(
             session,
             thread_id=thread.id,
             action_type=authority.action_type,
-            idempotency_key=f"thread-create:{thread.id}",
+            idempotency_key=thread_create_action_key(thread.id),
             dispatch_id=authority.action_receipt_id,
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(

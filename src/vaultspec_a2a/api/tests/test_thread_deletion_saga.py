@@ -41,6 +41,7 @@ from ...database.models import ThreadDeletionSagaModel
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import CleanupKind
+from ...thread.idempotency import thread_create_action_key
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ async def _seed_thread_with_action(
         session,
         thread_id=thread_id,
         action_type=authority.action_type,
-        idempotency_key=f"thread-create:{thread_id}",
+        idempotency_key=thread_create_action_key(thread_id),
         dispatch_id=authority.action_receipt_id,
         recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )

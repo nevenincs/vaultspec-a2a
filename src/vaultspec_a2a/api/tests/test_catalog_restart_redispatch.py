@@ -67,6 +67,7 @@ from ...tests.gateway_boot import (
 )
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ..schemas.gateway import FrozenTeamAssignmentSummary
 from .conftest import _InProcessWorker
 
@@ -317,7 +318,7 @@ async def _seed_restart_case(case: _RestartCase) -> None:
                     session,
                     thread_id=thread_id,
                     action_type=authority.action_type,
-                    idempotency_key=f"thread-create:{thread_id}",
+                    idempotency_key=thread_create_action_key(thread_id),
                     dispatch_id=authority.action_receipt_id,
                     recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                     payload=freeze_accepted_input(
@@ -557,7 +558,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                     session,
                     thread_id=thread_id,
                     action_type=authority.action_type,
-                    idempotency_key=f"thread-create:{thread_id}",
+                    idempotency_key=thread_create_action_key(thread_id),
                     dispatch_id=authority.action_receipt_id,
                     recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
@@ -579,7 +580,9 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                 session,
                 thread_id="retired-durable-model-profile-sentinel",
                 action_type=authority.action_type,
-                idempotency_key="thread-create:retired-durable-model-profile-sentinel",
+                idempotency_key=thread_create_action_key(
+                    "retired-durable-model-profile-sentinel"
+                ),
                 dispatch_id=authority.action_receipt_id,
                 recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             )

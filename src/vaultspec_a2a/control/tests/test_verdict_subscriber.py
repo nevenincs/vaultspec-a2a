@@ -55,7 +55,6 @@ from ...control.verdict_subscriber import (
     _proposal_reconcile_verdict,
     _recovery_high_water,
     _StreamInterruptedError,
-    _verdict_resume_idempotency_key,
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
@@ -70,6 +69,7 @@ from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import authoring_verdict_action_key, thread_create_action_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -265,7 +265,7 @@ async def _seed_parked_thread(
                 session,
                 thread_id=thread_id,
                 action_type=authority.action_type,
-                idempotency_key=f"thread-create:{thread_id}",
+                idempotency_key=thread_create_action_key(thread_id),
                 dispatch_id=authority.action_receipt_id,
                 recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 payload=freeze_accepted_input(
@@ -914,7 +914,7 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
             action = await get_control_action_by_idempotency_key(
                 session,
                 thread_id="dedup",
-                idempotency_key=_verdict_resume_idempotency_key("proposal:research"),
+                idempotency_key=authoring_verdict_action_key("proposal:research"),
             )
             assert action is not None
             assert action.dispatch_id in worker_app.state.dispatch_ids
@@ -957,7 +957,7 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
             action = await get_control_action_by_idempotency_key(
                 session,
                 thread_id="competing-verdicts",
-                idempotency_key=_verdict_resume_idempotency_key("proposal:research"),
+                idempotency_key=authoring_verdict_action_key("proposal:research"),
             )
             assert action is not None
             assert action.request_id == "proposal:research"

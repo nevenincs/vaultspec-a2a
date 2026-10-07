@@ -31,6 +31,7 @@ from ...tests._checkpoint_seeding import real_input_checkpoint
 from ...thread.checkpoint_evidence import CheckpointEvidenceKind
 from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..recovery_authority import (
@@ -76,7 +77,7 @@ async def crashed_at_input(tmp_path: Path) -> AsyncIterator[CrashedRun]:
             db,
             thread_id=_THREAD,
             action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{_THREAD}",
+            idempotency_key=thread_create_action_key(_THREAD),
             dispatch_id=_DISPATCH,
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(

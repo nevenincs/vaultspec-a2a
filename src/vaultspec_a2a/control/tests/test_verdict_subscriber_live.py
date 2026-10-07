@@ -74,10 +74,7 @@ from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
-from ...control.verdict_subscriber import (
-    VerdictSubscriber,
-    _verdict_resume_idempotency_key,
-)
+from ...control.verdict_subscriber import VerdictSubscriber
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
@@ -94,6 +91,7 @@ from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import authoring_verdict_action_key, thread_create_action_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -578,7 +576,7 @@ async def _seed_parked_gate(
                 session,
                 thread_id=thread_id,
                 action_type=authority.action_type,
-                idempotency_key=f"thread-create:{thread_id}",
+                idempotency_key=thread_create_action_key(thread_id),
                 dispatch_id=authority.action_receipt_id,
                 payload=freeze_accepted_input(
                     dispatch, intent={"content": "seed accepted graph authority"}
@@ -803,9 +801,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
                 action = await get_control_action_by_idempotency_key(
                     db,
                     thread_id=thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
-                        info["proposal_id"]
-                    ),
+                    idempotency_key=authoring_verdict_action_key(info["proposal_id"]),
                 )
                 gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
                 thread = await get_thread(db, thread_id)
@@ -945,7 +941,7 @@ async def _run_clobbered_reconcile(
                 action = await get_control_action_by_idempotency_key(
                     db,
                     thread_id=seed.thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
+                    idempotency_key=authoring_verdict_action_key(
                         seed.info["proposal_id"]
                     ),
                 )
@@ -965,7 +961,7 @@ async def _run_clobbered_reconcile(
                 settled = await get_control_action_by_idempotency_key(
                     db,
                     thread_id=seed.thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
+                    idempotency_key=authoring_verdict_action_key(
                         seed.info["proposal_id"]
                     ),
                 )

@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import (
 
 from ...api.schemas.events import PermissionRequestEvent
 from ...conftest import materialize_schema
-from ...control._permission_response_contract import permission_response_action_key
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import (
@@ -61,6 +60,10 @@ from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ...thread.idempotency import (
+    permission_response_action_key,
+    thread_create_action_key,
+)
 from ...worker.ipc import WorkerBridge
 
 if TYPE_CHECKING:
@@ -298,7 +301,7 @@ async def test_dispatch_application_receipt_settles_ingest_action(
                 thread_id=thread.id,
                 spec=_SeedActionSpec(
                     action_type=ControlActionType.INGEST,
-                    idempotency_key=f"thread-create:{thread.id}",
+                    idempotency_key=thread_create_action_key(thread.id),
                 ),
             )
             await session.commit()
@@ -955,7 +958,7 @@ async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
             thread_id=thread_id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
             request_id=request_id,
-            idempotency_key=f"permission-response:{request_id}",
+            idempotency_key=permission_response_action_key(request_id),
             payload={"option_id": "allow"},
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )

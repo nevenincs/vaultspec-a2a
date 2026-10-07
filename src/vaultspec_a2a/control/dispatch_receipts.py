@@ -19,6 +19,7 @@ from ..database import (
 )
 from ..database.graph_receipt_repository import persist_graph_action_receipt
 from ..thread.action_receipts import (
+    GRAPH_ACTION_VERB,
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
@@ -32,12 +33,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _PAYLOAD = TypeAdapter(dict[str, object])
-_GRAPH_ACTIONS = {
-    ControlActionType.INGEST: "ingest",
-    ControlActionType.MESSAGE_FOLLOWUP_REQUESTED: "ingest",
-    ControlActionType.RESUME: "resume",
-    ControlActionType.PERMISSION_RESPONSE_SUBMITTED: "resume",
-}
 
 
 def validate_current_graph_receipt(
@@ -56,7 +51,7 @@ def validate_current_graph_receipt(
         accepted = AcceptedActionInput.model_validate_json(action.payload_json)
         if accepted.dispatch["thread_id"] != thread.id or accepted.dispatch[
             "action"
-        ] != _GRAPH_ACTIONS.get(receipt.action_type):
+        ] != GRAPH_ACTION_VERB.get(receipt.action_type):
             return None
         fingerprint = control_action_payload_fingerprint(
             _PAYLOAD.validate_json(action.payload_json)
@@ -105,11 +100,11 @@ def _accepted_graph_action(
         accepted = AcceptedActionInput.model_validate(payload)
         if accepted.dispatch["thread_id"] != thread_id or accepted.dispatch[
             "action"
-        ] != _GRAPH_ACTIONS.get(action_type):
+        ] != GRAPH_ACTION_VERB.get(action_type):
             return None
     except (ValueError, ValidationError):
         return None
-    if action_type not in _GRAPH_ACTIONS:
+    if action_type not in GRAPH_ACTION_VERB:
         return None
     return action_type, payload
 
@@ -203,7 +198,7 @@ async def bind_graph_action_receipt(
     dispatch: DispatchRequest,
 ) -> DispatchRequest:
     """Read committed acceptance evidence; delivery creates no receipt or writer."""
-    if dispatch.action == "cancel":
+    if not dispatch.requires_graph_receipt:
         return dispatch
     bind = cast("AsyncEngine | AsyncConnection | None", db.bind)
     if bind is None:
@@ -223,6 +218,9 @@ async def bind_graph_action_receipt(
             else None
         )
         receipt = _matching_dispatch_receipt(dispatch, receipt, action)
-    if receipt is not None and _GRAPH_ACTIONS[receipt.action_type] != dispatch.action:
+    if (
+        receipt is not None
+        and GRAPH_ACTION_VERB[receipt.action_type] != dispatch.action
+    ):
         receipt = None
     return dispatch.model_copy(update={"graph_action_receipt": receipt})

@@ -96,12 +96,10 @@ async def test_desktop_terminal_refuses_before_creating_child(tmp_path: Path) ->
     command = _command(project, private, marker)
     # An existing real stream owner supplies the session context; it is created
     # before arming, and no native agent/tool child is permitted after arming.
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        "pass",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
+    # It is spawned the way a provider is, inside its own containment, which is
+    # the only authority the provider reaper releases a process through.
+    process = await spawn_acp_process(
+        [sys.executable, "-c", "pass"], dict(os.environ), str(tmp_path), use_exec=True
     )
     assert process.stdin is not None and process.stdout is not None
     ctx = AcpSessionContext(

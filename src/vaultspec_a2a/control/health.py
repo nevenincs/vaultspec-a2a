@@ -44,6 +44,14 @@ from ..utils.coercion import coerce_object_mapping
 from ._worker_health import WorkerState, probe_worker_health, worker_liveness
 from .config import settings
 from .provider_execution import native_execution_refusal_reason
+from .readiness import (
+    DesktopReadiness,
+    GatewayReadiness,
+    LivenessState,
+    ProviderEligibility,
+    RunAdmission,
+    WorkerLifecycleState,
+)
 from .worker_management import LazyWorkerSpawner
 from .worker_status import WorkerConnectionStatus
 
@@ -53,13 +61,6 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..api.schemas.gateway_readiness import (
-        DesktopReadiness,
-        GatewayReadiness,
-        ProviderEligibility,
-        RunAdmission,
-        WorkerLifecycleState,
-    )
     from .leased_dispatch import DispatchTransport
 
 __all__ = [
@@ -516,8 +517,6 @@ def _desktop_worker_state(
     worker_probe_ready: bool | None,
     worker_adoptable: bool | None,
 ) -> tuple[WorkerLifecycleState, str | None]:
-    from ..api.schemas.gateway_readiness import WorkerLifecycleState
-
     worker_spawned = bool(shared["worker_spawned"])
     worker_status = shared["worker_status"]
     if not worker_spawned and worker_probe_ready is True and worker_adoptable is True:
@@ -563,13 +562,6 @@ def _desktop_run_admission(
     recovery_owner_error: object,
     native_refusal: str | None,
 ) -> RunAdmission:
-    from ..api.schemas.gateway_readiness import (
-        GatewayReadiness,
-        ProviderEligibility,
-        RunAdmission,
-        WorkerLifecycleState,
-    )
-
     if (
         gateway_readiness is not GatewayReadiness.READY
         or recovery_owner_error is not None
@@ -609,12 +601,6 @@ def assemble_desktop_readiness(
     """
     import os
 
-    from ..api.schemas.gateway_readiness import (
-        DesktopReadiness,
-        GatewayReadiness,
-        LivenessState,
-        ProviderEligibility,
-    )
     from ..utils import package_version
 
     shared = assemble_health_status(app_state=app_state)

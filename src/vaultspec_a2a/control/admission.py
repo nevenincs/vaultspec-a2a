@@ -36,15 +36,10 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ..thread.actor_tokens import MAX_ROLES_PER_RUN
+from .readiness import ProviderEligibility, RunAdmission, WorkerLifecycleState
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-
-    from ..api.schemas.gateway_readiness import (
-        ProviderEligibility,
-        RunAdmission,
-        WorkerLifecycleState,
-    )
 
 __all__ = [
     "AdmissionBroker",
@@ -109,8 +104,6 @@ class AdmissionReadiness:
     @property
     def not_ready_reason(self) -> str | None:
         """Return the safe refusal reason, or ``None`` when execution-ready."""
-        from ..api.schemas.gateway_readiness import RunAdmission
-
         if self.run_admission is RunAdmission.READY:
             return None
         return _REASON_NOT_READY

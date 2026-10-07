@@ -65,7 +65,6 @@ __all__ = [
     "WorkerRef",
     "authoring_capability",
     "discover_team_preset_ids",
-    "is_mock_preset",
     "load_agent_config",
     "load_team_config",
     "supported_capabilities",
@@ -131,16 +130,6 @@ def discover_team_preset_ids(workspace_root: Path | None = None) -> frozenset[st
     if _PRESET_TEAMS_DIR.is_dir():
         ids.update(p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml"))
     return frozenset(ids)
-
-
-def is_mock_preset(preset_id: str) -> bool:
-    """Return whether a preset id follows the source-side mock convention.
-
-    Source and Compose discovery may include these certification presets. The
-    desktop product wheel excludes them at packaging time; this helper remains
-    useful to source-side callers that need to label the wider inventory.
-    """
-    return preset_id.startswith("mock-")
 
 
 class AuthoringCapability(StrEnum):

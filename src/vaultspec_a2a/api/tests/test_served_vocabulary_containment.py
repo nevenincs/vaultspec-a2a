@@ -66,7 +66,7 @@ LIVE_EXECUTION_READINESS = {"healthy", "needs_reconciliation"}
 LIVE_PROVIDER_CONDITION = {"unknown"}
 LIVE_SEMANTIC_PHASE = {"completed", "failed", "recovery_required"}
 LIVE_TOPOLOGY = {"pipeline", "pipeline_loop", "research_adr", "star"}
-LIVE_ORIGIN = {"bundled", "test_mock"}
+LIVE_ORIGIN = {"bundled"}
 LIVE_WORKER_STATUS = {"up"}
 LIVE_DEGRADED_REASON = {"execution_state_projection_missing"}
 

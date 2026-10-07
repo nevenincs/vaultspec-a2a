@@ -952,8 +952,6 @@ class PresetSummary(BaseModel):
     # either, so a wrong value here misinforms a reader rather than refusing a
     # run. See the owning module on the topology-versus-role keying question.
     authoring_capability: AuthoringCapability | None = None
-    # True for bundled mock/test presets so the product layer can exclude them.
-    is_mock: bool = False
     # The origin and document outputs are descriptive preset facts.
     origin: PresetOrigin | None = None
     supported_capabilities: list[DocumentCapability] = Field(default_factory=list)

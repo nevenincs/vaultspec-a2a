@@ -59,7 +59,7 @@ from ...thread.constants import (
     MAX_WORKSPACE_ROOT_LENGTH,
 )
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import TERMINAL_STATUSES, ControlActionResultStatus
+from ...thread.enums import TERMINAL_STATUSES
 from ...thread.idempotency import IDEMPOTENCY_KEY_MAX_LENGTH
 from ...utils import package_version
 from ...utils.coercion import coerce_object_mapping
@@ -67,9 +67,7 @@ from .._dispatch_refusals import (
     CODED_REFUSALS,
     DISPATCH_FAILURES,
     refusal_responses,
-    refused_action,
-    refused_cancel,
-    refused_dispatch,
+    refused_outcome,
 )
 from ..dependencies import (
     get_checkpointer,
@@ -232,17 +230,12 @@ def _get_clarification_endpoint_context(
     )
 
 
-__all__ = ["PROVIDER_CATALOG_PATH", "_summarize_preset", "route_signature"]
+__all__ = ["PROVIDER_CATALOG_PATH", "route_signature", "summarize_preset"]
 
 # ---------------------------------------------------------------------------
 # run-message
 # ---------------------------------------------------------------------------
 
-
-#: The served ``action_status`` of a turn whose work the run has finished.
-#: A fresh admission never reports it; only a replay of a key whose turn has
-#: already run does, which is what makes ``applied`` true on this verb.
-_APPLIED_ACTION_STATUS = ControlActionResultStatus.APPLIED.value
 
 # What a follow-up offer can be refused with. The verb queues the turn rather
 # than dispatching it, so no worker or transport condition can reach it.
@@ -337,13 +330,14 @@ async def run_message_endpoint(
         idempotency_key=context.idempotency_key,
     )
 
-    if result.failure_type is not None:
-        raise refused_dispatch(result.failure_type, result.error_detail)
+    refusal = refused_outcome(result)
+    if refusal is not None:
+        raise refusal
 
     return RunMessageResponse(
         run_id=result.thread_id,
         action_status=result.action_status,
-        applied=result.action_status == _APPLIED_ACTION_STATUS,
+        applied=result.applied,
         action_id=result.action_id,
         idempotency_key=context.idempotency_key,
         queue_position=result.queue_position,
@@ -413,11 +407,11 @@ async def run_permission_respond_endpoint(
     and a superseded or expired request is refused with a journaled rejection
     that replays identically.
 
-    Scoping matters as much as the answer. The request is resolved and checked
-    against the run in the path BEFORE anything acts on it, so a guessed request
-    id cannot be used to answer another run's question - and because that check
-    precedes the service call, a mismatch has no effect at all rather than being
-    detected after the fact.
+    Scoping matters as much as the answer. The service resolves the request
+    against the run in the path, from that run's live checkpoint, BEFORE anything
+    acts on it, so a guessed request id cannot be used to answer another run's
+    question - and a mismatch has no effect at all rather than being detected
+    after the fact.
     """
     dependencies = context.dependencies
     result = await respond_to_permission(
@@ -432,12 +426,9 @@ async def run_permission_respond_endpoint(
 
     if result.dispatched:
         worker_liveness(context.request.app.state).record_contact()
-    if result.error_detail:
-        raise refused_action(
-            result.error_detail,
-            guard_status=result.error_status_code,
-            failure_type=result.failure_type,
-        )
+    refusal = refused_outcome(result)
+    if refusal is not None:
+        raise refusal
 
     return RunPermissionRespondResponse(
         run_id=result.thread_id,
@@ -510,12 +501,9 @@ async def run_clarification_respond_endpoint(
         resolution=resolution,
         runtime=ClarificationRuntime(context.checkpointer, dependencies.transport()),
     )
-    if result.error_status_code is not None or result.failure_type is not None:
-        raise refused_action(
-            result.error_detail or "Clarification resolution failed",
-            guard_status=result.error_status_code,
-            failure_type=result.failure_type,
-        )
+    refusal = refused_outcome(result)
+    if refusal is not None:
+        raise refusal
 
     if result.dispatched:
         worker_liveness(context.request.app.state).record_contact()
@@ -565,7 +553,7 @@ async def run_cancel_endpoint(
         transport=dependencies.transport(),
     )
 
-    refusal = refused_cancel(result)
+    refusal = refused_outcome(result, fallback_detail="Cancel dispatch failed")
     if refusal is not None:
         raise refusal
 
@@ -662,7 +650,7 @@ def _build_preset_summaries(ws_root: Path | None) -> list[PresetSummary]:
     from ...team.team_config import discover_team_preset_ids
 
     return [
-        _summarize_preset(preset_id, ws_root)
+        summarize_preset(preset_id, ws_root)
         for preset_id in sorted(discover_team_preset_ids(ws_root))
     ]
 
@@ -686,12 +674,8 @@ def _safe_load_reason(exc: Exception) -> str:
     return f"preset failed to load ({type(exc).__name__})"
 
 
-def _preset_origin(
-    preset_id: str, ws_root: Path | None, *, is_mock: bool
-) -> PresetOrigin:
-    """Classify a preset's origin: test_mock, workspace, or bundled."""
-    if is_mock:
-        return PresetOrigin.TEST_MOCK
+def _preset_origin(preset_id: str, ws_root: Path | None) -> PresetOrigin:
+    """Classify a preset's origin: workspace or bundled."""
     if ws_root is not None:
         workspace_toml = ws_root / ".vaultspec" / "teams" / f"{preset_id}.toml"
         if workspace_toml.is_file():
@@ -699,7 +683,7 @@ def _preset_origin(
     return PresetOrigin.BUNDLED
 
 
-def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
+def summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
     """Load one preset and summarize it, capturing any load failure truthfully.
 
     Any load or validation error is caught and reported as an unloadable preset
@@ -708,12 +692,10 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
     """
     from ...team.team_config import (
         authoring_capability,
-        is_mock_preset,
         load_team_config,
         supported_capabilities,
     )
 
-    is_mock = is_mock_preset(preset_id)
     try:
         tc = load_team_config(preset_id, workspace_root=ws_root)
     except Exception as exc:
@@ -722,8 +704,7 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
             id=preset_id,
             loadable=False,
             unavailable_reason=_safe_load_reason(exc),
-            is_mock=is_mock,
-            origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
+            origin=_preset_origin(preset_id, ws_root),
         )
     return PresetSummary(
         id=tc.id,
@@ -741,8 +722,7 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
         # observe it.
         required_roles=required_role_ids(tc),
         authoring_capability=authoring_capability(tc),
-        is_mock=is_mock,
-        origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
+        origin=_preset_origin(preset_id, ws_root),
         supported_capabilities=supported_capabilities(tc.topology.type),
     )
 

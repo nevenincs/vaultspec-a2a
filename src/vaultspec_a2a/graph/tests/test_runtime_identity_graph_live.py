@@ -18,7 +18,7 @@ from ...thread.enums import ThreadStatus
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
 from .._compiler_research import _make_research_producer
 from ..enums import Provider
-from ..nodes.worker import create_worker_node
+from ..nodes.worker import WorkerNodeOptions, create_worker_node
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,9 +72,9 @@ async def test_worker_and_research_turns_share_first_runtime_identity(
         model=model,
         system_prompt="You are terse.",
         name="coder",
-        autonomous=True,
-        workspace_root=tmp_path,
-        runtime_identity_port=port,
+        options=WorkerNodeOptions(
+            autonomous=True, workspace_root=tmp_path, runtime_identity_port=port
+        ),
     )
     result = await worker(state)
     assert isinstance(result, dict)

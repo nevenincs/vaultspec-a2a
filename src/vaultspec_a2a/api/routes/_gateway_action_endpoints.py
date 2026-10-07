@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 from fastapi import (
+    APIRouter,
     Depends,
     FastAPI,
     Header,
@@ -104,7 +105,6 @@ from .gateway import (
     _optional_enum,
     _string_field,
     admission_gate,
-    router,
 )
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
@@ -233,7 +233,7 @@ def _get_clarification_endpoint_context(
     )
 
 
-__all__ = ["route_signature", "summarize_preset"]
+__all__ = ["register", "route_signature", "summarize_preset"]
 
 # ---------------------------------------------------------------------------
 # run-message
@@ -248,38 +248,6 @@ _FOLLOWUP_REFUSALS: frozenset[FailureType] = CODED_REFUSALS | {
 }
 
 
-@router.post(
-    "/runs/{run_id}/messages",
-    status_code=202,
-    response_model=RunMessageResponse,
-    responses=refusal_responses(
-        _FOLLOWUP_REFUSALS,
-        {
-            202: {
-                "description": (
-                    "The follow-up turn is queued behind the one the run is "
-                    "executing. It holds a place in the run's queue and no write "
-                    "authority; it reaches the worker when the current turn's "
-                    "terminal checkpoint is proven. ``queue_position`` says where "
-                    "it sits."
-                ),
-            },
-            409: {
-                "model": RunMessageRefusalResponse,
-                "description": (
-                    "The run cannot accept a follow-up turn. Nothing was reserved "
-                    "and nothing was dispatched; the typed code names which "
-                    "condition refused it."
-                ),
-            },
-            # Restates the router's token refusal because naming a response here
-            # replaces the router-wide description for this route.
-            503: {
-                "description": "Gateway service token is not configured.",
-            },
-        },
-    ),
-)
 async def run_message_endpoint(
     run_id: PathSafeRunId,
     body: RunMessageRequest,
@@ -352,43 +320,6 @@ async def run_message_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/runs/{run_id}/permissions/{request_id}/respond",
-    response_model=RunPermissionRespondResponse,
-    responses=refusal_responses(
-        DISPATCH_FAILURES,
-        {
-            404: {
-                "description": "No such run, or no such permission request on it.",
-            },
-            409: {
-                "model": RunPermissionRefusalResponse,
-                "description": (
-                    "The answer was not taken. A worker that refused the dispatch "
-                    "is reported with the typed refusal code every run action "
-                    "shares; a request-state conflict carries a plain sentence. "
-                    "Nothing was applied either way."
-                ),
-            },
-            502: {
-                "description": (
-                    "The answer was accepted and retained but the worker could "
-                    "not be reached or failed inside itself. Reconcile from "
-                    "run-status."
-                ),
-            },
-            # Restates the router's token refusal because naming a response
-            # here replaces the router-wide description for this route.
-            503: {
-                "description": (
-                    "Gateway service token is not configured, or the worker is "
-                    "saturated or shut out by the failure breaker and the answer "
-                    "was retained for retry."
-                ),
-            },
-        },
-    ),
-)
 async def run_permission_respond_endpoint(
     run_id: PathSafeRunId,
     request_id: str,
@@ -449,28 +380,6 @@ async def run_permission_respond_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/runs/{run_id}/clarifications/{request_id}/respond",
-    response_model=RunClarificationRespondResponse,
-    responses=refusal_responses(
-        DISPATCH_FAILURES,
-        {
-            404: {
-                "description": (
-                    "No such run, or the run is not parked on this questionnaire."
-                ),
-            },
-            409: {
-                "description": (
-                    "The resolution was not taken: a different one is already "
-                    "accepted, the run is not active or cannot be confirmed to "
-                    "have applied it, or the worker refused the dispatch with the "
-                    "typed code every run action shares."
-                ),
-            },
-        },
-    ),
-)
 async def run_clarification_respond_endpoint(
     run_id: PathSafeRunId,
     request_id: str,
@@ -525,24 +434,6 @@ async def run_clarification_respond_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/runs/{run_id}/cancel",
-    response_model=RunCancelResponse,
-    responses=refusal_responses(
-        DISPATCH_FAILURES,
-        {
-            409: {
-                "description": (
-                    "The run's state refuses cancellation - it settled some "
-                    "other way, its accepted deadline expired, or its authority "
-                    "changed - and no retry will change that; re-read "
-                    "run-status. Cancelling a run that is already cancelled is "
-                    "not refused."
-                ),
-            },
-        },
-    ),
-)
 async def run_cancel_endpoint(
     run_id: PathSafeRunId,
     context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
@@ -590,7 +481,6 @@ async def run_cancel_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.get(PROVIDER_CATALOG_ROUTE, response_model=ProviderCatalogResponse)
 async def provider_catalog_endpoint(
     request: Request,
     workspace_root: str = Query(min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH),
@@ -621,7 +511,6 @@ async def provider_catalog_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/presets", response_model=PresetsListResponse)
 async def presets_list_endpoint(
     workspace_root: str | None = Query(
         default=None, max_length=MAX_WORKSPACE_ROOT_LENGTH
@@ -777,7 +666,6 @@ def _service_check_ready(checks: dict[str, object], name: str) -> bool:
     return _string_field(check, "status") == "ok"
 
 
-@router.get("/service", response_model=ServiceStateResponse)
 async def service_state_endpoint(
     request: Request,
     services: tuple[AsyncSession, RelayHub, Checkpointer, httpx.AsyncClient] = Depends(
@@ -874,3 +762,121 @@ async def service_state_endpoint(
         routes=route_signature(request.app),
         readiness=readiness,
     )
+
+
+def register(router: APIRouter) -> None:
+    """Mount the run action verbs and the preset, catalog, and service reads."""
+    router.post(
+        "/runs/{run_id}/messages",
+        status_code=202,
+        response_model=RunMessageResponse,
+        responses=refusal_responses(
+            _FOLLOWUP_REFUSALS,
+            {
+                202: {
+                    "description": (
+                        "The follow-up turn is queued behind the one the run is "
+                        "executing. It holds a place in the run's queue and no write "
+                        "authority; it reaches the worker when the current turn's "
+                        "terminal checkpoint is proven. ``queue_position`` says where "
+                        "it sits."
+                    ),
+                },
+                409: {
+                    "model": RunMessageRefusalResponse,
+                    "description": (
+                        "The run cannot accept a follow-up turn. Nothing was reserved "
+                        "and nothing was dispatched; the typed code names which "
+                        "condition refused it."
+                    ),
+                },
+                # Restates the router's token refusal because naming a response here
+                # replaces the router-wide description for this route.
+                503: {
+                    "description": "Gateway service token is not configured.",
+                },
+            },
+        ),
+    )(run_message_endpoint)
+    router.post(
+        "/runs/{run_id}/permissions/{request_id}/respond",
+        response_model=RunPermissionRespondResponse,
+        responses=refusal_responses(
+            DISPATCH_FAILURES,
+            {
+                404: {
+                    "description": "No such run, or no such permission request on it.",
+                },
+                409: {
+                    "model": RunPermissionRefusalResponse,
+                    "description": (
+                        "The answer was not taken. A worker that refused the dispatch "
+                        "is reported with the typed refusal code every run action "
+                        "shares; a request-state conflict carries a plain sentence. "
+                        "Nothing was applied either way."
+                    ),
+                },
+                502: {
+                    "description": (
+                        "The answer was accepted and retained but the worker could "
+                        "not be reached or failed inside itself. Reconcile from "
+                        "run-status."
+                    ),
+                },
+                # Restates the router's token refusal because naming a response
+                # here replaces the router-wide description for this route.
+                503: {
+                    "description": (
+                        "Gateway service token is not configured, or the worker is "
+                        "saturated or shut out by the failure breaker and the answer "
+                        "was retained for retry."
+                    ),
+                },
+            },
+        ),
+    )(run_permission_respond_endpoint)
+    router.post(
+        "/runs/{run_id}/clarifications/{request_id}/respond",
+        response_model=RunClarificationRespondResponse,
+        responses=refusal_responses(
+            DISPATCH_FAILURES,
+            {
+                404: {
+                    "description": (
+                        "No such run, or the run is not parked on this questionnaire."
+                    ),
+                },
+                409: {
+                    "description": (
+                        "The resolution was not taken: a different one is already "
+                        "accepted, the run is not active or cannot be confirmed to "
+                        "have applied it, or the worker refused the dispatch with the "
+                        "typed code every run action shares."
+                    ),
+                },
+            },
+        ),
+    )(run_clarification_respond_endpoint)
+    router.post(
+        "/runs/{run_id}/cancel",
+        response_model=RunCancelResponse,
+        responses=refusal_responses(
+            DISPATCH_FAILURES,
+            {
+                409: {
+                    "description": (
+                        "The run's state refuses cancellation - it settled some "
+                        "other way, its accepted deadline expired, or its authority "
+                        "changed - and no retry will change that; re-read "
+                        "run-status. Cancelling a run that is already cancelled is "
+                        "not refused."
+                    ),
+                },
+            },
+        ),
+    )(run_cancel_endpoint)
+    router.get(PROVIDER_CATALOG_ROUTE, response_model=ProviderCatalogResponse)(
+        provider_catalog_endpoint
+    )
+    router.get("/presets", response_model=PresetsListResponse)(presets_list_endpoint)
+    router.get("/service", response_model=ServiceStateResponse)(service_state_endpoint)

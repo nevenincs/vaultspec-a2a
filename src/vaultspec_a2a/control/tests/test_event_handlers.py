@@ -26,6 +26,7 @@ from ...conftest import SqlitePosture
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import (
+    RelayServices,
     _handle_permission_event,
     _handle_progress_event,
     _handle_terminal_event,
@@ -477,7 +478,7 @@ async def test_exact_cancellation_evidence_settles_current_action(
     }
     for _delivery in range(2):
         await _handle_terminal_event(
-            thread_id, payload, session_factory=session_factory
+            thread_id, payload, services=RelayServices(session_factory=session_factory)
         )
 
     async with session_factory() as session:
@@ -511,7 +512,7 @@ def _busy_once_control_app(
             await _handle_terminal_event(
                 event["thread_id"],
                 event["payload"],
-                session_factory=sessions,
+                services=RelayServices(session_factory=sessions),
             )
         except OperationalError as exc:
             if not isinstance(exc.orig, sqlite3.OperationalError):
@@ -650,7 +651,7 @@ async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
     await _handle_terminal_event(
         thread_id,
         payload,
-        session_factory=session_factory,
+        services=RelayServices(session_factory=session_factory),
     )
 
     async with session_factory() as session:
@@ -891,8 +892,9 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         await relay_event(
             thread_id,
             payload,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
         )
 
     async with session_factory() as session:
@@ -984,8 +986,9 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        services=RelayServices(
+            session_factory=session_factory, checkpointer=checkpointer
+        ),
     )
 
     async with session_factory() as session:
@@ -1046,7 +1049,7 @@ async def test_failure_evidence_elects_only_its_current_graph_action(
             "provider_condition": condition,
             "failure_evidence": evidence.model_dump(mode="json"),
         },
-        session_factory=session_factory,
+        services=RelayServices(session_factory=session_factory),
     )
     async with session_factory() as session:
         refused_thread = await session.get(ThreadModel, thread.id)
@@ -1065,7 +1068,7 @@ async def test_failure_evidence_elects_only_its_current_graph_action(
             "provider_condition": condition,
             "failure_evidence": evidence.model_dump(mode="json"),
         },
-        session_factory=session_factory,
+        services=RelayServices(session_factory=session_factory),
     )
 
     async with session_factory() as session:
@@ -1113,8 +1116,9 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
     await relay_event(
         thread_id,
         payload,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        services=RelayServices(
+            session_factory=session_factory, checkpointer=checkpointer
+        ),
     )
 
     async with session_factory() as session:

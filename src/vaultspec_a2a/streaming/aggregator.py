@@ -14,9 +14,6 @@ The gateway side of the stream is :class:`vaultspec_a2a.streaming.RelayHub`.
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, TypedDict, Unpack, cast
-
-from langgraph.types import Command
 
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
@@ -31,41 +28,6 @@ from .types import SequencedEvent, StreamableGraph
 logger = logging.getLogger(__name__)
 
 __all__ = ["RunEventProducer"]
-
-
-class _IngestOptions(TypedDict, total=False):
-    graph_input: dict[str, Any] | Command[Any] | None
-    config: dict[str, Any]
-    on_graph_started: Callable[[], Awaitable[None]] | None
-    context: object | None
-    control: object | None
-
-
-def _validate_ingest_arguments(
-    args: tuple[object, ...], options: _IngestOptions
-) -> None:
-    unknown = set(options).difference(
-        {"graph_input", "config", "on_graph_started", "context", "control"}
-    )
-    if unknown:
-        unexpected = next(iter(unknown))
-        raise TypeError(
-            "RunEventProducer.ingest() got an unexpected keyword argument "
-            f"{unexpected!r}"
-        )
-    if len(args) > 2:
-        raise TypeError(
-            "RunEventProducer.ingest() takes 5 positional arguments but "
-            f"{len(args) + 4} were given"
-        )
-    if args and "graph_input" in options:
-        raise TypeError(
-            "RunEventProducer.ingest() got multiple values for argument 'graph_input'"
-        )
-    if len(args) > 1 and "config" in options:
-        raise TypeError(
-            "RunEventProducer.ingest() got multiple values for argument 'config'"
-        )
 
 
 class RunEventProducer:
@@ -166,40 +128,13 @@ class RunEventProducer:
         thread_id: str,
         agent_id: str,
         graph: StreamableGraph,
-        *args: object,
-        **options: Unpack[_IngestOptions],
+        invocation: GraphInvocation,
+        *,
+        on_graph_started: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
         """Consume one graph run and return the outcome it settled on."""
-        _validate_ingest_arguments(args, options)
-        if args:
-            graph_input = cast("dict[str, Any] | Command[Any] | None", args[0])
-        elif "graph_input" in options:
-            graph_input = options["graph_input"]
-        else:
-            raise TypeError(
-                "RunEventProducer.ingest() missing required argument 'graph_input'"
-            )
-        if len(args) > 1:
-            config = cast("dict[str, Any]", args[1])
-        elif "config" in options:
-            config = options["config"]
-        else:
-            raise TypeError(
-                "RunEventProducer.ingest() missing required argument 'config'"
-            )
         return await self._ingest.ingest(
-            IngestRequest(
-                thread_id,
-                agent_id,
-                graph,
-                GraphInvocation(
-                    graph_input,
-                    config,
-                    options.get("context"),
-                    options.get("control"),
-                ),
-                options.get("on_graph_started"),
-            )
+            IngestRequest(thread_id, agent_id, graph, invocation, on_graph_started)
         )
 
     # -- Shutdown -------------------------------------------------------

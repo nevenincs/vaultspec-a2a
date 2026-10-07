@@ -230,6 +230,7 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
     from langgraph.types import interrupt
 
     from vaultspec_a2a.streaming import RunEventProducer
+    from vaultspec_a2a.streaming.ingest import GraphInvocation
     from vaultspec_a2a.testing import add_test_node, compile_test_graph, new_state_graph
 
 
@@ -260,8 +261,11 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
 
             producer.add_broadcast_hook(capture)
             outcome = await producer.ingest(
-                "t", "supervisor", graph, {"note": ""},
-                {"configurable": {"thread_id": "t"}},
+                "t", "supervisor", graph,
+                GraphInvocation(
+                    graph_input={"note": ""},
+                    config={"configurable": {"thread_id": "t"}},
+                ),
             )
             return {"outcome": outcome, "emitted": emitted}
 

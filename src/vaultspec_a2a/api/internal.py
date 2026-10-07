@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from ..control._worker_health import worker_liveness
 from ..control.config import settings
 from ..control.event_handlers import (
+    RelayServices,
     _handle_execution_state_event,
     relay_event,
 )
@@ -204,10 +205,12 @@ async def _relay_single_event(
         await relay_event(
             thread_id,
             payload,
-            session_factory=context.session_factory,
-            checkpointer=context.checkpointer,
-            drain_gate=context.drain_gate,
-            prune_registry=context.prune_registry,
+            services=RelayServices(
+                session_factory=context.session_factory,
+                checkpointer=context.checkpointer,
+                drain_gate=context.drain_gate,
+                prune_registry=context.prune_registry,
+            ),
         )
         return
 
@@ -226,12 +229,14 @@ async def _relay_single_event(
     await relay_event(
         thread_id,
         payload,
-        aggregator=context.agg,
-        session_factory=context.session_factory,
-        checkpointer=context.checkpointer,
-        drain_gate=context.drain_gate,
-        prune_registry=context.prune_registry,
-        publish_terminal=publish_terminal,
+        services=RelayServices(
+            aggregator=context.agg,
+            session_factory=context.session_factory,
+            checkpointer=context.checkpointer,
+            drain_gate=context.drain_gate,
+            prune_registry=context.prune_registry,
+            publish_terminal=publish_terminal,
+        ),
     )
 
 

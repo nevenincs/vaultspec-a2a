@@ -62,7 +62,7 @@ from .nodes.diverge import (
     researcher_node_name,
 )
 from .nodes.vault_reader import create_context_mounter
-from .nodes.worker import WorkerNode, create_worker_node
+from .nodes.worker import WorkerNode, WorkerNodeOptions, create_worker_node
 from .run_context import RunContext
 
 logger = logging.getLogger(__name__)
@@ -395,21 +395,23 @@ def _compile_worker_node(
         model,
         composed_worker_prompt(agent_cfg, model),
         name=agent_cfg.id,
-        autonomous=options["autonomous"],
-        workspace_root=workspace_root,
-        cost_port=options["cost_port"],
-        runtime_identity_port=options["runtime_identity_port"],
-        authoring_binding_provider=options["authoring_binding_provider"],
-        role=agent_cfg.role,
-        # The same role-to-phase reading the supervisor gates on, so the worker
-        # the completion gate reroutes a blocked FINISH to is the worker whose
-        # return retires the validation errors that blocked it. Reading it here
-        # keeps the mapping in the one place that owns it.
-        phase=_ROLE_TO_PHASE.get(agent_cfg.role),
-        harness_mcp_servers=team_config.harness_mcp_servers(),
-        # Every worker these topologies compile sits behind a mount node that
-        # refreshes the vault index; the worker expands the documents itself.
-        context_mounter=create_context_mounter(workspace_root),
+        options=WorkerNodeOptions(
+            autonomous=options["autonomous"],
+            workspace_root=workspace_root,
+            cost_port=options["cost_port"],
+            runtime_identity_port=options["runtime_identity_port"],
+            authoring_binding_provider=options["authoring_binding_provider"],
+            role=agent_cfg.role,
+            # The same role-to-phase reading the supervisor gates on, so the worker
+            # the completion gate reroutes a blocked FINISH to is the worker whose
+            # return retires the validation errors that blocked it. Reading it here
+            # keeps the mapping in the one place that owns it.
+            phase=_ROLE_TO_PHASE.get(agent_cfg.role),
+            harness_mcp_servers=team_config.harness_mcp_servers(),
+            # Every worker these topologies compile sits behind a mount node that
+            # refreshes the vault index; the worker expands the documents itself.
+            context_mounter=create_context_mounter(workspace_root),
+        ),
     )
     metadata = _agent_node_metadata(agent_cfg, used_provider, model_name)
     return worker_node, metadata

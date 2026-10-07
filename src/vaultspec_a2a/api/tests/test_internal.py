@@ -790,7 +790,7 @@ class TestAggregatorGCOnTerminal:
         """_handle_terminal_event drops the terminated run's mirrored state and
         leaves a still-active run's alone.
         """
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
 
         aggregator = RelayHub()
         _mirror_working_agent(aggregator, "t-pruned")
@@ -803,9 +803,11 @@ class TestAggregatorGCOnTerminal:
         await _handle_terminal_event(
             "t-pruned",
             {"event_type": "thread_terminal", "status": "completed"},
-            aggregator=aggregator,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                aggregator=aggregator,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            ),
         )
 
         assert aggregator.mirror.get_agent_states("t-pruned") == {}
@@ -820,7 +822,7 @@ class TestAggregatorGCOnTerminal:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A refused completion identifies the thread and evidence failure."""
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...thread.enums import ThreadStatus
 
         aggregator = RelayHub()
@@ -839,8 +841,9 @@ class TestAggregatorGCOnTerminal:
             await _handle_terminal_event(
                 "t-logged",
                 {"event_type": "thread_terminal", "status": "completed"},
-                aggregator=aggregator,
-                session_factory=session_factory,
+                services=RelayServices(
+                    aggregator=aggregator, session_factory=session_factory
+                ),
             )
 
         record = next(
@@ -856,7 +859,7 @@ class TestAggregatorGCOnTerminal:
         checkpointer: AsyncSqliteSaver,
     ) -> None:
         """Repeated proven terminal delivery is idempotent for the live set."""
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
 
         aggregator = RelayHub()
         async with session_factory() as session:
@@ -870,17 +873,21 @@ class TestAggregatorGCOnTerminal:
         await _handle_terminal_event(
             "t-terminal-skip",
             {"event_type": "thread_terminal", "status": "completed"},
-            aggregator=aggregator,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                aggregator=aggregator,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            ),
         )
         assert aggregator.mirror.get_agent_states("t-terminal-skip") == {}
         await _handle_terminal_event(
             "t-terminal-skip",
             {"event_type": "thread_terminal", "status": "completed"},
-            aggregator=aggregator,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                aggregator=aggregator,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            ),
         )
         assert aggregator.mirror.get_agent_states("t-terminal-skip") == {}
 
@@ -898,7 +905,7 @@ class TestTerminalEventFailureReasonPersistence:
         self,
         session_factory: SessionFactory,
     ) -> None:
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
@@ -912,7 +919,7 @@ class TestTerminalEventFailureReasonPersistence:
             _failed_payload(
                 receipt, "Ingest stalled: no event from the graph for over 90s"
             ),
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -931,7 +938,7 @@ class TestTerminalEventFailureReasonPersistence:
         checkpointer: AsyncSqliteSaver,
     ) -> None:
         """No error_detail on completed/cancelled — the column stays None."""
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
@@ -944,8 +951,9 @@ class TestTerminalEventFailureReasonPersistence:
         await _handle_terminal_event(
             "t-completed-no-reason",
             {"event_type": "thread_terminal", "status": "completed"},
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
         )
 
         async with session_factory() as session:
@@ -962,7 +970,7 @@ class TestTerminalEventFailureReasonPersistence:
         """A malformed relay payload (e.g. error_detail as a number) never
         reaches the durable column — falls back to leaving it untouched
         rather than raising or coercing garbage into the record."""
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
@@ -976,7 +984,7 @@ class TestTerminalEventFailureReasonPersistence:
         await _handle_terminal_event(
             "t-malformed-detail",
             payload,
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1000,7 +1008,7 @@ class TestTerminalEventProviderConditionPersistence:
         session_factory: SessionFactory,
     ) -> None:
         """The lane's own verdict survives the relay hop into the column."""
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database.models import ThreadModel
         from ...providers import ProviderCondition
 
@@ -1015,7 +1023,7 @@ class TestTerminalEventProviderConditionPersistence:
             _failed_payload(
                 receipt, "the provider refused for rate", ProviderCondition.THROTTLED
             ),
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1036,7 +1044,7 @@ class TestTerminalEventProviderConditionPersistence:
         campaign removes; the floor says plainly that nothing classified it,
         which a consumer can render and act on.
         """
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database.models import ThreadModel
         from ...providers import ProviderCondition
 
@@ -1051,7 +1059,7 @@ class TestTerminalEventProviderConditionPersistence:
             _failed_payload(
                 receipt, "unclassified provider failure", ProviderCondition.UNKNOWN
             ),
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1071,7 +1079,7 @@ class TestTerminalEventProviderConditionPersistence:
         consumer a value it must reject - strictly worse than the floor, which
         it can at least render.
         """
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
@@ -1085,7 +1093,7 @@ class TestTerminalEventProviderConditionPersistence:
         await _handle_terminal_event(
             "t-failed-bogus-condition",
             payload,
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1101,7 +1109,7 @@ class TestTerminalEventProviderConditionPersistence:
         checkpointer: AsyncSqliteSaver,
     ) -> None:
         """A run that did not fail has no provider failure to classify."""
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database.models import ThreadModel
 
         async with session_factory() as session:
@@ -1118,8 +1126,9 @@ class TestTerminalEventProviderConditionPersistence:
                 "status": "completed",
                 "provider_condition": "throttled",
             },
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
         )
 
         async with session_factory() as session:

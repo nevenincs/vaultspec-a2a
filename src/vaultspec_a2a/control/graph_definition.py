@@ -10,12 +10,15 @@ from ..thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ..thread.enums import ControlActionType
-from ..thread.executable_graph import FrozenGraphDefinition
 from ..thread.idempotency import thread_create_action_key
-from .accepted_input import AcceptedActionInput
+from .accepted_input import read_accepted_input
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from ..thread.executable_graph import FrozenGraphDefinition
+
+__all__ = ["read_accepted_graph_definition"]
 
 
 async def read_accepted_graph_definition(
@@ -32,7 +35,7 @@ async def read_accepted_graph_definition(
         or action.payload_json is None
     ):
         raise ValueError("run has no current initial graph authority")
-    accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+    accepted = read_accepted_input(action)
     if action.graph_receipt_json is None:
         raise ValueError("initial graph authority has no immutable receipt")
     receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
@@ -48,4 +51,7 @@ async def read_accepted_graph_definition(
         raise ValueError("initial graph authority does not match its receipt")
     if accepted.dispatch["thread_id"] != thread_id:
         raise ValueError("initial graph authority belongs to a different run")
-    return FrozenGraphDefinition.model_validate(accepted.dispatch["graph_definition"])
+    definition = accepted.graph_definition
+    if definition is None:
+        raise ValueError("initial graph authority carries no graph definition")
+    return definition

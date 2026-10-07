@@ -14,7 +14,10 @@ from ...testing import current_execution_metadata
 from ..execution_authority import (
     ExecutionAuthorityError,
     ExecutionAuthorityFailure,
+    read_frozen_team_selection,
+    read_frozen_team_selection_from_fields,
     resolve_execution_authority,
+    resolve_execution_authority_from_fields,
 )
 
 
@@ -68,6 +71,53 @@ def test_absent_corrupt_and_retired_authority_fail_with_one_bounded_reason(
 
     assert raised.value.reason is reason
     assert "profile_id" not in str(raised.value)
+
+
+def test_decoded_metadata_resolves_as_the_stored_text_does(tmp_path: Path) -> None:
+    text = current_execution_metadata(tmp_path)
+    fields = json.loads(text)
+
+    assert resolve_execution_authority_from_fields(
+        fields
+    ) == resolve_execution_authority(text)
+    assert read_frozen_team_selection_from_fields(fields) == read_frozen_team_selection(
+        text
+    )
+
+
+@pytest.mark.parametrize(
+    ("fields", "reason"),
+    [
+        (None, ExecutionAuthorityFailure.ABSENT),
+        ({"workspace_root": "C:/project"}, ExecutionAuthorityFailure.ABSENT),
+        (
+            {"model_profile": {"profile_id": "retired"}},
+            ExecutionAuthorityFailure.RETIRED,
+        ),
+        (
+            {"provider_catalog_selection": {"schema_version": 0}},
+            ExecutionAuthorityFailure.CORRUPT,
+        ),
+    ],
+)
+def test_decoded_metadata_without_current_authority_fails_with_one_reason(
+    fields: dict[str, object] | None,
+    reason: ExecutionAuthorityFailure,
+) -> None:
+    with pytest.raises(ExecutionAuthorityError) as raised:
+        resolve_execution_authority_from_fields(fields)
+
+    assert raised.value.reason is reason
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [None, {}, {"model_profile": {"profile_id": "retired"}}],
+)
+def test_decoded_metadata_without_current_authority_discloses_no_selection(
+    fields: dict[str, object] | None,
+) -> None:
+    assert read_frozen_team_selection_from_fields(fields) is None
 
 
 @pytest.mark.parametrize(

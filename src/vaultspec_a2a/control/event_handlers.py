@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -38,7 +38,7 @@ from ..thread.snapshots import (
     is_terminal_event,
     wire_event_type,
 )
-from ..utils.coercion import coerce_object_mapping, decode_json_object
+from ..utils.coercion import decode_json_object
 from ._event_application import (
     apply_permission_resolution as _apply_permission_resolution,
 )
@@ -51,19 +51,22 @@ from ._event_application import (
 from ._event_application import (
     validated_application_receipt as _validated_application_receipt,
 )
+from ._thread_metadata import run_lease_id
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..database import ThreadStatusElectionOutcome
+    from ..database import ControlActionModel, ThreadModel, ThreadStatusElectionOutcome
     from ..database.checkpoints import Checkpointer
     from ..streaming import RelayHub
     from .drain import DrainGate
+    from .terminal_settlement import TerminalEvidence
 
 __all__ = [
     "CheckpointPruneRegistry",
+    "RelayServices",
     "_handle_execution_state_event",
     "_handle_permission_event",
     "_handle_progress_event",
@@ -73,11 +76,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-
-# The metadata key binding a run to its non-secret admission lease identity,
-# written by the gateway at commit; restated inline here to read it back, matching
-# the metadata convention the frozen model profile uses.
-_RUN_LEASE_METADATA_KEY = "run_lease"
 
 # Strong references to in-flight settlement callbacks so a fire-and-forget task is
 # not garbage-collected before it completes; each removes itself when done.
@@ -94,18 +92,22 @@ _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 type _TerminalPublisher = Callable[[], None]
 
 
-class _TerminalEventOptions(TypedDict, total=False):
-    aggregator: RelayHub | None
-    session_factory: async_sessionmaker[AsyncSession] | None
-    checkpointer: Checkpointer | None
-    drain_gate: DrainGate | None
-    prune_registry: CheckpointPruneRegistry | None
-    publish_terminal: _TerminalPublisher | None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RelayServices:
+    """The collaborators a relayed worker event is handled against.
 
+    Each is optional because a process may own none of them: without a session
+    factory the durable writes are skipped, without a checkpointer the handlers
+    that need checkpoint proof decline, and without a drain gate, prune registry
+    or relay hub there is nothing to release.
+    """
 
-#: Read off the declaration rather than restated, so a new option cannot be
-#: accepted by one handler and rejected as unknown by the other.
-_RELAY_OPTIONS = frozenset(_TerminalEventOptions.__optional_keys__)
+    aggregator: RelayHub | None = None
+    session_factory: async_sessionmaker[AsyncSession] | None = None
+    checkpointer: Checkpointer | None = None
+    drain_gate: DrainGate | None = None
+    prune_registry: CheckpointPruneRegistry | None = None
+    publish_terminal: _TerminalPublisher | None = None
 
 
 def _session_factory(
@@ -142,6 +144,50 @@ async def _keep_settlement_if_won(
     return True
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _ProvenTerminal:
+    """One terminal the worker's own evidence asks the control plane to settle.
+
+    *prove* judges the locked run and the journal action the evidence names,
+    and returns what to settle them with, or ``None`` when the pair does not
+    admit this evidence.
+    """
+
+    thread_id: str
+    dispatch_id: str
+    status: ThreadStatus
+    last_sequence: int | None
+    prove: Callable[[ThreadModel, ControlActionModel], TerminalEvidence | None]
+
+
+async def _settle_proven_terminal(
+    factory: async_sessionmaker[AsyncSession], terminal: _ProvenTerminal
+) -> bool:
+    """Lock the run, find the action its evidence names, and settle if proven."""
+    from ..database import get_control_action_by_dispatch_id
+    from .terminal_settlement import lock_terminal_run, settle_terminal
+
+    async with factory() as db:
+        thread = await lock_terminal_run(db, terminal.thread_id)
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=terminal.thread_id, dispatch_id=terminal.dispatch_id
+        )
+        proof = (
+            None if thread is None or action is None else terminal.prove(thread, action)
+        )
+        if thread is None or proof is None:
+            await db.rollback()
+            return False
+        outcome = await settle_terminal(
+            db,
+            thread,
+            terminal.status,
+            evidence=proof,
+            last_sequence=terminal.last_sequence,
+        )
+        return await _keep_settlement_if_won(db, outcome)
+
+
 async def _persist_proven_cancellation(
     factory: async_sessionmaker[AsyncSession],
     *,
@@ -150,22 +196,13 @@ async def _persist_proven_cancellation(
     last_sequence: int | None,
 ) -> bool:
     """Elect and settle one exact current cancellation terminal."""
-    from ..database import get_control_action_by_dispatch_id, thread_write_expectation
+    from ..database import thread_write_expectation
     from ..thread.enums import ControlActionResultStatus, ControlActionType
-    from .terminal_settlement import (
-        TerminalEvidence,
-        lock_terminal_run,
-        settle_terminal,
-    )
+    from .terminal_settlement import TerminalEvidence
 
-    async with factory() as db:
-        thread = await lock_terminal_run(db, thread_id)
-        action = await get_control_action_by_dispatch_id(
-            db, thread_id=thread_id, dispatch_id=evidence.dispatch_id
-        )
-        if thread is None or action is None:
-            await db.rollback()
-            return False
+    def prove(
+        thread: ThreadModel, action: ControlActionModel
+    ) -> TerminalEvidence | None:
         expectation = thread_write_expectation(thread)
         if (
             action.action_type != ControlActionType.CANCEL.value
@@ -175,26 +212,29 @@ async def _persist_proven_cancellation(
                 ControlActionType.CANCEL, evidence.dispatch_id
             )
         ):
-            await db.rollback()
-            return False
-        outcome = await settle_terminal(
-            db,
-            thread,
-            ThreadStatus.CANCELLED,
-            evidence=TerminalEvidence(
-                expectation=expectation,
-                action_id=action.id,
-                action_type=ControlActionType.CANCEL,
-                action_receipt_id=evidence.dispatch_id,
-                result_status=(
-                    ControlActionResultStatus.CANCELLED_CEASED
-                    if evidence.outcome == "ceased"
-                    else ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK
-                ),
+            return None
+        return TerminalEvidence(
+            expectation=expectation,
+            action_id=action.id,
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id=evidence.dispatch_id,
+            result_status=(
+                ControlActionResultStatus.CANCELLED_CEASED
+                if evidence.outcome == "ceased"
+                else ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK
             ),
-            last_sequence=last_sequence,
         )
-        return await _keep_settlement_if_won(db, outcome)
+
+    return await _settle_proven_terminal(
+        factory,
+        _ProvenTerminal(
+            thread_id=thread_id,
+            dispatch_id=evidence.dispatch_id,
+            status=ThreadStatus.CANCELLED,
+            last_sequence=last_sequence,
+            prove=prove,
+        ),
+    )
 
 
 async def _persist_proven_failure(
@@ -206,43 +246,38 @@ async def _persist_proven_failure(
     last_sequence: int | None,
 ) -> bool:
     """Elect and settle one failure for the exact current graph action."""
-    from ..database import get_control_action_by_dispatch_id, thread_write_expectation
+    from ..database import thread_write_expectation
     from ..thread.enums import NON_ACTIVE_STATUSES
     from .dispatch_receipts import validate_current_graph_receipt
-    from .terminal_settlement import (
-        TerminalEvidence,
-        lock_terminal_run,
-        settle_terminal,
-    )
+    from .terminal_settlement import TerminalEvidence
 
-    async with factory() as db:
-        thread = await lock_terminal_run(db, thread_id)
-        action = await get_control_action_by_dispatch_id(
-            db, thread_id=thread_id, dispatch_id=evidence.action.dispatch_id
-        )
+    def prove(
+        thread: ThreadModel, action: ControlActionModel
+    ) -> TerminalEvidence | None:
         if (
-            thread is None
-            or action is None
-            or ThreadStatus(thread.status) in NON_ACTIVE_STATUSES
+            ThreadStatus(thread.status) in NON_ACTIVE_STATUSES
             or validate_current_graph_receipt(thread, action) != evidence.action
         ):
-            await db.rollback()
-            return False
-        outcome = await settle_terminal(
-            db,
-            thread,
-            ThreadStatus.FAILED,
-            evidence=TerminalEvidence(
-                expectation=thread_write_expectation(thread),
-                action_id=action.id,
-                action_type=evidence.action.action_type,
-                action_receipt_id=evidence.action.dispatch_id,
-                failure_reason=failure_reason,
-                provider_condition=evidence.provider_condition,
-            ),
-            last_sequence=last_sequence,
+            return None
+        return TerminalEvidence(
+            expectation=thread_write_expectation(thread),
+            action_id=action.id,
+            action_type=evidence.action.action_type,
+            action_receipt_id=evidence.action.dispatch_id,
+            failure_reason=failure_reason,
+            provider_condition=evidence.provider_condition,
         )
-        return await _keep_settlement_if_won(db, outcome)
+
+    return await _settle_proven_terminal(
+        factory,
+        _ProvenTerminal(
+            thread_id=thread_id,
+            dispatch_id=evidence.action.dispatch_id,
+            status=ThreadStatus.FAILED,
+            last_sequence=last_sequence,
+            prove=prove,
+        ),
+    )
 
 
 def _skip_without_database(what: str, thread_id: str) -> None:
@@ -325,16 +360,9 @@ async def _read_run_lease(
 
     async with session_factory() as db:
         thread = await get_thread(db, thread_id)
-    if thread is None or not thread.thread_metadata:
+    if thread is None:
         return None
-    data = decode_json_object(thread.thread_metadata)
-    if data is None:
-        return None
-    lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
-    if lease is None:
-        return None
-    lease_id: object = lease.get("lease_id")
-    return lease_id if isinstance(lease_id, str) and lease_id else None
+    return run_lease_id(decode_json_object(thread.thread_metadata))
 
 
 async def _confirm_completed_terminal(
@@ -677,7 +705,7 @@ def _publish_terminal(thread_id: str, publish: _TerminalPublisher | None) -> Non
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
-    **options: Unpack[_TerminalEventOptions],
+    services: RelayServices | None = None,
 ) -> None:
     """Settle a proven terminal event, then release drain and relay hub state.
 
@@ -691,19 +719,11 @@ async def _handle_terminal_event(
     Only a settled run publishes, before the prune, drain release and
     relay hub purge that would otherwise make the frame undeliverable.
     """
-    unknown = set(options).difference(_RELAY_OPTIONS)
-    if unknown:
-        unexpected = next(iter(unknown))
-        raise TypeError(
-            "_handle_terminal_event() got an unexpected keyword argument "
-            f"{unexpected!r}"
-        )
-    aggregator = options.get("aggregator")
-    session_factory = options.get("session_factory")
-    checkpointer = options.get("checkpointer")
-    drain_gate = options.get("drain_gate")
-    prune_registry = options.get("prune_registry")
-    publish = options.get("publish_terminal")
+    resolved = services or RelayServices()
+    aggregator = resolved.aggregator
+    checkpointer = resolved.checkpointer
+    drain_gate = resolved.drain_gate
+    prune_registry = resolved.prune_registry
     if not is_terminal_event(payload):
         return
     # Capture before the durable write and before relay hub state is pruned.
@@ -715,7 +735,7 @@ async def _handle_terminal_event(
     if terminal_status is None:
         # An unreadable terminal settled nothing and cannot close a stream.
         return
-    factory = _session_factory(session_factory)
+    factory = _session_factory(resolved.session_factory)
     disposition = await _accept_terminal_event(
         thread_id, payload, terminal_status, (factory, last_sequence, checkpointer)
     )
@@ -723,7 +743,7 @@ async def _handle_terminal_event(
         # A promoted turn or refused stale event did not end the run. Its
         # frame takes no number and never enters the replay log.
         return
-    _publish_terminal(thread_id, publish)
+    _publish_terminal(thread_id, resolved.publish_terminal)
     if factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
@@ -984,7 +1004,7 @@ async def _handle_pause_event(
 async def relay_event(
     thread_id: str,
     payload: dict[str, object],
-    **options: Unpack[_TerminalEventOptions],
+    services: RelayServices | None = None,
 ) -> None:
     """Consolidated relay: run every event handler in sequence.
 
@@ -1002,45 +1022,26 @@ async def relay_event(
 
     A terminal frame is the one exception to the caller owning the fan-out.
     Whether it may be shown at all is this plane's answer, so the caller hands
-    it over as *publish_terminal* and :func:`_handle_terminal_event` releases
-    it; see that function for why.
+    it over as the services' *publish_terminal* and :func:`_handle_terminal_event`
+    releases it; see that function for why.
     """
-    unknown = set(options).difference(_RELAY_OPTIONS)
-    if unknown:
-        unexpected = next(iter(unknown))
-        raise TypeError(
-            f"relay_event() got an unexpected keyword argument {unexpected!r}"
-        )
-    aggregator = options.get("aggregator")
-    session_factory = options.get("session_factory")
-    checkpointer = options.get("checkpointer")
-    drain_gate = options.get("drain_gate")
-    prune_registry = options.get("prune_registry")
+    resolved = services or RelayServices()
     await _handle_permission_event(
         thread_id,
         payload,
-        session_factory=session_factory,
+        session_factory=resolved.session_factory,
     )
     await _handle_progress_event(
         thread_id,
         payload,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        session_factory=resolved.session_factory,
+        checkpointer=resolved.checkpointer,
     )
     await _handle_pause_event(
         thread_id,
         payload,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        session_factory=resolved.session_factory,
+        checkpointer=resolved.checkpointer,
     )
     # Terminal status update + relay hub GC + drain-gate release.
-    await _handle_terminal_event(
-        thread_id,
-        payload,
-        aggregator=aggregator,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        drain_gate=drain_gate,
-        prune_registry=prune_registry,
-        publish_terminal=options.get("publish_terminal"),
-    )
+    await _handle_terminal_event(thread_id, payload, resolved)

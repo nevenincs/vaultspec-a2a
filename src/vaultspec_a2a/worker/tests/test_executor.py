@@ -38,6 +38,7 @@ from ...providers import ProviderCondition, ProviderFactory
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
+from ...streaming.ingest import GraphInvocation
 from ...team.team_config import load_agent_config, load_team_config
 from ...testing import (
     DEFAULT_TEAM_PRESET,
@@ -679,8 +680,10 @@ class TestHandleDispatch:
                     thread_id,
                     "supervisor",
                     graph,
-                    {},
-                    {"configurable": {"thread_id": thread_id}},
+                    GraphInvocation(
+                        graph_input={},
+                        config={"configurable": {"thread_id": thread_id}},
+                    ),
                 )
                 assert completed == ThreadStatus.COMPLETED
             request = DispatchRequest(

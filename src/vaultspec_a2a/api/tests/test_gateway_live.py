@@ -1081,7 +1081,7 @@ async def test_run_status_carries_reconnect_cursor(
     exercises the reconnect-cursor contract, since a reconnecting client only
     ever reads run-status after a run has already ended.
     """
-    from ...control.event_handlers import _handle_terminal_event
+    from ...control.event_handlers import RelayServices, _handle_terminal_event
     from ...thread.action_receipts import GraphCompletionReceipt
 
     run_id, receipt = await seed_live_thread(session_factory, title="cursor")
@@ -1132,9 +1132,11 @@ async def test_run_status_carries_reconnect_cursor(
         await _handle_terminal_event(
             run_id,
             {"event_type": "thread_terminal", "status": "completed"},
-            aggregator=agg,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                aggregator=agg,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            ),
         )
         # The purge genuinely ran: the live counter is gone until the run is
         # seeded again, matching what a reconnecting client's read below has

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import dataclasses
 import inspect
 import json
 import sqlite3
@@ -42,6 +43,7 @@ from sqlalchemy.schema import CreateTable
 
 from ...graph.compiler import compile_team_graph
 from ...graph.nodes.worker import (
+    WorkerNodeOptions,
     _describe_worker_model,
     _finalize_worker_response,
     _record_turn_usage,
@@ -848,7 +850,12 @@ class TestTheWritersAreActuallyInjected:
         missing = [
             node.lineno
             for node in calls
-            if not any(kw.arg == "cost_port" for kw in node.keywords)
+            if not any(
+                kw.arg == "options"
+                and isinstance(kw.value, ast.Call)
+                and any(option.arg == "cost_port" for option in kw.value.keywords)
+                for kw in node.keywords
+            )
         ]
         assert missing == [], (
             f"create_worker_node called without cost_port at lines {missing}; "
@@ -856,11 +863,12 @@ class TestTheWritersAreActuallyInjected:
         )
 
     def test_the_worker_node_accepts_the_port(self) -> None:
-        """The node factory's typed keyword contract must accept the port."""
+        """The node factory's typed options record must accept the port."""
         options = inspect.signature(create_worker_node).parameters["options"]
-        assert options.annotation == "Unpack[_WorkerNodeOptions]"
-        contract = create_worker_node.__globals__["_WorkerNodeOptions"]
-        assert "cost_port" in contract.__annotations__
+        assert options.annotation == "WorkerNodeOptions | None"
+        assert "cost_port" in {
+            option.name for option in dataclasses.fields(WorkerNodeOptions)
+        }
 
     def test_the_compile_entrypoint_accepts_the_port(self) -> None:
         """The graph entrypoint's typed keyword contract accepts the port."""

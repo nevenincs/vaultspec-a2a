@@ -9,7 +9,6 @@ run lists as it reads.
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +22,7 @@ from ..database import (
 from ..domain_config import domain_config
 from ..thread.enums import DegradedReason, RepairStatus, ThreadStatus
 from ..thread.snapshots import ThreadStateData, record_repair_posture
+from ..utils.coercion import decode_json_object
 from .projection import (
     clear_permissions_without_checkpoint_truth,
     durable_approval,
@@ -43,6 +43,10 @@ __all__ = [
 ]
 
 
+def _summary_text(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
 def _parse_thread_summary_metadata(
     raw_json: str | None,
 ) -> tuple[str | None, str | None, str | None]:
@@ -50,17 +54,14 @@ def _parse_thread_summary_metadata(
 
     Returns ``(feature_tag, source_branch, callee)``.
     """
-    if not raw_json:
+    meta = decode_json_object(raw_json)
+    if meta is None:
         return None, None, None
-    try:
-        meta = json.loads(raw_json)
-        return (
-            meta.get("feature_tag") or None,
-            meta.get("source_branch") or None,
-            meta.get("callee") or None,
-        )
-    except (json.JSONDecodeError, TypeError):
-        return None, None, None
+    return (
+        _summary_text(meta.get("feature_tag")),
+        _summary_text(meta.get("source_branch")),
+        _summary_text(meta.get("callee")),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,7 +160,7 @@ async def _judge_run_posture(
     either way.
     """
     snapshot = ThreadStateData(
-        thread_id=thread.id, status=thread.status, last_sequence=0
+        thread_id=thread.id, status=ThreadStatus(thread.status), last_sequence=0
     )
     record_repair_posture(snapshot, thread.repair_status)
     snapshot.approval_status, snapshot.approval_request_id = durable_approval(

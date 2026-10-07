@@ -65,6 +65,7 @@ if TYPE_CHECKING:
         ThreadStatusElectionOutcome,
     )
     from ..streaming import RelayHub
+    from ..thread import ProjectedInterrupt
     from .drain import DrainGate
     from .terminal_settlement import TerminalEvidence
 
@@ -761,9 +762,13 @@ async def _handle_terminal_event(
         relay_hub.clear_thread_state(thread_id)
 
 
-#: The approval gates record the pause they relay as itself; a tool permission
-#: classifies its pause from the tool it asks about.
-_APPROVAL_GATE_EVENT_TYPES: frozenset[str] = frozenset(
+#: The approval gates record the pause they relay as the interrupt kind the run
+#: is really parked on; a tool permission classifies its pause from the tool it
+#: asks about. Read off the checkpoint, never off the relayed frame: every
+#: permission frame crosses the wire as ``permission_request``, so keying this on
+#: the frame's own type named a document approval a plan approval and hid it from
+#: the lookup the out-of-run verdict subscriber reaches its run through.
+_APPROVAL_GATE_INTERRUPT_TYPES: frozenset[str] = frozenset(
     {
         InterruptType.PLAN_APPROVAL_REQUEST.value,
         InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
@@ -771,18 +776,63 @@ _APPROVAL_GATE_EVENT_TYPES: frozenset[str] = frozenset(
 )
 
 
-def _permission_request_fields(
-    payload: dict[str, object], event_type: str
-) -> tuple[str, str | None, str, str] | None:
-    """Validate and normalize the fields stored with a permission request."""
+async def _held_request_interrupt(
+    thread_id: str,
+    payload: dict[str, object],
+    checkpointer: Checkpointer | None,
+) -> ProjectedInterrupt | None:
+    """The checkpoint interrupt a relayed permission request announces.
+
+    The checkpoint is the pause authority for every interrupt kind, so the kind
+    a request is journaled under, and whether it is still open at all, are read
+    from the interrupt the run is really parked on rather than from the frame
+    that announced it. ``None`` means nothing may be journaled: the frame named
+    no request, no checkpoint could be read, or the request it names is one the
+    run no longer holds - answered in the window between emission and relay, so
+    a pending row written for it would be a row nobody can answer.
+    """
     request_id = named_request_id(payload)
     if request_id is None:
         return None
+    if checkpointer is None:
+        logger.warning(
+            "Skipping the permission journal for %s: no checkpointer is available",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "pause_proof_unavailable"},
+        )
+        return None
+    from ..database import read_latest_checkpoint
+    from ._permission_response_contract import held_interrupt
+    from .pause import project_checkpoint_read
+
+    projection = project_checkpoint_read(
+        await read_latest_checkpoint(checkpointer, thread_id), thread_id
+    )
+    held = held_interrupt(projection, request_id)
+    if held is None:
+        logger.info(
+            "Not journaling permission request %s on %s: its checkpoint holds "
+            "no such pause",
+            request_id,
+            thread_id,
+            extra={
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "action": "permission_request_not_held",
+            },
+        )
+    return held
+
+
+def _permission_request_fields(
+    payload: dict[str, object], held: ProjectedInterrupt
+) -> tuple[str | None, str, str]:
+    """Normalize the fields stored with a permission request the run holds."""
     tool_value = payload.get("tool_call")
     tool_call = tool_value if isinstance(tool_value, str) else None
     pause_reason_type = (
-        event_type
-        if event_type in _APPROVAL_GATE_EVENT_TYPES
+        held.interrupt_type
+        if held.interrupt_type in _APPROVAL_GATE_INTERRUPT_TYPES
         else classify_permission_pause_reason(tool_call)
     )
     description_value = payload.get("description")
@@ -793,7 +843,6 @@ def _permission_request_fields(
         else ""
     )
     return (
-        request_id,
         tool_call,
         pause_reason_type,
         description,
@@ -805,16 +854,17 @@ async def _persist_permission_request(
     thread_id: str,
     payload: dict[str, object],
     *,
-    event_type: str,
+    held: ProjectedInterrupt,
 ) -> None:
     """Record a fresh permission or approval request in the durable journal.
 
     The request row and its creation action are the journal: they hold the
     request's lifecycle and cache its description and offered options for
     disclosure. Whether the run is parked on it is the checkpoint's to say, so
-    the pause recorder projects the pause and this writes no run state. A
-    payload with no request id is ignored, and a replayed event finds its
-    creation action already reserved and changes nothing.
+    the pause recorder projects the pause and this writes no run state, and
+    *held* - the interrupt that checkpoint holds under this request id - names
+    the pause kind the row records. A replayed event finds its creation action
+    already reserved and changes nothing.
     """
     from ..database import (
         get_thread,
@@ -824,10 +874,10 @@ async def _persist_permission_request(
     )
     from ..thread.enums import ControlActionResultStatus, ControlActionType
 
-    fields = _permission_request_fields(payload, event_type)
-    if fields is None:
-        return
-    request_id, tool_call, pause_reason_type, description = fields
+    request_id = held.interrupt_id
+    tool_call, pause_reason_type, description = _permission_request_fields(
+        payload, held
+    )
     if await get_thread(db, thread_id) is None:
         return
     reservation = await reserve_control_action(
@@ -863,29 +913,36 @@ async def _handle_permission_event(
     payload: dict[str, object],
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
 ) -> None:
     """Persist worker permission events into the durable journal.
 
     Validates the payload as a permission event, then dispatches to the request
     persistence stage or the resolution stage under one committed transaction.
+    A request is journaled only against the interrupt its run's checkpoint
+    holds, so the checkpoint read happens before the write transaction opens
+    rather than while it holds the store's write lock.
     """
     if not is_permission_event(payload):
         return
-    event_type = wire_event_type(payload)
     from ..database import begin_write_transaction
 
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the durable permission journal", thread_id)
         return
+    if wire_event_type(payload) not in PERMISSION_REQUEST_EVENT_TYPES:
+        async with factory() as db:
+            await begin_write_transaction(db)
+            await _apply_permission_resolution(db, thread_id, payload)
+            await db.commit()
+        return
+    held = await _held_request_interrupt(thread_id, payload, checkpointer)
+    if held is None:
+        return
     async with factory() as db:
         await begin_write_transaction(db)
-        if event_type in PERMISSION_REQUEST_EVENT_TYPES:
-            await _persist_permission_request(
-                db, thread_id, payload, event_type=event_type
-            )
-        else:
-            await _apply_permission_resolution(db, thread_id, payload)
+        await _persist_permission_request(db, thread_id, payload, held=held)
         await db.commit()
 
 
@@ -1021,6 +1078,7 @@ async def relay_event(
         thread_id,
         payload,
         session_factory=resolved.session_factory,
+        checkpointer=resolved.checkpointer,
     )
     await _handle_progress_event(
         thread_id,

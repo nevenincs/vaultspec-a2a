@@ -871,23 +871,37 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
     the run reads parked, with its approval pending, because its checkpoint holds
     the interrupt and the pause recorder wrote that. The park is elected under
     the dispatch that raised it, once, however often the request is replayed.
+
+    The frame carries the ``permission_request`` wire type every permission
+    frame crosses the relay as, so the ``plan_approval_request`` cause on the
+    row can only have come from the interrupt the checkpoint holds.
     """
     async with session_factory() as session:
         thread_id, receipt = await seed_accepted_thread(session, status="running")
         await session.commit()
 
     request_id = f"{thread_id}:plan-approval-1"
+    options: list[dict[str, object]] = [
+        {"option_id": "approve", "name": "Approve", "kind": "allow_once"},
+        {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
+    ]
+    await _park_on_interrupt(
+        checkpointer,
+        thread_id=thread_id,
+        payload={
+            "type": "plan_approval_request",
+            "request_id": request_id,
+            "feature": "audit-5",
+            "exec_worker": "coder",
+        },
+    )
     payload: dict[str, object] = {
-        "type": "plan_approval_request",
+        "type": "permission_request",
         "request_id": request_id,
         "description": "Approve plan for feature 'audit-5'",
-        "options": [
-            {"option_id": "approve", "name": "Approve", "kind": "allow_once"},
-            {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
-        ],
+        "options": options,
         "tool_call": "plan_approval",
     }
-    await _park_on_interrupt(checkpointer, thread_id=thread_id, payload=payload)
 
     for _delivery in range(2):
         await relay_event(
@@ -1092,24 +1106,37 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
     is INPUT_REQUIRED and the out-of-run verdict subscriber can correlate an
     engine verdict to the parked run. The journal holds the request; the run
     reads parked because the pause recorder found the interrupt in its checkpoint.
+
+    The gate's frame reaches the relay as a ``permission_request`` naming the
+    ``plan_approval`` subject, exactly as the projection emits it, so only the
+    checkpoint can supply the document-approval cause the lookup matches on.
     """
     async with session_factory() as session:
         thread_id, _receipt = await seed_accepted_thread(session, status="running")
         await session.commit()
 
     request_id = f"{thread_id}:document-approval-1"
+    await _park_on_interrupt(
+        checkpointer,
+        thread_id=thread_id,
+        payload={
+            "type": "document_approval_request",
+            "request_id": request_id,
+            "phase": "research",
+            "proposal_id": request_id,
+            "feature": "sse-reconnection",
+        },
+    )
     payload: dict[str, object] = {
-        "type": "document_approval_request",
+        "type": "permission_request",
         "request_id": request_id,
-        "phase": "research",
-        "feature": "sse-reconnection",
         "description": "Approve the research document for feature 'sse-reconnection'",
         "options": [
             {"option_id": "approve", "name": "Approve Document", "kind": "allow_once"},
             {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
         ],
+        "tool_call": "plan_approval",
     }
-    await _park_on_interrupt(checkpointer, thread_id=thread_id, payload=payload)
 
     await relay_event(
         thread_id,
@@ -1426,6 +1453,7 @@ async def test_permission_resolution_for_unknown_request_is_a_clean_noop(
 @pytest.mark.asyncio
 async def test_persisted_description_matches_what_the_stream_showed(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The durable row holds exactly what the operator was streamed.
 
@@ -1455,6 +1483,16 @@ async def test_persisted_description_matches_what_the_stream_showed(
     # this pass with both truncations removed.
     assert len(oversize) > MAX_PERMISSION_DESCRIPTION_CHARS
 
+    await _park_on_interrupt(
+        checkpointer,
+        thread_id=thread.id,
+        payload={
+            "type": "permission_request",
+            "request_id": "bounded-description",
+            "tool_name": "bash",
+            "options": [],
+        },
+    )
     await _handle_permission_event(
         thread.id,
         {
@@ -1464,6 +1502,7 @@ async def test_persisted_description_matches_what_the_stream_showed(
             "options": [],
         },
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
